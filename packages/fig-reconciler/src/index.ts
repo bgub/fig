@@ -94,7 +94,6 @@ type Flag = number;
 const ReactiveEffect = 0;
 const BeforePaintEffect = 1;
 const BeforeLayoutEffect = 2;
-const EffectTag = Symbol("fig.effect");
 type EffectPhase =
   | typeof ReactiveEffect
   | typeof BeforePaintEffect
@@ -128,7 +127,6 @@ type HookKind =
   | "before-layout";
 
 interface Effect {
-  tag: typeof EffectTag;
   phase: EffectPhase;
   create: EffectCallback;
   controller: AbortController | null;
@@ -531,7 +529,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       previousEffect === null ||
       !areHookInputsEqual(nextDeps, previousEffect.deps);
     const effect: Effect = {
-      tag: EffectTag,
       phase,
       create,
       controller: previousEffect?.controller ?? null,
@@ -951,10 +948,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function abortFiberEffects(node: F): void {
     for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
-      const value = hook.memoizedState;
-      if (isEffect(value)) {
-        abortEffect(value);
-      }
+      if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
     }
 
     for (let child = node.child; child !== null; child = child.sibling) {
@@ -974,6 +968,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     clearEffectLists(node.child);
     clearEffectLists(node.sibling);
   }
+}
+
+function isEffectHook(kind: HookKind): boolean {
+  return (
+    kind === "reactive" ||
+    kind === "on-mount" ||
+    kind === "before-paint" ||
+    kind === "before-layout"
+  );
 }
 
 function createHook<S>(kind: HookKind, state: S): Hook<S> {
@@ -1070,12 +1073,6 @@ function areHookInputsEqual(
   }
 
   return true;
-}
-
-function isEffect(value: unknown): value is Effect {
-  return typeof value === "object" && value !== null && "tag" in value
-    ? value.tag === EffectTag
-    : false;
 }
 
 export { DefaultLane, runWithPriority, SyncLane };

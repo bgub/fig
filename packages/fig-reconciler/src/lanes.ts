@@ -9,7 +9,7 @@ import {
 
 export type Lane = number;
 export type Lanes = number;
-export type LaneMap<T> = T[];
+export type LaneMap<T extends number> = T[];
 
 export const TotalLanes = 31;
 export const NoTimestamp = -1;
@@ -103,10 +103,8 @@ let currentUpdateLane: Lane = DefaultLane;
 let nextTransitionLane: Lane = TransitionLane1;
 let nextRetryLane: Lane = RetryLane1;
 
-export function createLaneMap<T>(initial: T): LaneMap<T> {
-  const laneMap: T[] = [];
-  for (let index = 0; index < TotalLanes; index += 1) laneMap.push(initial);
-  return laneMap;
+export function createLaneMap<T extends number>(initial: T): LaneMap<T> {
+  return new Array<T>(TotalLanes).fill(initial);
 }
 
 export function mergeLanes(a: Lanes, b: Lanes): Lanes {

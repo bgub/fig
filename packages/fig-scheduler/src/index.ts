@@ -28,6 +28,82 @@ const priorityTimeouts: Record<PriorityLevel, number> = {
   [IdlePriority]: 1_073_741_823,
 };
 
+function compare(a: { sortIndex: number; id: number }, b: typeof a): number {
+  return a.sortIndex - b.sortIndex || a.id - b.id;
+}
+
+class MinHeap<T extends { sortIndex: number; id: number }> {
+  readonly items: T[] = [];
+
+  push(value: T): void {
+    this.items.push(value);
+    this.siftUp(this.items.length - 1);
+  }
+
+  peek(): T | null {
+    return this.items[0] ?? null;
+  }
+
+  pop(): T | null {
+    const first = this.items[0];
+    const last = this.items.pop();
+
+    if (first === undefined || last === undefined) return null;
+
+    if (first !== last) {
+      this.items[0] = last;
+      this.siftDown(0);
+    }
+
+    return first;
+  }
+
+  private siftUp(index: number): void {
+    const value = this.items[index];
+
+    while (index > 0) {
+      const parentIndex = (index - 1) >>> 1;
+      const parent = this.items[parentIndex];
+      if (compare(parent, value) <= 0) return;
+
+      this.items[parentIndex] = value;
+      this.items[index] = parent;
+      index = parentIndex;
+    }
+  }
+
+  private siftDown(index: number): void {
+    const length = this.items.length;
+    const value = this.items[index];
+
+    while (index < length) {
+      const leftIndex = index * 2 + 1;
+      const rightIndex = leftIndex + 1;
+      let smallest = index;
+
+      if (
+        leftIndex < length &&
+        compare(this.items[leftIndex], this.items[smallest]) < 0
+      ) {
+        smallest = leftIndex;
+      }
+
+      if (
+        rightIndex < length &&
+        compare(this.items[rightIndex], this.items[smallest]) < 0
+      ) {
+        smallest = rightIndex;
+      }
+
+      if (smallest === index) return;
+
+      this.items[index] = this.items[smallest];
+      this.items[smallest] = value;
+      index = smallest;
+    }
+  }
+}
+
 let frameInterval = 5;
 let startTime = -1;
 let taskId = 1;
@@ -36,8 +112,8 @@ let messageLoopRunning = false;
 let hostTimeout: ReturnType<typeof setTimeout> | null = null;
 let needsPaint = false;
 
-let taskQueue: MinHeap<Task>;
-let timerQueue: MinHeap<Task>;
+const taskQueue = new MinHeap<Task>();
+const timerQueue = new MinHeap<Task>();
 const channel =
   typeof MessageChannel === "function" ? new MessageChannel() : null;
 
@@ -212,83 +288,4 @@ function scheduleHostTimeout(): void {
     },
     Math.max(0, timer.startTime - now()),
   );
-}
-
-class MinHeap<T extends { sortIndex: number; id: number }> {
-  readonly items: T[] = [];
-
-  push(value: T): void {
-    this.items.push(value);
-    this.siftUp(this.items.length - 1);
-  }
-
-  peek(): T | null {
-    return this.items[0] ?? null;
-  }
-
-  pop(): T | null {
-    const first = this.items[0];
-    const last = this.items.pop();
-
-    if (first === undefined || last === undefined) return null;
-
-    if (first !== last) {
-      this.items[0] = last;
-      this.siftDown(0);
-    }
-
-    return first;
-  }
-
-  private siftUp(index: number): void {
-    const value = this.items[index];
-
-    while (index > 0) {
-      const parentIndex = (index - 1) >>> 1;
-      const parent = this.items[parentIndex];
-      if (compare(parent, value) <= 0) return;
-
-      this.items[parentIndex] = value;
-      this.items[index] = parent;
-      index = parentIndex;
-    }
-  }
-
-  private siftDown(index: number): void {
-    const length = this.items.length;
-    const value = this.items[index];
-
-    while (index < length) {
-      const leftIndex = index * 2 + 1;
-      const rightIndex = leftIndex + 1;
-      let smallest = index;
-
-      if (
-        leftIndex < length &&
-        compare(this.items[leftIndex], this.items[smallest]) < 0
-      ) {
-        smallest = leftIndex;
-      }
-
-      if (
-        rightIndex < length &&
-        compare(this.items[rightIndex], this.items[smallest]) < 0
-      ) {
-        smallest = rightIndex;
-      }
-
-      if (smallest === index) return;
-
-      this.items[index] = this.items[smallest];
-      this.items[smallest] = value;
-      index = smallest;
-    }
-  }
-}
-
-taskQueue = new MinHeap<Task>();
-timerQueue = new MinHeap<Task>();
-
-function compare(a: { sortIndex: number; id: number }, b: typeof a): number {
-  return a.sortIndex - b.sortIndex || a.id - b.id;
 }
