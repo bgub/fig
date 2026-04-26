@@ -282,7 +282,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (root.wip === null) {
       root.renderLanes = getNextLanes(root);
-      root.finishedWork = clone(root.current, { children: root.element });
+      root.finishedWork = createWorkInProgress(root.current, {
+        children: root.element,
+      });
       root.wip = root.finishedWork;
     }
 
@@ -327,7 +329,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function begin(node: F): void {
     if (canBailout(node)) {
-      node.child = node.alternate?.child ?? null;
+      cloneChildFibers(node);
       return;
     }
 
@@ -351,6 +353,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function canBailout(node: F): boolean {
     return (
       node.alternate !== null &&
+      (node.flags & PlacementFlag) === 0 &&
       node.props === node.alternate.memoizedProps &&
       !includesSomeLane(node.lanes | node.childLanes, rootOf(node).renderLanes)
     );
@@ -530,7 +533,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       const key = isValidElement(child) ? (child.key ?? index) : index;
       const old = existing.get(key);
       const canReuse = old !== undefined && sameType(old, child);
-      const next = canReuse ? clone(old, propsFor(child)) : fiberFrom(child);
+      const next = canReuse
+        ? createWorkInProgress(old, propsFor(child))
+        : fiberFrom(child);
 
       if (next === null) return;
 
@@ -548,9 +553,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         next.flags |= PlacementFlag;
       }
 
-      if (previous === null) parent.child = next;
-      else previous.sibling = next;
-      previous = next;
+      previous = appendChild(parent, previous, next);
     });
 
     for (const child of existing.values()) {
@@ -574,15 +577,31 @@ export function createRenderer<Container, Instance, TextInstance>(
   function commitMutationEffects(node: F | null): void {
     if (node === null) return;
 
-    if ((node.flags & PlacementFlag) !== 0 && isHost(node)) {
-      commitUpdate(node);
-      host.insertBefore(hostParent(node), hostNode(node), hostSibling(node));
+    if ((node.flags & PlacementFlag) !== 0) {
+      commitPlacement(node);
     } else if ((node.flags & UpdateFlag) !== 0 && isHost(node)) {
       commitUpdate(node);
     }
 
     commitMutationEffects(node.child);
     commitMutationEffects(node.sibling);
+  }
+
+  function commitPlacement(node: F): void {
+    if (isHost(node)) {
+      commitUpdate(node);
+      host.insertBefore(hostParent(node), hostNode(node), hostSibling(node));
+    } else if (node.alternate !== null) {
+      insertHostSubtree(node, hostParent(node), hostSibling(node));
+    }
+  }
+
+  function insertHostSubtree(
+    node: F,
+    parent: Parent<Container, Instance>,
+    before: HostNode<Instance, TextInstance> | null,
+  ): void {
+    visitHostNodes(node, (child) => host.insertBefore(parent, child, before));
   }
 
   function commitUpdate(node: F): void {
@@ -605,7 +624,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       const parent =
         node.tag === RootTag
           ? (node.stateNode as R).container
-          : hostParent(node);
+          : node.tag === HostTag
+            ? (node.stateNode as Instance)
+            : hostParent(node);
       for (const child of node.deletions) {
         abortFiberEffects(child);
         remove(child, parent);
@@ -618,13 +639,19 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function remove(node: F, parent: Parent<Container, Instance>): void {
+    visitHostNodes(node, (child) => host.removeChild(parent, child));
+  }
+
+  function visitHostNodes(
+    node: F,
+    visitor: (node: HostNode<Instance, TextInstance>) => void,
+  ): void {
     if (isHost(node)) {
-      host.removeChild(parent, hostNode(node));
+      visitor(hostNode(node));
       return;
     }
-
     for (let child = node.child; child !== null; child = child.sibling) {
-      remove(child, parent);
+      visitHostNodes(child, visitor);
     }
   }
 
@@ -666,10 +693,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleFiber(node: F, lane: Lane): void {
-    node.lanes = mergeLanes(node.lanes, lane);
+    markLanes(node, lane);
 
     for (let parent = node.return; parent !== null; parent = parent.return) {
-      parent.childLanes = mergeLanes(parent.childLanes, lane);
+      markChildLanes(parent, lane);
 
       if (parent.tag === RootTag) {
         const root = parent.stateNode as R;
@@ -680,20 +707,63 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function clone(current: F, props: Props): F {
-    const next = fiber(
-      current.tag,
-      current.type,
-      current.key,
-      props,
-      current.stateNode,
-    );
-    next.alternate = current;
-    next.childLanes = current.childLanes;
-    next.lanes = current.lanes;
+  function markLanes(node: F, lane: Lane): void {
+    node.lanes = mergeLanes(node.lanes, lane);
+    if (node.alternate !== null) {
+      node.alternate.lanes = mergeLanes(node.alternate.lanes, lane);
+    }
+  }
+
+  function markChildLanes(node: F, lane: Lane): void {
+    node.childLanes = mergeLanes(node.childLanes, lane);
+    if (node.alternate !== null) {
+      node.alternate.childLanes = mergeLanes(node.alternate.childLanes, lane);
+    }
+  }
+
+  function createWorkInProgress(current: F, props: Props): F {
+    const next =
+      current.alternate ??
+      fiber(current.tag, current.type, current.key, props, current.stateNode);
+
+    next.props = props;
+    next.memoizedProps = current.memoizedProps;
     next.memoizedState = current.memoizedState;
+    next.stateNode = current.stateNode;
+    next.return = current.return;
+    next.child = null;
+    next.sibling = null;
+    next.index = current.index;
+    next.flags = NoFlags;
+    next.deletions = null;
+    next.lanes = current.lanes;
+    next.childLanes = current.childLanes;
+    next.effects = null;
+    next.alternate = current;
     current.alternate = next;
+
     return next;
+  }
+
+  function cloneChildFibers(parent: F): void {
+    let current = parent.alternate?.child ?? null;
+    let previous: F | null = null;
+    parent.child = null;
+
+    while (current !== null) {
+      const next = createWorkInProgress(current, current.props);
+      next.index = current.index;
+      next.return = parent;
+
+      previous = appendChild(parent, previous, next);
+      current = current.sibling;
+    }
+  }
+
+  function appendChild(parent: F, previous: F | null, child: F): F {
+    if (previous === null) parent.child = child;
+    else previous.sibling = child;
+    return child;
   }
 
   function fiberFrom(child: FigChild): F | null {
