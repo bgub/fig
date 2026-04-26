@@ -297,6 +297,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRoot(root: R, forceSync: boolean): void {
+    try {
+      performRootWork(root, forceSync);
+    } catch (error) {
+      abandonRootWork(root);
+      throw error;
+    }
+  }
+
+  function performRootWork(root: R, forceSync: boolean): void {
     if (root.pendingLanes === NoLanes && root.wip === null) return;
 
     flushPendingReactiveEffects(root);
@@ -333,6 +342,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callbackPriority = NoLane;
 
     if (root.pendingLanes !== NoLanes) scheduleRoot(root);
+  }
+
+  function abandonRootWork(root: R): void {
+    root.wip = null;
+    root.finishedWork = null;
+    root.renderLanes = NoLanes;
+    root.callback = null;
+    root.callbackPriority = NoLane;
   }
 
   function performUnit(node: F): F | null {
@@ -587,11 +604,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitEffects(finishedWork.child, BeforeLayoutEffect);
     commitDeletions(finishedWork);
     commitMutationEffects(finishedWork.child);
+    root.current = finishedWork;
+    markRootFinished(root, root.pendingLanes & ~root.renderLanes);
     commitEffects(finishedWork.child, BeforePaintEffect);
     collectReactiveEffects(root, finishedWork.child);
     clearEffectLists(finishedWork.child);
-    root.current = finishedWork;
-    markRootFinished(root, root.pendingLanes & ~root.renderLanes);
     scheduleReactiveEffects(root);
   }
 

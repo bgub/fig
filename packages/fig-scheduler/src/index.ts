@@ -124,11 +124,15 @@ function performWorkUntilDeadline(): void {
   needsPaint = false;
   startTime = now();
 
-  const hasMoreWork = flushWork(startTime);
-  if (hasMoreWork) {
-    postMessageLoop();
-  } else {
-    messageLoopRunning = false;
+  let hasMoreWork = false;
+  try {
+    hasMoreWork = flushWork(startTime);
+  } finally {
+    if (hasMoreWork) {
+      postMessageLoop();
+    } else {
+      messageLoopRunning = false;
+    }
   }
 }
 

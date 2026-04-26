@@ -205,6 +205,67 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Now");
   });
 
+  it("abandons failed render work and recovers on later renders", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Broken() {
+      throw new Error("render failed");
+    }
+
+    function Recovered() {
+      const [value] = useState("Recovered");
+      return createElement("main", null, value);
+    }
+
+    flushSync(() => root.render(createElement("main", null, "Stable")));
+
+    expect(() => {
+      flushSync(() => root.render(createElement(Broken, null)));
+    }).toThrow("render failed");
+
+    expect(container.textContent).toBe("Stable");
+
+    flushSync(() => root.render(createElement(Recovered, null)));
+
+    expect(container.textContent).toBe("Recovered");
+  });
+
+  it("recovers after before-paint effects throw", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function App({
+      shouldThrow,
+      value,
+    }: {
+      shouldThrow?: boolean;
+      value: string;
+    }) {
+      useBeforePaint(() => {
+        if (shouldThrow) throw new Error("before paint failed");
+      }, [shouldThrow]);
+
+      return createElement("main", null, value);
+    }
+
+    flushSync(() => root.render(createElement(App, { value: "Stable" })));
+
+    expect(() => {
+      flushSync(() =>
+        root.render(
+          createElement(App, { shouldThrow: true, value: "Committed" }),
+        ),
+      );
+    }).toThrow("before paint failed");
+
+    expect(container.textContent).toBe("Committed");
+
+    flushSync(() => root.render(createElement(App, { value: "Recovered" })));
+
+    expect(container.textContent).toBe("Recovered");
+  });
+
   it("batches updates until the outer callback exits", async () => {
     let renders = 0;
     let setCount: ((updater: (count: number) => number) => void) | null = null;
