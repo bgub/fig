@@ -14,6 +14,7 @@ export {
 } from "@bgub/fig-reconciler";
 
 type Container = Element | DocumentFragment;
+type ListenerMap = Map<EventListener, EventListener>;
 
 const hostConfig: HostConfig<Container, Element, Text> = {
   createInstance: (type) => document.createElement(type),
@@ -27,7 +28,9 @@ const hostConfig: HostConfig<Container, Element, Text> = {
 };
 
 const renderer = createRenderer(hostConfig);
+const eventListeners = new WeakMap<Element, ListenerMap>();
 
+export const batchedUpdates = renderer.batchedUpdates;
 export const createRoot = renderer.createRoot;
 export const render = renderer.render;
 export const flushSync = renderer.flushSync;
@@ -53,10 +56,16 @@ function updateElement(
     if (event(name)) {
       const type = eventType(name);
       if (typeof previous === "function") {
-        element.removeEventListener(type, previous as EventListener);
+        element.removeEventListener(
+          type,
+          eventListener(element, previous as EventListener),
+        );
       }
       if (typeof next === "function") {
-        element.addEventListener(type, next as EventListener);
+        element.addEventListener(
+          type,
+          eventListener(element, next as EventListener),
+        );
       }
       continue;
     }
@@ -92,6 +101,30 @@ function event(name: string): boolean {
 
 function eventType(name: string): string {
   return name.slice(2).toLowerCase();
+}
+
+function eventListener(
+  element: Element,
+  listener: EventListener,
+): EventListener {
+  const elementListeners = listenerMap(element);
+  let wrapped = elementListeners.get(listener);
+
+  if (wrapped === undefined) {
+    wrapped = (event) => batchedUpdates(() => listener.call(element, event));
+    elementListeners.set(listener, wrapped);
+  }
+
+  return wrapped;
+}
+
+function listenerMap(element: Element): ListenerMap {
+  let listeners = eventListeners.get(element);
+  if (listeners === undefined) {
+    listeners = new Map();
+    eventListeners.set(element, listeners);
+  }
+  return listeners;
 }
 
 export { Fragment };

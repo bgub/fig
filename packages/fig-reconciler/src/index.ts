@@ -170,6 +170,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   type R = FiberRoot<Container, Instance, TextInstance>;
   const roots = new WeakMap<object, R>();
   const scheduledRoots = new Set<R>();
+  const batchedRoots = new Set<R>();
+  let batchDepth = 0;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -248,11 +250,30 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function batchedUpdates<T>(callback: () => T): T {
+    batchDepth += 1;
+
+    try {
+      return callback();
+    } finally {
+      batchDepth -= 1;
+      if (batchDepth === 0) {
+        for (const root of batchedRoots) scheduleRoot(root);
+        batchedRoots.clear();
+      }
+    }
+  }
+
   function updateRoot(root: R, children: FigNode): void {
     const lane = requestUpdateLane();
     root.element = children;
     markRootUpdated(root, lane);
-    scheduleRoot(root);
+    scheduleOrBatchRoot(root);
+  }
+
+  function scheduleOrBatchRoot(root: R): void {
+    if (batchDepth > 0) batchedRoots.add(root);
+    else scheduleRoot(root);
   }
 
   function scheduleRoot(root: R): void {
@@ -701,7 +722,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (parent.tag === RootTag) {
         const root = parent.stateNode as R;
         markRootUpdated(root, lane);
-        scheduleRoot(root);
+        scheduleOrBatchRoot(root);
         return;
       }
     }
@@ -812,7 +833,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     throw new Error("Could not find a root for fiber.");
   }
 
-  return { createRoot, render, flushSync };
+  return { batchedUpdates, createRoot, render, flushSync };
 
   function commitEffects(node: F | null, phase: EffectPhase): void {
     visitEffects(node, (effect) => {

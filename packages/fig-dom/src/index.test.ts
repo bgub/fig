@@ -9,6 +9,7 @@ import {
 } from "@bgub/fig";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  batchedUpdates,
   createRoot,
   DefaultLane,
   flushSync,
@@ -202,6 +203,68 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(createElement("main", null, "Now")));
 
     expect(container.textContent).toBe("Now");
+  });
+
+  it("batches updates until the outer callback exits", async () => {
+    let renders = 0;
+    let setCount: ((updater: (count: number) => number) => void) | null = null;
+
+    function Counter() {
+      renders += 1;
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("span", null, count);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(Counter, null)));
+    expect(renders).toBe(1);
+
+    batchedUpdates(() => {
+      setCount?.((count) => count + 1);
+      setCount?.((count) => count + 1);
+      expect(container.textContent).toBe("0");
+    });
+
+    await delay();
+    expect(container.textContent).toBe("2");
+    expect(renders).toBe(2);
+  });
+
+  it("batches updates inside DOM event handlers", async () => {
+    let renders = 0;
+
+    function Counter() {
+      renders += 1;
+      const [count, setCount] = useState(0);
+      return createElement(
+        "button",
+        {
+          onClick: () => {
+            setCount((value) => value + 1);
+            setCount((value) => value + 1);
+            expect(container.textContent).toBe("0");
+          },
+        },
+        count,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(Counter, null)));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.listeners.click({} as Event);
+
+    expect(renders).toBe(1);
+
+    await delay();
+    expect(container.textContent).toBe("2");
+    expect(renders).toBe(2);
   });
 
   it("rebases skipped lower-priority state updates", async () => {
@@ -626,8 +689,9 @@ describe("@bgub/fig-dom", () => {
   });
 
   it("updates DOM props without leaking stale attributes or listeners", () => {
-    const firstClick = () => undefined;
-    const secondClick = () => undefined;
+    const calls: string[] = [];
+    const firstClick = () => calls.push("first");
+    const secondClick = () => calls.push("second");
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
@@ -644,8 +708,9 @@ describe("@bgub/fig-dom", () => {
 
     const button = container.childNodes[0] as FakeElement;
     expect(button.attributes).toEqual({ class: "primary", disabled: "true" });
-    expect(button.listeners.click).toBe(firstClick);
     expect(button.style.color).toBe("red");
+    button.listeners.click({} as Event);
+    expect(calls).toEqual(["first"]);
 
     flushSync(() =>
       root.render(
@@ -658,8 +723,9 @@ describe("@bgub/fig-dom", () => {
     );
 
     expect(button.attributes).toEqual({});
-    expect(button.listeners.click).toBe(secondClick);
     expect(button.style.color).toBe("blue");
+    button.listeners.click({} as Event);
+    expect(calls).toEqual(["first", "second"]);
 
     flushSync(() => root.render(createElement("button", null)));
 
