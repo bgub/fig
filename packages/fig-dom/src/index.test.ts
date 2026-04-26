@@ -1,6 +1,8 @@
 import {
   createElement,
+  type FigNode,
   Fragment,
+  type Props,
   useBeforeLayout,
   useBeforePaint,
   useOnMount,
@@ -98,6 +100,26 @@ class FakeElement {
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
 const documentValue = globalThis.document;
+
+function expectHookDiagnostic<P extends Props>(
+  Component: (props: P & { children?: FigNode }) => FigNode,
+  initialProps: P,
+  nextProps: P,
+  message: string,
+): void {
+  const container = new FakeElement("root");
+  const root = createRoot(container as unknown as Element);
+
+  flushSync(() => root.render(createElement(Component, initialProps)));
+
+  expect(() => {
+    flushSync(() => root.render(createElement(Component, nextProps)));
+  }).toThrow(message);
+
+  expect(container.textContent).toBe("Stable");
+
+  flushSync(() => root.render(createElement("main", null, "Recovered")));
+}
 
 describe("@bgub/fig-dom", () => {
   beforeEach(() => {
@@ -264,6 +286,50 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(createElement(App, { value: "Recovered" })));
 
     expect(container.textContent).toBe("Recovered");
+  });
+
+  it("throws when components render fewer hooks", () => {
+    function App({ skip }: { skip?: boolean }) {
+      useState("first");
+      if (!skip) useState("second");
+      return createElement("main", null, "Stable");
+    }
+
+    expectHookDiagnostic(
+      App,
+      { skip: false },
+      { skip: true },
+      "Rendered fewer hooks than during the previous render.",
+    );
+  });
+
+  it("throws when components render more hooks", () => {
+    function App({ extra }: { extra?: boolean }) {
+      if (extra) useState("first");
+      return createElement("main", null, "Stable");
+    }
+
+    expectHookDiagnostic(
+      App,
+      { extra: false },
+      { extra: true },
+      "Rendered more hooks than during the previous render.",
+    );
+  });
+
+  it("throws when hook order changes", () => {
+    function App({ effect }: { effect?: boolean }) {
+      if (effect) useReactive(() => undefined, []);
+      else useState("first");
+      return createElement("main", null, "Stable");
+    }
+
+    expectHookDiagnostic(
+      App,
+      { effect: false },
+      { effect: true },
+      "Hook order changed: expected state, received reactive.",
+    );
   });
 
   it("batches updates until the outer callback exits", async () => {

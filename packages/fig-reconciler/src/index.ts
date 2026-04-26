@@ -112,12 +112,20 @@ interface HookQueue<S> {
 }
 
 interface Hook<S = unknown> {
+  kind: HookKind;
   memoizedState: S;
   baseState: S;
   baseQueue: HookUpdate<S> | null;
   queue: HookQueue<S>;
   next: Hook | null;
 }
+
+type HookKind =
+  | "state"
+  | "reactive"
+  | "on-mount"
+  | "before-paint"
+  | "before-layout";
 
 interface Effect {
   tag: typeof EffectTag;
@@ -182,16 +190,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       return [hook.memoizedState, hook.queue.dispatch];
     },
     useReactive(effect, deps) {
-      updateEffectHook(ReactiveEffect, effect, deps);
+      updateEffectHook("reactive", ReactiveEffect, effect, deps);
     },
     useBeforePaint(effect, deps) {
-      updateEffectHook(BeforePaintEffect, effect, deps);
+      updateEffectHook("before-paint", BeforePaintEffect, effect, deps);
     },
     useBeforeLayout(effect, deps) {
-      updateEffectHook(BeforeLayoutEffect, effect, deps);
+      updateEffectHook("before-layout", BeforeLayoutEffect, effect, deps);
     },
     useOnMount(effect) {
-      updateEffectHook(ReactiveEffect, effect, []);
+      updateEffectHook("on-mount", ReactiveEffect, effect, []);
     },
   };
 
@@ -406,6 +414,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     try {
       reconcile(node, (node.type as Component)(node.props));
+      if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
       setCurrentDispatcher(previousDispatcher);
       renderingFiber = null;
@@ -421,13 +430,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       );
     }
 
-    const oldHook = currentHook as Hook<S> | null;
+    const oldHook = updateHook("state") as Hook<S> | null;
     const hook: Hook<S> =
       oldHook === null
-        ? createHook(resolveInitialState(initialState))
+        ? createHook("state", resolveInitialState(initialState))
         : { ...oldHook, next: null };
 
-    currentHook = oldHook?.next ?? null;
     appendHook(hook);
 
     const queue = hook.queue;
@@ -505,6 +513,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateEffectHook(
+    kind: HookKind,
     phase: EffectPhase,
     create: EffectCallback,
     deps?: DependencyList,
@@ -513,7 +522,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw new Error("Hooks can only be called while rendering a component.");
     }
 
-    const oldHook = currentHook as Hook<Effect> | null;
+    const oldHook = updateHook(kind) as Hook<Effect> | null;
     const nextDeps = deps ?? null;
     const previousEffect = oldHook?.memoizedState ?? null;
     const hasChanged =
@@ -526,15 +535,43 @@ export function createRenderer<Container, Instance, TextInstance>(
       controller: previousEffect?.controller ?? null,
       deps: nextDeps,
     };
-    const hook = createHook(effect);
+    const hook = createHook(kind, effect);
 
-    currentHook = oldHook?.next ?? null;
     appendHook(hook);
 
     if (hasChanged) {
       renderingFiber.effects ??= [];
       renderingFiber.effects.push(effect);
     }
+  }
+
+  function updateHook(kind: HookKind): Hook | null {
+    const hook = currentHook;
+
+    if (hook === null) {
+      if (didRenderBefore(renderingFiber)) throw hookOrderError("more");
+      return null;
+    }
+
+    if (hook.kind !== kind) {
+      throw new Error(
+        `Hook order changed: expected ${hook.kind}, received ${kind}.`,
+      );
+    }
+
+    currentHook = hook.next;
+    return hook;
+  }
+
+  function didRenderBefore(node: F | null): boolean {
+    const previous = node?.alternate ?? null;
+    return previous !== null && previous.memoizedProps !== null;
+  }
+
+  function hookOrderError(direction: "fewer" | "more"): Error {
+    return new Error(
+      `Rendered ${direction} hooks than during the previous render.`,
+    );
   }
 
   function complete(node: F): void {
@@ -937,8 +974,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 }
 
-function createHook<S>(state: S): Hook<S> {
+function createHook<S>(kind: HookKind, state: S): Hook<S> {
   return {
+    kind,
     memoizedState: state,
     baseState: state,
     baseQueue: null,
