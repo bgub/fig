@@ -1,0 +1,37 @@
+{
+  "name": "fig",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "biome check --error-on-warnings",
+    "format": "biome format --write",
+    "test": "turbo test",
+    "size": "size-limit"
+  },
+  "size-limit": [
+    {
+      "path": "packages/fig/dist/index.js",
+      "limit": "5 KB"
+    },
+    {
+      "path": "packages/fig-dom/dist/index.js",
+      "limit": "5 KB"
+    }
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "2.2.3",
+    "@size-limit/preset-small-lib": "^8.2.4",
+    "@vitest/coverage-istanbul": "3.2.4",
+    "size-limit": "^8.2.4",
+    "tsdown": "^0.15.0",
+    "turbo": "^2.5.4",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

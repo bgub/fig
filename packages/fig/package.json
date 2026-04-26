@@ -1,0 +1,39 @@
+{
+  "name": "@bgub/fig",
+  "version": "0.0.1",
+  "description": "Fig — a UI library",
+  "keywords": [],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./jsx-runtime": {
+      "import": "./dist/jsx-runtime.js",
+      "types": "./dist/jsx-runtime.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "devDependencies": {}
+}
