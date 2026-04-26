@@ -70,25 +70,49 @@ function updateElement(
       continue;
     }
 
-    setProperty(element, name, next);
+    setProperty(element, name, previous, next);
   }
 }
 
-function setProperty(element: Element, name: string, value: unknown): void {
+function setProperty(
+  element: Element,
+  name: string,
+  previous: unknown,
+  next: unknown,
+): void {
   const attribute = name === "className" ? "class" : name;
 
-  if (name === "style" && typeof value === "object" && value !== null) {
-    Object.assign((element as HTMLElement).style, value);
-  } else if (value === null || value === undefined || value === false) {
+  if (name === "style") {
+    setStyle(element, previous, next);
+  } else if (next === null || next === undefined || next === false) {
     element.removeAttribute(attribute);
     if (name in element) {
       (element as unknown as Record<string, unknown>)[name] = "";
     }
-  } else if (name in element && typeof value !== "object") {
-    (element as unknown as Record<string, unknown>)[name] = value;
+  } else if (name in element && typeof next !== "object") {
+    (element as unknown as Record<string, unknown>)[name] = next;
   } else {
-    element.setAttribute(attribute, String(value));
+    element.setAttribute(attribute, String(next));
   }
+}
+
+function setStyle(element: Element, previous: unknown, next: unknown): void {
+  const style = (element as HTMLElement).style as unknown as Record<
+    string,
+    unknown
+  >;
+  const previousStyle = styleProps(previous);
+  const nextStyle = styleProps(next);
+
+  for (const name of Object.keys(previousStyle)) {
+    if (!(name in nextStyle)) style[name] = "";
+  }
+
+  Object.assign(style, nextStyle);
+}
+
+function styleProps(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? value : {};
 }
 
 function reserved(name: string): boolean {

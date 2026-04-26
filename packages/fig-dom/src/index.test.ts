@@ -422,6 +422,46 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("11");
   });
 
+  it("clears processed lanes so stable siblings can bail out", () => {
+    let setLeft: ((updater: (count: number) => number) => void) | null = null;
+    let setRight: ((updater: (count: number) => number) => void) | null = null;
+    let leftRenders = 0;
+    let rightRenders = 0;
+
+    function Left() {
+      leftRenders += 1;
+      const [, set] = useState(0);
+      setLeft = set;
+      return createElement("span", null, "L");
+    }
+
+    function Right() {
+      rightRenders += 1;
+      const [, set] = useState(0);
+      setRight = set;
+      return createElement("span", null, "R");
+    }
+
+    const left = createElement(Left, null);
+    const right = createElement(Right, null);
+
+    function App() {
+      return createElement("main", null, left, right);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect([leftRenders, rightRenders]).toEqual([1, 1]);
+
+    flushSync(() => setLeft?.((count) => count + 1));
+    expect([leftRenders, rightRenders]).toEqual([2, 1]);
+
+    flushSync(() => setRight?.((count) => count + 1));
+    expect([leftRenders, rightRenders]).toEqual([2, 2]);
+  });
+
   it("runs effect phases in commit order", async () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
@@ -828,7 +868,7 @@ describe("@bgub/fig-dom", () => {
           className: "primary",
           disabled: true,
           onClick: firstClick,
-          style: { color: "red" },
+          style: { color: "red", fontWeight: "bold" },
         }),
       ),
     );
@@ -836,6 +876,7 @@ describe("@bgub/fig-dom", () => {
     const button = container.childNodes[0] as FakeElement;
     expect(button.attributes).toEqual({ class: "primary", disabled: "true" });
     expect(button.style.color).toBe("red");
+    expect(button.style.fontWeight).toBe("bold");
     button.listeners.click({} as Event);
     expect(calls).toEqual(["first"]);
 
@@ -851,11 +892,13 @@ describe("@bgub/fig-dom", () => {
 
     expect(button.attributes).toEqual({});
     expect(button.style.color).toBe("blue");
+    expect(button.style.fontWeight).toBe("");
     button.listeners.click({} as Event);
     expect(calls).toEqual(["first", "second"]);
 
     flushSync(() => root.render(createElement("button", null)));
 
     expect(button.listeners.click).toBeUndefined();
+    expect(button.style.color).toBe("");
   });
 });

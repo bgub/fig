@@ -66,7 +66,7 @@ export const TransitionDeferredLanes =
 export const AllTransitionLanes = TransitionLanes | TransitionDeferredLanes;
 export const RetryLanes = RetryLane1 | RetryLane2 | RetryLane3 | RetryLane4;
 export const IdleLanes = IdleHydrationLane | IdleLane | OffscreenLane;
-export const NonIdleLanes = (1 << 29) - 1;
+export const NonIdleLanes = (1 << 27) - 1;
 export const HydrationLanes =
   SyncHydrationLane |
   InputContinuousHydrationLane |

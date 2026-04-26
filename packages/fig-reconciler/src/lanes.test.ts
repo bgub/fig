@@ -5,6 +5,7 @@ import {
   getHighestPriorityLane,
   getLanePriority,
   getNextLanes,
+  IdleHydrationLane,
   IdleLane,
   InputContinuousLane,
   type LaneRoot,
@@ -12,7 +13,9 @@ import {
   markRootUpdated,
   mergeLanes,
   NoLanes,
+  NonIdleLanes,
   NoTimestamp,
+  OffscreenLane,
   requestUpdateLane,
   runWithPriority,
   SyncLane,
@@ -41,6 +44,10 @@ describe("lanes", () => {
       InputContinuousLane,
     );
     expect(getLanePriority(DefaultLane)).toBe("default");
+    expect(NonIdleLanes & DefaultLane).toBe(DefaultLane);
+    expect(NonIdleLanes & (IdleHydrationLane | IdleLane | OffscreenLane)).toBe(
+      NoLanes,
+    );
   });
 
   it("tracks scoped update priority", () => {

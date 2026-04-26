@@ -379,6 +379,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    node.lanes &= ~rootOf(node).renderLanes;
+
     if (node.tag === FunctionTag) {
       renderFunction(node);
       return;
