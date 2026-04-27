@@ -479,6 +479,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (queue.dispatch === null) {
       const fiber = renderingFiber;
       queue.dispatch = (action: SetStateAction<S>) => {
+        if (renderingFiber !== null) {
+          throw new Error(
+            "State updates are not allowed while rendering a component.",
+          );
+        }
+
         const lane = requestUpdateLane();
         const update: HookUpdate<S> = { action, lane, next: null as never };
         update.next = update;
@@ -646,6 +652,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function reconcile(parent: F, children: FigNode): void {
     const existing = new Map<string | number, F>();
+    const seenKeys = new Set<string | number>();
     for (
       let old = parent.alternate?.child ?? null;
       old !== null;
@@ -661,7 +668,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let lastPlacedIndex = 0;
 
     normalized(children).forEach((child, index) => {
-      const key = isValidElement(child) ? (child.key ?? index) : index;
+      const key = childKey(child, index, seenKeys);
       const old = existing.get(key);
       const canReuse = old !== undefined && sameType(old, child);
       const next = canReuse
@@ -1168,11 +1175,48 @@ function propsFor(child: FigChild): Props {
     : child.props;
 }
 
+function childKey(
+  child: FigChild,
+  index: number,
+  seenKeys: Set<string | number>,
+): string | number {
+  if (!isValidElement(child) || child.key === null) return index;
+  if (seenKeys.has(child.key)) throw duplicateKeyError(child.key);
+  seenKeys.add(child.key);
+  return child.key;
+}
+
 function normalized(node: FigNode): FigChild[] {
   if (Array.isArray(node)) return node.flatMap(normalized);
-  return node === null || node === undefined || typeof node === "boolean"
-    ? []
-    : [node];
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return [];
+  }
+  if (
+    typeof node === "string" ||
+    typeof node === "number" ||
+    isValidElement(node)
+  ) {
+    return [node];
+  }
+
+  throw invalidChildError(node);
+}
+
+function duplicateKeyError(key: string | number): Error {
+  return new Error(`Duplicate key "${String(key)}" found among siblings.`);
+}
+
+function invalidChildError(value: unknown): Error {
+  return new Error(
+    `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, array, boolean, null, or undefined.`,
+  );
+}
+
+function describeInvalidChild(value: unknown): string {
+  if (typeof value !== "object" || value === null) return typeof value;
+
+  const keys = Object.keys(value);
+  return keys.length === 0 ? "object" : `object with keys ${keys.join(", ")}`;
 }
 
 function isHost<Container, Instance, TextInstance>(
