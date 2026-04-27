@@ -9,14 +9,18 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
+import { requestUpdateLane } from "@bgub/fig-reconciler";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   batchedUpdates,
   createRoot,
   DefaultLane,
   flushSync,
+  InputContinuousLane,
+  on,
   render,
   runWithPriority,
+  SyncLane,
 } from "./index.ts";
 
 class FakeText {
@@ -29,9 +33,23 @@ class FakeText {
   }
 }
 
+interface FakeListener {
+  capture: boolean;
+  listener: EventListener;
+}
+
+const nonBubblingEvents = new Set([
+  "blur",
+  "focus",
+  "mouseenter",
+  "mouseleave",
+  "scroll",
+]);
+
 class FakeElement {
   childNodes: Array<FakeElement | FakeText> = [];
   attributes: Record<string, string> = {};
+  listenerSets: Record<string, FakeListener[]> = {};
   listeners: Record<string, EventListener> = {};
   parentNode: FakeElement | null = null;
   style: Record<string, string> = {};
@@ -85,17 +103,86 @@ class FakeElement {
     delete this.attributes[name];
   }
 
-  addEventListener(name: string, listener: EventListener): void {
-    this.listeners[name] = listener;
+  addEventListener(
+    name: string,
+    listener: EventListener,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    this.listenerSets[name] ??= [];
+    this.listenerSets[name].push({
+      capture: captureOption(options),
+      listener,
+    });
+    this.listeners[name] = (event) => {
+      for (const current of this.listenerSets[name] ?? []) {
+        current.listener(event);
+      }
+    };
   }
 
-  removeEventListener(name: string): void {
-    delete this.listeners[name];
+  removeEventListener(
+    name: string,
+    listener: EventListener,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    const listeners = this.listenerSets[name];
+    if (listeners === undefined) return;
+
+    this.listenerSets[name] = listeners.filter(
+      (current) =>
+        current.listener !== listener ||
+        current.capture !== captureOption(options),
+    );
+    if (this.listenerSets[name].length === 0) {
+      delete this.listenerSets[name];
+      delete this.listeners[name];
+    }
+  }
+
+  dispatch(name: string): void {
+    const path: FakeElement[] = [];
+    for (
+      let element: FakeElement | null = this;
+      element !== null;
+      element = element.parentNode
+    ) {
+      path.push(element);
+    }
+
+    const event = {
+      cancelBubble: false,
+      composedPath: () => path,
+      target: this,
+      type: name,
+      stopPropagation() {
+        this.cancelBubble = true;
+      },
+    } as Event;
+
+    for (const element of path.toReversed()) {
+      element.invoke(name, event, true);
+      if (event.cancelBubble) return;
+    }
+
+    for (const element of path) {
+      element.invoke(name, event, false);
+      if (event.cancelBubble || nonBubblingEvents.has(name)) return;
+    }
+  }
+
+  invoke(name: string, event: Event, capture: boolean): void {
+    for (const current of this.listenerSets[name] ?? []) {
+      if (current.capture === capture) current.listener(event);
+    }
   }
 
   get textContent(): string {
     return this.childNodes.map((child) => child.textContent).join("");
   }
+}
+
+function captureOption(options?: AddEventListenerOptions | boolean): boolean {
+  return typeof options === "boolean" ? options : options?.capture === true;
 }
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -369,11 +456,13 @@ describe("@bgub/fig-dom", () => {
       return createElement(
         "button",
         {
-          onClick: () => {
-            setCount((value) => value + 1);
-            setCount((value) => value + 1);
-            expect(container.textContent).toBe("0");
-          },
+          events: [
+            on("click", () => {
+              setCount((value) => value + 1);
+              setCount((value) => value + 1);
+              expect(container.textContent).toBe("0");
+            }),
+          ],
         },
         count,
       );
@@ -385,13 +474,371 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(createElement(Counter, null)));
 
     const button = container.childNodes[0] as FakeElement;
-    button.listeners.click({} as Event);
+    button.dispatch("click");
 
     expect(renders).toBe(1);
 
     await delay();
     expect(container.textContent).toBe("2");
     expect(renders).toBe(2);
+  });
+
+  it("runs DOM event handlers with event priority", () => {
+    const lanes: number[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement("button", {
+          events: [
+            on("click", () => lanes.push(requestUpdateLane())),
+            on("mousemove", () => lanes.push(requestUpdateLane())),
+            on("load", () => lanes.push(requestUpdateLane())),
+          ],
+        }),
+        container as unknown as Element,
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+    button.dispatch("mousemove");
+    button.dispatch("load");
+
+    expect(lanes).toEqual([SyncLane, InputContinuousLane, DefaultLane]);
+  });
+
+  it("delegates events from the root with element currentTarget", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement(
+          "main",
+          {
+            events: [
+              on("click", (event) => {
+                calls.push(
+                  `main:${(event.currentTarget as unknown as FakeElement).tagName}`,
+                );
+              }),
+            ],
+          },
+          createElement("button", {
+            events: [
+              on("click", (event) => {
+                calls.push(
+                  `button:${(event.currentTarget as unknown as FakeElement).tagName}`,
+                );
+              }),
+            ],
+          }),
+        ),
+        container as unknown as Element,
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const button = main.childNodes[0] as FakeElement;
+
+    expect(container.listenerSets.click).toHaveLength(1);
+    expect(button.listenerSets.click).toBeUndefined();
+
+    button.dispatch("click");
+
+    expect(calls).toEqual(["button:button", "main:main"]);
+  });
+
+  it("updates event descriptors without duplicating handlers", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Button({ label }: { label: string }) {
+      return createElement("button", {
+        events: [
+          on("click", () => calls.push(`first:${label}`)),
+          on("click", () => calls.push(`second:${label}`)),
+        ],
+      });
+    }
+
+    flushSync(() => root.render(createElement(Button, { label: "one" })));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    flushSync(() => root.render(createElement(Button, { label: "two" })));
+
+    expect(container.listenerSets.click).toHaveLength(1);
+    expect(button.listenerSets.click).toBeUndefined();
+    button.dispatch("click");
+
+    expect(calls).toEqual([
+      "first:one",
+      "second:one",
+      "first:two",
+      "second:two",
+    ]);
+  });
+
+  it("dispatches capture and bubble events in order", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement(
+          "main",
+          {
+            events: [
+              on("click", () => calls.push("parent:capture"), {
+                capture: true,
+              }),
+              on("click", () => calls.push("parent:bubble")),
+            ],
+          },
+          createElement("button", {
+            events: [
+              on("click", () => calls.push("child:capture"), {
+                capture: true,
+              }),
+              on("click", () => calls.push("child:bubble")),
+            ],
+          }),
+        ),
+        container as unknown as Element,
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const button = main.childNodes[0] as FakeElement;
+
+    expect(container.listenerSets.click).toHaveLength(2);
+    button.dispatch("click");
+
+    expect(calls).toEqual([
+      "parent:capture",
+      "child:capture",
+      "child:bubble",
+      "parent:bubble",
+    ]);
+  });
+
+  it("stops delegated propagation", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement(
+          "main",
+          {
+            events: [on("click", () => calls.push("parent"))],
+          },
+          createElement("button", {
+            events: [
+              on("click", (event) => {
+                calls.push("child");
+                event.stopPropagation();
+              }),
+            ],
+          }),
+        ),
+        container as unknown as Element,
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const button = main.childNodes[0] as FakeElement;
+
+    button.dispatch("click");
+
+    expect(calls).toEqual(["child"]);
+  });
+
+  it("delegates focus-like events through capture with Fig bubble semantics", () => {
+    for (const type of ["focus", "blur"]) {
+      const calls: string[] = [];
+      const container = new FakeElement("root");
+
+      flushSync(() =>
+        render(
+          createElement(
+            "main",
+            {
+              events: [
+                on(type, () => calls.push("parent:capture"), {
+                  capture: true,
+                }),
+                on(type, () => calls.push("parent:bubble")),
+              ],
+            },
+            createElement("button", {
+              events: [on(type, () => calls.push("child:bubble"))],
+            }),
+          ),
+          container as unknown as Element,
+        ),
+      );
+
+      const main = container.childNodes[0] as FakeElement;
+      const button = main.childNodes[0] as FakeElement;
+
+      expect(container.listenerSets[type]).toHaveLength(1);
+      expect(button.listenerSets[type]).toBeUndefined();
+
+      button.dispatch(type);
+
+      expect(calls).toEqual([
+        "parent:capture",
+        "child:bubble",
+        "parent:bubble",
+      ]);
+    }
+  });
+
+  it("uses direct listeners for non-bubbling scroll and enter/leave events", () => {
+    for (const type of ["scroll", "mouseenter", "mouseleave"]) {
+      const calls: string[] = [];
+      const container = new FakeElement("root");
+
+      flushSync(() =>
+        render(
+          createElement(
+            "main",
+            {
+              events: [on(type, () => calls.push("parent"))],
+            },
+            createElement("button", {
+              events: [on(type, () => calls.push("child"))],
+            }),
+          ),
+          container as unknown as Element,
+        ),
+      );
+
+      const main = container.childNodes[0] as FakeElement;
+      const button = main.childNodes[0] as FakeElement;
+
+      expect(container.listenerSets[type]).toBeUndefined();
+      expect(main.listenerSets[type]).toHaveLength(1);
+      expect(button.listenerSets[type]).toHaveLength(1);
+
+      button.dispatch(type);
+
+      expect(calls).toEqual(["child"]);
+    }
+  });
+
+  it("cleans up once event listeners after dispatch", () => {
+    const calls: string[] = [];
+    const signals: AbortSignal[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement("button", {
+          events: [
+            on(
+              "click",
+              (_event, signal) => {
+                calls.push("click");
+                signals.push(signal);
+              },
+              { once: true },
+            ),
+          ],
+        }),
+        container as unknown as Element,
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+
+    button.dispatch("click");
+    button.dispatch("click");
+
+    expect(calls).toEqual(["click"]);
+    expect(signals[0].aborted).toBe(true);
+    expect(container.listeners.click).toBeUndefined();
+  });
+
+  it("keeps delegated root listeners while sibling handlers remain", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function App({ showFirst }: { showFirst: boolean }) {
+      return createElement(
+        "main",
+        null,
+        showFirst
+          ? createElement("button", {
+              key: "first",
+              events: [on("click", () => calls.push("first"))],
+            })
+          : null,
+        createElement("button", {
+          key: "second",
+          events: [on("click", () => calls.push("second"))],
+        }),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { showFirst: true })));
+
+    const main = container.childNodes[0] as FakeElement;
+    const second = main.childNodes[1] as FakeElement;
+
+    expect(container.listenerSets.click).toHaveLength(1);
+
+    flushSync(() => root.render(createElement(App, { showFirst: false })));
+
+    expect(container.listenerSets.click).toHaveLength(1);
+    second.dispatch("click");
+
+    expect(calls).toEqual(["second"]);
+  });
+
+  it("aborts event signals on re-entry and listener removal", () => {
+    const signals: AbortSignal[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Button({ label }: { label: string }) {
+      return createElement("button", {
+        events: [
+          on("click", (_event, signal) => {
+            signals.push(signal);
+            calls.push(label);
+          }),
+        ],
+      });
+    }
+
+    const calls: string[] = [];
+
+    flushSync(() => root.render(createElement(Button, { label: "one" })));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+    expect(signals[0].aborted).toBe(false);
+
+    flushSync(() => root.render(createElement(Button, { label: "two" })));
+
+    expect(signals[0].aborted).toBe(false);
+    button.dispatch("click");
+
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    expect(calls).toEqual(["one", "two"]);
+
+    flushSync(() => root.render(createElement("button", null)));
+
+    expect(signals[1].aborted).toBe(true);
+    expect(container.listeners.click).toBeUndefined();
   });
 
   it("rebases skipped lower-priority state updates", async () => {
@@ -867,7 +1314,7 @@ describe("@bgub/fig-dom", () => {
         createElement("button", {
           className: "primary",
           disabled: true,
-          onClick: firstClick,
+          events: [on("click", firstClick)],
           style: { color: "red", fontWeight: "bold" },
         }),
       ),
@@ -877,14 +1324,14 @@ describe("@bgub/fig-dom", () => {
     expect(button.attributes).toEqual({ class: "primary", disabled: "true" });
     expect(button.style.color).toBe("red");
     expect(button.style.fontWeight).toBe("bold");
-    button.listeners.click({} as Event);
+    button.dispatch("click");
     expect(calls).toEqual(["first"]);
 
     flushSync(() =>
       root.render(
         createElement("button", {
           disabled: false,
-          onClick: secondClick,
+          events: [on("click", secondClick)],
           style: { color: "blue" },
         }),
       ),
@@ -893,12 +1340,12 @@ describe("@bgub/fig-dom", () => {
     expect(button.attributes).toEqual({});
     expect(button.style.color).toBe("blue");
     expect(button.style.fontWeight).toBe("");
-    button.listeners.click({} as Event);
+    button.dispatch("click");
     expect(calls).toEqual(["first", "second"]);
 
     flushSync(() => root.render(createElement("button", null)));
 
-    expect(button.listeners.click).toBeUndefined();
+    expect(container.listeners.click).toBeUndefined();
     expect(button.style.color).toBe("");
   });
 });
