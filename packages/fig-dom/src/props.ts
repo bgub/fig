@@ -1,4 +1,5 @@
 import type { Props } from "@bgub/fig";
+import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
 
 export function updateElement(
@@ -14,6 +15,11 @@ export function updateElement(
   for (const name of names) {
     if (name === "events") {
       updateEvents(element, nextProps[name]);
+      continue;
+    }
+
+    if (name === "bind") {
+      updateBind(element, nextProps[name]);
       continue;
     }
 
@@ -70,9 +76,7 @@ function styleProps(value: unknown): Record<string, unknown> {
 }
 
 function reserved(name: string): boolean {
-  return (
-    name === "children" || name === "key" || name === "events" || event(name)
-  );
+  return name === "children" || name === "key" || event(name);
 }
 
 function event(name: string): boolean {

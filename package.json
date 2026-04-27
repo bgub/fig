@@ -17,7 +17,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "7 KB"
+      "limit": "9 KB"
     }
   ],
   "devDependencies": {

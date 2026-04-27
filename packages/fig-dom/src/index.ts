@@ -4,6 +4,7 @@ import {
   type FigRoot,
   type HostConfig,
 } from "@bgub/fig-reconciler";
+import { attachBindSubtree, removeBindSubtree } from "./bind.ts";
 import {
   attachEventSubtree,
   type Container,
@@ -14,6 +15,7 @@ import {
 } from "./events.ts";
 import { updateElement } from "./props.ts";
 
+export type { Bind } from "./bind.ts";
 export {
   type EventCallback,
   type EventDescriptor,
@@ -37,9 +39,11 @@ const hostConfig: HostConfig<Container, Element, Text> = {
   createTextInstance: (text) => document.createTextNode(text),
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
+    attachBindSubtree(child);
     attachEventSubtree(child, rootFor(parent));
   },
   removeChild: (parent, child) => {
+    removeBindSubtree(child);
     removeEventSubtree(child);
     parent.removeChild(child);
   },

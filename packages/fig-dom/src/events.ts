@@ -5,6 +5,7 @@ import {
   runWithPriority,
   SyncLane,
 } from "./priority.ts";
+import { isElement, parentOf, visitElementSubtree } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
 export type EventOptions = Pick<
@@ -461,21 +462,6 @@ function captureDelegated(type: string): boolean {
   return type === "blur" || type === "focus";
 }
 
-function visitElementSubtree(
-  node: Element | Text,
-  visitor: (element: Element) => void,
-): void {
-  if (isElement(node)) visitor(node);
-
-  for (const child of Array.from(node.childNodes ?? [])) {
-    visitElementSubtree(child as Element | Text, visitor);
-  }
-}
-
-function isElement(node: unknown): node is Element {
-  return typeof node === "object" && node !== null && "setAttribute" in node;
-}
-
 function isContainer(node: unknown): node is Container {
   return (
     typeof node === "object" &&
@@ -483,10 +469,4 @@ function isContainer(node: unknown): node is Container {
     "addEventListener" in node &&
     "childNodes" in node
   );
-}
-
-function parentOf(node: unknown): unknown {
-  return typeof node === "object" && node !== null && "parentNode" in node
-    ? node.parentNode
-    : null;
 }
