@@ -1,0 +1,14 @@
+{
+  "name": "@bgub/fig-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "serve": "python3 -m http.server 4173 --bind 127.0.0.1"
+  },
+  "dependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*"
+  }
+}

@@ -33,6 +33,15 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(jiti@2.6.1)
 
+  apps/demo:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
+
   packages/fig: {}
 
   packages/fig-dom:
