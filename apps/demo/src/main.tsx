@@ -1,5 +1,8 @@
 import {
+  createContext,
   type FigNode,
+  readContext,
+  readPromise,
   useBeforePaint,
   useOnMount,
   useReactive,
@@ -7,7 +10,7 @@ import {
 } from "@bgub/fig";
 import { type Bind, createRoot, on } from "@bgub/fig-dom";
 
-type Page = "state" | "diffing" | "effects" | "async";
+type Page = "state" | "diffing" | "effects" | "async" | "resources";
 
 interface DemoItem {
   id: number;
@@ -20,6 +23,7 @@ const pages: Array<{ id: Page; label: string }> = [
   { id: "diffing", label: "Keyed diffing" },
   { id: "effects", label: "Effects + bind" },
   { id: "async", label: "Async event signals" },
+  { id: "resources", label: "Context + promises" },
 ];
 
 const initialItems: DemoItem[] = [
@@ -27,6 +31,8 @@ const initialItems: DemoItem[] = [
   { id: 2, label: "Build fibers", tone: "render" },
   { id: 3, label: "Commit DOM", tone: "dom" },
 ];
+
+const ThemeContext = createContext("light");
 
 const focusBoundInput: Bind<HTMLInputElement> = (node, signal) => {
   node.focus();
@@ -114,6 +120,8 @@ function pageView(page: Page) {
       return <EffectsPage />;
     case "async":
       return <AsyncPage />;
+    case "resources":
+      return <ResourcesPage />;
     default:
       return <StatePage />;
   }
@@ -299,6 +307,56 @@ function AsyncPage() {
   );
 }
 
+function ResourcesPage() {
+  const [theme, setTheme] = useState("light");
+  const [messagePromise, setMessagePromise] = useState<Promise<string> | null>(
+    null,
+  );
+
+  return (
+    <PageFrame
+      title="Context + promises"
+      lede="Context is read without hook slots. Pending promises suspend root work and retry when settled."
+    >
+      <ThemeContext value={theme}>
+        <Row>
+          <ContextBadge />
+          <Command
+            primary
+            run={() =>
+              setTheme((value) => (value === "light" ? "dark" : "light"))
+            }
+          >
+            Toggle context
+          </Command>
+          <Command
+            run={() =>
+              setMessagePromise(delayedMessage(`Resolved for ${theme} theme`))
+            }
+          >
+            Read promise
+          </Command>
+        </Row>
+        {messagePromise === null ? (
+          <p className="hint">No promise read yet.</p>
+        ) : (
+          <PromiseMessage promise={messagePromise} />
+        )}
+      </ThemeContext>
+    </PageFrame>
+  );
+}
+
+function ContextBadge() {
+  const theme = readContext(ThemeContext);
+
+  return <span className="metric">{theme}</span>;
+}
+
+function PromiseMessage({ promise }: { promise: Promise<string> }) {
+  return <p className="hint">{readPromise(promise)}</p>;
+}
+
 function DemoList({ items }: { items: DemoItem[] }) {
   return (
     <ul className="list">
@@ -339,6 +397,12 @@ function searchResults(query: string): string[] {
     `${query} in effects`,
     `${query} in events`,
   ];
+}
+
+function delayedMessage(message: string): Promise<string> {
+  return new Promise((resolve) => {
+    window.setTimeout(() => resolve(message), 650);
+  });
 }
 
 const container = document.getElementById("root");

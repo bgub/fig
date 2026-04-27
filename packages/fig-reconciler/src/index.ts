@@ -4,12 +4,14 @@ import {
   type EffectCallback,
   type ElementType,
   type FigChild,
+  type FigContext,
   type FigElement,
   type FigNode,
   Fragment,
-  type HookDispatcher,
+  isContext,
   isValidElement,
   type Props,
+  type RenderDispatcher,
   type SetStateAction,
   setCurrentDispatcher,
 } from "@bgub/fig";
@@ -32,6 +34,8 @@ import {
   type LaneRoot,
   type Lanes,
   markRootFinished,
+  markRootPinged,
+  markRootSuspended,
   markRootUpdated,
   markStarvedLanesAsExpired,
   mergeLanes,
@@ -42,6 +46,7 @@ import {
   runWithPriority,
   SyncLane,
 } from "./lanes.ts";
+import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
 export * from "./lanes.ts";
 
@@ -79,12 +84,14 @@ const HostTag = 1;
 const TextTag = 2;
 const FunctionTag = 3;
 const FragmentTag = 4;
+const ContextProviderTag = 5;
 type Tag =
   | typeof RootTag
   | typeof HostTag
   | typeof TextTag
   | typeof FunctionTag
-  | typeof FragmentTag;
+  | typeof FragmentTag
+  | typeof ContextProviderTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -154,6 +161,7 @@ interface Fiber<Container, Instance, TextInstance> {
   lanes: Lanes;
   childLanes: Lanes;
   effects: Effect[] | null;
+  contextDependencies: FigContext<unknown>[] | null;
 }
 
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
@@ -167,6 +175,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   renderLanes: Lanes;
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
+  suspendedThenables: WeakMap<object, Lanes>;
 }
 
 export function createRenderer<Container, Instance, TextInstance>(
@@ -182,7 +191,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
 
-  const dispatcher: HookDispatcher = {
+  const dispatcher: RenderDispatcher = {
     useState(initialState) {
       const hook = updateStateHook(initialState);
       return [hook.memoizedState, hook.queue.dispatch];
@@ -198,6 +207,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
     useOnMount(effect) {
       updateEffectHook("on-mount", ReactiveEffect, effect, []);
+    },
+    readContext(context) {
+      return readContextValue(context);
+    },
+    readPromise(promise) {
+      return readThenable(promise);
     },
   };
 
@@ -225,6 +240,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         renderLanes: NoLanes,
         pendingReactiveEffects: [],
         reactiveCallback: null,
+        suspendedThenables: new WeakMap(),
       };
       current.stateNode = root;
       roots.set(key, root);
@@ -306,7 +322,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       performRootWork(root, forceSync);
     } catch (error) {
+      const suspendedLanes = root.renderLanes;
       abandonRootWork(root);
+
+      if (isThenable(error)) {
+        markRootSuspended(root, suspendedLanes);
+        attachPing(root, error, suspendedLanes);
+        return;
+      }
+
       throw error;
     }
   }
@@ -393,6 +417,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       node.stateNode ??= host.createInstance(String(node.type), node.props);
     }
 
+    if (changedContextProvider(node)) propagateContextChange(node);
+
     reconcile(node, node.props.children);
   }
 
@@ -410,6 +436,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     currentHook = node.alternate?.memoizedState ?? null;
     workInProgressHook = null;
     node.memoizedState = null;
+    node.contextDependencies = null;
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     try {
@@ -541,6 +568,36 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (hasChanged) {
       renderingFiber.effects ??= [];
       renderingFiber.effects.push(effect);
+    }
+  }
+
+  function readContextValue<T>(context: FigContext<T>): T {
+    if (renderingFiber === null) {
+      throw new Error(
+        "readContext can only be called while rendering a component.",
+      );
+    }
+
+    addContextDependency(renderingFiber, context);
+
+    for (
+      let parent = renderingFiber.return;
+      parent !== null;
+      parent = parent.return
+    ) {
+      if (parent.tag === ContextProviderTag && parent.type === context) {
+        return parent.props.value as T;
+      }
+    }
+
+    return context.defaultValue;
+  }
+
+  function addContextDependency(node: F, context: FigContext<unknown>): void {
+    node.contextDependencies ??= [];
+
+    if (!node.contextDependencies.includes(context)) {
+      node.contextDependencies.push(context);
     }
   }
 
@@ -781,6 +838,72 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function attachPing(root: R, thenable: Thenable, lanes: Lanes): void {
+    if (lanes === NoLanes) return;
+
+    const previousLanes = root.suspendedThenables.get(thenable) ?? NoLanes;
+    root.suspendedThenables.set(thenable, mergeLanes(previousLanes, lanes));
+
+    if (previousLanes !== NoLanes) return;
+    thenable.then(
+      () => ping(root, thenable),
+      () => ping(root, thenable),
+    );
+  }
+
+  function ping(root: R, thenable: object): void {
+    const lanes = root.suspendedThenables.get(thenable) ?? NoLanes;
+    if (lanes === NoLanes) return;
+
+    root.suspendedThenables.delete(thenable);
+    markRootPinged(root, lanes);
+    scheduleRoot(root);
+  }
+
+  function propagateContextChange(provider: F): void {
+    const currentProvider = provider.alternate;
+    if (currentProvider === null) return;
+
+    const context = provider.type as FigContext<unknown>;
+    const lanes = rootOf(provider).renderLanes;
+
+    for (
+      let child = currentProvider.child;
+      child !== null;
+      child = child.sibling
+    ) {
+      markContextConsumers(child, currentProvider, context, lanes);
+    }
+  }
+
+  function markContextConsumers(
+    node: F,
+    provider: F,
+    context: FigContext<unknown>,
+    lanes: Lanes,
+  ): void {
+    if (node.tag === ContextProviderTag && node.type === context) return;
+
+    if (node.contextDependencies?.includes(context) === true) {
+      markLanes(node, lanes);
+      markParentPath(node, provider, lanes);
+    }
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      markContextConsumers(child, provider, context, lanes);
+    }
+  }
+
+  function markParentPath(node: F, stopAt: F, lanes: Lanes): void {
+    for (
+      let parent = node.return;
+      parent !== null && parent !== stopAt;
+      parent = parent.return
+    ) {
+      markChildLanes(parent, lanes);
+    }
+  }
+
   function markLanes(node: F, lane: Lane): void {
     node.lanes = mergeLanes(node.lanes, lane);
     if (node.alternate !== null) {
@@ -813,6 +936,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.lanes = current.lanes;
     next.childLanes = current.childLanes;
     next.effects = null;
+    next.contextDependencies = current.contextDependencies;
     next.alternate = current;
     current.alternate = next;
 
@@ -875,6 +999,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       lanes: NoLanes,
       childLanes: NoLanes,
       effects: null,
+      contextDependencies: null,
     };
   }
 
@@ -1022,6 +1147,7 @@ function cloneUpdateNode<S>(update: HookUpdate<S>): HookUpdate<S> {
 function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
   if (element.type === Fragment) return FragmentTag;
+  if (isContext(element.type)) return ContextProviderTag;
   return FunctionTag;
 }
 
@@ -1073,6 +1199,16 @@ function areHookInputsEqual(
   }
 
   return true;
+}
+
+function changedContextProvider<Container, Instance, TextInstance>(
+  fiber: Fiber<Container, Instance, TextInstance>,
+): boolean {
+  return (
+    fiber.tag === ContextProviderTag &&
+    fiber.alternate !== null &&
+    !Object.is(fiber.props.value, fiber.alternate.memoizedProps?.value)
+  );
 }
 
 export { DefaultLane, runWithPriority, SyncLane };

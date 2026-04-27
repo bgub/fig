@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createElement, Fragment, isValidElement, useState } from "./index.ts";
+import {
+  createContext,
+  createElement,
+  Fragment,
+  isContext,
+  isValidElement,
+  readContext,
+  readPromise,
+  useState,
+} from "./index.ts";
 
 describe("@bgub/fig", () => {
   it("creates elements with keys and normalized children", () => {
@@ -18,9 +27,30 @@ describe("@bgub/fig", () => {
     expect(element.props.children).toBe("child");
   });
 
+  it("creates callable contexts", () => {
+    const Theme = createContext("light");
+    const element = createElement(Theme, { value: "dark" }, "child");
+
+    expect(isContext(Theme)).toBe(true);
+    expect(Theme.defaultValue).toBe("light");
+    expect(element.type).toBe(Theme);
+    expect(element.props).toEqual({ value: "dark", children: "child" });
+  });
+
   it("throws when hooks are called outside render", () => {
     expect(() => useState(0)).toThrow(
       "Hooks can only be called while rendering a component.",
+    );
+  });
+
+  it("throws when read APIs are called outside render", () => {
+    const Theme = createContext("light");
+
+    expect(() => readContext(Theme)).toThrow(
+      "readContext can only be called while rendering a component.",
+    );
+    expect(() => readPromise(Promise.resolve("done"))).toThrow(
+      "readPromise can only be called while rendering a component.",
     );
   });
 });

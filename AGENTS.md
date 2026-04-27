@@ -16,3 +16,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Non-bubbling DOM events stay direct; focus-like events use capture delegation with Fig bubble semantics.
 - DOM node access uses `bind={(node, signal) => ...}` instead of React refs; components forward it as a normal prop.
 - Styling should stay separate from the `events` and `bind` APIs.
+- Fig intentionally splits React's broad `use(resource)` idea into explicit reads.
+- Context uses `createContext` plus `readContext(context)` because context reads are render-time inputs, not hook slots.
+- Context reads are tracked so provider updates mark matching consumers, and propagation stops at nested providers of the same context.
+- Promises use `readPromise(promise)` as the future Suspense-facing primitive; promise identity matters, not call position.
