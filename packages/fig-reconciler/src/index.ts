@@ -9,6 +9,7 @@ import {
   type FigNode,
   Fragment,
   isContext,
+  isSuspense,
   isValidElement,
   type Props,
   type RenderDispatcher,
@@ -85,13 +86,15 @@ const TextTag = 2;
 const FunctionTag = 3;
 const FragmentTag = 4;
 const ContextProviderTag = 5;
+const SuspenseTag = 6;
 type Tag =
   | typeof RootTag
   | typeof HostTag
   | typeof TextTag
   | typeof FunctionTag
   | typeof FragmentTag
-  | typeof ContextProviderTag;
+  | typeof ContextProviderTag
+  | typeof SuspenseTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -140,6 +143,15 @@ interface Effect {
   deps: DependencyList | null;
 }
 
+interface SuspenseState<Container, Instance, TextInstance> {
+  primaryChild: Fiber<Container, Instance, TextInstance> | null;
+}
+
+type SuspensePings<Container, Instance, TextInstance> = WeakMap<
+  Fiber<Container, Instance, TextInstance>,
+  Lanes
+>;
+
 interface Fiber<Container, Instance, TextInstance> {
   tag: Tag;
   type: ElementType | null;
@@ -162,6 +174,7 @@ interface Fiber<Container, Instance, TextInstance> {
   childLanes: Lanes;
   effects: Effect[] | null;
   contextDependencies: FigContext<unknown>[] | null;
+  suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
 }
 
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
@@ -176,6 +189,10 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
+  suspendedBoundaries: WeakMap<
+    object,
+    SuspensePings<Container, Instance, TextInstance>
+  >;
   consumedPendingQueues: ConsumedPendingQueue[];
 }
 
@@ -247,6 +264,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         pendingReactiveEffects: [],
         reactiveCallback: null,
         suspendedThenables: new WeakMap(),
+        suspendedBoundaries: new WeakMap(),
         consumedPendingQueues: [],
       };
       current.stateNode = root;
@@ -422,7 +440,20 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performUnit(node: F): F | null {
-    begin(node);
+    try {
+      begin(node);
+    } catch (error) {
+      if (isThenable(error)) {
+        const boundary = findSuspenseBoundary(node);
+        if (boundary !== null) {
+          captureSuspenseBoundary(boundary, error);
+          return boundary.child;
+        }
+      }
+
+      throw error;
+    }
+
     if (node.child !== null) return node.child;
 
     let next: F | null = node;
@@ -456,9 +487,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       node.stateNode ??= host.createInstance(String(node.type), node.props);
     }
 
+    if (node.tag === SuspenseTag) {
+      beginSuspense(node);
+      return;
+    }
+
     if (changedContextProvider(node)) propagateContextChange(node);
 
-    reconcile(node, node.props.children);
+    reconcileCurrentChildren(node, node.props.children);
   }
 
   function canBailout(node: F): boolean {
@@ -470,6 +506,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
+  function shouldForceChildPlacement(node: F): boolean {
+    return (node.flags & PlacementFlag) !== 0 && node.alternate !== null;
+  }
+
   function renderFunction(node: F): void {
     renderingFiber = node;
     currentHook = node.alternate?.memoizedState ?? null;
@@ -479,7 +519,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     try {
-      reconcile(node, (node.type as Component)(node.props));
+      reconcileCurrentChildren(node, (node.type as Component)(node.props));
       if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
       setCurrentDispatcher(previousDispatcher);
@@ -487,6 +527,25 @@ export function createRenderer<Container, Instance, TextInstance>(
       currentHook = null;
       workInProgressHook = null;
     }
+  }
+
+  function beginSuspense(node: F): void {
+    const previousSuspenseState = node.alternate?.suspenseState ?? null;
+
+    node.suspenseState = null;
+
+    if (previousSuspenseState === null) {
+      reconcileCurrentChildren(node, node.props.children);
+      return;
+    }
+
+    reconcile(
+      node,
+      node.props.children,
+      previousSuspenseState.primaryChild,
+      true,
+    );
+    appendDeletions(node, node.alternate?.child ?? null);
   }
 
   function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
@@ -613,6 +672,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousEffect = oldHook?.memoizedState ?? null;
     const hasChanged =
       previousEffect === null ||
+      previousEffect.controller === null ||
+      previousEffect.controller.signal.aborted ||
       !areHookInputsEqual(nextDeps, previousEffect.deps);
     const effect: Effect = {
       phase,
@@ -703,14 +764,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     node.memoizedProps = node.props;
   }
 
-  function reconcile(parent: F, children: FigNode): void {
+  function reconcileCurrentChildren(parent: F, children: FigNode): void {
+    reconcile(
+      parent,
+      children,
+      parent.alternate?.child ?? null,
+      shouldForceChildPlacement(parent),
+    );
+  }
+
+  function reconcile(
+    parent: F,
+    children: FigNode,
+    currentFirstChild: F | null,
+    forcePlacement: boolean,
+  ): void {
     const existing = new Map<string, F>();
     const seenKeys = new Set<string>();
-    for (
-      let old = parent.alternate?.child ?? null;
-      old !== null;
-      old = old.sibling
-    ) {
+    for (let old = currentFirstChild; old !== null; old = old.sibling) {
       existing.set(fiberChildKey(old), old);
     }
 
@@ -735,8 +806,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (canReuse) {
         existing.delete(key);
-        if (old.index < lastPlacedIndex) next.flags |= PlacementFlag;
-        else {
+        if (forcePlacement || old.index < lastPlacedIndex) {
+          next.flags |= PlacementFlag;
+        } else {
           next.flags |= UpdateFlag;
           lastPlacedIndex = old.index;
         }
@@ -748,9 +820,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
 
     for (const child of existing.values()) {
-      parent.deletions ??= [];
-      parent.deletions.push(child);
+      appendDeletion(parent, child);
     }
+  }
+
+  function appendDeletions(parent: F, firstChild: F | null): void {
+    for (let child = firstChild; child !== null; child = child.sibling) {
+      appendDeletion(parent, child);
+    }
+  }
+
+  function appendDeletion(parent: F, child: F): void {
+    parent.deletions ??= [];
+    parent.deletions.push(child);
   }
 
   function commitRoot(root: R, finishedWork: F): void {
@@ -921,6 +1003,79 @@ export function createRenderer<Container, Instance, TextInstance>(
     scheduleRoot(root);
   }
 
+  function findSuspenseBoundary(node: F): F | null {
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if (parent.tag === SuspenseTag && parent.suspenseState === null) {
+        return parent;
+      }
+    }
+
+    return null;
+  }
+
+  function captureSuspenseBoundary(boundary: F, thenable: Thenable): void {
+    const root = rootOf(boundary);
+    const lanes = root.renderLanes;
+
+    boundary.suspenseState = { primaryChild: boundary.child };
+    attachSuspensePing(root, boundary, thenable, lanes);
+    reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
+  }
+
+  function attachSuspensePing(
+    root: R,
+    boundary: F,
+    thenable: Thenable,
+    lanes: Lanes,
+  ): void {
+    if (lanes === NoLanes) return;
+
+    let pings = root.suspendedBoundaries.get(thenable);
+    const shouldAttach = pings === undefined;
+
+    if (pings === undefined) {
+      pings = new WeakMap();
+      root.suspendedBoundaries.set(thenable, pings);
+    }
+
+    pings.set(boundary, mergeLanes(pings.get(boundary) ?? NoLanes, lanes));
+
+    if (!shouldAttach) return;
+
+    thenable.then(
+      () => pingSuspenseBoundaries(root, thenable),
+      () => pingSuspenseBoundaries(root, thenable),
+    );
+  }
+
+  function pingSuspenseBoundaries(root: R, thenable: object): void {
+    const pings = root.suspendedBoundaries.get(thenable);
+    if (pings === undefined) return;
+
+    root.suspendedBoundaries.delete(thenable);
+    pingCurrentSuspenseBoundaries(root.current, pings);
+  }
+
+  function pingCurrentSuspenseBoundaries(
+    node: F,
+    pings: SuspensePings<Container, Instance, TextInstance>,
+  ): void {
+    const lanes = mergeLanes(
+      pings.get(node) ?? NoLanes,
+      node.alternate === null
+        ? NoLanes
+        : (pings.get(node.alternate) ?? NoLanes),
+    );
+
+    if (lanes !== NoLanes) {
+      scheduleFiber(node, getHighestPriorityLane(lanes));
+    }
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      pingCurrentSuspenseBoundaries(child, pings);
+    }
+  }
+
   function propagateContextChange(provider: F): void {
     const currentProvider = provider.alternate;
     if (currentProvider === null) return;
@@ -998,6 +1153,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
+    next.suspenseState = current.suspenseState;
     next.alternate = current;
     current.alternate = next;
 
@@ -1061,6 +1217,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
+      suspenseState: null,
     };
   }
 
@@ -1233,6 +1390,7 @@ function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
   if (element.type === Fragment) return FragmentTag;
   if (isContext(element.type)) return ContextProviderTag;
+  if (isSuspense(element.type)) return SuspenseTag;
   return FunctionTag;
 }
 

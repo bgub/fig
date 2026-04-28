@@ -1,4 +1,4 @@
-import { createElement, useState } from "@bgub/fig";
+import { createElement, readPromise, Suspense, useState } from "@bgub/fig";
 import { requestPaint } from "@bgub/fig-scheduler";
 import { describe, expect, it } from "vitest";
 import { createRenderer, type HostConfig } from "./index.ts";
@@ -58,7 +58,45 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
   },
 };
 
+const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
+
 describe("reconciler", () => {
+  it("commits Suspense fallback and retries the boundary", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let resolve: (value: string) => void = () => undefined;
+    const promise = new Promise<string>((done) => {
+      resolve = done;
+    });
+
+    function Message() {
+      return createElement("span", null, readPromise(promise));
+    }
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        createElement("span", null, "Header"),
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Message, null),
+        ),
+        createElement("span", null, "Footer"),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("HeaderLoadingFooter");
+
+    resolve("Loaded");
+    await delay();
+
+    expect(container.textContent).toBe("HeaderLoadedFooter");
+  });
+
   it("restarts yielded work when flushSync schedules higher-priority work", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

@@ -3,6 +3,7 @@ import {
   type FigElement,
   FigElementSymbol,
   Fragment,
+  Suspense,
 } from "./element.ts";
 
 type JSXProps = Record<string, unknown>;
@@ -20,4 +21,4 @@ export function jsx(
   };
 }
 
-export { jsx as jsxs, jsx as jsxDEV, Fragment };
+export { jsx as jsxs, jsx as jsxDEV, Fragment, Suspense };

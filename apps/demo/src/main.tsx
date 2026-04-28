@@ -3,6 +3,7 @@ import {
   type FigNode,
   readContext,
   readPromise,
+  Suspense,
   useBeforePaint,
   useOnMount,
   useReactive,
@@ -316,7 +317,7 @@ function ResourcesPage() {
   return (
     <PageFrame
       title="Context + promises"
-      lede="Context is read without hook slots. Pending promises suspend root work and retry when settled."
+      lede="Context is read without hook slots. Pending promises render a local fallback and retry when settled."
     >
       <ThemeContext value={theme}>
         <Row>
@@ -340,7 +341,9 @@ function ResourcesPage() {
         {messagePromise === null ? (
           <p className="hint">No promise read yet.</p>
         ) : (
-          <PromiseMessage promise={messagePromise} />
+          <Suspense fallback={<p className="hint">Loading message...</p>}>
+            <PromiseMessage promise={messagePromise} />
+          </Suspense>
         )}
       </ThemeContext>
     </PageFrame>

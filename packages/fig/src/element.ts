@@ -3,6 +3,7 @@ export type Props = Record<string, unknown>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
+  | FigSuspense
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
 export type FigChild = FigElement | FigText | boolean | null | undefined;
@@ -15,8 +16,24 @@ export interface FigElement<P = Props> {
   readonly props: P & { children?: FigNode };
 }
 
+export interface SuspenseProps {
+  fallback?: FigNode;
+  children?: FigNode;
+}
+
+export interface FigSuspense {
+  (props: SuspenseProps): FigNode;
+  readonly $$typeof: symbol;
+}
+
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
+export const FigSuspenseSymbol = Symbol.for("fig.suspense");
+
+export const Suspense: FigSuspense = Object.assign(
+  (props: SuspenseProps) => props.children,
+  { $$typeof: FigSuspenseSymbol },
+);
 
 export function createElement<P extends Props>(
   type: ElementType<P>,
@@ -41,5 +58,12 @@ export function isValidElement(value: unknown): value is FigElement {
     typeof value === "object" &&
     value !== null &&
     (value as FigElement).$$typeof === FigElementSymbol
+  );
+}
+
+export function isSuspense(value: unknown): value is FigSuspense {
+  return (
+    typeof value === "function" &&
+    (value as FigSuspense).$$typeof === FigSuspenseSymbol
   );
 }

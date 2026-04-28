@@ -4,9 +4,11 @@ import {
   createElement,
   Fragment,
   isContext,
+  isSuspense,
   isValidElement,
   readContext,
   readPromise,
+  Suspense,
   useState,
 } from "./index.ts";
 
@@ -25,6 +27,20 @@ describe("@bgub/fig", () => {
 
     expect(element.type).toBe(Fragment);
     expect(element.props.children).toBe("child");
+  });
+
+  it("supports Suspense as a special element type", () => {
+    const element = createElement(Suspense, { fallback: "Loading" }, "Loaded");
+    const emptyFallback = createElement(Suspense, null, "Loaded");
+
+    expect(isSuspense(Suspense)).toBe(true);
+    expect(isValidElement(element)).toBe(true);
+    expect(element.type).toBe(Suspense);
+    expect(element.props).toEqual({
+      fallback: "Loading",
+      children: "Loaded",
+    });
+    expect(emptyFallback.props).toEqual({ children: "Loaded" });
   });
 
   it("creates callable contexts", () => {
