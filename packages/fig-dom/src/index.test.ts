@@ -334,6 +334,22 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Now");
   });
 
+  it("flushes batched root work inside flushSync", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("main", null, "Before")));
+
+    batchedUpdates(() => {
+      root.render(createElement("main", null, "After"));
+      expect(container.textContent).toBe("Before");
+
+      flushSync(() => undefined);
+
+      expect(container.textContent).toBe("After");
+    });
+  });
+
   it("abandons failed render work and recovers on later renders", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
@@ -358,6 +374,47 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(createElement(Recovered, null)));
 
     expect(container.textContent).toBe("Recovered");
+  });
+
+  it("preserves pending state updates when render work is abandoned", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let setCount: ((updater: (count: number) => number) => void) | null = null;
+
+    function Counter() {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("span", null, count);
+    }
+
+    function Broken() {
+      throw new Error("render failed");
+    }
+
+    function App({ fail }: { fail: boolean }) {
+      return createElement(
+        "main",
+        null,
+        createElement(Counter, null),
+        fail ? createElement(Broken, null) : null,
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { fail: false })));
+    expect(container.textContent).toBe("0");
+
+    expect(() => {
+      flushSync(() => {
+        setCount?.((count) => count + 1);
+        root.render(createElement(App, { fail: true }));
+      });
+    }).toThrow("render failed");
+
+    expect(container.textContent).toBe("0");
+
+    flushSync(() => root.render(createElement(App, { fail: false })));
+
+    expect(container.textContent).toBe("1");
   });
 
   it("recovers after before-paint effects throw", () => {
@@ -992,6 +1049,39 @@ describe("@bgub/fig-dom", () => {
     expect(calls).toEqual(["child"]);
   });
 
+  it("continues same-target delegated handlers after stopPropagation", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement(
+          "main",
+          {
+            events: [on("click", () => calls.push("parent"))],
+          },
+          createElement("button", {
+            events: [
+              on("click", (event) => {
+                calls.push("child:first");
+                event.stopPropagation();
+              }),
+              on("click", () => calls.push("child:second")),
+            ],
+          }),
+        ),
+        container as unknown as Element,
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const button = main.childNodes[0] as FakeElement;
+
+    button.dispatch("click");
+
+    expect(calls).toEqual(["child:first", "child:second"]);
+  });
+
   it("delegates focus-like events through capture with Fig bubble semantics", () => {
     for (const type of ["focus", "blur"]) {
       const calls: string[] = [];
@@ -1097,6 +1187,38 @@ describe("@bgub/fig-dom", () => {
     expect(calls).toEqual(["click"]);
     expect(signals[0].aborted).toBe(true);
     expect(container.listeners.click).toBeUndefined();
+  });
+
+  it("cleans up delegated once listeners when callbacks throw", () => {
+    let calls = 0;
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement("button", {
+          events: [
+            on(
+              "click",
+              () => {
+                calls += 1;
+                throw new Error("boom");
+              },
+              { once: true },
+            ),
+          ],
+        }),
+        container as unknown as Element,
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+
+    expect(() => button.dispatch("click")).toThrow("boom");
+    expect(calls).toBe(1);
+    expect(container.listeners.click).toBeUndefined();
+
+    expect(() => button.dispatch("click")).not.toThrow();
+    expect(calls).toBe(1);
   });
 
   it("keeps delegated root listeners while sibling handlers remain", () => {
@@ -1568,6 +1690,31 @@ describe("@bgub/fig-dom", () => {
 
     flushSync(() => root.render(createElement("div", null, null, false, "C")));
     expect(container.textContent).toBe("C");
+    expect((container.childNodes[0] as FakeElement).childNodes).toHaveLength(1);
+  });
+
+  it("does not collide numeric explicit keys with implicit index keys", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "div",
+          null,
+          createElement("span", { key: 1 }, "A"),
+          createElement("span", null, "B"),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("AB");
+
+    flushSync(() =>
+      root.render(createElement("div", null, createElement("span", null, "B"))),
+    );
+
+    expect(container.textContent).toBe("B");
     expect((container.childNodes[0] as FakeElement).childNodes).toHaveLength(1);
   });
 

@@ -45,6 +45,7 @@ const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const rootContainers = new WeakSet<Container>();
 const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
+const immediatePropagationStopped = new WeakSet<Event>();
 const discreteEvents = new Set([
   "beforeinput",
   "change",
@@ -183,34 +184,58 @@ function dispatchRootEvent(
   passive: boolean,
   event: Event,
 ): void {
-  const path = eventPath(root, event);
-  const orderedPath = capture ? path.toReversed() : path;
+  withStopImmediatePropagation(event, () => {
+    const path = eventPath(root, event);
+    const step = capture ? -1 : 1;
+    let index = capture ? path.length - 1 : 0;
 
-  for (const element of orderedPath) {
-    const slots = eventSlots.get(element);
-    if (slots === undefined) continue;
-
-    for (let index = 0; index < slots.length; index += 1) {
-      const slot = slots[index];
+    while (index >= 0 && index < path.length) {
       if (
-        slot.root !== root ||
-        slot.type !== type ||
-        slot.options.capture !== capture ||
-        slot.options.passive !== passive
+        dispatchRootEventAtElement(
+          root,
+          type,
+          capture,
+          passive,
+          event,
+          path[index],
+        )
       ) {
-        continue;
+        return;
       }
-
-      dispatchEventSlot(element, slot, event);
-
-      if (slot.options.once) {
-        removeElementSlot(element, slots, index);
-        index -= 1;
-      }
-
-      if (event.cancelBubble) return;
+      index += step;
     }
+  });
+}
+
+function dispatchRootEventAtElement(
+  root: Container,
+  type: string,
+  capture: boolean,
+  passive: boolean,
+  event: Event,
+  element: Element,
+): boolean {
+  const slots = eventSlots.get(element);
+  if (slots === undefined) return false;
+
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+    if (
+      slot.root !== root ||
+      slot.type !== type ||
+      slot.options.capture !== capture ||
+      slot.options.passive !== passive
+    ) {
+      continue;
+    }
+
+    index = detachOnceEventSlot(element, slot, slots, index);
+    dispatchEventSlotWithCleanup(element, slot, event);
+
+    if (immediatePropagationStopped.has(event)) return true;
   }
+
+  return event.cancelBubble;
 }
 
 function dispatchEventSlot(
@@ -277,14 +302,8 @@ function attachDirectEventSlot(element: Element, slot: EventSlot): void {
   detachEventSlot(slot);
   slot.element = element;
   slot.listener = (event) => {
-    dispatchEventSlot(element, slot, event);
-    if (!slot.options.once) return;
-
-    const slots = eventSlots.get(element);
-    const index = slots?.indexOf(slot) ?? -1;
-    if (slots !== undefined && index !== -1) {
-      removeElementSlot(element, slots, index);
-    }
+    detachOnceEventSlot(element, slot);
+    dispatchEventSlotWithCleanup(element, slot, event);
   };
   element.addEventListener(slot.type, slot.listener, slot.options);
 }
@@ -366,6 +385,29 @@ function removeElementSlot(
   if (slots.length === 0) eventSlots.delete(element);
 }
 
+function detachOnceEventSlot(
+  element: Element,
+  slot: EventSlot,
+  slots = eventSlots.get(element),
+  index = slots?.indexOf(slot) ?? -1,
+): number {
+  if (!slot.options.once || slots === undefined || index === -1) return index;
+  removeElementSlot(element, slots, index);
+  return index - 1;
+}
+
+function dispatchEventSlotWithCleanup(
+  element: Element,
+  slot: EventSlot,
+  event: Event,
+): void {
+  try {
+    dispatchEventSlot(element, slot, event);
+  } finally {
+    if (slot.options.once) abortEventSlot(slot);
+  }
+}
+
 function dispatchFocusLikeEvent(
   root: Container,
   type: string,
@@ -431,6 +473,36 @@ function withCurrentTarget<T>(
           .currentTarget;
       } else {
         Object.defineProperty(event, "currentTarget", previous);
+      }
+    }
+  }
+}
+
+function withStopImmediatePropagation<T>(event: Event, callback: () => T): T {
+  const stopImmediatePropagation = event.stopImmediatePropagation;
+  if (typeof stopImmediatePropagation !== "function") return callback();
+
+  const previous = Object.getOwnPropertyDescriptor(
+    event,
+    "stopImmediatePropagation",
+  );
+  const changed = Reflect.defineProperty(event, "stopImmediatePropagation", {
+    configurable: true,
+    value() {
+      immediatePropagationStopped.add(event);
+      stopImmediatePropagation.call(event);
+    },
+  });
+
+  try {
+    return callback();
+  } finally {
+    if (changed) {
+      if (previous === undefined) {
+        delete (event as unknown as { stopImmediatePropagation?: () => void })
+          .stopImmediatePropagation;
+      } else {
+        Object.defineProperty(event, "stopImmediatePropagation", previous);
       }
     }
   }

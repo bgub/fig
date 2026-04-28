@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createLaneMap,
   DefaultLane,
+  getEntangledLanes,
   getHighestPriorityLane,
   getLanePriority,
   getNextLanes,
@@ -22,6 +23,7 @@ import {
   TotalLanes,
   TransitionLane1,
   TransitionLane2,
+  TransitionLane3,
 } from "./lanes.ts";
 
 function root(): LaneRoot {
@@ -72,5 +74,16 @@ describe("lanes", () => {
     laneRoot.suspendedLanes = NoLanes;
 
     expect(getNextLanes(laneRoot)).toBe(TransitionLane1 | TransitionLane2);
+  });
+
+  it("includes transitive entangled lanes", () => {
+    const laneRoot = root();
+
+    markRootEntangled(laneRoot, mergeLanes(TransitionLane1, TransitionLane2));
+    markRootEntangled(laneRoot, mergeLanes(TransitionLane2, TransitionLane3));
+
+    expect(getEntangledLanes(laneRoot, TransitionLane1)).toBe(
+      TransitionLane1 | TransitionLane2 | TransitionLane3,
+    );
   });
 });

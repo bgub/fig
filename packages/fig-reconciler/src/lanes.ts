@@ -171,13 +171,15 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
 
 export function getEntangledLanes(root: LaneRoot, lanes: Lanes): Lanes {
   let entangled = lanes;
+  let visited = NoLanes;
   let laneSet = entangled & root.entangledLanes;
 
   while (laneSet !== NoLanes) {
     const index = laneToIndex(laneSet);
     const lane = 1 << index;
     entangled |= root.entanglements[index];
-    laneSet &= ~lane;
+    visited |= lane;
+    laneSet = entangled & root.entangledLanes & ~visited;
   }
 
   return entangled;

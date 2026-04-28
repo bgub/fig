@@ -176,6 +176,12 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
+  consumedPendingQueues: ConsumedPendingQueue[];
+}
+
+interface ConsumedPendingQueue {
+  queue: HookQueue<unknown>;
+  pending: HookUpdate<unknown>;
 }
 
 export function createRenderer<Container, Instance, TextInstance>(
@@ -184,7 +190,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
   const roots = new WeakMap<object, R>();
-  const scheduledRoots = new Set<R>();
+  const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
   let batchDepth = 0;
   let renderingFiber: F | null = null;
@@ -241,10 +247,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         pendingReactiveEffects: [],
         reactiveCallback: null,
         suspendedThenables: new WeakMap(),
+        consumedPendingQueues: [],
       };
       current.stateNode = root;
       roots.set(key, root);
-      scheduledRoots.add(root);
     }
 
     return {
@@ -262,12 +268,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   function flushSync(callback: () => void): void {
     runWithPriority(SyncLane, callback);
 
-    for (const root of scheduledRoots) {
+    for (const root of pendingRoots) {
       if (root.pendingLanes !== NoLanes) {
         root.callback?.cancel();
         root.callback = null;
         root.callbackPriority = NoLane;
         performRoot(root, true);
+      } else {
+        pendingRoots.delete(root);
       }
     }
   }
@@ -289,8 +297,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   function updateRoot(root: R, children: FigNode): void {
     const lane = requestUpdateLane();
     root.element = children;
-    markRootUpdated(root, lane);
+    markRootPending(root, lane);
     scheduleOrBatchRoot(root);
+  }
+
+  function markRootPending(root: R, lane: Lane): void {
+    markRootUpdated(root, lane);
+    pendingRoots.add(root);
   }
 
   function scheduleOrBatchRoot(root: R): void {
@@ -302,7 +315,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     markStarvedLanesAsExpired(root, now());
 
     const nextLanes = getNextLanes(root, root.renderLanes);
-    if (nextLanes === NoLanes) return;
+    if (nextLanes === NoLanes) {
+      if (root.pendingLanes === NoLanes) pendingRoots.delete(root);
+      return;
+    }
 
     const priorityLane = getHighestPriorityLane(nextLanes);
     if (root.callback !== null && root.callbackPriority === priorityLane)
@@ -336,12 +352,25 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingLanes === NoLanes && root.wip === null) return;
+    if (root.pendingLanes === NoLanes && root.wip === null) {
+      pendingRoots.delete(root);
+      return;
+    }
 
     flushPendingReactiveEffects(root);
 
+    const nextLanes = getNextLanes(root, root.renderLanes);
+    if (
+      root.wip !== null &&
+      nextLanes !== NoLanes &&
+      nextLanes !== root.renderLanes
+    ) {
+      restartRootWork(root);
+    }
+
     if (root.wip === null) {
-      root.renderLanes = getNextLanes(root);
+      root.renderLanes = nextLanes;
+      root.consumedPendingQueues = [];
       root.finishedWork = createWorkInProgress(root.current, {
         children: root.element,
       });
@@ -366,20 +395,30 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (root.finishedWork !== null) commitRoot(root, root.finishedWork);
 
+    finishRootWork(root);
+  }
+
+  function finishRootWork(root: R): void {
     root.renderLanes = NoLanes;
     root.finishedWork = null;
     root.callback = null;
     root.callbackPriority = NoLane;
 
     if (root.pendingLanes !== NoLanes) scheduleRoot(root);
+    else pendingRoots.delete(root);
   }
 
   function abandonRootWork(root: R): void {
+    restartRootWork(root);
+    root.callback = null;
+    root.callbackPriority = NoLane;
+  }
+
+  function restartRootWork(root: R): void {
+    restoreConsumedPendingQueues(root);
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
-    root.callback = null;
-    root.callbackPriority = NoLane;
   }
 
   function performUnit(node: F): F | null {
@@ -465,15 +504,15 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     appendHook(hook);
 
+    const root = rootOf(renderingFiber);
     const queue = hook.queue;
     const pending = queue.pending;
     if (pending !== null) {
-      queue.pending = null;
-      hook.baseQueue = mergeQueues(hook.baseQueue, pending);
+      hook.baseQueue = consumePendingHookQueue(root, hook, queue, pending);
     }
 
     if (hook.baseQueue !== null) {
-      processHookQueue(hook, rootOf(renderingFiber).renderLanes);
+      processHookQueue(hook, root.renderLanes);
     }
 
     if (queue.dispatch === null) {
@@ -531,6 +570,20 @@ export function createRenderer<Container, Instance, TextInstance>(
     hook.memoizedState = state;
     hook.baseState = newBaseQueue === null ? state : newBaseState;
     hook.baseQueue = newBaseQueue;
+  }
+
+  function consumePendingHookQueue<S>(
+    root: R,
+    hook: Hook<S>,
+    queue: HookQueue<S>,
+    pending: HookUpdate<S>,
+  ): HookUpdate<S> | null {
+    queue.pending = null;
+    root.consumedPendingQueues.push({
+      queue: queue as HookQueue<unknown>,
+      pending: pending as HookUpdate<unknown>,
+    });
+    return mergeQueues(cloneQueue(hook.baseQueue), cloneQueueNodes(pending));
   }
 
   function appendHook(hook: Hook): void {
@@ -651,14 +704,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function reconcile(parent: F, children: FigNode): void {
-    const existing = new Map<string | number, F>();
-    const seenKeys = new Set<string | number>();
+    const existing = new Map<string, F>();
+    const seenKeys = new Set<string>();
     for (
       let old = parent.alternate?.child ?? null;
       old !== null;
       old = old.sibling
     ) {
-      existing.set(old.key ?? old.index, old);
+      existing.set(fiberChildKey(old), old);
     }
 
     parent.child = null;
@@ -667,7 +720,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let previous: F | null = null;
     let lastPlacedIndex = 0;
 
-    normalized(children).forEach((child, index) => {
+    forEachChild(children, (child, index) => {
       const key = childKey(child, index, seenKeys);
       const old = existing.get(key);
       const canReuse = old !== undefined && sameType(old, child);
@@ -705,10 +758,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitDeletions(finishedWork);
     commitMutationEffects(finishedWork.child);
     root.current = finishedWork;
+    root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
     commitEffects(finishedWork.child, BeforePaintEffect);
     collectReactiveEffects(root, finishedWork.child);
-    clearEffectLists(finishedWork.child);
     scheduleReactiveEffects(root);
   }
 
@@ -838,7 +891,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (parent.tag === RootTag) {
         const root = parent.stateNode as R;
-        markRootUpdated(root, lane);
+        markRootPending(root, lane);
         scheduleOrBatchRoot(root);
         return;
       }
@@ -864,6 +917,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     root.suspendedThenables.delete(thenable);
     markRootPinged(root, lanes);
+    pendingRoots.add(root);
     scheduleRoot(root);
   }
 
@@ -1027,10 +1081,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function collectReactiveEffects(root: R, node: F | null): void {
-    visitEffects(node, (effect) => {
+    if (node === null) return;
+
+    for (const effect of node.effects ?? []) {
       if (effect.phase === ReactiveEffect)
         root.pendingReactiveEffects.push(effect);
-    });
+    }
+
+    node.effects = null;
+    collectReactiveEffects(root, node.child);
+    collectReactiveEffects(root, node.sibling);
   }
 
   function scheduleReactiveEffects(root: R): void {
@@ -1093,12 +1153,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     effect.controller = null;
   }
 
-  function clearEffectLists(node: F | null): void {
-    if (node === null) return;
+  function restoreConsumedPendingQueues(root: R): void {
+    for (const { queue, pending } of root.consumedPendingQueues) {
+      queue.pending =
+        queue.pending === null ? pending : mergeQueues(pending, queue.pending);
+    }
 
-    node.effects = null;
-    clearEffectLists(node.child);
-    clearEffectLists(node.sibling);
+    root.consumedPendingQueues = [];
   }
 }
 
@@ -1151,6 +1212,23 @@ function cloneUpdateNode<S>(update: HookUpdate<S>): HookUpdate<S> {
   return clone;
 }
 
+function cloneQueue<S>(queue: HookUpdate<S> | null): HookUpdate<S> | null {
+  if (queue === null) return null;
+  return cloneQueueNodes(queue);
+}
+
+function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
+  let clone: HookUpdate<S> | null = null;
+  let update = queue.next;
+
+  do {
+    clone = mergeQueues(clone, cloneUpdateNode(update));
+    update = update.next;
+  } while (update !== queue.next);
+
+  return clone as HookUpdate<S>;
+}
+
 function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
   if (element.type === Fragment) return FragmentTag;
@@ -1178,25 +1256,54 @@ function propsFor(child: FigChild): Props {
 function childKey(
   child: FigChild,
   index: number,
-  seenKeys: Set<string | number>,
-): string | number {
-  if (!isValidElement(child) || child.key === null) return index;
-  if (seenKeys.has(child.key)) throw duplicateKeyError(child.key);
-  seenKeys.add(child.key);
-  return child.key;
+  seenKeys: Set<string>,
+): string {
+  if (!isValidElement(child) || child.key === null) return implicitKey(index);
+
+  const key = explicitKey(child.key);
+  if (seenKeys.has(key)) throw duplicateKeyError(child.key);
+  seenKeys.add(key);
+  return key;
 }
 
-function normalized(node: FigNode): FigChild[] {
-  if (Array.isArray(node)) return node.flatMap(normalized);
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return [];
+function fiberChildKey<Container, Instance, TextInstance>(
+  fiber: Fiber<Container, Instance, TextInstance>,
+): string {
+  return fiber.key === null ? implicitKey(fiber.index) : explicitKey(fiber.key);
+}
+
+function explicitKey(key: string | number): string {
+  return `$${String(key)}`;
+}
+
+function implicitKey(index: number): string {
+  return `.${index}`;
+}
+
+function forEachChild(
+  node: FigNode,
+  visitor: (child: FigChild, index: number) => void,
+  index = 0,
+): number {
+  if (Array.isArray(node)) {
+    let nextIndex = index;
+    for (const child of node) {
+      nextIndex = forEachChild(child as FigNode, visitor, nextIndex);
+    }
+    return nextIndex;
   }
+
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return index;
+  }
+
   if (
     typeof node === "string" ||
     typeof node === "number" ||
     isValidElement(node)
   ) {
-    return [node];
+    visitor(node, index);
+    return index + 1;
   }
 
   throw invalidChildError(node);
