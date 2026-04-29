@@ -9,6 +9,7 @@ import {
   readContext,
   readPromise,
   Suspense,
+  transition,
   useState,
 } from "./index.ts";
 
@@ -68,5 +69,9 @@ describe("@bgub/fig", () => {
     expect(() => readPromise(Promise.resolve("done"))).toThrow(
       "readPromise can only be called while rendering a component.",
     );
+  });
+
+  it("runs transition callbacks without a renderer", () => {
+    expect(transition(() => "done")).toBe("done");
   });
 });

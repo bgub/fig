@@ -352,6 +352,14 @@ export function runWithPriority<T>(lane: Lane, callback: () => T): T {
   }
 }
 
+export function runWithTransition<T>(callback: () => T): T {
+  const lane = includesSomeLane(AllTransitionLanes, currentUpdateLane)
+    ? currentUpdateLane
+    : claimNextTransitionLane();
+
+  return runWithPriority(lane, callback);
+}
+
 function computeExpirationTime(lane: Lane, currentTime: number): number {
   if (
     includesSomeLane(

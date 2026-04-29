@@ -7,6 +7,7 @@ import {
   readContext,
   readPromise,
   Suspense,
+  transition,
   useBeforeLayout,
   useBeforePaint,
   useOnMount,
@@ -736,6 +737,77 @@ describe("@bgub/fig-dom", () => {
         ),
       ),
     );
+
+    expect(container.textContent).toBe("Loading");
+
+    pending.resolve("Loaded");
+    await delay();
+
+    expect(container.textContent).toBe("Loaded");
+  });
+
+  it("keeps revealed Suspense content visible while transitions suspend", async () => {
+    const pending = deferred<string>();
+    let setValue: ((value: Promise<string> | null) => void) | null = null;
+
+    function Message({ value }: { value: Promise<string> | null }) {
+      return createElement(
+        "span",
+        null,
+        value === null ? "Ready" : readPromise(value),
+      );
+    }
+
+    function App() {
+      const [value, set] = useState<Promise<string> | null>(null);
+      setValue = set;
+
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(Message, { value }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Ready");
+
+    transition(() => {
+      setValue?.(pending.promise);
+    });
+    await delay();
+
+    expect(container.textContent).toBe("Ready");
+
+    pending.resolve("Loaded");
+    await delay();
+
+    expect(container.textContent).toBe("Loaded");
+  });
+
+  it("renders Suspense fallback for initial transition suspension", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    transition(() => {
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Message, null),
+        ),
+      );
+    });
+    await delay();
 
     expect(container.textContent).toBe("Loading");
 

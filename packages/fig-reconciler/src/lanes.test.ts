@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AllTransitionLanes,
   createLaneMap,
   DefaultLane,
   getEntangledLanes,
@@ -9,6 +10,7 @@ import {
   IdleHydrationLane,
   IdleLane,
   InputContinuousLane,
+  includesSomeLane,
   type LaneRoot,
   markRootEntangled,
   markRootUpdated,
@@ -19,6 +21,7 @@ import {
   OffscreenLane,
   requestUpdateLane,
   runWithPriority,
+  runWithTransition,
   SyncLane,
   TotalLanes,
   TransitionLane1,
@@ -57,6 +60,19 @@ describe("lanes", () => {
 
     runWithPriority(SyncLane, () => {
       expect(requestUpdateLane()).toBe(SyncLane);
+    });
+
+    expect(requestUpdateLane()).toBe(DefaultLane);
+  });
+
+  it("tracks scoped transition priority", () => {
+    runWithTransition(() => {
+      const lane = requestUpdateLane();
+      expect(includesSomeLane(AllTransitionLanes, lane)).toBe(true);
+
+      runWithTransition(() => {
+        expect(requestUpdateLane()).toBe(lane);
+      });
     });
 
     expect(requestUpdateLane()).toBe(DefaultLane);

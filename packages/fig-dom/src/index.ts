@@ -1,4 +1,4 @@
-import { type FigNode, Fragment, Suspense } from "@bgub/fig";
+import { type FigNode, Fragment, Suspense, transition } from "@bgub/fig";
 import {
   createRenderer,
   type FigRoot,
@@ -70,4 +70,4 @@ export function render(children: FigNode, container: Container): FigRoot {
   return root;
 }
 
-export { Fragment, Suspense };
+export { Fragment, Suspense, transition };

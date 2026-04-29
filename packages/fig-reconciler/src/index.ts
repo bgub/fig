@@ -15,6 +15,7 @@ import {
   type RenderDispatcher,
   type SetStateAction,
   setCurrentDispatcher,
+  setTransitionHandler,
 } from "@bgub/fig";
 import {
   NormalPriority,
@@ -29,6 +30,7 @@ import {
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
+  includesOnlyTransitions,
   includesSomeLane,
   isSyncLane,
   type Lane,
@@ -45,11 +47,14 @@ import {
   NoTimestamp,
   requestUpdateLane,
   runWithPriority,
+  runWithTransition,
   SyncLane,
 } from "./lanes.ts";
 import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
 export * from "./lanes.ts";
+
+setTransitionHandler(runWithTransition);
 
 type Component = (props: Props & { children?: FigNode }) => FigNode;
 type HostNode<Instance, TextInstance> = Instance | TextInstance;
@@ -200,6 +205,8 @@ interface ConsumedPendingQueue {
   queue: HookQueue<unknown>;
   pending: HookUpdate<unknown>;
 }
+
+const PreservedSuspense = Symbol("fig.preserved-suspense");
 
 export function createRenderer<Container, Instance, TextInstance>(
   host: HostConfig<Container, Instance, TextInstance>,
@@ -356,6 +363,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       performRootWork(root, forceSync);
     } catch (error) {
+      if (error === PreservedSuspense) {
+        abandonRootWork(root);
+        return;
+      }
+
       const suspendedLanes = root.renderLanes;
       abandonRootWork(root);
 
@@ -446,8 +458,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (isThenable(error)) {
         const boundary = findSuspenseBoundary(node);
         if (boundary !== null) {
-          captureSuspenseBoundary(boundary, error);
-          return boundary.child;
+          return captureSuspenseBoundary(boundary, error);
         }
       }
 
@@ -456,6 +467,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (node.child !== null) return node.child;
 
+    return completeUnit(node);
+  }
+
+  function completeUnit(node: F): F | null {
     let next: F | null = node;
     while (next !== null) {
       complete(next);
@@ -1013,13 +1028,27 @@ export function createRenderer<Container, Instance, TextInstance>(
     return null;
   }
 
-  function captureSuspenseBoundary(boundary: F, thenable: Thenable): void {
+  function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
     const root = rootOf(boundary);
     const lanes = root.renderLanes;
+    attachSuspensePing(root, boundary, thenable, lanes);
+
+    if (shouldPreserveSuspenseBoundary(root, boundary)) {
+      markRootSuspended(root, lanes);
+      throw PreservedSuspense;
+    }
 
     boundary.suspenseState = { primaryChild: boundary.child };
-    attachSuspensePing(root, boundary, thenable, lanes);
     reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
+    return boundary.child ?? completeUnit(boundary);
+  }
+
+  function shouldPreserveSuspenseBoundary(root: R, boundary: F): boolean {
+    return (
+      boundary.alternate !== null &&
+      boundary.alternate.suspenseState === null &&
+      includesOnlyTransitions(root.renderLanes)
+    );
   }
 
   function attachSuspensePing(
@@ -1164,6 +1193,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let current = parent.alternate?.child ?? null;
     let previous: F | null = null;
     parent.child = null;
+    parent.deletions = null;
 
     while (current !== null) {
       const next = createWorkInProgress(current, current.props);
