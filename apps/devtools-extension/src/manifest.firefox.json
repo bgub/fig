@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Fig DevTools",
+  "version": "0.0.1",
+  "description": "Inspect Fig component trees in Firefox DevTools.",
+  "devtools_page": "devtools.html",
+  "background": {
+    "scripts": ["service-worker.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["hook.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

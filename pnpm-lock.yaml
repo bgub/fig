@@ -42,7 +42,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/fig-dom
 
+  apps/devtools-extension:
+    dependencies:
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:../../packages/fig-devtools
+      '@bgub/fig-reconciler':
+        specifier: workspace:*
+        version: link:../../packages/fig-reconciler
+
   packages/fig: {}
+
+  packages/fig-devtools:
+    dependencies:
+      '@bgub/fig-reconciler':
+        specifier: workspace:*
+        version: link:../fig-reconciler
 
   packages/fig-dom:
     dependencies:

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Fig">
+  <rect width="32" height="32" rx="7" fill="#111827" />
+  <path
+    fill="#dbeafe"
+    d="M8 8h16v4H13v4h9v4h-9v4H8z"
+  />
+</svg>

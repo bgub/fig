@@ -25,6 +25,16 @@ import {
   shouldYieldToHost,
 } from "@bgub/fig-scheduler";
 import {
+  devtoolsTypeName,
+  type FigDevtoolsEffectPhase,
+  type FigDevtoolsFiberKind,
+  type FigDevtoolsFiberSnapshot,
+  type FigDevtoolsHookKind,
+  type FigDevtoolsHookSnapshot,
+  type FigDevtoolsRootSnapshot,
+  getFigDevtoolsGlobalHook,
+} from "./devtools.ts";
+import {
   createLaneMap,
   DefaultLane,
   getHighestPriorityLane,
@@ -52,6 +62,7 @@ import {
 } from "./lanes.ts";
 import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
+export * from "./devtools.ts";
 export * from "./lanes.ts";
 
 setTransitionHandler(runWithTransition);
@@ -126,20 +137,13 @@ interface HookQueue<S> {
 }
 
 interface Hook<S = unknown> {
-  kind: HookKind;
+  kind: FigDevtoolsHookKind;
   memoizedState: S;
   baseState: S;
   baseQueue: HookUpdate<S> | null;
   queue: HookQueue<S>;
   next: Hook | null;
 }
-
-type HookKind =
-  | "state"
-  | "reactive"
-  | "on-mount"
-  | "before-paint"
-  | "before-layout";
 
 interface Effect {
   phase: EffectPhase;
@@ -216,7 +220,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   const roots = new WeakMap<object, R>();
   const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
+  const devtoolsFiberIds = new WeakMap<object, number>();
+  const devtoolsRootIds = new WeakMap<object, number>();
   let batchDepth = 0;
+  let devtoolsRendererId: number | null = null;
+  let nextDevtoolsFiberId = 1;
+  let nextDevtoolsRootId = 1;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -673,7 +682,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateEffectHook(
-    kind: HookKind,
+    kind: FigDevtoolsHookKind,
     phase: EffectPhase,
     create: EffectCallback,
     deps?: DependencyList,
@@ -736,7 +745,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function updateHook(kind: HookKind): Hook | null {
+  function updateHook(kind: FigDevtoolsHookKind): Hook | null {
     const hook = currentHook;
 
     if (hook === null) {
@@ -860,6 +869,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitEffects(finishedWork.child, BeforePaintEffect);
     collectReactiveEffects(root, finishedWork.child);
     scheduleReactiveEffects(root);
+    emitDevtoolsCommit(root);
   }
 
   function commitMutationEffects(node: F | null): void {
@@ -1261,6 +1271,185 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   return { batchedUpdates, createRoot, render, flushSync };
 
+  function emitDevtoolsCommit(root: R): void {
+    const hook = getFigDevtoolsGlobalHook();
+    if (hook === null) return;
+
+    try {
+      devtoolsRendererId ??= hook.inject({
+        name: "Fig",
+        packageName: "@bgub/fig-reconciler",
+      });
+      hook.onCommitRoot(
+        devtoolsRendererId,
+        snapshotDevtoolsRoot(root, devtoolsRendererId),
+      );
+    } catch {
+      // DevTools should never affect application rendering.
+    }
+  }
+
+  function snapshotDevtoolsRoot(
+    root: R,
+    rendererId: number,
+  ): FigDevtoolsRootSnapshot {
+    return {
+      id: devtoolsRootId(root),
+      rendererId,
+      committedAt: now(),
+      pendingLanes: root.pendingLanes,
+      suspendedLanes: root.suspendedLanes,
+      pingedLanes: root.pingedLanes,
+      expiredLanes: root.expiredLanes,
+      tree: snapshotDevtoolsFiber(root.current, null),
+    };
+  }
+
+  function snapshotDevtoolsFiber(
+    node: F,
+    parentId: number | null,
+  ): FigDevtoolsFiberSnapshot {
+    const id = devtoolsFiberId(node);
+    const children: FigDevtoolsFiberSnapshot[] = [];
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      children.push(snapshotDevtoolsFiber(child, id));
+    }
+
+    return {
+      id,
+      parentId,
+      name: devtoolsFiberName(node),
+      kind: devtoolsFiberKind(node),
+      key: node.key,
+      index: node.index,
+      props: devtoolsProps(node),
+      lanes: node.lanes,
+      childLanes: node.childLanes,
+      hooks: devtoolsHooks(node.memoizedState),
+      contextDependencies: devtoolsContextDependencies(node),
+      children,
+    };
+  }
+
+  function devtoolsRootId(root: R): number {
+    const existing = devtoolsRootIds.get(root);
+    if (existing !== undefined) return existing;
+
+    const id = nextDevtoolsRootId;
+    nextDevtoolsRootId += 1;
+    devtoolsRootIds.set(root, id);
+    return id;
+  }
+
+  function devtoolsFiberId(node: F): number {
+    const existing =
+      devtoolsFiberIds.get(node) ??
+      (node.alternate === null
+        ? undefined
+        : devtoolsFiberIds.get(node.alternate));
+
+    if (existing !== undefined) {
+      devtoolsFiberIds.set(node, existing);
+      if (node.alternate !== null)
+        devtoolsFiberIds.set(node.alternate, existing);
+      return existing;
+    }
+
+    const id = nextDevtoolsFiberId;
+    nextDevtoolsFiberId += 1;
+    devtoolsFiberIds.set(node, id);
+    if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, id);
+    return id;
+  }
+
+  function devtoolsProps(node: F): Props {
+    const props: Props = {};
+    const source = node.memoizedProps ?? node.props;
+
+    for (const [key, value] of Object.entries(source)) {
+      if (key !== "children") props[key] = value;
+    }
+
+    return props;
+  }
+
+  function devtoolsHooks(firstHook: Hook | null): FigDevtoolsHookSnapshot[] {
+    const hooks: FigDevtoolsHookSnapshot[] = [];
+    let id = 0;
+
+    for (let hook = firstHook; hook !== null; hook = hook.next) {
+      id += 1;
+
+      if (isEffectHook(hook.kind)) {
+        const effect = hook.memoizedState as Effect;
+        hooks.push({
+          id,
+          kind: hook.kind,
+          deps: effect.deps,
+          phase: devtoolsEffectPhase(effect.phase),
+          active: effect.controller !== null,
+        });
+      } else {
+        hooks.push({
+          id,
+          kind: hook.kind,
+          state: hook.memoizedState,
+        });
+      }
+    }
+
+    return hooks;
+  }
+
+  function devtoolsContextDependencies(node: F): string[] {
+    return (
+      node.contextDependencies?.map((context) =>
+        devtoolsTypeName(context, "Context"),
+      ) ?? []
+    );
+  }
+
+  function devtoolsFiberKind(node: F): FigDevtoolsFiberKind {
+    switch (node.tag) {
+      case RootTag:
+        return "root";
+      case HostTag:
+        return "host";
+      case TextTag:
+        return "text";
+      case FunctionTag:
+        return "function";
+      case FragmentTag:
+        return "fragment";
+      case ContextProviderTag:
+        return "context-provider";
+    }
+  }
+
+  function devtoolsFiberName(node: F): string {
+    switch (node.tag) {
+      case RootTag:
+        return "Root";
+      case HostTag:
+        return String(node.type);
+      case TextTag:
+        return "#text";
+      case FunctionTag:
+        return devtoolsTypeName(node.type, "Anonymous");
+      case FragmentTag:
+        return "Fragment";
+      case ContextProviderTag:
+        return `${devtoolsTypeName(node.type, "Context")}.Provider`;
+    }
+  }
+
+  function devtoolsEffectPhase(phase: EffectPhase): FigDevtoolsEffectPhase {
+    if (phase === BeforePaintEffect) return "before-paint";
+    if (phase === BeforeLayoutEffect) return "before-layout";
+    return "reactive";
+  }
+
   function commitEffects(node: F | null, phase: EffectPhase): void {
     visitEffects(node, (effect) => {
       if (effect.phase === phase) runEffect(effect);
@@ -1350,7 +1539,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 }
 
-function isEffectHook(kind: HookKind): boolean {
+function isEffectHook(kind: FigDevtoolsHookKind): boolean {
   return (
     kind === "reactive" ||
     kind === "on-mount" ||
@@ -1359,7 +1548,7 @@ function isEffectHook(kind: HookKind): boolean {
   );
 }
 
-function createHook<S>(kind: HookKind, state: S): Hook<S> {
+function createHook<S>(kind: FigDevtoolsHookKind, state: S): Hook<S> {
   return {
     kind,
     memoizedState: state,
