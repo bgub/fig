@@ -79,6 +79,12 @@ importers:
 
   packages/fig-scheduler: {}
 
+  packages/fig-server:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+
 packages:
 
   '@babel/code-frame@7.29.0':

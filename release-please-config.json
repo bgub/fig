@@ -13,6 +13,11 @@
       "extra-files": ["jsr.json"],
       "prerelease-type": "alpha"
     },
+    "packages/fig-server": {
+      "package-name": "@bgub/fig-server",
+      "extra-files": ["jsr.json"],
+      "prerelease-type": "alpha"
+    },
     "packages/fig-reconciler": {
       "package-name": "@bgub/fig-reconciler",
       "extra-files": ["jsr.json"],
