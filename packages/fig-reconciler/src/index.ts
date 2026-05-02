@@ -1101,14 +1101,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     currentFirstChild: F | null,
     forcePlacement: boolean,
   ): void {
-    const nextChildren: FigChild[] = [];
+    const nextChildren = collectChildren(children);
     const nextKeys: string[] = [];
     const seenKeys = new Set<string>();
 
-    forEachChild(children, (child, index) => {
-      nextChildren.push(child);
-      nextKeys.push(childKey(child, index, seenKeys));
-    });
+    for (let index = 0; index < nextChildren.length; index += 1) {
+      nextKeys.push(childKey(nextChildren[index], index, seenKeys));
+    }
 
     parent.child = null;
     parent.deletions = null;
@@ -2137,33 +2136,41 @@ function implicitKey(index: number): string {
   return `.${index}`;
 }
 
-function forEachChild(
-  node: FigNode,
-  visitor: (child: FigChild, index: number) => void,
-  index = 0,
-): number {
+function collectChildren(node: FigNode): FigChild[] {
+  const children: FigChild[] = [];
+  collectChild(node, children);
+  return children;
+}
+
+function collectChild(node: FigNode, children: FigChild[]): void {
   if (Array.isArray(node)) {
-    let nextIndex = index;
-    for (const child of node) {
-      nextIndex = forEachChild(child as FigNode, visitor, nextIndex);
-    }
-    return nextIndex;
+    for (const child of node) collectChild(child as FigNode, children);
+    return;
   }
 
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return index;
+  if (node === null || node === undefined || typeof node === "boolean") return;
+
+  if (typeof node === "string" || typeof node === "number") {
+    appendTextChild(children, String(node));
+    return;
   }
 
-  if (
-    typeof node === "string" ||
-    typeof node === "number" ||
-    isValidElement(node)
-  ) {
-    visitor(node, index);
-    return index + 1;
+  if (isValidElement(node)) {
+    children.push(node);
+    return;
   }
 
   throw invalidChildError(node);
+}
+
+function appendTextChild(children: FigChild[], text: string): void {
+  const previous = children.at(-1);
+
+  if (typeof previous === "string" || typeof previous === "number") {
+    children[children.length - 1] = `${previous}${text}`;
+  } else {
+    children.push(text);
+  }
 }
 
 function duplicateKeyError(key: string | number): Error {

@@ -153,8 +153,7 @@ describe("reconciler", () => {
     expect(span?.name).toBe("span");
     expect(span?.props).toEqual({ id: "count" });
     expect(span?.children.map((child) => child.props.nodeValue)).toEqual([
-      "Count ",
-      "3",
+      "Count 3",
     ]);
 
     const counterId = counter?.id;
@@ -176,6 +175,38 @@ describe("reconciler", () => {
     expect(() => hydrateRoot(container, createElement("span", null))).toThrow(
       "Hydration is not supported by this renderer.",
     );
+  });
+
+  it("coalesces adjacent text children into one host text node", () => {
+    let createdTexts = 0;
+    let textUpdates = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      createTextInstance: (text) => {
+        createdTexts += 1;
+        return new TestText(text);
+      },
+      commitTextUpdate: (text, value) => {
+        textUpdates += 1;
+        text.nodeValue = value;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App({ count }: { count: number }) {
+      return createElement("span", null, "Count", ": ", count);
+    }
+
+    flushSync(() => root.render(createElement(App, { count: 1 })));
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(createdTexts).toBe(1);
+
+    flushSync(() => root.render(createElement(App, { count: 2 })));
+
+    expect(container.textContent).toBe("Count: 2");
+    expect(textUpdates).toBe(1);
   });
 
   it("inserts preassembled host subtrees once at the live parent", () => {
