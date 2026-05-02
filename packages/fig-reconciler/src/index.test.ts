@@ -254,6 +254,35 @@ describe("reconciler", () => {
     expect(textContentUpdates).toBe(2);
   });
 
+  it("updates host text content without generic host commits", () => {
+    let genericUpdates = 0;
+    let textContentUpdates = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      commitUpdate: (instance, previousProps, nextProps) => {
+        genericUpdates += 1;
+        host.commitUpdate(instance, previousProps, nextProps);
+      },
+      setTextContent: (instance, text) => {
+        textContentUpdates += 1;
+        instance.textContent = text;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App({ count }: { count: number }) {
+      return createElement("span", { title: "stable" }, "Count ", count);
+    }
+
+    flushSync(() => root.render(createElement(App, { count: 1 })));
+    flushSync(() => root.render(createElement(App, { count: 2 })));
+
+    expect(container.textContent).toBe("Count 2");
+    expect(genericUpdates).toBe(0);
+    expect(textContentUpdates).toBe(2);
+  });
+
   it("transitions between host text content and child elements", () => {
     const { createRoot, flushSync } = createRenderer({
       ...host,

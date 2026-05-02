@@ -153,6 +153,7 @@ const NoFlags = 0;
 const PlacementFlag = 1 << 0;
 const UpdateFlag = 1 << 1;
 const HydrationFlag = 1 << 2;
+const TextContentFlag = 1 << 3;
 type Flag = number;
 
 const ReactiveEffect = 0;
@@ -1154,10 +1155,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.return = parent;
 
       if (forcePlacement) {
-        next.flags |= PlacementFlag;
-        if (needsHostCommit(old, next.props)) next.flags |= UpdateFlag;
+        next.flags |= PlacementFlag | hostUpdateFlags(old, next.props);
       } else {
-        if (needsHostCommit(old, next.props)) next.flags |= UpdateFlag;
+        next.flags |= hostUpdateFlags(old, next.props);
         lastPlacedIndex = old.index;
       }
 
@@ -1205,10 +1205,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (canReuse) {
         existing.delete(key);
         if (forcePlacement || matched.index < lastPlacedIndex) {
-          next.flags |= PlacementFlag;
-          if (needsHostCommit(matched, next.props)) next.flags |= UpdateFlag;
+          next.flags |= PlacementFlag | hostUpdateFlags(matched, next.props);
         } else {
-          if (needsHostCommit(matched, next.props)) next.flags |= UpdateFlag;
+          next.flags |= hostUpdateFlags(matched, next.props);
           lastPlacedIndex = matched.index;
         }
       } else {
@@ -1234,18 +1233,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     parent.deletions.push(child);
   }
 
-  function needsHostCommit(current: F, nextProps: Props): boolean {
+  function hostUpdateFlags(current: F, nextProps: Props): Flag {
     if (current.tag === TextTag) {
-      return current.committedProps?.nodeValue !== nextProps.nodeValue;
+      return current.committedProps?.nodeValue !== nextProps.nodeValue
+        ? UpdateFlag
+        : NoFlags;
     }
 
-    if (current.tag !== HostTag) return false;
+    if (current.tag !== HostTag) return NoFlags;
 
     const previousProps = current.committedProps ?? {};
-    return (
-      hostTextContentChanged(previousProps, nextProps) ||
-      hostPropsChanged(previousProps, nextProps)
-    );
+    let flags = NoFlags;
+
+    if (hostPropsChanged(previousProps, nextProps)) flags |= UpdateFlag;
+    if (hostTextContentChanged(previousProps, nextProps)) {
+      flags |= TextContentFlag;
+    }
+
+    return flags;
   }
 
   function hostTextContentChanged(previous: Props, next: Props): boolean {
@@ -1323,7 +1328,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         continue;
       }
 
-      if ((cursor.flags & UpdateFlag) !== 0 && isHost(cursor)) {
+      if (
+        (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
+        isHost(cursor)
+      ) {
         commitUpdate(cursor);
       }
 
@@ -1379,7 +1387,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function shouldCommitPlacementUpdate(node: F): boolean {
-    if ((node.flags & UpdateFlag) !== 0) return true;
+    if ((node.flags & (UpdateFlag | TextContentFlag)) !== 0) return true;
     if (node.alternate !== null || node.tag === TextTag) return false;
     return host.finalizeInitialInstance === undefined;
   }
@@ -1404,26 +1412,31 @@ export function createRenderer<Container, Instance, TextInstance>(
     ) {
       host.commitHydratedInstance(node.stateNode as Instance, node.props);
     } else {
-      host.commitUpdate(
-        node.stateNode as Instance,
-        previousCommittedProps(node),
-        node.props,
-      );
-      commitHostTextContent(node);
+      const previousProps = previousCommittedProps(node);
+
+      if ((node.flags & UpdateFlag) !== 0) {
+        host.commitUpdate(
+          node.stateNode as Instance,
+          previousProps,
+          node.props,
+        );
+      }
+
+      if ((node.flags & TextContentFlag) !== 0) {
+        commitHostTextContent(node, previousProps);
+      }
     }
 
     markHostCommitted(node);
   }
 
-  function commitHostTextContent(node: F): void {
+  function commitHostTextContent(node: F, previousProps: Props): void {
     if (host.setTextContent === undefined || node.tag !== HostTag) return;
 
     const nextText = hostTextContent(node.props.children);
     if (nextText !== null) {
       host.setTextContent(node.stateNode as Instance, nextText);
-    } else if (
-      hostTextContent(previousCommittedProps(node).children) !== null
-    ) {
+    } else if (hostTextContent(previousProps.children) !== null) {
       host.setTextContent(node.stateNode as Instance, "");
     }
   }
@@ -2229,14 +2242,42 @@ function appendTextChild(children: FigChild[], text: string): void {
   }
 }
 
-function hostTextContent(children: unknown): string | null {
-  const nextChildren = collectChildren(children as FigNode);
-  if (nextChildren.length !== 1) return null;
+const NoHostTextContent = Symbol("fig.no-host-text-content");
 
-  const child = nextChildren[0];
-  return typeof child === "string" || typeof child === "number"
-    ? String(child)
-    : null;
+type HostTextContent = string | typeof NoHostTextContent;
+
+function hostTextContent(children: unknown): string | null {
+  const text = hostTextContentPart(children as FigNode);
+  return text === NoHostTextContent ? null : text;
+}
+
+function hostTextContentPart(node: FigNode): HostTextContent {
+  if (Array.isArray(node)) {
+    let hasText = false;
+    let text = "";
+
+    for (const child of node) {
+      const childText = hostTextContentPart(child as FigNode);
+      if (childText === NoHostTextContent) continue;
+
+      hasText = true;
+      text += childText;
+    }
+
+    return hasText ? text : NoHostTextContent;
+  }
+
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return NoHostTextContent;
+  }
+
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+
+  if (isValidElement(node)) return NoHostTextContent;
+
+  throw invalidChildError(node);
 }
 
 function duplicateKeyError(key: string | number): Error {
