@@ -55,6 +55,7 @@ interface BenchmarkResult {
   runtime: BenchmarkRuntime;
   name: string;
   rows: number;
+  iterations: number;
   samples: number[];
   median: number;
   min: number;
@@ -70,6 +71,10 @@ interface BenchmarkComparison {
   fig: BenchmarkResult | null;
   react: BenchmarkResult | null;
 }
+
+const benchmarkSampleCount = 5;
+const benchmarkTargetMs = 40;
+const benchmarkMaxIterations = 50;
 
 let activeBenchmarkOperations: BenchmarkOperations | null = null;
 
@@ -663,9 +668,9 @@ function BenchmarksPage() {
       <p className="hint">{status}</p>
       {results.length === 0 ? (
         <p className="hint">
-          Results measure median synchronous `flushSync` time across five runs
-          for both Fig and React. Use them for relative comparisons, not
-          absolute browser benchmarks.
+          Results measure median synchronous `flushSync` time across five
+          batched samples for both Fig and React. Use them for relative
+          comparisons, not absolute browser benchmarks.
         </p>
       ) : (
         <BenchmarkTable results={results} />
@@ -752,7 +757,8 @@ function BenchmarkMeasure({
         />
       </div>
       <div className="benchmark-range">
-        {formatMs(result.min)} – {formatMs(result.max)}
+        {formatMs(result.min)} – {formatMs(result.max)} · ×{result.iterations}
+        /sample
       </div>
     </div>
   );
@@ -916,24 +922,25 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Initial mount",
       rows,
       "Fresh root and host tree creation.",
-      () => measureFigInitialMount(rows),
+      (iterations) => measureFigInitialMount(rows, iterations),
     ),
     measureBenchmark(
       "React",
       "Initial mount",
       rows,
       "Fresh root and host tree creation.",
-      () => measureReactInitialMount(rows),
+      (iterations) => measureReactInitialMount(rows, iterations),
     ),
     measureBenchmark(
       "Fig",
       "Same-order update",
       rows,
       "Stable keys, changed row props/text.",
-      () =>
+      (iterations) =>
         measureFigUpdate(
           <BenchmarkRows count={rows} version={1} />,
           <BenchmarkRows count={rows} version={2} />,
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -941,10 +948,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Same-order update",
       rows,
       "Stable keys, changed row props/text.",
-      () =>
+      (iterations) =>
         measureReactUpdate(
           reactBenchmarkElement({ count: rows, version: 1 }),
           reactBenchmarkElement({ count: rows, version: 2 }),
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -952,10 +960,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Append 10%",
       rows,
       "Stable ordered keys plus new tail rows.",
-      () =>
+      (iterations) =>
         measureFigUpdate(
           <BenchmarkRows count={rows} />,
           <BenchmarkRows count={rows + appendCount} />,
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -963,10 +972,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Append 10%",
       rows,
       "Stable ordered keys plus new tail rows.",
-      () =>
+      (iterations) =>
         measureReactUpdate(
           reactBenchmarkElement({ count: rows }),
           reactBenchmarkElement({ count: rows + appendCount }),
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -974,10 +984,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Prepend 10%",
       rows,
       "New head rows before stable existing keys.",
-      () =>
+      (iterations) =>
         measureFigUpdate(
           <BenchmarkRows count={rows} />,
           <BenchmarkRows count={rows + appendCount} start={-appendCount} />,
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -985,13 +996,14 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Prepend 10%",
       rows,
       "New head rows before stable existing keys.",
-      () =>
+      (iterations) =>
         measureReactUpdate(
           reactBenchmarkElement({ count: rows }),
           reactBenchmarkElement({
             count: rows + appendCount,
             start: -appendCount,
           }),
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -999,10 +1011,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Reverse keyed rows",
       rows,
       "Worst-case keyed reordering pressure.",
-      () =>
+      (iterations) =>
         measureFigUpdate(
           <BenchmarkRows count={rows} />,
           <BenchmarkRows count={rows} reverse />,
+          iterations,
         ),
     ),
     measureBenchmark(
@@ -1010,10 +1023,11 @@ function runBenchmarks(rowCount: number): BenchmarkResult[] {
       "Reverse keyed rows",
       rows,
       "Worst-case keyed reordering pressure.",
-      () =>
+      (iterations) =>
         measureReactUpdate(
           reactBenchmarkElement({ count: rows }),
           reactBenchmarkElement({ count: rows, reverse: true }),
+          iterations,
         ),
     ),
   ];
@@ -1024,19 +1038,20 @@ function measureBenchmark(
   name: string,
   rows: number,
   notes: string,
-  measure: () => number,
+  measure: (iterations: number) => number,
 ): BenchmarkResult {
-  measure();
+  const warmup = measure(1);
+  const iterations = benchmarkIterations(warmup);
   const samples: number[] = [];
 
-  for (let index = 0; index < 5; index += 1) {
-    samples.push(measure());
+  for (let index = 0; index < benchmarkSampleCount; index += 1) {
+    samples.push(measure(iterations) / iterations);
   }
 
   const operations = createBenchmarkOperations();
   activeBenchmarkOperations = operations;
   try {
-    measure();
+    measure(1);
   } finally {
     activeBenchmarkOperations = null;
   }
@@ -1046,6 +1061,7 @@ function measureBenchmark(
     runtime,
     name,
     rows,
+    iterations,
     samples,
     median: sorted[Math.floor(sorted.length / 2)],
     min: sorted[0],
@@ -1053,6 +1069,14 @@ function measureBenchmark(
     notes,
     operations: hasOperations(operations) ? operations : undefined,
   };
+}
+
+function benchmarkIterations(warmupMs: number): number {
+  if (warmupMs <= 0) return benchmarkMaxIterations;
+  return Math.min(
+    benchmarkMaxIterations,
+    Math.max(1, Math.ceil(benchmarkTargetMs / warmupMs)),
+  );
 }
 
 function createBenchmarkOperations(): BenchmarkOperations {
@@ -1070,41 +1094,53 @@ function hasOperations(operations: BenchmarkOperations): boolean {
   return Object.values(operations).some((value) => value > 0);
 }
 
-function measureFigInitialMount(rows: number): number {
-  const container = createBenchmarkContainer();
-  const root = createRoot(container);
-  const duration = measureFigSync(() =>
-    root.render(<BenchmarkRows count={rows} version={1} />),
-  );
-  cleanupFigBenchmarkRoot(root, container);
+function measureFigInitialMount(rows: number, iterations: number): number {
+  const roots = createFigBenchmarkRoots(iterations);
+  const duration = measureFigSync(() => {
+    for (const { root } of roots) {
+      root.render(<BenchmarkRows count={rows} version={1} />);
+    }
+  });
+  cleanupFigBenchmarkRoots(roots);
   return duration;
 }
 
-function measureReactInitialMount(rows: number): number {
-  const container = createBenchmarkContainer();
-  const root = createReactRoot(container);
-  const duration = measureReactSync(() =>
-    root.render(reactBenchmarkElement({ count: rows, version: 1 })),
-  );
-  cleanupReactBenchmarkRoot(root, container);
+function measureReactInitialMount(rows: number, iterations: number): number {
+  const roots = createReactBenchmarkRoots(iterations);
+  const duration = measureReactSync(() => {
+    for (const { root } of roots) {
+      root.render(reactBenchmarkElement({ count: rows, version: 1 }));
+    }
+  });
+  cleanupReactBenchmarkRoots(roots);
   return duration;
 }
 
-function measureFigUpdate(previous: FigNode, next: FigNode): number {
-  const container = createBenchmarkContainer();
-  const root = createRoot(container);
-  flushSync(() => root.render(previous));
-  const duration = measureFigSync(() => root.render(next));
-  cleanupFigBenchmarkRoot(root, container);
+function measureFigUpdate(
+  previous: FigNode,
+  next: FigNode,
+  iterations: number,
+): number {
+  const roots = createFigBenchmarkRoots(iterations);
+  for (const { root } of roots) flushSync(() => root.render(previous));
+  const duration = measureFigSync(() => {
+    for (const { root } of roots) root.render(next);
+  });
+  cleanupFigBenchmarkRoots(roots);
   return duration;
 }
 
-function measureReactUpdate(previous: ReactNode, next: ReactNode): number {
-  const container = createBenchmarkContainer();
-  const root = createReactRoot(container);
-  reactFlushSync(() => root.render(previous));
-  const duration = measureReactSync(() => root.render(next));
-  cleanupReactBenchmarkRoot(root, container);
+function measureReactUpdate(
+  previous: ReactNode,
+  next: ReactNode,
+  iterations: number,
+): number {
+  const roots = createReactBenchmarkRoots(iterations);
+  for (const { root } of roots) reactFlushSync(() => root.render(previous));
+  const duration = measureReactSync(() => {
+    for (const { root } of roots) root.render(next);
+  });
+  cleanupReactBenchmarkRoots(roots);
   return duration;
 }
 
@@ -1227,17 +1263,42 @@ function propertyDescriptorOwner(
   return null;
 }
 
-function cleanupFigBenchmarkRoot(
-  root: ReturnType<typeof createRoot>,
-  node: Node,
-) {
-  flushSync(() => root.unmount());
-  node.parentNode?.removeChild(node);
+function createFigBenchmarkRoots(iterations: number): Array<{
+  root: ReturnType<typeof createRoot>;
+  container: Node;
+}> {
+  return Array.from({ length: iterations }, () => {
+    const container = createBenchmarkContainer();
+    return { root: createRoot(container), container };
+  });
 }
 
-function cleanupReactBenchmarkRoot(root: ReactRoot, node: Node) {
-  reactFlushSync(() => root.unmount());
-  node.parentNode?.removeChild(node);
+function createReactBenchmarkRoots(iterations: number): Array<{
+  root: ReactRoot;
+  container: Node;
+}> {
+  return Array.from({ length: iterations }, () => {
+    const container = createBenchmarkContainer();
+    return { root: createReactRoot(container), container };
+  });
+}
+
+function cleanupFigBenchmarkRoots(
+  roots: Array<{ root: ReturnType<typeof createRoot>; container: Node }>,
+) {
+  for (const { root, container } of roots) {
+    flushSync(() => root.unmount());
+    container.parentNode?.removeChild(container);
+  }
+}
+
+function cleanupReactBenchmarkRoots(
+  roots: Array<{ root: ReactRoot; container: Node }>,
+) {
+  for (const { root, container } of roots) {
+    reactFlushSync(() => root.unmount());
+    container.parentNode?.removeChild(container);
+  }
 }
 
 function createBenchmarkContainer(): HTMLDivElement {
@@ -1311,7 +1372,7 @@ function formatPercent(value: number): string {
 }
 
 function formatMs(value: number): string {
-  return `${value.toFixed(2)} ms`;
+  return `${value.toFixed(3)} ms`;
 }
 
 function formatOperations(operations: BenchmarkOperations | undefined): string {
