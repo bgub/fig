@@ -243,6 +243,50 @@ button {
   color: #075985;
 }
 
+.hydration-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.hydration-grid h3 {
+  margin: 0 0 8px;
+  color: #344054;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.code {
+  min-height: 190px;
+  border-radius: 6px;
+  background: #101828;
+  color: #e4e7ec;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hydration-sandbox {
+  min-height: 190px;
+  border: 1px dashed #b7c2d1;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.hydration-target {
+  display: contents;
+}
+
+.hydration-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  padding: 12px;
+}
+
 .benchmark-list {
   display: grid;
   gap: 2px;
@@ -266,6 +310,10 @@ button {
 }
 
 @media (max-width: 760px) {
+  .hydration-grid {
+    grid-template-columns: 1fr;
+  }
+
   .shell {
     grid-template-columns: 1fr;
   }

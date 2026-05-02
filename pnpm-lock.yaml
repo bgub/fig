@@ -41,6 +41,9 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../../packages/fig-server
       react:
         specifier: ^19.2.5
         version: 19.2.5

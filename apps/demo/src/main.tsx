@@ -10,7 +10,14 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import { type Bind, createRoot, flushSync, on } from "@bgub/fig-dom";
+import {
+  type Bind,
+  createRoot,
+  flushSync,
+  hydrateRoot,
+  on,
+} from "@bgub/fig-dom";
+import { renderToString } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
 import {
@@ -24,6 +31,7 @@ type Page =
   | "effects"
   | "async"
   | "resources"
+  | "hydration"
   | "benchmarks";
 
 interface DemoItem {
@@ -63,6 +71,7 @@ const pages: Array<{ id: Page; label: string }> = [
   { id: "effects", label: "Effects + bind" },
   { id: "async", label: "Async event signals" },
   { id: "resources", label: "Context + promises" },
+  { id: "hydration", label: "SSR + hydration" },
   { id: "benchmarks", label: "Benchmarks" },
 ];
 
@@ -73,6 +82,9 @@ const initialItems: DemoItem[] = [
 ];
 
 const ThemeContext = createContext("light");
+
+let hydrationSandbox: HTMLDivElement | null = null;
+let hydrationDemoRoot: ReturnType<typeof createRoot> | null = null;
 
 const focusBoundInput: Bind<HTMLInputElement> = (node, signal) => {
   node.focus();
@@ -162,6 +174,8 @@ function pageView(page: Page) {
       return <AsyncPage />;
     case "resources":
       return <ResourcesPage />;
+    case "hydration":
+      return <HydrationPage />;
     case "benchmarks":
       return <BenchmarksPage />;
     default:
@@ -400,6 +414,165 @@ function ResourcesPage() {
       </ThemeContext>
     </PageFrame>
   );
+}
+
+function HydrationPage() {
+  const [serverHtml, setServerHtml] = useState("");
+  const [status, setStatus] = useState("Render server HTML to begin.");
+  const [recoverableErrors, setRecoverableErrors] = useState<string[]>([]);
+
+  const runDemo = async (mismatch: boolean) => {
+    const host = hydrationSandbox;
+    if (host === null) {
+      setStatus("Hydration sandbox is not mounted yet.");
+      return;
+    }
+
+    setStatus("Rendering HTML with @bgub/fig-server...");
+    setRecoverableErrors([]);
+    resetHydrationDemoRoot();
+    host.replaceChildren();
+
+    const html = await renderToString(
+      <HydrationIsland
+        mode="server"
+        wrapper={mismatch ? "article" : "section"}
+      />,
+    );
+
+    if (hydrationSandbox !== host) return;
+
+    const target = document.createElement("div");
+    target.className = "hydration-target";
+    target.innerHTML = html;
+    host.replaceChildren(target);
+    setServerHtml(html);
+    setStatus(
+      mismatch
+        ? "Hydrating intentionally mismatched HTML..."
+        : "Hydrating matching server HTML...",
+    );
+
+    flushSync(() => {
+      hydrationDemoRoot = hydrateRoot(
+        target,
+        <HydrationIsland
+          mode={mismatch ? "client" : "server"}
+          wrapper="section"
+          onAction={() => {
+            setStatus(
+              `Hydrated event handled at ${new Date().toLocaleTimeString()}.`,
+            );
+          }}
+        />,
+        {
+          onRecoverableError(error) {
+            setRecoverableErrors((errors) => [
+              ...errors,
+              error instanceof Error ? error.message : String(error),
+            ]);
+            setStatus("Mismatch recovered with a client render.");
+          },
+        },
+      );
+    });
+
+    if (!mismatch) setStatus("Hydrated matching server HTML.");
+  };
+
+  return (
+    <PageFrame
+      title="SSR + hydration"
+      lede="Render HTML with the Fig server renderer, then hydrate it with the DOM renderer."
+    >
+      <Row>
+        <Command primary run={() => void runDemo(false)}>
+          Hydrate matching HTML
+        </Command>
+        <Command run={() => void runDemo(true)}>Recover mismatch</Command>
+      </Row>
+      <p className="hint">{status}</p>
+      {recoverableErrors.length > 0 ? (
+        <ul className="list">
+          {recoverableErrors.map((message) => (
+            <li className="item" key={message}>
+              <span>{message}</span>
+              <span className="tag">recoverable</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="hydration-grid">
+        <section>
+          <h3>Server HTML</h3>
+          <pre className="code">{serverHtml || "No server render yet."}</pre>
+        </section>
+        <section>
+          <h3>Hydration target</h3>
+          <div className="hydration-sandbox" bind={hydrationSandboxBind} />
+        </section>
+      </div>
+    </PageFrame>
+  );
+}
+
+function HydrationIsland({
+  mode,
+  wrapper,
+  onAction,
+}: {
+  mode: "server" | "client";
+  wrapper: "section" | "article";
+  onAction?: () => void;
+}) {
+  const content = (
+    <>
+      <div className="row">
+        <span className="metric">SSR</span>
+        <span className="tag">{mode}</span>
+      </div>
+      <p className="hint">
+        This subtree was rendered to HTML first, then claimed by hydrateRoot.
+      </p>
+      <button
+        type="button"
+        className="button primary"
+        events={[on("click", () => onAction?.())]}
+      >
+        Test hydrated event
+      </button>
+    </>
+  );
+
+  return wrapper === "article" ? (
+    <article className="hydration-card" data-mode={mode}>
+      {content}
+    </article>
+  ) : (
+    <section className="hydration-card" data-mode={mode}>
+      {content}
+    </section>
+  );
+}
+
+const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
+  hydrationSandbox = node;
+  signal.addEventListener(
+    "abort",
+    () => {
+      hydrationDemoRoot = null;
+      if (hydrationSandbox === node) hydrationSandbox = null;
+    },
+    { once: true },
+  );
+};
+
+function resetHydrationDemoRoot(): void {
+  if (hydrationDemoRoot === null) return;
+
+  const root = hydrationDemoRoot;
+  hydrationDemoRoot = null;
+  flushSync(() => root.unmount());
 }
 
 function BenchmarksPage() {
