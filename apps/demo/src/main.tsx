@@ -433,9 +433,11 @@ function HydrationPage() {
     resetHydrationDemoRoot();
     host.replaceChildren();
 
+    const servedAt = new Date().toLocaleString();
     const html = await renderToString(
       <HydrationIsland
         mode="server"
+        servedAt={servedAt}
         wrapper={mismatch ? "article" : "section"}
       />,
     );
@@ -458,6 +460,7 @@ function HydrationPage() {
         target,
         <HydrationIsland
           mode={mismatch ? "client" : "server"}
+          servedAt={servedAt}
           wrapper="section"
           onAction={() => {
             setStatus(
@@ -520,8 +523,10 @@ function HydrationIsland({
   mode,
   wrapper,
   onAction,
+  servedAt,
 }: {
   mode: "server" | "client";
+  servedAt: string;
   wrapper: "section" | "article";
   onAction?: () => void;
 }) {
@@ -534,6 +539,7 @@ function HydrationIsland({
       <p className="hint">
         This subtree was rendered to HTML first, then claimed by hydrateRoot.
       </p>
+      <p className="server-stamp">Server-rendered at {servedAt}</p>
       <button
         type="button"
         className="button primary"

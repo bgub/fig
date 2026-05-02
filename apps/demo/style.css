@@ -287,6 +287,18 @@ button {
   padding: 12px;
 }
 
+.server-stamp {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .benchmark-list {
   display: grid;
   gap: 2px;
