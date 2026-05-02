@@ -74,6 +74,11 @@ type Parent<Container, Instance> = Container | Instance;
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(type: string, props: Props): Instance;
   createTextInstance(text: string): TextInstance;
+  appendInitialChild?(
+    parent: Instance,
+    child: HostNode<Instance, TextInstance>,
+  ): void;
+  finalizeInitialInstance?(instance: Instance, props: Props): void;
   getFirstHydratableChild?(
     parent: Parent<Container, Instance>,
   ): HostNode<Instance, TextInstance> | null;
@@ -199,6 +204,7 @@ interface Fiber<Container, Instance, TextInstance> {
   key: string | number | null;
   props: Props;
   memoizedProps: Props | null;
+  committedProps: Props | null;
   memoizedState: Hook | null;
   stateNode:
     | HostNode<Instance, TextInstance>
@@ -788,7 +794,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function shouldForceChildPlacement(node: F): boolean {
-    return (node.flags & PlacementFlag) !== 0 && node.alternate !== null;
+    return (
+      (node.flags & PlacementFlag) !== 0 &&
+      node.alternate !== null &&
+      node.tag !== HostTag
+    );
   }
 
   function renderFunction(node: F): void {
@@ -1043,8 +1053,37 @@ export function createRenderer<Container, Instance, TextInstance>(
       child = child.sibling;
     }
 
+    if (isNewHostInstance(node)) {
+      finalizeInitialHostInstance(node);
+      appendAllHostChildren(node.stateNode as Instance, node.child);
+    }
+
     node.childLanes = childLanes;
     node.memoizedProps = node.props;
+  }
+
+  function isNewHostInstance(node: F): boolean {
+    return (
+      node.tag === HostTag &&
+      node.alternate === null &&
+      (node.flags & HydrationFlag) === 0
+    );
+  }
+
+  function finalizeInitialHostInstance(node: F): void {
+    host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
+  }
+
+  function appendAllHostChildren(parent: Instance, child: F | null): void {
+    if (host.appendInitialChild === undefined) return;
+
+    for (let node = child; node !== null; node = node.sibling) {
+      if (node.tag === HostTag || node.tag === TextTag) {
+        host.appendInitialChild(parent, hostNode(node));
+      } else {
+        appendAllHostChildren(parent, node.child);
+      }
+    }
   }
 
   function reconcileCurrentChildren(parent: F, children: FigNode): void {
@@ -1062,47 +1101,99 @@ export function createRenderer<Container, Instance, TextInstance>(
     currentFirstChild: F | null,
     forcePlacement: boolean,
   ): void {
-    const existing = new Map<string, F>();
+    const nextChildren: FigChild[] = [];
+    const nextKeys: string[] = [];
     const seenKeys = new Set<string>();
-    for (let old = currentFirstChild; old !== null; old = old.sibling) {
-      existing.set(fiberChildKey(old), old);
-    }
+
+    forEachChild(children, (child, index) => {
+      nextChildren.push(child);
+      nextKeys.push(childKey(child, index, seenKeys));
+    });
 
     parent.child = null;
     parent.deletions = null;
 
     let previous: F | null = null;
+    let old: F | null = currentFirstChild;
+    let index = 0;
     let lastPlacedIndex = 0;
     const isHydratingNewTree =
       rootOf(parent).isHydrating && currentFirstChild === null;
 
-    forEachChild(children, (child, index) => {
-      const key = childKey(child, index, seenKeys);
-      const old = existing.get(key);
-      const canReuse = old !== undefined && sameType(old, child);
+    for (; old !== null && index < nextChildren.length; index += 1) {
+      const child = nextChildren[index];
+      if (fiberChildKey(old) !== nextKeys[index] || !sameType(old, child)) {
+        break;
+      }
+
+      const next = createWorkInProgress(old, propsFor(child));
+      next.index = index;
+      next.return = parent;
+
+      if (forcePlacement) {
+        next.flags |= PlacementFlag;
+        if (needsHostCommit(old, next.props)) next.flags |= UpdateFlag;
+      } else {
+        if (needsHostCommit(old, next.props)) next.flags |= UpdateFlag;
+        lastPlacedIndex = old.index;
+      }
+
+      previous = appendChild(parent, previous, next);
+      old = old.sibling;
+    }
+
+    if (index === nextChildren.length) {
+      appendDeletions(parent, old);
+      return;
+    }
+
+    if (old === null) {
+      for (; index < nextChildren.length; index += 1) {
+        const next = fiberFrom(nextChildren[index]);
+        if (next === null) continue;
+
+        next.index = index;
+        next.return = parent;
+        if (!isHydratingNewTree) next.flags |= PlacementFlag;
+        previous = appendChild(parent, previous, next);
+      }
+      return;
+    }
+
+    const existing = new Map<string, F>();
+    for (; old !== null; old = old.sibling) {
+      existing.set(fiberChildKey(old), old);
+    }
+
+    for (; index < nextChildren.length; index += 1) {
+      const child = nextChildren[index];
+      const key = nextKeys[index];
+      const matched = existing.get(key);
+      const canReuse = matched !== undefined && sameType(matched, child);
       const next = canReuse
-        ? createWorkInProgress(old, propsFor(child))
+        ? createWorkInProgress(matched, propsFor(child))
         : fiberFrom(child);
 
-      if (next === null) return;
+      if (next === null) continue;
 
       next.index = index;
       next.return = parent;
 
       if (canReuse) {
         existing.delete(key);
-        if (forcePlacement || old.index < lastPlacedIndex) {
+        if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
+          if (needsHostCommit(matched, next.props)) next.flags |= UpdateFlag;
         } else {
-          next.flags |= UpdateFlag;
-          lastPlacedIndex = old.index;
+          if (needsHostCommit(matched, next.props)) next.flags |= UpdateFlag;
+          lastPlacedIndex = matched.index;
         }
       } else {
         if (!isHydratingNewTree) next.flags |= PlacementFlag;
       }
 
       previous = appendChild(parent, previous, next);
-    });
+    }
 
     for (const child of existing.values()) {
       appendDeletion(parent, child);
@@ -1118,6 +1209,33 @@ export function createRenderer<Container, Instance, TextInstance>(
   function appendDeletion(parent: F, child: F): void {
     parent.deletions ??= [];
     parent.deletions.push(child);
+  }
+
+  function needsHostCommit(current: F, nextProps: Props): boolean {
+    if (current.tag === TextTag) {
+      return current.committedProps?.nodeValue !== nextProps.nodeValue;
+    }
+
+    if (current.tag !== HostTag) return false;
+
+    return hostPropsChanged(current.committedProps ?? {}, nextProps);
+  }
+
+  function hostPropsChanged(previous: Props, next: Props): boolean {
+    const previousKeys = Object.keys(previous).filter(committedHostProp);
+    const nextKeys = Object.keys(next).filter(committedHostProp);
+
+    if (previousKeys.length !== nextKeys.length) return true;
+
+    for (const key of previousKeys) {
+      if (!(key in next) || previous[key] !== next[key]) return true;
+    }
+
+    return false;
+  }
+
+  function committedHostProp(name: string): boolean {
+    return name !== "children";
   }
 
   function commitRoot(root: R, finishedWork: F): void {
@@ -1158,25 +1276,71 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitMutationEffects(node: F | null): void {
-    if (node === null) return;
+    let cursor = node;
 
-    if ((node.flags & PlacementFlag) !== 0) {
-      commitPlacement(node);
-    } else if ((node.flags & UpdateFlag) !== 0 && isHost(node)) {
-      commitUpdate(node);
+    while (cursor !== null) {
+      if ((cursor.flags & PlacementFlag) !== 0) {
+        const firstPlaced = cursor;
+        const lastPlaced = placementRunTail(firstPlaced);
+        const afterPlaced = lastPlaced.sibling;
+        const before = hostSibling(lastPlaced);
+
+        for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
+          const next = placed.sibling;
+          commitPlacement(placed, before);
+          if (!isPreassembledHostSubtree(placed)) {
+            commitMutationEffects(placed.child);
+          }
+          placed = next;
+        }
+
+        cursor = afterPlaced;
+        continue;
+      }
+
+      if ((cursor.flags & UpdateFlag) !== 0 && isHost(cursor)) {
+        commitUpdate(cursor);
+      }
+
+      commitMutationEffects(cursor.child);
+      cursor = cursor.sibling;
     }
-
-    commitMutationEffects(node.child);
-    commitMutationEffects(node.sibling);
   }
 
-  function commitPlacement(node: F): void {
-    if (isHost(node)) {
-      commitUpdate(node);
-      host.insertBefore(hostParent(node), hostNode(node), hostSibling(node));
-    } else if (node.alternate !== null) {
-      insertHostSubtree(node, hostParent(node), hostSibling(node));
+  function isPreassembledHostSubtree(node: F): boolean {
+    return isNewHostInstance(node) && host.appendInitialChild !== undefined;
+  }
+
+  function placementRunTail(node: F): F {
+    let tail = node;
+    while (
+      tail.sibling !== null &&
+      (tail.sibling.flags & PlacementFlag) !== 0
+    ) {
+      tail = tail.sibling;
     }
+    return tail;
+  }
+
+  function commitPlacement(
+    node: F,
+    before: HostNode<Instance, TextInstance> | null = hostSibling(node),
+  ): void {
+    if (isHost(node)) {
+      if (shouldCommitPlacementUpdate(node)) commitUpdate(node);
+      host.insertBefore(hostParent(node), hostNode(node), before);
+      markHostCommitted(node);
+      if (isPreassembledHostSubtree(node)) markHostSubtreeCommitted(node.child);
+    } else if (node.alternate !== null) {
+      insertHostSubtree(node, hostParent(node), before);
+    }
+  }
+
+  function shouldCommitPlacementUpdate(node: F): boolean {
+    if ((node.flags & UpdateFlag) !== 0) return true;
+    if (node.alternate !== null) return false;
+    if (node.tag === TextTag) return false;
+    return node.tag !== HostTag || host.finalizeInitialInstance === undefined;
   }
 
   function insertHostSubtree(
@@ -1201,9 +1365,33 @@ export function createRenderer<Container, Instance, TextInstance>(
     } else {
       host.commitUpdate(
         node.stateNode as Instance,
-        node.alternate?.memoizedProps ?? {},
+        previousCommittedProps(node),
         node.props,
       );
+    }
+
+    markHostCommitted(node);
+  }
+
+  function previousCommittedProps(node: F): Props {
+    return (
+      node.committedProps ??
+      node.alternate?.committedProps ??
+      node.alternate?.memoizedProps ??
+      {}
+    );
+  }
+
+  function markHostCommitted(node: F): void {
+    if (!isHost(node)) return;
+    node.committedProps = node.props;
+    if (node.alternate !== null) node.alternate.committedProps = node.props;
+  }
+
+  function markHostSubtreeCommitted(node: F | null): void {
+    for (let child = node; child !== null; child = child.sibling) {
+      markHostCommitted(child);
+      markHostSubtreeCommitted(child.child);
     }
   }
 
@@ -1470,6 +1658,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     next.props = props;
     next.memoizedProps = current.memoizedProps;
+    next.committedProps = current.committedProps;
     next.memoizedState = current.memoizedState;
     next.stateNode = current.stateNode;
     next.return = current.return;
@@ -1534,6 +1723,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       key,
       props,
       memoizedProps: null,
+      committedProps: null,
       memoizedState: null,
       stateNode,
       return: null,

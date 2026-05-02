@@ -207,6 +207,15 @@ button {
   vertical-align: top;
 }
 
+.benchmark-table td:nth-child(7) {
+  max-width: 320px;
+  color: #475467;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+}
+
 .benchmark-table th {
   color: #344054;
   font-size: 12px;

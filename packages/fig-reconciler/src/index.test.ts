@@ -55,6 +55,8 @@ class TestElement {
 const host: HostConfig<TestElement, TestElement, TestText> = {
   createInstance: (type) => new TestElement(type),
   createTextInstance: (text) => new TestText(text),
+  appendInitialChild: (parent, child) => parent.insertBefore(child, null),
+  finalizeInitialInstance: () => undefined,
   insertBefore: (parent, child, before) => parent.insertBefore(child, before),
   removeChild: (parent, child) => parent.removeChild(child),
   commitUpdate: () => undefined,
@@ -174,6 +176,302 @@ describe("reconciler", () => {
     expect(() => hydrateRoot(container, createElement("span", null))).toThrow(
       "Hydration is not supported by this renderer.",
     );
+  });
+
+  it("inserts preassembled host subtrees once at the live parent", () => {
+    let liveInserts = 0;
+    let initialAppends = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      appendInitialChild: (parent, child) => {
+        initialAppends += 1;
+        parent.insertBefore(child, null);
+      },
+      insertBefore: (parent, child, before) => {
+        liveInserts += 1;
+        parent.insertBefore(child, before);
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        createElement("span", null, "A"),
+        createElement("span", null, "B"),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+
+    expect(container.textContent).toBe("AB");
+    expect(initialAppends).toBe(4);
+    expect(liveInserts).toBe(1);
+  });
+
+  it("updates same-order keyed children without remounting", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Row({ label }: { label: string }) {
+      const [initialLabel] = useState(label);
+      return createElement("span", null, label, ":", initialLabel);
+    }
+
+    function List({ labels }: { labels: string[] }) {
+      return createElement(
+        "main",
+        null,
+        labels.map((label, index) => createElement(Row, { key: index, label })),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { labels: ["A1", "B1", "C1"] })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { labels: ["A2", "B2", "C2"] })),
+    );
+
+    expect(container.textContent).toBe("A2:A1B2:B1C2:C1");
+  });
+
+  it("appends keyed children after a same-order prefix", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) => createElement("span", { key: item }, item)),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C"] })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C", "D"] })),
+    );
+
+    expect(container.textContent).toBe("ABCD");
+  });
+
+  it("prepends keyed children while preserving old child state", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Row({ label }: { label: string }) {
+      const [initialLabel] = useState(label);
+      return createElement("span", null, label, ":", initialLabel);
+    }
+
+    function List({ items }: { items: Array<{ id: string; label: string }> }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) =>
+          createElement(Row, { key: item.id, label: item.label }),
+        ),
+      );
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(List, {
+          items: [
+            { id: "a", label: "A1" },
+            { id: "b", label: "B1" },
+          ],
+        }),
+      ),
+    );
+    flushSync(() =>
+      root.render(
+        createElement(List, {
+          items: [
+            { id: "x", label: "X1" },
+            { id: "a", label: "A2" },
+            { id: "b", label: "B2" },
+          ],
+        }),
+      ),
+    );
+
+    expect(container.textContent).toBe("X1:X1A2:A1B2:B1");
+  });
+
+  it("throws duplicate keys before committing fast-path work", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) => createElement("span", { key: item }, item)),
+      );
+    }
+
+    flushSync(() => root.render(createElement(List, { items: ["A"] })));
+
+    expect(() =>
+      flushSync(() => root.render(createElement(List, { items: ["A", "A"] }))),
+    ).toThrow('Duplicate key "A" found among siblings.');
+    expect(container.textContent).toBe("A");
+  });
+
+  it("commits reversed keyed host children", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) => createElement("span", { key: item }, item)),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C", "D"] })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { items: ["D", "C", "B", "A"] })),
+    );
+
+    expect(container.textContent).toBe("DCBA");
+  });
+
+  it("moves host subtrees without forcing descendant placement", () => {
+    let liveInserts = 0;
+    let hostUpdates = 0;
+    let textUpdates = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      insertBefore: (parent, child, before) => {
+        liveInserts += 1;
+        parent.insertBefore(child, before);
+      },
+      commitUpdate: () => {
+        hostUpdates += 1;
+      },
+      commitTextUpdate: (text, value) => {
+        textUpdates += 1;
+        text.nodeValue = value;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) =>
+          createElement("li", { key: item }, createElement("span", null, item)),
+        ),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C"] })),
+    );
+    liveInserts = 0;
+    hostUpdates = 0;
+    textUpdates = 0;
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["C", "B", "A"] })),
+    );
+
+    expect(container.textContent).toBe("CBA");
+    expect(liveInserts).toBe(2);
+    expect(hostUpdates).toBe(0);
+    expect(textUpdates).toBe(0);
+  });
+
+  it("commits a moved placement run before a stable anchor", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) => createElement("span", { key: item }, item)),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C", "D", "E"] })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { items: ["D", "A", "B", "C", "E"] })),
+    );
+
+    expect(container.textContent).toBe("DABCE");
+  });
+
+  it("commits moved keyed function children", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Row({ label }: { label: string }) {
+      return createElement("span", null, label);
+    }
+
+    function List({ items }: { items: string[] }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) => createElement(Row, { key: item, label: item })),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C", "D"] })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { items: ["D", "C", "B", "A"] })),
+    );
+
+    expect(container.textContent).toBe("DCBA");
+  });
+
+  it("commits text updates inside moved keyed children", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function List({ items, version }: { items: string[]; version: number }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) =>
+          createElement("span", { key: item }, `${item}:${version}`),
+        ),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(List, { items: ["A", "B", "C"], version: 1 })),
+    );
+    flushSync(() =>
+      root.render(createElement(List, { items: ["C", "A", "B"], version: 2 })),
+    );
+
+    expect(container.textContent).toBe("C:2A:2B:2");
   });
 
   it("restarts yielded work when flushSync schedules higher-priority work", async () => {

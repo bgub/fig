@@ -10,7 +10,15 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import { type Bind, createRoot, flushSync, on } from "@bgub/fig-dom";
+import {
+  type Bind,
+  createRoot,
+  type FigDomInstrumentationSnapshot,
+  flushSync,
+  getInstrumentation,
+  on,
+  resetInstrumentation,
+} from "@bgub/fig-dom";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
 import {
@@ -43,6 +51,7 @@ interface BenchmarkResult {
   min: number;
   max: number;
   notes: string;
+  operations?: FigDomInstrumentationSnapshot;
 }
 
 const pages: Array<{ id: Page; label: string }> = [
@@ -468,6 +477,7 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
           <th>Median</th>
           <th>Min</th>
           <th>Max</th>
+          <th>Ops</th>
           <th>Notes</th>
         </tr>
       </thead>
@@ -484,6 +494,7 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
             <td>{formatMs(result.median)}</td>
             <td>{formatMs(result.min)}</td>
             <td>{formatMs(result.max)}</td>
+            <td>{formatOperations(result.operations)}</td>
             <td>{result.notes}</td>
           </tr>
         ))}
@@ -743,8 +754,12 @@ function measureBenchmark(
 ): BenchmarkResult {
   measure();
   const samples: number[] = [];
+  let operations: FigDomInstrumentationSnapshot | undefined;
 
-  for (let index = 0; index < 5; index += 1) samples.push(measure());
+  for (let index = 0; index < 5; index += 1) {
+    samples.push(measure());
+    if (runtime === "Fig" && index === 4) operations = getInstrumentation();
+  }
 
   const sorted = [...samples].sort((a, b) => a - b);
   return {
@@ -756,10 +771,12 @@ function measureBenchmark(
     min: sorted[0],
     max: sorted[sorted.length - 1],
     notes,
+    operations,
   };
 }
 
 function measureFigInitialMount(rows: number): number {
+  resetInstrumentation();
   const container = createBenchmarkContainer();
   const root = createRoot(container);
   const duration = measureFigSync(() =>
@@ -780,9 +797,11 @@ function measureReactInitialMount(rows: number): number {
 }
 
 function measureFigUpdate(previous: FigNode, next: FigNode): number {
+  resetInstrumentation();
   const container = createBenchmarkContainer();
   const root = createRoot(container);
   flushSync(() => root.render(previous));
+  resetInstrumentation();
   const duration = measureFigSync(() => root.render(next));
   cleanupFigBenchmarkRoot(root, container);
   return duration;
@@ -835,6 +854,36 @@ function clampRows(value: number): number {
 
 function formatMs(value: number): string {
   return `${value.toFixed(2)} ms`;
+}
+
+function formatOperations(
+  operations: FigDomInstrumentationSnapshot | undefined,
+): string {
+  if (operations === undefined) return "—";
+
+  const entries: string[] = [];
+  if (operations.createInstance > 0)
+    entries.push(`create:${operations.createInstance}`);
+  if (operations.createTextInstance > 0)
+    entries.push(`text:${operations.createTextInstance}`);
+  if (operations.appendInitialChild > 0)
+    entries.push(`appendInitial:${operations.appendInitialChild}`);
+  if (operations.finalizeInitialInstance > 0)
+    entries.push(`finalize:${operations.finalizeInitialInstance}`);
+  if (operations.insertBefore > 0)
+    entries.push(`insert:${operations.insertBefore}`);
+  if (operations.commitUpdate > 0)
+    entries.push(`update:${operations.commitUpdate}`);
+  if (operations.commitTextUpdate > 0)
+    entries.push(`textUpdate:${operations.commitTextUpdate}`);
+  if (operations.removeChild > 0)
+    entries.push(`remove:${operations.removeChild}`);
+  if (operations.attachBindSubtree > 0)
+    entries.push(`bindAttach:${operations.attachBindSubtree}`);
+  if (operations.attachEventSubtree > 0)
+    entries.push(`eventAttach:${operations.attachEventSubtree}`);
+
+  return entries.length === 0 ? "none" : entries.join(", ");
 }
 
 const container = document.getElementById("root");
