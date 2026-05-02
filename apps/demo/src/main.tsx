@@ -10,15 +10,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import {
-  type Bind,
-  createRoot,
-  type FigDomInstrumentationSnapshot,
-  flushSync,
-  getInstrumentation,
-  on,
-  resetInstrumentation,
-} from "@bgub/fig-dom";
+import { type Bind, createRoot, flushSync, on } from "@bgub/fig-dom";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
 import {
@@ -40,6 +32,15 @@ interface DemoItem {
   tone: string;
 }
 
+interface BenchmarkOperations {
+  createInstance: number;
+  createTextInstance: number;
+  appendChild: number;
+  insertBefore: number;
+  removeChild: number;
+  commitTextUpdate: number;
+}
+
 type BenchmarkRuntime = "Fig" | "React";
 
 interface BenchmarkResult {
@@ -51,8 +52,10 @@ interface BenchmarkResult {
   min: number;
   max: number;
   notes: string;
-  operations?: FigDomInstrumentationSnapshot;
+  operations?: BenchmarkOperations;
 }
+
+let activeBenchmarkOperations: BenchmarkOperations | null = null;
 
 const pages: Array<{ id: Page; label: string }> = [
   { id: "state", label: "State + events" },
@@ -754,11 +757,17 @@ function measureBenchmark(
 ): BenchmarkResult {
   measure();
   const samples: number[] = [];
-  let operations: FigDomInstrumentationSnapshot | undefined;
 
   for (let index = 0; index < 5; index += 1) {
     samples.push(measure());
-    if (runtime === "Fig" && index === 4) operations = getInstrumentation();
+  }
+
+  const operations = createBenchmarkOperations();
+  activeBenchmarkOperations = operations;
+  try {
+    measure();
+  } finally {
+    activeBenchmarkOperations = null;
   }
 
   const sorted = [...samples].sort((a, b) => a - b);
@@ -771,12 +780,26 @@ function measureBenchmark(
     min: sorted[0],
     max: sorted[sorted.length - 1],
     notes,
-    operations,
+    operations: hasOperations(operations) ? operations : undefined,
   };
 }
 
+function createBenchmarkOperations(): BenchmarkOperations {
+  return {
+    createInstance: 0,
+    createTextInstance: 0,
+    appendChild: 0,
+    insertBefore: 0,
+    removeChild: 0,
+    commitTextUpdate: 0,
+  };
+}
+
+function hasOperations(operations: BenchmarkOperations): boolean {
+  return Object.values(operations).some((value) => value > 0);
+}
+
 function measureFigInitialMount(rows: number): number {
-  resetInstrumentation();
   const container = createBenchmarkContainer();
   const root = createRoot(container);
   const duration = measureFigSync(() =>
@@ -797,11 +820,9 @@ function measureReactInitialMount(rows: number): number {
 }
 
 function measureFigUpdate(previous: FigNode, next: FigNode): number {
-  resetInstrumentation();
   const container = createBenchmarkContainer();
   const root = createRoot(container);
   flushSync(() => root.render(previous));
-  resetInstrumentation();
   const duration = measureFigSync(() => root.render(next));
   cleanupFigBenchmarkRoot(root, container);
   return duration;
@@ -817,15 +838,122 @@ function measureReactUpdate(previous: ReactNode, next: ReactNode): number {
 }
 
 function measureFigSync(callback: () => void): number {
-  const start = performance.now();
-  flushSync(callback);
-  return performance.now() - start;
+  return measureSync(() => flushSync(callback));
 }
 
 function measureReactSync(callback: () => void): number {
+  return measureSync(() => reactFlushSync(callback));
+}
+
+function measureSync(callback: () => void): number {
+  const operations = activeBenchmarkOperations;
+
+  if (operations !== null) {
+    return captureDomOperations(operations, () => {
+      const start = performance.now();
+      callback();
+      return performance.now() - start;
+    });
+  }
+
   const start = performance.now();
-  reactFlushSync(callback);
+  callback();
   return performance.now() - start;
+}
+
+function captureDomOperations<T>(
+  operations: BenchmarkOperations,
+  callback: () => T,
+): T {
+  const createElement = document.createElement.bind(document);
+  const createTextNode = document.createTextNode.bind(document);
+  const appendChild = Node.prototype.appendChild;
+  const insertBefore = Node.prototype.insertBefore;
+  const removeChild = Node.prototype.removeChild;
+  const nodeValueOwner = propertyDescriptorOwner(Node.prototype, "nodeValue");
+  const nodeValueDescriptor =
+    nodeValueOwner === null
+      ? undefined
+      : Object.getOwnPropertyDescriptor(nodeValueOwner, "nodeValue");
+
+  document.createElement = ((
+    tagName: string,
+    options?: ElementCreationOptions,
+  ) => {
+    operations.createInstance += 1;
+    return createElement(tagName, options);
+  }) as Document["createElement"];
+  document.createTextNode = (data: string) => {
+    operations.createTextInstance += 1;
+    return createTextNode(data);
+  };
+  Node.prototype.appendChild = function measuredAppendChild<TNode extends Node>(
+    this: Node,
+    node: TNode,
+  ): TNode {
+    operations.appendChild += 1;
+    return appendChild.call(this, node) as TNode;
+  };
+  Node.prototype.insertBefore = function measuredInsertBefore<
+    TNode extends Node,
+  >(this: Node, node: TNode, child: Node | null): TNode {
+    operations.insertBefore += 1;
+    return insertBefore.call(this, node, child) as TNode;
+  };
+  Node.prototype.removeChild = function measuredRemoveChild<TNode extends Node>(
+    this: Node,
+    child: TNode,
+  ): TNode {
+    operations.removeChild += 1;
+    return removeChild.call(this, child) as TNode;
+  };
+
+  if (
+    nodeValueOwner !== null &&
+    nodeValueDescriptor?.get !== undefined &&
+    nodeValueDescriptor.set !== undefined &&
+    nodeValueDescriptor.configurable
+  ) {
+    Object.defineProperty(nodeValueOwner, "nodeValue", {
+      configurable: true,
+      enumerable: nodeValueDescriptor.enumerable,
+      get(this: Node) {
+        return nodeValueDescriptor.get?.call(this) as string | null;
+      },
+      set(this: Node, value: string | null) {
+        if (this.nodeType === Node.TEXT_NODE) operations.commitTextUpdate += 1;
+        nodeValueDescriptor.set?.call(this, value);
+      },
+    });
+  }
+
+  try {
+    return callback();
+  } finally {
+    document.createElement = createElement as Document["createElement"];
+    document.createTextNode = createTextNode;
+    Node.prototype.appendChild = appendChild;
+    Node.prototype.insertBefore = insertBefore;
+    Node.prototype.removeChild = removeChild;
+    if (nodeValueOwner !== null && nodeValueDescriptor !== undefined) {
+      Object.defineProperty(nodeValueOwner, "nodeValue", nodeValueDescriptor);
+    }
+  }
+}
+
+function propertyDescriptorOwner(
+  prototype: object | null,
+  property: string,
+): object | null {
+  for (
+    let owner = prototype;
+    owner !== null;
+    owner = Object.getPrototypeOf(owner)
+  ) {
+    if (Object.hasOwn(owner, property)) return owner;
+  }
+
+  return null;
 }
 
 function cleanupFigBenchmarkRoot(
@@ -856,9 +984,7 @@ function formatMs(value: number): string {
   return `${value.toFixed(2)} ms`;
 }
 
-function formatOperations(
-  operations: FigDomInstrumentationSnapshot | undefined,
-): string {
+function formatOperations(operations: BenchmarkOperations | undefined): string {
   if (operations === undefined) return "—";
 
   const entries: string[] = [];
@@ -866,23 +992,14 @@ function formatOperations(
     entries.push(`create:${operations.createInstance}`);
   if (operations.createTextInstance > 0)
     entries.push(`text:${operations.createTextInstance}`);
-  if (operations.appendInitialChild > 0)
-    entries.push(`appendInitial:${operations.appendInitialChild}`);
-  if (operations.finalizeInitialInstance > 0)
-    entries.push(`finalize:${operations.finalizeInitialInstance}`);
+  if (operations.appendChild > 0)
+    entries.push(`append:${operations.appendChild}`);
   if (operations.insertBefore > 0)
     entries.push(`insert:${operations.insertBefore}`);
-  if (operations.commitUpdate > 0)
-    entries.push(`update:${operations.commitUpdate}`);
   if (operations.commitTextUpdate > 0)
     entries.push(`textUpdate:${operations.commitTextUpdate}`);
   if (operations.removeChild > 0)
     entries.push(`remove:${operations.removeChild}`);
-  if (operations.attachBindSubtree > 0)
-    entries.push(`bindAttach:${operations.attachBindSubtree}`);
-  if (operations.attachEventSubtree > 0)
-    entries.push(`eventAttach:${operations.attachEventSubtree}`);
-
   return entries.length === 0 ? "none" : entries.join(", ");
 }
 

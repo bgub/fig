@@ -16,40 +16,6 @@ import {
 } from "./events.ts";
 import { hydrateElement, updateElement } from "./props.ts";
 
-export interface FigDomInstrumentation {
-  createInstance: number;
-  createTextInstance: number;
-  appendInitialChild: number;
-  finalizeInitialInstance: number;
-  insertBefore: number;
-  removeChild: number;
-  commitUpdate: number;
-  commitTextUpdate: number;
-  commitHydratedInstance: number;
-  attachBindSubtree: number;
-  attachEventSubtree: number;
-  removeBindSubtree: number;
-  removeEventSubtree: number;
-}
-
-export type FigDomInstrumentationSnapshot = Readonly<FigDomInstrumentation>;
-
-const instrumentation: FigDomInstrumentation = {
-  createInstance: 0,
-  createTextInstance: 0,
-  appendInitialChild: 0,
-  finalizeInitialInstance: 0,
-  insertBefore: 0,
-  removeChild: 0,
-  commitUpdate: 0,
-  commitTextUpdate: 0,
-  commitHydratedInstance: 0,
-  attachBindSubtree: 0,
-  attachEventSubtree: 0,
-  removeBindSubtree: 0,
-  removeEventSubtree: 0,
-};
-
 export type { Bind } from "./bind.ts";
 export {
   type EventCallback,
@@ -70,22 +36,11 @@ export {
 } from "./priority.ts";
 
 const hostConfig: HostConfig<Container, Element, Text> = {
-  createInstance: (type) => {
-    instrumentation.createInstance += 1;
-    return document.createElement(type);
-  },
-  createTextInstance: (text) => {
-    instrumentation.createTextInstance += 1;
-    return document.createTextNode(text);
-  },
-  appendInitialChild: (parent, child) => {
-    instrumentation.appendInitialChild += 1;
-    parent.appendChild(child);
-  },
-  finalizeInitialInstance: (instance, props) => {
-    instrumentation.finalizeInitialInstance += 1;
-    updateElement(instance, {}, props);
-  },
+  createInstance: (type) => document.createElement(type),
+  createTextInstance: (text) => document.createTextNode(text),
+  appendInitialChild: (parent, child) => parent.appendChild(child),
+  finalizeInitialInstance: (instance, props) =>
+    updateElement(instance, {}, props),
   getFirstHydratableChild: (parent) =>
     parent.firstChild as Element | Text | null,
   getNextHydratableSibling: (node) => node.nextSibling as Element | Text | null,
@@ -96,43 +51,29 @@ const hostConfig: HostConfig<Container, Element, Text> = {
 
     while (child !== null) {
       const next = child.nextSibling as Element | Text | null;
-      instrumentation.removeBindSubtree += 1;
       removeBindSubtree(child);
-      instrumentation.removeEventSubtree += 1;
       removeEventSubtree(child);
-      instrumentation.removeChild += 1;
       container.removeChild(child);
       child = next;
     }
   },
   insertBefore: (parent, child, before) => {
-    instrumentation.insertBefore += 1;
     parent.insertBefore(child, before);
-    instrumentation.attachBindSubtree += 1;
     attachBindSubtree(child);
-    instrumentation.attachEventSubtree += 1;
     attachEventSubtree(child, rootFor(parent));
   },
   removeChild: (parent, child) => {
-    instrumentation.removeBindSubtree += 1;
     removeBindSubtree(child);
-    instrumentation.removeEventSubtree += 1;
     removeEventSubtree(child);
-    instrumentation.removeChild += 1;
     parent.removeChild(child);
   },
   commitTextUpdate: (text, value) => {
-    instrumentation.commitTextUpdate += 1;
     if (text.nodeValue !== value) text.nodeValue = value;
   },
-  commitUpdate: (instance, previousProps, nextProps) => {
-    instrumentation.commitUpdate += 1;
-    updateElement(instance, previousProps, nextProps);
-  },
-  commitHydratedInstance: (instance, nextProps) => {
-    instrumentation.commitHydratedInstance += 1;
-    hydrateElement(instance, nextProps);
-  },
+  commitUpdate: (instance, previousProps, nextProps) =>
+    updateElement(instance, previousProps, nextProps),
+  commitHydratedInstance: (instance, nextProps) =>
+    hydrateElement(instance, nextProps),
 };
 
 const renderer = createRenderer(hostConfig);
@@ -140,18 +81,6 @@ setEventBatching(renderer.batchedUpdates);
 
 export const batchedUpdates = renderer.batchedUpdates;
 export const flushSync = renderer.flushSync;
-
-export function resetInstrumentation(): void {
-  for (const key of Object.keys(instrumentation) as Array<
-    keyof FigDomInstrumentation
-  >) {
-    instrumentation[key] = 0;
-  }
-}
-
-export function getInstrumentation(): FigDomInstrumentationSnapshot {
-  return { ...instrumentation };
-}
 
 export type { FigRootOptions };
 
