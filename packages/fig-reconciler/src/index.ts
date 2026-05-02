@@ -1221,16 +1221,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function hostPropsChanged(previous: Props, next: Props): boolean {
-    const previousKeys = Object.keys(previous).filter(committedHostProp);
-    const nextKeys = Object.keys(next).filter(committedHostProp);
+    let previousCount = 0;
 
-    if (previousKeys.length !== nextKeys.length) return true;
-
-    for (const key of previousKeys) {
+    for (const key of Object.keys(previous)) {
+      if (!committedHostProp(key)) continue;
+      previousCount += 1;
       if (!(key in next) || previous[key] !== next[key]) return true;
     }
 
-    return false;
+    let nextCount = 0;
+
+    for (const key of Object.keys(next)) {
+      if (committedHostProp(key)) nextCount += 1;
+    }
+
+    return previousCount !== nextCount;
   }
 
   function committedHostProp(name: string): boolean {
@@ -1279,21 +1284,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     while (cursor !== null) {
       if ((cursor.flags & PlacementFlag) !== 0) {
-        const firstPlaced = cursor;
-        const lastPlaced = placementRunTail(firstPlaced);
-        const afterPlaced = lastPlaced.sibling;
-        const before = hostSibling(lastPlaced);
-
-        for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
-          const next = placed.sibling;
-          commitPlacement(placed, before);
-          if (!isPreassembledHostSubtree(placed)) {
-            commitMutationEffects(placed.child);
-          }
-          placed = next;
-        }
-
-        cursor = afterPlaced;
+        cursor = commitPlacementRun(cursor);
         continue;
       }
 
@@ -1304,6 +1295,23 @@ export function createRenderer<Container, Instance, TextInstance>(
       commitMutationEffects(cursor.child);
       cursor = cursor.sibling;
     }
+  }
+
+  function commitPlacementRun(firstPlaced: F): F | null {
+    const lastPlaced = placementRunTail(firstPlaced);
+    const afterPlaced = lastPlaced.sibling;
+    const before = hostSibling(lastPlaced);
+
+    for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
+      const next = placed.sibling;
+      commitPlacement(placed, before);
+      if (!isPreassembledHostSubtree(placed)) {
+        commitMutationEffects(placed.child);
+      }
+      placed = next;
+    }
+
+    return afterPlaced;
   }
 
   function isPreassembledHostSubtree(node: F): boolean {
@@ -1337,9 +1345,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function shouldCommitPlacementUpdate(node: F): boolean {
     if ((node.flags & UpdateFlag) !== 0) return true;
-    if (node.alternate !== null) return false;
-    if (node.tag === TextTag) return false;
-    return node.tag !== HostTag || host.finalizeInitialInstance === undefined;
+    if (node.alternate !== null || node.tag === TextTag) return false;
+    return host.finalizeInitialInstance === undefined;
   }
 
   function insertHostSubtree(
