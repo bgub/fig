@@ -800,14 +800,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function shouldForceChildPlacement(node: F): boolean {
-    return (
-      (node.flags & PlacementFlag) !== 0 &&
-      node.alternate !== null &&
-      node.tag !== HostTag
-    );
-  }
-
   function shouldUseHostTextContent(node: F): boolean {
     return (
       host.setTextContent !== undefined &&
@@ -1112,12 +1104,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function reconcileCurrentChildren(parent: F, children: FigNode): void {
-    reconcile(
-      parent,
-      children,
-      parent.alternate?.child ?? null,
-      shouldForceChildPlacement(parent),
-    );
+    reconcile(parent, children, parent.alternate?.child ?? null, false);
   }
 
   function reconcile(

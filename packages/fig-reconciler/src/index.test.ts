@@ -585,7 +585,14 @@ describe("reconciler", () => {
   });
 
   it("commits moved keyed function children", () => {
-    const { createRoot, flushSync } = createRenderer(host);
+    let liveInserts = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      insertBefore: (parent, child, before) => {
+        liveInserts += 1;
+        parent.insertBefore(child, before);
+      },
+    });
     const container = new TestElement("root");
     const root = createRoot(container);
 
@@ -604,11 +611,13 @@ describe("reconciler", () => {
     flushSync(() =>
       root.render(createElement(List, { items: ["A", "B", "C", "D"] })),
     );
+    liveInserts = 0;
     flushSync(() =>
       root.render(createElement(List, { items: ["D", "C", "B", "A"] })),
     );
 
     expect(container.textContent).toBe("DCBA");
+    expect(liveInserts).toBe(3);
   });
 
   it("commits text updates inside moved keyed children", () => {
