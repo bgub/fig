@@ -137,7 +137,7 @@ function Command({
 }
 
 function App() {
-  const [page, setPage] = useState<Page>("state");
+  const [page, setPage] = useState<Page>("hydration");
 
   return (
     <div className="shell">
@@ -421,7 +421,7 @@ function HydrationPage() {
   const [status, setStatus] = useState("Render server HTML to begin.");
   const [recoverableErrors, setRecoverableErrors] = useState<string[]>([]);
 
-  const runDemo = async (mismatch: boolean) => {
+  const runDemo = async (mismatch: boolean, signal?: AbortSignal) => {
     const host = hydrationSandbox;
     if (host === null) {
       setStatus("Hydration sandbox is not mounted yet.");
@@ -442,7 +442,7 @@ function HydrationPage() {
       />,
     );
 
-    if (hydrationSandbox !== host) return;
+    if (signal?.aborted === true || hydrationSandbox !== host) return;
 
     const target = document.createElement("div");
     target.className = "hydration-target";
@@ -482,6 +482,10 @@ function HydrationPage() {
 
     if (!mismatch) setStatus("Hydrated matching server HTML.");
   };
+
+  useOnMount((signal) => {
+    void runDemo(false, signal);
+  });
 
   return (
     <PageFrame
