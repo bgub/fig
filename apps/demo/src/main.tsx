@@ -83,8 +83,12 @@ const initialItems: DemoItem[] = [
 
 const ThemeContext = createContext("light");
 
-let hydrationSandbox: HTMLDivElement | null = null;
-let hydrationDemoRoot: ReturnType<typeof createRoot> | null = null;
+type HydrationWrapper = "section" | "article";
+
+const hydrationDemo = {
+  root: null as ReturnType<typeof createRoot> | null,
+  sandbox: null as HTMLDivElement | null,
+};
 
 const focusBoundInput: Bind<HTMLInputElement> = (node, signal) => {
   node.focus();
@@ -422,8 +426,8 @@ function HydrationPage() {
   const [recoverableErrors, setRecoverableErrors] = useState<string[]>([]);
 
   const runDemo = async (mismatch: boolean, signal?: AbortSignal) => {
-    const host = hydrationSandbox;
-    if (host === null) {
+    const sandbox = hydrationDemo.sandbox;
+    if (sandbox === null) {
       setStatus("Hydration sandbox is not mounted yet.");
       return;
     }
@@ -431,23 +435,13 @@ function HydrationPage() {
     setStatus("Rendering HTML with @bgub/fig-server...");
     setRecoverableErrors([]);
     resetHydrationDemoRoot();
-    host.replaceChildren();
+    sandbox.replaceChildren();
 
-    const servedAt = new Date().toLocaleString();
-    const html = await renderToString(
-      <HydrationIsland
-        mode="server"
-        servedAt={servedAt}
-        wrapper={mismatch ? "article" : "section"}
-      />,
-    );
+    const { html, servedAt } = await renderHydrationHtml(mismatch);
+    if (signal?.aborted === true || hydrationDemo.sandbox !== sandbox) return;
 
-    if (signal?.aborted === true || hydrationSandbox !== host) return;
-
-    const target = document.createElement("div");
-    target.className = "hydration-target";
-    target.innerHTML = html;
-    host.replaceChildren(target);
+    const target = hydrationTarget(html);
+    sandbox.replaceChildren(target);
     setServerHtml(html);
     setStatus(
       mismatch
@@ -456,7 +450,7 @@ function HydrationPage() {
     );
 
     flushSync(() => {
-      hydrationDemoRoot = hydrateRoot(
+      hydrationDemo.root = hydrateRoot(
         target,
         <HydrationIsland
           mode={mismatch ? "client" : "server"}
@@ -523,6 +517,29 @@ function HydrationPage() {
   );
 }
 
+async function renderHydrationHtml(mismatch: boolean): Promise<{
+  html: string;
+  servedAt: string;
+}> {
+  const servedAt = new Date().toLocaleString();
+  const html = await renderToString(
+    <HydrationIsland
+      mode="server"
+      servedAt={servedAt}
+      wrapper={mismatch ? "article" : "section"}
+    />,
+  );
+
+  return { html, servedAt };
+}
+
+function hydrationTarget(html: string): HTMLDivElement {
+  const target = document.createElement("div");
+  target.className = "hydration-target";
+  target.innerHTML = html;
+  return target;
+}
+
 function HydrationIsland({
   mode,
   wrapper,
@@ -531,7 +548,7 @@ function HydrationIsland({
 }: {
   mode: "server" | "client";
   servedAt: string;
-  wrapper: "section" | "article";
+  wrapper: HydrationWrapper;
   onAction?: () => void;
 }) {
   const content = (
@@ -554,34 +571,31 @@ function HydrationIsland({
     </>
   );
 
-  return wrapper === "article" ? (
-    <article className="hydration-card" data-mode={mode}>
+  const Element = wrapper;
+  return (
+    <Element className="hydration-card" data-mode={mode}>
       {content}
-    </article>
-  ) : (
-    <section className="hydration-card" data-mode={mode}>
-      {content}
-    </section>
+    </Element>
   );
 }
 
 const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
-  hydrationSandbox = node;
+  hydrationDemo.sandbox = node;
   signal.addEventListener(
     "abort",
     () => {
-      hydrationDemoRoot = null;
-      if (hydrationSandbox === node) hydrationSandbox = null;
+      hydrationDemo.root = null;
+      if (hydrationDemo.sandbox === node) hydrationDemo.sandbox = null;
     },
     { once: true },
   );
 };
 
 function resetHydrationDemoRoot(): void {
-  if (hydrationDemoRoot === null) return;
+  const root = hydrationDemo.root;
+  if (root === null) return;
 
-  const root = hydrationDemoRoot;
-  hydrationDemoRoot = null;
+  hydrationDemo.root = null;
   flushSync(() => root.unmount());
 }
 
