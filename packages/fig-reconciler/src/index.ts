@@ -1246,17 +1246,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     let flags = NoFlags;
 
     if (hostPropsChanged(previousProps, nextProps)) flags |= UpdateFlag;
-    if (hostTextContentChanged(previousProps, nextProps)) {
+    if (hostTextContentChanged(current, previousProps, nextProps)) {
       flags |= TextContentFlag;
     }
 
     return flags;
   }
 
-  function hostTextContentChanged(previous: Props, next: Props): boolean {
+  function hostTextContentChanged(
+    current: F,
+    previous: Props,
+    next: Props,
+  ): boolean {
+    if (host.setTextContent === undefined) return false;
+
+    const previousText = hostTextContent(previous.children);
+    const nextText = hostTextContent(next.children);
+
     return (
-      host.setTextContent !== undefined &&
-      hostTextContent(previous.children) !== hostTextContent(next.children)
+      previousText !== nextText || (nextText !== null && current.child !== null)
     );
   }
 

@@ -345,6 +345,26 @@ describe("@bgub/fig-dom", () => {
     expect(calls).toEqual(["click"]);
   });
 
+  it("keeps hydrated host text content after a same-value update", () => {
+    const container = new FakeElement("root");
+    const span = new FakeElement("span");
+    span.appendChild(new FakeText("Hello"));
+    container.appendChild(span);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+
+    flushSync(() => {
+      root = hydrateRoot(
+        container as unknown as Element,
+        createElement("span", null, "Hello"),
+      );
+    });
+    flushSync(() => root?.render(createElement("span", null, "Hello")));
+
+    expect(container.childNodes).toEqual([span]);
+    expect(span.textContent).toBe("Hello");
+    expect(span.childNodes).toHaveLength(1);
+  });
+
   it("runs binds for hydrated host elements", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
