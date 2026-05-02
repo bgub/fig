@@ -2242,13 +2242,17 @@ function appendTextChild(children: FigChild[], text: string): void {
   }
 }
 
-const NoHostTextContent = Symbol("fig.no-host-text-content");
+const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
+const NonTextHostContent = Symbol("fig.non-text-host-content");
 
-type HostTextContent = string | typeof NoHostTextContent;
+type HostTextContent =
+  | string
+  | typeof EmptyHostTextContent
+  | typeof NonTextHostContent;
 
 function hostTextContent(children: unknown): string | null {
   const text = hostTextContentPart(children as FigNode);
-  return text === NoHostTextContent ? null : text;
+  return typeof text === "string" ? text : null;
 }
 
 function hostTextContentPart(node: FigNode): HostTextContent {
@@ -2258,24 +2262,25 @@ function hostTextContentPart(node: FigNode): HostTextContent {
 
     for (const child of node) {
       const childText = hostTextContentPart(child as FigNode);
-      if (childText === NoHostTextContent) continue;
+      if (childText === NonTextHostContent) return NonTextHostContent;
+      if (childText === EmptyHostTextContent) continue;
 
       hasText = true;
       text += childText;
     }
 
-    return hasText ? text : NoHostTextContent;
+    return hasText ? text : EmptyHostTextContent;
   }
 
   if (node === null || node === undefined || typeof node === "boolean") {
-    return NoHostTextContent;
+    return EmptyHostTextContent;
   }
 
   if (typeof node === "string" || typeof node === "number") {
     return String(node);
   }
 
-  if (isValidElement(node)) return NoHostTextContent;
+  if (isValidElement(node)) return NonTextHostContent;
 
   throw invalidChildError(node);
 }

@@ -283,6 +283,35 @@ describe("reconciler", () => {
     expect(textContentUpdates).toBe(2);
   });
 
+  it("does not use host text content for mixed element and text children", () => {
+    let createdTexts = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      createTextInstance: (text) => {
+        createdTexts += 1;
+        return new TestText(text);
+      },
+      setTextContent: (instance, text) => {
+        instance.textContent = text;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      return createElement("span", null, createElement("em", null, "A"), "B");
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+
+    const span = container.childNodes[0] as TestElement;
+    expect(span.type).toBe("span");
+    expect((span.childNodes[0] as TestElement).type).toBe("em");
+    expect(span.textContent).toBe("AB");
+    expect(span.childNodes).toHaveLength(2);
+    expect(createdTexts).toBe(1);
+  });
+
   it("transitions between host text content and child elements", () => {
     const { createRoot, flushSync } = createRenderer({
       ...host,
