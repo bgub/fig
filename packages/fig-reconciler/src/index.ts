@@ -74,6 +74,21 @@ type Parent<Container, Instance> = Container | Instance;
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(type: string, props: Props): Instance;
   createTextInstance(text: string): TextInstance;
+  getFirstHydratableChild?(
+    parent: Parent<Container, Instance>,
+  ): HostNode<Instance, TextInstance> | null;
+  getNextHydratableSibling?(
+    node: HostNode<Instance, TextInstance>,
+  ): HostNode<Instance, TextInstance> | null;
+  canHydrateInstance?(
+    node: HostNode<Instance, TextInstance>,
+    type: string,
+  ): boolean;
+  canHydrateTextInstance?(
+    node: HostNode<Instance, TextInstance>,
+    text: string,
+  ): boolean;
+  clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
     child: HostNode<Instance, TextInstance>,
@@ -88,6 +103,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousProps: Props,
     nextProps: Props,
   ): void;
+  commitHydratedInstance?(instance: Instance, nextProps: Props): void;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -95,6 +111,21 @@ export interface FigRoot {
   render(children: FigNode): void;
   unmount(): void;
 }
+
+export interface FigRootOptions {
+  onRecoverableError?: (error: unknown) => void;
+}
+
+type HydrationHostConfig<Container, Instance, TextInstance> = Required<
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    | "getFirstHydratableChild"
+    | "getNextHydratableSibling"
+    | "canHydrateInstance"
+    | "canHydrateTextInstance"
+    | "clearContainer"
+  >
+>;
 
 const RootTag = 0;
 const HostTag = 1;
@@ -115,6 +146,7 @@ type Tag =
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
 const UpdateFlag = 1 << 1;
+const HydrationFlag = 1 << 2;
 type Flag = number;
 
 const ReactiveEffect = 0;
@@ -203,6 +235,13 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
     SuspensePings<Container, Instance, TextInstance>
   >;
   consumedPendingQueues: ConsumedPendingQueue[];
+  onRecoverableError: (error: unknown) => void;
+  recoverableErrors: unknown[];
+  isHydrating: boolean;
+  hydrationParent: Fiber<Container, Instance, TextInstance> | null;
+  nextHydratableInstance: HostNode<Instance, TextInstance> | null;
+  clearContainerBeforeCommit: boolean;
+  hydrationInitialElement: FigNode | typeof NoHydrationInitialElement;
 }
 
 interface ConsumedPendingQueue {
@@ -211,6 +250,9 @@ interface ConsumedPendingQueue {
 }
 
 const PreservedSuspense = Symbol("fig.preserved-suspense");
+const NoHydrationInitialElement = Symbol("fig.no-hydration-initial-element");
+
+class HydrationMismatchError extends Error {}
 
 export function createRenderer<Container, Instance, TextInstance>(
   host: HostConfig<Container, Instance, TextInstance>,
@@ -255,38 +297,93 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
   };
 
-  function createRoot(container: Container): FigRoot {
-    const key = container as object;
-    let root = roots.get(key);
+  function createRoot(
+    container: Container,
+    options: FigRootOptions = {},
+  ): FigRoot {
+    return rootHandle(rootForContainer(container, { kind: "client", options }));
+  }
 
-    if (root === undefined) {
-      const current = fiber(RootTag, null, null, { children: null }, null);
-      root = {
-        container,
-        current,
-        element: null,
-        pendingLanes: NoLanes,
-        suspendedLanes: NoLanes,
-        pingedLanes: NoLanes,
-        expiredLanes: NoLanes,
-        entangledLanes: NoLanes,
-        entanglements: createLaneMap(NoLanes),
-        expirationTimes: createLaneMap(NoTimestamp),
-        callback: null,
-        callbackPriority: NoLane,
-        wip: null,
-        finishedWork: null,
-        renderLanes: NoLanes,
-        pendingReactiveEffects: [],
-        reactiveCallback: null,
-        suspendedThenables: new WeakMap(),
-        suspendedBoundaries: new WeakMap(),
-        consumedPendingQueues: [],
-      };
-      current.stateNode = root;
-      roots.set(key, root);
+  function hydrateRoot(
+    container: Container,
+    children: FigNode,
+    options: FigRootOptions = {},
+  ): FigRoot {
+    const root = rootForContainer(container, { kind: "hydration", options });
+    root.hydrationInitialElement = children;
+    updateRoot(root, children);
+    return rootHandle(root);
+  }
+
+  function rootForContainer(
+    container: Container,
+    request: {
+      kind: "client" | "hydration";
+      options?: FigRootOptions;
+      reuse?: boolean;
+    },
+  ): R {
+    const existing = roots.get(container as object);
+    if (existing !== undefined) {
+      if (request.reuse === true) return existing;
+      throw duplicateRootError(request.kind);
     }
 
+    if (request.kind === "hydration") requireHydrationHostConfig();
+
+    const root = createFiberRoot(container, request.options ?? {});
+    roots.set(container as object, root);
+
+    if (request.kind === "hydration") root.isHydrating = true;
+
+    return root;
+  }
+
+  function createFiberRoot(container: Container, options: FigRootOptions): R {
+    const current = fiber(RootTag, null, null, { children: null }, null);
+    const root: R = {
+      container,
+      current,
+      element: null,
+      pendingLanes: NoLanes,
+      suspendedLanes: NoLanes,
+      pingedLanes: NoLanes,
+      expiredLanes: NoLanes,
+      entangledLanes: NoLanes,
+      entanglements: createLaneMap(NoLanes),
+      expirationTimes: createLaneMap(NoTimestamp),
+      callback: null,
+      callbackPriority: NoLane,
+      wip: null,
+      finishedWork: null,
+      renderLanes: NoLanes,
+      pendingReactiveEffects: [],
+      reactiveCallback: null,
+      suspendedThenables: new WeakMap(),
+      suspendedBoundaries: new WeakMap(),
+      consumedPendingQueues: [],
+      onRecoverableError: options.onRecoverableError ?? noopRecoverableError,
+      recoverableErrors: [],
+      isHydrating: false,
+      hydrationParent: null,
+      nextHydratableInstance: null,
+      clearContainerBeforeCommit: false,
+      hydrationInitialElement: NoHydrationInitialElement,
+    };
+    current.stateNode = root;
+    return root;
+  }
+
+  function duplicateRootError(kind: "client" | "hydration"): Error {
+    const method = kind === "hydration" ? "hydrateRoot" : "createRoot";
+    return new Error(
+      `Cannot call ${method} on a container that already has a Fig root. Use the existing root.render(...) to update it instead.`,
+    );
+  }
+
+  function noopRecoverableError(): void {}
+
+  function rootHandle(root: R): FigRoot {
     return {
       render: (children) => updateRoot(root, children),
       unmount: () => updateRoot(root, null),
@@ -294,7 +391,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function render(children: FigNode, container: Container): FigRoot {
-    const root = createRoot(container);
+    const root = rootHandle(
+      rootForContainer(container, { kind: "client", reuse: true }),
+    );
     root.render(children);
     return root;
   }
@@ -329,6 +428,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateRoot(root: R, children: FigNode): void {
+    if (shouldClientRenderEarlyHydrationUpdate(root, children)) {
+      forceClientRender(root);
+    }
+
     const lane = requestUpdateLane();
     root.element = children;
     markRootPending(root, lane);
@@ -377,6 +480,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         return;
       }
 
+      if (error instanceof HydrationMismatchError) {
+        recoverFromHydrationMismatch(root);
+        return;
+      }
+
       const suspendedLanes = root.renderLanes;
       abandonRootWork(root);
 
@@ -388,6 +496,30 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       throw error;
     }
+  }
+
+  function recoverFromHydrationMismatch(root: R): void {
+    restartRootWork(root);
+    forceClientRender(root);
+    performRoot(root, true);
+  }
+
+  function shouldClientRenderEarlyHydrationUpdate(
+    root: R,
+    children: FigNode,
+  ): boolean {
+    return (
+      root.isHydrating &&
+      root.current.child === null &&
+      root.hydrationInitialElement !== NoHydrationInitialElement &&
+      root.hydrationInitialElement !== children
+    );
+  }
+
+  function forceClientRender(root: R): void {
+    root.isHydrating = false;
+    root.clearContainerBeforeCommit = true;
+    root.hydrationInitialElement = NoHydrationInitialElement;
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
@@ -414,6 +546,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         children: root.element,
       });
       root.wip = root.finishedWork;
+      prepareToHydrateRoot(root);
     }
 
     while (
@@ -442,6 +575,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.finishedWork = null;
     root.callback = null;
     root.callbackPriority = NoLane;
+    root.hydrationParent = null;
+    root.nextHydratableInstance = null;
 
     if (root.pendingLanes !== NoLanes) scheduleRoot(root);
     else pendingRoots.delete(root);
@@ -458,6 +593,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
+    root.hydrationParent = null;
+    root.nextHydratableInstance = null;
   }
 
   function performUnit(node: F): F | null {
@@ -503,11 +640,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === TextTag) {
+      if (tryHydrateText(node)) return;
       node.stateNode ??= host.createTextInstance(String(node.props.nodeValue));
       return;
     }
 
     if (node.tag === HostTag) {
+      if (tryHydrateInstance(node)) {
+        reconcileCurrentChildren(node, node.props.children);
+        return;
+      }
+
       node.stateNode ??= host.createInstance(String(node.type), node.props);
     }
 
@@ -519,6 +662,120 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (changedContextProvider(node)) propagateContextChange(node);
 
     reconcileCurrentChildren(node, node.props.children);
+  }
+
+  function prepareToHydrateRoot(root: R): void {
+    if (!root.isHydrating) return;
+
+    const hydrationHost = requireHydrationHostConfig();
+    root.hydrationParent = root.finishedWork;
+    root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
+      root.container,
+    );
+  }
+
+  function tryHydrateInstance(node: F): boolean {
+    const root = rootOf(node);
+    if (!shouldHydrateFiber(root, node)) return false;
+
+    const hydrationHost = requireHydrationHostConfig();
+    const hydratable = root.nextHydratableInstance;
+    const type = String(node.type);
+
+    if (hydratable === null) {
+      throwHydrationMismatch(root, `expected <${type}>, but found no DOM node`);
+    }
+
+    if (!hydrationHost.canHydrateInstance(hydratable, type)) {
+      throwHydrationMismatch(root, `expected <${type}>`);
+    }
+
+    node.stateNode = hydratable as Instance;
+    node.flags |= UpdateFlag | HydrationFlag;
+    root.hydrationParent = node;
+    root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
+      hydratable as Instance,
+    );
+
+    return true;
+  }
+
+  function tryHydrateText(node: F): boolean {
+    const root = rootOf(node);
+    if (!shouldHydrateFiber(root, node)) return false;
+
+    const hydrationHost = requireHydrationHostConfig();
+    const hydratable = root.nextHydratableInstance;
+    const text = String(node.props.nodeValue);
+
+    if (hydratable === null) {
+      throwHydrationMismatch(root, "expected text, but found no DOM node");
+    }
+
+    if (!hydrationHost.canHydrateTextInstance(hydratable, text)) {
+      throwHydrationMismatch(root, "expected text");
+    }
+
+    node.stateNode = hydratable as TextInstance;
+    node.flags |= UpdateFlag;
+    root.nextHydratableInstance =
+      hydrationHost.getNextHydratableSibling(hydratable);
+
+    return true;
+  }
+
+  function shouldHydrateFiber(root: R, node: F): boolean {
+    return (
+      root.isHydrating && node.alternate === null && node.stateNode === null
+    );
+  }
+
+  function completeHydration(node: F): void {
+    const root = rootOf(node);
+    if (!root.isHydrating || root.hydrationParent !== node) return;
+
+    if (root.nextHydratableInstance !== null) {
+      throwHydrationMismatch(root, "found an extra DOM node");
+    }
+
+    const hydrationHost = requireHydrationHostConfig();
+    root.hydrationParent = nextHydrationParent(node.return);
+    root.nextHydratableInstance =
+      node.tag === HostTag
+        ? hydrationHost.getNextHydratableSibling(node.stateNode as Instance)
+        : null;
+  }
+
+  function nextHydrationParent(node: F | null): F | null {
+    for (let parent = node; parent !== null; parent = parent.return) {
+      if (parent.tag === RootTag || parent.tag === HostTag) return parent;
+    }
+
+    return null;
+  }
+
+  function requireHydrationHostConfig(): HydrationHostConfig<
+    Container,
+    Instance,
+    TextInstance
+  > {
+    if (
+      host.getFirstHydratableChild === undefined ||
+      host.getNextHydratableSibling === undefined ||
+      host.canHydrateInstance === undefined ||
+      host.canHydrateTextInstance === undefined ||
+      host.clearContainer === undefined
+    ) {
+      throw new Error("Hydration is not supported by this renderer.");
+    }
+
+    return host as HydrationHostConfig<Container, Instance, TextInstance>;
+  }
+
+  function throwHydrationMismatch(root: R, message: string): never {
+    const error = new Error(`Hydration mismatch: ${message}.`);
+    root.recoverableErrors.push(error);
+    throw new HydrationMismatchError(error.message);
   }
 
   function canBailout(node: F): boolean {
@@ -775,6 +1032,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function complete(node: F): void {
+    completeHydration(node);
+
     let child = node.child;
     let childLanes = NoLanes;
 
@@ -814,6 +1073,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let previous: F | null = null;
     let lastPlacedIndex = 0;
+    const isHydratingNewTree =
+      rootOf(parent).isHydrating && currentFirstChild === null;
 
     forEachChild(children, (child, index) => {
       const key = childKey(child, index, seenKeys);
@@ -837,7 +1098,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           lastPlacedIndex = old.index;
         }
       } else {
-        next.flags |= PlacementFlag;
+        if (!isHydratingNewTree) next.flags |= PlacementFlag;
       }
 
       previous = appendChild(parent, previous, next);
@@ -861,15 +1122,39 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitRoot(root: R, finishedWork: F): void {
     commitEffects(finishedWork.child, BeforeLayoutEffect);
+    if (root.clearContainerBeforeCommit) {
+      requireHydrationHostConfig().clearContainer(root.container);
+      root.clearContainerBeforeCommit = false;
+    }
     commitDeletions(finishedWork);
     commitMutationEffects(finishedWork.child);
     root.current = finishedWork;
+    root.isHydrating = false;
+    root.hydrationParent = null;
+    root.nextHydratableInstance = null;
+    root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
     commitEffects(finishedWork.child, BeforePaintEffect);
     collectReactiveEffects(root, finishedWork.child);
     scheduleReactiveEffects(root);
     emitDevtoolsCommit(root);
+    flushRecoverableErrors(root);
+  }
+
+  function flushRecoverableErrors(root: R): void {
+    const errors = root.recoverableErrors;
+    if (errors.length === 0) return;
+
+    root.recoverableErrors = [];
+
+    for (const error of errors) {
+      try {
+        root.onRecoverableError(error);
+      } catch {
+        // Recoverable error reporting should not break a successful commit.
+      }
+    }
   }
 
   function commitMutationEffects(node: F | null): void {
@@ -908,6 +1193,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         node.stateNode as TextInstance,
         String(node.props.nodeValue),
       );
+    } else if (
+      (node.flags & HydrationFlag) !== 0 &&
+      host.commitHydratedInstance !== undefined
+    ) {
+      host.commitHydratedInstance(node.stateNode as Instance, node.props);
     } else {
       host.commitUpdate(
         node.stateNode as Instance,
@@ -1269,7 +1559,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     throw new Error("Could not find a root for fiber.");
   }
 
-  return { batchedUpdates, createRoot, render, flushSync };
+  return { batchedUpdates, createRoot, hydrateRoot, render, flushSync };
 
   function emitDevtoolsCommit(root: R): void {
     const hook = getFigDevtoolsGlobalHook();

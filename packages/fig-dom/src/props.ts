@@ -34,13 +34,88 @@ export function updateElement(
   }
 }
 
+export function hydrateElement(element: Element, nextProps: Props): void {
+  removeExtraHydratedAttributes(element, nextProps);
+  clearHydratedStyle(element);
+  updateElement(element, {}, nextProps);
+}
+
+function removeExtraHydratedAttributes(
+  element: Element,
+  nextProps: Props,
+): void {
+  const expectedAttributes = new Set<string>();
+
+  for (const name of Object.keys(nextProps)) {
+    if (name === "events" || name === "bind" || reserved(name)) continue;
+    expectedAttributes.add(attributeName(name));
+  }
+
+  for (const name of attributeNames(element)) {
+    if (!expectedAttributes.has(name)) element.removeAttribute(name);
+  }
+}
+
+function clearHydratedStyle(element: Element): void {
+  element.removeAttribute("style");
+
+  const style = (element as HTMLElement).style;
+  if (style === undefined) return;
+
+  if (typeof style.length === "number" && typeof style.item === "function") {
+    const names: string[] = [];
+    for (let index = 0; index < style.length; index += 1) {
+      const name = style.item(index);
+      if (name !== "") names.push(name);
+    }
+
+    for (const name of names) style.removeProperty(name);
+    return;
+  }
+
+  const styleRecord = style as unknown as Record<string, unknown>;
+  for (const name of Object.keys(styleRecord)) styleRecord[name] = "";
+}
+
+function attributeNames(element: Element): string[] {
+  const attributes = element.attributes as
+    | (NamedNodeMap & Iterable<Attr>)
+    | Record<string, unknown>
+    | undefined;
+
+  if (attributes === undefined) return [];
+
+  if (
+    "length" in attributes &&
+    typeof attributes.length === "number" &&
+    "item" in attributes &&
+    typeof attributes.item === "function"
+  ) {
+    const names: string[] = [];
+    for (let index = 0; index < attributes.length; index += 1) {
+      const attribute = attributes.item(index);
+      if (attribute !== null) names.push(attribute.name);
+    }
+    return names;
+  }
+
+  if (Symbol.iterator in attributes) {
+    return Array.from(
+      attributes as Iterable<Attr>,
+      (attribute) => attribute.name,
+    );
+  }
+
+  return Object.keys(attributes);
+}
+
 function setProperty(
   element: Element,
   name: string,
   previous: unknown,
   next: unknown,
 ): void {
-  const attribute = name === "className" ? "class" : name;
+  const attribute = attributeName(name);
 
   if (name === "style") {
     setStyle(element, previous, next);
@@ -73,6 +148,10 @@ function setStyle(element: Element, previous: unknown, next: unknown): void {
 
 function styleProps(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value : {};
+}
+
+function attributeName(name: string): string {
+  return name === "className" ? "class" : name;
 }
 
 function reserved(name: string): boolean {

@@ -161,6 +161,21 @@ describe("reconciler", () => {
     expect(commits.at(-1)?.tree.children[0]?.id).toBe(counterId);
   });
 
+  it("throws a hydration support diagnostic when clearContainer is missing", () => {
+    const { hydrateRoot } = createRenderer({
+      ...host,
+      getFirstHydratableChild: () => null,
+      getNextHydratableSibling: () => null,
+      canHydrateInstance: () => false,
+      canHydrateTextInstance: () => false,
+    });
+    const container = new TestElement("root");
+
+    expect(() => hydrateRoot(container, createElement("span", null))).toThrow(
+      "Hydration is not supported by this renderer.",
+    );
+  });
+
   it("restarts yielded work when flushSync schedules higher-priority work", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
