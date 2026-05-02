@@ -4,19 +4,45 @@ import {
   readContext,
   readPromise,
   Suspense,
+  transition,
   useBeforePaint,
   useOnMount,
   useReactive,
   useState,
 } from "@bgub/fig";
-import { type Bind, createRoot, on } from "@bgub/fig-dom";
+import { type Bind, createRoot, flushSync, on } from "@bgub/fig-dom";
+import { createElement, type ReactNode } from "react";
+import { flushSync as reactFlushSync } from "react-dom";
+import {
+  createRoot as createReactRoot,
+  type Root as ReactRoot,
+} from "react-dom/client";
 
-type Page = "state" | "diffing" | "effects" | "async" | "resources";
+type Page =
+  | "state"
+  | "diffing"
+  | "effects"
+  | "async"
+  | "resources"
+  | "benchmarks";
 
 interface DemoItem {
   id: number;
   label: string;
   tone: string;
+}
+
+type BenchmarkRuntime = "Fig" | "React";
+
+interface BenchmarkResult {
+  runtime: BenchmarkRuntime;
+  name: string;
+  rows: number;
+  samples: number[];
+  median: number;
+  min: number;
+  max: number;
+  notes: string;
 }
 
 const pages: Array<{ id: Page; label: string }> = [
@@ -25,6 +51,7 @@ const pages: Array<{ id: Page; label: string }> = [
   { id: "effects", label: "Effects + bind" },
   { id: "async", label: "Async event signals" },
   { id: "resources", label: "Context + promises" },
+  { id: "benchmarks", label: "Benchmarks" },
 ];
 
 const initialItems: DemoItem[] = [
@@ -123,6 +150,8 @@ function pageView(page: Page) {
       return <AsyncPage />;
     case "resources":
       return <ResourcesPage />;
+    case "benchmarks":
+      return <BenchmarksPage />;
     default:
       return <StatePage />;
   }
@@ -317,7 +346,7 @@ function ResourcesPage() {
   return (
     <PageFrame
       title="Context + promises"
-      lede="Context is read without hook slots. Pending promises render a local fallback and retry when settled."
+      lede="Context reads, local fallbacks, and transition retries."
     >
       <ThemeContext value={theme}>
         <Row>
@@ -332,10 +361,21 @@ function ResourcesPage() {
           </Command>
           <Command
             run={() =>
-              setMessagePromise(delayedMessage(`Resolved for ${theme} theme`))
+              setMessagePromise(delayedMessage(messageText("Resolved", theme)))
             }
           >
             Read promise
+          </Command>
+          <Command
+            run={() =>
+              transition(() => {
+                setMessagePromise(
+                  delayedMessage(messageText("Transitioned", theme)),
+                );
+              })
+            }
+          >
+            Transition read
           </Command>
         </Row>
         {messagePromise === null ? (
@@ -347,6 +387,108 @@ function ResourcesPage() {
         )}
       </ThemeContext>
     </PageFrame>
+  );
+}
+
+function BenchmarksPage() {
+  const [rowCount, setRowCount] = useState(1000);
+  const [status, setStatus] = useState("Ready to run.");
+  const [results, setResults] = useState<BenchmarkResult[]>([]);
+
+  return (
+    <PageFrame
+      title="Benchmarks"
+      lede="Synchronous render/update microbenchmarks comparing Fig and React on the same DOM workloads."
+    >
+      <Row>
+        <label className="field">
+          Rows
+          <input
+            className="input small"
+            type="number"
+            min="10"
+            max="10000"
+            value={rowCount}
+            events={[
+              on("input", (event) => {
+                const value = Number(
+                  (event.currentTarget as HTMLInputElement).value,
+                );
+                if (Number.isFinite(value)) setRowCount(clampRows(value));
+              }),
+            ]}
+          />
+        </label>
+        <Command
+          primary
+          run={() => {
+            setStatus("Running benchmarks...");
+            window.setTimeout(() => {
+              const nextResults = runBenchmarks(rowCount);
+              setResults(nextResults);
+              setStatus(
+                `Completed ${nextResults.length} scenarios at ${new Date().toLocaleTimeString()}.`,
+              );
+            }, 0);
+          }}
+        >
+          Run benchmarks
+        </Command>
+        <Command
+          run={() => {
+            setResults([]);
+            setStatus("Ready to run.");
+          }}
+        >
+          Clear
+        </Command>
+      </Row>
+      <p className="hint">{status}</p>
+      {results.length === 0 ? (
+        <p className="hint">
+          Results measure median synchronous `flushSync` time across five runs
+          for both Fig and React. Use them for relative comparisons, not
+          absolute browser benchmarks.
+        </p>
+      ) : (
+        <BenchmarkTable results={results} />
+      )}
+    </PageFrame>
+  );
+}
+
+function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
+  return (
+    <table className="benchmark-table">
+      <thead>
+        <tr>
+          <th>Runtime</th>
+          <th>Scenario</th>
+          <th>Rows</th>
+          <th>Median</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {results.map((result) => (
+          <tr key={`${result.runtime}:${result.name}`}>
+            <td>
+              <span className={`runtime ${result.runtime.toLowerCase()}`}>
+                {result.runtime}
+              </span>
+            </td>
+            <td>{result.name}</td>
+            <td>{result.rows}</td>
+            <td>{formatMs(result.median)}</td>
+            <td>{formatMs(result.min)}</td>
+            <td>{formatMs(result.max)}</td>
+            <td>{result.notes}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -386,6 +528,73 @@ function ResultList({ results }: { results: string[] }) {
   );
 }
 
+interface BenchmarkRowsProps {
+  count: number;
+  label?: string;
+  reverse?: boolean;
+  start?: number;
+  version?: number;
+}
+
+function BenchmarkRows({
+  count,
+  label = "Row",
+  reverse = false,
+  start = 0,
+  version = 0,
+}: BenchmarkRowsProps) {
+  const rows = benchmarkRowIds(count, start, reverse);
+
+  return (
+    <ul className="benchmark-list">
+      {rows.map((id) => (
+        <li className="benchmark-row" key={id}>
+          <span>
+            {label} {id}
+          </span>
+          <span className="tag">v{version}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function reactBenchmarkElement(props: BenchmarkRowsProps): ReactNode {
+  return createElement(ReactBenchmarkRows, props);
+}
+
+function ReactBenchmarkRows({
+  count,
+  label = "Row",
+  reverse = false,
+  start = 0,
+  version = 0,
+}: BenchmarkRowsProps): ReactNode {
+  return createElement(
+    "ul",
+    { className: "benchmark-list" },
+    benchmarkRowIds(count, start, reverse).map((id) =>
+      createElement(
+        "li",
+        { className: "benchmark-row", key: id },
+        createElement("span", null, `${label} ${id}`),
+        createElement("span", { className: "tag" }, `v${version}`),
+      ),
+    ),
+  );
+}
+
+function benchmarkRowIds(
+  count: number,
+  start: number,
+  reverse: boolean,
+): number[] {
+  const rows: number[] = [];
+  for (let index = 0; index < count; index += 1) rows.push(start + index);
+  if (reverse) rows.reverse();
+  return rows;
+}
+
 function rotate<T>(items: T[]): T[] {
   return items.length < 2 ? items : [...items.slice(1), items[0]];
 }
@@ -406,6 +615,226 @@ function delayedMessage(message: string): Promise<string> {
   return new Promise((resolve) => {
     window.setTimeout(() => resolve(message), 650);
   });
+}
+
+function messageText(kind: string, theme: string): string {
+  return `${kind} for ${theme} theme at ${Math.round(performance.now())}`;
+}
+
+function runBenchmarks(rowCount: number): BenchmarkResult[] {
+  const rows = clampRows(rowCount);
+  const appendCount = Math.max(1, Math.round(rows * 0.1));
+
+  return [
+    measureBenchmark(
+      "Fig",
+      "Initial mount",
+      rows,
+      "Fresh root and host tree creation.",
+      () => measureFigInitialMount(rows),
+    ),
+    measureBenchmark(
+      "React",
+      "Initial mount",
+      rows,
+      "Fresh root and host tree creation.",
+      () => measureReactInitialMount(rows),
+    ),
+    measureBenchmark(
+      "Fig",
+      "Same-order update",
+      rows,
+      "Stable keys, changed row props/text.",
+      () =>
+        measureFigUpdate(
+          <BenchmarkRows count={rows} version={1} />,
+          <BenchmarkRows count={rows} version={2} />,
+        ),
+    ),
+    measureBenchmark(
+      "React",
+      "Same-order update",
+      rows,
+      "Stable keys, changed row props/text.",
+      () =>
+        measureReactUpdate(
+          reactBenchmarkElement({ count: rows, version: 1 }),
+          reactBenchmarkElement({ count: rows, version: 2 }),
+        ),
+    ),
+    measureBenchmark(
+      "Fig",
+      "Append 10%",
+      rows,
+      "Stable ordered keys plus new tail rows.",
+      () =>
+        measureFigUpdate(
+          <BenchmarkRows count={rows} />,
+          <BenchmarkRows count={rows + appendCount} />,
+        ),
+    ),
+    measureBenchmark(
+      "React",
+      "Append 10%",
+      rows,
+      "Stable ordered keys plus new tail rows.",
+      () =>
+        measureReactUpdate(
+          reactBenchmarkElement({ count: rows }),
+          reactBenchmarkElement({ count: rows + appendCount }),
+        ),
+    ),
+    measureBenchmark(
+      "Fig",
+      "Prepend 10%",
+      rows,
+      "New head rows before stable existing keys.",
+      () =>
+        measureFigUpdate(
+          <BenchmarkRows count={rows} />,
+          <BenchmarkRows count={rows + appendCount} start={-appendCount} />,
+        ),
+    ),
+    measureBenchmark(
+      "React",
+      "Prepend 10%",
+      rows,
+      "New head rows before stable existing keys.",
+      () =>
+        measureReactUpdate(
+          reactBenchmarkElement({ count: rows }),
+          reactBenchmarkElement({
+            count: rows + appendCount,
+            start: -appendCount,
+          }),
+        ),
+    ),
+    measureBenchmark(
+      "Fig",
+      "Reverse keyed rows",
+      rows,
+      "Worst-case keyed reordering pressure.",
+      () =>
+        measureFigUpdate(
+          <BenchmarkRows count={rows} />,
+          <BenchmarkRows count={rows} reverse />,
+        ),
+    ),
+    measureBenchmark(
+      "React",
+      "Reverse keyed rows",
+      rows,
+      "Worst-case keyed reordering pressure.",
+      () =>
+        measureReactUpdate(
+          reactBenchmarkElement({ count: rows }),
+          reactBenchmarkElement({ count: rows, reverse: true }),
+        ),
+    ),
+  ];
+}
+
+function measureBenchmark(
+  runtime: BenchmarkRuntime,
+  name: string,
+  rows: number,
+  notes: string,
+  measure: () => number,
+): BenchmarkResult {
+  measure();
+  const samples: number[] = [];
+
+  for (let index = 0; index < 5; index += 1) samples.push(measure());
+
+  const sorted = [...samples].sort((a, b) => a - b);
+  return {
+    runtime,
+    name,
+    rows,
+    samples,
+    median: sorted[Math.floor(sorted.length / 2)],
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    notes,
+  };
+}
+
+function measureFigInitialMount(rows: number): number {
+  const container = createBenchmarkContainer();
+  const root = createRoot(container);
+  const duration = measureFigSync(() =>
+    root.render(<BenchmarkRows count={rows} version={1} />),
+  );
+  cleanupFigBenchmarkRoot(root, container);
+  return duration;
+}
+
+function measureReactInitialMount(rows: number): number {
+  const container = createBenchmarkContainer();
+  const root = createReactRoot(container);
+  const duration = measureReactSync(() =>
+    root.render(reactBenchmarkElement({ count: rows, version: 1 })),
+  );
+  cleanupReactBenchmarkRoot(root, container);
+  return duration;
+}
+
+function measureFigUpdate(previous: FigNode, next: FigNode): number {
+  const container = createBenchmarkContainer();
+  const root = createRoot(container);
+  flushSync(() => root.render(previous));
+  const duration = measureFigSync(() => root.render(next));
+  cleanupFigBenchmarkRoot(root, container);
+  return duration;
+}
+
+function measureReactUpdate(previous: ReactNode, next: ReactNode): number {
+  const container = createBenchmarkContainer();
+  const root = createReactRoot(container);
+  reactFlushSync(() => root.render(previous));
+  const duration = measureReactSync(() => root.render(next));
+  cleanupReactBenchmarkRoot(root, container);
+  return duration;
+}
+
+function measureFigSync(callback: () => void): number {
+  const start = performance.now();
+  flushSync(callback);
+  return performance.now() - start;
+}
+
+function measureReactSync(callback: () => void): number {
+  const start = performance.now();
+  reactFlushSync(callback);
+  return performance.now() - start;
+}
+
+function cleanupFigBenchmarkRoot(
+  root: ReturnType<typeof createRoot>,
+  node: Node,
+) {
+  flushSync(() => root.unmount());
+  node.parentNode?.removeChild(node);
+}
+
+function cleanupReactBenchmarkRoot(root: ReactRoot, node: Node) {
+  reactFlushSync(() => root.unmount());
+  node.parentNode?.removeChild(node);
+}
+
+function createBenchmarkContainer(): HTMLDivElement {
+  const container = document.createElement("div");
+  container.className = "benchmark-sandbox";
+  document.body.appendChild(container);
+  return container;
+}
+
+function clampRows(value: number): number {
+  return Math.min(10000, Math.max(10, Math.round(value)));
+}
+
+function formatMs(value: number): string {
+  return `${value.toFixed(2)} ms`;
 }
 
 const container = document.getElementById("root");

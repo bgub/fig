@@ -76,7 +76,7 @@ button {
 }
 
 .page {
-  max-width: 940px;
+  max-width: 1100px;
 }
 
 .page h2 {
@@ -166,6 +166,17 @@ button {
   padding: 10px 12px;
 }
 
+.input.small {
+  width: 120px;
+}
+
+.field {
+  display: inline-grid;
+  gap: 4px;
+  color: #667085;
+  font-size: 13px;
+}
+
 .log {
   min-height: 168px;
   border-radius: 6px;
@@ -180,6 +191,69 @@ button {
 .hint {
   color: #667085;
   font-size: 14px;
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  border-top: 1px solid #d9dee7;
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.benchmark-table th {
+  color: #344054;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.runtime {
+  display: inline-flex;
+  min-width: 56px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runtime.fig {
+  background: #eaf7f1;
+  color: #0f5132;
+}
+
+.runtime.react {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.benchmark-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.benchmark-row {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #eef2f7;
+  padding: 4px 6px;
+}
+
+.benchmark-sandbox {
+  position: absolute;
+  top: 0;
+  left: -10000px;
+  width: 900px;
 }
 
 @media (max-width: 760px) {
