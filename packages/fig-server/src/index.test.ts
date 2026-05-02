@@ -5,6 +5,7 @@ import {
   readContext,
   readPromise,
   Suspense,
+  useMemo,
   useReactive,
   useState,
 } from "@bgub/fig";
@@ -53,11 +54,12 @@ describe("@bgub/fig-server", () => {
   it("renders fragments, arrays, function components, and state initializers", async () => {
     function Counter() {
       const [count] = useState(() => 3);
+      const label = useMemo(() => "Count ", []);
       useReactive(() => {
         throw new Error("Server effects should not run.");
       });
 
-      return createElement("span", null, "Count ", count);
+      return createElement("span", null, label, count);
     }
 
     const html = await renderToString(

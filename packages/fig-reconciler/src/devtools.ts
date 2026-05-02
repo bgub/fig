@@ -17,6 +17,7 @@ export type FigDevtoolsFiberKind =
 
 export type FigDevtoolsHookKind =
   | "state"
+  | "memo"
   | "reactive"
   | "on-mount"
   | "before-paint"

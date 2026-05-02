@@ -2,9 +2,11 @@ import type { FigContext } from "./context.ts";
 
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
+type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+  useMemo<T>(calculate: () => T, deps: DependencyList): T;
   useReactive(effect: EffectCallback, deps?: DependencyList): void;
   useBeforePaint(effect: EffectCallback, deps?: DependencyList): void;
   useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void;
@@ -22,6 +24,17 @@ export function useState<S>(
   initialState: S | (() => S),
 ): [S, Dispatch<SetStateAction<S>>] {
   return resolveDispatcher().useState(initialState);
+}
+
+export function useMemo<T>(calculate: () => T, deps: DependencyList): T {
+  return resolveDispatcher().useMemo(calculate, deps);
+}
+
+export function useCallback<T extends Callback>(
+  callback: T,
+  deps: DependencyList,
+): T {
+  return resolveDispatcher().useMemo(() => callback, deps);
 }
 
 export function useReactive(

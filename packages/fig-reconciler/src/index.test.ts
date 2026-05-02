@@ -1,4 +1,10 @@
-import { createElement, readPromise, Suspense, useState } from "@bgub/fig";
+import {
+  createElement,
+  readPromise,
+  Suspense,
+  useMemo,
+  useState,
+} from "@bgub/fig";
 import { requestPaint } from "@bgub/fig-scheduler";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -146,7 +152,8 @@ describe("reconciler", () => {
 
     function Counter({ label }: { label: string }) {
       const [count] = useState(3);
-      return createElement("span", { id: "count" }, label, count);
+      const text = useMemo(() => `${label}${count}`, [label, count]);
+      return createElement("span", { id: "count" }, text);
     }
 
     flushSync(() => root.render(createElement(Counter, { label: "Count " })));
@@ -158,7 +165,10 @@ describe("reconciler", () => {
     const counter = firstSnapshot?.tree.children[0];
     expect(counter?.name).toBe("Counter");
     expect(counter?.kind).toBe("function");
-    expect(counter?.hooks).toMatchObject([{ id: 1, kind: "state", state: 3 }]);
+    expect(counter?.hooks).toMatchObject([
+      { id: 1, kind: "state", state: 3 },
+      { id: 2, kind: "memo", state: "Count 3", deps: ["Count ", 3] },
+    ]);
 
     const span = counter?.children[0];
     expect(span?.name).toBe("span");

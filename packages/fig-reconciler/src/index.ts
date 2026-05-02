@@ -191,6 +191,11 @@ interface Effect {
   deps: DependencyList | null;
 }
 
+interface MemoState<T> {
+  value: T;
+  deps: DependencyList;
+}
+
 interface SuspenseState<Container, Instance, TextInstance> {
   primaryChild: Fiber<Container, Instance, TextInstance> | null;
 }
@@ -284,6 +289,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     useState(initialState) {
       const hook = updateStateHook(initialState);
       return [hook.memoizedState, hook.queue.dispatch];
+    },
+    useMemo(calculate, deps) {
+      return updateMemoHook(calculate, deps);
     },
     useReactive(effect, deps) {
       updateEffectHook("reactive", ReactiveEffect, effect, deps);
@@ -890,6 +898,22 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     return hook;
+  }
+
+  function updateMemoHook<T>(calculate: () => T, deps: DependencyList): T {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    const previous = (updateHook("memo") as Hook<MemoState<T>> | null)
+      ?.memoizedState;
+    const state =
+      previous !== undefined && areHookInputsEqual(deps, previous.deps)
+        ? previous
+        : { deps, value: calculate() };
+
+    appendHook(createHook("memo", state));
+    return state.value;
   }
 
   function processHookQueue<S>(hook: Hook<S>, renderLanes: Lanes): void {
@@ -1932,6 +1956,14 @@ export function createRenderer<Container, Instance, TextInstance>(
           deps: effect.deps,
           phase: devtoolsEffectPhase(effect.phase),
           active: effect.controller !== null,
+        });
+      } else if (hook.kind === "memo") {
+        const memo = hook.memoizedState as MemoState<unknown>;
+        hooks.push({
+          id,
+          kind: hook.kind,
+          state: memo.value,
+          deps: memo.deps,
         });
       } else {
         hooks.push({

@@ -101,6 +101,9 @@ function createServerDispatcher(frame: RenderContext): RenderDispatcher {
       };
       return [value, dispatch];
     },
+    useMemo(calculate) {
+      return calculate();
+    },
     useReactive: noopEffect,
     useBeforePaint: noopEffect,
     useBeforeLayout: noopEffect,

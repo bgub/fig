@@ -10,6 +10,8 @@ import {
   transition,
   useBeforeLayout,
   useBeforePaint,
+  useCallback,
+  useMemo,
   useOnMount,
   useReactive,
   useState,
@@ -570,6 +572,73 @@ describe("@bgub/fig-dom", () => {
     expect(initializers).toBe(1);
   });
 
+  it("memoizes computed values while deps are stable", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const values: Array<{ doubled: number }> = [];
+    let calculations = 0;
+
+    function App({ label, value }: { label: string; value: number }) {
+      const memoized = useMemo(() => {
+        calculations += 1;
+        return { doubled: value * 2 };
+      }, [value]);
+      values.push(memoized);
+      return createElement("main", null, label, ":", memoized.doubled);
+    }
+
+    flushSync(() =>
+      root.render(createElement(App, { label: "first", value: 2 })),
+    );
+    flushSync(() =>
+      root.render(createElement(App, { label: "second", value: 2 })),
+    );
+    flushSync(() =>
+      root.render(createElement(App, { label: "third", value: 3 })),
+    );
+
+    expect(container.textContent).toBe("third:6");
+    expect(calculations).toBe(2);
+    expect(values[1]).toBe(values[0]);
+    expect(values[2]).not.toBe(values[1]);
+  });
+
+  it("memoizes callback identities while deps are stable", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const callbacks: Array<(next: string) => void> = [];
+    const calls: string[] = [];
+
+    function App({ label, value }: { label: string; value: string }) {
+      const callback = useCallback(
+        (next: string) => {
+          calls.push(`${value}:${next}`);
+        },
+        [value],
+      );
+      callbacks.push(callback);
+      return createElement("main", null, label);
+    }
+
+    flushSync(() =>
+      root.render(createElement(App, { label: "first", value: "a" })),
+    );
+    flushSync(() =>
+      root.render(createElement(App, { label: "second", value: "a" })),
+    );
+    flushSync(() =>
+      root.render(createElement(App, { label: "third", value: "b" })),
+    );
+
+    callbacks[0]("x");
+    callbacks[2]("y");
+
+    expect(container.textContent).toBe("third");
+    expect(callbacks[1]).toBe(callbacks[0]);
+    expect(callbacks[2]).not.toBe(callbacks[1]);
+    expect(calls).toEqual(["a:x", "b:y"]);
+  });
+
   it("keeps state dispatches working across alternate tree swaps", () => {
     let setCount: ((updater: (count: number) => number) => void) | null = null;
 
@@ -807,6 +876,21 @@ describe("@bgub/fig-dom", () => {
       { effect: false },
       { effect: true },
       "Hook order changed: expected state, received reactive.",
+    );
+  });
+
+  it("throws when memo hook order changes", () => {
+    function App({ memo }: { memo?: boolean }) {
+      if (memo) useMemo(() => "first", []);
+      else useState("first");
+      return createElement("main", null, "Stable");
+    }
+
+    expectHookDiagnostic(
+      App,
+      { memo: false },
+      { memo: true },
+      "Hook order changed: expected state, received memo.",
     );
   });
 

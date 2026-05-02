@@ -10,6 +10,8 @@ import {
   readPromise,
   Suspense,
   transition,
+  useCallback,
+  useMemo,
   useState,
 } from "./index.ts";
 
@@ -56,6 +58,12 @@ describe("@bgub/fig", () => {
 
   it("throws when hooks are called outside render", () => {
     expect(() => useState(0)).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useMemo(() => 1, [])).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useCallback(() => undefined, [])).toThrow(
       "Hooks can only be called while rendering a component.",
     );
   });

@@ -1,6 +1,7 @@
 import type {
   FigDevtoolsFiberSnapshot,
   FigDevtoolsGlobalHook,
+  FigDevtoolsHookSnapshot,
   FigDevtoolsRendererInfo,
   FigDevtoolsRootSnapshot,
 } from "@bgub/fig-reconciler";
@@ -352,14 +353,19 @@ function hooksSection(
   }
 
   for (const hook of fiber.hooks) {
-    const value =
-      hook.kind === "state"
-        ? formatValue(hook.state)
-        : `${hook.phase ?? hook.kind} deps ${formatValue(hook.deps)}${hook.active ? " active" : ""}`;
-    section.append(row(doc, `#${hook.id} ${hook.kind}`, value));
+    section.append(row(doc, `#${hook.id} ${hook.kind}`, hookValue(hook)));
   }
 
   return section;
+}
+
+function hookValue(hook: FigDevtoolsHookSnapshot): string {
+  if (hook.kind === "state") return formatValue(hook.state);
+  if (hook.kind === "memo") {
+    return `${formatValue(hook.state)} deps ${formatValue(hook.deps)}`;
+  }
+
+  return `${hook.phase ?? hook.kind} deps ${formatValue(hook.deps)}${hook.active ? " active" : ""}`;
 }
 
 function listSection(
