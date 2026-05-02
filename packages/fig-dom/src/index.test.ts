@@ -198,6 +198,17 @@ class FakeElement {
   get textContent(): string {
     return this.childNodes.map((child) => child.textContent).join("");
   }
+
+  set textContent(value: string) {
+    for (const child of this.childNodes) child.parentNode = null;
+    this.childNodes = [];
+
+    if (value !== "") {
+      const text = new FakeText(value);
+      text.parentNode = this;
+      this.childNodes.push(text);
+    }
+  }
 }
 
 function captureOption(options?: AddEventListenerOptions | boolean): boolean {

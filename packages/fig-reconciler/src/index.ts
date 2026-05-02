@@ -79,6 +79,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
     child: HostNode<Instance, TextInstance>,
   ): void;
   finalizeInitialInstance?(instance: Instance, props: Props): void;
+  setTextContent?(instance: Instance, text: string): void;
   getFirstHydratableChild?(
     parent: Parent<Container, Instance>,
   ): HostNode<Instance, TextInstance> | null;
@@ -658,6 +659,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       node.stateNode ??= host.createInstance(String(node.type), node.props);
+
+      if (shouldUseHostTextContent(node)) {
+        reconcileCurrentChildren(node, null);
+        return;
+      }
     }
 
     if (node.tag === SuspenseTag) {
@@ -798,6 +804,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       (node.flags & PlacementFlag) !== 0 &&
       node.alternate !== null &&
       node.tag !== HostTag
+    );
+  }
+
+  function shouldUseHostTextContent(node: F): boolean {
+    return (
+      host.setTextContent !== undefined &&
+      !rootOf(node).isHydrating &&
+      hostTextContent(node.props.children) !== null
     );
   }
 
@@ -1055,7 +1069,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (isNewHostInstance(node)) {
       finalizeInitialHostInstance(node);
-      appendAllHostChildren(node.stateNode as Instance, node.child);
+      if (!setInitialHostTextContent(node)) {
+        appendAllHostChildren(node.stateNode as Instance, node.child);
+      }
     }
 
     node.childLanes = childLanes;
@@ -1072,6 +1088,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function finalizeInitialHostInstance(node: F): void {
     host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
+  }
+
+  function setInitialHostTextContent(node: F): boolean {
+    const text = hostTextContent(node.props.children);
+    if (text === null || host.setTextContent === undefined) return false;
+
+    host.setTextContent(node.stateNode as Instance, text);
+    return true;
   }
 
   function appendAllHostChildren(parent: Instance, child: F | null): void {
@@ -1217,7 +1241,18 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (current.tag !== HostTag) return false;
 
-    return hostPropsChanged(current.committedProps ?? {}, nextProps);
+    const previousProps = current.committedProps ?? {};
+    return (
+      hostTextContentChanged(previousProps, nextProps) ||
+      hostPropsChanged(previousProps, nextProps)
+    );
+  }
+
+  function hostTextContentChanged(previous: Props, next: Props): boolean {
+    return (
+      host.setTextContent !== undefined &&
+      hostTextContent(previous.children) !== hostTextContent(next.children)
+    );
   }
 
   function hostPropsChanged(previous: Props, next: Props): boolean {
@@ -1374,9 +1409,23 @@ export function createRenderer<Container, Instance, TextInstance>(
         previousCommittedProps(node),
         node.props,
       );
+      commitHostTextContent(node);
     }
 
     markHostCommitted(node);
+  }
+
+  function commitHostTextContent(node: F): void {
+    if (host.setTextContent === undefined || node.tag !== HostTag) return;
+
+    const nextText = hostTextContent(node.props.children);
+    if (nextText !== null) {
+      host.setTextContent(node.stateNode as Instance, nextText);
+    } else if (
+      hostTextContent(previousCommittedProps(node).children) !== null
+    ) {
+      host.setTextContent(node.stateNode as Instance, "");
+    }
   }
 
   function previousCommittedProps(node: F): Props {
@@ -2178,6 +2227,16 @@ function appendTextChild(children: FigChild[], text: string): void {
   } else {
     children.push(text);
   }
+}
+
+function hostTextContent(children: unknown): string | null {
+  const nextChildren = collectChildren(children as FigNode);
+  if (nextChildren.length !== 1) return null;
+
+  const child = nextChildren[0];
+  return typeof child === "string" || typeof child === "number"
+    ? String(child)
+    : null;
 }
 
 function duplicateKeyError(key: string | number): Error {

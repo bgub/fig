@@ -50,6 +50,17 @@ class TestElement {
   get textContent(): string {
     return this.childNodes.map((child) => child.textContent).join("");
   }
+
+  set textContent(value: string) {
+    for (const child of this.childNodes) child.parentNode = null;
+    this.childNodes = [];
+
+    if (value !== "") {
+      const text = new TestText(value);
+      text.parentNode = this;
+      this.childNodes.push(text);
+    }
+  }
 }
 
 const host: HostConfig<TestElement, TestElement, TestText> = {
@@ -207,6 +218,68 @@ describe("reconciler", () => {
 
     expect(container.textContent).toBe("Count: 2");
     expect(textUpdates).toBe(1);
+  });
+
+  it("uses host text content for text-only host children", () => {
+    let createdTexts = 0;
+    let textContentUpdates = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      createTextInstance: (text) => {
+        createdTexts += 1;
+        return new TestText(text);
+      },
+      setTextContent: (instance, text) => {
+        textContentUpdates += 1;
+        instance.textContent = text;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App({ count }: { count: number }) {
+      return createElement("span", null, "Count", ": ", count);
+    }
+
+    flushSync(() => root.render(createElement(App, { count: 1 })));
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(createdTexts).toBe(0);
+    expect(textContentUpdates).toBe(1);
+
+    flushSync(() => root.render(createElement(App, { count: 2 })));
+
+    expect(container.textContent).toBe("Count: 2");
+    expect(createdTexts).toBe(0);
+    expect(textContentUpdates).toBe(2);
+  });
+
+  it("transitions between host text content and child elements", () => {
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      setTextContent: (instance, text) => {
+        instance.textContent = text;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App({ text }: { text: boolean }) {
+      return createElement(
+        "span",
+        null,
+        text ? "Plain text" : createElement("em", null, "Element text"),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { text: true })));
+    expect(container.textContent).toBe("Plain text");
+
+    flushSync(() => root.render(createElement(App, { text: false })));
+    expect(container.textContent).toBe("Element text");
+
+    flushSync(() => root.render(createElement(App, { text: true })));
+    expect(container.textContent).toBe("Plain text");
   });
 
   it("inserts preassembled host subtrees once at the live parent", () => {

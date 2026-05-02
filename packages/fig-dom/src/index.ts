@@ -41,6 +41,9 @@ const hostConfig: HostConfig<Container, Element, Text> = {
   appendInitialChild: (parent, child) => parent.appendChild(child),
   finalizeInitialInstance: (instance, props) =>
     updateElement(instance, {}, props),
+  setTextContent: (instance, text) => {
+    if (instance.textContent !== text) instance.textContent = text;
+  },
   getFirstHydratableChild: (parent) =>
     parent.firstChild as Element | Text | null,
   getNextHydratableSibling: (node) => node.nextSibling as Element | Text | null,
