@@ -78,14 +78,14 @@ const benchmarkMaxIterations = 50;
 
 let activeBenchmarkOperations: BenchmarkOperations | null = null;
 
-const pages: Array<{ id: Page; label: string }> = [
-  { id: "state", label: "State + events" },
-  { id: "diffing", label: "Keyed diffing" },
-  { id: "effects", label: "Effects + bind" },
-  { id: "async", label: "Async event signals" },
-  { id: "resources", label: "Context + promises" },
-  { id: "hydration", label: "SSR + hydration" },
-  { id: "benchmarks", label: "Benchmarks" },
+const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
+  { id: "state", label: "State + events", shortLabel: "State" },
+  { id: "diffing", label: "Keyed diffing", shortLabel: "Diffing" },
+  { id: "effects", label: "Effects + bind", shortLabel: "Effects" },
+  { id: "async", label: "Async event signals", shortLabel: "Async" },
+  { id: "resources", label: "Context + promises", shortLabel: "Resources" },
+  { id: "hydration", label: "SSR + hydration", shortLabel: "Hydration" },
+  { id: "benchmarks", label: "Benchmarks", shortLabel: "Benchmarks" },
 ];
 
 const initialItems: DemoItem[] = [
@@ -154,24 +154,40 @@ function Command({
 }
 
 function App() {
-  const [page, setPage] = useState<Page>("hydration");
+  const [page, setPage] = useState(readInitialPage);
+  const activePage = pageInfo(page);
+
+  const navigate = (nextPage: Page) => {
+    setPage(nextPage);
+    window.localStorage.setItem("fig-demo-page", nextPage);
+    window.history.replaceState(null, "", `#${nextPage}`);
+  };
+
+  useOnMount((signal) => {
+    const onHashChange = () => setPage(readInitialPage());
+    window.addEventListener("hashchange", onHashChange, { signal });
+  });
 
   return (
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <h1>Fig Demo</h1>
-          <p>Small examples for exercising runtime behavior.</p>
+          <span className="brand-mark">φ</span>
+          <div>
+            <h1>Fig Demo</h1>
+            <p>{activePage.label}</p>
+          </div>
         </div>
-        <nav className="nav">
+        <nav className="nav" aria-label="Demo sections">
           {pages.map((item) => (
             <button
               key={item.id}
               type="button"
               className={item.id === page ? "active" : ""}
-              events={[on("click", () => setPage(item.id))]}
+              events={[on("click", () => navigate(item.id))]}
             >
-              {item.label}
+              <span className="nav-label">{item.label}</span>
+              <span className="nav-short-label">{item.shortLabel}</span>
             </button>
           ))}
         </nav>
@@ -179,6 +195,22 @@ function App() {
       <main className="content">{pageView(page)}</main>
     </div>
   );
+}
+
+function readInitialPage(): Page {
+  return (
+    pageFromString(window.location.hash.slice(1)) ??
+    pageFromString(window.localStorage.getItem("fig-demo-page")) ??
+    "hydration"
+  );
+}
+
+function pageInfo(page: Page): (typeof pages)[number] {
+  return pages.find((item) => item.id === page) ?? pages[0];
+}
+
+function pageFromString(value: string | null): Page | null {
+  return pages.some((item) => item.id === value) ? (value as Page) : null;
 }
 
 function pageView(page: Page) {
