@@ -207,8 +207,8 @@ button {
   vertical-align: top;
 }
 
-.benchmark-table td:nth-child(7) {
-  max-width: 320px;
+.benchmark-table .ops-cell {
+  max-width: 360px;
   color: #475467;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
@@ -241,6 +241,72 @@ button {
 .runtime.react {
   background: #e0f2fe;
   color: #075985;
+}
+
+.benchmark-measure {
+  display: grid;
+  min-width: 180px;
+  gap: 6px;
+}
+
+.benchmark-measure-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.benchmark-bar {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.benchmark-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.benchmark-bar-fill.fig {
+  background: #2e8b57;
+}
+
+.benchmark-bar-fill.react {
+  background: #0284c7;
+}
+
+.benchmark-range {
+  color: #667085;
+  font-size: 12px;
+}
+
+.benchmark-delta {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.benchmark-delta.faster {
+  background: #eaf7f1;
+  color: #0f5132;
+}
+
+.benchmark-delta.slower {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.benchmark-delta.same {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.benchmark-delta.unknown {
+  background: #f2f4f7;
+  color: #475467;
 }
 
 .hydration-grid {

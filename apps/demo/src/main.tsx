@@ -63,6 +63,14 @@ interface BenchmarkResult {
   operations?: BenchmarkOperations;
 }
 
+interface BenchmarkComparison {
+  name: string;
+  rows: number;
+  notes: string;
+  fig: BenchmarkResult | null;
+  react: BenchmarkResult | null;
+}
+
 let activeBenchmarkOperations: BenchmarkOperations | null = null;
 
 const pages: Array<{ id: Page; label: string }> = [
@@ -667,39 +675,105 @@ function BenchmarksPage() {
 }
 
 function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
+  const comparisons = benchmarkComparisons(results);
+
   return (
     <table className="benchmark-table">
       <thead>
         <tr>
-          <th>Runtime</th>
           <th>Scenario</th>
           <th>Rows</th>
-          <th>Median</th>
-          <th>Min</th>
-          <th>Max</th>
+          <th>Fig median</th>
+          <th>React median</th>
+          <th>Fig vs React</th>
           <th>Ops</th>
           <th>Notes</th>
         </tr>
       </thead>
       <tbody>
-        {results.map((result) => (
-          <tr key={`${result.runtime}:${result.name}`}>
-            <td>
-              <span className={`runtime ${result.runtime.toLowerCase()}`}>
-                {result.runtime}
-              </span>
-            </td>
-            <td>{result.name}</td>
-            <td>{result.rows}</td>
-            <td>{formatMs(result.median)}</td>
-            <td>{formatMs(result.min)}</td>
-            <td>{formatMs(result.max)}</td>
-            <td>{formatOperations(result.operations)}</td>
-            <td>{result.notes}</td>
-          </tr>
-        ))}
+        {comparisons.map((comparison) => {
+          const max = benchmarkMaxMedian(comparison);
+
+          return (
+            <tr key={comparison.name}>
+              <td>{comparison.name}</td>
+              <td>{comparison.rows}</td>
+              <td>
+                <BenchmarkMeasure result={comparison.fig} max={max} />
+              </td>
+              <td>
+                <BenchmarkMeasure result={comparison.react} max={max} />
+              </td>
+              <td>
+                <BenchmarkDelta comparison={comparison} />
+              </td>
+              <td className="ops-cell">
+                <BenchmarkOps
+                  label="Fig"
+                  operations={comparison.fig?.operations}
+                />
+                <BenchmarkOps
+                  label="React"
+                  operations={comparison.react?.operations}
+                />
+              </td>
+              <td>{comparison.notes}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
+  );
+}
+
+function BenchmarkMeasure({
+  result,
+  max,
+}: {
+  result: BenchmarkResult | null;
+  max: number;
+}) {
+  if (result === null) return <span className="hint">—</span>;
+
+  const width = Math.max(2, (result.median / max) * 100);
+
+  return (
+    <div className="benchmark-measure">
+      <div className="benchmark-measure-label">
+        <span className={`runtime ${result.runtime.toLowerCase()}`}>
+          {result.runtime}
+        </span>
+        <strong>{formatMs(result.median)}</strong>
+      </div>
+      <div className="benchmark-bar" title="Longer bars are slower.">
+        <div
+          className={`benchmark-bar-fill ${result.runtime.toLowerCase()}`}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+      <div className="benchmark-range">
+        {formatMs(result.min)} – {formatMs(result.max)}
+      </div>
+    </div>
+  );
+}
+
+function BenchmarkDelta({ comparison }: { comparison: BenchmarkComparison }) {
+  const delta = benchmarkDelta(comparison);
+  return <span className={`benchmark-delta ${delta.kind}`}>{delta.text}</span>;
+}
+
+function BenchmarkOps({
+  label,
+  operations,
+}: {
+  label: BenchmarkRuntime;
+  operations: BenchmarkOperations | undefined;
+}) {
+  return (
+    <div>
+      <strong>{label}</strong> {formatOperations(operations)}
+    </div>
   );
 }
 
@@ -1175,6 +1249,65 @@ function createBenchmarkContainer(): HTMLDivElement {
 
 function clampRows(value: number): number {
   return Math.min(10000, Math.max(10, Math.round(value)));
+}
+
+function benchmarkComparisons(
+  results: BenchmarkResult[],
+): BenchmarkComparison[] {
+  const comparisons = new Map<string, BenchmarkComparison>();
+
+  for (const result of results) {
+    const comparison = comparisons.get(result.name) ?? {
+      name: result.name,
+      rows: result.rows,
+      notes: result.notes,
+      fig: null,
+      react: null,
+    };
+
+    if (result.runtime === "Fig") comparison.fig = result;
+    else comparison.react = result;
+    comparisons.set(result.name, comparison);
+  }
+
+  return [...comparisons.values()];
+}
+
+function benchmarkMaxMedian(comparison: BenchmarkComparison): number {
+  return Math.max(
+    comparison.fig?.median ?? 0,
+    comparison.react?.median ?? 0,
+    1,
+  );
+}
+
+function benchmarkDelta(comparison: BenchmarkComparison): {
+  kind: "faster" | "slower" | "same" | "unknown";
+  text: string;
+} {
+  const fig = comparison.fig?.median;
+  const react = comparison.react?.median;
+
+  if (fig === undefined || react === undefined) {
+    return { kind: "unknown", text: "—" };
+  }
+
+  if (react === 0) {
+    return fig === 0
+      ? { kind: "same", text: "Same" }
+      : { kind: "unknown", text: "React rounded to 0 ms" };
+  }
+
+  const percent = ((fig - react) / react) * 100;
+  if (Math.abs(percent) < 0.5) return { kind: "same", text: "Same" };
+
+  return percent > 0
+    ? { kind: "slower", text: `Fig ${formatPercent(percent)} slower` }
+    : { kind: "faster", text: `Fig ${formatPercent(-percent)} faster` };
+}
+
+function formatPercent(value: number): string {
+  return `${value.toFixed(value < 10 ? 1 : 0)}%`;
 }
 
 function formatMs(value: number): string {
