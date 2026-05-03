@@ -536,6 +536,34 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("does not collide numeric explicit keys with implicit index keys", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("span", { key: 1 }, "A"),
+          createElement("span", null, "B"),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("AB");
+
+    flushSync(() =>
+      root.render(
+        createElement("main", null, createElement("span", null, "B")),
+      ),
+    );
+
+    expect(container.textContent).toBe("B");
+    expect((container.childNodes[0] as TestElement).childNodes).toHaveLength(1);
+  });
+
   it("commits reversed keyed host children", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

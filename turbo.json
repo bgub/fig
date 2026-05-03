@@ -12,8 +12,6 @@
     "lint": {
       "dependsOn": ["^build"]
     },
-    "test": {
-      "dependsOn": ["build"]
-    }
+    "test": {}
   }
 }

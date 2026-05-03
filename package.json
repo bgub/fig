@@ -8,6 +8,9 @@
     "lint": "biome check --error-on-warnings",
     "format": "biome format --write",
     "test": "turbo test",
+    "test:dom": "pnpm --filter @bgub/fig-dom test",
+    "test:reconciler": "pnpm --filter @bgub/fig-reconciler test",
+    "test:watch": "vitest",
     "size": "size-limit"
   },
   "size-limit": [
@@ -18,6 +21,14 @@
     {
       "path": "packages/fig-dom/dist/index.js",
       "limit": "15 KB"
+    },
+    {
+      "path": "packages/fig-reconciler/dist/index.js",
+      "limit": "70 KB"
+    },
+    {
+      "path": "packages/fig-scheduler/dist/index.js",
+      "limit": "7 KB"
     }
   ],
   "devDependencies": {

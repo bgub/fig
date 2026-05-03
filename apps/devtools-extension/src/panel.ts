@@ -2,7 +2,7 @@ import {
   createFigDevtoolsGlobalHook,
   type FigDevtoolsHook,
   mountFigDevtoolsPanel,
-} from "../../../packages/fig-devtools/src/index.ts";
+} from "@bgub/fig-devtools";
 import {
   applyHookMessage,
   type InitMessage,
