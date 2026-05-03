@@ -75,10 +75,16 @@ type Component = (props: Props & { children?: FigNode }) => FigNode;
 type HostNode<Instance, TextInstance> = Instance | TextInstance;
 type Parent<Container, Instance> = Container | Instance;
 
+export interface DehydratedSuspenseError {
+  digest?: string;
+  message?: string;
+}
+
 export interface DehydratedSuspenseBoundary<
   Instance = unknown,
   TextInstance = unknown,
 > {
+  error?: DehydratedSuspenseError | null;
   id: string | null;
   start: HostNode<Instance, TextInstance>;
   end: HostNode<Instance, TextInstance>;
@@ -132,6 +138,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     target: unknown,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): boolean;
+  registerSuspenseBoundaryRetry?(
+    boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
+    retry: () => void,
+  ): void;
   commitHydratedSuspenseBoundary?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
@@ -768,7 +778,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    node.lanes &= ~rootOf(node).renderLanes;
+    const root = rootOf(node);
+    const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
+    node.lanes &= ~root.renderLanes;
 
     if (node.tag === FunctionTag) {
       renderFunction(node);
@@ -796,7 +808,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === SuspenseTag) {
-      beginSuspense(node);
+      beginSuspense(node, hasOwnWork);
       return;
     }
 
@@ -1009,12 +1021,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function beginSuspense(node: F): void {
+  function beginSuspense(node: F, hasOwnWork: boolean): void {
     const previousSuspenseState = node.alternate?.suspenseState ?? null;
 
     node.suspenseState = null;
 
     if (previousSuspenseState?.kind === "dehydrated") {
+      if (!hasOwnWork) {
+        node.suspenseState = previousSuspenseState;
+        return;
+      }
       hydrateDehydratedSuspenseBoundary(node, previousSuspenseState.boundary);
       return;
     }
@@ -1052,6 +1068,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (boundary === null) return false;
 
     node.suspenseState = { kind: "dehydrated", boundary };
+    host.registerSuspenseBoundaryRetry?.(boundary, () =>
+      scheduleFiber(node, DefaultLane),
+    );
     root.nextHydratableInstance = nextAfterSuspenseBoundary(boundary);
     return true;
   }
@@ -1060,17 +1079,43 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void {
-    if (boundary.status === "completed" && !boundary.forceClientRender) {
-      enterSuspenseHydration(node, boundary);
-      node.suspenseState = null;
-      node.flags |= HydrationFlag;
-      reconcile(node, node.props.children, null, false);
-      return;
+    if (!boundary.forceClientRender) {
+      if (boundary.status === "completed") {
+        enterSuspenseHydration(node, boundary);
+        node.suspenseState = null;
+        node.flags |= HydrationFlag;
+        reconcile(node, node.props.children, null, false);
+        return;
+      }
+
+      if (boundary.status === "pending") {
+        node.suspenseState = { kind: "dehydrated", boundary };
+        return;
+      }
+    }
+
+    if (boundary.status === "client-rendered") {
+      queueClientRenderedSuspenseError(rootOf(node), boundary);
     }
 
     node.suspenseState = null;
     node.flags |= HydrationFlag;
     reconcile(node, node.props.children, null, false);
+  }
+
+  function queueClientRenderedSuspenseError(
+    root: R,
+    boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
+  ): void {
+    const boundaryError = boundary.error;
+    const error = new Error(
+      boundaryError?.message ??
+        "The server could not finish this Suspense boundary. Switched to client rendering.",
+    );
+    if (boundaryError?.digest !== undefined) {
+      (error as Error & { digest?: string }).digest = boundaryError.digest;
+    }
+    root.recoverableErrors.push(error);
   }
 
   function enterSuspenseHydration(
@@ -1569,7 +1614,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
-    scheduleDehydratedSuspenseHydration(root);
+    scheduleDehydratedSuspenseRetries(root);
     commitEffects(finishedWork.child, BeforePaintEffect);
     flushCaughtBoundaryErrors(root, finishedWork.child);
     collectReactiveEffects(root, finishedWork.child);
@@ -1578,21 +1623,23 @@ export function createRenderer<Container, Instance, TextInstance>(
     flushRecoverableErrors(root);
   }
 
-  function scheduleDehydratedSuspenseHydration(root: R): void {
+  function scheduleDehydratedSuspenseRetries(root: R): void {
     const boundaries: F[] = [];
-    collectDehydratedSuspenseBoundaries(root.current.child, boundaries);
+    collectRetriableDehydratedSuspense(root.current.child, boundaries);
     if (boundaries.length === 0) return;
 
     queueMicrotask(() => {
       for (const boundary of boundaries) {
-        if (boundary.suspenseState?.kind === "dehydrated") {
-          scheduleFiber(boundary, DefaultHydrationLane);
-        }
+        const state = boundary.suspenseState;
+        if (state?.kind !== "dehydrated") continue;
+
+        const lane = dehydratedSuspenseRetryLane(state.boundary);
+        if (lane !== NoLane) scheduleFiber(boundary, lane);
       }
     });
   }
 
-  function collectDehydratedSuspenseBoundaries(
+  function collectRetriableDehydratedSuspense(
     node: F | null,
     boundaries: F[],
   ): void {
@@ -1600,14 +1647,23 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (
       node.suspenseState?.kind === "dehydrated" &&
-      node.suspenseState.boundary.status === "completed"
+      dehydratedSuspenseRetryLane(node.suspenseState.boundary) !== NoLane
     ) {
       boundaries.push(node);
       return;
     }
 
-    collectDehydratedSuspenseBoundaries(node.child, boundaries);
-    collectDehydratedSuspenseBoundaries(node.sibling, boundaries);
+    collectRetriableDehydratedSuspense(node.child, boundaries);
+    collectRetriableDehydratedSuspense(node.sibling, boundaries);
+  }
+
+  function dehydratedSuspenseRetryLane(
+    boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
+  ): Lane {
+    if (boundary.forceClientRender) return DefaultLane;
+    if (boundary.status === "completed") return DefaultHydrationLane;
+    if (boundary.status === "client-rendered") return DefaultLane;
+    return NoLane;
   }
 
   function flushRecoverableErrors(root: R): void {

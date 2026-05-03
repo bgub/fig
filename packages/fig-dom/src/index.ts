@@ -8,6 +8,7 @@ import {
 import {
   createRenderer,
   type DehydratedSuspenseBoundary,
+  type DehydratedSuspenseError,
   type FigRoot,
   type FigRootOptions,
   type HostConfig,
@@ -24,6 +25,16 @@ import {
 import { hydrateElement, updateElement } from "./props.ts";
 
 type TextLike = Text | Comment;
+type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
+type SuspenseBoundaryStatus = DehydratedSuspenseBoundary<
+  Element,
+  TextLike
+>["status"];
+
+interface SuspenseMarker {
+  id: string | null;
+  status: SuspenseBoundaryStatus;
+}
 
 export type { Bind } from "./bind.ts";
 export {
@@ -90,6 +101,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   getSuspenseBoundary: (node) => suspenseBoundaryFor(node),
   isTargetWithinSuspenseBoundary: (target, boundary) =>
     isWithinSuspenseBoundary(target, boundary),
+  registerSuspenseBoundaryRetry: (boundary, retry) => {
+    (boundary.start as RetriableSuspenseMarker).__figRetry = retry;
+  },
   commitHydratedSuspenseBoundary: (boundary) => {
     if (boundary.status === "completed" && !boundary.forceClientRender) {
       removeNode(boundary.start);
@@ -160,31 +174,44 @@ function suspenseBoundaryFor(
 ): DehydratedSuspenseBoundary<Element, TextLike> | null {
   if (!isComment(node)) return null;
 
-  const marker = node.data;
-  if (marker === "fig:suspense:completed") {
-    return suspenseBoundary(node, "completed", null);
-  }
-
-  if (marker === "fig:suspense:client") {
-    return suspenseBoundary(node, "client-rendered", null);
-  }
-
-  const pending = /^fig:suspense:pending:(.+)$/.exec(marker);
-  if (pending !== null) {
-    return suspenseBoundary(node, "pending", pending[1]);
-  }
-
-  return null;
+  const marker = suspenseMarker(node);
+  return marker === null ? null : suspenseBoundary(node, marker);
 }
 
 function suspenseBoundary(
   start: TextLike,
-  status: DehydratedSuspenseBoundary<Element, TextLike>["status"],
-  id: string | null,
+  initialMarker: SuspenseMarker,
 ): DehydratedSuspenseBoundary<Element, TextLike> | null {
   const end = suspenseBoundaryEnd(start);
   if (end === null) return null;
-  return { end, forceClientRender: false, id, start, status };
+  return {
+    end,
+    forceClientRender: false,
+    id: initialMarker.id,
+    start,
+    get error() {
+      return suspenseBoundaryError(start);
+    },
+    get status() {
+      return suspenseMarker(start)?.status ?? initialMarker.status;
+    },
+  };
+}
+
+function suspenseMarker(node: unknown): SuspenseMarker | null {
+  if (!isComment(node)) return null;
+
+  if (node.data === "fig:suspense:completed") {
+    return { id: null, status: "completed" };
+  }
+
+  if (node.data === "fig:suspense:client") {
+    return { id: null, status: "client-rendered" };
+  }
+
+  const pending = /^fig:suspense:pending:(.+)$/.exec(node.data);
+  if (pending !== null) return { id: pending[1], status: "pending" };
+  return null;
 }
 
 function suspenseBoundaryEnd(start: TextLike): TextLike | null {
@@ -197,6 +224,18 @@ function suspenseBoundaryEnd(start: TextLike): TextLike | null {
   }
 
   return null;
+}
+
+function suspenseBoundaryError(
+  start: TextLike,
+): DehydratedSuspenseError | null {
+  const placeholder = start.nextSibling;
+  if (!hasDataset(placeholder)) return null;
+
+  return {
+    digest: placeholder.dataset.dgst,
+    message: placeholder.dataset.msg,
+  };
 }
 
 function isWithinSuspenseBoundary(
@@ -249,6 +288,12 @@ function isComment(node: unknown): node is Comment {
     "nodeType" in node &&
     node.nodeType === 8
   );
+}
+
+function hasDataset(
+  node: unknown,
+): node is Element & { dataset: DOMStringMap } {
+  return typeof node === "object" && node !== null && "dataset" in node;
 }
 
 function isNode(value: unknown): value is Node {

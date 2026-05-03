@@ -55,6 +55,7 @@ export class FakeElement {
   readonly nodeType = 1;
   childNodes: Array<FakeElement | FakeText | FakeComment> = [];
   attributes: Record<string, string> = {};
+  dataset: Record<string, string> = {};
   listenerSets: Record<string, FakeListener[]> = {};
   listeners: Record<string, EventListener> = {};
   parentNode: FakeElement | null = null;

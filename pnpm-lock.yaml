@@ -72,6 +72,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:../../packages/fig-server

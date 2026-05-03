@@ -1,44 +1,39 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { readPromise, Suspense } from "@bgub/fig";
 import { renderToReadableStream } from "@bgub/fig-server";
+import {
+  App,
+  clientDataFor,
+  createServerRequest,
+  type DemoRequest,
+  demoDataScriptId,
+  demoRootId,
+  streamBoundaryDigest,
+  streamIdentifierPrefix,
+} from "./app.tsx";
 import { styles } from "./styles.ts";
-
-interface Metric {
-  label: string;
-  value: string;
-}
-
-interface Activity {
-  label: string;
-  status: string;
-}
-
-interface ChartPoint {
-  label: string;
-  value: number;
-}
-
-interface DemoResources {
-  activities: Promise<Activity[]>;
-  broken: Promise<string>;
-  chart: Promise<ChartPoint[]>;
-  metrics: Promise<Metric[]>;
-}
-
-interface DemoRequest {
-  abortDelay: number | null;
-  nonce: string;
-  resources: DemoResources;
-  startedAt: string;
-}
 
 const port = Number(process.env.PORT ?? 4180);
 const logRecoveredErrors = process.env.FIG_STREAM_DEMO_LOG_ERRORS === "1";
+const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
+const noStore = { "cache-control": "no-store" };
+const textPlain = { "content-type": "text/plain; charset=utf-8" };
+const documentStart = [
+  "<!doctype html>",
+  '<html lang="en">',
+  "<head>",
+  '<meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  "<title>Fig Streaming SSR</title>",
+  '<link rel="stylesheet" href="/style.css">',
+  "</head>",
+  "<body>",
+].join("");
 
 createServer((request, response) => {
   void handleRequest(request, response).catch((error: unknown) => {
@@ -65,8 +60,16 @@ async function handleRequest(
 
   if (url.pathname === "/style.css") {
     send(response, 200, styles, {
-      "cache-control": "no-store",
+      ...noStore,
       "content-type": "text/css; charset=utf-8",
+    });
+    return;
+  }
+
+  if (url.pathname === "/client.js") {
+    await sendFile(response, clientScriptUrl, {
+      ...noStore,
+      "content-type": "text/javascript; charset=utf-8",
     });
     return;
   }
@@ -78,35 +81,37 @@ async function handleRequest(
   }
 
   if (url.pathname !== "/" && url.pathname !== "/abort") {
-    send(response, 404, "Not found", {
-      "content-type": "text/plain; charset=utf-8",
-    });
+    send(response, 404, "Not found", textPlain);
     return;
   }
 
   const abortDelay = abortDelayFor(url);
-  const demoRequest: DemoRequest = {
+  const nonce = randomUUID();
+  const demoRequest = createServerRequest(
     abortDelay,
-    nonce: randomUUID(),
-    resources: createResources(),
-    startedAt: new Date().toLocaleTimeString(),
-  };
-  const render = renderToReadableStream(<App request={demoRequest} />, {
-    identifierPrefix: "stream-demo",
-    nonce: demoRequest.nonce,
-    onError(error, info) {
-      if (logRecoveredErrors) {
-        console.error("Boundary recovered on the server", {
-          error,
-          stack: info.componentStack,
-        });
-      }
-      return { digest: "stream-demo-boundary" };
+    new Date().toLocaleTimeString(),
+  );
+  const render = renderToReadableStream(
+    <div id={demoRootId}>
+      <App request={demoRequest} />
+    </div>,
+    {
+      identifierPrefix: streamIdentifierPrefix,
+      nonce,
+      onError(error, info) {
+        if (logRecoveredErrors) {
+          console.error("Boundary recovered on the server", {
+            error,
+            stack: info.componentStack,
+          });
+        }
+        return { digest: streamBoundaryDigest };
+      },
+      onShellError(error) {
+        console.error("Shell failed", error);
+      },
     },
-    onShellError(error) {
-      console.error("Shell failed", error);
-    },
-  });
+  );
 
   let closed = false;
   response.on("close", () => {
@@ -124,11 +129,11 @@ async function handleRequest(
   }
 
   response.writeHead(200, {
-    "cache-control": "no-store",
+    ...noStore,
     "content-type": render.contentType,
     "x-accel-buffering": "no",
   });
-  await writeResponse(response, documentStart());
+  await writeResponse(response, documentStart);
 
   const abortTimer =
     abortDelay === null
@@ -139,236 +144,18 @@ async function handleRequest(
         );
 
   try {
-    await pipeStream(render.stream, response);
+    await pipeStream(
+      render.stream,
+      response,
+      bootstrapScripts(demoRequest, nonce),
+    );
   } finally {
     if (abortTimer !== null) clearTimeout(abortTimer);
     if (!closed && !response.writableEnded) {
-      await writeResponse(response, documentEnd());
+      await writeResponse(response, documentEnd);
     }
     if (!closed && !response.writableEnded) response.end();
   }
-}
-
-function App({ request }: { request: DemoRequest }) {
-  const mode = request.abortDelay === null ? "normal" : "abort";
-
-  return (
-    <div className="app" data-mode={mode}>
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">φ</span>
-          <div>
-            <h1>Streaming SSR</h1>
-            <p>Fig server demo</p>
-          </div>
-        </div>
-        <nav className="nav" aria-label="Streaming modes">
-          <a className={mode === "normal" ? "active" : ""} href="/">
-            Full stream
-          </a>
-          <a className={mode === "abort" ? "active" : ""} href="/abort">
-            Abort after shell
-          </a>
-        </nav>
-      </aside>
-      <main className="content">
-        <header className="header">
-          <div>
-            <h2>Operations dashboard</h2>
-            <p className="muted">Request started at {request.startedAt}</p>
-          </div>
-          <div className="actions">
-            <span className={mode === "abort" ? "tag warn" : "tag ok"}>
-              {mode === "abort" ? "abort route" : "stream route"}
-            </span>
-            <a className="button" href="/">
-              Reload
-            </a>
-          </div>
-        </header>
-        <section className="grid">
-          <Suspense fallback={<LoadingPanel title="Pipeline" />}>
-            <PipelinePanel resources={request.resources} />
-          </Suspense>
-          <div className="server-log">
-            <ShellPanel abortDelay={request.abortDelay} />
-            <Suspense fallback={<RecoveredFallback />}>
-              <RecoveredPanel promise={request.resources.broken} />
-            </Suspense>
-          </div>
-        </section>
-      </main>
-    </div>
-  );
-}
-
-function ShellPanel({ abortDelay }: { abortDelay: number | null }) {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>Shell</h3>
-          <p className="muted">
-            {abortDelay === null
-              ? "Initial HTML flushed while data is pending."
-              : `Abort scheduled at ${abortDelay}ms.`}
-          </p>
-        </div>
-        <span className="tag ok">ready</span>
-      </div>
-      <div className="code">shellReady resolved before allReady</div>
-    </section>
-  );
-}
-
-function PipelinePanel({ resources }: { resources: DemoResources }) {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>Pipeline</h3>
-          <p className="muted">Segments stream as each promise settles.</p>
-        </div>
-        <span className="tag ok">server</span>
-      </div>
-      <Metrics promise={resources.metrics} />
-      <ActivityList promise={resources.activities} />
-      <Chart promise={resources.chart} />
-    </section>
-  );
-}
-
-function Metrics({ promise }: { promise: Promise<Metric[]> }) {
-  const metrics = readPromise(promise);
-
-  return (
-    <div className="metric-grid">
-      {metrics.map((metric) => (
-        <div className="metric" key={metric.label}>
-          <span>{metric.label}</span>
-          <strong>{metric.value}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ActivityList({ promise }: { promise: Promise<Activity[]> }) {
-  const activities = readPromise(promise);
-
-  return (
-    <ul className="list">
-      {activities.map((activity) => (
-        <li className="item" key={activity.label}>
-          <span>{activity.label}</span>
-          <span className="tag">{activity.status}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Chart({ promise }: { promise: Promise<ChartPoint[]> }) {
-  const points = readPromise(promise);
-
-  return (
-    <div className="bars">
-      {points.map((point) => (
-        <div className="bar" key={point.label}>
-          <span>{point.label}</span>
-          <div className="track">
-            <div className="fill" style={{ "--value": `${point.value}%` }} />
-          </div>
-          <strong>{point.value}%</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RecoveredPanel({ promise }: { promise: Promise<string> }) {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>Audit service</h3>
-          <p className="muted">{readPromise(promise)}</p>
-        </div>
-        <span className="tag ok">ready</span>
-      </div>
-    </section>
-  );
-}
-
-function RecoveredFallback() {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h3>Audit service</h3>
-          <p className="muted">Fallback remained after server recovery.</p>
-        </div>
-        <span className="tag danger">client</span>
-      </div>
-      <div className="code">__figSSR.x(...) emitted</div>
-    </section>
-  );
-}
-
-function LoadingPanel({ title }: { title: string }) {
-  return (
-    <section className="panel placeholder">
-      <div className="panel-header">
-        <div>
-          <h3>{title}</h3>
-          <p className="muted">Fallback shell</p>
-        </div>
-        <span className="tag warn">pending</span>
-      </div>
-      <div className="placeholder-line" />
-      <div className="placeholder-line" />
-      <div className="placeholder-line short" />
-    </section>
-  );
-}
-
-function createResources(): DemoResources {
-  return {
-    activities: delay(
-      [
-        { label: "Hydrate account rows", status: "queued" },
-        { label: "Reprice subscriptions", status: "running" },
-        { label: "Publish reconciliation report", status: "ready" },
-      ],
-      1100,
-    ),
-    broken: rejectAfter(new Error("audit service unavailable"), 850),
-    chart: delay(
-      [
-        { label: "North", value: 72 },
-        { label: "West", value: 48 },
-        { label: "East", value: 88 },
-        { label: "South", value: 61 },
-      ],
-      1750,
-    ),
-    metrics: delay(
-      [
-        { label: "Open", value: "128" },
-        { label: "Blocked", value: "7" },
-        { label: "SLA", value: "94%" },
-      ],
-      520,
-    ),
-  };
-}
-
-function delay<T>(value: T, ms: number): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
-}
-
-function rejectAfter(error: Error, ms: number): Promise<string> {
-  return new Promise((_, reject) => setTimeout(() => reject(error), ms));
 }
 
 function abortDelayFor(url: URL): number | null {
@@ -381,35 +168,84 @@ function abortDelayFor(url: URL): number | null {
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null;
 }
 
-function documentStart(): string {
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "<title>Fig Streaming SSR</title>",
-    '<link rel="stylesheet" href="/style.css">',
-    "</head>",
-    "<body>",
-  ].join("");
-}
+const documentEnd = "</body></html>";
 
-function documentEnd(): string {
-  return "</body></html>";
+function bootstrapScripts(request: DemoRequest, nonce: string): string {
+  return [
+    `<script id="${demoDataScriptId}" type="application/json" nonce="${escapeAttribute(
+      nonce,
+    )}">${escapeJson(clientDataFor(request))}</script>`,
+    `<script type="module" async nonce="${escapeAttribute(nonce)}" src="/client.js"></script>`,
+  ].join("");
 }
 
 async function pipeStream(
   stream: ReadableStream<Uint8Array>,
   response: ServerResponse,
+  bootstrap: string,
 ): Promise<void> {
   const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let bootstrapped = false;
+  let pending = "";
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) return;
-    if (value !== undefined) await writeResponse(response, value);
+    const chunk = done
+      ? decoder.decode()
+      : value === undefined
+        ? ""
+        : decoder.decode(value, { stream: true });
+
+    if (bootstrapped) {
+      await writeResponse(response, chunk);
+    } else {
+      pending += chunk;
+      bootstrapped = await flushShell(response, pending, bootstrap);
+      if (bootstrapped) pending = "";
+    }
+
+    if (!done) continue;
+    if (!bootstrapped) {
+      await writeResponse(response, pending);
+      await writeResponse(response, bootstrap);
+    }
+    return;
   }
+}
+
+async function flushShell(
+  response: ServerResponse,
+  html: string,
+  bootstrap: string,
+): Promise<boolean> {
+  const shellEnd = rootElementEndIndex(html);
+  if (shellEnd === -1) return false;
+
+  await writeResponse(response, html.slice(0, shellEnd));
+  await writeResponse(response, bootstrap);
+  await writeResponse(response, html.slice(shellEnd));
+  return true;
+}
+
+function rootElementEndIndex(html: string): number {
+  const rootStart = html.indexOf(`<div id="${demoRootId}"`);
+  if (rootStart === -1) return -1;
+
+  const tags = /<\/?div\b[^>]*>/g;
+  tags.lastIndex = rootStart;
+
+  let depth = 0;
+  for (let match = tags.exec(html); match !== null; match = tags.exec(html)) {
+    if (match[0].startsWith("</")) {
+      depth -= 1;
+      if (depth === 0) return match.index + match[0].length;
+    } else {
+      depth += 1;
+    }
+  }
+
+  return -1;
 }
 
 function writeResponse(
@@ -443,6 +279,18 @@ function send(
   response.end(body);
 }
 
+async function sendFile(
+  response: ServerResponse,
+  url: URL,
+  headers: Record<string, string>,
+): Promise<void> {
+  try {
+    send(response, 200, await readFile(url, "utf8"), headers);
+  } catch {
+    send(response, 404, "Not found", textPlain);
+  }
+}
+
 function shellErrorHtml(error: unknown): string {
   return `<!doctype html><html lang="en"><body><pre>${escapeText(
     error instanceof Error ? error.message : String(error),
@@ -455,6 +303,19 @@ function escapeText(value: string): string {
     if (character === "<") return "&lt;";
     return "&gt;";
   });
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/[&"<>]/g, (character) => {
+    if (character === "&") return "&amp;";
+    if (character === '"') return "&quot;";
+    if (character === "<") return "&lt;";
+    return "&gt;";
+  });
+}
+
+function escapeJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003C");
 }
 
 function escapeComment(error: unknown): string {

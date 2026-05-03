@@ -7,7 +7,7 @@ interface ProtocolRequest {
 type WriteChunk = (chunk: string) => void;
 
 export const serverRuntimeCode =
-  "globalThis.__figSSR??={s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},c(b,s){b=document.getElementById(b);s=document.getElementById(s);if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode;if(!p)return;let n=Array.from(s.childNodes);for(const c of n)p.insertBefore(c,a);for(let e=a;e;){let x=e.nextSibling,e2=e;e=x;e2.remove();if(e2.nodeType===8&&e2.data==='/fig:suspense')break}s.remove()},x(b,d,m){b=document.getElementById(b);if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8)s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m}}";
+  "globalThis.__figSSR??={s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},c(b,s){b=document.getElementById(b);s=document.getElementById(s);if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode;if(!p)return;while(s.firstChild)p.insertBefore(s.firstChild,b);for(let e=b;e;){if(e.nodeType===8&&e.data==='/fig:suspense')break;let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='fig:suspense:completed';a.__figRetry&&a.__figRetry()}},x(b,d,m){b=document.getElementById(b);if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}}}";
 
 export function writeRuntime(
   request: ProtocolRequest,

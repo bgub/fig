@@ -1,4 +1,4 @@
-import { createElement, Suspense } from "@bgub/fig";
+import { createElement, Suspense, useState } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
@@ -176,12 +176,14 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls).toEqual(["click"]);
   });
 
-  it("client-renders pending Suspense boundaries when interaction selects them", () => {
-    const { container, content: fallback } = suspenseDom(
-      "pending",
-      "button",
-      "Loading",
-    );
+  it("keeps pending Suspense boundaries dehydrated when interaction selects them", () => {
+    const {
+      container,
+      content: fallback,
+      end,
+      placeholder,
+      start,
+    } = suspenseDom("pending", "button", "Loading");
 
     flushSync(() =>
       hydrateRoot(
@@ -196,9 +198,161 @@ describe("@bgub/fig-dom hydration", () => {
 
     fallback.dispatch("click");
 
+    expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
+    expect(container.textContent).toBe("Loading");
+  });
+
+  it("keeps pending Suspense boundaries dehydrated when continuous events select them", async () => {
+    const {
+      container,
+      content: fallback,
+      end,
+      placeholder,
+      start,
+    } = suspenseDom("pending", "button", "Loading");
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement("button", null, "Client"),
+        ),
+      ),
+    );
+
+    fallback.dispatch("mousemove");
+    await delay();
+
+    expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
+    expect(container.textContent).toBe("Loading");
+  });
+
+  it("hydrates pending Suspense boundaries after the server completes them", async () => {
+    const {
+      container,
+      content: fallback,
+      end,
+      placeholder,
+      start,
+    } = suspenseDom("pending", "button", "Loading");
+    const calls: string[] = [];
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("click"))] },
+            "Client",
+          ),
+        ),
+      ),
+    );
+
+    fallback.dispatch("click");
+
+    const serverContent = element("button", "Server");
+    if (placeholder === null) throw new Error("Expected pending placeholder.");
+    start.data = "fig:suspense:completed";
+    container.removeChild(placeholder);
+    container.removeChild(fallback);
+    container.insertBefore(serverContent, end);
+    (start as RetriableFakeComment).__figRetry?.();
+
+    await delay();
+
+    expect(container.childNodes).toEqual([serverContent]);
+    expect(serverContent.textContent).toBe("Client");
+    serverContent.dispatch("click");
+
+    expect(calls).toEqual(["click"]);
+  });
+
+  it("client-renders server-recovered Suspense boundaries in background work", async () => {
+    const {
+      container,
+      content: fallback,
+      placeholder,
+    } = suspenseDom("client-rendered", "button", "Loading");
+    const calls: string[] = [];
+    const errors: unknown[] = [];
+    if (placeholder === null) throw new Error("Expected client placeholder.");
+    placeholder.dataset.dgst = "digest-1";
+    placeholder.dataset.msg = "Server failed";
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("click"))] },
+            "Client",
+          ),
+        ),
+        { onRecoverableError: (error) => errors.push(error) },
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+
+    await delay();
+
     expect(container.childNodes).toHaveLength(1);
     expect(container.childNodes[0]).not.toBe(fallback);
     expect(container.textContent).toBe("Client");
+
+    (container.childNodes[0] as FakeElement).dispatch("click");
+    expect(calls).toEqual(["click"]);
+    expect((errors[0] as Error).message).toBe("Server failed");
+    expect((errors[0] as Error & { digest?: string }).digest).toBe("digest-1");
+  });
+
+  it("client-renders pending Suspense boundaries when the server marks them recovered", async () => {
+    const {
+      container,
+      content: fallback,
+      end,
+      placeholder,
+      start,
+    } = suspenseDom("pending", "button", "Loading");
+    const errors: unknown[] = [];
+    if (placeholder === null) throw new Error("Expected pending placeholder.");
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement("button", null, "Client"),
+        ),
+        { onRecoverableError: (error) => errors.push(error) },
+      ),
+    );
+
+    start.data = "fig:suspense:client";
+    placeholder.dataset.msg = "Server failed after shell";
+    (start as RetriableFakeComment).__figRetry?.();
+
+    await delay();
+
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.childNodes).not.toEqual([
+      start,
+      placeholder,
+      fallback,
+      end,
+    ]);
+    expect(container.textContent).toBe("Client");
+    expect((errors[0] as Error).message).toBe("Server failed after shell");
   });
 
   it("leaves pending Suspense boundaries dehydrated during background work", async () => {
@@ -225,6 +379,52 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
     expect(container.textContent).toBe("Loading");
+  });
+
+  it("does not hydrate completed Suspense boundaries during unrelated updates", () => {
+    const {
+      container,
+      content: fallback,
+      end,
+      placeholder,
+      start,
+    } = suspenseDom("pending", "span", "Loading");
+    const shell = new FakeElement("button");
+    shell.appendChild(new FakeText("Shell 0"));
+    container.insertBefore(shell, start);
+    let increment: (() => void) | null = null;
+
+    function App() {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+
+      return [
+        createElement("button", null, `Shell ${count}`),
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement("span", null, "Client"),
+        ),
+      ];
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App)),
+    );
+
+    start.data = "fig:suspense:completed";
+
+    flushSync(() => increment?.());
+
+    expect(container.childNodes).toEqual([
+      shell,
+      start,
+      placeholder,
+      fallback,
+      end,
+    ]);
+    expect(shell.textContent).toBe("Shell 1");
+    expect(fallback.textContent).toBe("Loading");
   });
 
   it("recovers Suspense hydration mismatches at the boundary", () => {
@@ -425,8 +625,10 @@ describe("@bgub/fig-dom hydration", () => {
   });
 });
 
+type RetriableFakeComment = FakeComment & { __figRetry?: () => void };
+
 function suspenseDom(
-  status: "completed" | "pending",
+  status: "client-rendered" | "completed" | "pending",
   tagName: string,
   text: string,
 ): {
@@ -440,9 +642,12 @@ function suspenseDom(
   const start = new FakeComment(
     status === "completed"
       ? "fig:suspense:completed"
-      : "fig:suspense:pending:0",
+      : status === "pending"
+        ? "fig:suspense:pending:0"
+        : "fig:suspense:client",
   );
-  const placeholder = status === "pending" ? new FakeElement("template") : null;
+  const placeholder =
+    status === "completed" ? null : new FakeElement("template");
   const content = element(tagName, text);
   const end = new FakeComment("/fig:suspense");
 

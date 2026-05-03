@@ -20,8 +20,9 @@ bindings/events, and reports recoverable mismatches through
 
 Suspense hydration is boundary-based: server Suspense markers stay
 dehydrated after the shell hydrates, then hydrate in background work or
-synchronously when an interaction lands inside that boundary. Pending or
-server-recovered boundaries fall back to client rendering for that boundary.
+synchronously when an interaction lands inside that boundary. Pending
+boundaries stay dehydrated until the server completes them, while
+server-recovered boundaries schedule client rendering for that boundary.
 
 ## License
 

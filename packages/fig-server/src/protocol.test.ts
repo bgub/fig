@@ -67,43 +67,93 @@ class TestDocument {
   }
 }
 
-describe("server streaming protocol", () => {
-  it("replaces the full Suspense marker range when completing a boundary", () => {
-    const document = new TestDocument();
-    const globalScope: {
-      __figSSR?: { c(boundaryId: string, segmentId: string): void };
-    } = {};
+interface TestRuntime {
+  c(boundaryId: string, segmentId: string): void;
+  x(boundaryId: string, digest: string, message: string): void;
+}
 
-    const root = new TestNode(elementNode, "root");
-    const start = new TestNode(commentNode, null, "fig:suspense:pending:0");
-    const boundaryPlaceholder = document.register(
-      new TestNode(elementNode, "b"),
-    );
-    const fallback = new TestNode(elementNode, "fallback");
-    const end = new TestNode(commentNode, null, "/fig:suspense");
+type RetriableTestNode = TestNode & { __figRetry?: () => void };
+
+function installRuntime(document: TestDocument): TestRuntime {
+  const globalScope: { __figSSR?: TestRuntime } = {};
+
+  new Function("document", "globalThis", serverRuntimeCode)(
+    document,
+    globalScope,
+  );
+
+  if (globalScope.__figSSR === undefined) {
+    throw new Error("Expected server runtime.");
+  }
+
+  return globalScope.__figSSR;
+}
+
+function createPendingBoundary(document: TestDocument): {
+  boundaryPlaceholder: TestNode;
+  calls: string[];
+  end: TestNode;
+  fallback: TestNode;
+  root: TestNode;
+  start: RetriableTestNode;
+} {
+  const calls: string[] = [];
+  const root = new TestNode(elementNode, "root");
+  const start = new TestNode(
+    commentNode,
+    null,
+    "fig:suspense:pending:0",
+  ) as RetriableTestNode;
+  const boundaryPlaceholder = document.register(new TestNode(elementNode, "b"));
+  const fallback = new TestNode(elementNode, "fallback");
+  const end = new TestNode(commentNode, null, "/fig:suspense");
+
+  start.__figRetry = () => calls.push("retry");
+  root.appendChild(start);
+  root.appendChild(boundaryPlaceholder);
+  root.appendChild(fallback);
+  root.appendChild(end);
+
+  return { boundaryPlaceholder, calls, end, fallback, root, start };
+}
+
+describe("server streaming protocol", () => {
+  it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {
+    const document = new TestDocument();
+    const { boundaryPlaceholder, calls, end, fallback, root, start } =
+      createPendingBoundary(document);
     const after = new TestNode(elementNode, "after");
     const segment = document.register(new TestNode(elementNode, "s"));
     const completed = new TestNode(elementNode, "completed");
 
-    root.appendChild(start);
-    root.appendChild(boundaryPlaceholder);
-    root.appendChild(fallback);
-    root.appendChild(end);
     root.appendChild(after);
     root.appendChild(segment);
     segment.appendChild(completed);
 
-    new Function("document", "globalThis", serverRuntimeCode)(
-      document,
-      globalScope,
-    );
-    globalScope.__figSSR?.c("b", "s");
+    installRuntime(document).c("b", "s");
 
-    expect(root.childNodes).toEqual([completed, after]);
+    expect(root.childNodes).toEqual([start, completed, end, after]);
     expect(segment.parentNode).toBeNull();
-    expect(start.parentNode).toBeNull();
+    expect(start.data).toBe("fig:suspense:completed");
+    expect(start.parentNode).toBe(root);
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(fallback.parentNode).toBeNull();
-    expect(end.parentNode).toBeNull();
+    expect(end.parentNode).toBe(root);
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("marks client-rendered boundaries and retries hydrated parents", () => {
+    const document = new TestDocument();
+    const { boundaryPlaceholder, calls, start } =
+      createPendingBoundary(document);
+
+    installRuntime(document).x("b", "digest-1", "Server failed");
+
+    expect(start.data).toBe("fig:suspense:client");
+    expect(boundaryPlaceholder.dataset).toEqual({
+      dgst: "digest-1",
+      msg: "Server failed",
+    });
+    expect(calls).toEqual(["retry"]);
   });
 });
