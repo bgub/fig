@@ -1,69 +1,18 @@
 import type { FigNode } from "@bgub/fig";
-import { renderServerTree } from "./renderer.ts";
+import { createServerRenderRequest } from "./renderer.ts";
+import type { ServerRenderOptions, ServerRenderResult } from "./types.ts";
 
-export interface ServerRenderOptions {
-  signal?: AbortSignal;
-  onError?: (error: unknown) => void;
-}
-
-export interface ServerRenderResult {
-  stream: ReadableStream<Uint8Array>;
-  allReady: Promise<void>;
-  contentType: "text/html; charset=utf-8";
-  abort(reason?: unknown): void;
-}
-
-const textEncoder = new TextEncoder();
 const contentType = "text/html; charset=utf-8";
 
-export async function renderToReadableStream(
+export function renderToReadableStream(
   node: FigNode,
   options: ServerRenderOptions = {},
-): Promise<ServerRenderResult> {
-  throwIfAborted(options.signal);
-
-  const controller = new AbortController();
-  const signal = controller.signal;
-  const abort = (reason?: unknown) => {
-    if (!signal.aborted) controller.abort(reason);
-  };
-
-  if (options.signal !== undefined) {
-    options.signal.addEventListener(
-      "abort",
-      () => abort(options.signal?.reason),
-      { once: true },
-    );
-  }
-
-  let html: string;
-  try {
-    html = renderServerTree(node, { signal }).html;
-  } catch (error) {
-    reportError(options, error);
-    throw error;
-  }
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(streamController) {
-      if (signal.aborted) {
-        streamController.error(abortReason(signal));
-        return;
-      }
-
-      if (html !== "") streamController.enqueue(textEncoder.encode(html));
-      streamController.close();
-    },
-    cancel(reason) {
-      abort(reason);
-    },
-  });
+): ServerRenderResult {
+  const request = createServerRenderRequest(node, options);
 
   return {
-    stream,
-    allReady: Promise.resolve(),
+    ...request,
     contentType,
-    abort,
   };
 }
 
@@ -71,16 +20,10 @@ export async function renderToString(
   node: FigNode,
   options: ServerRenderOptions = {},
 ): Promise<string> {
-  const result = await renderToReadableStream(node, options);
-
-  try {
-    const html = await readStreamToString(result.stream);
-    await result.allReady;
-    return html;
-  } catch (error) {
-    await result.allReady.catch(() => undefined);
-    throw error;
-  }
+  const result = renderToReadableStream(node, options);
+  result.shellReady.catch(() => undefined);
+  await result.allReady;
+  return readStreamToString(result.stream);
 }
 
 function readStreamToString(
@@ -101,18 +44,9 @@ function readStreamToString(
   });
 }
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) throw abortReason(signal);
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new Error("Server render was aborted.");
-}
-
-function reportError(options: ServerRenderOptions, error: unknown): void {
-  try {
-    options.onError?.(error);
-  } catch {
-    // Error reporting should not replace the render failure.
-  }
-}
+export type {
+  ServerErrorInfo,
+  ServerErrorPayload,
+  ServerRenderOptions,
+  ServerRenderResult,
+} from "./types.ts";

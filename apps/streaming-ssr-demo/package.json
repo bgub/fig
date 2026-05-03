@@ -1,0 +1,14 @@
+{
+  "name": "@bgub/fig-streaming-ssr-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown ./src/server.tsx --platform node --format esm --sourcemap",
+    "dev": "pnpm --filter @bgub/fig build && pnpm --filter @bgub/fig-server build && pnpm build && pnpm serve",
+    "serve": "node dist/server.js"
+  },
+  "dependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-server": "workspace:*"
+  }
+}

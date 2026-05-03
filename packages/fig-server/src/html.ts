@@ -1,5 +1,8 @@
 import type { Props } from "@bgub/fig";
-import type { HtmlSink } from "./sinks.ts";
+
+interface HtmlSink {
+  write(chunk: string): void;
+}
 
 const voidElements = new Set([
   "area",

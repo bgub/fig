@@ -67,6 +67,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/fig-reconciler
 
+  apps/streaming-ssr-demo:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../../packages/fig-server
+
   packages/fig: {}
 
   packages/fig-devtools:

@@ -25,3 +25,5 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Context uses `createContext` plus `readContext(context)` because context reads are render-time inputs, not hook slots.
 - Context reads are tracked so provider updates mark matching consumers, and propagation stops at nested providers of the same context.
 - Promises use `readPromise(promise)` as the future Suspense-facing primitive; promise identity matters, not call position.
+- Server streaming uses nonce-compatible inline scripts; no external runtime format.
+- Server Suspense streams fallbacks first, then completed content and partial segments; server errors recover only through Suspense client-render markers.
