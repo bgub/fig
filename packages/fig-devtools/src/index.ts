@@ -310,6 +310,13 @@ function fiberDetails(
     row(doc, "Lanes", `${fiber.lanes} / child ${fiber.childLanes}`),
   );
 
+  if (fiber.capturedError !== undefined) {
+    details.append(
+      row(doc, "Captured error", formatValue(fiber.capturedError)),
+      row(doc, "Component stack", fiber.componentStack?.trim() ?? ""),
+    );
+  }
+
   details.append(
     recordSection(doc, "Props", fiber.props),
     hooksSection(doc, fiber),
@@ -453,6 +460,7 @@ function formatValue(
   if (typeof value === "symbol") return String(value);
   if (typeof value === "function")
     return `[Function ${value.name || "anonymous"}]`;
+  if (value instanceof Error) return `[${value.name}: ${value.message}]`;
   if (typeof value !== "object") return String(value);
 
   if (seen.has(value)) return "[Circular]";

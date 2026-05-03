@@ -3,12 +3,14 @@ import {
   type Dispatch,
   type EffectCallback,
   type ElementType,
+  type ErrorInfo,
   type FigChild,
   type FigContext,
   type FigElement,
   type FigNode,
   Fragment,
   isContext,
+  isErrorBoundary,
   isSuspense,
   isValidElement,
   type Props,
@@ -120,6 +122,7 @@ export interface FigRoot {
 
 export interface FigRootOptions {
   onRecoverableError?: (error: unknown) => void;
+  onUncaughtError?: (error: unknown, info: ErrorInfo) => void;
 }
 
 type HydrationHostConfig<Container, Instance, TextInstance> = Required<
@@ -140,6 +143,7 @@ const FunctionTag = 3;
 const FragmentTag = 4;
 const ContextProviderTag = 5;
 const SuspenseTag = 6;
+const ErrorBoundaryTag = 7;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -147,7 +151,8 @@ type Tag =
   | typeof FunctionTag
   | typeof FragmentTag
   | typeof ContextProviderTag
-  | typeof SuspenseTag;
+  | typeof SuspenseTag
+  | typeof ErrorBoundaryTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -189,6 +194,7 @@ interface Effect {
   create: EffectCallback;
   controller: AbortController | null;
   deps: DependencyList | null;
+  owner: Fiber<unknown, unknown, unknown>;
 }
 
 interface MemoState<T> {
@@ -198,6 +204,12 @@ interface MemoState<T> {
 
 interface SuspenseState<Container, Instance, TextInstance> {
   primaryChild: Fiber<Container, Instance, TextInstance> | null;
+}
+
+interface ErrorBoundaryState {
+  error: unknown;
+  info: ErrorInfo;
+  didReport: boolean;
 }
 
 type SuspensePings<Container, Instance, TextInstance> = WeakMap<
@@ -229,6 +241,7 @@ interface Fiber<Container, Instance, TextInstance> {
   effects: Effect[] | null;
   contextDependencies: FigContext<unknown>[] | null;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
+  errorBoundaryState: ErrorBoundaryState | null;
 }
 
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
@@ -249,7 +262,9 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   >;
   consumedPendingQueues: ConsumedPendingQueue[];
   onRecoverableError: (error: unknown) => void;
+  onUncaughtError: (error: unknown, info: ErrorInfo) => void;
   recoverableErrors: unknown[];
+  uncaughtErrorInfo: ErrorInfo | null;
   isHydrating: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
   nextHydratableInstance: HostNode<Instance, TextInstance> | null;
@@ -378,8 +393,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       suspendedThenables: new WeakMap(),
       suspendedBoundaries: new WeakMap(),
       consumedPendingQueues: [],
-      onRecoverableError: options.onRecoverableError ?? noopRecoverableError,
+      onRecoverableError: options.onRecoverableError ?? noop,
+      onUncaughtError: options.onUncaughtError ?? noop,
       recoverableErrors: [],
+      uncaughtErrorInfo: null,
       isHydrating: false,
       hydrationParent: null,
       nextHydratableInstance: null,
@@ -397,7 +414,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function noopRecoverableError(): void {}
+  function noop(): void {}
 
   function rootHandle(root: R): FigRoot {
     return {
@@ -492,7 +509,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       performRootWork(root, forceSync);
     } catch (error) {
       if (error === PreservedSuspense) {
-        abandonRootWork(root);
+        restartRootWork(root);
         return;
       }
 
@@ -501,15 +518,18 @@ export function createRenderer<Container, Instance, TextInstance>(
         return;
       }
 
-      const suspendedLanes = root.renderLanes;
-      abandonRootWork(root);
-
       if (isThenable(error)) {
+        const suspendedLanes = root.renderLanes;
+        restartRootWork(root);
         markRootSuspended(root, suspendedLanes);
         attachPing(root, error, suspendedLanes);
         return;
       }
 
+      const info = root.uncaughtErrorInfo ?? errorInfoFor(root.current);
+      restartRootWork(root);
+      clearRootAfterUncaughtError(root);
+      reportUncaughtError(root, error, info);
       throw error;
     }
   }
@@ -587,49 +607,55 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function finishRootWork(root: R): void {
-    root.renderLanes = NoLanes;
-    root.finishedWork = null;
-    root.callback = null;
-    root.callbackPriority = NoLane;
-    root.hydrationParent = null;
-    root.nextHydratableInstance = null;
+    resetRootWork(root);
 
     if (root.pendingLanes !== NoLanes) scheduleRoot(root);
     else pendingRoots.delete(root);
   }
 
-  function abandonRootWork(root: R): void {
-    restartRootWork(root);
-    root.callback = null;
-    root.callbackPriority = NoLane;
-  }
-
   function restartRootWork(root: R): void {
     restoreConsumedPendingQueues(root);
+    resetRootWork(root);
+  }
+
+  function resetRootWork(root: R): void {
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
+    root.callback = null;
+    root.callbackPriority = NoLane;
     root.hydrationParent = null;
     root.nextHydratableInstance = null;
+    root.uncaughtErrorInfo = null;
   }
 
   function performUnit(node: F): F | null {
     try {
       begin(node);
     } catch (error) {
-      if (isThenable(error)) {
-        const boundary = findSuspenseBoundary(node);
-        if (boundary !== null) {
-          return captureSuspenseBoundary(boundary, error);
-        }
-      }
-
-      throw error;
+      return handleThrownValue(node, error);
     }
 
     if (node.child !== null) return node.child;
 
     return completeUnit(node);
+  }
+
+  function handleThrownValue(node: F, error: unknown): F | null {
+    if (isThenable(error)) {
+      const boundary = findSuspenseBoundary(node);
+      if (boundary !== null) return captureSuspenseBoundary(boundary, error);
+
+      throw error;
+    }
+
+    if (error instanceof HydrationMismatchError) throw error;
+
+    const boundary = findErrorBoundary(node);
+    if (boundary !== null) return captureErrorBoundary(boundary, error, node);
+
+    rootOf(node).uncaughtErrorInfo = errorInfoFor(node);
+    throw error;
   }
 
   function completeUnit(node: F): F | null {
@@ -677,6 +703,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (node.tag === SuspenseTag) {
       beginSuspense(node);
+      return;
+    }
+
+    if (node.tag === ErrorBoundaryTag) {
+      beginErrorBoundary(node);
       return;
     }
 
@@ -854,6 +885,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     appendDeletions(node, node.alternate?.child ?? null);
   }
 
+  function beginErrorBoundary(node: F): void {
+    const previousErrorState = node.alternate?.errorBoundaryState ?? null;
+
+    node.errorBoundaryState = previousErrorState;
+
+    reconcileCurrentChildren(
+      node,
+      previousErrorState === null
+        ? node.props.children
+        : (node.props.fallback as FigNode),
+    );
+  }
+
   function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
     if (renderingFiber === null) {
       throw new Error(
@@ -1002,6 +1046,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       create,
       controller: previousEffect?.controller ?? null,
       deps: nextDeps,
+      owner: renderingFiber as Fiber<unknown, unknown, unknown>,
     };
     const hook = createHook(kind, effect);
 
@@ -1317,6 +1362,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
     commitEffects(finishedWork.child, BeforePaintEffect);
+    flushCaughtBoundaryErrors(root, finishedWork.child);
     collectReactiveEffects(root, finishedWork.child);
     scheduleReactiveEffects(root);
     emitDevtoolsCommit(root);
@@ -1338,6 +1384,80 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function flushCaughtBoundaryErrors(root: R, node: F | null): void {
+    if (node === null) return;
+
+    flushCaughtBoundaryError(root, node);
+    flushCaughtBoundaryErrors(root, node.child);
+    flushCaughtBoundaryErrors(root, node.sibling);
+  }
+
+  function flushCaughtBoundaryError(root: R, node: F): void {
+    if (
+      node.tag !== ErrorBoundaryTag ||
+      node.errorBoundaryState === null ||
+      node.errorBoundaryState.didReport
+    ) {
+      return;
+    }
+
+    const state = node.errorBoundaryState;
+    state.didReport = true;
+    if (node.alternate !== null) node.alternate.errorBoundaryState = state;
+
+    const onError = node.props.onError;
+    if (typeof onError !== "function") return;
+
+    try {
+      (onError as (error: unknown, info: ErrorInfo) => void)(
+        state.error,
+        state.info,
+      );
+    } catch (error) {
+      reportUncaughtError(root, error, errorInfoFor(node));
+    }
+  }
+
+  function reportUncaughtError(root: R, error: unknown, info: ErrorInfo): void {
+    try {
+      root.onUncaughtError(error, info);
+    } catch {
+      // Error reporting should not corrupt already-failed recovery work.
+    }
+  }
+
+  function clearRootAfterUncaughtError(root: R): void {
+    root.reactiveCallback?.cancel();
+    root.reactiveCallback = null;
+    root.pendingReactiveEffects = [];
+    root.element = null;
+
+    if (root.current.child !== null) abortFiberEffects(root.current);
+
+    if (host.clearContainer !== undefined) {
+      host.clearContainer(root.container);
+    } else if (root.current.child !== null) {
+      for (
+        let child = root.current.child;
+        child !== null;
+        child = child.sibling
+      ) {
+        remove(child, root.container);
+      }
+    }
+
+    const current = fiber(RootTag, null, null, { children: null }, root);
+    current.memoizedProps = current.props;
+    current.committedProps = current.props;
+    root.current = current;
+    resetRootWork(root);
+    root.clearContainerBeforeCommit = false;
+    root.hydrationInitialElement = NoHydrationInitialElement;
+    root.consumedPendingQueues = [];
+    markRootFinished(root, NoLanes);
+    pendingRoots.delete(root);
+  }
+
   function commitMutationEffects(node: F | null): void {
     let cursor = node;
 
@@ -1351,7 +1471,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
         isHost(cursor)
       ) {
-        commitUpdate(cursor);
+        commitHostMutation(cursor, () => commitUpdate(cursor));
       }
 
       commitMutationEffects(cursor.child);
@@ -1366,7 +1486,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
       const next = placed.sibling;
-      commitPlacement(placed, before);
+      commitHostMutation(placed, () => commitPlacement(placed, before));
       if (!isPreassembledHostSubtree(placed)) {
         commitMutationEffects(placed.child);
       }
@@ -1374,6 +1494,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     return afterPlaced;
+  }
+
+  function commitHostMutation(source: F, mutation: () => void): void {
+    try {
+      mutation();
+    } catch (error) {
+      rootOf(source).uncaughtErrorInfo = errorInfoFor(source);
+      throw error;
+    }
   }
 
   function isPreassembledHostSubtree(node: F): boolean {
@@ -1603,6 +1732,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     return null;
   }
 
+  function findErrorBoundary(node: F): F | null {
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if (
+        parent.tag === ErrorBoundaryTag &&
+        parent.errorBoundaryState === null
+      ) {
+        return parent;
+      }
+    }
+
+    return null;
+  }
+
   function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
     const root = rootOf(boundary);
     const lanes = root.renderLanes;
@@ -1616,6 +1758,38 @@ export function createRenderer<Container, Instance, TextInstance>(
     boundary.suspenseState = { primaryChild: boundary.child };
     reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
     return boundary.child ?? completeUnit(boundary);
+  }
+
+  function captureErrorBoundary(
+    boundary: F,
+    error: unknown,
+    source: F,
+  ): F | null {
+    boundary.errorBoundaryState = createErrorBoundaryState(error, source);
+    reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
+    return boundary.child ?? completeUnit(boundary);
+  }
+
+  function captureCommittedErrorBoundary(
+    boundary: F,
+    error: unknown,
+    source: F,
+  ): void {
+    const state = createErrorBoundaryState(error, source);
+    boundary.errorBoundaryState = state;
+    if (boundary.alternate !== null)
+      boundary.alternate.errorBoundaryState = state;
+  }
+
+  function createErrorBoundaryState(
+    error: unknown,
+    source: F,
+  ): ErrorBoundaryState {
+    return {
+      error,
+      info: errorInfoFor(source),
+      didReport: false,
+    };
   }
 
   function shouldPreserveSuspenseBoundary(root: R, boundary: F): boolean {
@@ -1759,6 +1933,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
     next.suspenseState = current.suspenseState;
+    next.errorBoundaryState = current.errorBoundaryState;
     next.alternate = current;
     current.alternate = next;
 
@@ -1825,6 +2000,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       effects: null,
       contextDependencies: null,
       suspenseState: null,
+      errorBoundaryState: null,
     };
   }
 
@@ -1834,6 +2010,36 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     throw new Error("Could not find a root for fiber.");
+  }
+
+  function errorInfoFor(node: F): ErrorInfo {
+    return { componentStack: componentStackFor(node) };
+  }
+
+  function componentStackFor(node: F): string {
+    const frames: string[] = [];
+
+    for (let fiber: F | null = node; fiber !== null; fiber = fiber.return) {
+      const name = componentStackName(fiber);
+      if (name !== null) frames.push(`    at ${name}`);
+    }
+
+    return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
+  }
+
+  function componentStackName(node: F): string | null {
+    switch (node.tag) {
+      case FunctionTag:
+        return devtoolsTypeName(node.type, "Anonymous");
+      case ContextProviderTag:
+        return `${devtoolsTypeName(node.type, "Context")}.Provider`;
+      case SuspenseTag:
+        return "Suspense";
+      case ErrorBoundaryTag:
+        return "ErrorBoundary";
+      default:
+        return null;
+    }
   }
 
   return { batchedUpdates, createRoot, hydrateRoot, render, flushSync };
@@ -1895,6 +2101,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: node.childLanes,
       hooks: devtoolsHooks(node.memoizedState),
       contextDependencies: devtoolsContextDependencies(node),
+      capturedError: node.errorBoundaryState?.error,
+      componentStack: node.errorBoundaryState?.info.componentStack,
       children,
     };
   }
@@ -1999,6 +2207,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "fragment";
       case ContextProviderTag:
         return "context-provider";
+      case ErrorBoundaryTag:
+        return "error-boundary";
     }
   }
 
@@ -2016,6 +2226,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "Fragment";
       case ContextProviderTag:
         return `${devtoolsTypeName(node.type, "Context")}.Provider`;
+      case ErrorBoundaryTag:
+        return "ErrorBoundary";
     }
   }
 
@@ -2086,7 +2298,26 @@ export function createRenderer<Container, Instance, TextInstance>(
   function runEffect(effect: Effect): void {
     abortEffect(effect);
     effect.controller = new AbortController();
-    effect.create(effect.controller.signal);
+    try {
+      effect.create(effect.controller.signal);
+    } catch (error) {
+      abortEffect(effect);
+      handleEffectError(effect, error);
+    }
+  }
+
+  function handleEffectError(effect: Effect, error: unknown): void {
+    const owner = effect.owner as F;
+
+    const boundary = findErrorBoundary(owner);
+    if (boundary !== null) {
+      captureCommittedErrorBoundary(boundary, error, owner);
+      scheduleFiber(boundary, DefaultLane);
+      return;
+    }
+
+    rootOf(owner).uncaughtErrorInfo = errorInfoFor(owner);
+    throw error;
   }
 
   function abortFiberEffects(node: F): void {
@@ -2185,6 +2416,7 @@ function tagFor(element: FigElement): Tag {
   if (element.type === Fragment) return FragmentTag;
   if (isContext(element.type)) return ContextProviderTag;
   if (isSuspense(element.type)) return SuspenseTag;
+  if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
   return FunctionTag;
 }
 

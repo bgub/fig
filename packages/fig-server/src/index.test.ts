@@ -1,6 +1,7 @@
 import {
   createContext,
   createElement,
+  ErrorBoundary,
   Fragment,
   readContext,
   readPromise,
@@ -107,6 +108,34 @@ describe("@bgub/fig-server", () => {
     );
 
     expect(html).toBe("<em>Loading</em>");
+  });
+
+  it("renders error boundary children on the server", async () => {
+    const html = await renderToString(
+      createElement(
+        ErrorBoundary,
+        { fallback: createElement("span", null, "Crashed") },
+        createElement("span", null, "Ready"),
+      ),
+    );
+
+    expect(html).toBe("<span>Ready</span>");
+  });
+
+  it("does not catch server render errors with error boundaries", async () => {
+    function Broken() {
+      throw new Error("server failed");
+    }
+
+    await expect(
+      renderToString(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("span", null, "Crashed") },
+          createElement(Broken, null),
+        ),
+      ),
+    ).rejects.toThrow("server failed");
   });
 
   it("returns a Web stream result with an allReady promise", async () => {

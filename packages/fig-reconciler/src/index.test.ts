@@ -1,5 +1,6 @@
 import {
   createElement,
+  ErrorBoundary,
   readPromise,
   Suspense,
   useMemo,
@@ -181,6 +182,41 @@ describe("reconciler", () => {
     flushSync(() => root.render(createElement(Counter, { label: "Again " })));
 
     expect(commits.at(-1)?.tree.children[0]?.id).toBe(counterId);
+  });
+
+  it("publishes captured error boundary state to DevTools", () => {
+    const commits: FigDevtoolsRootSnapshot[] = [];
+    globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
+      inject() {
+        return 7;
+      },
+      onCommitRoot(_rendererId, snapshot) {
+        commits.push(snapshot);
+      },
+    };
+
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Broken() {
+      throw new Error("boom");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("span", null, "Crashed") },
+          createElement(Broken, null),
+        ),
+      ),
+    );
+
+    const boundary = commits.at(-1)?.tree.children[0];
+    expect(boundary?.kind).toBe("error-boundary");
+    expect((boundary?.capturedError as Error).message).toBe("boom");
+    expect(boundary?.componentStack).toContain("at Broken");
   });
 
   it("throws a hydration support diagnostic when clearContainer is missing", () => {
@@ -497,7 +533,7 @@ describe("reconciler", () => {
     expect(() =>
       flushSync(() => root.render(createElement(List, { items: ["A", "A"] }))),
     ).toThrow('Duplicate key "A" found among siblings.');
-    expect(container.textContent).toBe("A");
+    expect(container.textContent).toBe("");
   });
 
   it("commits reversed keyed host children", () => {

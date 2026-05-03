@@ -19,6 +19,8 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Render diagnostics throw before commit for duplicate sibling keys, invalid children, and render-phase state updates.
 - `useMemo` and `useCallback` are supported for stable values and callback identities.
 - `useReducer` is intentionally not built in; reducer abstractions can live in libraries on top of `useState`.
+- `ErrorBoundary` catches render and Fig effect errors with a sticky fallback; reset by remounting/changing the boundary key.
+- Error boundaries do not catch promises, event handler errors, async callback errors, server render errors, or host commit failures.
 - Fig intentionally splits React's broad `use(resource)` idea into explicit reads.
 - Context uses `createContext` plus `readContext(context)` because context reads are render-time inputs, not hook slots.
 - Context reads are tracked so provider updates mark matching consumers, and propagation stops at nested providers of the same context.

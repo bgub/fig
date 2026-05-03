@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createContext,
   createElement,
+  ErrorBoundary,
   Fragment,
   isContext,
+  isErrorBoundary,
   isSuspense,
   isValidElement,
   readContext,
@@ -44,6 +46,22 @@ describe("@bgub/fig", () => {
       children: "Loaded",
     });
     expect(emptyFallback.props).toEqual({ children: "Loaded" });
+  });
+
+  it("supports ErrorBoundary as a special element type", () => {
+    const element = createElement(
+      ErrorBoundary,
+      { fallback: "Crashed" },
+      "Loaded",
+    );
+
+    expect(isErrorBoundary(ErrorBoundary)).toBe(true);
+    expect(isValidElement(element)).toBe(true);
+    expect(element.type).toBe(ErrorBoundary);
+    expect(element.props).toEqual({
+      fallback: "Crashed",
+      children: "Loaded",
+    });
   });
 
   it("creates callable contexts", () => {

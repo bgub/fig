@@ -1,4 +1,10 @@
-import { type FigNode, Fragment, Suspense, transition } from "@bgub/fig";
+import {
+  ErrorBoundary,
+  type FigNode,
+  Fragment,
+  Suspense,
+  transition,
+} from "@bgub/fig";
 import {
   createRenderer,
   type FigRoot,
@@ -128,4 +134,4 @@ function isHydratableText(node: Element | Text): boolean {
   return !("setAttribute" in node) && "nodeValue" in node;
 }
 
-export { Fragment, Suspense, transition };
+export { ErrorBoundary, Fragment, Suspense, transition };

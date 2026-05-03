@@ -6,6 +6,7 @@ import {
   type FigNode,
   Fragment,
   isContext,
+  isErrorBoundary,
   isSuspense,
   isValidElement,
   type Props,
@@ -161,6 +162,11 @@ function renderElement(element: FigElement, context: RenderContext): void {
 
   if (isSuspense(type)) {
     renderSuspense(element.props, context);
+    return;
+  }
+
+  if (isErrorBoundary(type)) {
+    renderNode(element.props.children, context);
     return;
   }
 

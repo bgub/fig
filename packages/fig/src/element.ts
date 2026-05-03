@@ -3,6 +3,7 @@ export type Props = Record<string, unknown>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
+  | FigErrorBoundary
   | FigSuspense
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
@@ -26,9 +27,30 @@ export interface FigSuspense {
   readonly $$typeof: symbol;
 }
 
+export interface ErrorBoundaryProps {
+  fallback?: FigNode;
+  onError?: (error: unknown, info: ErrorInfo) => void;
+  children?: FigNode;
+}
+
+export interface ErrorInfo {
+  componentStack: string;
+}
+
+export interface FigErrorBoundary {
+  (props: ErrorBoundaryProps): FigNode;
+  readonly $$typeof: symbol;
+}
+
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
+export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
+
+export const ErrorBoundary: FigErrorBoundary = Object.assign(
+  (props: ErrorBoundaryProps) => props.children,
+  { $$typeof: FigErrorBoundarySymbol },
+);
 
 export const Suspense: FigSuspense = Object.assign(
   (props: SuspenseProps) => props.children,
@@ -65,5 +87,12 @@ export function isSuspense(value: unknown): value is FigSuspense {
   return (
     typeof value === "function" &&
     (value as FigSuspense).$$typeof === FigSuspenseSymbol
+  );
+}
+
+export function isErrorBoundary(value: unknown): value is FigErrorBoundary {
+  return (
+    typeof value === "function" &&
+    (value as FigErrorBoundary).$$typeof === FigErrorBoundarySymbol
   );
 }

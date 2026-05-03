@@ -1,5 +1,6 @@
 import {
   type ElementType,
+  ErrorBoundary,
   type FigElement,
   FigElementSymbol,
   Fragment,
@@ -21,4 +22,4 @@ export function jsx(
   };
 }
 
-export { jsx as jsxs, jsx as jsxDEV, Fragment, Suspense };
+export { jsx as jsxs, jsx as jsxDEV, ErrorBoundary, Fragment, Suspense };

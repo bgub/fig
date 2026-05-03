@@ -1,6 +1,7 @@
 import {
   createContext,
   createElement,
+  ErrorBoundary,
   type FigNode,
   Fragment,
   type Props,
@@ -255,7 +256,7 @@ function expectHookDiagnostic<P extends Props>(
     flushSync(() => root.render(createElement(Component, nextProps)));
   }).toThrow(message);
 
-  expect(container.textContent).toBe("Stable");
+  expect(container.textContent).toBe("");
 
   flushSync(() => root.render(createElement("main", null, "Recovered")));
 }
@@ -270,7 +271,7 @@ function expectRenderDiagnostic(node: FigNode, message: string): void {
     flushSync(() => root.render(node));
   }).toThrow(message);
 
-  expect(container.textContent).toBe("Stable");
+  expect(container.textContent).toBe("");
 
   flushSync(() => root.render(createElement("main", null, "Recovered")));
   expect(container.textContent).toBe("Recovered");
@@ -639,6 +640,332 @@ describe("@bgub/fig-dom", () => {
     expect(calls).toEqual(["a:x", "b:y"]);
   });
 
+  it("renders sticky error boundary fallbacks for render errors", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let renders = 0;
+
+    function Broken({ fail }: { fail: boolean }) {
+      renders += 1;
+      if (fail) throw new Error("boom");
+      return createElement("span", null, "Ready");
+    }
+
+    function App({ fail }: { fail: boolean }) {
+      return createElement(
+        ErrorBoundary,
+        { fallback: createElement("span", null, "Crashed") },
+        createElement(Broken, { fail }),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { fail: false })));
+    expect(container.textContent).toBe("Ready");
+
+    flushSync(() => root.render(createElement(App, { fail: true })));
+    expect(container.textContent).toBe("Crashed");
+
+    flushSync(() => root.render(createElement(App, { fail: false })));
+    expect(container.textContent).toBe("Crashed");
+    expect(renders).toBe(2);
+  });
+
+  it("reports caught errors with component stacks after fallback commit", () => {
+    const container = new FakeElement("root");
+    const reports: Array<{ error: unknown; stack: string }> = [];
+    const root = createRoot(container as unknown as Element);
+
+    function Broken() {
+      throw new Error("boom");
+    }
+
+    function Panel() {
+      return createElement(Broken, null);
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError(error, info) {
+              reports.push({ error, stack: info.componentStack });
+            },
+          },
+          createElement(Panel, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Crashed");
+    expect((reports[0]?.error as Error).message).toBe("boom");
+    expect(reports[0]?.stack).toContain("at Broken");
+    expect(reports[0]?.stack).toContain("at Panel");
+    expect(reports[0]?.stack).toContain("at ErrorBoundary");
+  });
+
+  it("does not let error reporting failures corrupt committed fallbacks", () => {
+    const container = new FakeElement("root");
+    const uncaught: unknown[] = [];
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError(error) {
+        uncaught.push(error);
+      },
+    });
+
+    function Broken() {
+      throw new Error("boom");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError() {
+              throw new Error("report failed");
+            },
+          },
+          createElement(Broken, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Crashed");
+    expect((uncaught[0] as Error).message).toBe("report failed");
+  });
+
+  it("lets error boundary fallbacks update state without retrying children", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let renders = 0;
+    let setFallbackCount:
+      | ((updater: (count: number) => number) => void)
+      | null = null;
+
+    function Broken() {
+      renders += 1;
+      throw new Error("boom");
+    }
+
+    function Fallback() {
+      const [count, setCount] = useState(0);
+      setFallbackCount = setCount;
+      return createElement("span", null, "Crashed ", count);
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement(Fallback, null) },
+          createElement(Broken, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Crashed 0");
+    expect(renders).toBe(1);
+
+    flushSync(() => setFallbackCount?.((count) => count + 1));
+
+    expect(container.textContent).toBe("Crashed 1");
+    expect(renders).toBe(1);
+  });
+
+  it("resets error boundaries when their key changes", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Broken({ fail }: { fail: boolean }) {
+      if (fail) throw new Error("boom");
+      return createElement("span", null, "Ready");
+    }
+
+    function App({ attempt, fail }: { attempt: number; fail: boolean }) {
+      return createElement(
+        ErrorBoundary,
+        {
+          key: attempt,
+          fallback: createElement("span", null, "Crashed"),
+        },
+        createElement(Broken, { fail }),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(App, { attempt: 0, fail: true })),
+    );
+    expect(container.textContent).toBe("Crashed");
+
+    flushSync(() =>
+      root.render(createElement(App, { attempt: 1, fail: false })),
+    );
+    expect(container.textContent).toBe("Ready");
+  });
+
+  it("bubbles fallback errors to the next error boundary", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Broken() {
+      throw new Error("primary failed");
+    }
+
+    function BrokenFallback() {
+      throw new Error("fallback failed");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("span", null, "Outer") },
+          createElement(
+            ErrorBoundary,
+            { fallback: createElement(BrokenFallback, null) },
+            createElement(Broken, null),
+          ),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Outer");
+  });
+
+  it("does not catch suspending promises with error boundaries", async () => {
+    const pending = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("span", null, "Crashed") },
+          createElement(Message, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("");
+
+    pending.resolve("Ready");
+    await delay();
+
+    expect(container.textContent).toBe("Ready");
+  });
+
+  it("catches rejected promise reasons after Suspense retries", async () => {
+    const pending = deferred<string>();
+    const container = new FakeElement("root");
+    const reports: string[] = [];
+    const root = createRoot(container as unknown as Element);
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const node = createElement(
+      ErrorBoundary,
+      {
+        fallback: createElement("span", null, "Crashed"),
+        onError(error) {
+          reports.push((error as Error).message);
+        },
+      },
+      createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(Message, null),
+      ),
+    );
+
+    flushSync(() => root.render(node));
+    expect(container.textContent).toBe("Loading");
+
+    pending.reject(new Error("read failed"));
+    await Promise.resolve();
+    flushSync(() => root.render(node));
+
+    expect(container.textContent).toBe("Crashed");
+    expect(reports).toEqual(["read failed"]);
+  });
+
+  it("catches Fig effect errors with error boundaries", () => {
+    const container = new FakeElement("root");
+    const reports: string[] = [];
+    const root = createRoot(container as unknown as Element);
+
+    function BrokenEffect() {
+      useBeforePaint(() => {
+        throw new Error("effect failed");
+      }, []);
+      return createElement("span", null, "Primary");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError(error) {
+              reports.push((error as Error).message);
+            },
+          },
+          createElement(BrokenEffect, null),
+        ),
+      ),
+    );
+
+    flushSync(() => undefined);
+
+    expect(container.textContent).toBe("Crashed");
+    expect(reports).toEqual(["effect failed"]);
+  });
+
+  it("catches reactive effect errors with error boundaries", async () => {
+    const container = new FakeElement("root");
+    const reports: string[] = [];
+    const root = createRoot(container as unknown as Element);
+
+    function BrokenEffect() {
+      useReactive(() => {
+        throw new Error("reactive failed");
+      }, []);
+      return createElement("span", null, "Primary");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError(error) {
+              reports.push((error as Error).message);
+            },
+          },
+          createElement(BrokenEffect, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Primary");
+
+    await delay();
+
+    expect(container.textContent).toBe("Crashed");
+    expect(reports).toEqual(["reactive failed"]);
+  });
+
   it("keeps state dispatches working across alternate tree swaps", () => {
     let setCount: ((updater: (count: number) => number) => void) | null = null;
 
@@ -697,9 +1024,14 @@ describe("@bgub/fig-dom", () => {
     });
   });
 
-  it("abandons failed render work and recovers on later renders", () => {
+  it("unmounts uncaught render errors and recovers on later renders", () => {
     const container = new FakeElement("root");
-    const root = createRoot(container as unknown as Element);
+    const uncaught: Array<{ error: unknown; stack: string }> = [];
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError(error, info) {
+        uncaught.push({ error, stack: info.componentStack });
+      },
+    });
 
     function Broken() {
       throw new Error("render failed");
@@ -716,14 +1048,16 @@ describe("@bgub/fig-dom", () => {
       flushSync(() => root.render(createElement(Broken, null)));
     }).toThrow("render failed");
 
-    expect(container.textContent).toBe("Stable");
+    expect(container.textContent).toBe("");
+    expect((uncaught[0]?.error as Error).message).toBe("render failed");
+    expect(uncaught[0]?.stack).toContain("at Broken");
 
     flushSync(() => root.render(createElement(Recovered, null)));
 
     expect(container.textContent).toBe("Recovered");
   });
 
-  it("preserves pending state updates when render work is abandoned", () => {
+  it("drops pending state updates when uncaught render errors unmount", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     let setCount: ((updater: (count: number) => number) => void) | null = null;
@@ -757,11 +1091,11 @@ describe("@bgub/fig-dom", () => {
       });
     }).toThrow("render failed");
 
-    expect(container.textContent).toBe("0");
+    expect(container.textContent).toBe("");
 
     flushSync(() => root.render(createElement(App, { fail: false })));
 
-    expect(container.textContent).toBe("1");
+    expect(container.textContent).toBe("0");
   });
 
   it("recovers after before-paint effects throw", () => {
@@ -792,7 +1126,7 @@ describe("@bgub/fig-dom", () => {
       );
     }).toThrow("before paint failed");
 
-    expect(container.textContent).toBe("Committed");
+    expect(container.textContent).toBe("");
 
     flushSync(() => root.render(createElement(App, { value: "Recovered" })));
 
@@ -1382,7 +1716,7 @@ describe("@bgub/fig-dom", () => {
     await Promise.resolve();
 
     expect(() => flushSync(() => root.render(node))).toThrow("read failed");
-    expect(container.textContent).toBe("Loading");
+    expect(container.textContent).toBe("");
 
     flushSync(() => root.render(createElement("main", null, "Recovered")));
     expect(container.textContent).toBe("Recovered");
@@ -1542,6 +1876,31 @@ describe("@bgub/fig-dom", () => {
     expect(calls).toEqual(["input"]);
     expect(signals[0].aborted).toBe(false);
     expect(input.attributes.bind).toBeUndefined();
+  });
+
+  it("treats bind failures as uncaught commit errors", () => {
+    const container = new FakeElement("root");
+    const reports: Array<{ error: unknown; stack: string }> = [];
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError(error, info) {
+        reports.push({ error, stack: info.componentStack });
+      },
+    });
+
+    function App() {
+      return createElement("button", {
+        bind() {
+          throw new Error("bind failed");
+        },
+      });
+    }
+
+    expect(() =>
+      flushSync(() => root.render(createElement(App, null))),
+    ).toThrow("bind failed");
+    expect(container.textContent).toBe("");
+    expect((reports[0]?.error as Error).message).toBe("bind failed");
+    expect(reports[0]?.stack).toContain("at App");
   });
 
   it("updates bind callbacks without duplicate setup", () => {

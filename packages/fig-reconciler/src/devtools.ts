@@ -13,7 +13,8 @@ export type FigDevtoolsFiberKind =
   | "text"
   | "function"
   | "fragment"
-  | "context-provider";
+  | "context-provider"
+  | "error-boundary";
 
 export type FigDevtoolsHookKind =
   | "state"
@@ -49,6 +50,8 @@ export interface FigDevtoolsFiberSnapshot {
   childLanes: Lanes;
   hooks: FigDevtoolsHookSnapshot[];
   contextDependencies: string[];
+  capturedError?: unknown;
+  componentStack?: string;
   children: FigDevtoolsFiberSnapshot[];
 }
 
