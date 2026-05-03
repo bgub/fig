@@ -1,6 +1,7 @@
 import { afterEach, beforeEach } from "vitest";
 
 export class FakeText {
+  readonly nodeType = 3;
   parentNode: FakeElement | null = null;
 
   constructor(public nodeValue: string) {}
@@ -11,6 +12,29 @@ export class FakeText {
 
   get textContent(): string {
     return this.nodeValue;
+  }
+}
+
+export class FakeComment {
+  readonly nodeType = 8;
+  parentNode: FakeElement | null = null;
+
+  constructor(public data: string) {}
+
+  get nextSibling(): FakeElement | FakeText | FakeComment | null {
+    return nextSiblingOf(this);
+  }
+
+  get nodeValue(): string {
+    return this.data;
+  }
+
+  set nodeValue(value: string) {
+    this.data = value;
+  }
+
+  get textContent(): string {
+    return "";
   }
 }
 
@@ -28,7 +52,8 @@ const nonBubblingEvents = new Set([
 ]);
 
 export class FakeElement {
-  childNodes: Array<FakeElement | FakeText> = [];
+  readonly nodeType = 1;
+  childNodes: Array<FakeElement | FakeText | FakeComment> = [];
   attributes: Record<string, string> = {};
   listenerSets: Record<string, FakeListener[]> = {};
   listeners: Record<string, EventListener> = {};
@@ -37,15 +62,17 @@ export class FakeElement {
 
   constructor(public tagName: string) {}
 
-  get firstChild(): FakeElement | FakeText | null {
+  get firstChild(): FakeElement | FakeText | FakeComment | null {
     return this.childNodes[0] ?? null;
   }
 
-  get nextSibling(): FakeElement | FakeText | null {
+  get nextSibling(): FakeElement | FakeText | FakeComment | null {
     return nextSiblingOf(this);
   }
 
-  appendChild(node: FakeElement | FakeText): FakeElement | FakeText {
+  appendChild(
+    node: FakeElement | FakeText | FakeComment,
+  ): FakeElement | FakeText | FakeComment {
     node.parentNode?.removeChild(node);
     this.childNodes.push(node);
     node.parentNode = this;
@@ -53,9 +80,9 @@ export class FakeElement {
   }
 
   insertBefore(
-    node: FakeElement | FakeText,
-    child: FakeElement | FakeText | null,
-  ): FakeElement | FakeText {
+    node: FakeElement | FakeText | FakeComment,
+    child: FakeElement | FakeText | FakeComment | null,
+  ): FakeElement | FakeText | FakeComment {
     if (child === null) {
       return this.appendChild(node);
     }
@@ -73,7 +100,9 @@ export class FakeElement {
     return node;
   }
 
-  removeChild(node: FakeElement | FakeText): FakeElement | FakeText {
+  removeChild(
+    node: FakeElement | FakeText | FakeComment,
+  ): FakeElement | FakeText | FakeComment {
     const index = this.childNodes.indexOf(node);
 
     if (index !== -1) {
@@ -201,6 +230,7 @@ export function installFakeDocument(): void {
     globalThis.document = {
       createElement: (tagName: string) => new FakeElement(tagName),
       createTextNode: (value: string) => new FakeText(value),
+      createComment: (value: string) => new FakeComment(value),
     } as unknown as Document;
   });
 
@@ -214,8 +244,8 @@ function captureOption(options?: AddEventListenerOptions | boolean): boolean {
 }
 
 function nextSiblingOf(
-  node: FakeElement | FakeText,
-): FakeElement | FakeText | null {
+  node: FakeElement | FakeText | FakeComment,
+): FakeElement | FakeText | FakeComment | null {
   const siblings = node.parentNode?.childNodes;
   if (siblings === undefined) return null;
 

@@ -45,6 +45,8 @@ const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const rootContainers = new WeakSet<Container>();
 const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
+const rootHydrationCallbacks = new WeakMap<Container, HydrationCallback>();
+const rootsWithHydrationListeners = new WeakSet<Container>();
 const immediatePropagationStopped = new WeakSet<Event>();
 const discreteEvents = new Set([
   "beforeinput",
@@ -66,14 +68,32 @@ const continuousEvents = new Set([
   "touchmove",
   "wheel",
 ]);
+const hydrationEvents = new Set([
+  ...discreteEvents,
+  ...continuousEvents,
+  "blur",
+  "focus",
+  "mouseenter",
+  "mouseleave",
+]);
+const hydratedEvents = new WeakSet<Event>();
 let batch: Batch = (callback) => callback();
+
+type HydrationCallback = (target: EventTarget | null, lane: Lane) => boolean;
 
 export function setEventBatching(nextBatch: Batch): void {
   batch = nextBatch;
 }
 
-export function registerRoot(container: Container): void {
+export function registerRoot(
+  container: Container,
+  hydrate?: HydrationCallback,
+): void {
   rootContainers.add(container);
+  if (hydrate === undefined) return;
+
+  rootHydrationCallbacks.set(container, hydrate);
+  ensureHydrationListeners(container);
 }
 
 export function on<K extends keyof HTMLElementEventMap>(
@@ -184,6 +204,8 @@ function dispatchRootEvent(
   passive: boolean,
   event: Event,
 ): void {
+  hydrateForEvent(root, type, event);
+
   withStopImmediatePropagation(event, () => {
     const path = eventPath(root, event);
     const step = capture ? -1 : 1;
@@ -204,6 +226,31 @@ function dispatchRootEvent(
       }
       index += step;
     }
+  });
+}
+
+function ensureHydrationListeners(root: Container): void {
+  if (rootsWithHydrationListeners.has(root)) return;
+  rootsWithHydrationListeners.add(root);
+
+  for (const type of hydrationEvents) {
+    const listener = (event: Event) => hydrateForEvent(root, type, event);
+    root.addEventListener(type, listener, {
+      capture: true,
+      passive: passiveHydrationEvent(type),
+    });
+  }
+}
+
+function hydrateForEvent(root: Container, type: string, event: Event): void {
+  const hydrate = rootHydrationCallbacks.get(root);
+  if (hydrate === undefined) return;
+  if (hydratedEvents.has(event)) return;
+
+  hydratedEvents.add(event);
+  const lane = eventLane(type);
+  runWithPriority(lane, () => {
+    hydrate(event.target, lane);
   });
 }
 
@@ -524,6 +571,10 @@ function eventLane(type: string): Lane {
   if (discreteEvents.has(type)) return SyncLane;
   if (continuousEvents.has(type)) return InputContinuousLane;
   return DefaultLane;
+}
+
+function passiveHydrationEvent(type: string): boolean {
+  return continuousEvents.has(type);
 }
 
 function direct(type: string): boolean {
