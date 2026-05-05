@@ -280,7 +280,7 @@ describe("@bgub/fig-dom hydration", () => {
       placeholder,
     } = suspenseDom("client-rendered", "button", "Loading");
     const calls: string[] = [];
-    const errors: unknown[] = [];
+    const recoverable = captureRecoverableErrors();
     if (placeholder === null) throw new Error("Expected client placeholder.");
     placeholder.dataset.dgst = "digest-1";
     placeholder.dataset.msg = "Server failed";
@@ -297,7 +297,7 @@ describe("@bgub/fig-dom hydration", () => {
             "Client",
           ),
         ),
-        { onRecoverableError: (error) => errors.push(error) },
+        { onRecoverableError: recoverable.capture },
       ),
     );
 
@@ -311,8 +311,18 @@ describe("@bgub/fig-dom hydration", () => {
 
     (container.childNodes[0] as FakeElement).dispatch("click");
     expect(calls).toEqual(["click"]);
-    expect((errors[0] as Error).message).toBe("Server failed");
-    expect((errors[0] as Error & { digest?: string }).digest).toBe("digest-1");
+    expect((recoverable.errors[0] as Error).message).toBe("Server failed");
+    expect((recoverable.errors[0] as Error & { digest?: string }).digest).toBe(
+      "digest-1",
+    );
+    expect(recoverable.infos[0]).toMatchObject({
+      digest: "digest-1",
+      recovery: "suspense",
+      source: "server",
+    });
+    expect(
+      (recoverable.infos[0] as { componentStack?: string }).componentStack,
+    ).toContain("at Suspense");
   });
 
   it("client-renders pending Suspense boundaries when the server marks them recovered", async () => {
@@ -323,7 +333,7 @@ describe("@bgub/fig-dom hydration", () => {
       placeholder,
       start,
     } = suspenseDom("pending", "button", "Loading");
-    const errors: unknown[] = [];
+    const recoverable = captureRecoverableErrors();
     if (placeholder === null) throw new Error("Expected pending placeholder.");
 
     flushSync(() =>
@@ -334,7 +344,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement("button", null, "Client"),
         ),
-        { onRecoverableError: (error) => errors.push(error) },
+        { onRecoverableError: recoverable.capture },
       ),
     );
 
@@ -352,7 +362,13 @@ describe("@bgub/fig-dom hydration", () => {
       end,
     ]);
     expect(container.textContent).toBe("Client");
-    expect((errors[0] as Error).message).toBe("Server failed after shell");
+    expect((recoverable.errors[0] as Error).message).toBe(
+      "Server failed after shell",
+    );
+    expect(recoverable.infos[0]).toMatchObject({
+      recovery: "suspense",
+      source: "server",
+    });
   });
 
   it("leaves pending Suspense boundaries dehydrated during background work", async () => {
@@ -436,7 +452,7 @@ describe("@bgub/fig-dom hydration", () => {
       end,
       start,
     } = suspenseDom("completed", "span", "Server");
-    const errors: string[] = [];
+    const recoverable = captureRecoverableErrors();
 
     container.appendChild(before);
     container.appendChild(start);
@@ -456,10 +472,7 @@ describe("@bgub/fig-dom hydration", () => {
           ),
           createElement("p", null, "After"),
         ],
-        {
-          onRecoverableError: (error) =>
-            errors.push(error instanceof Error ? error.message : String(error)),
-        },
+        { onRecoverableError: recoverable.capture },
       ),
     );
 
@@ -468,7 +481,18 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes[0]).toBe(before);
     expect(container.childNodes.at(-1)).toBe(after);
     expect(container.textContent).toBe("BeforeClientAfter");
-    expect(errors).toEqual(["Hydration mismatch: expected <div>."]);
+    expect(recoverable.messages()).toEqual([
+      "Hydration mismatch: expected <div>.",
+    ]);
+    expect(recoverable.infos[0]).toMatchObject({
+      actual: "different DOM node",
+      expected: "<div>",
+      recovery: "suspense",
+      source: "hydration",
+    });
+    expect(
+      (recoverable.infos[0] as { componentStack?: string }).componentStack,
+    ).toContain("at Suspense");
   });
 
   it("removes dehydrated Suspense ranges when they unmount", () => {
@@ -521,14 +545,14 @@ describe("@bgub/fig-dom hydration", () => {
   it("reports recoverable hydration mismatches while client-rendering", () => {
     const container = new FakeElement("root");
     const span = new FakeElement("span");
-    const errors: unknown[] = [];
+    const recoverable = captureRecoverableErrors();
     container.appendChild(span);
 
     flushSync(() =>
       hydrateRoot(
         container as unknown as Element,
         createElement("div", null, "Client"),
-        { onRecoverableError: (error) => errors.push(error) },
+        { onRecoverableError: recoverable.capture },
       ),
     );
 
@@ -536,11 +560,17 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes[0]).not.toBe(span);
     expect((container.childNodes[0] as FakeElement).tagName).toBe("div");
     expect(container.textContent).toBe("Client");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toBeInstanceOf(Error);
-    expect((errors[0] as Error).message).toBe(
+    expect(recoverable.errors).toHaveLength(1);
+    expect(recoverable.errors[0]).toBeInstanceOf(Error);
+    expect((recoverable.errors[0] as Error).message).toBe(
       "Hydration mismatch: expected <div>.",
     );
+    expect(recoverable.infos[0]).toMatchObject({
+      actual: "different DOM node",
+      expected: "<div>",
+      recovery: "root",
+      source: "hydration",
+    });
   });
 
   it("ignores recoverable error callback failures after recovery", () => {
@@ -626,6 +656,30 @@ describe("@bgub/fig-dom hydration", () => {
 });
 
 type RetriableFakeComment = FakeComment & { __figRetry?: () => void };
+
+function captureRecoverableErrors(): {
+  capture(error: unknown, info: unknown): void;
+  errors: unknown[];
+  infos: unknown[];
+  messages(): string[];
+} {
+  const errors: unknown[] = [];
+  const infos: unknown[] = [];
+
+  return {
+    capture(error, info) {
+      errors.push(error);
+      infos.push(info);
+    },
+    errors,
+    infos,
+    messages() {
+      return errors.map((error) =>
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  };
+}
 
 function suspenseDom(
   status: "client-rendered" | "completed" | "pending",

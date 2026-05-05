@@ -157,8 +157,17 @@ export interface FigRoot {
 }
 
 export interface FigRootOptions {
-  onRecoverableError?: (error: unknown) => void;
+  onRecoverableError?: (error: unknown, info: RecoverableErrorInfo) => void;
   onUncaughtError?: (error: unknown, info: ErrorInfo) => void;
+}
+
+export interface RecoverableErrorInfo extends ErrorInfo {
+  actual?: string;
+  boundaryId?: string;
+  digest?: string;
+  expected?: string;
+  recovery: "root" | "suspense";
+  source: "hydration" | "server";
 }
 
 type HydrationHostConfig<Container, Instance, TextInstance> = Required<
@@ -307,9 +316,9 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
     SuspensePings<Container, Instance, TextInstance>
   >;
   consumedPendingQueues: ConsumedPendingQueue[];
-  onRecoverableError: (error: unknown) => void;
+  onRecoverableError: (error: unknown, info: RecoverableErrorInfo) => void;
   onUncaughtError: (error: unknown, info: ErrorInfo) => void;
-  recoverableErrors: unknown[];
+  recoverableErrors: RecoverableErrorRecord[];
   uncaughtErrorInfo: ErrorInfo | null;
   isHydrating: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
@@ -323,6 +332,20 @@ interface ConsumedPendingQueue {
   queue: HookQueue<unknown>;
   pending: HookUpdate<unknown>;
 }
+
+interface RecoverableErrorRecord {
+  error: unknown;
+  info: RecoverableErrorInfo;
+}
+
+interface HydrationMismatch {
+  actual?: string;
+  boundaryId?: string;
+  expected?: string;
+  message: string;
+}
+
+type RecoverableDetails = Omit<RecoverableErrorInfo, "componentStack">;
 
 const PreservedSuspense = Symbol("fig.preserved-suspense");
 const NoHydrationInitialElement = Symbol("fig.no-hydration-initial-element");
@@ -611,6 +634,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    markHydrationRecovery(root, "root");
     restartRootWork(root);
     forceClientRender(root);
     performRoot(root, true);
@@ -623,15 +647,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     restartRootWork(root);
 
     if (state?.kind !== "dehydrated") {
+      markHydrationRecovery(root, "root");
       forceClientRender(root);
       performRoot(root, true);
       return;
     }
 
+    markHydrationRecovery(root, "suspense");
     state.boundary.forceClientRender = true;
     deactivateHydration(root);
     scheduleFiber(current, SelectiveHydrationLane);
     performRoot(root, true);
+  }
+
+  function markHydrationRecovery(
+    root: R,
+    recovery: RecoverableErrorInfo["recovery"],
+  ): void {
+    for (const record of root.recoverableErrors) {
+      if (record.info.source === "hydration") record.info.recovery = recovery;
+    }
   }
 
   function shouldClientRenderEarlyHydrationUpdate(
@@ -841,11 +876,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     const type = String(node.type);
 
     if (hydratable === null) {
-      throwHydrationMismatch(root, `expected <${type}>, but found no DOM node`);
+      throwHydrationMismatch(root, node, {
+        actual: "nothing",
+        expected: `<${type}>`,
+        message: `expected <${type}>, but found no DOM node`,
+      });
     }
 
     if (!hydrationHost.canHydrateInstance(hydratable, type)) {
-      throwHydrationMismatch(root, `expected <${type}>`);
+      throwHydrationMismatch(root, node, {
+        actual: "different DOM node",
+        expected: `<${type}>`,
+        message: `expected <${type}>`,
+      });
     }
 
     node.stateNode = hydratable as Instance;
@@ -867,11 +910,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     const text = String(node.props.nodeValue);
 
     if (hydratable === null) {
-      throwHydrationMismatch(root, "expected text, but found no DOM node");
+      throwHydrationMismatch(root, node, {
+        actual: "nothing",
+        expected: "text",
+        message: "expected text, but found no DOM node",
+      });
     }
 
     if (!hydrationHost.canHydrateTextInstance(hydratable, text)) {
-      throwHydrationMismatch(root, "expected text");
+      throwHydrationMismatch(root, node, {
+        actual: "different DOM node",
+        expected: "text",
+        message: "expected text",
+      });
     }
 
     node.stateNode = hydratable as TextInstance;
@@ -903,7 +954,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (!root.isHydrating || root.hydrationParent !== node) return;
 
     if (root.nextHydratableInstance !== null) {
-      throwHydrationMismatch(root, "found an extra DOM node");
+      throwHydrationMismatch(root, node, {
+        actual: "extra DOM node",
+        message: "found an extra DOM node",
+      });
     }
 
     const hydrationHost = requireHydrationHostConfig();
@@ -924,7 +978,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       !boundary.forceClientRender &&
       root.nextHydratableInstance !== boundary.end
     ) {
-      throwHydrationMismatch(root, "found an extra DOM node in Suspense");
+      throwHydrationMismatch(root, node, {
+        actual: "extra DOM node",
+        boundaryId: boundary.id ?? undefined,
+        message: "found an extra DOM node in Suspense",
+      });
     }
 
     leaveSuspenseHydration(root, node, boundary);
@@ -979,9 +1037,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     return host as HydrationHostConfig<Container, Instance, TextInstance>;
   }
 
-  function throwHydrationMismatch(root: R, message: string): never {
-    const error = new Error(`Hydration mismatch: ${message}.`);
-    root.recoverableErrors.push(error);
+  function throwHydrationMismatch(
+    root: R,
+    node: F,
+    mismatch: HydrationMismatch,
+  ): never {
+    const error = new Error(`Hydration mismatch: ${mismatch.message}.`);
+    queueRecoverableError(root, node, error, {
+      actual: mismatch.actual,
+      boundaryId: mismatch.boundaryId,
+      expected: mismatch.expected,
+      recovery: "root",
+      source: "hydration",
+    });
     throw new HydrationMismatchError(error.message);
   }
 
@@ -1095,7 +1163,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (boundary.status === "client-rendered") {
-      queueClientRenderedSuspenseError(rootOf(node), boundary);
+      queueClientRenderedSuspenseError(rootOf(node), node, boundary);
     }
 
     node.suspenseState = null;
@@ -1105,6 +1173,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function queueClientRenderedSuspenseError(
     root: R,
+    node: F,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void {
     const boundaryError = boundary.error;
@@ -1115,7 +1184,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (boundaryError?.digest !== undefined) {
       (error as Error & { digest?: string }).digest = boundaryError.digest;
     }
-    root.recoverableErrors.push(error);
+    queueRecoverableError(root, node, error, {
+      boundaryId: boundary.id ?? undefined,
+      digest: boundaryError?.digest,
+      recovery: "suspense",
+      source: "server",
+    });
   }
 
   function enterSuspenseHydration(
@@ -1672,9 +1746,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     root.recoverableErrors = [];
 
-    for (const error of errors) {
+    for (const { error, info } of errors) {
       try {
-        root.onRecoverableError(error);
+        root.onRecoverableError(error, info);
       } catch {
         // Recoverable error reporting should not break a successful commit.
       }
@@ -2367,6 +2441,18 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function errorInfoFor(node: F): ErrorInfo {
     return { componentStack: componentStackFor(node) };
+  }
+
+  function queueRecoverableError(
+    root: R,
+    node: F,
+    error: unknown,
+    details: RecoverableDetails,
+  ): void {
+    root.recoverableErrors.push({
+      error,
+      info: { ...details, componentStack: componentStackFor(node) },
+    });
   }
 
   function componentStackFor(node: F): string {

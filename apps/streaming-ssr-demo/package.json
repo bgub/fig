@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsdown",
     "dev": "pnpm --filter @bgub/fig build && pnpm --filter @bgub/fig-dom build && pnpm --filter @bgub/fig-server build && pnpm build && pnpm serve",
-    "serve": "node dist/server.js"
+    "serve": "node dist/server.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
