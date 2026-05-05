@@ -27,6 +27,18 @@ function commitPlacement(node: F): void {
 
 For a large reverse reorder, many siblings are marked with `PlacementFlag`, and each placement scans forward through sibling fibers to find the next stable host sibling. That can repeat the same search work many times.
 
+After Phases 1-3, a 1,000-row browser run produced these medians:
+
+| Scenario | Fig median | React median | Gap |
+| --- | ---: | ---: | ---: |
+| Initial mount | 3.500 ms | 2.286 ms | Fig 53% slower |
+| Same-order update | 2.357 ms | 1.450 ms | Fig 63% slower |
+| Append 10% | 1.571 ms | 2.100 ms | Fig 25% faster |
+| Prepend 10% | 1.500 ms | 2.150 ms | Fig 30% faster |
+| Reverse keyed rows | 3.786 ms | 4.643 ms | Fig 18% faster |
+
+The placement work closed the reverse-keyed reorder gap and made append/prepend faster than React on this benchmark. Remaining gaps are initial mount and same-order updates.
+
 ## Goals
 
 - Improve worst-case keyed reorder performance without changing public APIs.
@@ -211,7 +223,7 @@ After each phase:
 - [x] `pnpm lint`
 - [x] `pnpm test`
 - [x] `pnpm --filter @bgub/fig-demo build`
-- [ ] Run demo benchmark page at 1,000 rows and record medians. (pending browser measurement)
+- [x] Run demo benchmark page at 1,000 rows and record medians.
 - [ ] Optionally run 5,000 rows to expose scaling behavior. (pending browser measurement)
 
 ## Suggested order

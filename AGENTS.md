@@ -28,4 +28,4 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Server streaming uses nonce-compatible inline scripts; no external runtime format.
 - Server Suspense streams fallbacks first, then completed content and partial segments; server errors recover only through Suspense client-render markers.
 - Hydration is Suspense-boundary selective: server markers can stay dehydrated until background work or interaction hydrates that boundary.
-- Hydration does not replay events yet; interactions can force hydration before normal delegated dispatch.
+- Hydration queues replayable events blocked by pending Suspense hydration and replays them after the boundary hydrates.
