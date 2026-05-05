@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   createContext,
   createElement,
+  createPortalNode,
   ErrorBoundary,
   Fragment,
   isContext,
   isErrorBoundary,
+  isPortal,
   isSuspense,
   isValidElement,
   readContext,
@@ -62,6 +64,16 @@ describe("@bgub/fig", () => {
       fallback: "Crashed",
       children: "Loaded",
     });
+  });
+
+  it("creates portal nodes", () => {
+    const target = {};
+    const portal = createPortalNode("child", target, "modal");
+
+    expect(isPortal(portal)).toBe(true);
+    expect(portal.children).toBe("child");
+    expect(portal.key).toBe("modal");
+    expect(portal.target).toBe(target);
   });
 
   it("creates callable contexts", () => {

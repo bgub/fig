@@ -34,6 +34,7 @@ interface EventSlot {
   controller: AbortController | null;
   element: Element | null;
   listener: EventListener | null;
+  listenerTarget: Container | null;
   root: Container | null;
 }
 
@@ -48,8 +49,14 @@ interface QueuedReplayableEvent {
   type: string;
 }
 
+interface PortalOwner {
+  logicalParent: Container | Element;
+  root: Container;
+}
+
 const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
+const portalOwners = new WeakMap<Container, PortalOwner>();
 const rootContainers = new WeakSet<Container>();
 const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
 const rootHydrationCallbacks = new WeakMap<Container, HydrationCallback>();
@@ -136,6 +143,7 @@ export function updateEvents(element: Element, value: unknown): void {
   const slots = eventSlotsFor(element);
   const descriptors = eventDescriptors(value);
   const root = rootFor(element);
+  const listenerTarget = listenerTargetFor(element);
 
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
@@ -144,10 +152,24 @@ export function updateEvents(element: Element, value: unknown): void {
     const slot = slots[index];
 
     if (slot === undefined) {
-      slots[index] = addEventSlot(element, root, descriptor, options, key);
+      slots[index] = addEventSlot(
+        element,
+        root,
+        listenerTarget,
+        descriptor,
+        options,
+        key,
+      );
     } else if (slot.key !== key) {
       removeEventSlot(slot);
-      slots[index] = addEventSlot(element, root, descriptor, options, key);
+      slots[index] = addEventSlot(
+        element,
+        root,
+        listenerTarget,
+        descriptor,
+        options,
+        key,
+      );
     } else if (slot.callback !== descriptor.callback) {
       slot.callback = descriptor.callback as EventCallback;
     }
@@ -160,15 +182,13 @@ export function updateEvents(element: Element, value: unknown): void {
   slots.length = descriptors.length;
 }
 
-export function attachEventSubtree(
-  node: Element | Text,
-  root: Container | null,
-): void {
-  if (root === null) return;
-
+export function attachEventSubtree(node: Element | Text): void {
   visitElementSubtree(node, (element) => {
+    const root = rootFor(element);
+    const listenerTarget = listenerTargetFor(element);
+
     for (const slot of eventSlots.get(element) ?? []) {
-      attachEventSlot(element, root, slot);
+      attachEventSlot(element, root, listenerTarget, slot);
     }
   });
 }
@@ -184,11 +204,31 @@ export function rootFor(
   node: Element | Text | Comment | Container,
 ): Container | null {
   for (let current: unknown = node; current !== null; ) {
-    if (isContainer(current) && rootContainers.has(current)) return current;
+    if (isContainer(current)) {
+      const owner = portalOwners.get(current);
+      if (owner !== undefined) return owner.root;
+      if (rootContainers.has(current)) return current;
+    }
+
     current = parentOf(current);
   }
 
   return null;
+}
+
+export function registerPortalContainer(
+  container: Container,
+  root: Container,
+  logicalParent: Container | Element,
+): void {
+  portalOwners.set(container, {
+    logicalParent,
+    root,
+  });
+}
+
+export function removePortalContainer(container: Container): void {
+  portalOwners.delete(container);
 }
 
 export function replayQueuedEvents(root: Container): void {
@@ -218,6 +258,7 @@ export function replayQueuedEvents(root: Container): void {
 function addEventSlot(
   element: Element,
   root: Container | null,
+  listenerTarget: Container | null,
   descriptor: EventDescriptor,
   options: Required<EventOptions>,
   key: string,
@@ -230,9 +271,10 @@ function addEventSlot(
     controller: null,
     element: null,
     listener: null,
+    listenerTarget: null,
     root: null,
   };
-  attachEventSlot(element, root, slot);
+  attachEventSlot(element, root, listenerTarget, slot);
   return slot;
 }
 
@@ -243,15 +285,17 @@ function removeEventSlot(slot: EventSlot): void {
 
 function dispatchRootEvent(
   root: Container,
+  listenerTarget: Container,
   type: string,
   capture: boolean,
   passive: boolean,
   event: Event,
 ): void {
+  if (listenerTargetFor(event.target) !== listenerTarget) return;
   if (hydrateForEvent(root, type, event) === "blocked") return;
 
   withStopImmediatePropagation(event, () => {
-    dispatchRootEventPath(root, type, capture, passive, event);
+    dispatchRootEventPath(root, listenerTarget, type, capture, passive, event);
   });
 }
 
@@ -318,21 +362,22 @@ function dispatchReplayedEvent(
   event: Event,
 ): void {
   withStopImmediatePropagation(event, () => {
-    dispatchRootEventPath(root, type, true, null, event);
+    dispatchRootEventPath(root, root, type, true, null, event);
     if (!event.cancelBubble) {
-      dispatchRootEventPath(root, type, false, null, event);
+      dispatchRootEventPath(root, root, type, false, null, event);
     }
   });
 }
 
 function dispatchRootEventPath(
   root: Container,
+  listenerTarget: Container,
   type: string,
   capture: boolean,
   passive: boolean | null,
   event: Event,
 ): void {
-  const path = eventPath(root, event);
+  const path = eventPath(root, listenerTarget, event);
   const step = capture ? -1 : 1;
   let index = capture ? path.length - 1 : 0;
 
@@ -433,12 +478,13 @@ function eventSlotsFor(element: Element): EventSlot[] {
 function attachEventSlot(
   element: Element,
   root: Container | null,
+  listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
   if (direct(slot.type)) {
     attachDirectEventSlot(element, slot);
   } else {
-    attachDelegatedEventSlot(root, slot);
+    attachDelegatedEventSlot(root, listenerTarget, slot);
   }
 }
 
@@ -456,14 +502,22 @@ function attachDirectEventSlot(element: Element, slot: EventSlot): void {
 
 function attachDelegatedEventSlot(
   root: Container | null,
+  listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
-  if (root === null || slot.root === root) return;
+  if (
+    root === null ||
+    listenerTarget === null ||
+    (slot.root === root && slot.listenerTarget === listenerTarget)
+  ) {
+    return;
+  }
 
   detachEventSlot(slot);
   slot.root = root;
+  slot.listenerTarget = listenerTarget;
 
-  const listeners = rootListenerMap(root);
+  const listeners = rootListenerMap(listenerTarget);
   const key = rootListenerKey(slot);
   let rootListener = listeners.get(key);
 
@@ -475,10 +529,20 @@ function attachDelegatedEventSlot(
       count: 0,
       listener: (event) =>
         captureDelegated(type)
-          ? dispatchFocusLikeEvent(root, type, passive, event)
-          : dispatchRootEvent(root, type, capture, passive, event),
+          ? dispatchFocusLikeEvent(root, listenerTarget, type, passive, event)
+          : dispatchRootEvent(
+              root,
+              listenerTarget,
+              type,
+              capture,
+              passive,
+              event,
+            ),
     };
-    root.addEventListener(type, rootListener.listener, { capture, passive });
+    listenerTarget.addEventListener(type, rootListener.listener, {
+      capture,
+      passive,
+    });
     listeners.set(key, rootListener);
   }
 
@@ -501,12 +565,13 @@ function detachDirectEventSlot(slot: EventSlot): void {
 }
 
 function detachDelegatedEventSlot(slot: EventSlot): void {
-  const root = slot.root;
-  if (root === null) return;
+  const listenerTarget = slot.listenerTarget;
+  if (listenerTarget === null) return;
 
   slot.root = null;
+  slot.listenerTarget = null;
   const key = rootListenerKey(slot);
-  const listeners = rootListeners.get(root);
+  const listeners = rootListeners.get(listenerTarget);
   const rootListener = listeners?.get(key);
 
   if (rootListener === undefined) return;
@@ -514,7 +579,7 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
   rootListener.count -= 1;
 
   if (rootListener.count === 0) {
-    root.removeEventListener(slot.type, rootListener.listener, {
+    listenerTarget.removeEventListener(slot.type, rootListener.listener, {
       capture: rootListenerCapture(slot),
     });
     listeners.delete(key);
@@ -556,12 +621,15 @@ function dispatchEventSlotWithCleanup(
 
 function dispatchFocusLikeEvent(
   root: Container,
+  listenerTarget: Container,
   type: string,
   passive: boolean,
   event: Event,
 ): void {
-  dispatchRootEvent(root, type, true, passive, event);
-  if (!event.cancelBubble) dispatchRootEvent(root, type, false, passive, event);
+  dispatchRootEvent(root, listenerTarget, type, true, passive, event);
+  if (!event.cancelBubble) {
+    dispatchRootEvent(root, listenerTarget, type, false, passive, event);
+  }
 }
 
 function rootListenerMap(root: Container): Map<string, RootListener> {
@@ -581,19 +649,47 @@ function rootListenerCapture(slot: EventSlot): boolean {
   return captureDelegated(slot.type) || slot.options.capture;
 }
 
-function eventPath(root: Container, event: Event): Element[] {
+function eventPath(
+  root: Container,
+  listenerTarget: Container,
+  event: Event,
+): Element[] {
   const composedPath = event.composedPath?.();
 
   if (composedPath !== undefined) {
-    const index = composedPath.indexOf(root);
-    if (index !== -1) return composedPath.slice(0, index).filter(isElement);
+    const index = composedPath.indexOf(listenerTarget);
+    if (index !== -1) {
+      return [
+        ...composedPath.slice(0, index).filter(isElement),
+        ...logicalPortalPath(root, listenerTarget),
+      ];
+    }
   }
 
   const path: Element[] = [];
-  for (let current: unknown = event.target; current !== root; ) {
+  for (let current: unknown = event.target; current !== listenerTarget; ) {
     if (isElement(current)) path.push(current);
     current = parentOf(current);
     if (current === null) break;
+  }
+
+  return [...path, ...logicalPortalPath(root, listenerTarget)];
+}
+
+function logicalPortalPath(
+  root: Container,
+  listenerTarget: Container,
+): Element[] {
+  const owner = portalOwners.get(listenerTarget);
+  if (owner === undefined || owner.root !== root) return [];
+
+  const path: Element[] = [];
+  for (
+    let current: unknown = owner.logicalParent;
+    current !== null && current !== root;
+    current = parentOf(current)
+  ) {
+    if (isElement(current)) path.push(current);
   }
 
   return path;
@@ -609,6 +705,22 @@ function targetWithinRoot(
   }
 
   return false;
+}
+
+function listenerTargetFor(
+  node: Element | Text | Comment | Container,
+): Container | null {
+  for (let current: unknown = node; current !== null; ) {
+    if (isContainer(current)) {
+      if (portalOwners.has(current) || rootContainers.has(current)) {
+        return current;
+      }
+    }
+
+    current = parentOf(current);
+  }
+
+  return null;
 }
 
 function withCurrentTarget<T>(

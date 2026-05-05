@@ -1,7 +1,9 @@
 import {
+  createPortalNode,
   ErrorBoundary,
   type FigNode,
   Fragment,
+  type Key,
   Suspense,
   transition,
 } from "@bgub/fig";
@@ -17,8 +19,10 @@ import { attachBindSubtree, removeBindSubtree } from "./bind.ts";
 import {
   attachEventSubtree,
   type Container,
+  registerPortalContainer,
   registerRoot,
   removeEventSubtree,
+  removePortalContainer,
   replayQueuedEvents,
   rootFor,
   setEventBatching,
@@ -85,7 +89,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
     attachBindSubtree(child as Element | Text);
-    attachEventSubtree(child as Element | Text, rootFor(parent));
+    attachEventSubtree(child as Element | Text);
   },
   removeChild: (parent, child) => {
     removeBindSubtree(child as Element | Text);
@@ -120,6 +124,16 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   removeDehydratedSuspenseBoundary: (boundary) => {
     removeSuspenseBoundaryRange(boundary);
   },
+  preparePortalContainer: (container, root, logicalParent) => {
+    registerPortalContainer(
+      container as Container,
+      root,
+      logicalParent as Container | Element,
+    );
+  },
+  removePortalContainer: (container) => {
+    removePortalContainer(container as Container);
+  },
 };
 
 const renderer = createRenderer(hostConfig);
@@ -152,6 +166,14 @@ export function hydrateRoot(
 export function render(children: FigNode, container: Container): FigRoot {
   registerRoot(container);
   return renderer.render(children, container);
+}
+
+export function createPortal(
+  children: FigNode,
+  container: Container,
+  key: Key | null = null,
+) {
+  return createPortalNode(children, container, key);
 }
 
 function isHydratableElement(node: Element | TextLike, type: string): boolean {

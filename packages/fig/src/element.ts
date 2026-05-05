@@ -7,7 +7,13 @@ export type ElementType<P = Props> =
   | FigSuspense
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
-export type FigChild = FigElement | FigText | boolean | null | undefined;
+export type FigChild =
+  | FigElement
+  | FigPortal
+  | FigText
+  | boolean
+  | null
+  | undefined;
 export type FigNode = FigChild | FigChild[];
 
 export interface FigElement<P = Props> {
@@ -15,6 +21,13 @@ export interface FigElement<P = Props> {
   readonly type: ElementType<P>;
   readonly key: Key | null;
   readonly props: P & { children?: FigNode };
+}
+
+export interface FigPortal<Target = unknown> {
+  readonly $$typeof: symbol;
+  readonly children: FigNode;
+  readonly key: Key | null;
+  readonly target: Target;
 }
 
 export interface SuspenseProps {
@@ -45,6 +58,7 @@ export interface FigErrorBoundary {
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
 export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
+export const FigPortalSymbol = Symbol.for("fig.portal");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
 
 export const ErrorBoundary: FigErrorBoundary = Object.assign(
@@ -80,6 +94,22 @@ export function isValidElement(value: unknown): value is FigElement {
     typeof value === "object" &&
     value !== null &&
     (value as FigElement).$$typeof === FigElementSymbol
+  );
+}
+
+export function createPortalNode<Target>(
+  children: FigNode,
+  target: Target,
+  key: Key | null = null,
+): FigPortal<Target> {
+  return { $$typeof: FigPortalSymbol, children, key, target };
+}
+
+export function isPortal(value: unknown): value is FigPortal {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as FigPortal).$$typeof === FigPortalSymbol
   );
 }
 

@@ -1,4 +1,4 @@
-import type { Props } from "@bgub/fig";
+import { isPortal, type Props } from "@bgub/fig";
 
 interface HtmlSink {
   write(chunk: string): void;
@@ -46,6 +46,7 @@ export function isVoidElement(type: string): boolean {
 
 export function hasRenderableChild(node: unknown): boolean {
   if (Array.isArray(node)) return node.some(hasRenderableChild);
+  if (isPortal(node)) return false;
   return node !== null && node !== undefined && typeof node !== "boolean";
 }
 

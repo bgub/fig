@@ -8,9 +8,11 @@ import {
   type FigContext,
   type FigElement,
   type FigNode,
+  type FigPortal,
   Fragment,
   isContext,
   isErrorBoundary,
+  isPortal,
   isSuspense,
   isValidElement,
   type Props,
@@ -148,6 +150,12 @@ export interface HostConfig<Container, Instance, TextInstance> {
   removeDehydratedSuspenseBoundary?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
+  preparePortalContainer?(
+    container: Parent<Container, Instance>,
+    root: Container,
+    logicalParent: Parent<Container, Instance>,
+  ): void;
+  removePortalContainer?(container: Parent<Container, Instance>): void;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -191,6 +199,7 @@ const FragmentTag = 4;
 const ContextProviderTag = 5;
 const SuspenseTag = 6;
 const ErrorBoundaryTag = 7;
+const PortalTag = 8;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -199,7 +208,8 @@ type Tag =
   | typeof FragmentTag
   | typeof ContextProviderTag
   | typeof SuspenseTag
-  | typeof ErrorBoundaryTag;
+  | typeof ErrorBoundaryTag
+  | typeof PortalTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -859,6 +869,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === PortalTag) {
+      beginPortal(node);
+      return;
+    }
+
     if (changedContextProvider(node)) propagateContextChange(node);
 
     reconcileCurrentChildren(node, node.props.children);
@@ -1234,6 +1249,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
+  function beginPortal(node: F): void {
+    reconcileCurrentChildren(node, node.props.children as FigNode);
+  }
+
   function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
     if (renderingFiber === null) {
       throw new Error(
@@ -1500,6 +1519,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (host.appendInitialChild === undefined) return;
 
     for (let node = child; node !== null; node = node.sibling) {
+      if (node.tag === PortalTag) continue;
+
       if (node.tag === HostTag || node.tag === TextTag) {
         host.appendInitialChild(parent, hostNode(node));
       } else {
@@ -1534,7 +1555,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     let index = 0;
     let lastPlacedIndex = 0;
     const isHydratingNewTree =
-      rootOf(parent).isHydrating && currentFirstChild === null;
+      parent.tag !== PortalTag &&
+      rootOf(parent).isHydrating &&
+      currentFirstChild === null;
 
     for (; old !== null && index < nextChildren.length; index += 1) {
       const child = nextChildren[index];
@@ -1813,6 +1836,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (root.current.child !== null) abortFiberEffects(root.current);
 
     if (host.clearContainer !== undefined) {
+      removePortalDescendants(root.current.child);
       host.clearContainer(root.container);
     } else if (root.current.child !== null) {
       for (
@@ -1845,6 +1869,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         continue;
       }
 
+      if (cursor.tag === PortalTag) {
+        commitPortal(cursor);
+      }
+
       if (
         (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
         isHost(cursor)
@@ -1872,11 +1900,24 @@ export function createRenderer<Container, Instance, TextInstance>(
       commitHostMutation(placed, () => commitPlacement(placed, before));
       if (!isPreassembledHostSubtree(placed)) {
         commitMutationEffects(placed.child);
+      } else {
+        commitPortalsInPreassembledSubtree(placed.child);
       }
       placed = next;
     }
 
     return afterPlaced;
+  }
+
+  function commitPortalsInPreassembledSubtree(node: F | null): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if (cursor.tag === PortalTag) {
+        commitHostMutation(cursor, () => commitPlacement(cursor));
+        commitMutationEffects(cursor.child);
+      } else {
+        commitPortalsInPreassembledSubtree(cursor.child);
+      }
+    }
   }
 
   function commitHostMutation(source: F, mutation: () => void): void {
@@ -1912,9 +1953,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       host.insertBefore(hostParent(node), hostNode(node), before);
       markHostCommitted(node);
       if (isPreassembledHostSubtree(node)) markHostSubtreeCommitted(node.child);
+    } else if (node.tag === PortalTag) {
+      commitPortal(node);
+      if (node.alternate !== null) insertPortalChildren(node);
     } else if (node.alternate !== null) {
       insertHostSubtree(node, hostParent(node), before);
     }
+  }
+
+  function commitPortal(node: F): void {
+    host.preparePortalContainer?.(
+      portalTarget(node),
+      rootOf(node).container,
+      hostParent(node),
+    );
   }
 
   function shouldCommitPlacementUpdate(node: F): boolean {
@@ -1929,6 +1981,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     before: HostNode<Instance, TextInstance> | null,
   ): void {
     visitHostNodes(node, (child) => host.insertBefore(parent, child, before));
+  }
+
+  function insertPortalChildren(node: F): void {
+    const parent = portalTarget(node);
+    for (let child = node.child; child !== null; child = child.sibling) {
+      visitHostNodes(child, (hostChild) =>
+        host.insertBefore(parent, hostChild, null),
+      );
+    }
   }
 
   function commitUpdate(node: F): void {
@@ -2003,12 +2064,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitDeletions(node: F): void {
     if (node.deletions !== null) {
-      const parent =
-        node.tag === RootTag
-          ? (node.stateNode as R).container
-          : node.tag === HostTag
-            ? (node.stateNode as Instance)
-            : hostParent(node);
+      const parent = isHostParent(node)
+        ? hostParentFor(node)
+        : hostParent(node);
       for (const child of node.deletions) {
         abortFiberEffects(child);
         remove(child, parent);
@@ -2030,7 +2088,39 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    visitHostNodes(node, (child) => host.removeChild(parent, child));
+    if (node.tag === PortalTag) {
+      removePortalChildren(node);
+      host.removePortalContainer?.(portalTarget(node));
+      return;
+    }
+
+    if (isHost(node)) {
+      removePortalDescendants(node.child);
+      host.removeChild(parent, hostNode(node));
+      return;
+    }
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      remove(child, parent);
+    }
+  }
+
+  function removePortalChildren(node: F): void {
+    const parent = portalTarget(node);
+    for (let child = node.child; child !== null; child = child.sibling) {
+      remove(child, parent);
+    }
+  }
+
+  function removePortalDescendants(node: F | null): void {
+    for (let child = node; child !== null; child = child.sibling) {
+      if (child.tag === PortalTag) {
+        removePortalChildren(child);
+        host.removePortalContainer?.(portalTarget(child));
+      } else {
+        removePortalDescendants(child.child);
+      }
+    }
   }
 
   function visitHostNodes(
@@ -2041,6 +2131,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       visitor(hostNode(node));
       return;
     }
+
+    if (node.tag === PortalTag) return;
+
     for (let child = node.child; child !== null; child = child.sibling) {
       visitHostNodes(child, visitor);
     }
@@ -2048,8 +2141,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function hostParent(node: F): Parent<Container, Instance> {
     for (let parent = node.return; parent !== null; parent = parent.return) {
-      if (parent.tag === RootTag) return (parent.stateNode as R).container;
-      if (parent.tag === HostTag) return parent.stateNode as Instance;
+      if (isHostParent(parent)) return hostParentFor(parent);
     }
 
     throw new Error("Could not find a host parent for fiber.");
@@ -2063,11 +2155,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     search: while (true) {
       while (cursor.sibling === null) {
-        if (
-          cursor.return === null ||
-          cursor.return.tag === RootTag ||
-          cursor.return.tag === HostTag
-        ) {
+        if (cursor.return === null || isHostParent(cursor.return)) {
           return null;
         }
         cursor = cursor.return;
@@ -2076,7 +2164,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       cursor = cursor.sibling;
 
       while (!isHost(cursor)) {
-        if ((cursor.flags & PlacementFlag) !== 0 || cursor.child === null) {
+        if (
+          cursor.tag === PortalTag ||
+          (cursor.flags & PlacementFlag) !== 0 ||
+          cursor.child === null
+        ) {
           continue search;
         }
         cursor = cursor.child;
@@ -2100,10 +2192,22 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
 
-      if (parent.tag === HostTag || parent.tag === RootTag) return null;
+      if (isHostParent(parent)) return null;
     }
 
     return null;
+  }
+
+  function isHostParent(node: F): boolean {
+    return (
+      node.tag === RootTag || node.tag === HostTag || node.tag === PortalTag
+    );
+  }
+
+  function hostParentFor(node: F): Parent<Container, Instance> {
+    if (node.tag === RootTag) return (node.stateNode as R).container;
+    if (node.tag === HostTag) return node.stateNode as Instance;
+    return portalTarget(node);
   }
 
   function dehydratedSuspenseBoundary(
@@ -2401,9 +2505,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       return fiber(TextTag, null, null, { nodeValue: String(child) }, null);
     }
 
+    if (isPortal(child)) {
+      return fiber(PortalTag, null, child.key, portalProps(child), null);
+    }
+
     if (!isValidElement(child)) return null;
 
     return fiber(tagFor(child), child.type, child.key, child.props, null);
+  }
+
+  function portalTarget(node: F): Parent<Container, Instance> {
+    return node.props.target as Parent<Container, Instance>;
   }
 
   function fiber(
@@ -2483,6 +2595,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "Suspense";
       case ErrorBoundaryTag:
         return "ErrorBoundary";
+      case PortalTag:
+        return "Portal";
       default:
         return null;
     }
@@ -2684,6 +2798,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "context-provider";
       case ErrorBoundaryTag:
         return "error-boundary";
+      case PortalTag:
+        return "portal";
     }
   }
 
@@ -2703,6 +2819,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return `${devtoolsTypeName(node.type, "Context")}.Provider`;
       case ErrorBoundaryTag:
         return "ErrorBoundary";
+      case PortalTag:
+        return "Portal";
     }
   }
 
@@ -2903,13 +3021,25 @@ function sameType<Container, Instance, TextInstance>(
     return fiber.tag === TextTag;
   }
 
+  if (isPortal(child)) {
+    return fiber.tag === PortalTag && fiber.props.target === child.target;
+  }
+
   return isValidElement(child) && fiber.type === child.type;
 }
 
 function propsFor(child: FigChild): Props {
-  return typeof child === "string" || typeof child === "number"
-    ? { nodeValue: String(child) }
-    : child.props;
+  if (typeof child === "string" || typeof child === "number") {
+    return { nodeValue: String(child) };
+  }
+
+  if (isPortal(child)) return portalProps(child);
+
+  return child.props;
+}
+
+function portalProps(child: FigPortal): Props {
+  return { children: child.children, target: child.target };
 }
 
 function childKey(
@@ -2917,7 +3047,9 @@ function childKey(
   index: number,
   seenKeys: Set<string>,
 ): string {
-  if (!isValidElement(child) || child.key === null) return implicitKey(index);
+  if ((!isValidElement(child) && !isPortal(child)) || child.key === null) {
+    return implicitKey(index);
+  }
 
   const key = explicitKey(child.key);
   if (seenKeys.has(key)) throw duplicateKeyError(child.key);
@@ -2958,7 +3090,7 @@ function collectChild(node: FigNode, children: FigChild[]): void {
     return;
   }
 
-  if (isValidElement(node)) {
+  if (isValidElement(node) || isPortal(node)) {
     children.push(node);
     return;
   }
@@ -3014,7 +3146,7 @@ function hostTextContentPart(node: FigNode): HostTextContent {
     return String(node);
   }
 
-  if (isValidElement(node)) return NonTextHostContent;
+  if (isValidElement(node) || isPortal(node)) return NonTextHostContent;
 
   throw invalidChildError(node);
 }

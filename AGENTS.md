@@ -14,6 +14,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Event callbacks receive native DOM events plus an `AbortSignal`; Fig aborts the previous signal on re-entry and on listener removal.
 - DOM event listeners are delegated at the root and mapped to lanes/priorities.
 - Non-bubbling DOM events stay direct; focus-like events use capture delegation with Fig bubble semantics.
+- Portals render into explicit DOM targets while preserving Fig context, effects, and delegated event bubbling through the logical tree.
 - DOM node access uses `bind={(node, signal) => ...}` instead of React refs; components forward it as a normal prop.
 - Styling should stay separate from the `events` and `bind` APIs.
 - Render diagnostics throw before commit for duplicate sibling keys, invalid children, and render-phase state updates.

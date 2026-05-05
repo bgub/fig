@@ -8,6 +8,7 @@ import {
   Fragment,
   isContext,
   isErrorBoundary,
+  isPortal,
   isSuspense,
   isValidElement,
   type Props,
@@ -384,6 +385,8 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
     writeText(String(node), frame.segment);
     return;
   }
+
+  if (isPortal(node)) return;
 
   if (!isValidElement(node)) throw invalidChildError(node);
 
@@ -1113,7 +1116,7 @@ function collectChild(node: FigNode, children: FigChild[]): void {
     return;
   }
 
-  if (isValidElement(node)) {
+  if (isValidElement(node) || isPortal(node)) {
     children.push(node);
     return;
   }
