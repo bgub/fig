@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo... build",
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "serve": "python3 -m http.server 4173 --bind 127.0.0.1"
+    "serve": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
@@ -15,6 +17,7 @@
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3"
   }

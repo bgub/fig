@@ -9,7 +9,7 @@
     "format": "biome format --write",
     "test": "turbo test",
     "test:dom": "pnpm --filter @bgub/fig-dom test",
-    "test:e2e": "pnpm --filter @bgub/fig-streaming-ssr-demo test:e2e",
+    "test:e2e": "pnpm --filter @bgub/fig-streaming-ssr-demo --filter @bgub/fig-demo test:e2e",
     "test:reconciler": "pnpm --filter @bgub/fig-reconciler test",
     "test:watch": "vitest",
     "size": "size-limit"
