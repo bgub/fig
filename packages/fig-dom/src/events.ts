@@ -1,5 +1,6 @@
 import {
   DefaultLane,
+  type HydrationTargetResult,
   InputContinuousLane,
   type Lane,
   runWithPriority,
@@ -41,6 +42,12 @@ interface RootListener {
   listener: EventListener;
 }
 
+interface QueuedReplayableEvent {
+  event: Event;
+  root: Container;
+  type: string;
+}
+
 const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const rootContainers = new WeakSet<Container>();
@@ -48,6 +55,8 @@ const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
 const rootHydrationCallbacks = new WeakMap<Container, HydrationCallback>();
 const rootsWithHydrationListeners = new WeakSet<Container>();
 const immediatePropagationStopped = new WeakSet<Event>();
+const eventHydrationResults = new WeakMap<Event, HydrationTargetResult>();
+const queuedReplayableEvents: QueuedReplayableEvent[] = [];
 const discreteEvents = new Set([
   "beforeinput",
   "change",
@@ -58,6 +67,13 @@ const discreteEvents = new Set([
   "pointerdown",
   "pointerup",
   "submit",
+]);
+const replayableEvents = new Set([
+  "click",
+  "keydown",
+  "keyup",
+  "pointerdown",
+  "pointerup",
 ]);
 const continuousEvents = new Set([
   "drag",
@@ -76,10 +92,12 @@ const hydrationEvents = new Set([
   "mouseenter",
   "mouseleave",
 ]);
-const hydratedEvents = new WeakSet<Event>();
 let batch: Batch = (callback) => callback();
 
-type HydrationCallback = (target: EventTarget | null, lane: Lane) => boolean;
+type HydrationCallback = (
+  target: EventTarget | null,
+  lane: Lane,
+) => HydrationTargetResult;
 
 export function setEventBatching(nextBatch: Batch): void {
   batch = nextBatch;
@@ -162,13 +180,39 @@ export function removeEventSubtree(node: Element | Text): void {
   });
 }
 
-export function rootFor(node: Element | Text | Container): Container | null {
+export function rootFor(
+  node: Element | Text | Comment | Container,
+): Container | null {
   for (let current: unknown = node; current !== null; ) {
     if (isContainer(current) && rootContainers.has(current)) return current;
     current = parentOf(current);
   }
 
   return null;
+}
+
+export function replayQueuedEvents(root: Container): void {
+  for (let index = 0; index < queuedReplayableEvents.length; ) {
+    const queued = queuedReplayableEvents[index];
+
+    if (queued.root !== root) {
+      index += 1;
+      continue;
+    }
+
+    if (!targetWithinRoot(root, queued.event.target)) {
+      queuedReplayableEvents.splice(index, 1);
+      continue;
+    }
+
+    if (hydrateQueuedEvent(queued) === "blocked") {
+      index += 1;
+      continue;
+    }
+
+    queuedReplayableEvents.splice(index, 1);
+    dispatchReplayedEvent(root, queued.type, queued.event);
+  }
 }
 
 function addEventSlot(
@@ -204,28 +248,10 @@ function dispatchRootEvent(
   passive: boolean,
   event: Event,
 ): void {
-  hydrateForEvent(root, type, event);
+  if (hydrateForEvent(root, type, event) === "blocked") return;
 
   withStopImmediatePropagation(event, () => {
-    const path = eventPath(root, event);
-    const step = capture ? -1 : 1;
-    let index = capture ? path.length - 1 : 0;
-
-    while (index >= 0 && index < path.length) {
-      if (
-        dispatchRootEventAtElement(
-          root,
-          type,
-          capture,
-          passive,
-          event,
-          path[index],
-        )
-      ) {
-        return;
-      }
-      index += step;
-    }
+    dispatchRootEventPath(root, type, capture, passive, event);
   });
 }
 
@@ -242,23 +268,96 @@ function ensureHydrationListeners(root: Container): void {
   }
 }
 
-function hydrateForEvent(root: Container, type: string, event: Event): void {
+function hydrateForEvent(
+  root: Container,
+  type: string,
+  event: Event,
+): HydrationTargetResult {
   const hydrate = rootHydrationCallbacks.get(root);
-  if (hydrate === undefined) return;
-  if (hydratedEvents.has(event)) return;
+  if (hydrate === undefined) return "none";
 
-  hydratedEvents.add(event);
+  const previousResult = eventHydrationResults.get(event);
+  if (previousResult !== undefined) return previousResult;
+
   const lane = eventLane(type);
-  runWithPriority(lane, () => {
-    hydrate(event.target, lane);
+  const result = runWithPriority(lane, () => hydrate(event.target, lane));
+  eventHydrationResults.set(event, result);
+
+  if (result === "blocked" && replayableEvents.has(type)) {
+    queueReplayableEvent(root, type, event);
+  }
+
+  return result;
+}
+
+function queueReplayableEvent(
+  root: Container,
+  type: string,
+  event: Event,
+): void {
+  queuedReplayableEvents.push({
+    event,
+    root,
+    type,
   });
+}
+
+function hydrateQueuedEvent(
+  queued: QueuedReplayableEvent,
+): HydrationTargetResult {
+  const hydrate = rootHydrationCallbacks.get(queued.root);
+  if (hydrate === undefined) return "none";
+
+  const lane = eventLane(queued.type);
+  return runWithPriority(lane, () => hydrate(queued.event.target, lane));
+}
+
+function dispatchReplayedEvent(
+  root: Container,
+  type: string,
+  event: Event,
+): void {
+  withStopImmediatePropagation(event, () => {
+    dispatchRootEventPath(root, type, true, null, event);
+    if (!event.cancelBubble) {
+      dispatchRootEventPath(root, type, false, null, event);
+    }
+  });
+}
+
+function dispatchRootEventPath(
+  root: Container,
+  type: string,
+  capture: boolean,
+  passive: boolean | null,
+  event: Event,
+): void {
+  const path = eventPath(root, event);
+  const step = capture ? -1 : 1;
+  let index = capture ? path.length - 1 : 0;
+
+  while (index >= 0 && index < path.length) {
+    if (
+      dispatchRootEventAtElement(
+        root,
+        type,
+        capture,
+        passive,
+        event,
+        path[index],
+      )
+    ) {
+      return;
+    }
+    index += step;
+  }
 }
 
 function dispatchRootEventAtElement(
   root: Container,
   type: string,
   capture: boolean,
-  passive: boolean,
+  passive: boolean | null,
   event: Event,
   element: Element,
 ): boolean {
@@ -271,7 +370,7 @@ function dispatchRootEventAtElement(
       slot.root !== root ||
       slot.type !== type ||
       slot.options.capture !== capture ||
-      slot.options.passive !== passive
+      (passive !== null && slot.options.passive !== passive)
     ) {
       continue;
     }
@@ -498,6 +597,18 @@ function eventPath(root: Container, event: Event): Element[] {
   }
 
   return path;
+}
+
+function targetWithinRoot(
+  root: Container,
+  target: EventTarget | null,
+): boolean {
+  for (let current: unknown = target; current !== null; ) {
+    if (current === root) return true;
+    current = parentOf(current);
+  }
+
+  return false;
 }
 
 function withCurrentTarget<T>(

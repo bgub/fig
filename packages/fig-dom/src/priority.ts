@@ -2,6 +2,7 @@ export {
   DefaultLane,
   DeferredLane,
   GestureLane,
+  type HydrationTargetResult,
   IdleLane,
   InputContinuousLane,
   type Lane,

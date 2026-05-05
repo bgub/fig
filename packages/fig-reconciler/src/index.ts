@@ -170,6 +170,8 @@ export interface RecoverableErrorInfo extends ErrorInfo {
   source: "hydration" | "server";
 }
 
+export type HydrationTargetResult = "none" | "hydrated" | "blocked";
+
 type HydrationHostConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
@@ -506,20 +508,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     container: Container,
     target: unknown,
     lane: Lane = SelectiveHydrationLane,
-  ): boolean {
+  ): HydrationTargetResult {
     const root = roots.get(container as object);
     if (root === undefined || host.isTargetWithinSuspenseBoundary === undefined)
-      return false;
+      return "none";
 
     const boundary = findDehydratedSuspenseBoundaryForTarget(
       root.current.child,
       target,
     );
-    if (boundary === null) return false;
+    if (boundary === null) return "none";
 
     scheduleFiber(boundary, lane);
     if (isSyncLane(lane)) performRoot(root, true);
-    return true;
+    return findDehydratedSuspenseBoundaryForTarget(
+      root.current.child,
+      target,
+    ) === null
+      ? "hydrated"
+      : "blocked";
   }
 
   function flushSync(callback: () => void): void {

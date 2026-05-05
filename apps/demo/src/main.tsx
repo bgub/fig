@@ -32,6 +32,7 @@ type Page =
   | "async"
   | "resources"
   | "hydration"
+  | "event-replay"
   | "benchmarks";
 
 interface DemoItem {
@@ -85,6 +86,11 @@ const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
   { id: "async", label: "Async event signals", shortLabel: "Async" },
   { id: "resources", label: "Context + promises", shortLabel: "Resources" },
   { id: "hydration", label: "SSR + hydration", shortLabel: "Hydration" },
+  {
+    id: "event-replay",
+    label: "Hydration event replay",
+    shortLabel: "Replay",
+  },
   { id: "benchmarks", label: "Benchmarks", shortLabel: "Benchmarks" },
 ];
 
@@ -97,10 +103,20 @@ const initialItems: DemoItem[] = [
 const ThemeContext = createContext("light");
 
 type HydrationWrapper = "section" | "article";
+type ReplaySuspenseMarker = Comment & { __figRetry?: () => void };
 
 const hydrationDemo = {
   root: null as ReturnType<typeof createRoot> | null,
   sandbox: null as HTMLDivElement | null,
+};
+
+const replayDemo = {
+  button: null as HTMLButtonElement | null,
+  placeholder: null as HTMLTemplateElement | null,
+  root: null as ReturnType<typeof createRoot> | null,
+  sandbox: null as HTMLDivElement | null,
+  start: null as ReplaySuspenseMarker | null,
+  target: null as HTMLDivElement | null,
 };
 
 const focusBoundInput: Bind<HTMLInputElement> = (node, signal) => {
@@ -225,6 +241,8 @@ function pageView(page: Page) {
       return <ResourcesPage />;
     case "hydration":
       return <HydrationPage />;
+    case "event-replay":
+      return <HydrationReplayPage />;
     case "benchmarks":
       return <BenchmarksPage />;
     default:
@@ -562,6 +580,125 @@ function HydrationPage() {
   );
 }
 
+function HydrationReplayPage() {
+  const [status, setStatus] = useState("Mounting pending boundary...");
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const log = (message: string) => {
+    setLogs((value) =>
+      [...value, `${new Date().toLocaleTimeString()}  ${message}`].slice(-8),
+    );
+  };
+
+  const mountPendingBoundary = () => {
+    const sandbox = replayDemo.sandbox;
+    if (sandbox === null) {
+      setStatus("Replay sandbox is not mounted yet.");
+      return;
+    }
+
+    resetReplayDemoRoot();
+    setLogs([]);
+
+    const target = replayTarget();
+    sandbox.replaceChildren(target);
+
+    const refs = replayBoundaryRefs(target);
+    if (refs === null) {
+      setStatus("Could not find replay boundary markers.");
+      return;
+    }
+
+    replayDemo.button = refs.button;
+    replayDemo.placeholder = refs.placeholder;
+    replayDemo.start = refs.start;
+    replayDemo.target = target;
+
+    flushSync(() => {
+      replayDemo.root = hydrateRoot(
+        target,
+        <ReplayIsland
+          onChildAction={() => log("child handler ran")}
+          onParentAction={() => log("parent handler ran")}
+        />,
+      );
+    });
+
+    setStatus("Pending boundary mounted.");
+  };
+
+  const dispatchPendingClick = () => {
+    if (replayDemo.button === null) {
+      setStatus("Mount a pending boundary first.");
+      return;
+    }
+
+    replayDemo.button.click();
+    setStatus("Click dispatched while Suspense is pending.");
+  };
+
+  const completeBoundary = (replaceTarget: boolean) => {
+    const start = replayDemo.start;
+    const placeholder = replayDemo.placeholder;
+
+    if (start === null || placeholder === null) {
+      setStatus("Mount a pending boundary first.");
+      return;
+    }
+
+    if (replaceTarget) replaceReplayTarget();
+
+    start.data = "fig:suspense:completed";
+    placeholder.remove();
+    replayDemo.placeholder = null;
+    start.__figRetry?.();
+    setStatus(
+      replaceTarget
+        ? "Boundary completed after replacing the original target."
+        : "Boundary completed with the original target preserved.",
+    );
+  };
+
+  useOnMount((signal) => {
+    mountPendingBoundary();
+    signal.addEventListener("abort", resetReplayDemoRoot, { once: true });
+  });
+
+  return (
+    <PageFrame
+      title="Hydration event replay"
+      lede="A pending Suspense boundary with a delegated parent handler and a hydrated child handler."
+    >
+      <Row>
+        <Command primary run={mountPendingBoundary}>
+          Reset pending
+        </Command>
+        <Command run={dispatchPendingClick}>Click pending target</Command>
+        <Command run={() => completeBoundary(false)}>
+          Complete, keep target
+        </Command>
+        <Command run={() => completeBoundary(true)}>
+          Complete, replace target
+        </Command>
+      </Row>
+      <p className="hint">{status}</p>
+      <div className="hydration-grid">
+        <section>
+          <h3>Replay target</h3>
+          <div
+            className="hydration-sandbox replay-sandbox"
+            bind={replaySandboxBind}
+          />
+        </section>
+        <section>
+          <h3>Event log</h3>
+          <pre className="log">{logs.join("\n") || "No Fig handlers yet."}</pre>
+        </section>
+      </div>
+    </PageFrame>
+  );
+}
+
 async function renderHydrationHtml(mismatch: boolean): Promise<{
   html: string;
   servedAt: string;
@@ -624,6 +761,49 @@ function HydrationIsland({
   );
 }
 
+function ReplayIsland({
+  onChildAction,
+  onParentAction,
+}: {
+  onChildAction: () => void;
+  onParentAction: () => void;
+}) {
+  return (
+    <section
+      className="replay-parent"
+      events={[on("click", () => onParentAction())]}
+    >
+      <Suspense fallback={<ReplayButton label="Pending target" />}>
+        <ReplayButton
+          label="Hydrated target"
+          onAction={(event) => {
+            event.stopPropagation();
+            onChildAction();
+          }}
+        />
+      </Suspense>
+    </section>
+  );
+}
+
+function ReplayButton({
+  label,
+  onAction,
+}: {
+  label: string;
+  onAction?: (event: MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="button primary replay-action"
+      events={onAction === undefined ? undefined : [on("click", onAction)]}
+    >
+      {label}
+    </button>
+  );
+}
+
 const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   hydrationDemo.sandbox = node;
   signal.addEventListener(
@@ -636,12 +816,93 @@ const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   );
 };
 
+const replaySandboxBind: Bind<HTMLDivElement> = (node, signal) => {
+  replayDemo.sandbox = node;
+  signal.addEventListener(
+    "abort",
+    () => {
+      resetReplayDemoRoot();
+      if (replayDemo.sandbox === node) replayDemo.sandbox = null;
+    },
+    { once: true },
+  );
+};
+
 function resetHydrationDemoRoot(): void {
   const root = hydrationDemo.root;
   if (root === null) return;
 
   hydrationDemo.root = null;
   flushSync(() => root.unmount());
+}
+
+function resetReplayDemoRoot(): void {
+  const root = replayDemo.root;
+
+  replayDemo.button = null;
+  replayDemo.placeholder = null;
+  replayDemo.root = null;
+  replayDemo.start = null;
+  replayDemo.target = null;
+
+  if (root === null) return;
+  flushSync(() => root.unmount());
+}
+
+function replayTarget(): HTMLDivElement {
+  const target = document.createElement("div");
+  target.className = "hydration-target replay-target";
+  target.innerHTML = pendingReplayHtml();
+  return target;
+}
+
+function pendingReplayHtml(): string {
+  return [
+    '<section class="replay-parent">',
+    "<!--fig:suspense:pending:0-->",
+    '<template id="b-0"></template>',
+    '<button type="button" class="button primary replay-action" data-replay-button="true">Pending target</button>',
+    "<!--/fig:suspense-->",
+    "</section>",
+  ].join("");
+}
+
+function replayBoundaryRefs(target: HTMLDivElement): {
+  button: HTMLButtonElement;
+  placeholder: HTMLTemplateElement;
+  start: ReplaySuspenseMarker;
+} | null {
+  const button = target.querySelector<HTMLButtonElement>(
+    "[data-replay-button]",
+  );
+  const placeholder = target.querySelector<HTMLTemplateElement>("template");
+  const start = findReplayStart(target);
+
+  if (button === null || placeholder === null || start === null) return null;
+  return { button, placeholder, start };
+}
+
+function findReplayStart(target: HTMLDivElement): ReplaySuspenseMarker | null {
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_COMMENT);
+
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const comment = node as ReplaySuspenseMarker;
+    if (comment.data.startsWith("fig:suspense:pending:")) return comment;
+  }
+
+  return null;
+}
+
+function replaceReplayTarget(): void {
+  const button = replayDemo.button;
+  if (button === null) return;
+
+  const replacement = document.createElement("button");
+  replacement.type = "button";
+  replacement.className = "button primary replay-action";
+  replacement.textContent = "Replacement target";
+  button.replaceWith(replacement);
+  replayDemo.button = replacement;
 }
 
 function BenchmarksPage() {

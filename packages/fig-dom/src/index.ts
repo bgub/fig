@@ -19,6 +19,7 @@ import {
   type Container,
   registerRoot,
   removeEventSubtree,
+  replayQueuedEvents,
   rootFor,
   setEventBatching,
 } from "./events.ts";
@@ -105,13 +106,16 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     (boundary.start as RetriableSuspenseMarker).__figRetry = retry;
   },
   commitHydratedSuspenseBoundary: (boundary) => {
+    const root = rootFor(boundary.start);
+
     if (boundary.status === "completed" && !boundary.forceClientRender) {
       removeNode(boundary.start);
       removeNode(boundary.end);
-      return;
+    } else {
+      removeSuspenseBoundaryRange(boundary);
     }
 
-    removeSuspenseBoundaryRange(boundary);
+    if (root !== null) queueMicrotask(() => replayQueuedEvents(root));
   },
   removeDehydratedSuspenseBoundary: (boundary) => {
     removeSuspenseBoundaryRange(boundary);

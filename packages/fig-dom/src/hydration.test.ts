@@ -229,6 +229,89 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.textContent).toBe("Loading");
   });
 
+  it("replays blocked clicks after pending Suspense boundaries hydrate", async () => {
+    const boundary = suspenseDom("pending", "button", "Loading");
+    const container = new FakeElement("root");
+    const parent = new FakeElement("section");
+    const calls: string[] = [];
+
+    container.appendChild(parent);
+    parent.appendChild(boundary.start);
+    if (boundary.placeholder !== null) parent.appendChild(boundary.placeholder);
+    parent.appendChild(boundary.content);
+    parent.appendChild(boundary.end);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "section",
+          { events: [on("click", () => calls.push("parent"))] },
+          createElement(
+            Suspense,
+            { fallback: createElement("button", null, "Loading") },
+            createElement(
+              "button",
+              {
+                events: [
+                  on("click", (event) => {
+                    calls.push(
+                      `child:${(event.currentTarget as unknown as FakeElement).tagName}`,
+                    );
+                    event.stopPropagation();
+                  }),
+                ],
+              },
+              "Client",
+            ),
+          ),
+        ),
+      ),
+    );
+
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(parent, boundary);
+
+    await delay();
+
+    expect(parent.childNodes).toEqual([boundary.content]);
+    expect(boundary.content.textContent).toBe("Client");
+    expect(calls).toEqual(["child:button"]);
+  });
+
+  it("does not replay hydrate-only events after pending Suspense hydrates", async () => {
+    const boundary = suspenseDom("pending", "textarea", "Loading");
+    const calls: string[] = [];
+
+    flushSync(() =>
+      hydrateRoot(
+        boundary.container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("textarea", null, "Loading") },
+          createElement(
+            "textarea",
+            { events: [on("input", () => calls.push("input"))] },
+            "Client",
+          ),
+        ),
+      ),
+    );
+
+    boundary.content.dispatch("input");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(boundary.container, boundary);
+
+    await delay();
+
+    expect(boundary.container.childNodes).toEqual([boundary.content]);
+    expect(boundary.content.textContent).toBe("Client");
+    expect(calls).toEqual([]);
+  });
+
   it("hydrates pending Suspense boundaries after the server completes them", async () => {
     const {
       container,
@@ -268,6 +351,8 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([serverContent]);
     expect(serverContent.textContent).toBe("Client");
+    expect(calls).toEqual([]);
+
     serverContent.dispatch("click");
 
     expect(calls).toEqual(["click"]);
@@ -755,4 +840,17 @@ function element(tagName: string, text: string): FakeElement {
   const node = new FakeElement(tagName);
   node.appendChild(new FakeText(text));
   return node;
+}
+
+function completePendingBoundary(
+  parent: FakeElement,
+  boundary: ReturnType<typeof suspenseDom>,
+): void {
+  if (boundary.placeholder === null) {
+    throw new Error("Expected pending placeholder.");
+  }
+
+  boundary.start.data = "fig:suspense:completed";
+  parent.removeChild(boundary.placeholder);
+  (boundary.start as RetriableFakeComment).__figRetry?.();
 }

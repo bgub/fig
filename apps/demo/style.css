@@ -402,6 +402,25 @@ button {
   padding: 12px;
 }
 
+.replay-sandbox {
+  min-height: 220px;
+}
+
+.replay-parent {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 164px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.replay-action {
+  width: fit-content;
+  min-width: 176px;
+}
+
 .server-stamp {
   display: inline-flex;
   width: fit-content;
