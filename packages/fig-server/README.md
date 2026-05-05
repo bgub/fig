@@ -37,6 +37,10 @@ collects the readable stream:
 const html = await renderToString(<App />);
 ```
 
+Pass `identifierPrefix` when multiple streaming renders share a document. Fig
+uses it in generated Suspense marker and script identifiers, and it defaults to
+an empty string.
+
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, no-op server effects, host prop serialization,
 streaming Suspense, partial segments inside Suspense boundaries, abort fallback

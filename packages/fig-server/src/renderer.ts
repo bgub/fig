@@ -24,9 +24,11 @@ import {
 } from "./html.ts";
 import {
   boundaryId,
+  boundaryPlaceholderMarkup,
   jsString,
   placeholderId,
   placeholderMarkup,
+  segmentContainerStartMarkup,
   segmentId,
   writeRuntime as writeProtocolRuntime,
   writeScript as writeProtocolScript,
@@ -158,9 +160,7 @@ export function createServerRenderRequest(
     completedRootSegment: null,
     controller: null,
     fatalError: null,
-    identifierPrefix: validateIdentifierPrefix(
-      options.identifierPrefix ?? "fig",
-    ),
+    identifierPrefix: options.identifierPrefix ?? "",
     nextBoundaryId: 0,
     nextSegmentId: 0,
     nonce: options.nonce,
@@ -606,16 +606,7 @@ function finishedTask(request: Request, task: Task, segment: Segment): void {
 
     if (segment.parentFlushed) queueCompletedSegment(boundary, segment);
 
-    if (boundary.pendingTasks === 0 && boundary.status === "pending") {
-      boundary.status = "completed";
-      for (const fallbackTask of [...boundary.fallbackAbortableTasks]) {
-        abortTask(request, fallbackTask);
-      }
-
-      if (boundary.parentFlushed) {
-        request.completedBoundaries.push(boundary);
-      }
-    } else if (boundary.parentFlushed) {
+    if (!completeBoundaryIfReady(request, boundary) && boundary.parentFlushed) {
       enqueuePartialBoundary(request, boundary);
     }
   }
@@ -657,21 +648,33 @@ function abortTask(request: Request, task: Task): void {
     if (request.pendingRootTasks === 0) request.closeShellReady();
   } else {
     boundary.pendingTasks -= 1;
-
-    if (boundary.pendingTasks === 0 && boundary.status === "pending") {
-      boundary.status = "completed";
-
-      for (const fallbackTask of [...boundary.fallbackAbortableTasks]) {
-        abortTask(request, fallbackTask);
-      }
-
-      if (boundary.parentFlushed) {
-        request.completedBoundaries.push(boundary);
-      }
-    }
+    completeBoundaryIfReady(request, boundary);
   }
 
   if (request.pendingTasks === 0) request.closeAllReady();
+}
+
+function completeBoundaryIfReady(
+  request: Request,
+  boundary: SuspenseBoundary,
+): boolean {
+  if (boundary.pendingTasks !== 0 || boundary.status !== "pending") {
+    return false;
+  }
+
+  boundary.status = "completed";
+  abortFallbackTasks(request, boundary);
+  if (boundary.parentFlushed) request.completedBoundaries.push(boundary);
+  return true;
+}
+
+function abortFallbackTasks(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
+  for (const fallbackTask of [...boundary.fallbackAbortableTasks]) {
+    abortTask(request, fallbackTask);
+  }
 }
 
 function markBoundaryClientRendered(
@@ -826,10 +829,7 @@ function flushSuspenseBoundary(
 
   boundary.id ??= request.nextBoundaryId++;
   write(request, `<!--fig:suspense:pending:${boundary.id}-->`);
-  write(
-    request,
-    `<template id="${boundaryId(request, boundary.id)}"></template>`,
-  );
+  write(request, boundaryPlaceholderMarkup(request, boundary.id));
   flushSubtree(request, segment);
   write(request, "<!--/fig:suspense-->");
 
@@ -856,30 +856,10 @@ function flushCompletedBoundary(
 ): void {
   boundary.id ??= request.nextBoundaryId++;
   for (const segment of boundary.completedSegments) {
-    segment.id ??= request.nextSegmentId++;
-    if (segment === boundary.contentSegment) {
-      boundary.contentSegmentId = segment.id;
-    }
-    flushSegmentContainer(request, segment);
-
-    if (segment !== boundary.contentSegment) {
-      writeRuntime(request);
-      writeScript(
-        request,
-        `__figSSR.s(${jsString(placeholderId(request, segment.id))},${jsString(
-          segmentId(request, segment.id),
-        )})`,
-      );
-    }
+    flushBoundarySegment(request, boundary, segment);
   }
   boundary.completedSegments = [];
-  writeRuntime(request);
-  writeScript(
-    request,
-    `__figSSR.c(${jsString(boundaryId(request, boundary.id))},${jsString(
-      segmentId(request, requireBoundaryContentId(boundary)),
-    )})`,
-  );
+  writeBoundaryRevealScript(request, boundary);
 }
 
 function flushPartialBoundary(
@@ -887,12 +867,12 @@ function flushPartialBoundary(
   boundary: SuspenseBoundary,
 ): void {
   for (const segment of boundary.completedSegments) {
-    flushPartiallyCompletedSegment(request, boundary, segment);
+    flushBoundarySegment(request, boundary, segment);
   }
   boundary.completedSegments = [];
 }
 
-function flushPartiallyCompletedSegment(
+function flushBoundarySegment(
   request: Request,
   boundary: SuspenseBoundary,
   segment: Segment,
@@ -905,14 +885,32 @@ function flushPartiallyCompletedSegment(
   flushSegmentContainer(request, segment);
 
   if (segment !== boundary.contentSegment) {
-    writeRuntime(request);
-    writeScript(
-      request,
-      `__figSSR.s(${jsString(placeholderId(request, segment.id))},${jsString(
-        segmentId(request, segment.id),
-      )})`,
-    );
+    writeSegmentRevealScript(request, segment);
   }
+}
+
+function writeSegmentRevealScript(request: Request, segment: Segment): void {
+  const id = requireSegmentId(segment);
+  writeRuntime(request);
+  writeScript(
+    request,
+    `__figSSR.s(${jsString(placeholderId(request, id))},${jsString(
+      segmentId(request, id),
+    )})`,
+  );
+}
+
+function writeBoundaryRevealScript(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
+  writeRuntime(request);
+  writeScript(
+    request,
+    `__figSSR.c(${jsString(
+      boundaryId(request, requireBoundaryId(boundary)),
+    )},${jsString(segmentId(request, requireBoundaryContentId(boundary)))})`,
+  );
 }
 
 function flushSegmentContainer(request: Request, segment: Segment): void {
@@ -920,7 +918,7 @@ function flushSegmentContainer(request: Request, segment: Segment): void {
 
   write(
     request,
-    `<div hidden id="${segmentId(request, requireSegmentId(segment))}">`,
+    segmentContainerStartMarkup(request, requireSegmentId(segment)),
   );
   flushSegment(request, segment);
   write(request, "</div>");
@@ -1027,6 +1025,13 @@ function requireSegmentId(segment: Segment): number {
     throw new Error("Expected a segment id before flushing.");
   }
   return segment.id;
+}
+
+function requireBoundaryId(boundary: SuspenseBoundary): number {
+  if (boundary.id === null) {
+    throw new Error("Expected a Suspense boundary id before revealing.");
+  }
+  return boundary.id;
 }
 
 function requireBoundaryContentId(boundary: SuspenseBoundary): number {
@@ -1171,13 +1176,6 @@ function abortError(reason: unknown): Error {
 
 function abortReason(reason: unknown): unknown {
   return reason ?? new Error("Server render was aborted.");
-}
-
-function validateIdentifierPrefix(value: string): string {
-  if (/^[A-Za-z0-9:_-]+$/.test(value)) return value;
-  throw new Error(
-    "identifierPrefix may only contain letters, numbers, colons, underscores, and dashes.",
-  );
 }
 
 function invalidChildError(value: unknown): Error {

@@ -1,6 +1,10 @@
 import type { FigNode } from "@bgub/fig";
 
 export interface ServerRenderOptions {
+  /**
+   * Prefix for generated streaming Suspense identifiers.
+   * Defaults to an empty string.
+   */
   identifierPrefix?: string;
   nonce?: string;
   onError?: (

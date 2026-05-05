@@ -12,6 +12,7 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { renderToReadableStream, renderToString } from "./index.ts";
+import { jsString } from "./protocol.ts";
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
@@ -46,6 +47,30 @@ async function waitForMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function readResolvedSuspenseHtml(
+  identifierPrefix?: string,
+): Promise<string> {
+  const pending = deferred<string>();
+
+  function Message() {
+    return createElement("span", null, readPromise(pending.promise));
+  }
+
+  const result = renderToReadableStream(
+    createElement(
+      Suspense,
+      { fallback: createElement("em", null, "Loading") },
+      createElement("div", null, "Before ", createElement(Message, null)),
+    ),
+    identifierPrefix === undefined ? undefined : { identifierPrefix },
+  );
+
+  await result.shellReady;
+  pending.resolve("Ready");
+  await result.allReady;
+  return readStream(result.stream);
 }
 
 describe("@bgub/fig-server", () => {
@@ -345,16 +370,51 @@ describe("@bgub/fig-server", () => {
     ).rejects.toThrow('Cannot serialize prop "data" to HTML.');
   });
 
-  it("rejects unsafe streaming identifier prefixes", () => {
-    const node = createElement("p", null, "Hi");
-    const message =
-      "identifierPrefix may only contain letters, numbers, colons, underscores, and dashes.";
+  it("uses React-like streaming identifier prefixes", async () => {
+    for (const [identifierPrefix, expectedPrefix] of [
+      [undefined, ""],
+      ["", ""],
+      ["test", "test-"],
+    ] as const) {
+      const html = await readResolvedSuspenseHtml(identifierPrefix);
 
-    for (const identifierPrefix of ['x" onclick="bad', "<script>"]) {
-      expect(() => renderToReadableStream(node, { identifierPrefix })).toThrow(
-        message,
+      expect(html).toContain(`<template id="${expectedPrefix}b-0"></template>`);
+      expect(html).toContain(`<template id="${expectedPrefix}p-1"></template>`);
+      expect(html).toContain(`<div hidden id="${expectedPrefix}s-0">`);
+      expect(html).toContain(
+        `__figSSR.s("${expectedPrefix}p-1","${expectedPrefix}s-1")`,
+      );
+      expect(html).toContain(
+        `__figSSR.c("${expectedPrefix}b-0","${expectedPrefix}s-0")`,
       );
     }
+
+    const hostilePrefix = 'x" onclick="<bad>&';
+    const hostileHtml = await readResolvedSuspenseHtml(hostilePrefix);
+    const escapedPrefix = "x&quot; onclick=&quot;&lt;bad&gt;&amp;";
+    const escapedBoundaryId = `${escapedPrefix}-b-0`;
+    const escapedContentSegmentId = `${escapedPrefix}-s-0`;
+    const escapedPlaceholderId = `${escapedPrefix}-p-1`;
+    const boundaryId = `${hostilePrefix}-b-0`;
+    const contentSegmentId = `${hostilePrefix}-s-0`;
+    const placeholderId = `${hostilePrefix}-p-1`;
+    const partialSegmentId = `${hostilePrefix}-s-1`;
+
+    expect(hostileHtml).toContain(
+      `<template id="${escapedBoundaryId}"></template>`,
+    );
+    expect(hostileHtml).toContain(
+      `<div hidden id="${escapedContentSegmentId}">`,
+    );
+    expect(hostileHtml).toContain(
+      `<template id="${escapedPlaceholderId}"></template>`,
+    );
+    expect(hostileHtml).toContain(
+      `__figSSR.s(${jsString(placeholderId)},${jsString(partialSegmentId)})`,
+    );
+    expect(hostileHtml).toContain(
+      `__figSSR.c(${jsString(boundaryId)},${jsString(contentSegmentId)})`,
+    );
   });
 
   it("renders void elements and rejects their children", async () => {
