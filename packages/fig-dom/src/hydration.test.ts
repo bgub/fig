@@ -514,6 +514,44 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes).toEqual([]);
   });
 
+  it("matches nested dehydrated Suspense ranges when they unmount", () => {
+    const container = new FakeElement("root");
+    const outerStart = new FakeComment("fig:suspense:completed");
+    const outerEnd = new FakeComment("/fig:suspense");
+    const inner = suspenseDom("pending", "span", "Inner loading");
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    if (inner.placeholder === null) throw new Error("Expected pending marker.");
+
+    for (const node of [
+      outerStart,
+      inner.start,
+      inner.placeholder,
+      inner.content,
+      inner.end,
+      outerEnd,
+    ]) {
+      container.appendChild(node);
+    }
+
+    flushSync(() => {
+      root = hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Outer loading") },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Inner loading") },
+            createElement("span", null, "Inner client"),
+          ),
+        ),
+      );
+    });
+    flushSync(() => root?.render(null));
+
+    expect(container.childNodes).toEqual([]);
+  });
+
   it("removes server-only attributes and styles during hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");

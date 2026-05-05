@@ -158,7 +158,9 @@ export function createServerRenderRequest(
     completedRootSegment: null,
     controller: null,
     fatalError: null,
-    identifierPrefix: options.identifierPrefix ?? "fig",
+    identifierPrefix: validateIdentifierPrefix(
+      options.identifierPrefix ?? "fig",
+    ),
     nextBoundaryId: 0,
     nextSegmentId: 0,
     nonce: options.nonce,
@@ -1169,6 +1171,13 @@ function abortError(reason: unknown): Error {
 
 function abortReason(reason: unknown): unknown {
   return reason ?? new Error("Server render was aborted.");
+}
+
+function validateIdentifierPrefix(value: string): string {
+  if (/^[A-Za-z0-9:_-]+$/.test(value)) return value;
+  throw new Error(
+    "identifierPrefix may only contain letters, numbers, colons, underscores, and dashes.",
+  );
 }
 
 function invalidChildError(value: unknown): Error {

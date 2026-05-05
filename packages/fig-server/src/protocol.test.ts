@@ -117,18 +117,30 @@ function createPendingBoundary(document: TestDocument): {
   return { boundaryPlaceholder, calls, end, fallback, root, start };
 }
 
+function appendCompletedSegment(
+  document: TestDocument,
+  root: TestNode,
+): { after: TestNode; completed: TestNode; segment: TestNode } {
+  const after = new TestNode(elementNode, "after");
+  const segment = document.register(new TestNode(elementNode, "s"));
+  const completed = new TestNode(elementNode, "completed");
+
+  root.appendChild(after);
+  root.appendChild(segment);
+  segment.appendChild(completed);
+
+  return { after, completed, segment };
+}
+
 describe("server streaming protocol", () => {
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {
     const document = new TestDocument();
     const { boundaryPlaceholder, calls, end, fallback, root, start } =
       createPendingBoundary(document);
-    const after = new TestNode(elementNode, "after");
-    const segment = document.register(new TestNode(elementNode, "s"));
-    const completed = new TestNode(elementNode, "completed");
-
-    root.appendChild(after);
-    root.appendChild(segment);
-    segment.appendChild(completed);
+    const { after, completed, segment } = appendCompletedSegment(
+      document,
+      root,
+    );
 
     installRuntime(document).c("b", "s");
 
@@ -139,6 +151,35 @@ describe("server streaming protocol", () => {
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(fallback.parentNode).toBeNull();
     expect(end.parentNode).toBe(root);
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("removes nested fallback Suspense ranges when completing a boundary", () => {
+    const document = new TestDocument();
+    const { boundaryPlaceholder, calls, end, fallback, root, start } =
+      createPendingBoundary(document);
+    const innerStart = new TestNode(
+      commentNode,
+      null,
+      "fig:suspense:pending:1",
+    );
+    const innerEnd = new TestNode(commentNode, null, "/fig:suspense");
+    const innerPlaceholder = document.register(new TestNode(elementNode, "ib"));
+
+    root.insertBefore(innerStart, fallback);
+    root.insertBefore(innerPlaceholder, fallback);
+    root.insertBefore(innerEnd, end);
+    const { after, completed, segment } = appendCompletedSegment(
+      document,
+      root,
+    );
+
+    installRuntime(document).c("b", "s");
+
+    expect(root.childNodes).toEqual([start, completed, end, after]);
+    expect(segment.parentNode).toBeNull();
+    expect(boundaryPlaceholder.parentNode).toBeNull();
+    expect(start.data).toBe("fig:suspense:completed");
     expect(calls).toEqual(["retry"]);
   });
 

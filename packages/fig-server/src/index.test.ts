@@ -345,6 +345,18 @@ describe("@bgub/fig-server", () => {
     ).rejects.toThrow('Cannot serialize prop "data" to HTML.');
   });
 
+  it("rejects unsafe streaming identifier prefixes", () => {
+    const node = createElement("p", null, "Hi");
+    const message =
+      "identifierPrefix may only contain letters, numbers, colons, underscores, and dashes.";
+
+    for (const identifierPrefix of ['x" onclick="bad', "<script>"]) {
+      expect(() => renderToReadableStream(node, { identifierPrefix })).toThrow(
+        message,
+      );
+    }
+  });
+
   it("renders void elements and rejects their children", async () => {
     await expect(
       renderToString(createElement("input", { value: "Fig" })),

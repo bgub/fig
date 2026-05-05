@@ -215,12 +215,23 @@ function suspenseMarker(node: unknown): SuspenseMarker | null {
 }
 
 function suspenseBoundaryEnd(start: TextLike): TextLike | null {
+  let depth = 0;
+
   for (
     let node = start.nextSibling as Element | TextLike | null;
     node !== null;
     node = node.nextSibling as Element | TextLike | null
   ) {
-    if (isComment(node) && node.data === "/fig:suspense") return node;
+    if (!isComment(node)) continue;
+
+    if (suspenseMarker(node) !== null) {
+      depth += 1;
+      continue;
+    }
+
+    if (node.data !== "/fig:suspense") continue;
+    if (depth === 0) return node;
+    depth -= 1;
   }
 
   return null;
