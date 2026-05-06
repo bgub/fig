@@ -39,6 +39,20 @@ After Phases 1-3, a 1,000-row browser run produced these medians:
 
 The placement work closed the reverse-keyed reorder gap and made append/prepend faster than React on this benchmark. Remaining gaps are initial mount and same-order updates.
 
+A 5,000-row browser run produced these medians:
+
+| Scenario | Fig median | React median | Gap |
+| --- | ---: | ---: | ---: |
+| Initial mount | 18.500 ms | 13.500 ms | Fig 37% slower |
+| Same-order update | 14.000 ms | 9.333 ms | Fig 50% slower |
+| Append 10% | 7.833 ms | 10.125 ms | Fig 23% faster |
+| Prepend 10% | 8.667 ms | 10.500 ms | Fig 17% faster |
+| Reverse keyed rows | 23.000 ms | 57.000 ms | Fig 60% faster |
+
+At 5,000 rows, the same shape holds: Fig is ahead on append, prepend, and
+reverse keyed reorder, while initial mount and same-order updates remain the
+main opportunities.
+
 ## Goals
 
 - Improve worst-case keyed reorder performance without changing public APIs.
@@ -224,7 +238,7 @@ After each phase:
 - [x] `pnpm test`
 - [x] `pnpm --filter @bgub/fig-demo build`
 - [x] Run demo benchmark page at 1,000 rows and record medians.
-- [ ] Optionally run 5,000 rows to expose scaling behavior. (pending browser measurement)
+- [x] Optionally run 5,000 rows to expose scaling behavior.
 
 ## Suggested order
 
