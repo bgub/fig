@@ -14,6 +14,7 @@ export type FigDevtoolsFiberKind =
   | "function"
   | "fragment"
   | "context-provider"
+  | "suspense"
   | "error-boundary"
   | "portal";
 

@@ -2744,6 +2744,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     parentId: number | null,
   ): FigDevtoolsFiberSnapshot {
     const id = devtoolsFiberId(node);
+    const { kind, name } = devtoolsFiberInfo(node);
     const children: FigDevtoolsFiberSnapshot[] = [];
 
     for (let child = node.child; child !== null; child = child.sibling) {
@@ -2753,8 +2754,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     return {
       id,
       parentId,
-      name: devtoolsFiberName(node),
-      kind: devtoolsFiberKind(node),
+      name,
+      kind,
       key: node.key,
       index: node.index,
       props: devtoolsProps(node),
@@ -2860,45 +2861,35 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function devtoolsFiberKind(node: F): FigDevtoolsFiberKind {
+  function devtoolsFiberInfo(node: F): {
+    kind: FigDevtoolsFiberKind;
+    name: string;
+  } {
     switch (node.tag) {
       case RootTag:
-        return "root";
+        return { kind: "root", name: "Root" };
       case HostTag:
-        return "host";
+        return { kind: "host", name: String(node.type) };
       case TextTag:
-        return "text";
+        return { kind: "text", name: "#text" };
       case FunctionTag:
-        return "function";
+        return {
+          kind: "function",
+          name: devtoolsTypeName(node.type, "Anonymous"),
+        };
       case FragmentTag:
-        return "fragment";
+        return { kind: "fragment", name: "Fragment" };
       case ContextProviderTag:
-        return "context-provider";
+        return {
+          kind: "context-provider",
+          name: `${devtoolsTypeName(node.type, "Context")}.Provider`,
+        };
+      case SuspenseTag:
+        return { kind: "suspense", name: "Suspense" };
       case ErrorBoundaryTag:
-        return "error-boundary";
+        return { kind: "error-boundary", name: "ErrorBoundary" };
       case PortalTag:
-        return "portal";
-    }
-  }
-
-  function devtoolsFiberName(node: F): string {
-    switch (node.tag) {
-      case RootTag:
-        return "Root";
-      case HostTag:
-        return String(node.type);
-      case TextTag:
-        return "#text";
-      case FunctionTag:
-        return devtoolsTypeName(node.type, "Anonymous");
-      case FragmentTag:
-        return "Fragment";
-      case ContextProviderTag:
-        return `${devtoolsTypeName(node.type, "Context")}.Provider`;
-      case ErrorBoundaryTag:
-        return "ErrorBoundary";
-      case PortalTag:
-        return "Portal";
+        return { kind: "portal", name: "Portal" };
     }
   }
 

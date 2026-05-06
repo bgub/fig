@@ -89,6 +89,24 @@ const globalWithDevtoolsHook = globalThis as typeof globalThis & {
   __FIG_DEVTOOLS_GLOBAL_HOOK__?: FigDevtoolsGlobalHook;
 };
 
+function collectDevtoolsCommits(): FigDevtoolsRootSnapshot[] {
+  const commits: FigDevtoolsRootSnapshot[] = [];
+  globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
+    inject(renderer) {
+      expect(renderer).toEqual({
+        name: "Fig",
+        packageName: "@bgub/fig-reconciler",
+      });
+      return 7;
+    },
+    onCommitRoot(rendererId, snapshot) {
+      expect(rendererId).toBe(7);
+      commits.push(snapshot);
+    },
+  };
+  return commits;
+}
+
 afterEach(() => {
   delete globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__;
 });
@@ -131,22 +149,7 @@ describe("reconciler", () => {
   });
 
   it("publishes committed fiber snapshots to the Fig DevTools hook", () => {
-    const commits: FigDevtoolsRootSnapshot[] = [];
-    const hook: FigDevtoolsGlobalHook = {
-      inject(renderer) {
-        expect(renderer).toEqual({
-          name: "Fig",
-          packageName: "@bgub/fig-reconciler",
-        });
-        return 7;
-      },
-      onCommitRoot(rendererId, snapshot) {
-        expect(rendererId).toBe(7);
-        commits.push(snapshot);
-      },
-    };
-    globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = hook;
-
+    const commits = collectDevtoolsCommits();
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
     const root = createRoot(container);
@@ -184,17 +187,32 @@ describe("reconciler", () => {
     expect(commits.at(-1)?.tree.children[0]?.id).toBe(counterId);
   });
 
-  it("publishes captured error boundary state to DevTools", () => {
-    const commits: FigDevtoolsRootSnapshot[] = [];
-    globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
-      inject() {
-        return 7;
-      },
-      onCommitRoot(_rendererId, snapshot) {
-        commits.push(snapshot);
-      },
-    };
+  it("publishes Suspense fibers to DevTools snapshots", () => {
+    const commits = collectDevtoolsCommits();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
 
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement("span", null, "Ready"),
+        ),
+      ),
+    );
+
+    const suspense = commits.at(-1)?.tree.children[0];
+    expect(suspense).toMatchObject({
+      kind: "suspense",
+      name: "Suspense",
+    });
+    expect(suspense?.children[0]?.name).toBe("span");
+  });
+
+  it("publishes captured error boundary state to DevTools", () => {
+    const commits = collectDevtoolsCommits();
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
     const root = createRoot(container);
