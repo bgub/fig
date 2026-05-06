@@ -361,6 +361,15 @@ function createServerDispatcher(
     useBeforePaint: noopEffect,
     useBeforeLayout: noopEffect,
     useOnMount: noopEffect,
+    useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
+      if (getServerSnapshot === undefined) {
+        throw new Error(
+          "useExternalStore requires getServerSnapshot during server render.",
+        );
+      }
+
+      return getServerSnapshot();
+    },
     readContext(context) {
       return readContextValue(frame, context);
     },

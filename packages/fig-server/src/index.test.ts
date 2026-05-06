@@ -6,6 +6,7 @@ import {
   readContext,
   readPromise,
   Suspense,
+  useExternalStore,
   useMemo,
   useReactive,
   useState,
@@ -119,6 +120,35 @@ describe("@bgub/fig-server", () => {
     );
 
     expect(html).toBe("<h1>Fig</h1><span>Count 3</span> done");
+  });
+
+  it("reads external store server snapshots", async () => {
+    function App() {
+      const snapshot = useExternalStore(
+        () => () => undefined,
+        () => "Client",
+        () => "Server",
+      );
+      return createElement("span", null, snapshot);
+    }
+
+    await expect(renderToString(createElement(App, null))).resolves.toBe(
+      "<span>Server</span>",
+    );
+  });
+
+  it("throws when external stores omit server snapshots", async () => {
+    function App() {
+      const snapshot = useExternalStore(
+        () => () => undefined,
+        () => "Client",
+      );
+      return createElement("span", null, snapshot);
+    }
+
+    await expect(renderToString(createElement(App, null))).rejects.toThrow(
+      "useExternalStore requires getServerSnapshot during server render.",
+    );
   });
 
   it("reads server context values from the nearest provider", async () => {

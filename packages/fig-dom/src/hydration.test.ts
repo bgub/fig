@@ -1,4 +1,4 @@
-import { createElement, Suspense, useState } from "@bgub/fig";
+import { createElement, Suspense, useExternalStore, useState } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
@@ -60,6 +60,41 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes).toEqual([span]);
     expect(span.textContent).toBe("Hello");
     expect(span.childNodes).toHaveLength(1);
+  });
+
+  it("uses server external-store snapshots during hydration", async () => {
+    const container = new FakeElement("root");
+    const span = new FakeElement("span");
+    span.appendChild(new FakeText("Server"));
+    container.appendChild(span);
+    const listeners = new Set<() => void>();
+    const value = "Client";
+
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+
+    function App() {
+      const snapshot = useExternalStore(
+        subscribe,
+        () => value,
+        () => "Server",
+      );
+      return createElement("span", null, snapshot);
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null)),
+    );
+
+    expect(container.childNodes).toEqual([span]);
+    expect(span.textContent).toBe("Server");
+
+    await delay();
+
+    expect(container.childNodes).toEqual([span]);
+    expect(span.textContent).toBe("Client");
   });
 
   it("runs binds for hydrated host elements", () => {

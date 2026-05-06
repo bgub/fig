@@ -16,7 +16,9 @@ import { createPortal, createRoot, hydrateRoot } from "@bgub/fig-dom";
 
 `hydrateRoot(container, node)` reuses server HTML, attaches Fig DOM
 bindings/events, and reports recoverable mismatches through
-`onRecoverableError`.
+`onRecoverableError`. Components that read external stores with
+`useExternalStore` use their server snapshot during hydration, then subscribe
+and reconcile to the current client snapshot after commit.
 
 Suspense hydration is boundary-based: server Suspense markers stay
 dehydrated after the shell hydrates, then hydrate in background work or

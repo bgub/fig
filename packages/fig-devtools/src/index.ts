@@ -368,6 +368,7 @@ function hooksSection(
 
 function hookValue(hook: FigDevtoolsHookSnapshot): string {
   if (hook.kind === "state") return formatValue(hook.state);
+  if (hook.kind === "external-store") return formatValue(hook.state);
   if (hook.kind === "memo") {
     return `${formatValue(hook.state)} deps ${formatValue(hook.deps)}`;
   }

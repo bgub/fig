@@ -2,6 +2,7 @@ import type { FigContext } from "./context.ts";
 
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
+export type ExternalStoreSubscribe = (callback: () => void) => () => void;
 type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {
@@ -11,6 +12,11 @@ export interface RenderDispatcher {
   useBeforePaint(effect: EffectCallback, deps?: DependencyList): void;
   useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void;
   useOnMount(effect: EffectCallback): void;
+  useExternalStore<T>(
+    subscribe: ExternalStoreSubscribe,
+    getSnapshot: () => T,
+    getServerSnapshot?: () => T,
+  ): T;
   readContext<T>(context: FigContext<T>): T;
   readPromise<T>(promise: PromiseLike<T>): T;
 }
@@ -60,6 +66,18 @@ export function useBeforeLayout(
 
 export function useOnMount(effect: EffectCallback): void {
   resolveDispatcher().useOnMount(effect);
+}
+
+export function useExternalStore<T>(
+  subscribe: ExternalStoreSubscribe,
+  getSnapshot: () => T,
+  getServerSnapshot?: () => T,
+): T {
+  return resolveDispatcher().useExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
 }
 
 export function readContext<T>(context: FigContext<T>): T {

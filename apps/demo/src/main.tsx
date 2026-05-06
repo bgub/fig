@@ -78,6 +78,7 @@ const benchmarkTargetMs = 40;
 const benchmarkMaxIterations = 50;
 
 let activeBenchmarkOperations: BenchmarkOperations | null = null;
+let currentDemoPage: Page | null = null;
 
 const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
   { id: "state", label: "State + events", shortLabel: "State" },
@@ -170,17 +171,24 @@ function Command({
 }
 
 function App() {
-  const [page, setPage] = useState(readInitialPage);
+  const [page, setPage] = useState(() => {
+    const initialPage = readInitialPage();
+    currentDemoPage = initialPage;
+    return initialPage;
+  });
   const activePage = pageInfo(page);
 
   const navigate = (nextPage: Page) => {
-    setPage(nextPage);
+    if (!setDemoPage(nextPage, setPage)) return;
+
     window.localStorage.setItem("fig-demo-page", nextPage);
     window.history.replaceState(null, "", `#${nextPage}`);
   };
 
   useOnMount((signal) => {
-    const onHashChange = () => setPage(readInitialPage());
+    const onHashChange = () => {
+      setDemoPage(readInitialPage(), setPage);
+    };
     window.addEventListener("hashchange", onHashChange, { signal });
   });
 
@@ -659,9 +667,8 @@ function HydrationReplayPage() {
     );
   };
 
-  useOnMount((signal) => {
+  useOnMount(() => {
     mountPendingBoundary();
-    signal.addEventListener("abort", resetReplayDemoRoot, { once: true });
   });
 
   return (
@@ -809,7 +816,6 @@ const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   signal.addEventListener(
     "abort",
     () => {
-      hydrationDemo.root = null;
       if (hydrationDemo.sandbox === node) hydrationDemo.sandbox = null;
     },
     { once: true },
@@ -821,12 +827,26 @@ const replaySandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   signal.addEventListener(
     "abort",
     () => {
-      resetReplayDemoRoot();
       if (replayDemo.sandbox === node) replayDemo.sandbox = null;
     },
     { once: true },
   );
 };
+
+function setDemoPage(nextPage: Page, setPage: (page: Page) => void): boolean {
+  const previousPage = currentDemoPage;
+  if (nextPage === previousPage) return false;
+
+  if (previousPage !== null) cleanupDemoPage(previousPage);
+  currentDemoPage = nextPage;
+  setPage(nextPage);
+  return true;
+}
+
+function cleanupDemoPage(page: Page): void {
+  if (page === "hydration") resetHydrationDemoRoot();
+  if (page === "event-replay") resetReplayDemoRoot();
+}
 
 function resetHydrationDemoRoot(): void {
   const root = hydrationDemo.root;

@@ -4,6 +4,7 @@ import {
   type EffectCallback,
   type ElementType,
   type ErrorInfo,
+  type ExternalStoreSubscribe,
   type FigChild,
   type FigContext,
   type FigElement,
@@ -259,6 +260,21 @@ interface MemoState<T> {
   deps: DependencyList;
 }
 
+interface ExternalStoreInstance<T, Owner> {
+  committedSubscribe: ExternalStoreSubscribe | null;
+  getSnapshot: () => T;
+  owner: Owner | null;
+  unsubscribe: (() => void) | null;
+  value: T;
+}
+
+interface ExternalStoreState<T, Owner> {
+  getSnapshot: () => T;
+  instance: ExternalStoreInstance<T, Owner>;
+  subscribe: ExternalStoreSubscribe;
+  value: T;
+}
+
 interface SuspenseFallbackState<Container, Instance, TextInstance> {
   kind: "fallback";
   primaryChild: Fiber<Container, Instance, TextInstance> | null;
@@ -401,6 +417,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
     useOnMount(effect) {
       updateEffectHook("on-mount", ReactiveEffect, effect, []);
+    },
+    useExternalStore(subscribe, getSnapshot, getServerSnapshot) {
+      return updateExternalStoreHook(subscribe, getSnapshot, getServerSnapshot);
     },
     readContext(context) {
       return readContextValue(context);
@@ -1315,6 +1334,58 @@ export function createRenderer<Container, Instance, TextInstance>(
     return state.value;
   }
 
+  function updateExternalStoreHook<T>(
+    subscribe: ExternalStoreSubscribe,
+    getSnapshot: () => T,
+    getServerSnapshot?: () => T,
+  ): T {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    const oldHook = updateHook("external-store") as Hook<
+      ExternalStoreState<T, F>
+    > | null;
+    const root = rootOf(renderingFiber);
+    const value = readExternalStoreSnapshot(
+      root,
+      getSnapshot,
+      getServerSnapshot,
+    );
+    const instance = oldHook?.memoizedState.instance ?? {
+      committedSubscribe: null,
+      getSnapshot,
+      owner: null,
+      unsubscribe: null,
+      value,
+    };
+    const state: ExternalStoreState<T, F> = {
+      getSnapshot,
+      instance,
+      subscribe,
+      value,
+    };
+
+    appendHook(createHook("external-store", state));
+    return value;
+  }
+
+  function readExternalStoreSnapshot<T>(
+    root: R,
+    getSnapshot: () => T,
+    getServerSnapshot?: () => T,
+  ): T {
+    if (!root.isHydrating) return getSnapshot();
+
+    if (getServerSnapshot === undefined) {
+      throw new Error(
+        "useExternalStore requires getServerSnapshot during hydration.",
+      );
+    }
+
+    return getServerSnapshot();
+  }
+
   function processHookQueue<S>(hook: Hook<S>, renderLanes: Lanes): void {
     const baseQueue = hook.baseQueue;
     if (baseQueue === null) return;
@@ -1718,6 +1789,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
+    commitExternalStores(finishedWork.child);
     scheduleDehydratedSuspenseRetries(root);
     commitEffects(finishedWork.child, BeforePaintEffect);
     flushCaughtBoundaryErrors(root, finishedWork.child);
@@ -2762,6 +2834,12 @@ export function createRenderer<Container, Instance, TextInstance>(
           state: memo.value,
           deps: memo.deps,
         });
+      } else if (isExternalStoreHook(hook)) {
+        hooks.push({
+          id,
+          kind: hook.kind,
+          state: hook.memoizedState.value,
+        });
       } else {
         hooks.push({
           id,
@@ -2830,6 +2908,45 @@ export function createRenderer<Container, Instance, TextInstance>(
     return "reactive";
   }
 
+  function commitExternalStores(node: F | null): void {
+    visitFiberHooks(node, (owner, hook) => {
+      if (isExternalStoreHook(hook))
+        commitExternalStore(owner, hook.memoizedState);
+    });
+  }
+
+  function commitExternalStore(
+    owner: F,
+    state: ExternalStoreState<unknown, F>,
+  ): void {
+    const instance = state.instance;
+
+    if (instance.committedSubscribe !== state.subscribe) {
+      instance.unsubscribe?.();
+      instance.unsubscribe = null;
+      instance.committedSubscribe = state.subscribe;
+    }
+
+    instance.getSnapshot = state.getSnapshot;
+    instance.owner = owner;
+    instance.value = state.value;
+    instance.unsubscribe ??= state.subscribe(() => {
+      scheduleExternalStoreIfChanged(instance.owner, instance);
+    });
+
+    scheduleExternalStoreIfChanged(owner, instance);
+  }
+
+  function scheduleExternalStoreIfChanged(
+    owner: F | null,
+    instance: ExternalStoreInstance<unknown, F>,
+  ): void {
+    if (owner === null) return;
+
+    const latestValue = instance.getSnapshot();
+    if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, SyncLane);
+  }
+
   function commitEffects(node: F | null, phase: EffectPhase): void {
     visitEffects(node, (effect) => {
       if (effect.phase === phase) runEffect(effect);
@@ -2888,6 +3005,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     visitEffects(node.sibling, visitor);
   }
 
+  function visitFiberHooks(
+    node: F | null,
+    visitor: (owner: F, hook: Hook) => void,
+  ): void {
+    if (node === null) return;
+
+    for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
+      visitor(node, hook);
+    }
+
+    visitFiberHooks(node.child, visitor);
+    visitFiberHooks(node.sibling, visitor);
+  }
+
+  function isExternalStoreHook(
+    hook: Hook,
+  ): hook is Hook<ExternalStoreState<unknown, F>> {
+    return hook.kind === "external-store";
+  }
+
   function runEffect(effect: Effect): void {
     abortEffect(effect);
     effect.controller = new AbortController();
@@ -2914,18 +3051,25 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function abortFiberEffects(node: F): void {
-    for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
+    visitFiberHooks(node, (_owner, hook) => {
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
-    }
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      abortFiberEffects(child);
-    }
+      if (isExternalStoreHook(hook))
+        unsubscribeExternalStore(hook.memoizedState);
+    });
   }
 
   function abortEffect(effect: Effect): void {
     effect.controller?.abort();
     effect.controller = null;
+  }
+
+  function unsubscribeExternalStore(
+    state: ExternalStoreState<unknown, F>,
+  ): void {
+    state.instance.unsubscribe?.();
+    state.instance.unsubscribe = null;
+    state.instance.committedSubscribe = null;
+    state.instance.owner = null;
   }
 
   function restoreConsumedPendingQueues(root: R): void {

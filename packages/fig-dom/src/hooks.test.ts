@@ -3,6 +3,7 @@ import {
   type FigNode,
   type Props,
   useCallback,
+  useExternalStore,
   useMemo,
   useReactive,
   useState,
@@ -138,6 +139,56 @@ describe("@bgub/fig-dom hooks", () => {
     expect(callbacks[1]).toBe(callbacks[0]);
     expect(callbacks[2]).not.toBe(callbacks[1]);
     expect(calls).toEqual(["a:x", "b:y"]);
+  });
+
+  it("subscribes to external stores and updates from emitted snapshots", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const listeners = new Set<() => void>();
+    let value = "Initial";
+
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+
+    function App() {
+      const snapshot = useExternalStore(subscribe, () => value);
+      return createElement("main", null, snapshot);
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Initial");
+
+    value = "Updated";
+    flushSync(() => {
+      for (const listener of listeners) listener();
+    });
+
+    expect(container.textContent).toBe("Updated");
+  });
+
+  it("unsubscribes from external stores on unmount", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let unsubscribeCalls = 0;
+
+    function App() {
+      const snapshot = useExternalStore(
+        () => {
+          return () => {
+            unsubscribeCalls += 1;
+          };
+        },
+        () => "Mounted",
+      );
+      return createElement("main", null, snapshot);
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    flushSync(() => root.unmount());
+
+    expect(unsubscribeCalls).toBe(1);
   });
 
   it("throws on render-phase state updates without committing failed work", () => {

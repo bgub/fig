@@ -42,10 +42,10 @@ uses it in generated Suspense marker and script identifiers, and it defaults to
 an empty string.
 
 The server renderer supports function components, fragments, context providers,
-`useState` initial values, no-op server effects, host prop serialization,
-streaming Suspense, partial segments inside Suspense boundaries, abort fallback
-flushing, and Suspense-only server error recovery. Error boundaries do not catch
-server render errors.
+`useState` initial values, `useExternalStore` server snapshots, no-op server
+effects, host prop serialization, streaming Suspense, partial segments inside
+Suspense boundaries, abort fallback flushing, and Suspense-only server error
+recovery. Error boundaries do not catch server render errors.
 
 ## License
 

@@ -15,6 +15,7 @@ import {
   Suspense,
   transition,
   useCallback,
+  useExternalStore,
   useMemo,
   useState,
 } from "./index.ts";
@@ -96,6 +97,12 @@ describe("@bgub/fig", () => {
     expect(() => useCallback(() => undefined, [])).toThrow(
       "Hooks can only be called while rendering a component.",
     );
+    expect(() =>
+      useExternalStore(
+        () => () => undefined,
+        () => "snapshot",
+      ),
+    ).toThrow("Hooks can only be called while rendering a component.");
   });
 
   it("throws when read APIs are called outside render", () => {
