@@ -1,9 +1,9 @@
 {
-  "name": "@bgub/fig-demo",
+  "name": "@bgub/fig-demo-client",
   "private": true,
   "type": "module",
   "scripts": {
-    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo... build",
+    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo-client... build",
     "build": "tsdown",
     "dev": "tsdown --watch",
     "serve": "python3 -m http.server 4173 --bind 127.0.0.1",

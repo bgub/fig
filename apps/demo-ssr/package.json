@@ -1,10 +1,10 @@
 {
-  "name": "@bgub/fig-streaming-ssr-demo",
+  "name": "@bgub/fig-demo-ssr",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsdown",
-    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-streaming-ssr-demo... build",
+    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo-ssr... build",
     "dev": "pnpm --filter @bgub/fig build && pnpm --filter @bgub/fig-dom build && pnpm --filter @bgub/fig-server build && pnpm build && pnpm serve",
     "serve": "node dist/server.js",
     "test": "vitest run",

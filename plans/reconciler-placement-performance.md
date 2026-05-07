@@ -236,7 +236,7 @@ After each phase:
 
 - [x] `pnpm lint`
 - [x] `pnpm test`
-- [x] `pnpm --filter @bgub/fig-demo build`
+- [x] `pnpm --filter @bgub/fig-demo-client build`
 - [x] Run demo benchmark page at 1,000 rows and record medians.
 - [x] Optionally run 5,000 rows to expose scaling behavior.
 
