@@ -25,15 +25,7 @@ import {
   type Root as ReactRoot,
 } from "react-dom/client";
 
-type Page =
-  | "state"
-  | "diffing"
-  | "effects"
-  | "async"
-  | "resources"
-  | "hydration"
-  | "event-replay"
-  | "benchmarks";
+type Page = "state" | "effects" | "async" | "resources" | "hydration" | "benchmarks";
 
 interface DemoItem {
   id: number;
@@ -81,17 +73,11 @@ let activeBenchmarkOperations: BenchmarkOperations | null = null;
 let currentDemoPage: Page | null = null;
 
 const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
-  { id: "state", label: "State + events", shortLabel: "State" },
-  { id: "diffing", label: "Keyed diffing", shortLabel: "Diffing" },
+  { id: "state", label: "State + diffing", shortLabel: "State" },
   { id: "effects", label: "Effects + bind", shortLabel: "Effects" },
   { id: "async", label: "Async event signals", shortLabel: "Async" },
   { id: "resources", label: "Context + promises", shortLabel: "Resources" },
-  { id: "hydration", label: "SSR + hydration", shortLabel: "Hydration" },
-  {
-    id: "event-replay",
-    label: "Hydration event replay",
-    shortLabel: "Replay",
-  },
+  { id: "hydration", label: "Hydration", shortLabel: "Hydration" },
   { id: "benchmarks", label: "Benchmarks", shortLabel: "Benchmarks" },
 ];
 
@@ -139,9 +125,13 @@ function PageFrame({
 }) {
   return (
     <section className="page">
-      <h2>{title}</h2>
-      <p className="lede">{lede}</p>
-      <div className="panel stack">{children}</div>
+      <div className="page-header">
+        <div>
+          <h2>{title}</h2>
+          <p className="lede">{lede}</p>
+        </div>
+      </div>
+      {children}
     </section>
   );
 }
@@ -176,7 +166,6 @@ function App() {
     currentDemoPage = initialPage;
     return initialPage;
   });
-  const activePage = pageInfo(page);
 
   const navigate = (nextPage: Page) => {
     if (!setDemoPage(nextPage, setPage)) return;
@@ -194,28 +183,24 @@ function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">φ</span>
-          <div>
-            <h1>Fig Demo</h1>
-            <p>{activePage.label}</p>
-          </div>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <h1 className="brand">Fig Demo</h1>
+          <nav className="nav" aria-label="Demo sections">
+            {pages.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.id === page ? "active" : ""}
+                events={[on("click", () => navigate(item.id))]}
+              >
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-short-label">{item.shortLabel}</span>
+              </button>
+            ))}
+          </nav>
         </div>
-        <nav className="nav" aria-label="Demo sections">
-          {pages.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={item.id === page ? "active" : ""}
-              events={[on("click", () => navigate(item.id))]}
-            >
-              <span className="nav-label">{item.label}</span>
-              <span className="nav-short-label">{item.shortLabel}</span>
-            </button>
-          ))}
-        </nav>
-      </aside>
+      </header>
       <main className="content">{pageView(page)}</main>
     </div>
   );
@@ -229,18 +214,13 @@ function readInitialPage(): Page {
   );
 }
 
-function pageInfo(page: Page): (typeof pages)[number] {
-  return pages.find((item) => item.id === page) ?? pages[0];
-}
-
 function pageFromString(value: string | null): Page | null {
+  if (value === "event-replay") return "hydration";
   return pages.some((item) => item.id === value) ? (value as Page) : null;
 }
 
 function pageView(page: Page) {
   switch (page) {
-    case "diffing":
-      return <DiffingPage />;
     case "effects":
       return <EffectsPage />;
     case "async":
@@ -249,8 +229,6 @@ function pageView(page: Page) {
       return <ResourcesPage />;
     case "hydration":
       return <HydrationPage />;
-    case "event-replay":
-      return <HydrationReplayPage />;
     case "benchmarks":
       return <BenchmarksPage />;
     default:
@@ -261,73 +239,84 @@ function pageView(page: Page) {
 function StatePage() {
   const [count, setCount] = useState(0);
   const [lastAction, setLastAction] = useState("Nothing yet");
-
-  return (
-    <PageFrame
-      title="State + events"
-      lede="Basic state updates, batched DOM event handlers, and delegated events."
-    >
-      <Row>
-        <span className="metric">{count}</span>
-        <Command
-          primary
-          run={() => {
-            setCount((value) => value + 1);
-            setLastAction("Incremented once");
-          }}
-        >
-          Increment
-        </Command>
-        <Command
-          run={() => {
-            setCount((value) => value + 1);
-            setCount((value) => value + 1);
-            setLastAction("Queued two updates in one event");
-          }}
-        >
-          Double update
-        </Command>
-        <Command
-          run={() => {
-            setCount(0);
-            setLastAction("Reset");
-          }}
-        >
-          Reset
-        </Command>
-      </Row>
-      <p className="hint">{lastAction}</p>
-    </PageFrame>
-  );
-}
-
-function DiffingPage() {
   const [items, setItems] = useState(() => initialItems);
   const [nextId, setNextId] = useState(4);
 
   return (
     <PageFrame
-      title="Keyed diffing"
-      lede="Reorder, insert, and remove keyed children while preserving identity."
+      title="State + diffing"
+      lede="State updates, batched events, and keyed list diffing."
     >
-      <Row>
-        <Command primary run={() => setItems((value) => value.toReversed())}>
-          Reverse
-        </Command>
-        <Command run={() => setItems(rotate)}>Rotate</Command>
-        <Command
-          run={() => {
-            setItems((value) => [...value, newItem(nextId)]);
-            setNextId((value) => value + 1);
-          }}
-        >
-          Add
-        </Command>
-        <Command run={() => setItems((value) => value.slice(0, -1))}>
-          Remove last
-        </Command>
-      </Row>
-      <DemoList items={items} />
+      <div className="columns">
+        <section className="card">
+          <div className="card-header">
+            <h3>Counter</h3>
+            <p className="hint">
+              Batched state updates coalesce into a single render.
+            </p>
+          </div>
+          <Row>
+            <span className="metric">{count}</span>
+            <Command
+              primary
+              run={() => {
+                setCount((value) => value + 1);
+                setLastAction("Incremented once");
+              }}
+            >
+              Increment
+            </Command>
+            <Command
+              run={() => {
+                setCount((value) => value + 1);
+                setCount((value) => value + 1);
+                setLastAction("Queued two updates in one event");
+              }}
+            >
+              Double update
+            </Command>
+            <Command
+              run={() => {
+                setCount(0);
+                setLastAction("Reset");
+              }}
+            >
+              Reset
+            </Command>
+          </Row>
+          <p className="hint">{lastAction}</p>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <h3>Keyed list</h3>
+            <p className="hint">
+              Keyed children are diffed by identity, not position.
+            </p>
+          </div>
+          <Row>
+            <Command
+              primary
+              run={() => setItems((value) => value.toReversed())}
+            >
+              Reverse
+            </Command>
+            <Command run={() => setItems(rotate)}>Rotate</Command>
+            <Command
+              run={() => {
+                setItems((value) => [...value, newItem(nextId)]);
+                setNextId((value) => value + 1);
+              }}
+            >
+              Add
+            </Command>
+            <Command run={() => setItems((value) => value.slice(0, -1))}>
+              Remove last
+            </Command>
+          </Row>
+          <DemoList items={items} />
+        </section>
+      </div>
     </PageFrame>
   );
 }
@@ -493,17 +482,29 @@ function ResourcesPage() {
 
 function HydrationPage() {
   const [serverHtml, setServerHtml] = useState("");
-  const [status, setStatus] = useState("Render server HTML to begin.");
+  const [hydrationStatus, setHydrationStatus] = useState(
+    "Rendering matching server HTML...",
+  );
+  const [replayStatus, setReplayStatus] = useState(
+    "Mounting a pending Suspense boundary...",
+  );
   const [recoverableErrors, setRecoverableErrors] = useState<string[]>([]);
+  const [replayLogs, setReplayLogs] = useState<string[]>([]);
+
+  const logReplay = (message: string) => {
+    setReplayLogs((value) =>
+      [...value, `${new Date().toLocaleTimeString()}  ${message}`].slice(-8),
+    );
+  };
 
   const runDemo = async (mismatch: boolean, signal?: AbortSignal) => {
     const sandbox = hydrationDemo.sandbox;
     if (sandbox === null) {
-      setStatus("Hydration sandbox is not mounted yet.");
+      setHydrationStatus("Hydration sandbox is not mounted yet.");
       return;
     }
 
-    setStatus("Rendering HTML with @bgub/fig-server...");
+    setHydrationStatus("Rendering HTML with @bgub/fig-server...");
     setRecoverableErrors([]);
     resetHydrationDemoRoot();
     sandbox.replaceChildren();
@@ -514,7 +515,7 @@ function HydrationPage() {
     const target = hydrationTarget(html);
     sandbox.replaceChildren(target);
     setServerHtml(html);
-    setStatus(
+    setHydrationStatus(
       mismatch
         ? "Hydrating intentionally mismatched HTML..."
         : "Hydrating matching server HTML...",
@@ -528,7 +529,7 @@ function HydrationPage() {
           servedAt={servedAt}
           wrapper="section"
           onAction={() => {
-            setStatus(
+            setHydrationStatus(
               `Hydrated event handled at ${new Date().toLocaleTimeString()}.`,
             );
           }}
@@ -539,81 +540,31 @@ function HydrationPage() {
               ...errors,
               error instanceof Error ? error.message : String(error),
             ]);
-            setStatus("Mismatch recovered with a client render.");
+            setHydrationStatus("Mismatch recovered with a client render.");
           },
         },
       );
     });
 
-    if (!mismatch) setStatus("Hydrated matching server HTML.");
-  };
-
-  useOnMount((signal) => {
-    void runDemo(false, signal);
-  });
-
-  return (
-    <PageFrame
-      title="SSR + hydration"
-      lede="Render HTML with the Fig server renderer, then hydrate it with the DOM renderer."
-    >
-      <Row>
-        <Command primary run={() => void runDemo(false)}>
-          Hydrate matching HTML
-        </Command>
-        <Command run={() => void runDemo(true)}>Recover mismatch</Command>
-      </Row>
-      <p className="hint">{status}</p>
-      {recoverableErrors.length > 0 ? (
-        <ul className="list">
-          {recoverableErrors.map((message) => (
-            <li className="item" key={message}>
-              <span>{message}</span>
-              <span className="tag">recoverable</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="hydration-grid">
-        <section>
-          <h3>Server HTML</h3>
-          <pre className="code">{serverHtml || "No server render yet."}</pre>
-        </section>
-        <section>
-          <h3>Hydration target</h3>
-          <div className="hydration-sandbox" bind={hydrationSandboxBind} />
-        </section>
-      </div>
-    </PageFrame>
-  );
-}
-
-function HydrationReplayPage() {
-  const [status, setStatus] = useState("Mounting pending boundary...");
-  const [logs, setLogs] = useState<string[]>([]);
-
-  const log = (message: string) => {
-    setLogs((value) =>
-      [...value, `${new Date().toLocaleTimeString()}  ${message}`].slice(-8),
-    );
+    if (!mismatch) setHydrationStatus("Hydrated matching server HTML.");
   };
 
   const mountPendingBoundary = () => {
     const sandbox = replayDemo.sandbox;
     if (sandbox === null) {
-      setStatus("Replay sandbox is not mounted yet.");
+      setReplayStatus("Replay sandbox is not mounted yet.");
       return;
     }
 
     resetReplayDemoRoot();
-    setLogs([]);
+    setReplayLogs([]);
 
     const target = replayTarget();
     sandbox.replaceChildren(target);
 
     const refs = replayBoundaryRefs(target);
     if (refs === null) {
-      setStatus("Could not find replay boundary markers.");
+      setReplayStatus("Could not find replay boundary markers.");
       return;
     }
 
@@ -626,23 +577,23 @@ function HydrationReplayPage() {
       replayDemo.root = hydrateRoot(
         target,
         <ReplayIsland
-          onChildAction={() => log("child handler ran")}
-          onParentAction={() => log("parent handler ran")}
+          onChildAction={() => logReplay("child handler ran")}
+          onParentAction={() => logReplay("parent handler ran")}
         />,
       );
     });
 
-    setStatus("Pending boundary mounted.");
+    setReplayStatus("Pending boundary mounted.");
   };
 
   const dispatchPendingClick = () => {
     if (replayDemo.button === null) {
-      setStatus("Mount a pending boundary first.");
+      setReplayStatus("Mount a pending boundary first.");
       return;
     }
 
     replayDemo.button.click();
-    setStatus("Click dispatched while Suspense is pending.");
+    setReplayStatus("Click dispatched while Suspense is pending.");
   };
 
   const completeBoundary = (replaceTarget: boolean) => {
@@ -650,7 +601,7 @@ function HydrationReplayPage() {
     const placeholder = replayDemo.placeholder;
 
     if (start === null || placeholder === null) {
-      setStatus("Mount a pending boundary first.");
+      setReplayStatus("Mount a pending boundary first.");
       return;
     }
 
@@ -660,46 +611,99 @@ function HydrationReplayPage() {
     placeholder.remove();
     replayDemo.placeholder = null;
     start.__figRetry?.();
-    setStatus(
+    setReplayStatus(
       replaceTarget
         ? "Boundary completed after replacing the original target."
         : "Boundary completed with the original target preserved.",
     );
   };
 
-  useOnMount(() => {
+  useOnMount((signal) => {
+    void runDemo(false, signal);
     mountPendingBoundary();
   });
 
   return (
     <PageFrame
-      title="Hydration event replay"
-      lede="A pending Suspense boundary with a delegated parent handler and a hydrated child handler."
+      title="Hydration"
+      lede="Server render, hydrate, mismatch recovery, and pending boundary event replay."
     >
-      <Row>
-        <Command primary run={mountPendingBoundary}>
-          Reset pending
-        </Command>
-        <Command run={dispatchPendingClick}>Click pending target</Command>
-        <Command run={() => completeBoundary(false)}>
-          Complete, keep target
-        </Command>
-        <Command run={() => completeBoundary(true)}>
-          Complete, replace target
-        </Command>
-      </Row>
-      <p className="hint">{status}</p>
-      <div className="hydration-grid">
-        <section>
-          <h3>Replay target</h3>
-          <div
-            className="hydration-sandbox replay-sandbox"
-            bind={replaySandboxBind}
-          />
+      <div className="columns">
+        <section className="card">
+          <div className="card-header">
+            <h3>SSR hydration</h3>
+            <p className="hint">
+              Server HTML is inserted into the sandbox, then `hydrateRoot`
+              claims it.
+            </p>
+            <Row>
+              <Command primary run={() => void runDemo(false)}>
+                Hydrate matching
+              </Command>
+              <Command run={() => void runDemo(true)}>Recover mismatch</Command>
+            </Row>
+          </div>
+          <div className="hydration-status">
+            <span className="tag">Status</span>
+            <span>{hydrationStatus}</span>
+          </div>
+          {recoverableErrors.length > 0 ? (
+            <ul className="list">
+              {recoverableErrors.map((message) => (
+                <li className="item" key={message}>
+                  <span>{message}</span>
+                  <span className="tag">recoverable</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="hydration-output">
+            <h4>Server HTML</h4>
+            <pre className="code">{serverHtml || "No server render yet."}</pre>
+          </div>
+          <div className="hydration-output">
+            <h4>Hydrated DOM</h4>
+            <div className="hydration-sandbox" bind={hydrationSandboxBind} />
+          </div>
         </section>
-        <section>
-          <h3>Event log</h3>
-          <pre className="log">{logs.join("\n") || "No Fig handlers yet."}</pre>
+
+        <section className="card">
+          <div className="card-header">
+            <h3>Hydration event replay</h3>
+            <p className="hint">
+              A click on a pending Suspense boundary is queued until that
+              boundary hydrates.
+            </p>
+            <Row>
+              <Command run={mountPendingBoundary}>Reset boundary</Command>
+              <Command primary run={dispatchPendingClick}>
+                Click pending target
+              </Command>
+              <Command run={() => completeBoundary(false)}>
+                Complete, keep target
+              </Command>
+              <Command run={() => completeBoundary(true)}>
+                Complete, replace target
+              </Command>
+            </Row>
+          </div>
+          <div className="hydration-status">
+            <span className="tag">Status</span>
+            <span>{replayStatus}</span>
+          </div>
+          <div className="hydration-output">
+            <h4>Replay target</h4>
+            <div
+              className="hydration-sandbox replay-sandbox"
+              bind={replaySandboxBind}
+            />
+          </div>
+          <div className="hydration-output">
+            <h4>Event log</h4>
+            <pre className="log">
+              {replayLogs.join("\n") || "No Fig handlers yet."}
+            </pre>
+          </div>
         </section>
       </div>
     </PageFrame>
@@ -844,8 +848,10 @@ function setDemoPage(nextPage: Page, setPage: (page: Page) => void): boolean {
 }
 
 function cleanupDemoPage(page: Page): void {
-  if (page === "hydration") resetHydrationDemoRoot();
-  if (page === "event-replay") resetReplayDemoRoot();
+  if (page === "hydration") {
+    resetHydrationDemoRoot();
+    resetReplayDemoRoot();
+  }
 }
 
 function resetHydrationDemoRoot(): void {
