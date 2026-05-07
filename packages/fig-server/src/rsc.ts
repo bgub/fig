@@ -1,0 +1,1045 @@
+import {
+  clientReference,
+  createElement,
+  type Dispatch,
+  type ElementType,
+  type FigChild,
+  type FigClientReference,
+  type FigContext,
+  type FigElement,
+  type FigNode,
+  Fragment,
+  isClientReference,
+  isContext,
+  isErrorBoundary,
+  isPortal,
+  isSuspense,
+  isValidElement,
+  type Key,
+  type Props,
+  type RenderDispatcher,
+  readPromise,
+  type SetStateAction,
+  Suspense,
+  setCurrentDispatcher,
+} from "@bgub/fig";
+
+export interface RscRenderResult {
+  allReady: Promise<void>;
+  contentType: string;
+  stream: ReadableStream<Uint8Array>;
+}
+
+export interface RscRootLike {
+  render(node: FigNode): void;
+}
+
+type RscRow =
+  | { id: number; tag: "client"; value: { id: string } }
+  | { id: number; tag: "error"; value: { message: string } }
+  | { id: number; tag: "model"; value: RscModel }
+  | { boundary: string; tag: "refresh"; value: RscModel };
+
+type RscModel =
+  | null
+  | boolean
+  | number
+  | string
+  | RscModel[]
+  | { [key: string]: RscModel }
+  | RscElementModel
+  | RscSpecialModel;
+
+type RscElementModel = {
+  $fig: "element";
+  key: Key | null;
+  props: Record<string, RscModel>;
+  type: string | RscSpecialModel;
+};
+
+type RscSpecialModel =
+  | { $fig: "boundary"; child: RscModel; id: string }
+  | { $fig: "client"; id: number }
+  | { $fig: "fragment" }
+  | { $fig: "lazy"; id: number }
+  | { $fig: "promise"; id: number }
+  | { $fig: "suspense" }
+  | { $fig: "undefined" };
+
+export interface RscDecodeOptions {
+  loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
+  resolveClientReference?: (metadata: { id: string }) => ElementType;
+}
+
+export interface RscClientResponse {
+  bindRoot(root: RscRootLike): () => void;
+  getRoot(): FigNode;
+  processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
+  processStringChunk(chunk: string): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export type RscFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export interface RscFetchOptions extends RequestInit {
+  fetch?: RscFetch;
+}
+
+type RscRequest = {
+  allReady: Promise<void>;
+  clientReferenceRows: Map<string, number>;
+  closeAllReady(): void;
+  controller: ReadableStreamDefaultController<Uint8Array> | null;
+  nextRowId: number;
+  pendingTasks: number;
+  pingedTasks: Task[];
+  queuedRows: string[];
+  recoverAllReady(error: unknown): void;
+  refreshBoundary: string | null;
+  status: "opening" | "open" | "closed";
+  stream: ReadableStream<Uint8Array>;
+  textEncoder: TextEncoder;
+};
+
+type Task = {
+  contextValues: ContextValues;
+  id: number;
+  kind: "node" | "promise";
+  value: unknown;
+};
+
+type Component = (props: Props & { children?: FigNode }) => unknown;
+type ContextValues = Map<FigContext<unknown>, unknown[]>;
+type Thenable<T = unknown> = PromiseLike<T> & object;
+
+type RenderFrame = {
+  contextValues: ContextValues;
+  request: RscRequest;
+};
+
+type ThenableRecord<T> = {
+  reason?: unknown;
+  status: "pending" | "fulfilled" | "rejected";
+  value?: T;
+};
+
+type DecodedChunk = {
+  model: RscModel | null;
+  promise: Promise<unknown>;
+  reject(reason: unknown): void;
+  resolve(value: unknown): void;
+  status: "pending" | "fulfilled" | "rejected";
+  value: unknown;
+};
+
+const contentType = "text/x-component; charset=utf-8";
+const RscBoundarySymbol = Symbol.for("fig.rsc-boundary");
+const thenableRecords = new WeakMap<object, ThenableRecord<unknown>>();
+
+type RscBoundaryProps = { children?: FigNode; id: string };
+
+interface RscBoundaryComponent {
+  (props: RscBoundaryProps): FigNode;
+  readonly $$typeof: symbol;
+}
+
+const RscBoundaryImpl: RscBoundaryComponent = Object.assign(
+  (props: RscBoundaryProps) => props.children,
+  { $$typeof: RscBoundarySymbol },
+);
+
+export const RscBoundary: (props: {
+  children?: FigNode;
+  id: string;
+}) => FigNode = RscBoundaryImpl;
+
+export function renderToRscStream(node: FigNode): RscRenderResult {
+  return createRscRenderResult(node, null);
+}
+
+export function renderToRscRefreshStream(
+  boundary: string,
+  node: FigNode,
+): RscRenderResult {
+  return createRscRenderResult(node, boundary);
+}
+
+export function createRscClientResponse(
+  options: RscDecodeOptions = {},
+): RscClientResponse {
+  return new RscClientResponseImpl(options);
+}
+
+function createRscRenderResult(
+  node: FigNode,
+  refreshBoundary: string | null,
+): RscRenderResult {
+  const request = createRscRequest(node, refreshBoundary);
+  return { allReady: request.allReady, contentType, stream: request.stream };
+}
+
+async function processRscStream(
+  response: RscClientResponse,
+  stream: ReadableStream<Uint8Array>,
+): Promise<void> {
+  await readTextStream(stream, (chunk) => response.processStringChunk(chunk));
+  response.processStringChunk("\n");
+}
+
+export async function fetchRsc(
+  response: RscClientResponse,
+  input: RequestInfo | URL,
+  options: RscFetchOptions = {},
+): Promise<Response> {
+  return requestRsc(response, input, options);
+}
+
+export async function refreshRscBoundary(
+  response: RscClientResponse,
+  boundary: string,
+  input: RequestInfo | URL,
+  options: RscFetchOptions = {},
+): Promise<Response> {
+  return requestRsc(response, input, options, boundary);
+}
+
+async function requestRsc(
+  response: RscClientResponse,
+  input: RequestInfo | URL,
+  options: RscFetchOptions,
+  boundary?: string,
+): Promise<Response> {
+  const { fetch: fetchImpl = globalThis.fetch, headers, ...init } = options;
+  if (fetchImpl === undefined) {
+    throw new Error("fetchRsc requires a fetch implementation.");
+  }
+
+  const result = await fetchImpl(input, {
+    ...init,
+    headers: appendRscHeaders(headers, boundary),
+  });
+  if (!result.ok) {
+    throw new Error(`RSC request failed with status ${result.status}.`);
+  }
+  if (result.body === null) {
+    throw new Error("RSC response did not include a body.");
+  }
+
+  await response.processStream(result.body);
+  return result;
+}
+
+function createRscRequest(
+  node: FigNode,
+  refreshBoundary: string | null,
+): RscRequest {
+  let resolveAllReady: () => void = () => undefined;
+  let rejectAllReady: (error: unknown) => void = () => undefined;
+  const allReady = new Promise<void>((resolve, reject) => {
+    resolveAllReady = resolve;
+    rejectAllReady = reject;
+  });
+
+  const request: RscRequest = {
+    allReady,
+    clientReferenceRows: new Map(),
+    closeAllReady: resolveAllReady,
+    controller: null,
+    nextRowId: 1,
+    pendingTasks: 0,
+    pingedTasks: [],
+    queuedRows: [],
+    recoverAllReady: rejectAllReady,
+    refreshBoundary,
+    status: "opening",
+    stream: null as never,
+    textEncoder: new TextEncoder(),
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      request.controller = controller;
+      flushRows(request);
+    },
+    cancel(reason) {
+      closeWithError(request, reason);
+    },
+  });
+  request.stream = stream;
+  request.pingedTasks.push(createTask(request, 0, "node", node, new Map()));
+
+  queueMicrotask(() => performWork(request));
+
+  return request;
+}
+
+class RscClientResponseImpl implements RscClientResponse {
+  private readonly boundaries = new Map<string, RscModel>();
+  private readonly chunks = new Map<number, DecodedChunk>();
+  private listeners = new Set<() => void>();
+  private stringBuffer = "";
+
+  constructor(private readonly options: RscDecodeOptions) {}
+
+  bindRoot(root: RscRootLike): () => void {
+    const render = () => root.render(this.getRoot());
+    const unsubscribe = this.subscribe(render);
+    render();
+    return unsubscribe;
+  }
+
+  getRoot(): FigNode {
+    return createElement(RscResponseRoot, {
+      response: this,
+    });
+  }
+
+  private processRow(row: RscRow): void {
+    if (row.tag === "refresh") {
+      this.boundaries.set(row.boundary, row.value);
+      this.notify();
+      return;
+    }
+
+    resolveDecodedRow(this, row);
+    if (row.id === 0) this.notify();
+  }
+
+  processStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+    return processRscStream(this, stream);
+  }
+
+  processStringChunk(chunk: string): void {
+    this.stringBuffer += chunk;
+
+    while (true) {
+      const newlineIndex = this.stringBuffer.indexOf("\n");
+      if (newlineIndex === -1) return;
+
+      const line = this.stringBuffer.slice(0, newlineIndex);
+      this.stringBuffer = this.stringBuffer.slice(newlineIndex + 1);
+      this.processLine(line);
+    }
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  readBoundary(id: string, initial: RscModel): FigNode {
+    return decodeModel(this, this.boundaries.get(id) ?? initial) as FigNode;
+  }
+
+  readChunk(id: number): FigNode {
+    const chunk = this.getChunk(id);
+    if (chunk.status === "rejected") throw chunk.value;
+    if (chunk.status === "pending") readPromise(chunk.promise);
+    if (chunk.model === null) return chunk.value as FigNode;
+    return decodeModel(this, chunk.model) as FigNode;
+  }
+
+  decodeClientReference(metadata: { id: string }): ElementType {
+    const resolved = this.options.resolveClientReference?.(metadata);
+    if (resolved !== undefined) return resolved;
+
+    if (this.options.loadClientReference !== undefined) {
+      const loaded = this.options.loadClientReference(metadata);
+
+      return function RscClientComponent(props: Props) {
+        const moduleValue = readPromise(loaded);
+        const type = resolveClientReferenceExport(moduleValue, metadata.id);
+        return createElement(type, props);
+      };
+    }
+
+    return clientReference({
+      id: metadata.id,
+      load: () => Promise.resolve({}),
+    });
+  }
+
+  getChunk(id: number): DecodedChunk {
+    return getOrCreateChunk(this.chunks, id);
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private processLine(line: string): void {
+    if (line.length > 0) this.processRow(JSON.parse(line) as RscRow);
+  }
+}
+
+function createTask(
+  request: RscRequest,
+  id: number,
+  kind: Task["kind"],
+  value: unknown,
+  contextValues: ContextValues,
+): Task {
+  request.pendingTasks += 1;
+  return { contextValues, id, kind, value };
+}
+
+function performWork(request: RscRequest): void {
+  if (request.status === "closed") return;
+  if (request.status === "opening") request.status = "open";
+
+  const tasks = request.pingedTasks;
+  request.pingedTasks = [];
+
+  for (const task of tasks) retryTask(request, task);
+
+  flushRows(request);
+}
+
+function retryTask(request: RscRequest, task: Task): void {
+  const frame = createRenderFrame(
+    request,
+    cloneContextValues(task.contextValues),
+  );
+
+  try {
+    const value =
+      task.kind === "node"
+        ? serializeNode(task.value as FigNode, frame)
+        : serializeValue(readThenable(task.value as Thenable), frame);
+    if (request.refreshBoundary !== null && task.id === 0) {
+      emitRow(request, {
+        boundary: request.refreshBoundary,
+        tag: "refresh",
+        value,
+      });
+    } else {
+      emitRow(request, { id: task.id, tag: "model", value });
+    }
+    finishTask(request);
+  } catch (error) {
+    if (isThenable(error)) {
+      error.then(
+        () => pingTask(request, task),
+        () => pingTask(request, task),
+      );
+      return;
+    }
+
+    emitRow(request, {
+      id: task.id,
+      tag: "error",
+      value: { message: errorMessage(error) },
+    });
+    finishTask(request);
+  }
+}
+
+function finishTask(request: RscRequest): void {
+  request.pendingTasks -= 1;
+  if (request.pendingTasks === 0) request.closeAllReady();
+}
+
+function createRenderFrame(
+  request: RscRequest,
+  contextValues: ContextValues,
+): RenderFrame {
+  return { contextValues, request };
+}
+
+function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
+  return {
+    useState(initialState) {
+      const value = resolveInitialState(initialState);
+      const dispatch: Dispatch<SetStateAction<typeof value>> = () => {
+        throw new Error("State updates are not allowed during RSC render.");
+      };
+      return [value, dispatch];
+    },
+    useMemo(calculate) {
+      return calculate();
+    },
+    useReactive: noopEffect,
+    useBeforePaint: noopEffect,
+    useBeforeLayout: noopEffect,
+    useOnMount: noopEffect,
+    useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
+      if (getServerSnapshot === undefined) {
+        throw new Error(
+          "useExternalStore requires getServerSnapshot during RSC render.",
+        );
+      }
+
+      return getServerSnapshot();
+    },
+    readContext(context) {
+      return readContextValue(frame, context);
+    },
+    readPromise(promise) {
+      return readThenable(promise);
+    },
+  };
+}
+
+function serializeNode(node: FigNode, frame: RenderFrame): RscModel {
+  if (Array.isArray(node)) {
+    return collectChildren(node).map((child) =>
+      serializeNodeOrLazy(child, frame),
+    );
+  }
+
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return node === undefined ? { $fig: "undefined" } : node;
+  }
+
+  if (typeof node === "string" || typeof node === "number") {
+    return node;
+  }
+
+  if (isPortal(node)) return null;
+  if (!isValidElement(node)) throw invalidChildError(node);
+
+  return serializeElement(node, frame);
+}
+
+function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): RscModel {
+  try {
+    return serializeNode(node, frame);
+  } catch (error) {
+    if (isThenable(error)) {
+      return outlineTask(frame, "node", node, "lazy", error);
+    }
+    return outlineError(frame.request, error, "lazy");
+  }
+}
+
+function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
+  const type = element.type;
+
+  if (typeof type === "string") {
+    return serializeElementModel(element, type, frame);
+  }
+
+  if (type === Fragment) {
+    return serializeElementModel(element, { $fig: "fragment" }, frame);
+  }
+
+  if (isClientReference(type)) {
+    const clientId = emitClientReference(frame.request, type);
+    return serializeElementModel(
+      element,
+      { $fig: "client", id: clientId },
+      frame,
+    );
+  }
+
+  if (isRscBoundary(type)) {
+    const id = element.props.id;
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error("RSC boundaries require a non-empty string id.");
+    }
+
+    return {
+      $fig: "boundary",
+      child: serializeValue(element.props.children, frame),
+      id,
+    };
+  }
+
+  if (isContext(type)) {
+    return serializeContextProvider(type, element.props, frame);
+  }
+
+  if (isSuspense(type)) {
+    return serializeElementModel(element, { $fig: "suspense" }, frame);
+  }
+
+  if (isErrorBoundary(type)) {
+    return serializeNode(element.props.children, frame);
+  }
+
+  if (typeof type === "function") {
+    return serializeFunctionComponent(type as Component, element.props, frame);
+  }
+
+  throw new Error("Unsupported Fig element type during RSC render.");
+}
+
+function serializeElementModel(
+  element: FigElement,
+  type: RscElementModel["type"],
+  frame: RenderFrame,
+): RscElementModel {
+  return {
+    $fig: "element",
+    key: element.key,
+    props: serializeProps(element.props, frame),
+    type,
+  };
+}
+
+function serializeFunctionComponent(
+  type: Component,
+  props: Props,
+  frame: RenderFrame,
+): RscModel {
+  const previousDispatcher = setCurrentDispatcher(createRscDispatcher(frame));
+
+  try {
+    const result = type(props);
+    return serializeNode(
+      isThenable(result) ? readThenable(result) : result,
+      frame,
+    );
+  } finally {
+    setCurrentDispatcher(previousDispatcher);
+  }
+}
+
+function serializeContextProvider(
+  context: FigContext<unknown>,
+  props: Props,
+  frame: RenderFrame,
+): RscModel {
+  const stack = contextStack(frame, context);
+  stack.push(props.value);
+
+  try {
+    return serializeNode(props.children, frame);
+  } finally {
+    stack.pop();
+  }
+}
+
+function serializeProps(
+  props: Props,
+  frame: RenderFrame,
+): { [key: string]: RscModel } {
+  const serialized: { [key: string]: RscModel } = {};
+
+  for (const [name, value] of Object.entries(props)) {
+    serialized[name] = serializeValue(value, frame);
+  }
+
+  return serialized;
+}
+
+function serializeValue(value: unknown, frame: RenderFrame): RscModel {
+  if (value === null) return null;
+  if (value === undefined) return { $fig: "undefined" };
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "symbol") return String(value);
+  if (typeof value === "function") {
+    if (isClientReference(value)) {
+      return { $fig: "client", id: emitClientReference(frame.request, value) };
+    }
+
+    throw new Error("Functions cannot be passed to Client Components.");
+  }
+
+  if (isThenable(value)) {
+    return outlineTask(frame, "promise", value, "promise", value);
+  }
+  if (isValidElement(value)) return serializeNodeOrLazy(value, frame);
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeValue(item, frame));
+  }
+  if (isPortal(value)) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(
+        `Cannot serialize ${prototype?.constructor?.name ?? "object"} to RSC.`,
+      );
+    }
+
+    const serialized: { [key: string]: RscModel } = {};
+    for (const [name, child] of Object.entries(value)) {
+      serialized[name] = serializeValue(child, frame);
+    }
+    return serialized;
+  }
+
+  throw new Error(`Cannot serialize ${typeof value} to RSC.`);
+}
+
+function outlineTask(
+  frame: RenderFrame,
+  kind: Task["kind"],
+  value: unknown,
+  referenceKind: "lazy" | "promise",
+  wakeable: Thenable,
+): RscSpecialModel {
+  const request = frame.request;
+  const id = request.nextRowId++;
+  const task = createTask(
+    request,
+    id,
+    kind,
+    value,
+    cloneContextValues(frame.contextValues),
+  );
+
+  wakeable.then(
+    () => pingTask(request, task),
+    () => pingTask(request, task),
+  );
+
+  return { $fig: referenceKind, id };
+}
+
+function outlineError(
+  request: RscRequest,
+  error: unknown,
+  referenceKind: "lazy" | "promise",
+): RscSpecialModel {
+  const id = request.nextRowId++;
+  emitRow(request, {
+    id,
+    tag: "error",
+    value: { message: errorMessage(error) },
+  });
+  return { $fig: referenceKind, id };
+}
+
+function emitClientReference(
+  request: RscRequest,
+  reference: FigClientReference,
+): number {
+  const existing = request.clientReferenceRows.get(reference.id);
+  if (existing !== undefined) return existing;
+
+  const id = request.nextRowId++;
+  request.clientReferenceRows.set(reference.id, id);
+  emitRow(request, { id, tag: "client", value: { id: reference.id } });
+  return id;
+}
+
+function emitRow(request: RscRequest, row: RscRow): void {
+  request.queuedRows.push(`${JSON.stringify(row)}\n`);
+  flushRows(request);
+}
+
+function pingTask(request: RscRequest, task: Task): void {
+  if (request.status === "closed") return;
+  request.pingedTasks.push(task);
+  queueMicrotask(() => performWork(request));
+}
+
+function flushRows(request: RscRequest): void {
+  if (request.controller === null || request.status === "closed") return;
+  if (request.status === "opening") return;
+
+  for (const row of request.queuedRows) {
+    request.controller.enqueue(request.textEncoder.encode(row));
+  }
+  request.queuedRows = [];
+
+  if (request.pendingTasks === 0) {
+    request.status = "closed";
+    request.controller.close();
+  }
+}
+
+function closeWithError(request: RscRequest, error: unknown): void {
+  if (request.status === "closed") return;
+  request.status = "closed";
+  request.recoverAllReady(error);
+  request.controller?.error(error);
+}
+
+function readThenable<T>(thenable: PromiseLike<T>): T {
+  const key = thenable as Thenable<T>;
+  let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
+
+  if (record === undefined) {
+    record = { status: "pending" };
+    thenableRecords.set(key, record);
+    thenable.then(
+      (value) => {
+        record.status = "fulfilled";
+        record.value = value;
+      },
+      (reason: unknown) => {
+        record.status = "rejected";
+        record.reason = reason;
+      },
+    );
+  }
+
+  if (record.status === "fulfilled") return record.value as T;
+  if (record.status === "rejected") throw record.reason;
+  throw thenable;
+}
+
+function isThenable(value: unknown): value is Thenable {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return false;
+  }
+
+  return typeof (value as PromiseLike<unknown>).then === "function";
+}
+
+function collectChildren(children: FigChild[]): FigChild[] {
+  const collected: FigChild[] = [];
+
+  for (const child of children) {
+    if (Array.isArray(child)) collected.push(...collectChildren(child));
+    else collected.push(child);
+  }
+
+  return collected;
+}
+
+function contextStack(
+  frame: RenderFrame,
+  context: FigContext<unknown>,
+): unknown[] {
+  let stack = frame.contextValues.get(context);
+  if (stack === undefined) {
+    stack = [];
+    frame.contextValues.set(context, stack);
+  }
+  return stack;
+}
+
+function readContextValue<T>(frame: RenderFrame, context: FigContext<T>): T {
+  const stack = frame.contextValues.get(context);
+  if (stack === undefined || stack.length === 0) return context.defaultValue;
+  return stack[stack.length - 1] as T;
+}
+
+function cloneContextValues(contextValues: ContextValues): ContextValues {
+  const clone: ContextValues = new Map();
+  for (const [context, stack] of contextValues) clone.set(context, [...stack]);
+  return clone;
+}
+
+function resolveInitialState<S>(initialState: S | (() => S)): S {
+  return typeof initialState === "function"
+    ? (initialState as () => S)()
+    : initialState;
+}
+
+function noopEffect(): void {}
+
+function invalidChildError(value: unknown): Error {
+  if (typeof value === "object" && value !== null) {
+    return new Error(
+      `Invalid Fig child in RSC render: object with keys ${Object.keys(
+        value,
+      ).join(", ")}.`,
+    );
+  }
+
+  return new Error(`Invalid Fig child in RSC render: ${String(value)}.`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readTextStream(
+  stream: ReadableStream<Uint8Array>,
+  onChunk: (chunk: string) => void,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      onChunk(decoder.decode());
+      return;
+    }
+
+    onChunk(decoder.decode(value, { stream: true }));
+  }
+}
+
+function resolveDecodedRow(
+  response: RscClientResponseImpl,
+  row: Extract<RscRow, { id: number }>,
+): void {
+  const chunk = response.getChunk(row.id);
+
+  if (row.tag === "error") {
+    const error = new Error(row.value.message);
+    chunk.model = null;
+    chunk.status = "rejected";
+    chunk.value = error;
+    chunk.reject(error);
+    return;
+  }
+
+  const value =
+    row.tag === "client"
+      ? response.decodeClientReference(row.value)
+      : decodeModel(response, row.value);
+
+  chunk.model = row.tag === "model" ? row.value : null;
+  chunk.status = "fulfilled";
+  chunk.value = value;
+  chunk.resolve(value);
+}
+
+function decodeModel(
+  response: RscClientResponseImpl,
+  model: RscModel,
+): unknown {
+  if (model === null) return null;
+  if (Array.isArray(model))
+    return model.map((item) => decodeModel(response, item));
+
+  if (typeof model !== "object") return model;
+
+  if ("$fig" in model) return decodeSpecialModel(response, model);
+
+  const decoded: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(model)) {
+    decoded[name] = decodeModel(response, value);
+  }
+  return decoded;
+}
+
+function decodeSpecialModel(
+  response: RscClientResponseImpl,
+  model: RscElementModel | RscSpecialModel,
+): unknown {
+  switch (model.$fig) {
+    case "boundary":
+      return createElement(RscBoundarySlot, {
+        id: model.id,
+        initial: model.child,
+        response,
+      });
+    case "element": {
+      const type = decodeElementType(response, model.type);
+      const props = decodeModel(response, model.props) as Props & {
+        key?: Key | null;
+      };
+      if (model.key !== null) props.key = model.key;
+      return createElement(type, props);
+    }
+    case "client":
+      return response.readChunk(model.id);
+    case "fragment":
+      return Fragment;
+    case "lazy":
+      return createElement(RscLazyNode, { id: model.id, response });
+    case "promise":
+      return response.getChunk(model.id).promise;
+    case "suspense":
+      return Suspense;
+    case "undefined":
+      return undefined;
+  }
+}
+
+function decodeElementType(
+  response: RscClientResponseImpl,
+  type: string | RscSpecialModel,
+): ElementType {
+  if (typeof type === "string") return type;
+  return decodeSpecialModel(response, type) as ElementType;
+}
+
+function RscResponseRoot(props: { response: RscClientResponseImpl }): FigNode {
+  return props.response.readChunk(0);
+}
+
+function RscBoundarySlot(props: {
+  id: string;
+  initial: RscModel;
+  response: RscClientResponseImpl;
+}): FigNode {
+  return props.response.readBoundary(props.id, props.initial);
+}
+
+function RscLazyNode(props: {
+  id: number;
+  response: RscClientResponseImpl;
+}): FigNode {
+  return props.response.readChunk(props.id);
+}
+
+function resolveClientReferenceExport(
+  moduleValue: unknown,
+  id: string,
+): ElementType {
+  if (typeof moduleValue === "function") return moduleValue as ElementType;
+
+  if (typeof moduleValue === "object" && moduleValue !== null) {
+    const exportName = id.includes("#")
+      ? id.slice(id.lastIndexOf("#") + 1)
+      : "";
+    const candidate =
+      exportName === ""
+        ? undefined
+        : (moduleValue as Record<string, unknown>)[exportName];
+
+    if (typeof candidate === "function") return candidate as ElementType;
+  }
+
+  throw new Error(`Client reference "${id}" did not load a component.`);
+}
+
+function appendRscHeaders(
+  headers: HeadersInit | undefined,
+  boundary?: string,
+): Headers {
+  const next = new Headers(headers);
+  if (!next.has("accept")) next.set("accept", contentType);
+  if (boundary !== undefined) next.set("x-fig-rsc-boundary", boundary);
+  return next;
+}
+
+function getOrCreateChunk(
+  chunks: Map<number, DecodedChunk>,
+  id: number,
+): DecodedChunk {
+  const existing = chunks.get(id);
+  if (existing !== undefined) return existing;
+
+  let resolve: (value: unknown) => void = () => undefined;
+  let reject: (reason: unknown) => void = () => undefined;
+  const promise = new Promise<unknown>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  const chunk: DecodedChunk = {
+    model: null,
+    promise,
+    reject,
+    resolve,
+    status: "pending",
+    value: undefined,
+  };
+  chunks.set(id, chunk);
+  return chunk;
+}
+
+function isRscBoundary(value: unknown): value is RscBoundaryComponent {
+  return (
+    typeof value === "function" &&
+    (value as RscBoundaryComponent).$$typeof === RscBoundarySymbol
+  );
+}

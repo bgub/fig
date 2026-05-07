@@ -3,6 +3,7 @@ export type Props = Record<string, unknown>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
+  | FigClientReference<P>
   | FigErrorBoundary
   | FigSuspense
   | ((props: P & { children?: FigNode }) => FigNode);
@@ -28,6 +29,18 @@ export interface FigPortal<Target = unknown> {
   readonly children: FigNode;
   readonly key: Key | null;
   readonly target: Target;
+}
+
+export interface ClientReferenceOptions {
+  id: string;
+  load: () => Promise<unknown>;
+}
+
+export interface FigClientReference<P = Props> {
+  (props: P & { children?: FigNode }): FigNode;
+  readonly $$typeof: symbol;
+  readonly id: string;
+  readonly load: () => Promise<unknown>;
 }
 
 export interface SuspenseProps {
@@ -57,6 +70,7 @@ export interface FigErrorBoundary {
 
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
+export const FigClientReferenceSymbol = Symbol.for("fig.client-reference");
 export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigPortalSymbol = Symbol.for("fig.portal");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
@@ -110,6 +124,29 @@ export function isPortal(value: unknown): value is FigPortal {
     typeof value === "object" &&
     value !== null &&
     (value as FigPortal).$$typeof === FigPortalSymbol
+  );
+}
+
+export function clientReference<P extends Props>(
+  options: ClientReferenceOptions,
+): FigClientReference<P> {
+  const reference = (() => {
+    throw new Error(
+      `Client reference "${options.id}" cannot be rendered on the server directly.`,
+    );
+  }) as FigClientReference<P>;
+
+  return Object.assign(reference, {
+    $$typeof: FigClientReferenceSymbol,
+    id: options.id,
+    load: options.load,
+  });
+}
+
+export function isClientReference(value: unknown): value is FigClientReference {
+  return (
+    typeof value === "function" &&
+    (value as FigClientReference).$$typeof === FigClientReferenceSymbol
   );
 }
 

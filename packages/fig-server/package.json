@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./rsc": {
+      "import": "./dist/rsc.js",
+      "types": "./dist/rsc.d.ts"
     }
   },
   "types": "./dist/index.d.ts",
@@ -17,8 +21,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown ./src/index.ts --dts --sourcemap",
-    "dev": "tsdown ./src/index.ts --dts --sourcemap --watch",
+    "build": "tsdown ./src/index.ts ./src/rsc.ts --dts --sourcemap",
+    "dev": "tsdown ./src/index.ts ./src/rsc.ts --dts --sourcemap --watch",
     "test": "vitest run"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
