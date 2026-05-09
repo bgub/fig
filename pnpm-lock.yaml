@@ -61,6 +61,18 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
 
+  apps/demo-rsc:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../../packages/fig-server
+
   apps/demo-ssr:
     dependencies:
       '@bgub/fig':
