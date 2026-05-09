@@ -43,6 +43,13 @@ interface FakeListener {
   listener: EventListener;
 }
 
+type FakeStyle = Record<string, string> & {
+  readonly length: number;
+  item(index: number): string;
+  removeProperty(name: string): void;
+  setProperty(name: string, value: string): void;
+};
+
 const nonBubblingEvents = new Set([
   "blur",
   "focus",
@@ -50,6 +57,7 @@ const nonBubblingEvents = new Set([
   "mouseleave",
   "scroll",
 ]);
+const xlinkNamespace = "http://www.w3.org/1999/xlink";
 
 export class FakeElement {
   readonly nodeType = 1;
@@ -59,7 +67,7 @@ export class FakeElement {
   listenerSets: Record<string, FakeListener[]> = {};
   listeners: Record<string, EventListener> = {};
   parentNode: FakeElement | null = null;
-  style: Record<string, string> = {};
+  style: FakeStyle = createFakeStyle();
   checked = false;
   defaultChecked = false;
   defaultValue = "";
@@ -67,7 +75,14 @@ export class FakeElement {
   selected = false;
   value = "";
 
-  constructor(public tagName: string) {}
+  constructor(
+    public tagName: string,
+    public namespaceURI = "http://www.w3.org/1999/xhtml",
+  ) {}
+
+  get localName(): string {
+    return this.tagName;
+  }
 
   get firstChild(): FakeElement | FakeText | FakeComment | null {
     return this.childNodes[0] ?? null;
@@ -124,8 +139,20 @@ export class FakeElement {
     this.attributes[name] = value;
   }
 
+  setAttributeNS(namespace: string, name: string, value: string): void {
+    this.setAttribute(namespacedAttributeName(namespace, name), value);
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null;
+  }
+
   removeAttribute(name: string): void {
     delete this.attributes[name];
+  }
+
+  removeAttributeNS(namespace: string, name: string): void {
+    this.removeAttribute(namespacedAttributeName(namespace, name));
   }
 
   addEventListener(
@@ -219,6 +246,37 @@ export class FakeElement {
 
 export const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+function createFakeStyle(): FakeStyle {
+  const style = {} as FakeStyle;
+  Object.defineProperties(style, {
+    item: {
+      value: (index: number) => styleNames(style)[index] ?? "",
+    },
+    length: {
+      get: () => styleNames(style).length,
+    },
+    removeProperty: {
+      value: (name: string) => {
+        style[name] = "";
+      },
+    },
+    setProperty: {
+      value: (name: string, value: string) => {
+        style[name] = value;
+      },
+    },
+  });
+  return style;
+}
+
+function styleNames(style: Record<string, string>): string[] {
+  return Object.keys(style).filter((name) => style[name] !== "");
+}
+
+function namespacedAttributeName(namespace: string, name: string): string {
+  return namespace === xlinkNamespace && name === "href" ? "xlink:href" : name;
+}
+
 export function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
   let reject: (reason?: unknown) => void = () => undefined;
@@ -236,6 +294,8 @@ export function installFakeDocument(): void {
   beforeEach(() => {
     globalThis.document = {
       createElement: (tagName: string) => new FakeElement(tagName),
+      createElementNS: (namespace: string, tagName: string) =>
+        new FakeElement(tagName, namespace),
       createTextNode: (value: string) => new FakeText(value),
       createComment: (value: string) => new FakeComment(value),
     } as unknown as Document;

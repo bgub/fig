@@ -98,7 +98,11 @@ export interface DehydratedSuspenseBoundary<
 }
 
 export interface HostConfig<Container, Instance, TextInstance> {
-  createInstance(type: string, props: Props): Instance;
+  createInstance(
+    type: string,
+    props: Props,
+    parent: Parent<Container, Instance>,
+  ): Instance;
   createTextInstance(text: string): TextInstance;
   appendInitialChild?(
     parent: Instance,
@@ -895,7 +899,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         return;
       }
 
-      node.stateNode ??= host.createInstance(String(node.type), node.props);
+      node.stateNode ??= host.createInstance(
+        String(node.type),
+        node.props,
+        hostParent(node),
+      );
 
       if (shouldUseHostTextContent(node)) {
         reconcileCurrentChildren(node, null);

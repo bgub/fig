@@ -62,7 +62,7 @@ export {
 } from "./priority.ts";
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
-  createInstance: (type) => document.createElement(type),
+  createInstance: (type, _props, parent) => createDomElement(type, parent),
   createTextInstance: (text) => document.createTextNode(text),
   appendInitialChild: (parent, child) => {
     parent.appendChild(child);
@@ -195,6 +195,27 @@ function isHydratableElement(node: Element | TextLike, type: string): boolean {
         : "";
 
   return name.toLowerCase() === type.toLowerCase();
+}
+
+const htmlNamespace = "http://www.w3.org/1999/xhtml";
+const mathNamespace = "http://www.w3.org/1998/Math/MathML";
+const svgNamespace = "http://www.w3.org/2000/svg";
+
+function createDomElement(type: string, parent: Container | Element): Element {
+  const namespace = namespaceFor(type, parent);
+  return namespace === htmlNamespace
+    ? document.createElement(type)
+    : document.createElementNS(namespace, type);
+}
+
+function namespaceFor(type: string, parent: Container | Element): string {
+  const normalizedType = type.toLowerCase();
+  if (normalizedType === "svg") return svgNamespace;
+  if (normalizedType === "math") return mathNamespace;
+
+  return "namespaceURI" in parent && elementName(parent) !== "foreignobject"
+    ? (parent.namespaceURI ?? htmlNamespace)
+    : htmlNamespace;
 }
 
 function hydratableFirstChild(

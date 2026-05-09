@@ -82,8 +82,11 @@ describe("@bgub/fig-server", () => {
       createElement(
         "button",
         {
+          "aria-label": "Save",
           className: "primary",
+          "data-id": "save",
           disabled: true,
+          tabIndex: 0,
           value: '<&"',
           events: [{}],
           bind: () => undefined,
@@ -99,8 +102,16 @@ describe("@bgub/fig-server", () => {
     );
 
     expect(html).toBe(
-      '<button class="primary" disabled value="&lt;&amp;&quot;" style="background-color:red;--gap:1rem;opacity:0">Save &amp; &lt;</button>',
+      '<button aria-label="Save" class="primary" data-id="save" disabled tabindex="0" value="&lt;&amp;&quot;" style="background-color:red;--gap:1rem;opacity:0">Save &amp; &lt;</button>',
     );
+  });
+
+  it("serializes namespaced SVG attribute aliases", async () => {
+    const html = await renderToString(
+      createElement("svg", null, createElement("use", { xlinkHref: "#icon" })),
+    );
+
+    expect(html).toBe('<svg><use xlink:href="#icon"></use></svg>');
   });
 
   it("renders fragments, arrays, function components, and state initializers", async () => {

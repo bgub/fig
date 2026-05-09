@@ -72,4 +72,42 @@ describe("@bgub/fig-dom", () => {
       expect(container.textContent).toBe("After");
     });
   });
+
+  it("creates SVG, MathML, and foreignObject elements in the right namespace", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "svg",
+          null,
+          createElement("circle", null),
+          createElement("foreignObject", null, createElement("div", null)),
+          createElement("svg", null),
+        ),
+      ),
+    );
+
+    const svg = container.childNodes[0] as FakeElement;
+    const circle = svg.childNodes[0] as FakeElement;
+    const foreignObject = svg.childNodes[1] as FakeElement;
+    const div = foreignObject.childNodes[0] as FakeElement;
+    const nestedSvg = svg.childNodes[2] as FakeElement;
+
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(circle.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(foreignObject.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(div.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+    expect(nestedSvg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+
+    flushSync(() =>
+      root.render(createElement("math", null, createElement("mi", null, "x"))),
+    );
+
+    const math = container.childNodes[0] as FakeElement;
+    const mi = math.childNodes[0] as FakeElement;
+    expect(math.namespaceURI).toBe("http://www.w3.org/1998/Math/MathML");
+    expect(mi.namespaceURI).toBe("http://www.w3.org/1998/Math/MathML");
+  });
 });

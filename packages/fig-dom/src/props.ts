@@ -12,7 +12,13 @@ interface UpdateOptions {
   hydrating?: boolean;
 }
 
+type StyleTarget = Record<string, unknown> & {
+  removeProperty?: (name: string) => void;
+  setProperty?: (name: string, value: string) => void;
+};
+
 const selectState = new WeakMap<Element, SelectState>();
+const xlinkNamespace = "http://www.w3.org/1999/xlink";
 
 export function updateElement(
   element: Element,
@@ -138,19 +144,22 @@ function setProperty(
   previous: unknown,
   next: unknown,
 ): void {
-  const attribute = attributeName(name);
-
   if (name === "style") {
     setStyle(element, previous, next);
-  } else if (next === null || next === undefined || next === false) {
-    element.removeAttribute(attribute);
-    if (name in element) {
+    return;
+  }
+
+  const attribute = attributeName(name);
+  const namespaced = name === "xlinkHref";
+  if (next === null || next === undefined || next === false) {
+    removeDomAttribute(element, name, attribute);
+    if (!namespaced && name in element) {
       (element as unknown as Record<string, unknown>)[name] = "";
     }
-  } else if (name in element && typeof next !== "object") {
+  } else if (!namespaced && name in element && typeof next !== "object") {
     (element as unknown as Record<string, unknown>)[name] = next;
   } else {
-    element.setAttribute(attribute, String(next));
+    setDomAttribute(element, name, attribute, next);
   }
 }
 
@@ -344,26 +353,84 @@ function setBooleanAttribute(
 }
 
 function setStyle(element: Element, previous: unknown, next: unknown): void {
-  const style = (element as HTMLElement).style as unknown as Record<
-    string,
-    unknown
-  >;
+  const style = (element as HTMLElement).style as unknown as
+    | StyleTarget
+    | undefined;
+  if (style === undefined) return;
+
   const previousStyle = styleProps(previous);
   const nextStyle = styleProps(next);
 
   for (const name of Object.keys(previousStyle)) {
-    if (!(name in nextStyle)) style[name] = "";
+    if (!(name in nextStyle)) clearStyleProperty(style, name);
   }
 
-  Object.assign(style, nextStyle);
+  for (const [name, value] of Object.entries(nextStyle)) {
+    if (value === null || value === undefined || value === false) {
+      clearStyleProperty(style, name);
+    } else {
+      setStyleProperty(style, name, value);
+    }
+  }
 }
 
 function styleProps(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value : {};
 }
 
+function setStyleProperty(
+  style: StyleTarget,
+  name: string,
+  value: unknown,
+): void {
+  if (name.startsWith("--") && typeof style.setProperty === "function") {
+    style.setProperty(name, String(value));
+  } else {
+    style[name] = value;
+  }
+}
+
+function clearStyleProperty(style: StyleTarget, name: string): void {
+  if (name.startsWith("--") && typeof style.removeProperty === "function") {
+    style.removeProperty(name);
+  } else {
+    style[name] = "";
+  }
+}
+
 function attributeName(name: string): string {
-  return name === "className" ? "class" : name;
+  if (name === "className") return "class";
+  if (name === "htmlFor") return "for";
+  if (name === "tabIndex") return "tabindex";
+  if (name === "xlinkHref") return "xlink:href";
+  return name;
+}
+
+function setDomAttribute(
+  element: Element,
+  name: string,
+  attribute: string,
+  value: unknown,
+): void {
+  if (name === "xlinkHref") {
+    element.setAttributeNS(xlinkNamespace, attribute, String(value));
+    return;
+  }
+
+  element.setAttribute(attribute, String(value));
+}
+
+function removeDomAttribute(
+  element: Element,
+  name: string,
+  attribute: string,
+): void {
+  if (name === "xlinkHref") {
+    element.removeAttributeNS(xlinkNamespace, "href");
+    return;
+  }
+
+  element.removeAttribute(attribute);
 }
 
 function hydratedAttributeName(type: string, name: string): string | null {

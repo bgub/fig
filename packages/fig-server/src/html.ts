@@ -239,6 +239,8 @@ function reservedProp(name: string): boolean {
 function attributeName(name: string): string {
   if (name === "className") return "class";
   if (name === "htmlFor") return "for";
+  if (name === "tabIndex") return "tabindex";
+  if (name === "xlinkHref") return "xlink:href";
   return name;
 }
 

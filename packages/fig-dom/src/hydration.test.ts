@@ -738,6 +738,50 @@ describe("@bgub/fig-dom hydration", () => {
     expect(button.style.fontWeight).toBe("");
   });
 
+  it("keeps browser-normalized attributes aligned during hydration", () => {
+    const container = new FakeElement("root");
+    const svg = new FakeElement("svg", "http://www.w3.org/2000/svg");
+    const use = new FakeElement("use", "http://www.w3.org/2000/svg");
+
+    use.setAttribute("aria-label", "Icon");
+    use.setAttribute("data-id", "icon");
+    use.setAttribute("tabindex", "0");
+    use.setAttribute("xlink:href", "#icon");
+    use.setAttribute("style", "--accent: red; color: blue;");
+    use.style["--accent"] = "red";
+    use.style.color = "blue";
+    svg.appendChild(use);
+    container.appendChild(svg);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "svg",
+          null,
+          createElement("use", {
+            "aria-label": "Icon",
+            "data-id": "icon",
+            style: { "--accent": "red", color: "blue" },
+            tabIndex: 0,
+            xlinkHref: "#icon",
+          }),
+        ),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([svg]);
+    expect(svg.childNodes).toEqual([use]);
+    expect(use.attributes).toEqual({
+      "aria-label": "Icon",
+      "data-id": "icon",
+      tabindex: "0",
+      "xlink:href": "#icon",
+    });
+    expect(use.style["--accent"]).toBe("red");
+    expect(use.style.color).toBe("blue");
+  });
+
   it("hydrates controlled form values", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");

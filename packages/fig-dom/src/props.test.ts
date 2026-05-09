@@ -19,13 +19,18 @@ describe("@bgub/fig-dom props", () => {
           className: "primary",
           disabled: true,
           events: [on("click", firstClick)],
+          htmlFor: "field",
           style: { color: "red", fontWeight: "bold" },
         }),
       ),
     );
 
     const button = container.childNodes[0] as FakeElement;
-    expect(button.attributes).toEqual({ class: "primary", disabled: "true" });
+    expect(button.attributes).toEqual({
+      class: "primary",
+      disabled: "true",
+      for: "field",
+    });
     expect(button.style.color).toBe("red");
     expect(button.style.fontWeight).toBe("bold");
     button.dispatch("click");
@@ -51,6 +56,54 @@ describe("@bgub/fig-dom props", () => {
 
     expect(container.listeners.click).toBeUndefined();
     expect(button.style.color).toBe("");
+  });
+
+  it("canonicalizes DOM attribute names and updates CSS custom properties", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "svg",
+          null,
+          createElement("use", {
+            "aria-label": "Icon",
+            "data-id": "icon",
+            style: { "--accent": "red", color: "blue" },
+            tabIndex: 0,
+            xlinkHref: "#icon",
+          }),
+        ),
+      ),
+    );
+
+    const svg = container.childNodes[0] as FakeElement;
+    const use = svg.childNodes[0] as FakeElement;
+    expect(use.attributes).toEqual({
+      "aria-label": "Icon",
+      "data-id": "icon",
+      tabindex: "0",
+      "xlink:href": "#icon",
+    });
+    expect(use.style["--accent"]).toBe("red");
+    expect(use.style.color).toBe("blue");
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "svg",
+          null,
+          createElement("use", {
+            style: { color: "green" },
+          }),
+        ),
+      ),
+    );
+
+    expect(use.attributes).toEqual({});
+    expect(use.style["--accent"]).toBe("");
+    expect(use.style.color).toBe("green");
   });
 
   it("controls input values without resetting selection on equal updates", () => {
