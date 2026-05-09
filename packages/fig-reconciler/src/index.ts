@@ -120,6 +120,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   canHydrateInstance?(
     node: HostNode<Instance, TextInstance>,
     type: string,
+    props: Props,
   ): boolean;
   canHydrateTextInstance?(
     node: HostNode<Instance, TextInstance>,
@@ -894,8 +895,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === HostTag) {
+      const children = hostChildren(node.props);
+
       if (tryHydrateInstance(node)) {
-        reconcileCurrentChildren(node, node.props.children);
+        reconcileCurrentChildren(node, children);
         return;
       }
 
@@ -905,10 +908,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         hostParent(node),
       );
 
-      if (shouldUseHostTextContent(node)) {
-        reconcileCurrentChildren(node, null);
-        return;
-      }
+      reconcileCurrentChildren(
+        node,
+        children === null || shouldUseHostTextContent(node) ? null : children,
+      );
+      return;
     }
 
     if (node.tag === SuspenseTag) {
@@ -957,7 +961,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       });
     }
 
-    if (!hydrationHost.canHydrateInstance(hydratable, type)) {
+    if (!hydrationHost.canHydrateInstance(hydratable, type, node.props)) {
       throwHydrationMismatch(root, node, {
         actual: "different DOM node",
         expected: `<${type}>`,
@@ -1879,6 +1883,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next: Props,
   ): boolean {
     if (host.setTextContent === undefined) return false;
+    if (hasUnsafeHTML(next)) return false;
 
     const previousText = hostTextContent(previous.children);
     const nextText = hostTextContent(next.children);
@@ -3388,6 +3393,35 @@ type HostTextContent =
 function hostTextContent(children: unknown): string | null {
   const text = hostTextContentPart(children as FigNode);
   return typeof text === "string" ? text : null;
+}
+
+function validateHostContentProps(props: Props): void {
+  if (!hasRenderableChild(props.children as FigNode)) return;
+
+  throw new Error("Host elements cannot have both unsafeHTML and children.");
+}
+
+function hostChildren(props: Props): FigNode {
+  if (!hasUnsafeHTML(props)) return props.children as FigNode;
+  validateHostContentProps(props);
+  return null;
+}
+
+function hasUnsafeHTML(props: Props): boolean {
+  return !emptyValue(props.unsafeHTML);
+}
+
+function hasRenderableChild(node: FigNode): boolean {
+  if (Array.isArray(node)) return node.some(hasRenderableChild);
+  return !emptyChild(node);
+}
+
+function emptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === false;
+}
+
+function emptyChild(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === "boolean";
 }
 
 function hostTextContentPart(node: FigNode): HostTextContent {

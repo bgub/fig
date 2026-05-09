@@ -106,6 +106,19 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("renders unsafe HTML without escaping it", async () => {
+    const html = await renderToString(
+      createElement("article", {
+        class: "content",
+        unsafeHTML: "<strong>Fig</strong>&",
+      }),
+    );
+
+    expect(html).toBe(
+      '<article class="content"><strong>Fig</strong>&</article>',
+    );
+  });
+
   it("serializes namespaced SVG attribute aliases", async () => {
     const html = await renderToString(
       createElement(
@@ -464,6 +477,20 @@ describe("@bgub/fig-server", () => {
     await expect(
       renderToString(createElement("div", { data: { nope: true } })),
     ).rejects.toThrow('Cannot serialize prop "data" to HTML.');
+
+    await expect(
+      renderToString(
+        createElement("div", { unsafeHTML: "<strong>Fig</strong>" }, "Fig"),
+      ),
+    ).rejects.toThrow(
+      "Host elements cannot have both unsafeHTML and children.",
+    );
+
+    await expect(
+      renderToString(createElement("div", { unsafeHTML: { html: "" } })),
+    ).rejects.toThrow(
+      "The unsafeHTML prop must be a string during server render.",
+    );
   });
 
   it("uses React-like streaming identifier prefixes", async () => {
@@ -529,6 +556,10 @@ describe("@bgub/fig-server", () => {
     await expect(
       renderToString(createElement("input", null, "child")),
     ).rejects.toThrow("Void element <input> cannot have children.");
+
+    await expect(
+      renderToString(createElement("input", { unsafeHTML: "child" })),
+    ).rejects.toThrow("Void element <input> cannot have unsafeHTML.");
   });
 
   it("serializes form default props as browser HTML", async () => {

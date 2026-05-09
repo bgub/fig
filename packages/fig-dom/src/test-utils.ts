@@ -74,6 +74,7 @@ export class FakeElement {
   multiple = false;
   selected = false;
   value = "";
+  private innerHTMLValue: string | null = null;
 
   constructor(
     public tagName: string,
@@ -95,6 +96,7 @@ export class FakeElement {
   appendChild(
     node: FakeElement | FakeText | FakeComment,
   ): FakeElement | FakeText | FakeComment {
+    this.innerHTMLValue = null;
     node.parentNode?.removeChild(node);
     this.childNodes.push(node);
     node.parentNode = this;
@@ -105,6 +107,7 @@ export class FakeElement {
     node: FakeElement | FakeText | FakeComment,
     child: FakeElement | FakeText | FakeComment | null,
   ): FakeElement | FakeText | FakeComment {
+    this.innerHTMLValue = null;
     if (child === null) {
       return this.appendChild(node);
     }
@@ -125,6 +128,7 @@ export class FakeElement {
   removeChild(
     node: FakeElement | FakeText | FakeComment,
   ): FakeElement | FakeText | FakeComment {
+    this.innerHTMLValue = null;
     const index = this.childNodes.indexOf(node);
 
     if (index !== -1) {
@@ -229,10 +233,12 @@ export class FakeElement {
   }
 
   get textContent(): string {
+    if (this.innerHTMLValue !== null) return this.innerHTMLValue;
     return this.childNodes.map((child) => child.textContent).join("");
   }
 
   set textContent(value: string) {
+    this.innerHTMLValue = null;
     for (const child of this.childNodes) child.parentNode = null;
     this.childNodes = [];
 
@@ -241,6 +247,16 @@ export class FakeElement {
       text.parentNode = this;
       this.childNodes.push(text);
     }
+  }
+
+  get innerHTML(): string {
+    return this.innerHTMLValue ?? this.textContent;
+  }
+
+  set innerHTML(value: string) {
+    for (const child of this.childNodes) child.parentNode = null;
+    this.childNodes = [];
+    this.innerHTMLValue = value;
   }
 }
 

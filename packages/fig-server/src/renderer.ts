@@ -20,6 +20,7 @@ import {
   formTextContent,
   hasRenderableChild,
   isVoidElement,
+  unsafeHTMLContent,
   writeElementEnd,
   writeElementStart,
   writeText,
@@ -607,13 +608,27 @@ function renderHostElement(
   frame: RenderFrame,
 ): void {
   const isVoid = isVoidElement(type);
+  const unsafeHTML = unsafeHTMLContent(props);
+  const hasChildren = hasRenderableChild(props.children);
 
-  if (isVoid && hasRenderableChild(props.children)) {
+  if (isVoid && hasChildren) {
     throw new Error(`Void element <${type}> cannot have children.`);
+  }
+  if (isVoid && unsafeHTML !== null) {
+    throw new Error(`Void element <${type}> cannot have unsafeHTML.`);
+  }
+  if (unsafeHTML !== null && hasChildren) {
+    throw new Error("Host elements cannot have both unsafeHTML and children.");
   }
 
   writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
   if (isVoid) return;
+
+  if (unsafeHTML !== null) {
+    frame.segment.write(unsafeHTML);
+    writeElementEnd(type, frame.segment);
+    return;
+  }
 
   const formText = formTextContent(type, props);
   if (formText !== null) {

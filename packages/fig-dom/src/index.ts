@@ -77,7 +77,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     hydratableFirstChild(parent, props),
   getNextHydratableSibling: (node) =>
     node.nextSibling as Element | TextLike | null,
-  canHydrateInstance: (node, type) => isHydratableElement(node, type),
+  canHydrateInstance: (node, type, props) =>
+    isHydratableElement(node, type, props),
   canHydrateTextInstance: (node) => isHydratableText(node),
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
@@ -183,7 +184,11 @@ export function createPortal(
   return createPortalNode(children, container, key);
 }
 
-function isHydratableElement(node: Element | TextLike, type: string): boolean {
+function isHydratableElement(
+  node: Element | TextLike,
+  type: string,
+  props: Props,
+): boolean {
   if ("nodeType" in node && node.nodeType !== 1) return false;
   if (!("setAttribute" in node)) return false;
 
@@ -194,7 +199,8 @@ function isHydratableElement(node: Element | TextLike, type: string): boolean {
         ? node.tagName
         : "";
 
-  return name.toLowerCase() === type.toLowerCase();
+  if (name.toLowerCase() !== type.toLowerCase()) return false;
+  return hasMatchingUnsafeHTML(node, props);
 }
 
 const htmlNamespace = "http://www.w3.org/1999/xhtml";
@@ -222,6 +228,8 @@ function hydratableFirstChild(
   parent: Container | Element,
   props?: Props,
 ): Element | TextLike | null {
+  if (props !== undefined && unsafeHTMLValue(props) !== null) return null;
+
   if (
     elementName(parent) === "textarea" &&
     props !== undefined &&
@@ -235,6 +243,20 @@ function hydratableFirstChild(
 
 function hasManagedTextareaContent(props: Props): boolean {
   return props.value !== undefined || props.defaultValue !== undefined;
+}
+
+function unsafeHTMLValue(props: Props): unknown {
+  const value = props.unsafeHTML;
+  return value === null || value === undefined || value === false
+    ? null
+    : value;
+}
+
+function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
+  const expected = unsafeHTMLValue(props);
+  if (expected === null) return true;
+  if (typeof expected !== "string" || !("innerHTML" in element)) return true;
+  return element.innerHTML === expected;
 }
 
 function elementName(node: Container | Element | TextLike): string {

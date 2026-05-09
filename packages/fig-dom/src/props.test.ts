@@ -135,6 +135,56 @@ describe("@bgub/fig-dom props", () => {
     });
   });
 
+  it("sets, updates, and clears unsafe HTML content", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement("article", {
+          class: "content",
+          unsafeHTML: "<strong>Fig</strong>",
+        }),
+      ),
+    );
+
+    const article = container.childNodes[0] as FakeElement;
+    expect(article.attributes).toEqual({ class: "content" });
+    expect(article.innerHTML).toBe("<strong>Fig</strong>");
+    expect(article.childNodes).toEqual([]);
+
+    flushSync(() =>
+      root.render(
+        createElement("article", {
+          unsafeHTML: "<em>Updated</em>",
+        }),
+      ),
+    );
+
+    expect(article.attributes).toEqual({});
+    expect(article.innerHTML).toBe("<em>Updated</em>");
+
+    flushSync(() =>
+      root.render(
+        createElement("article", null, createElement("span", null, "Child")),
+      ),
+    );
+
+    expect(article.innerHTML).toBe("Child");
+    expect(article.childNodes[0]).toBeInstanceOf(FakeElement);
+  });
+
+  it("rejects non-string unsafe HTML values", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    expect(() =>
+      flushSync(() =>
+        root.render(createElement("article", { unsafeHTML: { html: "" } })),
+      ),
+    ).toThrow("The unsafeHTML prop must be a string.");
+  });
+
   it("controls input values without resetting selection on equal updates", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

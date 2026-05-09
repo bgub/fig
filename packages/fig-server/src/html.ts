@@ -48,7 +48,7 @@ export function isVoidElement(type: string): boolean {
 export function hasRenderableChild(node: unknown): boolean {
   if (Array.isArray(node)) return node.some(hasRenderableChild);
   if (isPortal(node)) return false;
-  return node !== null && node !== undefined && typeof node !== "boolean";
+  return !emptyChild(node);
 }
 
 export function formTextContent(type: string, props: Props): string | null {
@@ -56,6 +56,13 @@ export function formTextContent(type: string, props: Props): string | null {
 
   const value = props.value !== undefined ? props.value : props.defaultValue;
   return formString(value);
+}
+
+export function unsafeHTMLContent(props: Props): string | null {
+  const value = props.unsafeHTML;
+  if (emptyValue(value)) return null;
+  if (typeof value === "string") return value;
+  throw new Error("The unsafeHTML prop must be a string during server render.");
 }
 
 function writeAttributes(
@@ -129,13 +136,11 @@ function attributeValue(
   name: string,
   value: unknown,
 ): [string, unknown] | null {
-  return value === null || value === undefined || value === false
-    ? null
-    : [name, value];
+  return emptyValue(value) ? null : [name, value];
 }
 
 function valueAttribute(value: unknown): [string, unknown] | null {
-  if (value === null || value === undefined || value === false) return null;
+  if (emptyValue(value)) return null;
   if (serializableAttributeValue(value)) return ["value", String(value)];
   return ["value", value];
 }
@@ -145,12 +150,7 @@ function optionSelected(value: unknown, selectProps: Props): boolean {
     selectProps.value !== undefined
       ? selectProps.value
       : selectProps.defaultValue;
-  if (
-    selectValue === undefined ||
-    selectValue === null ||
-    selectValue === false
-  )
-    return false;
+  if (emptyValue(selectValue)) return false;
 
   const optionValue = formString(value);
   if (optionValue === null) return false;
@@ -181,7 +181,7 @@ function optionTextValue(node: unknown): string | null {
 }
 
 function formString(value: unknown): string | null {
-  if (value === null || value === undefined || value === false) return null;
+  if (emptyValue(value)) return null;
   if (serializableAttributeValue(value)) return String(value);
   return null;
 }
@@ -199,19 +199,27 @@ function serializableAttributeValue(value: unknown): boolean {
   );
 }
 
+function emptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === false;
+}
+
+function emptyChild(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === "boolean";
+}
+
 function writeAttribute(sink: HtmlSink, name: string, value: string): void {
   sink.write(` ${name}="${escapeAttribute(value)}"`);
 }
 
 function serializeStyle(value: unknown): string {
-  if (value === null || value === undefined || value === false) return "";
+  if (emptyValue(value)) return "";
   if (typeof value !== "object") {
     throw new Error("The style prop must be an object during server render.");
   }
 
   const declarations: string[] = [];
   for (const [name, item] of Object.entries(value)) {
-    if (item === null || item === undefined || item === false) continue;
+    if (emptyValue(item)) continue;
     if (
       typeof item !== "string" &&
       typeof item !== "number" &&
@@ -232,6 +240,7 @@ function reservedProp(name: string): boolean {
     name === "key" ||
     name === "events" ||
     name === "bind" ||
+    name === "unsafeHTML" ||
     /^on[A-Z]/.test(name)
   );
 }

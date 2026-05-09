@@ -45,7 +45,9 @@ The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useExternalStore` server snapshots, no-op server
 effects, host prop serialization, streaming Suspense, partial segments inside
 Suspense boundaries, abort fallback flushing, and Suspense-only server error
-recovery. Error boundaries do not catch server render errors.
+recovery. Host elements may render trusted raw content with `unsafeHTML`, which
+is written without escaping and cannot be combined with children. Error
+boundaries do not catch server render errors.
 
 ## License
 

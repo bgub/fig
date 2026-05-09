@@ -44,6 +44,10 @@ SVG and MathML elements are created in their own namespaces, and
 against Fig's native attribute names so browser-normalized server attributes
 such as `tabindex`, `readonly`, and `xlink:href` do not look like extras.
 
+Use `unsafeHTML="<p>trusted html</p>"` to write raw `innerHTML`. Fig does not
+sanitize this string, so only pass trusted or sanitized markup. `unsafeHTML`
+manages the element contents directly and cannot be combined with children.
+
 Fig intentionally does not implement React's resource and metadata behavior for
 `title`, `meta`, `link`, `script`, or `style`. It also does not warn for
 `contentEditable`; native DOM behavior applies.

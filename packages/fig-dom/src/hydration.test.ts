@@ -738,6 +738,49 @@ describe("@bgub/fig-dom hydration", () => {
     expect(button.style.fontWeight).toBe("");
   });
 
+  it("hydrates unsafe HTML without reconciling its children", () => {
+    const container = new FakeElement("root");
+    const article = new FakeElement("article");
+    article.innerHTML = "<strong>Client</strong>";
+    container.appendChild(article);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("article", {
+          unsafeHTML: "<strong>Client</strong>",
+        }),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([article]);
+    expect(article.innerHTML).toBe("<strong>Client</strong>");
+    expect(article.childNodes).toEqual([]);
+  });
+
+  it("recovers when hydrated unsafe HTML does not match", () => {
+    const container = new FakeElement("root");
+    const article = new FakeElement("article");
+    const recoverable = captureRecoverableErrors();
+    article.innerHTML = "<strong>Server</strong>";
+    container.appendChild(article);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("article", {
+          unsafeHTML: "<strong>Client</strong>",
+        }),
+        { onRecoverableError: recoverable.capture },
+      ),
+    );
+
+    const clientArticle = container.childNodes[0] as FakeElement;
+    expect(clientArticle).not.toBe(article);
+    expect(clientArticle.innerHTML).toBe("<strong>Client</strong>");
+    expect(recoverable.errors).toHaveLength(1);
+  });
+
   it("keeps native SVG attributes aligned during hydration", () => {
     const container = new FakeElement("root");
     const svg = new FakeElement("svg", "http://www.w3.org/2000/svg");

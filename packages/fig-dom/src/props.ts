@@ -45,10 +45,15 @@ export function updateElement(
       continue;
     }
 
-    if (reserved(name)) continue;
-
     const previous = previousProps[name];
     const next = nextProps[name];
+
+    if (name === "unsafeHTML") {
+      if (previous !== next) setUnsafeHTML(element, next);
+      continue;
+    }
+
+    if (reserved(name)) continue;
 
     if (formProp(name)) {
       setFormProperty(
@@ -212,9 +217,7 @@ function setFormValue(
 }
 
 function formValue(value: unknown): string | null {
-  return value === null || value === undefined || value === false
-    ? null
-    : String(value);
+  return emptyValue(value) ? null : String(value);
 }
 
 function setChecked(
@@ -231,6 +234,19 @@ function setChecked(
   if (options.live === true && "checked" in element) {
     (element as unknown as { checked: boolean }).checked = checked;
   }
+}
+
+function setUnsafeHTML(element: Element, value: unknown): void {
+  const html = unsafeHTMLValue(value);
+  if (!("innerHTML" in element)) return;
+
+  (element as unknown as { innerHTML: string }).innerHTML = html ?? "";
+}
+
+function unsafeHTMLValue(value: unknown): string | null {
+  if (emptyValue(value)) return null;
+  if (typeof value === "string") return value;
+  throw new Error("The unsafeHTML prop must be a string.");
 }
 
 function updateSelectOptions(
@@ -385,7 +401,7 @@ function setAttribute(
   attribute: string,
   value: unknown,
 ): void {
-  if (value === null || value === undefined || value === false) {
+  if (emptyValue(value)) {
     removeAttribute(element, attribute);
     return;
   }
@@ -429,6 +445,10 @@ function valueProp(name: string): boolean {
   return name === "value" || name === "defaultValue";
 }
 
+function emptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === false;
+}
+
 function elementName(element: Element): string {
   return (
     "localName" in element && typeof element.localName === "string"
@@ -457,7 +477,12 @@ function isElement(value: unknown): value is Element {
 }
 
 function reserved(name: string): boolean {
-  return name === "children" || name === "key" || event(name);
+  return (
+    name === "children" ||
+    name === "key" ||
+    name === "unsafeHTML" ||
+    event(name)
+  );
 }
 
 function event(name: string): boolean {

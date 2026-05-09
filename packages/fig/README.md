@@ -72,6 +72,7 @@ Use `@bgub/fig-dom` for browser rendering:
 - `createPortal(children, container, key?)` renders into external DOM targets.
 - DOM events use `events={[on("click", (event, signal) => ...)]}`.
 - DOM node access uses `bind={(node, signal) => ...}`.
+- Raw trusted HTML uses `unsafeHTML="<p>trusted html</p>"`.
 
 Use `@bgub/fig-server` for streaming server rendering with
 `renderToReadableStream` or `renderToString`.

@@ -44,4 +44,11 @@ describe("@bgub/fig-dom diagnostics", () => {
       "Invalid Fig child: object with keys nope.",
     );
   });
+
+  it("throws when unsafeHTML is mixed with children", () => {
+    expectRenderDiagnostic(
+      createElement("section", { unsafeHTML: "<strong>Fig</strong>" }, "Fig"),
+      "Host elements cannot have both unsafeHTML and children.",
+    );
+  });
 });
