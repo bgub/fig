@@ -88,6 +88,13 @@ export interface RscFetchOptions extends RequestInit {
   fetch?: RscFetch;
 }
 
+class RscRequestCancelledError extends Error {
+  constructor() {
+    super("RSC request cancelled.");
+    this.name = "RscRequestCancelledError";
+  }
+}
+
 type RscRequest = {
   allReady: Promise<void>;
   clientReferenceRows: Map<string, number>;
@@ -184,9 +191,23 @@ function createRscRenderResult(
 async function processRscStream(
   response: RscClientResponse,
   stream: ReadableStream<Uint8Array>,
+  signal?: AbortSignal | null,
 ): Promise<void> {
-  await readTextStream(stream, (chunk) => response.processStringChunk(chunk));
+  await readTextStream(
+    stream,
+    (chunk) => response.processStringChunk(chunk),
+    signal,
+  );
   response.processStringChunk("\n");
+}
+
+export function isRscRequestCancelled(error: unknown): boolean {
+  return (
+    error instanceof RscRequestCancelledError ||
+    (typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      error.name === "AbortError")
+  );
 }
 
 export async function fetchRsc(
@@ -212,15 +233,23 @@ async function requestRsc(
   options: RscFetchOptions,
   boundary?: string,
 ): Promise<Response> {
-  const { fetch: fetchImpl = globalThis.fetch, headers, ...init } = options;
+  const {
+    fetch: fetchImpl = globalThis.fetch,
+    headers,
+    signal,
+    ...init
+  } = options;
   if (fetchImpl === undefined) {
     throw new Error("fetchRsc requires a fetch implementation.");
   }
+  throwIfAborted(signal);
 
   const result = await fetchImpl(input, {
     ...init,
     headers: appendRscHeaders(headers, boundary),
+    signal,
   });
+  throwIfAborted(signal);
   if (!result.ok) {
     throw new Error(`RSC request failed with status ${result.status}.`);
   }
@@ -228,7 +257,7 @@ async function requestRsc(
     throw new Error("RSC response did not include a body.");
   }
 
-  await response.processStream(result.body);
+  await processRscStream(response, result.body, signal);
   return result;
 }
 
@@ -860,19 +889,38 @@ function errorMessage(error: unknown): string {
 async function readTextStream(
   stream: ReadableStream<Uint8Array>,
   onChunk: (chunk: string) => void,
+  signal?: AbortSignal | null,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
+  const abort = () => {
+    void reader.cancel(signal?.reason).catch(() => undefined);
+  };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      onChunk(decoder.decode());
-      return;
+  try {
+    signal?.addEventListener("abort", abort, { once: true });
+
+    while (true) {
+      throwIfAborted(signal);
+
+      const { done, value } = await reader.read();
+      throwIfAborted(signal);
+
+      if (done) {
+        onChunk(decoder.decode());
+        return;
+      }
+
+      onChunk(decoder.decode(value, { stream: true }));
     }
-
-    onChunk(decoder.decode(value, { stream: true }));
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    throwIfAborted(signal);
   }
+}
+
+function throwIfAborted(signal?: AbortSignal | null): void {
+  if (signal?.aborted) throw new RscRequestCancelledError();
 }
 
 function resolveDecodedRow(

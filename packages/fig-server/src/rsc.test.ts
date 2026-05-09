@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRscClientResponse,
   fetchRsc,
+  isRscRequestCancelled,
   RscBoundary,
   type RscFetch,
   refreshRscBoundary,
@@ -36,10 +37,7 @@ type TestRscRow =
   | { id: number; tag: "model"; value: TestRscModel }
   | { boundary: string; tag: "refresh"; value: TestRscModel };
 
-type TestRscElementModel = Extract<
-  TestRscModel,
-  { $fig: "element" }
->;
+type TestRscElementModel = Extract<TestRscModel, { $fig: "element" }>;
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -75,6 +73,29 @@ function streamFromString(input: string): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function controlledTextStream(): {
+  close(): void;
+  stream: ReadableStream<Uint8Array>;
+  write(chunk: string): void;
+} {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  return {
+    close() {
+      controller?.close();
+    },
+    stream: new ReadableStream<Uint8Array>({
+      start(innerController) {
+        controller = innerController;
+      },
+    }),
+    write(chunk) {
+      controller?.enqueue(encoder.encode(chunk));
+    },
+  };
 }
 
 async function renderToRscText(node: FigNode): Promise<string> {
@@ -231,7 +252,9 @@ describe("RSC rendering", () => {
         createElement("p", null, "Server child"),
       ),
     );
-    const root = rows.find((row) => "id" in row && row.id === 0) as TestRscRow & {
+    const root = rows.find(
+      (row) => "id" in row && row.id === 0,
+    ) as TestRscRow & {
       tag: "model";
       value: TestRscElementModel;
     };
@@ -559,8 +582,11 @@ describe("RSC rendering", () => {
   it("fetches initial RSC streams with an RSC accept header", async () => {
     const response = createRscClientResponse();
     let requestHeaders: Headers | null = null;
+    let requestSignal: AbortSignal | null = null;
+    const controller = new AbortController();
     const fetchImpl: RscFetch = async (_input, init) => {
       requestHeaders = new Headers(init?.headers);
+      requestSignal = init?.signal ?? null;
       return new Response(
         await renderToRscText(createElement("p", null, "Fetched")),
         {
@@ -569,15 +595,77 @@ describe("RSC rendering", () => {
       );
     };
 
-    await fetchRsc(response, "/rsc", { fetch: fetchImpl });
+    await fetchRsc(response, "/rsc", {
+      fetch: fetchImpl,
+      signal: controller.signal,
+    });
 
     expect(requestHeaders?.get("accept")).toBe(
       "text/x-component; charset=utf-8",
     );
+    expect(requestSignal).toBe(controller.signal);
     expect(evaluateRscNode(response.getRoot())).toMatchObject({
       props: { children: "Fetched" },
       type: "p",
     });
+  });
+
+  it("cancels initial RSC fetches before mutating the response", async () => {
+    const response = createRscClientResponse();
+    const controller = new AbortController();
+    let fetches = 0;
+    let notifications = 0;
+    response.subscribe(() => {
+      notifications += 1;
+    });
+
+    controller.abort();
+
+    let error: unknown;
+    try {
+      await fetchRsc(response, "/rsc", {
+        fetch: async () => {
+          fetches += 1;
+          return new Response("unreachable");
+        },
+        signal: controller.signal,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isRscRequestCancelled(error)).toBe(true);
+    expect(fetches).toBe(0);
+    expect(notifications).toBe(0);
+  });
+
+  it("cancels partial RSC streams without flushing buffered rows", async () => {
+    const response = createRscClientResponse();
+    const stream = controlledTextStream();
+    const controller = new AbortController();
+    let notifications = 0;
+    response.subscribe(() => {
+      notifications += 1;
+    });
+
+    const request = fetchRsc(response, "/rsc", {
+      fetch: async () => new Response(stream.stream),
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+
+    stream.write('{"id":0,"tag":"model","value":"Partial"');
+    controller.abort();
+
+    let error: unknown;
+    try {
+      await request;
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isRscRequestCancelled(error)).toBe(true);
+    expect(notifications).toBe(0);
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {
@@ -631,6 +719,60 @@ describe("RSC rendering", () => {
     });
   });
 
+  it("cancels boundary refresh streams without replacing existing content", async () => {
+    const response = createRscClientResponse();
+    const stream = controlledTextStream();
+    const controller = new AbortController();
+    const rendered: FigNode[] = [];
+    response.bindRoot({
+      render(node) {
+        rendered.push(node);
+      },
+    });
+
+    processTestRscRows(
+      response,
+      await renderToRscRows(
+        createElement(
+          "section",
+          null,
+          createElement(
+            RscBoundary,
+            { id: "post" },
+            createElement("p", null, "Initial"),
+          ),
+        ),
+      ),
+    );
+
+    const request = refreshRscBoundary(response, "post", "/rsc/post", {
+      fetch: async () => new Response(stream.stream),
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+
+    stream.write('{"boundary":"post","tag":"refresh","value":');
+    controller.abort();
+
+    let error: unknown;
+    try {
+      await request;
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isRscRequestCancelled(error)).toBe(true);
+    expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
+      props: {
+        children: {
+          props: { children: "Initial" },
+          type: "p",
+        },
+      },
+      type: "section",
+    });
+  });
+
   it("rejects failed RSC fetches before mutating the response", async () => {
     const response = createRscClientResponse();
     let notifications = 0;
@@ -644,5 +786,15 @@ describe("RSC rendering", () => {
       }),
     ).rejects.toThrow("RSC request failed with status 500.");
     expect(notifications).toBe(0);
+  });
+
+  it("rejects malformed RSC streams as real failures", async () => {
+    const response = createRscClientResponse();
+
+    await expect(
+      fetchRsc(response, "/rsc", {
+        fetch: async () => new Response(streamFromString("{not-json}\n")),
+      }),
+    ).rejects.toThrow(SyntaxError);
   });
 });
