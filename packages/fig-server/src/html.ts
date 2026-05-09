@@ -122,7 +122,7 @@ function formAttribute(
     return value === true ? ["selected", true] : null;
   }
 
-  return attributeValue(attributeName(name), value);
+  return attributeValue(name, value);
 }
 
 function attributeValue(
@@ -234,14 +234,6 @@ function reservedProp(name: string): boolean {
     name === "bind" ||
     /^on[A-Z]/.test(name)
   );
-}
-
-function attributeName(name: string): string {
-  if (name === "className") return "class";
-  if (name === "htmlFor") return "for";
-  if (name === "tabIndex") return "tabindex";
-  if (name === "xlinkHref") return "xlink:href";
-  return name;
 }
 
 function valueProp(name: string): boolean {

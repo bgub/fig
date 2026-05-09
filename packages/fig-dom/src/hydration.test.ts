@@ -726,7 +726,7 @@ describe("@bgub/fig-dom hydration", () => {
       hydrateRoot(
         container as unknown as Element,
         createElement("button", {
-          className: "client",
+          class: "client",
           style: { color: "blue" },
         }),
       ),
@@ -738,7 +738,7 @@ describe("@bgub/fig-dom hydration", () => {
     expect(button.style.fontWeight).toBe("");
   });
 
-  it("keeps browser-normalized attributes aligned during hydration", () => {
+  it("keeps native SVG attributes aligned during hydration", () => {
     const container = new FakeElement("root");
     const svg = new FakeElement("svg", "http://www.w3.org/2000/svg");
     const use = new FakeElement("use", "http://www.w3.org/2000/svg");
@@ -763,8 +763,8 @@ describe("@bgub/fig-dom hydration", () => {
             "aria-label": "Icon",
             "data-id": "icon",
             style: { "--accent": "red", color: "blue" },
-            tabIndex: 0,
-            xlinkHref: "#icon",
+            tabindex: 0,
+            "xlink:href": "#icon",
           }),
         ),
       ),
@@ -780,6 +780,32 @@ describe("@bgub/fig-dom hydration", () => {
     });
     expect(use.style["--accent"]).toBe("red");
     expect(use.style.color).toBe("blue");
+  });
+
+  it("keeps native HTML attributes aligned during hydration", () => {
+    const container = new FakeElement("root");
+    const input = new FakeElement("input");
+
+    input.setAttribute("data-server", "extra");
+    input.setAttribute("maxlength", "20");
+    input.setAttribute("readonly", "");
+    container.appendChild(input);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("input", {
+          maxlength: 20,
+          readonly: true,
+        }),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([input]);
+    expect(input.attributes).toEqual({
+      maxlength: "20",
+      readonly: "true",
+    });
   });
 
   it("hydrates controlled form values", () => {

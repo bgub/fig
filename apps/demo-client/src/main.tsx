@@ -25,7 +25,13 @@ import {
   type Root as ReactRoot,
 } from "react-dom/client";
 
-type Page = "state" | "effects" | "async" | "resources" | "hydration" | "benchmarks";
+type Page =
+  | "state"
+  | "effects"
+  | "async"
+  | "resources"
+  | "hydration"
+  | "benchmarks";
 
 interface DemoItem {
   id: number;
@@ -124,11 +130,11 @@ function PageFrame({
   children: FigNode;
 }) {
   return (
-    <section className="page">
-      <div className="page-header">
+    <section class="page">
+      <div class="page-header">
         <div>
           <h2>{title}</h2>
-          <p className="lede">{lede}</p>
+          <p class="lede">{lede}</p>
         </div>
       </div>
       {children}
@@ -137,7 +143,7 @@ function PageFrame({
 }
 
 function Row({ children }: { children: FigNode }) {
-  return <div className="row">{children}</div>;
+  return <div class="row">{children}</div>;
 }
 
 function Command({
@@ -152,7 +158,7 @@ function Command({
   return (
     <button
       type="button"
-      className={primary ? "button primary" : "button"}
+      class={primary ? "button primary" : "button"}
       events={[on("click", run)]}
     >
       {children}
@@ -182,26 +188,26 @@ function App() {
   });
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="topbar-inner">
-          <h1 className="brand">Fig Demo</h1>
-          <nav className="nav" aria-label="Demo sections">
+    <div class="shell">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <h1 class="brand">Fig Demo</h1>
+          <nav class="nav" aria-label="Demo sections">
             {pages.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={item.id === page ? "active" : ""}
+                class={item.id === page ? "active" : ""}
                 events={[on("click", () => navigate(item.id))]}
               >
-                <span className="nav-label">{item.label}</span>
-                <span className="nav-short-label">{item.shortLabel}</span>
+                <span class="nav-label">{item.label}</span>
+                <span class="nav-short-label">{item.shortLabel}</span>
               </button>
             ))}
           </nav>
         </div>
       </header>
-      <main className="content">{pageView(page)}</main>
+      <main class="content">{pageView(page)}</main>
     </div>
   );
 }
@@ -247,16 +253,16 @@ function StatePage() {
       title="State + diffing"
       lede="State updates, batched events, and keyed list diffing."
     >
-      <div className="columns">
-        <section className="card">
-          <div className="card-header">
+      <div class="columns">
+        <section class="card">
+          <div class="card-header">
             <h3>Counter</h3>
-            <p className="hint">
+            <p class="hint">
               Batched state updates coalesce into a single render.
             </p>
           </div>
           <Row>
-            <span className="metric">{count}</span>
+            <span class="metric">{count}</span>
             <Command
               primary
               run={() => {
@@ -284,13 +290,13 @@ function StatePage() {
               Reset
             </Command>
           </Row>
-          <p className="hint">{lastAction}</p>
+          <p class="hint">{lastAction}</p>
         </section>
 
-        <section className="card">
-          <div className="card-header">
+        <section class="card">
+          <div class="card-header">
             <h3>Keyed list</h3>
-            <p className="hint">
+            <p class="hint">
               Keyed children are diffed by identity, not position.
             </p>
           </div>
@@ -365,7 +371,7 @@ function EffectsPage() {
     >
       <Row>
         <input
-          className="input"
+          class="input"
           bind={focusBoundInput}
           value={`Bound input, tick ${tick}`}
         />
@@ -373,7 +379,7 @@ function EffectsPage() {
           Tick effects
         </Command>
       </Row>
-      <pre className="log">{logs.join("\n")}</pre>
+      <pre class="log">{logs.join("\n")}</pre>
     </PageFrame>
   );
 }
@@ -389,7 +395,7 @@ function AsyncPage() {
       lede="Input events receive AbortSignal cleanup, so stale async work is cancelled on re-entry."
     >
       <input
-        className="input"
+        class="input"
         value={query}
         placeholder="Try typing quickly"
         events={[
@@ -421,7 +427,7 @@ function AsyncPage() {
           }),
         ]}
       />
-      <p className="hint">{status}</p>
+      <p class="hint">{status}</p>
       <ResultList results={results} />
     </PageFrame>
   );
@@ -469,9 +475,9 @@ function ResourcesPage() {
           </Command>
         </Row>
         {messagePromise === null ? (
-          <p className="hint">No promise read yet.</p>
+          <p class="hint">No promise read yet.</p>
         ) : (
-          <Suspense fallback={<p className="hint">Loading message...</p>}>
+          <Suspense fallback={<p class="hint">Loading message...</p>}>
             <PromiseMessage promise={messagePromise} />
           </Suspense>
         )}
@@ -628,11 +634,11 @@ function HydrationPage() {
       title="Hydration"
       lede="Server render, hydrate, mismatch recovery, and pending boundary event replay."
     >
-      <div className="columns">
-        <section className="card">
-          <div className="card-header">
+      <div class="columns">
+        <section class="card">
+          <div class="card-header">
             <h3>SSR hydration</h3>
-            <p className="hint">
+            <p class="hint">
               Server HTML is inserted into the sandbox, then `hydrateRoot`
               claims it.
             </p>
@@ -643,34 +649,34 @@ function HydrationPage() {
               <Command run={() => void runDemo(true)}>Recover mismatch</Command>
             </Row>
           </div>
-          <div className="hydration-status">
-            <span className="tag">Status</span>
+          <div class="hydration-status">
+            <span class="tag">Status</span>
             <span>{hydrationStatus}</span>
           </div>
           {recoverableErrors.length > 0 ? (
-            <ul className="list">
+            <ul class="list">
               {recoverableErrors.map((message) => (
-                <li className="item" key={message}>
+                <li class="item" key={message}>
                   <span>{message}</span>
-                  <span className="tag">recoverable</span>
+                  <span class="tag">recoverable</span>
                 </li>
               ))}
             </ul>
           ) : null}
-          <div className="hydration-output">
+          <div class="hydration-output">
             <h4>Server HTML</h4>
-            <pre className="code">{serverHtml || "No server render yet."}</pre>
+            <pre class="code">{serverHtml || "No server render yet."}</pre>
           </div>
-          <div className="hydration-output">
+          <div class="hydration-output">
             <h4>Hydrated DOM</h4>
-            <div className="hydration-sandbox" bind={hydrationSandboxBind} />
+            <div class="hydration-sandbox" bind={hydrationSandboxBind} />
           </div>
         </section>
 
-        <section className="card">
-          <div className="card-header">
+        <section class="card">
+          <div class="card-header">
             <h3>Hydration event replay</h3>
-            <p className="hint">
+            <p class="hint">
               A click on a pending Suspense boundary is queued until that
               boundary hydrates.
             </p>
@@ -687,20 +693,20 @@ function HydrationPage() {
               </Command>
             </Row>
           </div>
-          <div className="hydration-status">
-            <span className="tag">Status</span>
+          <div class="hydration-status">
+            <span class="tag">Status</span>
             <span>{replayStatus}</span>
           </div>
-          <div className="hydration-output">
+          <div class="hydration-output">
             <h4>Replay target</h4>
             <div
-              className="hydration-sandbox replay-sandbox"
+              class="hydration-sandbox replay-sandbox"
               bind={replaySandboxBind}
             />
           </div>
-          <div className="hydration-output">
+          <div class="hydration-output">
             <h4>Event log</h4>
-            <pre className="log">
+            <pre class="log">
               {replayLogs.join("\n") || "No Fig handlers yet."}
             </pre>
           </div>
@@ -728,7 +734,7 @@ async function renderHydrationHtml(mismatch: boolean): Promise<{
 
 function hydrationTarget(html: string): HTMLDivElement {
   const target = document.createElement("div");
-  target.className = "hydration-target";
+  target.setAttribute("class", "hydration-target");
   target.innerHTML = html;
   return target;
 }
@@ -746,17 +752,17 @@ function HydrationIsland({
 }) {
   const content = (
     <>
-      <div className="row">
-        <span className="metric">SSR</span>
-        <span className="tag">{mode}</span>
+      <div class="row">
+        <span class="metric">SSR</span>
+        <span class="tag">{mode}</span>
       </div>
-      <p className="hint">
+      <p class="hint">
         This subtree was rendered to HTML first, then claimed by hydrateRoot.
       </p>
-      <p className="server-stamp">Server-rendered at {servedAt}</p>
+      <p class="server-stamp">Server-rendered at {servedAt}</p>
       <button
         type="button"
-        className="button primary"
+        class="button primary"
         events={[on("click", () => onAction?.())]}
       >
         Test hydrated event
@@ -766,7 +772,7 @@ function HydrationIsland({
 
   const Element = wrapper;
   return (
-    <Element className="hydration-card" data-mode={mode}>
+    <Element class="hydration-card" data-mode={mode}>
       {content}
     </Element>
   );
@@ -781,7 +787,7 @@ function ReplayIsland({
 }) {
   return (
     <section
-      className="replay-parent"
+      class="replay-parent"
       events={[on("click", () => onParentAction())]}
     >
       <Suspense fallback={<ReplayButton label="Pending target" />}>
@@ -807,7 +813,7 @@ function ReplayButton({
   return (
     <button
       type="button"
-      className="button primary replay-action"
+      class="button primary replay-action"
       events={onAction === undefined ? undefined : [on("click", onAction)]}
     >
       {label}
@@ -877,7 +883,7 @@ function resetReplayDemoRoot(): void {
 
 function replayTarget(): HTMLDivElement {
   const target = document.createElement("div");
-  target.className = "hydration-target replay-target";
+  target.setAttribute("class", "hydration-target replay-target");
   target.innerHTML = pendingReplayHtml();
   return target;
 }
@@ -925,7 +931,7 @@ function replaceReplayTarget(): void {
 
   const replacement = document.createElement("button");
   replacement.type = "button";
-  replacement.className = "button primary replay-action";
+  replacement.setAttribute("class", "button primary replay-action");
   replacement.textContent = "Replacement target";
   button.replaceWith(replacement);
   replayDemo.button = replacement;
@@ -942,10 +948,10 @@ function BenchmarksPage() {
       lede="Synchronous render/update microbenchmarks comparing Fig and React on the same DOM workloads."
     >
       <Row>
-        <label className="field">
+        <label class="field">
           Rows
           <input
-            className="input small"
+            class="input small"
             type="number"
             min="10"
             max="10000"
@@ -984,9 +990,9 @@ function BenchmarksPage() {
           Clear
         </Command>
       </Row>
-      <p className="hint">{status}</p>
+      <p class="hint">{status}</p>
       {results.length === 0 ? (
-        <p className="hint">
+        <p class="hint">
           Results measure median synchronous `flushSync` time across five
           batched samples for both Fig and React. Use them for relative
           comparisons, not absolute browser benchmarks.
@@ -1002,7 +1008,7 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
   const comparisons = benchmarkComparisons(results);
 
   return (
-    <table className="benchmark-table">
+    <table class="benchmark-table">
       <thead>
         <tr>
           <th>Scenario</th>
@@ -1031,7 +1037,7 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
               <td>
                 <BenchmarkDelta comparison={comparison} />
               </td>
-              <td className="ops-cell">
+              <td class="ops-cell">
                 <BenchmarkOps
                   label="Fig"
                   operations={comparison.fig?.operations}
@@ -1057,25 +1063,25 @@ function BenchmarkMeasure({
   result: BenchmarkResult | null;
   max: number;
 }) {
-  if (result === null) return <span className="hint">—</span>;
+  if (result === null) return <span class="hint">—</span>;
 
   const width = Math.max(2, (result.median / max) * 100);
 
   return (
-    <div className="benchmark-measure">
-      <div className="benchmark-measure-label">
-        <span className={`runtime ${result.runtime.toLowerCase()}`}>
+    <div class="benchmark-measure">
+      <div class="benchmark-measure-label">
+        <span class={`runtime ${result.runtime.toLowerCase()}`}>
           {result.runtime}
         </span>
         <strong>{formatMs(result.median)}</strong>
       </div>
-      <div className="benchmark-bar" title="Longer bars are slower.">
+      <div class="benchmark-bar" title="Longer bars are slower.">
         <div
-          className={`benchmark-bar-fill ${result.runtime.toLowerCase()}`}
+          class={`benchmark-bar-fill ${result.runtime.toLowerCase()}`}
           style={{ width: `${width}%` }}
         />
       </div>
-      <div className="benchmark-range">
+      <div class="benchmark-range">
         {formatMs(result.min)} – {formatMs(result.max)} · ×{result.iterations}
         /sample
       </div>
@@ -1085,7 +1091,7 @@ function BenchmarkMeasure({
 
 function BenchmarkDelta({ comparison }: { comparison: BenchmarkComparison }) {
   const delta = benchmarkDelta(comparison);
-  return <span className={`benchmark-delta ${delta.kind}`}>{delta.text}</span>;
+  return <span class={`benchmark-delta ${delta.kind}`}>{delta.text}</span>;
 }
 
 function BenchmarkOps({
@@ -1105,20 +1111,20 @@ function BenchmarkOps({
 function ContextBadge() {
   const theme = readContext(ThemeContext);
 
-  return <span className="metric">{theme}</span>;
+  return <span class="metric">{theme}</span>;
 }
 
 function PromiseMessage({ promise }: { promise: Promise<string> }) {
-  return <p className="hint">{readPromise(promise)}</p>;
+  return <p class="hint">{readPromise(promise)}</p>;
 }
 
 function DemoList({ items }: { items: DemoItem[] }) {
   return (
-    <ul className="list">
+    <ul class="list">
       {items.map((item) => (
-        <li className="item" key={item.id}>
+        <li class="item" key={item.id}>
           <span>{item.label}</span>
-          <span className="tag">{item.tone}</span>
+          <span class="tag">{item.tone}</span>
         </li>
       ))}
     </ul>
@@ -1127,11 +1133,11 @@ function DemoList({ items }: { items: DemoItem[] }) {
 
 function ResultList({ results }: { results: string[] }) {
   return (
-    <ul className="list">
+    <ul class="list">
       {results.map((result) => (
-        <li className="item" key={result}>
+        <li class="item" key={result}>
           <span>{result}</span>
-          <span className="tag">fresh</span>
+          <span class="tag">fresh</span>
         </li>
       ))}
     </ul>
@@ -1156,13 +1162,13 @@ function BenchmarkRows({
   const rows = benchmarkRowIds(count, start, reverse);
 
   return (
-    <ul className="benchmark-list">
+    <ul class="benchmark-list">
       {rows.map((id) => (
-        <li className="benchmark-row" key={id}>
+        <li class="benchmark-row" key={id}>
           <span>
             {label} {id}
           </span>
-          <span className="tag">v{version}</span>
+          <span class="tag">v{version}</span>
         </li>
       ))}
     </ul>
@@ -1182,13 +1188,13 @@ function ReactBenchmarkRows({
 }: BenchmarkRowsProps): ReactNode {
   return createElement(
     "ul",
-    { className: "benchmark-list" },
+    { class: "benchmark-list" },
     benchmarkRowIds(count, start, reverse).map((id) =>
       createElement(
         "li",
-        { className: "benchmark-row", key: id },
+        { class: "benchmark-row", key: id },
         createElement("span", null, `${label} ${id}`),
-        createElement("span", { className: "tag" }, `v${version}`),
+        createElement("span", { class: "tag" }, `v${version}`),
       ),
     ),
   );
@@ -1622,7 +1628,7 @@ function cleanupReactBenchmarkRoots(
 
 function createBenchmarkContainer(): HTMLDivElement {
   const container = document.createElement("div");
-  container.className = "benchmark-sandbox";
+  container.setAttribute("class", "benchmark-sandbox");
   document.body.appendChild(container);
   return container;
 }

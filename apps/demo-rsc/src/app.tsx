@@ -28,11 +28,11 @@ export function RscApp({ data }: { data: DemoData }) {
   return (
     <AppFrame
       actions={
-        <div className="actions">
-          <a className="button" href="/rsc">
+        <div class="actions">
+          <a class="button" href="/rsc">
             Raw stream
           </a>
-          <a className="button" href="/">
+          <a class="button" href="/">
             Reload
           </a>
         </div>
@@ -40,7 +40,7 @@ export function RscApp({ data }: { data: DemoData }) {
       description="Initial render is fetched as an RSC stream; the dashboard can refresh one server-rendered boundary without replacing the app shell."
       title="Server Components"
     >
-      <section className="grid">
+      <section class="grid">
         <RscBoundary id={feedBoundaryId}>
           <Dashboard data={data} />
         </RscBoundary>
@@ -54,20 +54,20 @@ export function RscApp({ data }: { data: DemoData }) {
 
 export function Dashboard({ data }: { data: DemoData }) {
   return (
-    <section className="panel tone-ok dashboard-panel" data-seed={data.seed}>
-      <div className="panel-header">
+    <section class="panel tone-ok dashboard-panel" data-seed={data.seed}>
+      <div class="panel-header">
         <div>
           <h2>Regional order pulse</h2>
-          <p className="muted">
+          <p class="muted">
             Rendered on the server at {data.generatedAt} with seed {data.seed}.
           </p>
         </div>
-        <span className="tag ok">boundary</span>
+        <span class="tag ok">boundary</span>
       </div>
-      <div className="panel-actions">
+      <div class="panel-actions">
         <RefreshButtonRef boundary={feedBoundaryId} seed={data.seed} />
       </div>
-      <div className="metric-grid">
+      <div class="metric-grid">
         <Metric label="Orders" value={data.stats.orders.toLocaleString()} />
         <Metric
           label="Revenue"
@@ -76,14 +76,14 @@ export function Dashboard({ data }: { data: DemoData }) {
         <Metric label="Trend" value={`${data.stats.trend}%`} />
         <Metric label="Latency" value={`${data.stats.latencyMs}ms`} />
       </div>
-      <div className="detail-grid">
-        <section className="panel">
+      <div class="detail-grid">
+        <section class="panel">
           <h3>Dispatch region</h3>
-          <p className="muted">{data.stats.region}</p>
+          <p class="muted">{data.stats.region}</p>
         </section>
-        <section className="panel">
+        <section class="panel">
           <h3>Refresh scope</h3>
-          <p className="muted">
+          <p class="muted">
             The button replaces this boundary with a new server render.
           </p>
         </section>
@@ -94,7 +94,7 @@ export function Dashboard({ data }: { data: DemoData }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <article className="metric">
+    <article class="metric">
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
@@ -103,13 +103,13 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function InsightPanel({ insight }: { insight: Promise<string> }) {
   return (
-    <section className="panel tone-ok async-panel">
-      <div className="panel-header">
+    <section class="panel tone-ok async-panel">
+      <div class="panel-header">
         <div>
           <h3>Async server note</h3>
-          <p className="muted">{readPromise(insight)}</p>
+          <p class="muted">{readPromise(insight)}</p>
         </div>
-        <span className="tag ok">resolved</span>
+        <span class="tag ok">resolved</span>
       </div>
     </section>
   );
@@ -117,13 +117,13 @@ function InsightPanel({ insight }: { insight: Promise<string> }) {
 
 function InsightPending() {
   return (
-    <section className="panel tone-warn async-panel">
-      <div className="panel-header">
+    <section class="panel tone-warn async-panel">
+      <div class="panel-header">
         <div>
           <h3>Async server note</h3>
-          <p className="muted">Streaming a slower server row.</p>
+          <p class="muted">Streaming a slower server row.</p>
         </div>
-        <span className="tag warn">pending</span>
+        <span class="tag warn">pending</span>
       </div>
     </section>
   );

@@ -14,14 +14,14 @@ export function AppFrame({
   title,
 }: AppFrameProps) {
   return (
-    <div className="app">
+    <div class="app">
       <Topbar />
-      <main className="content">
-        <div className="content-inner">
-          <header className="header">
+      <main class="content">
+        <div class="content-inner">
+          <header class="header">
             <div>
               <h2>{title}</h2>
-              <p className="muted">{description}</p>
+              <p class="muted">{description}</p>
             </div>
             {actions}
           </header>
@@ -52,11 +52,11 @@ export function ErrorShell({ error }: { error: unknown }) {
 
 function Topbar() {
   return (
-    <header className="topbar">
-      <div className="topbar-inner">
-        <h1 className="brand">RSC Demo</h1>
-        <nav className="nav" aria-label="RSC demo">
-          <a className="active" href="/">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <h1 class="brand">RSC Demo</h1>
+        <nav class="nav" aria-label="RSC demo">
+          <a class="active" href="/">
             Server model
           </a>
           <a href="/rsc">Raw stream</a>

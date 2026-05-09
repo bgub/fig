@@ -83,10 +83,10 @@ describe("@bgub/fig-server", () => {
         "button",
         {
           "aria-label": "Save",
-          className: "primary",
+          class: "primary",
           "data-id": "save",
           disabled: true,
-          tabIndex: 0,
+          tabindex: 0,
           value: '<&"',
           events: [{}],
           bind: () => undefined,
@@ -108,7 +108,11 @@ describe("@bgub/fig-server", () => {
 
   it("serializes namespaced SVG attribute aliases", async () => {
     const html = await renderToString(
-      createElement("svg", null, createElement("use", { xlinkHref: "#icon" })),
+      createElement(
+        "svg",
+        null,
+        createElement("use", { "xlink:href": "#icon" }),
+      ),
     );
 
     expect(html).toBe('<svg><use xlink:href="#icon"></use></svg>');

@@ -23,43 +23,43 @@ export function App({ request }: { request: DemoRequest }) {
   const isAbort = request.abortDelay !== null;
 
   return (
-    <div className="app" data-mode={isAbort ? "abort" : "normal"}>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <h1 className="brand">Streaming SSR</h1>
-          <nav className="nav" aria-label="Streaming modes">
-            <a className={isAbort ? "" : "active"} href="/">
+    <div class="app" data-mode={isAbort ? "abort" : "normal"}>
+      <header class="topbar">
+        <div class="topbar-inner">
+          <h1 class="brand">Streaming SSR</h1>
+          <nav class="nav" aria-label="Streaming modes">
+            <a class={isAbort ? "" : "active"} href="/">
               Full stream
             </a>
-            <a className={isAbort ? "active" : ""} href="/abort">
+            <a class={isAbort ? "active" : ""} href="/abort">
               Abort after shell
             </a>
           </nav>
         </div>
       </header>
-      <main className="content">
-        <div className="content-inner">
-          <header className="header">
+      <main class="content">
+        <div class="content-inner">
+          <header class="header">
             <div>
               <h2>{isAbort ? "Abort after shell" : "Full stream"}</h2>
-              <p className="muted">
+              <p class="muted">
                 {isAbort
                   ? "Shell hydrates first; server aborts and Suspense resolves on the client."
                   : "Shell hydrates first; Suspense streams from the server after 5 seconds."}
               </p>
             </div>
-            <div className="actions">
+            <div class="actions">
               <CounterButton id="shell" label="Shell clicks" />
-              <a className="button" href="/">
+              <a class="button" href="/">
                 Reload
               </a>
             </div>
           </header>
-          <section className="grid">
+          <section class="grid">
             <Suspense
               fallback={
                 <Panel
-                  className="suspense-panel"
+                  class="suspense-panel"
                   description="Pending fallback for 5 seconds."
                   tag="pending"
                   title="Suspense"
@@ -72,7 +72,7 @@ export function App({ request }: { request: DemoRequest }) {
             <Suspense
               fallback={
                 <Panel
-                  className="error-panel"
+                  class="error-panel"
                   description="Server render failed; waiting for client recovery."
                   tag="error"
                   title="Error recovery"
@@ -127,13 +127,13 @@ export function clientDataFor(request: DemoRequest): ClientData {
 function SuspenseContent({ resource }: { resource: Resource<string> }) {
   return (
     <Panel
-      className="suspense-panel"
+      class="suspense-panel"
       description={readResource(resource)}
       tag="resolved"
       title="Suspense"
       tone="ok"
     >
-      <div className="panel-actions">
+      <div class="panel-actions">
         <CounterButton id="suspense" label="Suspense clicks" />
       </div>
     </Panel>
@@ -143,13 +143,13 @@ function SuspenseContent({ resource }: { resource: Resource<string> }) {
 function ErrorRecoveryContent({ resource }: { resource: Resource<string> }) {
   return (
     <Panel
-      className="error-panel"
+      class="error-panel"
       description={readResource(resource)}
       tag="recovered"
       title="Error recovery"
       tone="ok"
     >
-      <div className="panel-actions">
+      <div class="panel-actions">
         <CounterButton id="server-error" label="Error clicks" />
       </div>
     </Panel>
@@ -158,29 +158,27 @@ function ErrorRecoveryContent({ resource }: { resource: Resource<string> }) {
 
 function Panel({
   children,
-  className,
+  class: extraClass,
   description,
   tag,
   title,
   tone,
 }: {
   children?: FigNode;
-  className?: string;
+  class?: string;
   description: FigNode;
   tag: string;
   title: string;
   tone: "danger" | "ok" | "warn";
 }) {
   return (
-    <section
-      className={`panel tone-${tone}${className ? ` ${className}` : ""}`}
-    >
-      <div className="panel-header">
+    <section class={`panel tone-${tone}${extraClass ? ` ${extraClass}` : ""}`}>
+      <div class="panel-header">
         <div>
           <h3>{title}</h3>
-          <p className="muted">{description}</p>
+          <p class="muted">{description}</p>
         </div>
-        <span className={`tag ${tone}`}>{tag}</span>
+        <span class={`tag ${tone}`}>{tag}</span>
       </div>
       {children}
     </section>
@@ -192,7 +190,7 @@ function CounterButton({ id, label }: { id: string; label: string }) {
 
   return (
     <button
-      className="button primary"
+      class="button primary"
       data-demo-control={id}
       events={[on("click", () => setCount((value) => value + 1))]}
       type="button"

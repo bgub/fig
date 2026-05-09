@@ -16,7 +16,7 @@ export function RefreshButton({ boundary, seed }: RefreshButtonProps) {
 
   return (
     <button
-      className="action-button"
+      class="action-button"
       data-refresh-state={status}
       events={[
         on("click", () => {

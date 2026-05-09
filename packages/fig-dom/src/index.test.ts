@@ -10,7 +10,7 @@ describe("@bgub/fig-dom", () => {
     const container = new FakeElement("root");
 
     render(
-      createElement("div", { id: "first", className: "box" }, "Hello"),
+      createElement("div", { class: "box", id: "first" }, "Hello"),
       container as unknown as Element,
     );
     await delay();

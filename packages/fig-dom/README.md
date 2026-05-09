@@ -32,22 +32,17 @@ logical Fig tree.
 
 ## DOM Compatibility
 
-Fig DOM forwards ordinary host props to the DOM instead of maintaining a large
-React-style property table. It keeps a small compatibility layer for names that
-need canonical DOM or server-rendered attribute output:
-
-- `className` renders as `class`.
-- `htmlFor` renders as `for`.
-- `tabIndex` renders as `tabindex`.
-- `xlinkHref` renders as the SVG `xlink:href` namespaced attribute.
-- `aria-*` and `data-*` props pass through as attributes.
-- Object `style` props support camel-cased CSS properties and CSS custom
-  properties such as `--accent`.
+Fig DOM treats ordinary host props as attributes instead of maintaining a large
+React-style property table. Native HTML/SVG attribute names such as `class`,
+`for`, `tabindex`, `readonly`, `maxlength`, `viewBox`, `stroke-width`,
+`xlink:href`, `aria-*`, and `data-*` pass through directly. Object `style`
+props support camel-cased CSS properties and CSS custom properties such as
+`--accent`.
 
 SVG and MathML elements are created in their own namespaces, and
 `foreignObject` children return to the HTML namespace. Hydration compares
-against Fig's canonical attribute names so browser-normalized server attributes
-such as `tabindex` and `xlink:href` do not look like extras.
+against Fig's native attribute names so browser-normalized server attributes
+such as `tabindex`, `readonly`, and `xlink:href` do not look like extras.
 
 Fig intentionally does not implement React's resource and metadata behavior for
 `title`, `meta`, `link`, `script`, or `style`. It also does not warn for

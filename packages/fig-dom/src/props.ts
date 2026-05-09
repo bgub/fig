@@ -18,6 +18,7 @@ type StyleTarget = Record<string, unknown> & {
 };
 
 const selectState = new WeakMap<Element, SelectState>();
+const htmlNamespace = "http://www.w3.org/1999/xhtml";
 const xlinkNamespace = "http://www.w3.org/1999/xlink";
 
 export function updateElement(
@@ -26,6 +27,8 @@ export function updateElement(
   nextProps: Props,
   options: UpdateOptions = {},
 ): void {
+  const type = elementName(element);
+  const html = htmlElement(element);
   const names = new Set([
     ...Object.keys(previousProps),
     ...Object.keys(nextProps),
@@ -48,15 +51,24 @@ export function updateElement(
     const next = nextProps[name];
 
     if (formProp(name)) {
-      setFormProperty(element, name, previous, next, previousProps, options);
+      setFormProperty(
+        element,
+        type,
+        name,
+        previous,
+        next,
+        previousProps,
+        options,
+      );
       continue;
     }
 
     if (previous === next) continue;
-    setProperty(element, name, previous, next);
+    if (name === "style") setStyle(element, previous, next);
+    else setAttribute(element, hostAttributeName(name, html), next);
   }
 
-  updateSelectOptions(element, previousProps, nextProps);
+  updateSelectOptions(element, type, previousProps, nextProps);
   updateParentSelect(element);
 }
 
@@ -72,16 +84,18 @@ function removeExtraHydratedAttributes(
 ): void {
   const expectedAttributes = new Set<string>();
   const type = elementName(element);
+  const html = htmlElement(element);
 
   for (const name of Object.keys(nextProps)) {
     if (name === "events" || name === "bind" || reserved(name)) continue;
 
-    const attribute = hydratedAttributeName(type, name);
+    const attribute = hydratedAttributeName(type, name, html);
     if (attribute !== null) expectedAttributes.add(attribute);
   }
 
   for (const name of attributeNames(element)) {
-    if (!expectedAttributes.has(name)) element.removeAttribute(name);
+    const attribute = hostAttributeName(name, html);
+    if (!expectedAttributes.has(attribute)) element.removeAttribute(name);
   }
 }
 
@@ -138,40 +152,15 @@ function attributeNames(element: Element): string[] {
   return Object.keys(attributes);
 }
 
-function setProperty(
-  element: Element,
-  name: string,
-  previous: unknown,
-  next: unknown,
-): void {
-  if (name === "style") {
-    setStyle(element, previous, next);
-    return;
-  }
-
-  const attribute = attributeName(name);
-  const namespaced = name === "xlinkHref";
-  if (next === null || next === undefined || next === false) {
-    removeDomAttribute(element, name, attribute);
-    if (!namespaced && name in element) {
-      (element as unknown as Record<string, unknown>)[name] = "";
-    }
-  } else if (!namespaced && name in element && typeof next !== "object") {
-    (element as unknown as Record<string, unknown>)[name] = next;
-  } else {
-    setDomAttribute(element, name, attribute, next);
-  }
-}
-
 function setFormProperty(
   element: Element,
+  type: string,
   name: string,
   previous: unknown,
   next: unknown,
   previousProps: Props,
   options: UpdateOptions,
 ): void {
-  const type = elementName(element);
   if (type === "select" && valueProp(name)) return;
 
   if (name === "value") {
@@ -194,8 +183,6 @@ function setFormProperty(
         previousProps.checked === undefined &&
         options.hydrating !== true,
     });
-  } else {
-    setProperty(element, name, previous, next);
   }
 }
 
@@ -208,8 +195,7 @@ function setFormValue(
   const textArea = type === "textarea";
   const next = formValue(value);
 
-  if (next === null || textArea) element.removeAttribute("value");
-  else element.setAttribute("value", next);
+  setAttribute(element, "value", textArea ? null : next);
 
   if (options.defaultValue === true && "defaultValue" in element) {
     (element as unknown as { defaultValue: string }).defaultValue = next ?? "";
@@ -237,7 +223,7 @@ function setChecked(
   options: { defaultChecked?: boolean; live?: boolean },
 ): void {
   const checked = value === true;
-  setBooleanAttribute(element, "checked", checked);
+  setAttribute(element, "checked", checked);
   if (options.defaultChecked === true && "defaultChecked" in element) {
     (element as unknown as { defaultChecked: boolean }).defaultChecked =
       checked;
@@ -249,10 +235,11 @@ function setChecked(
 
 function updateSelectOptions(
   element: Element,
+  type: string,
   previousProps: Props,
   nextProps: Props,
 ): void {
-  if (elementName(element) !== "select") return;
+  if (type !== "select") return;
 
   const controlled = nextProps.value !== undefined;
   const value = controlled ? nextProps.value : nextProps.defaultValue;
@@ -343,15 +330,6 @@ function attributeValue(element: Element, name: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function setBooleanAttribute(
-  element: Element,
-  name: string,
-  value: boolean,
-): void {
-  if (value) element.setAttribute(name, "true");
-  else element.removeAttribute(name);
-}
-
 function setStyle(element: Element, previous: unknown, next: unknown): void {
   const style = (element as HTMLElement).style as unknown as
     | StyleTarget
@@ -398,21 +376,21 @@ function clearStyleProperty(style: StyleTarget, name: string): void {
   }
 }
 
-function attributeName(name: string): string {
-  if (name === "className") return "class";
-  if (name === "htmlFor") return "for";
-  if (name === "tabIndex") return "tabindex";
-  if (name === "xlinkHref") return "xlink:href";
-  return name;
+function hostAttributeName(name: string, html: boolean): string {
+  return html ? name.toLowerCase() : name;
 }
 
-function setDomAttribute(
+function setAttribute(
   element: Element,
-  name: string,
   attribute: string,
   value: unknown,
 ): void {
-  if (name === "xlinkHref") {
+  if (value === null || value === undefined || value === false) {
+    removeAttribute(element, attribute);
+    return;
+  }
+
+  if (attribute === "xlink:href") {
     element.setAttributeNS(xlinkNamespace, attribute, String(value));
     return;
   }
@@ -420,12 +398,8 @@ function setDomAttribute(
   element.setAttribute(attribute, String(value));
 }
 
-function removeDomAttribute(
-  element: Element,
-  name: string,
-  attribute: string,
-): void {
-  if (name === "xlinkHref") {
+function removeAttribute(element: Element, attribute: string): void {
+  if (attribute === "xlink:href") {
     element.removeAttributeNS(xlinkNamespace, "href");
     return;
   }
@@ -433,18 +407,18 @@ function removeDomAttribute(
   element.removeAttribute(attribute);
 }
 
-function hydratedAttributeName(type: string, name: string): string | null {
-  if (type === "textarea" && (name === "value" || name === "defaultValue")) {
-    return null;
-  }
-
-  if (type === "select" && (name === "value" || name === "defaultValue")) {
+function hydratedAttributeName(
+  type: string,
+  name: string,
+  html: boolean,
+): string | null {
+  if ((type === "textarea" || type === "select") && valueProp(name)) {
     return null;
   }
 
   if (name === "defaultValue") return "value";
   if (name === "defaultChecked") return "checked";
-  return attributeName(name);
+  return hostAttributeName(name, html);
 }
 
 function formProp(name: string): boolean {
@@ -463,6 +437,14 @@ function elementName(element: Element): string {
         ? element.tagName
         : ""
   ).toLowerCase();
+}
+
+function htmlElement(element: Element): boolean {
+  return (
+    !("namespaceURI" in element) ||
+    element.namespaceURI === null ||
+    element.namespaceURI === htmlNamespace
+  );
 }
 
 function isElement(value: unknown): value is Element {

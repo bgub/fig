@@ -129,7 +129,7 @@ export function mountFigDevtoolsPanel(
   installStyle(doc);
 
   const panel = doc.createElement("section");
-  panel.className = "fig-devtools";
+  panel.setAttribute("class", "fig-devtools");
   panel.classList.toggle("is-panel", options.placement === "panel");
   panel.setAttribute("aria-label", "Fig DevTools");
   target.appendChild(panel);
@@ -254,7 +254,7 @@ function rootSelector(
 ): HTMLSelectElement {
   const { doc, state } = context;
   const select = doc.createElement("select");
-  select.className = "fig-devtools__root-select";
+  select.setAttribute("class", "fig-devtools__root-select");
 
   for (const root of roots) {
     const option = doc.createElement("option");
@@ -438,11 +438,11 @@ function button(
 function el<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
   tagName: K,
-  className: string,
+  classValue: string,
   text?: string,
 ): HTMLElementTagNameMap[K] {
   const element = doc.createElement(tagName);
-  element.className = className;
+  element.setAttribute("class", classValue);
   if (text !== undefined) element.textContent = text;
   return element;
 }

@@ -16,10 +16,10 @@ describe("@bgub/fig-dom props", () => {
     flushSync(() =>
       root.render(
         createElement("button", {
-          className: "primary",
+          class: "primary",
           disabled: true,
           events: [on("click", firstClick)],
-          htmlFor: "field",
+          for: "field",
           style: { color: "red", fontWeight: "bold" },
         }),
       ),
@@ -58,7 +58,7 @@ describe("@bgub/fig-dom props", () => {
     expect(button.style.color).toBe("");
   });
 
-  it("canonicalizes DOM attribute names and updates CSS custom properties", () => {
+  it("forwards DOM attributes and updates CSS custom properties", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
@@ -71,8 +71,8 @@ describe("@bgub/fig-dom props", () => {
             "aria-label": "Icon",
             "data-id": "icon",
             style: { "--accent": "red", color: "blue" },
-            tabIndex: 0,
-            xlinkHref: "#icon",
+            tabindex: 0,
+            "xlink:href": "#icon",
           }),
         ),
       ),
@@ -104,6 +104,35 @@ describe("@bgub/fig-dom props", () => {
     expect(use.attributes).toEqual({});
     expect(use.style["--accent"]).toBe("");
     expect(use.style.color).toBe("green");
+  });
+
+  it("sets SVG props as attributes", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "svg",
+          { class: "icon", viewBox: "0 0 10 10" },
+          createElement("path", {
+            "fill-rule": "evenodd",
+            "stroke-width": 2,
+          }),
+        ),
+      ),
+    );
+
+    const svg = container.childNodes[0] as FakeElement;
+    const path = svg.childNodes[0] as FakeElement;
+    expect(svg.attributes).toEqual({
+      class: "icon",
+      viewBox: "0 0 10 10",
+    });
+    expect(path.attributes).toEqual({
+      "fill-rule": "evenodd",
+      "stroke-width": "2",
+    });
   });
 
   it("controls input values without resetting selection on equal updates", () => {
