@@ -17,6 +17,7 @@ import {
   setCurrentDispatcher,
 } from "@bgub/fig";
 import {
+  formTextContent,
   hasRenderableChild,
   isVoidElement,
   writeElementEnd,
@@ -75,6 +76,7 @@ interface Task {
   contextValues: ContextValues;
   idPath: string;
   node: FigNode;
+  selectProps: Props | null;
   segment: Segment;
   stack: StackFrame | null;
 }
@@ -117,6 +119,7 @@ interface RenderFrame {
   segment: Segment;
   idPath: string;
   localIdCounter: number;
+  selectProps: Props | null;
   stack: StackFrame | null;
 }
 
@@ -206,6 +209,7 @@ export function createServerRenderRequest(
     request.abortableTasks,
     "",
     null,
+    null,
   );
   request.pingedTasks.push(rootTask);
 
@@ -235,6 +239,7 @@ function createTask(
   contextValues: ContextValues,
   abortSet: Set<Task>,
   idPath: string,
+  selectProps: Props | null,
   stack: StackFrame | null,
 ): Task {
   request.pendingTasks += 1;
@@ -250,6 +255,7 @@ function createTask(
     contextValues,
     idPath,
     node,
+    selectProps,
     segment,
     stack,
   };
@@ -313,6 +319,7 @@ function retryTask(request: Request, task: Task): void {
     cloneContextValues(task.contextValues),
     task.abortSet,
     task.idPath,
+    task.selectProps,
     task.stack,
   );
 
@@ -335,6 +342,7 @@ function createRenderFrame(
   contextValues: ContextValues,
   abortSet: Set<Task>,
   idPath: string,
+  selectProps: Props | null,
   stack: StackFrame | null,
 ): RenderFrame {
   const frame = {
@@ -345,6 +353,7 @@ function createRenderFrame(
     idPath,
     localIdCounter: 0,
     request,
+    selectProps,
     segment,
     stack,
   };
@@ -546,6 +555,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     cloneContextValues(frame.contextValues),
     frame.abortSet,
     frame.idPath,
+    frame.selectProps,
     frame.stack,
   );
 
@@ -574,6 +584,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     cloneContextValues(frame.contextValues),
     fallbackAbortableTasks,
     frame.idPath,
+    frame.selectProps,
     frame.stack,
   );
 
@@ -601,8 +612,18 @@ function renderHostElement(
     throw new Error(`Void element <${type}> cannot have children.`);
   }
 
-  writeElementStart(type, props, frame.segment);
+  writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
   if (isVoid) return;
+
+  const formText = formTextContent(type, props);
+  if (formText !== null) {
+    writeText(formText, frame.segment);
+    writeElementEnd(type, frame.segment);
+    return;
+  }
+
+  const previousSelectProps = frame.selectProps;
+  if (type === "select") frame.selectProps = props;
 
   try {
     renderChildren(props.children, frame);
@@ -612,6 +633,8 @@ function renderHostElement(
     } else {
       throw error;
     }
+  } finally {
+    frame.selectProps = previousSelectProps;
   }
   writeElementEnd(type, frame.segment);
 }
@@ -633,6 +656,7 @@ function spawnSuspendedTask(
     cloneContextValues(frame.contextValues),
     frame.abortSet,
     frame.idPath,
+    frame.selectProps,
     frame.stack,
   );
   thenable.then(

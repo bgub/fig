@@ -60,6 +60,12 @@ export class FakeElement {
   listeners: Record<string, EventListener> = {};
   parentNode: FakeElement | null = null;
   style: Record<string, string> = {};
+  checked = false;
+  defaultChecked = false;
+  defaultValue = "";
+  multiple = false;
+  selected = false;
+  value = "";
 
   constructor(public tagName: string) {}
 

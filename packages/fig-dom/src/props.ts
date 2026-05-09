@@ -2,10 +2,23 @@ import type { Props } from "@bgub/fig";
 import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
 
+interface SelectState {
+  appliedDefault: boolean;
+  controlled: boolean;
+  value: unknown;
+}
+
+interface UpdateOptions {
+  hydrating?: boolean;
+}
+
+const selectState = new WeakMap<Element, SelectState>();
+
 export function updateElement(
   element: Element,
   previousProps: Props,
   nextProps: Props,
+  options: UpdateOptions = {},
 ): void {
   const names = new Set([
     ...Object.keys(previousProps),
@@ -28,16 +41,23 @@ export function updateElement(
     const previous = previousProps[name];
     const next = nextProps[name];
 
-    if (previous === next) continue;
+    if (formProp(name)) {
+      setFormProperty(element, name, previous, next, previousProps, options);
+      continue;
+    }
 
+    if (previous === next) continue;
     setProperty(element, name, previous, next);
   }
+
+  updateSelectOptions(element, previousProps, nextProps);
+  updateParentSelect(element);
 }
 
 export function hydrateElement(element: Element, nextProps: Props): void {
   removeExtraHydratedAttributes(element, nextProps);
   clearHydratedStyle(element);
-  updateElement(element, {}, nextProps);
+  updateElement(element, {}, nextProps, { hydrating: true });
 }
 
 function removeExtraHydratedAttributes(
@@ -45,10 +65,13 @@ function removeExtraHydratedAttributes(
   nextProps: Props,
 ): void {
   const expectedAttributes = new Set<string>();
+  const type = elementName(element);
 
   for (const name of Object.keys(nextProps)) {
     if (name === "events" || name === "bind" || reserved(name)) continue;
-    expectedAttributes.add(attributeName(name));
+
+    const attribute = hydratedAttributeName(type, name);
+    if (attribute !== null) expectedAttributes.add(attribute);
   }
 
   for (const name of attributeNames(element)) {
@@ -131,6 +154,195 @@ function setProperty(
   }
 }
 
+function setFormProperty(
+  element: Element,
+  name: string,
+  previous: unknown,
+  next: unknown,
+  previousProps: Props,
+  options: UpdateOptions,
+): void {
+  const type = elementName(element);
+  if (type === "select" && valueProp(name)) return;
+
+  if (name === "value") {
+    setFormValue(element, next, type, { live: true });
+  } else if (name === "defaultValue") {
+    setFormValue(element, next, type, {
+      defaultValue: true,
+      live:
+        previous === undefined &&
+        previousProps.value === undefined &&
+        options.hydrating !== true,
+    });
+  } else if (name === "checked") {
+    setChecked(element, next, { live: true });
+  } else if (name === "defaultChecked") {
+    setChecked(element, next, {
+      defaultChecked: true,
+      live:
+        previous === undefined &&
+        previousProps.checked === undefined &&
+        options.hydrating !== true,
+    });
+  } else {
+    setProperty(element, name, previous, next);
+  }
+}
+
+function setFormValue(
+  element: Element,
+  value: unknown,
+  type: string,
+  options: { defaultValue?: boolean; live?: boolean },
+): void {
+  const textArea = type === "textarea";
+  const next = formValue(value);
+
+  if (next === null || textArea) element.removeAttribute("value");
+  else element.setAttribute("value", next);
+
+  if (options.defaultValue === true && "defaultValue" in element) {
+    (element as unknown as { defaultValue: string }).defaultValue = next ?? "";
+  }
+  if (textArea) element.textContent = next ?? "";
+
+  if (
+    options.live === true &&
+    "value" in element &&
+    (element as unknown as { value: string }).value !== (next ?? "")
+  ) {
+    (element as unknown as { value: string }).value = next ?? "";
+  }
+}
+
+function formValue(value: unknown): string | null {
+  return value === null || value === undefined || value === false
+    ? null
+    : String(value);
+}
+
+function setChecked(
+  element: Element,
+  value: unknown,
+  options: { defaultChecked?: boolean; live?: boolean },
+): void {
+  const checked = value === true;
+  setBooleanAttribute(element, "checked", checked);
+  if (options.defaultChecked === true && "defaultChecked" in element) {
+    (element as unknown as { defaultChecked: boolean }).defaultChecked =
+      checked;
+  }
+  if (options.live === true && "checked" in element) {
+    (element as unknown as { checked: boolean }).checked = checked;
+  }
+}
+
+function updateSelectOptions(
+  element: Element,
+  previousProps: Props,
+  nextProps: Props,
+): void {
+  if (elementName(element) !== "select") return;
+
+  const controlled = nextProps.value !== undefined;
+  const value = controlled ? nextProps.value : nextProps.defaultValue;
+  if (value === undefined || value === null || value === false) {
+    selectState.delete(element);
+    return;
+  }
+
+  const state = selectState.get(element);
+  const shouldApply =
+    controlled ||
+    (previousProps.value === undefined &&
+      previousProps.defaultValue === undefined &&
+      state?.appliedDefault !== true);
+  selectState.set(element, {
+    appliedDefault: state?.appliedDefault === true || !controlled,
+    controlled,
+    value,
+  });
+  if (!shouldApply) return;
+
+  setSelectValue(element, value);
+}
+
+export function updateParentSelect(
+  element: Element,
+  applyDefault = false,
+): void {
+  const select = closestParentSelect(element);
+  if (select === null) return;
+
+  const state = selectState.get(select);
+  if (state === undefined) return;
+  if (!state.controlled && state.appliedDefault && !applyDefault) return;
+
+  setSelectValue(select, state.value);
+  if (!state.controlled) state.appliedDefault = true;
+}
+
+function setSelectValue(element: Element, value: unknown): void {
+  const values = new Set(
+    Array.isArray(value) ? value.map(String) : [String(value)],
+  );
+
+  for (const option of descendantOptions(element)) {
+    const optionValue = currentOptionValue(option);
+    (option as unknown as { selected: boolean }).selected =
+      values.has(optionValue);
+  }
+}
+
+function closestParentSelect(element: Element): Element | null {
+  let parent: Node | null = element.parentNode;
+  while (parent !== null) {
+    if (isElement(parent) && elementName(parent) === "select") return parent;
+    parent = parent.parentNode;
+  }
+
+  return null;
+}
+
+function descendantOptions(element: Element): Element[] {
+  const options: Element[] = [];
+  for (const child of Array.from(element.childNodes)) {
+    if (!isElement(child)) continue;
+
+    if (elementName(child) === "option") {
+      options.push(child);
+    } else {
+      options.push(...descendantOptions(child));
+    }
+  }
+  return options;
+}
+
+function currentOptionValue(option: Element): string {
+  const value = attributeValue(option, "value");
+  return value === null ? (option.textContent ?? "") : value;
+}
+
+function attributeValue(element: Element, name: string): string | null {
+  if ("getAttribute" in element) {
+    return element.getAttribute(name);
+  }
+
+  const attributes = element.attributes as Record<string, unknown> | undefined;
+  const value = attributes?.[name];
+  return typeof value === "string" ? value : null;
+}
+
+function setBooleanAttribute(
+  element: Element,
+  name: string,
+  value: boolean,
+): void {
+  if (value) element.setAttribute(name, "true");
+  else element.removeAttribute(name);
+}
+
 function setStyle(element: Element, previous: unknown, next: unknown): void {
   const style = (element as HTMLElement).style as unknown as Record<
     string,
@@ -152,6 +364,47 @@ function styleProps(value: unknown): Record<string, unknown> {
 
 function attributeName(name: string): string {
   return name === "className" ? "class" : name;
+}
+
+function hydratedAttributeName(type: string, name: string): string | null {
+  if (type === "textarea" && (name === "value" || name === "defaultValue")) {
+    return null;
+  }
+
+  if (type === "select" && (name === "value" || name === "defaultValue")) {
+    return null;
+  }
+
+  if (name === "defaultValue") return "value";
+  if (name === "defaultChecked") return "checked";
+  return attributeName(name);
+}
+
+function formProp(name: string): boolean {
+  return valueProp(name) || name === "checked" || name === "defaultChecked";
+}
+
+function valueProp(name: string): boolean {
+  return name === "value" || name === "defaultValue";
+}
+
+function elementName(element: Element): string {
+  return (
+    "localName" in element && typeof element.localName === "string"
+      ? element.localName
+      : "tagName" in element && typeof element.tagName === "string"
+        ? element.tagName
+        : ""
+  ).toLowerCase();
+}
+
+function isElement(value: unknown): value is Element {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "nodeType" in value &&
+    value.nodeType === 1
+  );
 }
 
 function reserved(name: string): boolean {

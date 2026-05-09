@@ -29,10 +29,11 @@ export function writeElementStart(
   type: string,
   props: Props,
   sink: HtmlSink,
+  inheritedProps: Props = {},
 ): void {
   validateTagName(type);
   sink.write(`<${type}`);
-  writeAttributes(props, sink);
+  writeAttributes(type, props, inheritedProps, sink);
   sink.write(">");
 }
 
@@ -50,7 +51,19 @@ export function hasRenderableChild(node: unknown): boolean {
   return node !== null && node !== undefined && typeof node !== "boolean";
 }
 
-function writeAttributes(props: Props, sink: HtmlSink): void {
+export function formTextContent(type: string, props: Props): string | null {
+  if (type !== "textarea") return null;
+
+  const value = props.value !== undefined ? props.value : props.defaultValue;
+  return formString(value);
+}
+
+function writeAttributes(
+  type: string,
+  props: Props,
+  inheritedProps: Props,
+  sink: HtmlSink,
+): void {
   for (const [name, value] of Object.entries(props)) {
     if (reservedProp(name)) continue;
 
@@ -60,27 +73,130 @@ function writeAttributes(props: Props, sink: HtmlSink): void {
       continue;
     }
 
-    if (value === null || value === undefined || value === false) continue;
+    const attribute = formAttribute(type, name, value);
+    if (attribute === null) continue;
 
-    const attribute = attributeName(name);
-    validateAttributeName(attribute);
+    const [attributeNameValue, attributeValue] = attribute;
+    validateAttributeName(attributeNameValue);
 
-    if (value === true) {
-      sink.write(` ${attribute}`);
+    if (attributeValue === true) {
+      sink.write(` ${attributeNameValue}`);
       continue;
     }
 
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "bigint"
-    ) {
-      writeAttribute(sink, attribute, String(value));
+    if (serializableAttributeValue(attributeValue)) {
+      writeAttribute(sink, attributeNameValue, String(attributeValue));
       continue;
     }
 
     throw new Error(`Cannot serialize prop "${name}" to HTML.`);
   }
+
+  if (
+    type === "option" &&
+    props.selected === undefined &&
+    optionSelected(optionValue(props), inheritedProps)
+  ) {
+    sink.write(" selected");
+  }
+}
+
+function formAttribute(
+  type: string,
+  name: string,
+  value: unknown,
+): [string, unknown] | null {
+  if ((type === "textarea" || type === "select") && valueProp(name)) {
+    return null;
+  }
+
+  if (valueProp(name)) {
+    return valueAttribute(value);
+  }
+
+  if (name === "defaultChecked") {
+    return value === true ? ["checked", true] : null;
+  }
+
+  if (type === "option" && name === "selected") {
+    return value === true ? ["selected", true] : null;
+  }
+
+  return attributeValue(attributeName(name), value);
+}
+
+function attributeValue(
+  name: string,
+  value: unknown,
+): [string, unknown] | null {
+  return value === null || value === undefined || value === false
+    ? null
+    : [name, value];
+}
+
+function valueAttribute(value: unknown): [string, unknown] | null {
+  if (value === null || value === undefined || value === false) return null;
+  if (serializableAttributeValue(value)) return ["value", String(value)];
+  return ["value", value];
+}
+
+function optionSelected(value: unknown, selectProps: Props): boolean {
+  const selectValue =
+    selectProps.value !== undefined
+      ? selectProps.value
+      : selectProps.defaultValue;
+  if (
+    selectValue === undefined ||
+    selectValue === null ||
+    selectValue === false
+  )
+    return false;
+
+  const optionValue = formString(value);
+  if (optionValue === null) return false;
+
+  return selectedValueSet(selectValue).has(optionValue);
+}
+
+function optionValue(props: Props): string | null {
+  return props.value === undefined
+    ? optionTextValue(props.children)
+    : formString(props.value);
+}
+
+function optionTextValue(node: unknown): string | null {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    let text = "";
+    for (const child of node) {
+      const childText = optionTextValue(child);
+      if (childText === null) return null;
+      text += childText;
+    }
+    return text;
+  }
+  return null;
+}
+
+function formString(value: unknown): string | null {
+  if (value === null || value === undefined || value === false) return null;
+  if (serializableAttributeValue(value)) return String(value);
+  return null;
+}
+
+function selectedValueSet(value: unknown): Set<string> {
+  return new Set(Array.isArray(value) ? value.map(String) : [String(value)]);
+}
+
+function serializableAttributeValue(value: unknown): boolean {
+  return (
+    value === true ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint"
+  );
 }
 
 function writeAttribute(sink: HtmlSink, name: string, value: string): void {
@@ -124,6 +240,10 @@ function attributeName(name: string): string {
   if (name === "className") return "class";
   if (name === "htmlFor") return "for";
   return name;
+}
+
+function valueProp(name: string): boolean {
+  return name === "value" || name === "defaultValue";
 }
 
 function styleName(name: string): string {

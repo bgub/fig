@@ -504,7 +504,49 @@ describe("@bgub/fig-server", () => {
     ).resolves.toBe('<input value="Fig">');
 
     await expect(
+      renderToString(createElement("input", { value: true })),
+    ).resolves.toBe('<input value="true">');
+
+    await expect(
+      renderToString(createElement("input", { defaultValue: true })),
+    ).resolves.toBe('<input value="true">');
+
+    await expect(
       renderToString(createElement("input", null, "child")),
     ).rejects.toThrow("Void element <input> cannot have children.");
+  });
+
+  it("serializes form default props as browser HTML", async () => {
+    const html = await renderToString(
+      createElement(
+        "form",
+        null,
+        createElement("input", { defaultValue: "Draft" }),
+        createElement("input", { defaultChecked: true, type: "checkbox" }),
+        createElement("textarea", { defaultValue: "Hello <Fig>" }),
+        createElement(
+          "select",
+          { defaultValue: "b" },
+          createElement("option", { value: "a" }, "A"),
+          createElement("option", { value: "b" }, "B"),
+        ),
+        createElement(
+          "select",
+          { multiple: true, value: ["a", "c"] },
+          createElement("option", { value: "a" }, "A"),
+          createElement("option", { value: "b" }, "B"),
+          createElement("option", { value: "c" }, "C"),
+        ),
+        createElement(
+          "select",
+          { defaultValue: true },
+          createElement("option", { value: true }, "True"),
+        ),
+      ),
+    );
+
+    expect(html).toBe(
+      '<form><input value="Draft"><input checked type="checkbox"><textarea>Hello &lt;Fig&gt;</textarea><select><option value="a">A</option><option value="b" selected>B</option></select><select multiple><option value="a" selected>A</option><option value="b">B</option><option value="c" selected>C</option></select><select><option value="true" selected>True</option></select></form>',
+    );
   });
 });

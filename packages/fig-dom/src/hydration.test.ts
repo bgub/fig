@@ -738,6 +738,105 @@ describe("@bgub/fig-dom hydration", () => {
     expect(button.style.fontWeight).toBe("");
   });
 
+  it("hydrates controlled form values", () => {
+    const container = new FakeElement("root");
+    const input = new FakeElement("input");
+    input.setAttribute("value", "Server");
+    input.value = "User typed";
+    container.appendChild(input);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("input", { value: "Client" }),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([input]);
+    expect(input.value).toBe("Client");
+    expect(input.attributes.value).toBe("Client");
+  });
+
+  it("preserves uncontrolled form edits during hydration", () => {
+    const container = new FakeElement("root");
+    const input = new FakeElement("input");
+    input.setAttribute("value", "Server");
+    input.defaultValue = "Server";
+    input.value = "User typed";
+    container.appendChild(input);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("input", { defaultValue: "Server" }),
+      ),
+    );
+
+    expect(input.value).toBe("User typed");
+    expect(input.defaultValue).toBe("Server");
+    expect(input.attributes.value).toBe("Server");
+  });
+
+  it("preserves uncontrolled checked edits during hydration", () => {
+    const container = new FakeElement("root");
+    const input = new FakeElement("input");
+    input.setAttribute("checked", "true");
+    input.defaultChecked = true;
+    input.checked = false;
+    container.appendChild(input);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("input", { defaultChecked: true, type: "checkbox" }),
+      ),
+    );
+
+    expect(input.checked).toBe(false);
+    expect(input.defaultChecked).toBe(true);
+    expect(input.attributes.checked).toBe("true");
+  });
+
+  it("hydrates textarea default content without extra text mismatches", () => {
+    const container = new FakeElement("root");
+    const textarea = new FakeElement("textarea");
+    textarea.appendChild(new FakeText("Server draft"));
+    textarea.defaultValue = "Server draft";
+    textarea.value = "Server draft";
+    container.appendChild(textarea);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("textarea", { defaultValue: "Server draft" }),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([textarea]);
+    expect(textarea.value).toBe("Server draft");
+    expect(textarea.textContent).toBe("Server draft");
+  });
+
+  it("preserves uncontrolled textarea edits during hydration", () => {
+    const container = new FakeElement("root");
+    const textarea = new FakeElement("textarea");
+    textarea.appendChild(new FakeText("Server draft"));
+    textarea.defaultValue = "Server draft";
+    textarea.value = "User typed";
+    container.appendChild(textarea);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("textarea", { defaultValue: "Server draft" }),
+      ),
+    );
+
+    expect(textarea.value).toBe("User typed");
+    expect(textarea.defaultValue).toBe("Server draft");
+    expect(textarea.textContent).toBe("Server draft");
+  });
+
   it("reports recoverable hydration mismatches while client-rendering", () => {
     const container = new FakeElement("root");
     const span = new FakeElement("span");

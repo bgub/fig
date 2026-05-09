@@ -108,6 +108,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   setTextContent?(instance: Instance, text: string): void;
   getFirstHydratableChild?(
     parent: Parent<Container, Instance>,
+    props?: Props,
   ): HostNode<Instance, TextInstance> | null;
   getNextHydratableSibling?(
     node: HostNode<Instance, TextInstance>,
@@ -119,6 +120,11 @@ export interface HostConfig<Container, Instance, TextInstance> {
   canHydrateTextInstance?(
     node: HostNode<Instance, TextInstance>,
     text: string,
+  ): boolean;
+  shouldCommitUpdate?(
+    type: string,
+    previousProps: Props,
+    nextProps: Props,
   ): boolean;
   clearContainer?(container: Container): void;
   insertBefore(
@@ -956,6 +962,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationParent = node;
     root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
       hydratable as Instance,
+      node.props,
     );
 
     return true;
@@ -1843,7 +1850,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousProps = current.committedProps ?? {};
     let flags = NoFlags;
 
-    if (hostPropsChanged(previousProps, nextProps)) flags |= UpdateFlag;
+    if (hostPropsChanged(previousProps, nextProps)) {
+      flags |= UpdateFlag;
+    }
+    if (
+      host.shouldCommitUpdate?.(String(current.type), previousProps, nextProps)
+    ) {
+      flags |= UpdateFlag;
+    }
     if (hostTextContentChanged(current, previousProps, nextProps)) {
       flags |= TextContentFlag;
     }

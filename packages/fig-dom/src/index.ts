@@ -4,6 +4,7 @@ import {
   type FigNode,
   Fragment,
   type Key,
+  type Props,
   Suspense,
   transition,
 } from "@bgub/fig";
@@ -27,7 +28,7 @@ import {
   rootFor,
   setEventBatching,
 } from "./events.ts";
-import { hydrateElement, updateElement } from "./props.ts";
+import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
 
 type TextLike = Text | Comment;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
@@ -63,18 +64,23 @@ export {
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type) => document.createElement(type),
   createTextInstance: (text) => document.createTextNode(text),
-  appendInitialChild: (parent, child) => parent.appendChild(child),
+  appendInitialChild: (parent, child) => {
+    parent.appendChild(child);
+    if (isElementNode(child)) updateParentSelect(child, true);
+  },
   finalizeInitialInstance: (instance, props) =>
     updateElement(instance, {}, props),
   setTextContent: (instance, text) => {
     if (instance.textContent !== text) instance.textContent = text;
   },
-  getFirstHydratableChild: (parent) =>
-    parent.firstChild as Element | TextLike | null,
+  getFirstHydratableChild: (parent, props) =>
+    hydratableFirstChild(parent, props),
   getNextHydratableSibling: (node) =>
     node.nextSibling as Element | TextLike | null,
   canHydrateInstance: (node, type) => isHydratableElement(node, type),
   canHydrateTextInstance: (node) => isHydratableText(node),
+  shouldCommitUpdate: (type, _previousProps, nextProps) =>
+    shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
     let child = container.firstChild as Element | TextLike | null;
 
@@ -88,6 +94,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
+    if (isElementNode(child)) updateParentSelect(child, true);
     attachBindSubtree(child as Element | Text);
     attachEventSubtree(child as Element | Text);
   },
@@ -190,9 +197,49 @@ function isHydratableElement(node: Element | TextLike, type: string): boolean {
   return name.toLowerCase() === type.toLowerCase();
 }
 
+function hydratableFirstChild(
+  parent: Container | Element,
+  props?: Props,
+): Element | TextLike | null {
+  if (
+    elementName(parent) === "textarea" &&
+    props !== undefined &&
+    hasManagedTextareaContent(props)
+  ) {
+    return null;
+  }
+
+  return parent.firstChild as Element | TextLike | null;
+}
+
+function hasManagedTextareaContent(props: Props): boolean {
+  return props.value !== undefined || props.defaultValue !== undefined;
+}
+
+function elementName(node: Container | Element | TextLike): string {
+  if (!("nodeType" in node) || node.nodeType !== 1) return "";
+
+  return "localName" in node && typeof node.localName === "string"
+    ? node.localName.toLowerCase()
+    : "tagName" in node && typeof node.tagName === "string"
+      ? node.tagName.toLowerCase()
+      : "";
+}
+
+function isElementNode(node: Element | TextLike): node is Element {
+  return "nodeType" in node && node.nodeType === 1;
+}
+
 function isHydratableText(node: Element | TextLike): boolean {
   if ("nodeType" in node && node.nodeType !== 3) return false;
   return !("setAttribute" in node) && "nodeValue" in node;
+}
+
+function shouldRestoreControlledFormState(type: string, props: Props): boolean {
+  return (
+    (type === "input" || type === "textarea" || type === "select") &&
+    (props.value !== undefined || props.checked !== undefined)
+  );
 }
 
 function suspenseBoundaryFor(
