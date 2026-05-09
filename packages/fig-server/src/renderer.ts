@@ -73,6 +73,7 @@ interface Task {
   abortSet: Set<Task>;
   blockedBoundary: SuspenseBoundary | null;
   contextValues: ContextValues;
+  idPath: string;
   node: FigNode;
   segment: Segment;
   stack: StackFrame | null;
@@ -114,6 +115,8 @@ interface RenderFrame {
   dispatcher: RenderDispatcher;
   request: Request;
   segment: Segment;
+  idPath: string;
+  localIdCounter: number;
   stack: StackFrame | null;
 }
 
@@ -201,6 +204,7 @@ export function createServerRenderRequest(
     rootSegment,
     new Map(),
     request.abortableTasks,
+    "",
     null,
   );
   request.pingedTasks.push(rootTask);
@@ -230,6 +234,7 @@ function createTask(
   segment: Segment,
   contextValues: ContextValues,
   abortSet: Set<Task>,
+  idPath: string,
   stack: StackFrame | null,
 ): Task {
   request.pendingTasks += 1;
@@ -243,6 +248,7 @@ function createTask(
     abortSet,
     blockedBoundary,
     contextValues,
+    idPath,
     node,
     segment,
     stack,
@@ -306,11 +312,12 @@ function retryTask(request: Request, task: Task): void {
     task.blockedBoundary,
     cloneContextValues(task.contextValues),
     task.abortSet,
+    task.idPath,
     task.stack,
   );
 
   try {
-    renderNode(task.node, frame);
+    renderChildren(task.node, frame);
     task.segment.status = "completed";
     detachTask(request, task);
     finishedTask(request, task, task.segment);
@@ -327,6 +334,7 @@ function createRenderFrame(
   boundary: SuspenseBoundary | null,
   contextValues: ContextValues,
   abortSet: Set<Task>,
+  idPath: string,
   stack: StackFrame | null,
 ): RenderFrame {
   const frame = {
@@ -334,18 +342,17 @@ function createRenderFrame(
     boundary,
     contextValues,
     dispatcher: null as never,
+    idPath,
+    localIdCounter: 0,
     request,
     segment,
     stack,
   };
-  frame.dispatcher = createServerDispatcher(request, frame);
+  frame.dispatcher = createServerDispatcher(frame);
   return frame;
 }
 
-function createServerDispatcher(
-  request: Request,
-  frame: RenderFrame,
-): RenderDispatcher {
+function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
   return {
     useState(initialState) {
       const value = resolveInitialState(initialState);
@@ -354,8 +361,16 @@ function createServerDispatcher(
       };
       return [value, dispatch];
     },
+    useId() {
+      const id = `${frame.request.identifierPrefix}fig-${frame.idPath}-${frame.localIdCounter.toString(32)}`;
+      frame.localIdCounter += 1;
+      return id;
+    },
     useMemo(calculate) {
       return calculate();
+    },
+    useTransition() {
+      return [false, (callback) => callback()];
     },
     useReactive: noopEffect,
     useBeforePaint: noopEffect,
@@ -374,7 +389,7 @@ function createServerDispatcher(
       return readContextValue(frame, context);
     },
     readPromise(promise) {
-      throwIfAborting(request);
+      throwIfAborting(frame.request);
       return readThenable(promise);
     },
   };
@@ -382,7 +397,7 @@ function createServerDispatcher(
 
 function renderNode(node: FigNode, frame: RenderFrame): void {
   if (Array.isArray(node)) {
-    renderChildSequence(collectChildren(node), frame);
+    renderChildren(node, frame);
     return;
   }
 
@@ -402,10 +417,14 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
   renderElement(node, frame);
 }
 
+function renderChildren(node: FigNode, frame: RenderFrame): void {
+  renderChildSequence(collectChildren(node), frame);
+}
+
 function renderChildSequence(children: FigChild[], frame: RenderFrame): void {
   for (let index = 0; index < children.length; index += 1) {
     try {
-      renderNode(children[index], frame);
+      withIdSegment(frame, index, () => renderNode(children[index], frame));
     } catch (error) {
       if (isThenable(error) && frame.boundary !== null) {
         spawnSuspendedTask(frame, children.slice(index), error);
@@ -414,6 +433,23 @@ function renderChildSequence(children: FigChild[], frame: RenderFrame): void {
 
       throw error;
     }
+  }
+}
+
+function withIdSegment<T>(
+  frame: RenderFrame,
+  index: number,
+  callback: () => T,
+): T {
+  const previousIdPath = frame.idPath;
+  const segment = index.toString(32);
+  frame.idPath =
+    previousIdPath === "" ? segment : `${previousIdPath}-${segment}`;
+
+  try {
+    return callback();
+  } finally {
+    frame.idPath = previousIdPath;
   }
 }
 
@@ -426,7 +462,7 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
   }
 
   if (type === Fragment) {
-    renderNode(element.props.children, frame);
+    renderChildren(element.props.children, frame);
     return;
   }
 
@@ -441,7 +477,7 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
   }
 
   if (isErrorBoundary(type)) {
-    renderNode(element.props.children, frame);
+    renderChildren(element.props.children, frame);
     return;
   }
 
@@ -462,15 +498,18 @@ function renderFunctionComponent(
 ): void {
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousStack = frame.stack;
+  const previousLocalIdCounter = frame.localIdCounter;
   frame.stack = { name: type.name || "Anonymous", parent: previousStack };
+  frame.localIdCounter = 0;
 
   try {
-    renderNode(type(props), frame);
+    renderChildren(type(props), frame);
   } catch (error) {
     recordErrorStack(error, frame.stack);
     throw error;
   } finally {
     frame.stack = previousStack;
+    frame.localIdCounter = previousLocalIdCounter;
     setCurrentDispatcher(previousDispatcher);
   }
 }
@@ -484,7 +523,7 @@ function renderContextProvider(
   stack.push(props.value);
 
   try {
-    renderNode(props.children, frame);
+    renderChildren(props.children, frame);
   } finally {
     stack.pop();
   }
@@ -506,11 +545,12 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     boundary,
     cloneContextValues(frame.contextValues),
     frame.abortSet,
+    frame.idPath,
     frame.stack,
   );
 
   try {
-    renderNode(props.children, contentFrame);
+    renderChildren(props.children, contentFrame);
     contentSegment.status = "completed";
     boundary.completedSegments.push(contentSegment);
     if (boundary.pendingTasks === 0) boundary.status = "completed";
@@ -533,11 +573,12 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.boundary,
     cloneContextValues(frame.contextValues),
     fallbackAbortableTasks,
+    frame.idPath,
     frame.stack,
   );
 
   try {
-    renderNode(props.fallback as FigNode, fallbackFrame);
+    renderChildren(props.fallback as FigNode, fallbackFrame);
     boundarySegment.status = "completed";
   } catch (error) {
     if (boundary.pendingTasks > 0) {
@@ -564,7 +605,7 @@ function renderHostElement(
   if (isVoid) return;
 
   try {
-    renderNode(props.children, frame);
+    renderChildren(props.children, frame);
   } catch (error) {
     if (isThenable(error) && frame.boundary !== null) {
       spawnSuspendedTask(frame, props.children, error);
@@ -591,6 +632,7 @@ function spawnSuspendedTask(
     segment,
     cloneContextValues(frame.contextValues),
     frame.abortSet,
+    frame.idPath,
     frame.stack,
   );
   thenable.then(

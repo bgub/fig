@@ -7,9 +7,11 @@ import {
   readPromise,
   Suspense,
   useExternalStore,
+  useId,
   useMemo,
   useReactive,
   useState,
+  useTransition,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { renderToReadableStream, renderToString } from "./index.ts";
@@ -134,6 +136,55 @@ describe("@bgub/fig-server", () => {
 
     await expect(renderToString(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
+    );
+  });
+
+  it("renders stable prefixed ids", async () => {
+    function Field({ label }: { label: string }) {
+      const id = useId();
+
+      return createElement(
+        "label",
+        { for: id },
+        label,
+        createElement("input", { id }),
+      );
+    }
+
+    const html = await renderToString(
+      createElement(
+        "main",
+        null,
+        createElement(Field, { label: "First" }),
+        createElement(Field, { label: "Second" }),
+      ),
+      { identifierPrefix: "srv-" },
+    );
+
+    expect(html).toBe(
+      '<main><label for="srv-fig-0-0-0">First<input id="srv-fig-0-0-0"></label><label for="srv-fig-0-1-0">Second<input id="srv-fig-0-1-0"></label></main>',
+    );
+  });
+
+  it("runs server transition callbacks without pending state", async () => {
+    function App() {
+      const [isPending, startTransition] = useTransition();
+      let value = "Initial";
+      startTransition(() => {
+        value = "Updated";
+      });
+
+      return createElement(
+        "span",
+        null,
+        isPending ? "Pending" : "Idle",
+        ":",
+        value,
+      );
+    }
+
+    await expect(renderToString(createElement(App, null))).resolves.toBe(
+      "<span>Idle:Updated</span>",
     );
   });
 

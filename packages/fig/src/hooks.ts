@@ -3,11 +3,14 @@ import type { FigContext } from "./context.ts";
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
+export type StartTransition = (callback: () => void) => void;
 type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+  useId(): string;
   useMemo<T>(calculate: () => T, deps: DependencyList): T;
+  useTransition(): [boolean, StartTransition];
   useReactive(effect: EffectCallback, deps?: DependencyList): void;
   useBeforePaint(effect: EffectCallback, deps?: DependencyList): void;
   useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void;
@@ -32,8 +35,16 @@ export function useState<S>(
   return resolveDispatcher().useState(initialState);
 }
 
+export function useId(): string {
+  return resolveDispatcher().useId();
+}
+
 export function useMemo<T>(calculate: () => T, deps: DependencyList): T {
   return resolveDispatcher().useMemo(calculate, deps);
+}
+
+export function useTransition(): [boolean, StartTransition] {
+  return resolveDispatcher().useTransition();
 }
 
 export function useCallback<T extends Callback>(

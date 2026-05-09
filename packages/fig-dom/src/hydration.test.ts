@@ -1,4 +1,10 @@
-import { createElement, Suspense, useExternalStore, useState } from "@bgub/fig";
+import {
+  createElement,
+  Suspense,
+  useExternalStore,
+  useId,
+  useState,
+} from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
@@ -95,6 +101,38 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([span]);
     expect(span.textContent).toBe("Client");
+  });
+
+  it("generates matching ids during hydration", () => {
+    const container = new FakeElement("root");
+    const label = new FakeElement("label");
+    const input = new FakeElement("input");
+    label.setAttribute("for", "hydr-fig-0-0");
+    input.setAttribute("id", "hydr-fig-0-0");
+    label.appendChild(new FakeText("Name"));
+    label.appendChild(input);
+    container.appendChild(label);
+
+    function Field() {
+      const id = useId();
+
+      return createElement(
+        "label",
+        { for: id },
+        "Name",
+        createElement("input", { id }),
+      );
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(Field, null), {
+        identifierPrefix: "hydr-",
+      }),
+    );
+
+    expect(container.childNodes).toEqual([label]);
+    expect(label.attributes.for).toBe("hydr-fig-0-0");
+    expect(input.attributes.id).toBe("hydr-fig-0-0");
   });
 
   it("runs binds for hydrated host elements", () => {

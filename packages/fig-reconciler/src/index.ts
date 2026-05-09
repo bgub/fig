@@ -19,6 +19,7 @@ import {
   type Props,
   type RenderDispatcher,
   type SetStateAction,
+  type StartTransition,
   setCurrentDispatcher,
   setTransitionHandler,
 } from "@bgub/fig";
@@ -40,6 +41,7 @@ import {
   getFigDevtoolsGlobalHook,
 } from "./devtools.ts";
 import {
+  claimNextTransitionLane,
   createLaneMap,
   DefaultHydrationLane,
   DefaultLane,
@@ -166,6 +168,7 @@ export interface FigRoot {
 }
 
 export interface FigRootOptions {
+  identifierPrefix?: string;
   onRecoverableError?: (error: unknown, info: RecoverableErrorInfo) => void;
   onUncaughtError?: (error: unknown, info: ErrorInfo) => void;
 }
@@ -260,6 +263,13 @@ interface MemoState<T> {
   deps: DependencyList;
 }
 
+interface TransitionState {
+  pendingCount: number;
+  start: StartTransition | null;
+}
+
+type QueuedHookKind = "state" | "transition";
+
 interface ExternalStoreInstance<T, Owner> {
   committedSubscribe: ExternalStoreSubscribe | null;
   getSnapshot: () => T;
@@ -331,6 +341,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   container: Container;
   current: Fiber<Container, Instance, TextInstance>;
   element: FigNode;
+  identifierPrefix: string;
   callback: ScheduledTask | null;
   callbackPriority: Lane;
   wip: Fiber<Container, Instance, TextInstance> | null;
@@ -397,14 +408,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
+  let localIdCounter = 0;
 
   const dispatcher: RenderDispatcher = {
     useState(initialState) {
       const hook = updateStateHook(initialState);
       return [hook.memoizedState, hook.queue.dispatch];
     },
+    useId() {
+      return updateIdHook();
+    },
     useMemo(calculate, deps) {
       return updateMemoHook(calculate, deps);
+    },
+    useTransition() {
+      return updateTransitionHook();
     },
     useReactive(effect, deps) {
       updateEffectHook("reactive", ReactiveEffect, effect, deps);
@@ -477,6 +495,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       container,
       current,
       element: null,
+      identifierPrefix: options.identifierPrefix ?? "",
       pendingLanes: NoLanes,
       suspendedLanes: NoLanes,
       pingedLanes: NoLanes,
@@ -1115,6 +1134,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     renderingFiber = node;
     currentHook = node.alternate?.memoizedState ?? null;
     workInProgressHook = null;
+    localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
 
@@ -1127,6 +1147,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       renderingFiber = null;
       currentHook = null;
       workInProgressHook = null;
+      localIdCounter = 0;
     }
   }
 
@@ -1273,30 +1294,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
-    if (renderingFiber === null) {
-      throw new Error(
-        "useState can only be called while rendering a component.",
-      );
-    }
-
-    const oldHook = updateHook("state") as Hook<S> | null;
-    const hook: Hook<S> =
-      oldHook === null
-        ? createHook("state", resolveInitialState(initialState))
-        : { ...oldHook, next: null };
-
-    appendHook(hook);
-
-    const root = rootOf(renderingFiber);
+    const hook = updateQueuedHook("state", initialState);
     const queue = hook.queue;
-    const pending = queue.pending;
-    if (pending !== null) {
-      hook.baseQueue = consumePendingHookQueue(root, hook, queue, pending);
-    }
-
-    if (hook.baseQueue !== null) {
-      processHookQueue(hook, root.renderLanes);
-    }
 
     if (queue.dispatch === null) {
       const fiber = renderingFiber;
@@ -1307,15 +1306,27 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
 
-        const lane = requestUpdateLane();
-        const update: HookUpdate<S> = { action, lane, next: null as never };
-        update.next = update;
-        queue.pending = mergeQueues(queue.pending, update);
-        scheduleFiber(fiber, lane);
+        scheduleHookUpdate(fiber, queue, action, requestUpdateLane());
       };
     }
 
     return hook;
+  }
+
+  function updateIdHook(): string {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    const oldHook = updateHook("id") as Hook<string> | null;
+    const id =
+      oldHook === null
+        ? createFiberId(rootOf(renderingFiber), renderingFiber, localIdCounter)
+        : oldHook.memoizedState;
+    localIdCounter += 1;
+
+    appendHook(createHook("id", id));
+    return id;
   }
 
   function updateMemoHook<T>(calculate: () => T, deps: DependencyList): T {
@@ -1332,6 +1343,77 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     appendHook(createHook("memo", state));
     return state.value;
+  }
+
+  function updateTransitionHook(): [boolean, StartTransition] {
+    const hook: Hook<TransitionState> = updateQueuedHook("transition", {
+      pendingCount: 0,
+      start: null,
+    });
+    const queue = hook.queue;
+
+    if (hook.memoizedState.start === null) {
+      const fiber = renderingFiber;
+      const updatePending = (delta: 1 | -1, lane: Lane) => {
+        scheduleHookUpdate(
+          fiber,
+          queue,
+          (state) => ({
+            ...state,
+            pendingCount: Math.max(0, state.pendingCount + delta),
+          }),
+          lane,
+        );
+      };
+
+      hook.memoizedState.start = (callback) => {
+        if (renderingFiber !== null) {
+          throw new Error(
+            "Transitions cannot be started while rendering a component.",
+          );
+        }
+
+        const lane = claimNextTransitionLane();
+        updatePending(1, SyncLane);
+
+        try {
+          runWithPriority(lane, callback);
+        } finally {
+          updatePending(-1, lane);
+        }
+      };
+    }
+
+    return [hook.memoizedState.pendingCount > 0, hook.memoizedState.start];
+  }
+
+  function updateQueuedHook<S>(
+    kind: QueuedHookKind,
+    initialState: S | (() => S),
+  ): Hook<S> {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    const oldHook = updateHook(kind) as Hook<S> | null;
+    const hook: Hook<S> =
+      oldHook === null
+        ? createHook(kind, resolveInitialState(initialState))
+        : { ...oldHook, next: null };
+
+    appendHook(hook);
+
+    const root = rootOf(renderingFiber);
+    const pending = hook.queue.pending;
+    if (pending !== null) {
+      hook.baseQueue = consumePendingHookQueue(root, hook, hook.queue, pending);
+    }
+
+    if (hook.baseQueue !== null) {
+      processHookQueue(hook, root.renderLanes);
+    }
+
+    return hook;
   }
 
   function updateExternalStoreHook<T>(
@@ -1421,6 +1503,36 @@ export function createRenderer<Container, Instance, TextInstance>(
     hook.memoizedState = state;
     hook.baseState = newBaseQueue === null ? state : newBaseState;
     hook.baseQueue = newBaseQueue;
+  }
+
+  function scheduleHookUpdate<S>(
+    fiber: F,
+    queue: HookQueue<S>,
+    action: SetStateAction<S>,
+    lane: Lane,
+  ): void {
+    const update: HookUpdate<S> = { action, lane, next: null as never };
+    update.next = update;
+    queue.pending = mergeQueues(queue.pending, update);
+    scheduleFiber(fiber, lane);
+  }
+
+  function createFiberId(root: R, fiber: F, localId: number): string {
+    return `${root.identifierPrefix}fig-${fiberPath(fiber)}-${localId.toString(32)}`;
+  }
+
+  function fiberPath(fiber: F): string {
+    const parts: string[] = [];
+
+    for (
+      let node: F | null = fiber;
+      node !== null && node.tag !== RootTag;
+      node = node.return
+    ) {
+      parts.push(node.index.toString(32));
+    }
+
+    return parts.reverse().join("-");
   }
 
   function consumePendingHookQueue<S>(

@@ -100,6 +100,7 @@ type RscRequest = {
   clientReferenceRows: Map<string, number>;
   closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
+  nextId: number;
   nextRowId: number;
   pendingTasks: number;
   pingedTasks: Task[];
@@ -277,6 +278,7 @@ function createRscRequest(
     clientReferenceRows: new Map(),
     closeAllReady: resolveAllReady,
     controller: null,
+    nextId: 0,
     nextRowId: 1,
     pendingTasks: 0,
     pingedTasks: [],
@@ -489,8 +491,16 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
       };
       return [value, dispatch];
     },
+    useId() {
+      const id = `fig-rsc-${frame.request.nextId.toString(32)}`;
+      frame.request.nextId += 1;
+      return id;
+    },
     useMemo(calculate) {
       return calculate();
+    },
+    useTransition() {
+      return [false, (callback) => callback()];
     },
     useReactive: noopEffect,
     useBeforePaint: noopEffect,

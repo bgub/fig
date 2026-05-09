@@ -16,8 +16,10 @@ import {
   transition,
   useCallback,
   useExternalStore,
+  useId,
   useMemo,
   useState,
+  useTransition,
 } from "./index.ts";
 
 describe("@bgub/fig", () => {
@@ -95,6 +97,12 @@ describe("@bgub/fig", () => {
       "Hooks can only be called while rendering a component.",
     );
     expect(() => useCallback(() => undefined, [])).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useId()).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useTransition()).toThrow(
       "Hooks can only be called while rendering a component.",
     );
     expect(() =>

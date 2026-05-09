@@ -46,6 +46,8 @@ createRoot(container).render(<App />);
 
 - Elements: `createElement`, `Fragment`, and the JSX runtime.
 - State and memoization: `useState`, `useMemo`, and `useCallback`.
+- Stable identifiers: `useId()` generates IDs that match server render and
+  hydration output.
 - Context: `createContext(defaultValue)` plus render-time
   `readContext(context)`.
 - Effects: `useReactive`, `useBeforePaint`, `useBeforeLayout`, and
@@ -57,8 +59,8 @@ createRoot(container).render(<App />);
   until the promise settles.
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
   reporting and change the boundary key to reset sticky fallback state.
-- `transition(callback)` marks updates that may preserve already-revealed
-  Suspense content while new work is pending.
+- `transition(callback)` and `useTransition()` mark updates that may preserve
+  already-revealed Suspense content while new work is pending.
 
 ## Renderer APIs
 

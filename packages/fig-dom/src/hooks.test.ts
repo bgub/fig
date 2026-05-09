@@ -2,15 +2,24 @@ import {
   createElement,
   type FigNode,
   type Props,
+  readPromise,
+  Suspense,
   useCallback,
   useExternalStore,
+  useId,
   useMemo,
   useReactive,
   useState,
+  useTransition,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
-import { FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  deferred,
+  delay,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -139,6 +148,109 @@ describe("@bgub/fig-dom hooks", () => {
     expect(callbacks[1]).toBe(callbacks[0]);
     expect(callbacks[2]).not.toBe(callbacks[1]);
     expect(calls).toEqual(["a:x", "b:y"]);
+  });
+
+  it("generates stable prefixed ids", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element, {
+      identifierPrefix: "app-",
+    });
+    const ids: string[] = [];
+
+    function Field({ label }: { label: string }) {
+      const id = useId();
+      ids.push(id);
+
+      return createElement(
+        "label",
+        { for: id },
+        label,
+        createElement("input", { id }),
+      );
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(Field, { label: "First" }),
+          createElement(Field, { label: "Second" }),
+        ),
+      ),
+    );
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(Field, { label: "First updated" }),
+          createElement(Field, { label: "Second updated" }),
+        ),
+      ),
+    );
+
+    expect(ids).toEqual([
+      "app-fig-0-0-0",
+      "app-fig-0-1-0",
+      "app-fig-0-0-0",
+      "app-fig-0-1-0",
+    ]);
+
+    const main = container.childNodes[0] as FakeElement;
+    const firstLabel = main.childNodes[0] as FakeElement;
+    const secondLabel = main.childNodes[1] as FakeElement;
+    const firstInput = firstLabel.childNodes[1] as FakeElement;
+    const secondInput = secondLabel.childNodes[1] as FakeElement;
+
+    expect(firstLabel.attributes.for).toBe("app-fig-0-0-0");
+    expect(firstInput.attributes.id).toBe("app-fig-0-0-0");
+    expect(secondLabel.attributes.for).toBe("app-fig-0-1-0");
+    expect(secondInput.attributes.id).toBe("app-fig-0-1-0");
+  });
+
+  it("tracks pending transition work until suspended content resolves", async () => {
+    const pending = deferred<string>();
+    let start: ((callback: () => void) => void) | null = null;
+    let show: ((value: Promise<string>) => void) | null = null;
+
+    function Message({ value }: { value: Promise<string> | null }) {
+      return value === null ? "Ready" : readPromise(value);
+    }
+
+    function App() {
+      const [value, setValue] = useState<Promise<string> | null>(null);
+      const [isPending, startTransition] = useTransition();
+      start = startTransition;
+      show = setValue;
+
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Message, { value }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle Ready");
+
+    start?.(() => show?.(pending.promise));
+    await delay();
+
+    expect(container.textContent).toBe("Pending Ready");
+
+    pending.resolve("Loaded");
+    await delay();
+
+    expect(container.textContent).toBe("Idle Loaded");
   });
 
   it("subscribes to external stores and updates from emitted snapshots", () => {
