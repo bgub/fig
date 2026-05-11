@@ -30,6 +30,10 @@ export interface RscRenderResult {
   stream: ReadableStream<Uint8Array>;
 }
 
+export interface RscRenderOptions {
+  refreshBoundary?: string;
+}
+
 export interface RscRootLike {
   render(node: FigNode): void;
 }
@@ -66,12 +70,12 @@ type RscSpecialModel =
   | { $fig: "suspense" }
   | { $fig: "undefined" };
 
-export interface RscDecodeOptions {
+export interface RscResponseOptions {
   loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
   resolveClientReference?: (metadata: { id: string }) => ElementType;
 }
 
-export interface RscClientResponse {
+export interface RscResponse {
   bindRoot(root: RscRootLike): () => void;
   getRoot(): FigNode;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
@@ -86,6 +90,7 @@ export type RscFetch = (
 
 export interface RscFetchOptions extends RequestInit {
   fetch?: RscFetch;
+  refreshBoundary?: string;
 }
 
 class RscRequestCancelledError extends Error {
@@ -164,33 +169,22 @@ export const RscBoundary: (props: {
   id: string;
 }) => FigNode = RscBoundaryImpl;
 
-export function renderToRscStream(node: FigNode): RscRenderResult {
-  return createRscRenderResult(node, null);
-}
-
-export function renderToRscRefreshStream(
-  boundary: string,
+export function renderToRscStream(
   node: FigNode,
+  options: RscRenderOptions = {},
 ): RscRenderResult {
-  return createRscRenderResult(node, boundary);
-}
-
-export function createRscClientResponse(
-  options: RscDecodeOptions = {},
-): RscClientResponse {
-  return new RscClientResponseImpl(options);
-}
-
-function createRscRenderResult(
-  node: FigNode,
-  refreshBoundary: string | null,
-): RscRenderResult {
-  const request = createRscRequest(node, refreshBoundary);
+  const request = createRscRequest(node, options.refreshBoundary ?? null);
   return { allReady: request.allReady, contentType, stream: request.stream };
 }
 
+export function createRscResponse(
+  options: RscResponseOptions = {},
+): RscResponse {
+  return new RscResponseImpl(options);
+}
+
 async function processRscStream(
-  response: RscClientResponse,
+  response: RscResponse,
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal | null,
 ): Promise<void> {
@@ -212,31 +206,14 @@ export function isRscRequestCancelled(error: unknown): boolean {
 }
 
 export async function fetchRsc(
-  response: RscClientResponse,
+  response: RscResponse,
   input: RequestInfo | URL,
   options: RscFetchOptions = {},
-): Promise<Response> {
-  return requestRsc(response, input, options);
-}
-
-export async function refreshRscBoundary(
-  response: RscClientResponse,
-  boundary: string,
-  input: RequestInfo | URL,
-  options: RscFetchOptions = {},
-): Promise<Response> {
-  return requestRsc(response, input, options, boundary);
-}
-
-async function requestRsc(
-  response: RscClientResponse,
-  input: RequestInfo | URL,
-  options: RscFetchOptions,
-  boundary?: string,
 ): Promise<Response> {
   const {
     fetch: fetchImpl = globalThis.fetch,
     headers,
+    refreshBoundary,
     signal,
     ...init
   } = options;
@@ -247,7 +224,7 @@ async function requestRsc(
 
   const result = await fetchImpl(input, {
     ...init,
-    headers: appendRscHeaders(headers, boundary),
+    headers: appendRscHeaders(headers, refreshBoundary),
     signal,
   });
   throwIfAborted(signal);
@@ -307,13 +284,13 @@ function createRscRequest(
   return request;
 }
 
-class RscClientResponseImpl implements RscClientResponse {
+class RscResponseImpl implements RscResponse {
   private readonly boundaries = new Map<string, RscModel>();
   private readonly chunks = new Map<number, DecodedChunk>();
   private listeners = new Set<() => void>();
   private stringBuffer = "";
 
-  constructor(private readonly options: RscDecodeOptions) {}
+  constructor(private readonly options: RscResponseOptions) {}
 
   bindRoot(root: RscRootLike): () => void {
     const render = () => root.render(this.getRoot());
@@ -934,7 +911,7 @@ function throwIfAborted(signal?: AbortSignal | null): void {
 }
 
 function resolveDecodedRow(
-  response: RscClientResponseImpl,
+  response: RscResponseImpl,
   row: Extract<RscRow, { id: number }>,
 ): void {
   const chunk = response.getChunk(row.id);
@@ -959,10 +936,7 @@ function resolveDecodedRow(
   chunk.resolve(value);
 }
 
-function decodeModel(
-  response: RscClientResponseImpl,
-  model: RscModel,
-): unknown {
+function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
   if (model === null) return null;
   if (Array.isArray(model))
     return model.map((item) => decodeModel(response, item));
@@ -979,7 +953,7 @@ function decodeModel(
 }
 
 function decodeSpecialModel(
-  response: RscClientResponseImpl,
+  response: RscResponseImpl,
   model: RscElementModel | RscSpecialModel,
 ): unknown {
   switch (model.$fig) {
@@ -1013,28 +987,28 @@ function decodeSpecialModel(
 }
 
 function decodeElementType(
-  response: RscClientResponseImpl,
+  response: RscResponseImpl,
   type: string | RscSpecialModel,
 ): ElementType {
   if (typeof type === "string") return type;
   return decodeSpecialModel(response, type) as ElementType;
 }
 
-function RscResponseRoot(props: { response: RscClientResponseImpl }): FigNode {
+function RscResponseRoot(props: { response: RscResponseImpl }): FigNode {
   return props.response.readChunk(0);
 }
 
 function RscBoundarySlot(props: {
   id: string;
   initial: RscModel;
-  response: RscClientResponseImpl;
+  response: RscResponseImpl;
 }): FigNode {
   return props.response.readBoundary(props.id, props.initial);
 }
 
 function RscLazyNode(props: {
   id: number;
-  response: RscClientResponseImpl;
+  response: RscResponseImpl;
 }): FigNode {
   return props.response.readChunk(props.id);
 }

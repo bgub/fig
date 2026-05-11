@@ -41,6 +41,28 @@ Pass `identifierPrefix` when multiple streaming renders share a document. Fig
 uses it in generated Suspense marker and script identifiers, and it defaults to
 an empty string.
 
+## RSC
+
+```ts
+import {
+  createRscResponse,
+  fetchRsc,
+  renderToRscStream,
+  RscBoundary,
+} from "@bgub/fig-server/rsc";
+```
+
+`renderToRscStream(node, options?)` renders a Server Component payload.
+Pass `refreshBoundary` to render a targeted boundary refresh:
+
+```tsx
+renderToRscStream(<Dashboard />, { refreshBoundary: "feed" });
+```
+
+`createRscResponse()` decodes streamed rows on the client, and
+`fetchRsc(response, input, options?)` fetches and processes a payload. Pass
+`refreshBoundary` to `fetchRsc` to request and apply a boundary refresh.
+
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useExternalStore` server snapshots, no-op server
 effects, host prop serialization, streaming Suspense, partial segments inside

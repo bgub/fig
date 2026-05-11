@@ -5,11 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { renderToString } from "@bgub/fig-server";
-import {
-  type RscRenderResult,
-  renderToRscRefreshStream,
-  renderToRscStream,
-} from "@bgub/fig-server/rsc";
+import { type RscRenderResult, renderToRscStream } from "@bgub/fig-server/rsc";
 import { createDemoData, Dashboard, RscApp } from "./app.tsx";
 import { appRootId, feedBoundaryId } from "./shared.ts";
 import { LoadingShell } from "./shell.tsx";
@@ -76,10 +72,11 @@ async function sendRsc(
   const seed = seedFor(url);
   const boundary = headerValue(request.headers["x-fig-rsc-boundary"]);
   const data = createDemoData(seed);
-  const result =
-    boundary === feedBoundaryId
-      ? renderToRscRefreshStream(boundary, <Dashboard data={data} />)
-      : renderToRscStream(<RscApp data={data} />);
+  const refreshingFeed = boundary === feedBoundaryId;
+  const result = renderToRscStream(
+    refreshingFeed ? <Dashboard data={data} /> : <RscApp data={data} />,
+    refreshingFeed ? { refreshBoundary: boundary } : undefined,
+  );
 
   response.writeHead(200, {
     ...noStore,

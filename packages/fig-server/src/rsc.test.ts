@@ -13,13 +13,11 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import {
-  createRscClientResponse,
+  createRscResponse,
   fetchRsc,
   isRscRequestCancelled,
   RscBoundary,
   type RscFetch,
-  refreshRscBoundary,
-  renderToRscRefreshStream,
   renderToRscStream,
 } from "./rsc.ts";
 
@@ -98,30 +96,20 @@ function controlledTextStream(): {
   };
 }
 
-async function renderToRscText(node: FigNode): Promise<string> {
-  const result = renderToRscStream(node);
-  await result.allReady;
-  return readStream(result.stream);
-}
-
-async function renderToRscRefreshText(
-  boundary: string,
+async function renderToRscText(
   node: FigNode,
+  options?: Parameters<typeof renderToRscStream>[1],
 ): Promise<string> {
-  const result = renderToRscRefreshStream(boundary, node);
+  const result = renderToRscStream(node, options);
   await result.allReady;
   return readStream(result.stream);
 }
 
-async function renderToRscRows(node: FigNode): Promise<TestRscRow[]> {
-  return parseTestRscRows(await renderToRscText(node));
-}
-
-async function renderToRscRefreshRows(
-  boundary: string,
+async function renderToRscRows(
   node: FigNode,
+  options?: Parameters<typeof renderToRscStream>[1],
 ): Promise<TestRscRow[]> {
-  return parseTestRscRows(await renderToRscRefreshText(boundary, node));
+  return parseTestRscRows(await renderToRscText(node, options));
 }
 
 function parseTestRscRows(input: string): TestRscRow[] {
@@ -133,15 +121,15 @@ function parseTestRscRows(input: string): TestRscRow[] {
 
 function decodeTestRscRows(
   rows: TestRscRow[],
-  options?: Parameters<typeof createRscClientResponse>[0],
+  options?: Parameters<typeof createRscResponse>[0],
 ): FigNode {
-  const response = createRscClientResponse(options);
+  const response = createRscResponse(options);
   processTestRscRows(response, rows);
   return response.getRoot();
 }
 
 function processTestRscRows(
-  response: ReturnType<typeof createRscClientResponse>,
+  response: ReturnType<typeof createRscResponse>,
   rows: TestRscRow[],
 ): void {
   response.processStringChunk(
@@ -150,7 +138,7 @@ function processTestRscRows(
 }
 
 async function processTestRscStream(
-  response: ReturnType<typeof createRscClientResponse>,
+  response: ReturnType<typeof createRscResponse>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
   await readTextStream(stream, (chunk) => response.processStringChunk(chunk));
@@ -482,7 +470,9 @@ describe("RSC rendering", () => {
 
   it("renders boundary refresh rows", async () => {
     await expect(
-      renderToRscRefreshRows("post", createElement("p", null, "Updated")),
+      renderToRscRows(createElement("p", null, "Updated"), {
+        refreshBoundary: "post",
+      }),
     ).resolves.toEqual([
       {
         boundary: "post",
@@ -498,7 +488,7 @@ describe("RSC rendering", () => {
   });
 
   it("processes streamed rows incrementally", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     let notifications = 0;
     response.subscribe(() => {
       notifications += 1;
@@ -513,7 +503,7 @@ describe("RSC rendering", () => {
   });
 
   it("binds refresh rows to a normal Fig root render handle", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     const rendered: FigNode[] = [];
     const unsubscribe = response.bindRoot({
       render(node) {
@@ -537,7 +527,9 @@ describe("RSC rendering", () => {
     );
     processTestRscRows(
       response,
-      await renderToRscRefreshRows("post", createElement("p", null, "Updated")),
+      await renderToRscRows(createElement("p", null, "Updated"), {
+        refreshBoundary: "post",
+      }),
     );
 
     const evaluated = evaluateRscNode(rendered[rendered.length - 1]);
@@ -557,7 +549,7 @@ describe("RSC rendering", () => {
   });
 
   it("pipes readable streams into an RSC response", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     await processTestRscStream(
       response,
       streamFromString(await renderToRscText(createElement("p", null, "Hi"))),
@@ -570,7 +562,7 @@ describe("RSC rendering", () => {
   });
 
   it("flushes a final RSC row without a trailing newline", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     await processTestRscStream(
       response,
       streamFromString('{"id":0,"tag":"model","value":"Done"}'),
@@ -580,7 +572,7 @@ describe("RSC rendering", () => {
   });
 
   it("fetches initial RSC streams with an RSC accept header", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     let requestHeaders: Headers | null = null;
     let requestSignal: AbortSignal | null = null;
     const controller = new AbortController();
@@ -611,7 +603,7 @@ describe("RSC rendering", () => {
   });
 
   it("cancels initial RSC fetches before mutating the response", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     const controller = new AbortController();
     let fetches = 0;
     let notifications = 0;
@@ -640,7 +632,7 @@ describe("RSC rendering", () => {
   });
 
   it("cancels partial RSC streams without flushing buffered rows", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     const stream = controlledTextStream();
     const controller = new AbortController();
     let notifications = 0;
@@ -669,15 +661,14 @@ describe("RSC rendering", () => {
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     let requestHeaders: Headers | null = null;
     const fetchImpl: RscFetch = async (_input, init) => {
       requestHeaders = new Headers(init?.headers);
       return new Response(
-        await renderToRscRefreshText(
-          "post",
-          createElement("p", null, "Fetched refresh"),
-        ),
+        await renderToRscText(createElement("p", null, "Fetched refresh"), {
+          refreshBoundary: "post",
+        }),
       );
     };
     const rendered: FigNode[] = [];
@@ -701,9 +692,10 @@ describe("RSC rendering", () => {
         ),
       ),
     );
-    await refreshRscBoundary(response, "post", "/rsc/post", {
+    await fetchRsc(response, "/rsc/post", {
       fetch: fetchImpl,
       headers: { accept: "custom/rsc" },
+      refreshBoundary: "post",
     });
 
     expect(requestHeaders?.get("accept")).toBe("custom/rsc");
@@ -720,7 +712,7 @@ describe("RSC rendering", () => {
   });
 
   it("cancels boundary refresh streams without replacing existing content", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     const stream = controlledTextStream();
     const controller = new AbortController();
     const rendered: FigNode[] = [];
@@ -745,8 +737,9 @@ describe("RSC rendering", () => {
       ),
     );
 
-    const request = refreshRscBoundary(response, "post", "/rsc/post", {
+    const request = fetchRsc(response, "/rsc/post", {
       fetch: async () => new Response(stream.stream),
+      refreshBoundary: "post",
       signal: controller.signal,
     });
     await Promise.resolve();
@@ -774,7 +767,7 @@ describe("RSC rendering", () => {
   });
 
   it("rejects failed RSC fetches before mutating the response", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
     let notifications = 0;
     response.subscribe(() => {
       notifications += 1;
@@ -789,7 +782,7 @@ describe("RSC rendering", () => {
   });
 
   it("rejects malformed RSC streams as real failures", async () => {
-    const response = createRscClientResponse();
+    const response = createRscResponse();
 
     await expect(
       fetchRsc(response, "/rsc", {
