@@ -1,6 +1,7 @@
 import type { Props } from "@bgub/fig";
 import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
+import { elementName, isElementNode, isHtmlElement } from "./tree.ts";
 
 interface SelectState {
   appliedDefault: boolean;
@@ -18,7 +19,6 @@ type StyleTarget = Record<string, unknown> & {
 };
 
 const selectState = new WeakMap<Element, SelectState>();
-const htmlNamespace = "http://www.w3.org/1999/xhtml";
 const xlinkNamespace = "http://www.w3.org/1999/xlink";
 
 export function updateElement(
@@ -28,7 +28,7 @@ export function updateElement(
   options: UpdateOptions = {},
 ): void {
   const type = elementName(element);
-  const html = htmlElement(element);
+  const html = isHtmlElement(element);
   const names = new Set([
     ...Object.keys(previousProps),
     ...Object.keys(nextProps),
@@ -89,7 +89,7 @@ function removeExtraHydratedAttributes(
 ): void {
   const expectedAttributes = new Set<string>();
   const type = elementName(element);
-  const html = htmlElement(element);
+  const html = isHtmlElement(element);
 
   for (const name of Object.keys(nextProps)) {
     if (name === "events" || name === "bind" || reserved(name)) continue;
@@ -310,7 +310,9 @@ function setSelectValue(element: Element, value: unknown): void {
 function closestParentSelect(element: Element): Element | null {
   let parent: Node | null = element.parentNode;
   while (parent !== null) {
-    if (isElement(parent) && elementName(parent) === "select") return parent;
+    if (isElementNode(parent) && elementName(parent) === "select") {
+      return parent;
+    }
     parent = parent.parentNode;
   }
 
@@ -320,7 +322,7 @@ function closestParentSelect(element: Element): Element | null {
 function descendantOptions(element: Element): Element[] {
   const options: Element[] = [];
   for (const child of Array.from(element.childNodes)) {
-    if (!isElement(child)) continue;
+    if (!isElementNode(child)) continue;
 
     if (elementName(child) === "option") {
       options.push(child);
@@ -447,33 +449,6 @@ function valueProp(name: string): boolean {
 
 function emptyValue(value: unknown): boolean {
   return value === null || value === undefined || value === false;
-}
-
-function elementName(element: Element): string {
-  return (
-    "localName" in element && typeof element.localName === "string"
-      ? element.localName
-      : "tagName" in element && typeof element.tagName === "string"
-        ? element.tagName
-        : ""
-  ).toLowerCase();
-}
-
-function htmlElement(element: Element): boolean {
-  return (
-    !("namespaceURI" in element) ||
-    element.namespaceURI === null ||
-    element.namespaceURI === htmlNamespace
-  );
-}
-
-function isElement(value: unknown): value is Element {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "nodeType" in value &&
-    value.nodeType === 1
-  );
 }
 
 function reserved(name: string): boolean {

@@ -29,6 +29,13 @@ import {
   setEventBatching,
 } from "./events.ts";
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
+import {
+  elementName,
+  htmlNamespace,
+  isElementNode,
+  mathNamespace,
+  svgNamespace,
+} from "./tree.ts";
 
 type TextLike = Text | Comment;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
@@ -203,10 +210,6 @@ function isHydratableElement(
   return hasMatchingUnsafeHTML(node, props);
 }
 
-const htmlNamespace = "http://www.w3.org/1999/xhtml";
-const mathNamespace = "http://www.w3.org/1998/Math/MathML";
-const svgNamespace = "http://www.w3.org/2000/svg";
-
 function createDomElement(type: string, parent: Container | Element): Element {
   const namespace = namespaceFor(type, parent);
   return namespace === htmlNamespace
@@ -257,20 +260,6 @@ function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
   if (expected === null) return true;
   if (typeof expected !== "string" || !("innerHTML" in element)) return true;
   return element.innerHTML === expected;
-}
-
-function elementName(node: Container | Element | TextLike): string {
-  if (!("nodeType" in node) || node.nodeType !== 1) return "";
-
-  return "localName" in node && typeof node.localName === "string"
-    ? node.localName.toLowerCase()
-    : "tagName" in node && typeof node.tagName === "string"
-      ? node.tagName.toLowerCase()
-      : "";
-}
-
-function isElementNode(node: Element | TextLike): node is Element {
-  return "nodeType" in node && node.nodeType === 1;
 }
 
 function isHydratableText(node: Element | TextLike): boolean {

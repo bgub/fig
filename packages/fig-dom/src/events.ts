@@ -6,7 +6,7 @@ import {
   runWithPriority,
   SyncLane,
 } from "./priority.ts";
-import { isElement, parentOf, visitElementSubtree } from "./tree.ts";
+import { isElementNode, parentOf, visitElementSubtree } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
 export type EventOptions = Pick<
@@ -660,7 +660,7 @@ function eventPath(
     const index = composedPath.indexOf(listenerTarget);
     if (index !== -1) {
       return [
-        ...composedPath.slice(0, index).filter(isElement),
+        ...composedPath.slice(0, index).filter(isElementNode),
         ...logicalPortalPath(root, listenerTarget),
       ];
     }
@@ -668,7 +668,7 @@ function eventPath(
 
   const path: Element[] = [];
   for (let current: unknown = event.target; current !== listenerTarget; ) {
-    if (isElement(current)) path.push(current);
+    if (isElementNode(current)) path.push(current);
     current = parentOf(current);
     if (current === null) break;
   }
@@ -689,7 +689,7 @@ function logicalPortalPath(
     current !== null && current !== root;
     current = parentOf(current)
   ) {
-    if (isElement(current)) path.push(current);
+    if (isElementNode(current)) path.push(current);
   }
 
   return path;
