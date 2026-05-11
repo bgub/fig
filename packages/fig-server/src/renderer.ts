@@ -1,5 +1,4 @@
 import {
-  type Dispatch,
   type ElementType,
   type FigChild,
   type FigContext,
@@ -13,7 +12,6 @@ import {
   isValidElement,
   type Props,
   type RenderDispatcher,
-  type SetStateAction,
   setCurrentDispatcher,
 } from "@bgub/fig";
 import {
@@ -36,6 +34,16 @@ import {
   writeRuntime as writeProtocolRuntime,
   writeScript as writeProtocolScript,
 } from "./protocol.ts";
+import {
+  type ContextValues,
+  cloneContextValues,
+  createStaticDispatcher,
+  describeInvalidChild,
+  isThenable,
+  readThenable,
+  type Thenable,
+  withContextValue,
+} from "./shared.ts";
 import type {
   ServerErrorPayload,
   ServerRenderOptions,
@@ -107,9 +115,7 @@ interface SuspenseBoundary {
 
 type BoundaryStatus = "pending" | "completed" | "client-rendered";
 type SegmentStatus = "pending" | "rendering" | "completed" | "flushed";
-type ContextValues = Map<FigContext<unknown>, unknown[]>;
 type Component = (props: Props & { children?: FigNode }) => FigNode;
-type Thenable<T = unknown> = PromiseLike<T> & object;
 
 interface RenderFrame {
   abortSet: Set<Task>;
@@ -129,13 +135,6 @@ interface StackFrame {
   parent: StackFrame | null;
 }
 
-interface ThenableRecord<T> {
-  status: "pending" | "fulfilled" | "rejected";
-  value?: T;
-  reason?: unknown;
-}
-
-const thenableRecords = new WeakMap<object, ThenableRecord<unknown>>();
 const errorStacks = new WeakMap<object, StackFrame>();
 
 export function createServerRenderRequest(
@@ -363,46 +362,21 @@ function createRenderFrame(
 }
 
 function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
-  return {
-    useState(initialState) {
-      const value = resolveInitialState(initialState);
-      const dispatch: Dispatch<SetStateAction<typeof value>> = () => {
-        throw new Error("State updates are not allowed during server render.");
-      };
-      return [value, dispatch];
+  return createStaticDispatcher({
+    contextValues: frame.contextValues,
+    externalStoreError:
+      "useExternalStore requires getServerSnapshot during server render.",
+    readPromise(promise) {
+      throwIfAborting(frame.request);
+      return readThenable(promise);
     },
     useId() {
       const id = `${frame.request.identifierPrefix}fig-${frame.idPath}-${frame.localIdCounter.toString(32)}`;
       frame.localIdCounter += 1;
       return id;
     },
-    useMemo(calculate) {
-      return calculate();
-    },
-    useTransition() {
-      return [false, (callback) => callback()];
-    },
-    useReactive: noopEffect,
-    useBeforePaint: noopEffect,
-    useBeforeLayout: noopEffect,
-    useOnMount: noopEffect,
-    useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
-      if (getServerSnapshot === undefined) {
-        throw new Error(
-          "useExternalStore requires getServerSnapshot during server render.",
-        );
-      }
-
-      return getServerSnapshot();
-    },
-    readContext(context) {
-      return readContextValue(frame, context);
-    },
-    readPromise(promise) {
-      throwIfAborting(frame.request);
-      return readThenable(promise);
-    },
-  };
+    updateError: "State updates are not allowed during server render.",
+  });
 }
 
 function renderNode(node: FigNode, frame: RenderFrame): void {
@@ -529,14 +503,9 @@ function renderContextProvider(
   props: Props,
   frame: RenderFrame,
 ): void {
-  const stack = contextStack(frame, context);
-  stack.push(props.value);
-
-  try {
-    renderChildren(props.children, frame);
-  } finally {
-    stack.pop();
-  }
+  withContextValue(frame.contextValues, context, props.value, () =>
+    renderChildren(props.children, frame),
+  );
 }
 
 function renderSuspense(props: Props, frame: RenderFrame): void {
@@ -1134,59 +1103,6 @@ function requireBoundaryContentId(boundary: SuspenseBoundary): number {
   return boundary.contentSegmentId;
 }
 
-function readContextValue<T>(frame: RenderFrame, context: FigContext<T>): T {
-  const stack = frame.contextValues.get(context);
-  if (stack !== undefined && stack.length > 0) {
-    return stack[stack.length - 1] as T;
-  }
-
-  return context.defaultValue;
-}
-
-function contextStack(
-  frame: RenderFrame,
-  context: FigContext<unknown>,
-): unknown[] {
-  let stack = frame.contextValues.get(context);
-
-  if (stack === undefined) {
-    stack = [];
-    frame.contextValues.set(context, stack);
-  }
-
-  return stack;
-}
-
-function cloneContextValues(values: ContextValues): ContextValues {
-  const clone: ContextValues = new Map();
-  for (const [context, stack] of values) clone.set(context, [...stack]);
-  return clone;
-}
-
-function readThenable<T>(thenable: PromiseLike<T>): T {
-  const key = thenable as Thenable<T>;
-  let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
-
-  if (record === undefined) {
-    record = { status: "pending" };
-    thenableRecords.set(key, record);
-    thenable.then(
-      (value) => {
-        record.status = "fulfilled";
-        record.value = value;
-      },
-      (reason: unknown) => {
-        record.status = "rejected";
-        record.reason = reason;
-      },
-    );
-  }
-
-  if (record.status === "fulfilled") return record.value as T;
-  if (record.status === "rejected") throw record.reason;
-  throw key;
-}
-
 function collectChildren(node: FigNode): FigChild[] {
   const children: FigChild[] = [];
   collectChild(node, children);
@@ -1232,27 +1148,6 @@ function componentStack(stack: StackFrame | null): string {
   return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
 }
 
-function resolveInitialState<S>(initialState: S | (() => S)): S {
-  return typeof initialState === "function"
-    ? (initialState as () => S)()
-    : initialState;
-}
-
-function noopEffect(_effect: (signal: AbortSignal) => undefined): void {
-  // Effects do not run during server rendering.
-}
-
-function isThenable(value: unknown): value is Thenable {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null
-  ) {
-    return false;
-  }
-
-  return typeof (value as PromiseLike<unknown>).then === "function";
-}
-
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) throw abortReason(signal.reason);
 }
@@ -1275,13 +1170,6 @@ function invalidChildError(value: unknown): Error {
   return new Error(
     `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, array, boolean, null, or undefined.`,
   );
-}
-
-function describeInvalidChild(value: unknown): string {
-  if (typeof value !== "object" || value === null) return typeof value;
-
-  const keys = Object.keys(value);
-  return keys.length === 0 ? "object" : `object with keys ${keys.join(", ")}`;
 }
 
 function describeElementType(type: ElementType): string {

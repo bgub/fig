@@ -1,7 +1,6 @@
 import {
   clientReference,
   createElement,
-  type Dispatch,
   type ElementType,
   type FigChild,
   type FigClientReference,
@@ -19,10 +18,19 @@ import {
   type Props,
   type RenderDispatcher,
   readPromise,
-  type SetStateAction,
   Suspense,
   setCurrentDispatcher,
 } from "@bgub/fig";
+import {
+  type ContextValues,
+  cloneContextValues,
+  createStaticDispatcher,
+  describeInvalidChild,
+  isThenable,
+  readThenable,
+  type Thenable,
+  withContextValue,
+} from "./shared.ts";
 
 export interface RscRenderResult {
   allReady: Promise<void>;
@@ -125,18 +133,10 @@ type Task = {
 };
 
 type Component = (props: Props & { children?: FigNode }) => unknown;
-type ContextValues = Map<FigContext<unknown>, unknown[]>;
-type Thenable<T = unknown> = PromiseLike<T> & object;
 
 type RenderFrame = {
   contextValues: ContextValues;
   request: RscRequest;
-};
-
-type ThenableRecord<T> = {
-  reason?: unknown;
-  status: "pending" | "fulfilled" | "rejected";
-  value?: T;
 };
 
 type DecodedChunk = {
@@ -150,7 +150,6 @@ type DecodedChunk = {
 
 const contentType = "text/x-component; charset=utf-8";
 const RscBoundarySymbol = Symbol.for("fig.rsc-boundary");
-const thenableRecords = new WeakMap<object, ThenableRecord<unknown>>();
 
 type RscBoundaryProps = { children?: FigNode; id: string };
 
@@ -460,45 +459,18 @@ function createRenderFrame(
 }
 
 function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
-  return {
-    useState(initialState) {
-      const value = resolveInitialState(initialState);
-      const dispatch: Dispatch<SetStateAction<typeof value>> = () => {
-        throw new Error("State updates are not allowed during RSC render.");
-      };
-      return [value, dispatch];
-    },
+  return createStaticDispatcher({
+    contextValues: frame.contextValues,
+    externalStoreError:
+      "useExternalStore requires getServerSnapshot during RSC render.",
+    readPromise: readThenable,
     useId() {
       const id = `fig-rsc-${frame.request.nextId.toString(32)}`;
       frame.request.nextId += 1;
       return id;
     },
-    useMemo(calculate) {
-      return calculate();
-    },
-    useTransition() {
-      return [false, (callback) => callback()];
-    },
-    useReactive: noopEffect,
-    useBeforePaint: noopEffect,
-    useBeforeLayout: noopEffect,
-    useOnMount: noopEffect,
-    useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
-      if (getServerSnapshot === undefined) {
-        throw new Error(
-          "useExternalStore requires getServerSnapshot during RSC render.",
-        );
-      }
-
-      return getServerSnapshot();
-    },
-    readContext(context) {
-      return readContextValue(frame, context);
-    },
-    readPromise(promise) {
-      return readThenable(promise);
-    },
-  };
+    updateError: "State updates are not allowed during RSC render.",
+  });
 }
 
 function serializeNode(node: FigNode, frame: RenderFrame): RscModel {
@@ -621,14 +593,9 @@ function serializeContextProvider(
   props: Props,
   frame: RenderFrame,
 ): RscModel {
-  const stack = contextStack(frame, context);
-  stack.push(props.value);
-
-  try {
-    return serializeNode(props.children, frame);
-  } finally {
-    stack.pop();
-  }
+  return withContextValue(frame.contextValues, context, props.value, () =>
+    serializeNode(props.children, frame),
+  );
 }
 
 function serializeProps(
@@ -779,41 +746,6 @@ function closeWithError(request: RscRequest, error: unknown): void {
   request.controller?.error(error);
 }
 
-function readThenable<T>(thenable: PromiseLike<T>): T {
-  const key = thenable as Thenable<T>;
-  let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
-
-  if (record === undefined) {
-    record = { status: "pending" };
-    thenableRecords.set(key, record);
-    thenable.then(
-      (value) => {
-        record.status = "fulfilled";
-        record.value = value;
-      },
-      (reason: unknown) => {
-        record.status = "rejected";
-        record.reason = reason;
-      },
-    );
-  }
-
-  if (record.status === "fulfilled") return record.value as T;
-  if (record.status === "rejected") throw record.reason;
-  throw thenable;
-}
-
-function isThenable(value: unknown): value is Thenable {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null
-  ) {
-    return false;
-  }
-
-  return typeof (value as PromiseLike<unknown>).then === "function";
-}
-
 function collectChildren(children: FigChild[]): FigChild[] {
   const collected: FigChild[] = [];
 
@@ -825,48 +757,10 @@ function collectChildren(children: FigChild[]): FigChild[] {
   return collected;
 }
 
-function contextStack(
-  frame: RenderFrame,
-  context: FigContext<unknown>,
-): unknown[] {
-  let stack = frame.contextValues.get(context);
-  if (stack === undefined) {
-    stack = [];
-    frame.contextValues.set(context, stack);
-  }
-  return stack;
-}
-
-function readContextValue<T>(frame: RenderFrame, context: FigContext<T>): T {
-  const stack = frame.contextValues.get(context);
-  if (stack === undefined || stack.length === 0) return context.defaultValue;
-  return stack[stack.length - 1] as T;
-}
-
-function cloneContextValues(contextValues: ContextValues): ContextValues {
-  const clone: ContextValues = new Map();
-  for (const [context, stack] of contextValues) clone.set(context, [...stack]);
-  return clone;
-}
-
-function resolveInitialState<S>(initialState: S | (() => S)): S {
-  return typeof initialState === "function"
-    ? (initialState as () => S)()
-    : initialState;
-}
-
-function noopEffect(): void {}
-
 function invalidChildError(value: unknown): Error {
-  if (typeof value === "object" && value !== null) {
-    return new Error(
-      `Invalid Fig child in RSC render: object with keys ${Object.keys(
-        value,
-      ).join(", ")}.`,
-    );
-  }
-
-  return new Error(`Invalid Fig child in RSC render: ${String(value)}.`);
+  return new Error(
+    `Invalid Fig child in RSC render: ${describeInvalidChild(value)}.`,
+  );
 }
 
 function errorMessage(error: unknown): string {
