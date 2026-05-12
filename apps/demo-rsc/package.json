@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
-    "dev": "vp run --filter @bgub/fig-demo-rsc... build && vp run serve",
-    "serve": "node dist/server.js"
+    "dev": "vp run --filter @bgub/fig-demo-rsc... build && sh -c 'vp pack --watch & build=$!; node --watch dist/server.js & server=$!; trap \"kill $build $server\" INT TERM EXIT; wait $server'",
+    "dev:build": "vp pack --watch",
+    "serve": "node dist/server.js",
+    "serve:watch": "node --watch dist/server.js"
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",

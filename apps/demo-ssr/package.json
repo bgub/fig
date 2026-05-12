@@ -5,8 +5,10 @@
   "scripts": {
     "build": "vp pack",
     "build:e2e": "vp run --filter @bgub/fig-demo-ssr... build",
-    "dev": "vp run --filter @bgub/fig-demo-ssr... build && vp run serve",
+    "dev": "vp run --filter @bgub/fig-demo-ssr... build && sh -c 'vp pack --watch & build=$!; node --watch dist/server.js & server=$!; trap \"kill $build $server\" INT TERM EXIT; wait $server'",
+    "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
+    "serve:watch": "node --watch dist/server.js",
     "test": "vp test run",
     "test:e2e": "playwright test"
   },

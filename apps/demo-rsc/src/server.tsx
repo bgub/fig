@@ -7,6 +7,11 @@ import {
 import { renderToString } from "@bgub/fig-server";
 import { type RscRenderResult, renderToRscStream } from "@bgub/fig-server/rsc";
 import { createDemoData, Dashboard, RscApp } from "./app.tsx";
+import {
+  devReloadScript,
+  handleDevReloadRequest,
+  watchDevReloadFile,
+} from "../../dev-reload.ts";
 import { appRootId, feedBoundaryId } from "./shared.ts";
 import { LoadingShell } from "./shell.tsx";
 import { styles } from "./styles.ts";
@@ -21,6 +26,8 @@ const textJs = {
   "content-type": "text/javascript; charset=utf-8",
 };
 const textPlain = { "content-type": "text/plain; charset=utf-8" };
+
+watchDevReloadFile(clientScriptUrl);
 
 createServer((request, response) => {
   void handleRequest(request, response).catch((error: unknown) => {
@@ -41,6 +48,7 @@ async function handleRequest(
   response: ServerResponse,
 ): Promise<void> {
   const url = requestUrl(request);
+  if (handleDevReloadRequest(request, response, url)) return;
 
   switch (url.pathname) {
     case "/":
@@ -100,6 +108,7 @@ async function documentHtml(): Promise<string> {
     "</head>",
     "<body>",
     `<div id="${appRootId}">${shell}</div>`,
+    devReloadScript(),
     '<script type="module" src="/client.js"></script>',
     "</body>",
     "</html>",

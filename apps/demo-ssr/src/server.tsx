@@ -16,6 +16,11 @@ import {
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
+import {
+  devReloadScript,
+  handleDevReloadRequest,
+  watchDevReloadFile,
+} from "../../dev-reload.ts";
 import { styles } from "./styles.ts";
 
 const port = Number(process.env.PORT ?? 4180);
@@ -34,6 +39,8 @@ const documentStart = [
   "</head>",
   "<body>",
 ].join("");
+
+watchDevReloadFile(clientScriptUrl);
 
 createServer((request, response) => {
   void handleRequest(request, response).catch((error: unknown) => {
@@ -57,6 +64,7 @@ async function handleRequest(
     ? request.headers.host[0]
     : (request.headers.host ?? `127.0.0.1:${port}`);
   const url = new URL(request.url ?? "/", `http://${host}`);
+  if (handleDevReloadRequest(request, response, url)) return;
 
   if (url.pathname === "/style.css") {
     send(response, 200, styles, {
@@ -175,6 +183,7 @@ function bootstrapScripts(request: DemoRequest, nonce: string): string {
     `<script id="${demoDataScriptId}" type="application/json" nonce="${escapeAttribute(
       nonce,
     )}">${escapeJson(clientDataFor(request))}</script>`,
+    devReloadScript(nonce),
     `<script type="module" async nonce="${escapeAttribute(nonce)}" src="/client.js"></script>`,
   ].join("");
 }
