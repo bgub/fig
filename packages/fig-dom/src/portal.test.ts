@@ -1,9 +1,13 @@
 import { createContext, createElement, readContext } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createPortal, createRoot, flushSync, on } from "./index.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
+
+function portalTarget(target: FakeElement): Element {
+  return target as unknown as Element;
+}
 
 describe("@bgub/fig-dom portals", () => {
   it("renders portal children into a target outside the parent DOM tree", () => {
@@ -17,7 +21,10 @@ describe("@bgub/fig-dom portals", () => {
           "main",
           null,
           "Shell",
-          createPortal(createElement("aside", null, "Portal"), target),
+          createPortal(
+            createElement("aside", null, "Portal"),
+            portalTarget(target),
+          ),
         ),
       ),
     );
@@ -33,13 +40,23 @@ describe("@bgub/fig-dom portals", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() =>
-      root.render(createPortal(createElement("span", null, "Before"), target)),
+      root.render(
+        createPortal(
+          createElement("span", null, "Before"),
+          portalTarget(target),
+        ),
+      ),
     );
 
     const child = target.childNodes[0];
 
     flushSync(() =>
-      root.render(createPortal(createElement("span", null, "After"), target)),
+      root.render(
+        createPortal(
+          createElement("span", null, "After"),
+          portalTarget(target),
+        ),
+      ),
     );
 
     expect(target.childNodes[0]).toBe(child);
@@ -54,13 +71,19 @@ describe("@bgub/fig-dom portals", () => {
 
     flushSync(() =>
       root.render(
-        createPortal(createElement("span", null, "Portal"), firstTarget),
+        createPortal(
+          createElement("span", null, "Portal"),
+          portalTarget(firstTarget),
+        ),
       ),
     );
 
     flushSync(() =>
       root.render(
-        createPortal(createElement("span", null, "Portal"), secondTarget),
+        createPortal(
+          createElement("span", null, "Portal"),
+          portalTarget(secondTarget),
+        ),
       ),
     );
 
@@ -83,7 +106,7 @@ describe("@bgub/fig-dom portals", () => {
         createElement(
           Theme,
           { value: "dark" },
-          createPortal(createElement(Label, null), target),
+          createPortal(createElement(Label, null), portalTarget(target)),
         ),
       ),
     );
@@ -106,7 +129,7 @@ describe("@bgub/fig-dom portals", () => {
             createElement("button", {
               events: [on("click", () => calls.push("button"))],
             }),
-            target,
+            portalTarget(target),
           ),
         ),
       ),
@@ -134,7 +157,7 @@ describe("@bgub/fig-dom portals", () => {
             createElement("button", {
               events: [on("click", () => calls.push("button"))],
             }),
-            target,
+            portalTarget(target),
           ),
         ),
       ),
@@ -152,7 +175,12 @@ describe("@bgub/fig-dom portals", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() =>
-      root.render(createPortal(createElement("span", null, "Portal"), target)),
+      root.render(
+        createPortal(
+          createElement("span", null, "Portal"),
+          portalTarget(target),
+        ),
+      ),
     );
     flushSync(() => root.unmount());
 

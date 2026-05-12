@@ -11,7 +11,7 @@ import {
   readPromise,
   Suspense,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   createRscResponse,
   fetchRsc,
@@ -35,7 +35,12 @@ type TestRscRow =
   | { id: number; tag: "model"; value: TestRscModel }
   | { boundary: string; tag: "refresh"; value: TestRscModel };
 
-type TestRscElementModel = Extract<TestRscModel, { $fig: "element" }>;
+interface TestRscElementModel {
+  $fig: "element";
+  key: string | number | null;
+  props: Record<string, TestRscModel>;
+  type: TestRscModel;
+}
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -94,6 +99,11 @@ function controlledTextStream(): {
       controller?.enqueue(encoder.encode(chunk));
     },
   };
+}
+
+function requireHeaders(headers: Headers | null): Headers {
+  if (headers === null) throw new Error("Expected request headers.");
+  return headers;
 }
 
 async function renderToRscText(
@@ -195,7 +205,10 @@ function unwrapFunctionComponent(node: FigNode): FigNode {
 
 describe("RSC rendering", () => {
   it("serializes client references with normal JSX props", async () => {
-    const LikeButton = clientReference<{ initialCount: number }>({
+    const LikeButton = clientReference<{
+      initialCount: number;
+      tone?: string;
+    }>({
       id: "app/LikeButton.client.tsx#LikeButton",
       load: () => Promise.resolve({}),
     });
@@ -224,7 +237,7 @@ describe("RSC rendering", () => {
   });
 
   it("renders server components before passing them as client props", async () => {
-    const Card = clientReference<{ header: unknown; children: unknown }>({
+    const Card = clientReference<{ header: unknown; children?: unknown }>({
       id: "app/Card.client.tsx#Card",
       load: () => Promise.resolve({}),
     });
@@ -592,7 +605,7 @@ describe("RSC rendering", () => {
       signal: controller.signal,
     });
 
-    expect(requestHeaders?.get("accept")).toBe(
+    expect(requireHeaders(requestHeaders).get("accept")).toBe(
       "text/x-component; charset=utf-8",
     );
     expect(requestSignal).toBe(controller.signal);
@@ -698,8 +711,9 @@ describe("RSC rendering", () => {
       refreshBoundary: "post",
     });
 
-    expect(requestHeaders?.get("accept")).toBe("custom/rsc");
-    expect(requestHeaders?.get("x-fig-rsc-boundary")).toBe("post");
+    const headers = requireHeaders(requestHeaders);
+    expect(headers.get("accept")).toBe("custom/rsc");
+    expect(headers.get("x-fig-rsc-boundary")).toBe("post");
     expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
       props: {
         children: {

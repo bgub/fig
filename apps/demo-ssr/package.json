@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsdown",
-    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo-ssr... build",
-    "dev": "pnpm --filter @bgub/fig build && pnpm --filter @bgub/fig-dom build && pnpm --filter @bgub/fig-server build && pnpm build && pnpm serve",
+    "build": "vp pack",
+    "build:e2e": "vp run --filter @bgub/fig-demo-ssr... build",
+    "dev": "vp run --filter @bgub/fig-demo-ssr... build && vp run serve",
     "serve": "node dist/server.js",
-    "test": "vitest run",
+    "test": "vp test run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "@bgub/fig-server": "workspace:*"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^20.19.0"
   }
 }

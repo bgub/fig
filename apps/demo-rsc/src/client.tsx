@@ -12,6 +12,7 @@ const rootElement = document.getElementById(appRootId);
 if (rootElement === null) {
   throw new Error("Missing RSC demo root.");
 }
+const appRootElement = rootElement;
 
 const response = createRscResponse({
   resolveClientReference(metadata) {
@@ -19,7 +20,7 @@ const response = createRscResponse({
     throw new Error(`Unknown client reference "${metadata.id}".`);
   },
 });
-const root = createRoot(rootElement);
+const root = createRoot(appRootElement);
 const initialRequest = new AbortController();
 let shellCleared = false;
 
@@ -32,7 +33,7 @@ window.addEventListener("beforeunload", () => initialRequest.abort(), {
 
 function render(node = response.getRoot()): void {
   if (!shellCleared) {
-    rootElement.textContent = "";
+    appRootElement.textContent = "";
     shellCleared = true;
   }
 

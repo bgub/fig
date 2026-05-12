@@ -1,4 +1,4 @@
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach } from "vite-plus/test";
 
 export class FakeText {
   readonly nodeType = 3;
@@ -6,7 +6,7 @@ export class FakeText {
 
   constructor(public nodeValue: string) {}
 
-  get nextSibling(): FakeElement | FakeText | null {
+  get nextSibling(): FakeElement | FakeText | FakeComment | null {
     return nextSiblingOf(this);
   }
 
@@ -197,8 +197,9 @@ export class FakeElement {
 
   dispatch(name: string): void {
     const path: FakeElement[] = [];
+    path.push(this);
     for (
-      let element: FakeElement | null = this;
+      let element = this.parentNode;
       element !== null;
       element = element.parentNode
     ) {
@@ -210,10 +211,10 @@ export class FakeElement {
       composedPath: () => path,
       target: this,
       type: name,
-      stopPropagation() {
+      stopPropagation(this: { cancelBubble: boolean }) {
         this.cancelBubble = true;
       },
-    } as Event;
+    } as unknown as Event;
 
     for (const element of path.toReversed()) {
       element.invoke(name, event, true);

@@ -213,7 +213,7 @@ function writeAttribute(sink: HtmlSink, name: string, value: string): void {
 
 function serializeStyle(value: unknown): string {
   if (emptyValue(value)) return "";
-  if (typeof value !== "object") {
+  if (typeof value !== "object" || value === null) {
     throw new Error("The style prop must be an object during server render.");
   }
 

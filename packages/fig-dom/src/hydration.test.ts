@@ -5,7 +5,7 @@ import {
   useId,
   useState,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
   delay,
@@ -140,7 +140,7 @@ describe("@bgub/fig-dom hydration", () => {
     const input = new FakeElement("input");
     const calls: Array<[FakeElement, AbortSignal]> = [];
     const bind: Bind = (node, signal) =>
-      calls.push([node as FakeElement, signal]);
+      calls.push([node as unknown as FakeElement, signal]);
     container.appendChild(input);
 
     flushSync(() =>
@@ -1066,7 +1066,7 @@ describe("@bgub/fig-dom hydration", () => {
 type RetriableFakeComment = FakeComment & { __figRetry?: () => void };
 
 function captureRecoverableErrors(): {
-  capture(error: unknown, info: unknown): void;
+  capture(this: void, error: unknown, info: unknown): void;
   errors: unknown[];
   infos: unknown[];
   messages(): string[];
@@ -1075,7 +1075,7 @@ function captureRecoverableErrors(): {
   const infos: unknown[] = [];
 
   return {
-    capture(error, info) {
+    capture(this: void, error, info) {
       errors.push(error);
       infos.push(info);
     },

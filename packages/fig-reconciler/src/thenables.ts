@@ -13,16 +13,17 @@ export function readThenable<T>(thenable: PromiseLike<T>): T {
   let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
 
   if (record === undefined) {
-    record = { status: "pending" };
-    thenableRecords.set(key, record);
+    const pendingRecord: ThenableRecord<T> = { status: "pending" };
+    record = pendingRecord;
+    thenableRecords.set(key, pendingRecord);
     thenable.then(
       (value) => {
-        record.status = "fulfilled";
-        record.value = value;
+        pendingRecord.status = "fulfilled";
+        pendingRecord.value = value;
       },
       (reason: unknown) => {
-        record.status = "rejected";
-        record.reason = reason;
+        pendingRecord.status = "rejected";
+        pendingRecord.reason = reason;
       },
     );
   }

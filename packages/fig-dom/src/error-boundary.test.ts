@@ -7,7 +7,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync } from "./index.ts";
 import {
   deferred,
@@ -54,7 +54,7 @@ describe("@bgub/fig-dom error boundaries", () => {
     const reports: Array<{ error: unknown; stack: string }> = [];
     const root = createRoot(container as unknown as Element);
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("boom");
     }
 
@@ -78,10 +78,12 @@ describe("@bgub/fig-dom error boundaries", () => {
     );
 
     expect(container.textContent).toBe("Crashed");
-    expect((reports[0]?.error as Error).message).toBe("boom");
-    expect(reports[0]?.stack).toContain("at Broken");
-    expect(reports[0]?.stack).toContain("at Panel");
-    expect(reports[0]?.stack).toContain("at ErrorBoundary");
+    const report = reports[0];
+    if (report === undefined) throw new Error("Expected error report.");
+    expect((report.error as Error).message).toBe("boom");
+    expect(report.stack).toContain("at Broken");
+    expect(report.stack).toContain("at Panel");
+    expect(report.stack).toContain("at ErrorBoundary");
   });
 
   it("does not let error reporting failures corrupt committed fallbacks", () => {
@@ -93,7 +95,7 @@ describe("@bgub/fig-dom error boundaries", () => {
       },
     });
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("boom");
     }
 
@@ -124,7 +126,7 @@ describe("@bgub/fig-dom error boundaries", () => {
       | ((updater: (count: number) => number) => void)
       | null = null;
 
-    function Broken() {
+    function Broken(): never {
       renders += 1;
       throw new Error("boom");
     }
@@ -189,11 +191,11 @@ describe("@bgub/fig-dom error boundaries", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("primary failed");
     }
 
-    function BrokenFallback() {
+    function BrokenFallback(): never {
       throw new Error("fallback failed");
     }
 
@@ -354,7 +356,7 @@ describe("@bgub/fig-dom error boundaries", () => {
       },
     });
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("render failed");
     }
 
@@ -370,8 +372,17 @@ describe("@bgub/fig-dom error boundaries", () => {
     }).toThrow("render failed");
 
     expect(container.textContent).toBe("");
-    expect((uncaught[0]?.error as Error).message).toBe("render failed");
-    expect(uncaught[0]?.stack).toContain("at Broken");
+    const uncaughtReport = uncaught[0];
+    if (
+      typeof uncaughtReport !== "object" ||
+      uncaughtReport === null ||
+      !("error" in uncaughtReport) ||
+      !("stack" in uncaughtReport)
+    ) {
+      throw new Error("Expected uncaught error report.");
+    }
+    expect((uncaughtReport.error as Error).message).toBe("render failed");
+    expect(uncaughtReport.stack).toContain("at Broken");
 
     flushSync(() => root.render(createElement(Recovered, null)));
 
@@ -389,7 +400,7 @@ describe("@bgub/fig-dom error boundaries", () => {
       return createElement("span", null, count);
     }
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("render failed");
     }
 
@@ -475,7 +486,9 @@ describe("@bgub/fig-dom error boundaries", () => {
       flushSync(() => root.render(createElement(App, null))),
     ).toThrow("bind failed");
     expect(container.textContent).toBe("");
-    expect((reports[0]?.error as Error).message).toBe("bind failed");
-    expect(reports[0]?.stack).toContain("at App");
+    const report = reports[0];
+    if (report === undefined) throw new Error("Expected error report.");
+    expect((report.error as Error).message).toBe("bind failed");
+    expect(report.stack).toContain("at App");
   });
 });

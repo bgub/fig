@@ -11,7 +11,7 @@ import { appRootId, feedBoundaryId } from "./shared.ts";
 import { LoadingShell } from "./shell.tsx";
 import { styles } from "./styles.ts";
 
-const port = Number(process.env.PORT ?? 4190);
+const port = Number(process.env.PORT ?? 5174);
 const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
 const noStore = { "cache-control": "no-store" } as const;
 const textHtml = { ...noStore, "content-type": "text/html; charset=utf-8" };

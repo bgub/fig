@@ -339,13 +339,7 @@ function currentOptionValue(option: Element): string {
 }
 
 function attributeValue(element: Element, name: string): string | null {
-  if ("getAttribute" in element) {
-    return element.getAttribute(name);
-  }
-
-  const attributes = element.attributes as Record<string, unknown> | undefined;
-  const value = attributes?.[name];
-  return typeof value === "string" ? value : null;
+  return element.getAttribute(name);
 }
 
 function setStyle(element: Element, previous: unknown, next: unknown): void {
@@ -371,7 +365,9 @@ function setStyle(element: Element, previous: unknown, next: unknown): void {
 }
 
 function styleProps(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? value : {};
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function setStyleProperty(

@@ -104,7 +104,7 @@ let nextTransitionLane: Lane = TransitionLane1;
 let nextRetryLane: Lane = RetryLane1;
 
 export function createLaneMap<T extends number>(initial: T): LaneMap<T> {
-  return new Array<T>(TotalLanes).fill(initial);
+  return Array.from({ length: TotalLanes }, () => initial);
 }
 
 export function mergeLanes(a: Lanes, b: Lanes): Lanes {

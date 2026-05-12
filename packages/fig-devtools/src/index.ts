@@ -143,7 +143,7 @@ export function mountFigDevtoolsPanel(
       renderPanel(context);
     },
   };
-  const unsubscribe = hook.subscribe(context.rerender);
+  const unsubscribe = hook.subscribe(() => context.rerender());
   context.rerender();
 
   return {
@@ -462,7 +462,7 @@ function formatValue(
   if (typeof value === "function")
     return `[Function ${value.name || "anonymous"}]`;
   if (value instanceof Error) return `[${value.name}: ${value.message}]`;
-  if (typeof value !== "object") return String(value);
+  if (value === null) return "null";
 
   if (seen.has(value)) return "[Circular]";
   if (depth > 2) return Array.isArray(value) ? "[Array]" : "[Object]";

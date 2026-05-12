@@ -5,7 +5,7 @@ Browser DevTools extension for inspecting Fig apps.
 ## Build
 
 ```sh
-pnpm --filter @bgub/fig-devtools-extension build
+vp run --filter @bgub/fig-devtools-extension build
 ```
 
 ## Chrome

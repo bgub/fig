@@ -9,10 +9,13 @@ export interface FigContext<T> {
 export const FigContextSymbol = Symbol.for("fig.context");
 
 export function createContext<T>(defaultValue: T): FigContext<T> {
-  return Object.assign((props) => props.children, {
-    $$typeof: FigContextSymbol,
-    defaultValue,
-  });
+  return Object.assign(
+    (props: { value: T; children?: FigNode }) => props.children,
+    {
+      $$typeof: FigContextSymbol,
+      defaultValue,
+    },
+  );
 }
 
 export function isContext(value: unknown): value is FigContext<unknown> {

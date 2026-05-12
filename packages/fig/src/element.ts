@@ -1,5 +1,5 @@
 export type Key = string | number;
-export type Props = Record<string, unknown>;
+export type Props = Record<string, any>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
@@ -9,17 +9,18 @@ export type ElementType<P = Props> =
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
 export type FigChild =
-  | FigElement
-  | FigPortal
+  | FigElement<any>
+  | FigPortal<any>
   | FigText
   | boolean
   | null
-  | undefined;
-export type FigNode = FigChild | FigChild[];
+  | undefined
+  | FigChild[];
+export type FigNode = FigChild;
 
 export interface FigElement<P = Props> {
   readonly $$typeof: symbol;
-  readonly type: ElementType<P>;
+  readonly type: ElementType<any>;
   readonly key: Key | null;
   readonly props: P & { children?: FigNode };
 }
@@ -87,10 +88,10 @@ export const Suspense: FigSuspense = Object.assign(
 
 export function createElement<P extends Props>(
   type: ElementType<P>,
-  config: (P & { key?: Key | null }) | null,
-  ...children: FigChild[]
+  config?: (P & { key?: Key | null }) | null,
+  ...children: FigNode[]
 ): FigElement<P> {
-  const props = { ...(config ?? {}) } as P & {
+  const props = { ...config } as P & {
     children?: FigNode;
     key?: Key | null;
   };
@@ -134,7 +135,7 @@ export function clientReference<P extends Props>(
     throw new Error(
       `Client reference "${options.id}" cannot be rendered on the server directly.`,
     );
-  }) as FigClientReference<P>;
+  }) as unknown as FigClientReference<P>;
 
   return Object.assign(reference, {
     $$typeof: FigClientReferenceSymbol,

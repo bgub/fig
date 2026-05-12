@@ -572,7 +572,9 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
   slot.listenerTarget = null;
   const key = rootListenerKey(slot);
   const listeners = rootListeners.get(listenerTarget);
-  const rootListener = listeners?.get(key);
+  if (listeners === undefined) return;
+
+  const rootListener = listeners.get(key);
 
   if (rootListener === undefined) return;
 
@@ -707,9 +709,7 @@ function targetWithinRoot(
   return false;
 }
 
-function listenerTargetFor(
-  node: Element | Text | Comment | Container,
-): Container | null {
+function listenerTargetFor(node: EventTarget | null): Container | null {
   for (let current: unknown = node; current !== null; ) {
     if (isContainer(current)) {
       if (portalOwners.has(current) || rootContainers.has(current)) {
@@ -749,7 +749,10 @@ function withCurrentTarget<T>(
 }
 
 function withStopImmediatePropagation<T>(event: Event, callback: () => T): T {
-  const stopImmediatePropagation = event.stopImmediatePropagation;
+  const stopImmediatePropagation = Reflect.get(
+    event,
+    "stopImmediatePropagation",
+  );
   if (typeof stopImmediatePropagation !== "function") return callback();
 
   const previous = Object.getOwnPropertyDescriptor(

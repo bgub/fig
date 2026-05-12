@@ -349,7 +349,7 @@ function createRenderFrame(
     abortSet,
     boundary,
     contextValues,
-    dispatcher: null as never,
+    dispatcher: null as unknown as RenderDispatcher,
     idPath,
     localIdCounter: 0,
     request,
@@ -563,7 +563,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     boundarySegment.status = "completed";
   } catch (error) {
     if (boundary.pendingTasks > 0) {
-      for (const task of [...boundary.fallbackAbortableTasks]) {
+      for (const task of Array.from(boundary.fallbackAbortableTasks)) {
         abortTask(frame.request, task);
       }
     }
@@ -734,7 +734,7 @@ function abortFallbackTasks(
   request: Request,
   boundary: SuspenseBoundary,
 ): void {
-  for (const fallbackTask of [...boundary.fallbackAbortableTasks]) {
+  for (const fallbackTask of Array.from(boundary.fallbackAbortableTasks)) {
     abortTask(request, fallbackTask);
   }
 }
@@ -754,11 +754,11 @@ function markBoundaryClientRendered(
   removeQueuedBoundary(request.completedBoundaries, boundary);
   removeQueuedBoundary(request.partialBoundaries, boundary);
 
-  for (const task of [...request.abortableTasks]) {
+  for (const task of Array.from(request.abortableTasks)) {
     if (task.blockedBoundary === boundary) abortTask(request, task);
   }
 
-  for (const task of [...boundary.fallbackAbortableTasks]) {
+  for (const task of Array.from(boundary.fallbackAbortableTasks)) {
     abortTask(request, task);
   }
 
@@ -776,7 +776,7 @@ function abort(request: Request, reason?: unknown): void {
     return;
   }
 
-  for (const task of [...request.abortableTasks]) {
+  for (const task of Array.from(request.abortableTasks)) {
     const boundary = task.blockedBoundary;
     if (boundary !== null) {
       markBoundaryClientRendered(request, boundary, error, task.stack);
@@ -1159,7 +1159,8 @@ function throwIfAborting(request: Request): void {
 function abortError(reason: unknown): Error {
   if (reason instanceof Error) return reason;
   if (reason === undefined) return new Error("Server render was aborted.");
-  return new Error(String(reason));
+  if (typeof reason === "string") return new Error(reason);
+  return new Error("Server render was aborted.");
 }
 
 function abortReason(reason: unknown): unknown {

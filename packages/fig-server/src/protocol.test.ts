@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { serverRuntimeCode } from "./protocol.ts";
 
 const elementNode = 1;
@@ -77,6 +77,7 @@ type RetriableTestNode = TestNode & { __figRetry?: () => void };
 function installRuntime(document: TestDocument): TestRuntime {
   const globalScope: { __figSSR?: TestRuntime } = {};
 
+  // oxlint-disable-next-line typescript-eslint/no-implied-eval
   new Function("document", "globalThis", serverRuntimeCode)(
     document,
     globalScope,

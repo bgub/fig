@@ -80,7 +80,7 @@ type RscSpecialModel =
 
 export interface RscResponseOptions {
   loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
-  resolveClientReference?: (metadata: { id: string }) => ElementType;
+  resolveClientReference?: (metadata: { id: string }) => ElementType<any>;
 }
 
 export interface RscResponse {
@@ -579,10 +579,8 @@ function serializeFunctionComponent(
 
   try {
     const result = type(props);
-    return serializeNode(
-      isThenable(result) ? readThenable(result) : result,
-      frame,
-    );
+    const node = isThenable(result) ? readThenable(result) : result;
+    return serializeNode(node as FigNode, frame);
   } finally {
     setCurrentDispatcher(previousDispatcher);
   }
@@ -837,7 +835,12 @@ function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
 
   if (typeof model !== "object") return model;
 
-  if ("$fig" in model) return decodeSpecialModel(response, model);
+  if ("$fig" in model) {
+    return decodeSpecialModel(
+      response,
+      model as RscElementModel | RscSpecialModel,
+    );
+  }
 
   const decoded: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(model)) {
@@ -883,9 +886,9 @@ function decodeSpecialModel(
 function decodeElementType(
   response: RscResponseImpl,
   type: string | RscSpecialModel,
-): ElementType {
+): ElementType<any> {
   if (typeof type === "string") return type;
-  return decodeSpecialModel(response, type) as ElementType;
+  return decodeSpecialModel(response, type) as ElementType<any>;
 }
 
 function RscResponseRoot(props: { response: RscResponseImpl }): FigNode {
@@ -910,8 +913,8 @@ function RscLazyNode(props: {
 function resolveClientReferenceExport(
   moduleValue: unknown,
   id: string,
-): ElementType {
-  if (typeof moduleValue === "function") return moduleValue as ElementType;
+): ElementType<any> {
+  if (typeof moduleValue === "function") return moduleValue as ElementType<any>;
 
   if (typeof moduleValue === "object" && moduleValue !== null) {
     const exportName = id.includes("#")
@@ -922,7 +925,7 @@ function resolveClientReferenceExport(
         ? undefined
         : (moduleValue as Record<string, unknown>)[exportName];
 
-    if (typeof candidate === "function") return candidate as ElementType;
+    if (typeof candidate === "function") return candidate as ElementType<any>;
   }
 
   throw new Error(`Client reference "${id}" did not load a component.`);
