@@ -12,7 +12,7 @@ import {
   useState,
   useTransition,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync } from "./index.ts";
 import {
   deferred,
@@ -242,7 +242,12 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Idle Ready");
 
-    start?.(() => show?.(pending.promise));
+    const startTransition = start as ((callback: () => void) => void) | null;
+    const showValue = show as ((value: Promise<string>) => void) | null;
+    if (startTransition === null || showValue === null) {
+      throw new Error("Expected transition controls.");
+    }
+    startTransition(() => showValue(pending.promise));
     await delay();
 
     expect(container.textContent).toBe("Pending Ready");

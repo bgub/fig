@@ -1,5 +1,5 @@
 import { createElement, type FigNode } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync } from "./index.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 

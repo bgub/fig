@@ -3,8 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm build:js && pnpm build:chrome && pnpm build:firefox && pnpm clean:js",
-    "build:js": "tsdown",
+    "build": "vp pack && pnpm build:chrome && pnpm build:firefox && pnpm clean:js",
     "build:chrome": "rm -rf dist/chrome && mkdir -p dist/chrome && cp dist/*.js src/devtools.html src/panel.html src/icon.svg dist/chrome/ && cp src/manifest.chrome.json dist/chrome/manifest.json",
     "build:firefox": "rm -rf dist/firefox && mkdir -p dist/firefox && cp dist/*.js src/devtools.html src/panel.html src/icon.svg dist/firefox/ && cp src/manifest.firefox.json dist/firefox/manifest.json",
     "clean:js": "rm -f dist/*.js dist/*.html dist/*.svg dist/manifest.json"

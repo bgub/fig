@@ -2,6 +2,7 @@ import {
   createContext,
   createElement,
   ErrorBoundary,
+  type FigNode,
   Fragment,
   readContext,
   readPromise,
@@ -13,7 +14,7 @@ import {
   useState,
   useTransition,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { renderToReadableStream, renderToString } from "./index.ts";
 import { jsString } from "./protocol.ts";
 
@@ -344,7 +345,7 @@ describe("@bgub/fig-server", () => {
     const errors: unknown[] = [];
     const stacks: string[] = [];
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("server failed");
     }
 
@@ -433,7 +434,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("does not catch server render errors with error boundaries", async () => {
-    function Broken() {
+    function Broken(): never {
       throw new Error("server failed");
     }
 
@@ -471,7 +472,9 @@ describe("@bgub/fig-server", () => {
 
   it("throws for invalid children and invalid host props", async () => {
     await expect(
-      renderToString(createElement("div", null, { nope: true })),
+      renderToString(
+        createElement("div", null, { nope: true } as unknown as FigNode),
+      ),
     ).rejects.toThrow("Invalid Fig child: object with keys nope.");
 
     await expect(

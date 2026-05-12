@@ -4,13 +4,13 @@
 
 The demo benchmark page now compares Fig and React on the same DOM workloads. A 1,000-row run produced this baseline:
 
-| Scenario | Fig median | React median | Gap |
-| --- | ---: | ---: | ---: |
-| Initial mount | 10 ms | 2 ms | +8 ms |
-| Same-order update | 3 ms | 1 ms | +2 ms |
-| Append 10% | 2 ms | 1 ms | +1 ms |
-| Prepend 10% | 3 ms | 1 ms | +2 ms |
-| Reverse keyed rows | 17 ms | 4 ms | +13 ms |
+| Scenario           | Fig median | React median |    Gap |
+| ------------------ | ---------: | -----------: | -----: |
+| Initial mount      |      10 ms |         2 ms |  +8 ms |
+| Same-order update  |       3 ms |         1 ms |  +2 ms |
+| Append 10%         |       2 ms |         1 ms |  +1 ms |
+| Prepend 10%        |       3 ms |         1 ms |  +2 ms |
+| Reverse keyed rows |      17 ms |         4 ms | +13 ms |
 
 The biggest immediate opportunity is keyed reordering, especially reverse order. The current commit path calls `hostSibling(node)` separately for each placed fiber:
 
@@ -29,25 +29,25 @@ For a large reverse reorder, many siblings are marked with `PlacementFlag`, and 
 
 After Phases 1-3, a 1,000-row browser run produced these medians:
 
-| Scenario | Fig median | React median | Gap |
-| --- | ---: | ---: | ---: |
-| Initial mount | 3.500 ms | 2.286 ms | Fig 53% slower |
-| Same-order update | 2.357 ms | 1.450 ms | Fig 63% slower |
-| Append 10% | 1.571 ms | 2.100 ms | Fig 25% faster |
-| Prepend 10% | 1.500 ms | 2.150 ms | Fig 30% faster |
-| Reverse keyed rows | 3.786 ms | 4.643 ms | Fig 18% faster |
+| Scenario           | Fig median | React median |            Gap |
+| ------------------ | ---------: | -----------: | -------------: |
+| Initial mount      |   3.500 ms |     2.286 ms | Fig 53% slower |
+| Same-order update  |   2.357 ms |     1.450 ms | Fig 63% slower |
+| Append 10%         |   1.571 ms |     2.100 ms | Fig 25% faster |
+| Prepend 10%        |   1.500 ms |     2.150 ms | Fig 30% faster |
+| Reverse keyed rows |   3.786 ms |     4.643 ms | Fig 18% faster |
 
 The placement work closed the reverse-keyed reorder gap and made append/prepend faster than React on this benchmark. Remaining gaps are initial mount and same-order updates.
 
 A 5,000-row browser run produced these medians:
 
-| Scenario | Fig median | React median | Gap |
-| --- | ---: | ---: | ---: |
-| Initial mount | 18.500 ms | 13.500 ms | Fig 37% slower |
-| Same-order update | 14.000 ms | 9.333 ms | Fig 50% slower |
-| Append 10% | 7.833 ms | 10.125 ms | Fig 23% faster |
-| Prepend 10% | 8.667 ms | 10.500 ms | Fig 17% faster |
-| Reverse keyed rows | 23.000 ms | 57.000 ms | Fig 60% faster |
+| Scenario           | Fig median | React median |            Gap |
+| ------------------ | ---------: | -----------: | -------------: |
+| Initial mount      |  18.500 ms |    13.500 ms | Fig 37% slower |
+| Same-order update  |  14.000 ms |     9.333 ms | Fig 50% slower |
+| Append 10%         |   7.833 ms |    10.125 ms | Fig 23% faster |
+| Prepend 10%        |   8.667 ms |    10.500 ms | Fig 17% faster |
+| Reverse keyed rows |  23.000 ms |    57.000 ms | Fig 60% faster |
 
 At 5,000 rows, the same shape holds: Fig is ahead on append, prepend, and
 reverse keyed reorder, while initial mount and same-order updates remain the

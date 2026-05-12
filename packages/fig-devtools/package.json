@@ -17,9 +17,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown ./src/index.ts --platform browser --dts --minify --sourcemap",
-    "dev": "tsdown ./src/index.ts --platform browser --dts --minify --sourcemap --watch",
-    "test": "vitest run"
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
   "repository": {

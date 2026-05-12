@@ -27,7 +27,7 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
 
   await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
   await expect(
-    page.getByText("Content resolved after 5 seconds."),
+    page.getByText("Content resolved on the server after 5 seconds."),
   ).toBeVisible();
 
   const suspenseButton = page.getByRole("button", {
@@ -56,7 +56,9 @@ test("client-renders aborted Suspense boundaries after the shell", async ({
     "data-fig-hydrated",
     "true",
   );
-  await expect(page.getByText("abort route")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Abort after shell" }),
+  ).toBeVisible();
   await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
 
   const suspenseButton = page.getByRole("button", {

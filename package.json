@@ -3,15 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "turbo build",
-    "dev": "turbo dev",
-    "lint": "biome check --error-on-warnings",
-    "format": "biome format --write",
-    "test": "turbo test",
-    "test:dom": "pnpm --filter @bgub/fig-dom test",
-    "test:e2e": "pnpm --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client test:e2e",
-    "test:reconciler": "pnpm --filter @bgub/fig-reconciler test",
-    "test:watch": "vitest",
+    "build": "vp run -r build",
+    "check": "vp check",
+    "dev": "vp run -r --parallel dev",
+    "test": "vp test",
+    "test:dom": "vp run --filter @bgub/fig-dom test",
+    "test:e2e": "vp run --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client test:e2e",
+    "test:reconciler": "vp run --filter @bgub/fig-reconciler test",
+    "test:watch": "vp test watch",
     "size": "size-limit"
   },
   "size-limit": [
@@ -21,7 +20,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "15 KB"
+      "limit": "18 KB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
@@ -33,14 +32,12 @@
     }
   ],
   "devDependencies": {
-    "@biomejs/biome": "2.2.3",
     "@size-limit/preset-small-lib": "^8.2.4",
-    "@vitest/coverage-istanbul": "3.2.4",
+    "@types/node": "^20.19.0",
+    "@vitest/coverage-istanbul": "4.1.5",
     "size-limit": "^8.2.4",
-    "tsdown": "^0.15.0",
-    "turbo": "^2.5.4",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": ">=20"

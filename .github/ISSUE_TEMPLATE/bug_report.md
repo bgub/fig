@@ -1,9 +1,9 @@
 ---
 name: Bug report
 about: Create a report to help us improve
-title: ''
+title: ""
 labels: bug
-assignees: ''
+assignees: ""
 ---
 
 **Describe the bug**
@@ -16,6 +16,7 @@ Steps to reproduce the behavior.
 A clear and concise description of what you expected to happen.
 
 **Environment**
- - OS: [e.g. macOS]
- - Node version: [e.g. 20]
- - Package version: [e.g. 0.1.0]
+
+- OS: [e.g. macOS]
+- Node version: [e.g. 20]
+- Package version: [e.g. 0.1.0]

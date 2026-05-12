@@ -1,6 +1,6 @@
 import { createElement } from "@bgub/fig";
 import { requestUpdateLane } from "@bgub/fig-reconciler";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   createRoot,
   DefaultLane,

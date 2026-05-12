@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:e2e": "pnpm --dir ../.. --filter @bgub/fig-demo-client... build",
-    "build": "tsdown",
-    "dev": "tsdown --watch",
+    "build:e2e": "vp run --filter @bgub/fig-demo-client... build",
+    "build": "vp pack",
+    "dev": "vp pack --watch",
     "serve": "python3 -m http.server 4173 --bind 127.0.0.1",
     "test:e2e": "playwright test"
   },
@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@types/node": "^20.19.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3"
   }

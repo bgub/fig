@@ -13,6 +13,10 @@
     "./jsx-runtime": {
       "import": "./dist/jsx-runtime.js",
       "types": "./dist/jsx-runtime.d.ts"
+    },
+    "./jsx-dev-runtime": {
+      "import": "./dist/jsx-runtime.js",
+      "types": "./dist/jsx-runtime.d.ts"
     }
   },
   "types": "./dist/index.d.ts",
@@ -21,9 +25,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
-    "test": "vitest run"
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
   "repository": {

@@ -252,13 +252,13 @@ interface HookQueue<S> {
   dispatch: Dispatch<SetStateAction<S>> | null;
 }
 
-interface Hook<S = unknown> {
+interface Hook<S = any> {
   kind: FigDevtoolsHookKind;
   memoizedState: S;
   baseState: S;
   baseQueue: HookUpdate<S> | null;
   queue: HookQueue<S>;
-  next: Hook | null;
+  next: Hook<any> | null;
 }
 
 interface Effect {
@@ -328,7 +328,7 @@ interface Fiber<Container, Instance, TextInstance> {
   props: Props;
   memoizedProps: Props | null;
   committedProps: Props | null;
-  memoizedState: Hook | null;
+  memoizedState: Hook<any> | null;
   stateNode:
     | HostNode<Instance, TextInstance>
     | FiberRoot<Container, Instance, TextInstance>
@@ -424,7 +424,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   const dispatcher: RenderDispatcher = {
     useState(initialState) {
       const hook = updateStateHook(initialState);
-      return [hook.memoizedState, hook.queue.dispatch];
+      const dispatch = hook.queue.dispatch;
+      if (dispatch === null) {
+        throw new Error("Expected state dispatch to be initialized.");
+      }
+
+      return [hook.memoizedState, dispatch];
     },
     useId() {
       return updateIdHook();
@@ -1315,9 +1320,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
     const hook = updateQueuedHook("state", initialState);
     const queue = hook.queue;
+    const fiber = requireRenderingFiber();
 
     if (queue.dispatch === null) {
-      const fiber = renderingFiber;
       queue.dispatch = (action: SetStateAction<S>) => {
         if (renderingFiber !== null) {
           throw new Error(
@@ -1365,14 +1370,18 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateTransitionHook(): [boolean, StartTransition] {
-    const hook: Hook<TransitionState> = updateQueuedHook("transition", {
+    const initialState: TransitionState = {
       pendingCount: 0,
       start: null,
-    });
+    };
+    const hook: Hook<TransitionState> = updateQueuedHook(
+      "transition",
+      initialState,
+    );
     const queue = hook.queue;
 
     if (hook.memoizedState.start === null) {
-      const fiber = renderingFiber;
+      const fiber = requireRenderingFiber();
       const updatePending = (delta: 1 | -1, lane: Lane) => {
         scheduleHookUpdate(
           fiber,
@@ -1403,7 +1412,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
     }
 
-    return [hook.memoizedState.pendingCount > 0, hook.memoizedState.start];
+    const start = hook.memoizedState.start;
+    if (start === null) {
+      throw new Error("Expected transition starter to be initialized.");
+    }
+
+    return [hook.memoizedState.pendingCount > 0, start];
+  }
+
+  function requireRenderingFiber(): F {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    return renderingFiber;
   }
 
   function updateQueuedHook<S>(
@@ -1622,14 +1644,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       );
     }
 
-    addContextDependency(renderingFiber, context);
+    addContextDependency(renderingFiber, context as FigContext<unknown>);
 
     for (
       let parent = renderingFiber.return;
       parent !== null;
       parent = parent.return
     ) {
-      if (parent.tag === ContextProviderTag && parent.type === context) {
+      if (
+        parent.tag === ContextProviderTag &&
+        parent.type === (context as unknown as ElementType | null)
+      ) {
         return parent.props.value as T;
       }
     }
@@ -2050,12 +2075,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       removePortalDescendants(root.current.child);
       host.clearContainer(root.container);
     } else if (root.current.child !== null) {
-      for (
-        let child = root.current.child;
-        child !== null;
-        child = child.sibling
-      ) {
+      let child: F | null = root.current.child;
+      while (child !== null) {
+        const next: F | null = child.sibling;
         remove(child, root.container);
+        child = next;
       }
     }
 
@@ -2088,7 +2112,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
         isHost(cursor)
       ) {
-        commitHostMutation(cursor, () => commitUpdate(cursor));
+        const hostFiber = cursor;
+        commitHostMutation(hostFiber, () => commitUpdate(hostFiber));
       }
 
       commitMutationEffects(cursor.child);
@@ -2107,12 +2132,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     const before = hostSibling(lastPlaced);
 
     for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
-      const next = placed.sibling;
-      commitHostMutation(placed, () => commitPlacement(placed, before));
-      if (!isPreassembledHostSubtree(placed)) {
-        commitMutationEffects(placed.child);
+      if (placed === null) break;
+
+      const current: F = placed;
+      const next: F | null = current.sibling;
+      commitHostMutation(current, () => commitPlacement(current, before));
+      if (!isPreassembledHostSubtree(current)) {
+        commitMutationEffects(current.child);
       } else {
-        commitPortalsInPreassembledSubtree(placed.child);
+        commitPortalsInPreassembledSubtree(current.child);
       }
       placed = next;
     }
@@ -2607,7 +2635,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const currentProvider = provider.alternate;
     if (currentProvider === null) return;
 
-    const context = provider.type as FigContext<unknown>;
+    const context = provider.type as unknown as FigContext<unknown>;
     const lanes = rootOf(provider).renderLanes;
 
     for (
@@ -2625,7 +2653,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     context: FigContext<unknown>,
     lanes: Lanes,
   ): void {
-    if (node.tag === ContextProviderTag && node.type === context) return;
+    if (
+      node.tag === ContextProviderTag &&
+      node.type === (context as unknown as ElementType | null)
+    ) {
+      return;
+    }
 
     if (node.contextDependencies?.includes(context) === true) {
       markLanes(node, lanes);
@@ -2954,7 +2987,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hooks: FigDevtoolsHookSnapshot[] = [];
     let id = 0;
 
-    for (let hook = firstHook; hook !== null; hook = hook.next) {
+    for (
+      let hook: Hook<any> | null = firstHook;
+      hook !== null;
+      hook = hook.next
+    ) {
       id += 1;
 
       if (isEffectHook(hook.kind)) {
@@ -2981,10 +3018,11 @@ export function createRenderer<Container, Instance, TextInstance>(
           state: hook.memoizedState.value,
         });
       } else {
+        const stateHook = hook as Hook<unknown>;
         hooks.push({
           id,
-          kind: hook.kind,
-          state: hook.memoizedState,
+          kind: stateHook.kind,
+          state: stateHook.memoizedState,
         });
       }
     }
@@ -3308,8 +3346,9 @@ function propsFor(child: FigChild): Props {
   }
 
   if (isPortal(child)) return portalProps(child);
+  if (isValidElement(child)) return child.props;
 
-  return child.props;
+  throw invalidChildError(child);
 }
 
 function portalProps(child: FigPortal): Props {

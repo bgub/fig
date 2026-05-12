@@ -1499,9 +1499,18 @@ function captureDomOperations<T>(
 ): T {
   const createElement = document.createElement.bind(document);
   const createTextNode = document.createTextNode.bind(document);
-  const appendChild = Node.prototype.appendChild;
-  const insertBefore = Node.prototype.insertBefore;
-  const removeChild = Node.prototype.removeChild;
+  const appendChild = Reflect.get(
+    Node.prototype,
+    "appendChild",
+  ) as typeof Node.prototype.appendChild;
+  const insertBefore = Reflect.get(
+    Node.prototype,
+    "insertBefore",
+  ) as typeof Node.prototype.insertBefore;
+  const removeChild = Reflect.get(
+    Node.prototype,
+    "removeChild",
+  ) as typeof Node.prototype.removeChild;
   const nodeValueOwner = propertyDescriptorOwner(Node.prototype, "nodeValue");
   const nodeValueDescriptor =
     nodeValueOwner === null

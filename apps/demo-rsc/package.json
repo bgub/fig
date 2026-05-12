@@ -3,13 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsdown",
-    "dev": "pnpm --filter @bgub/fig build && pnpm --filter @bgub/fig-dom build && pnpm --filter @bgub/fig-server build && pnpm build && pnpm serve",
+    "build": "vp pack",
+    "dev": "vp run --filter @bgub/fig-demo-rsc... build && vp run serve",
     "serve": "node dist/server.js"
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0"
   }
 }

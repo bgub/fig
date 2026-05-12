@@ -1,5 +1,5 @@
 import { renderToReadableStream } from "@bgub/fig-server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   App,
   type DemoRequest,

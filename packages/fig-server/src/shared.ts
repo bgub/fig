@@ -58,7 +58,7 @@ export function readContextValue<T>(
   values: ContextValues,
   context: FigContext<T>,
 ): T {
-  const stack = values.get(context);
+  const stack = values.get(context as FigContext<unknown>);
   if (stack !== undefined && stack.length > 0) {
     return stack[stack.length - 1] as T;
   }
@@ -77,16 +77,17 @@ export function readThenable<T>(thenable: PromiseLike<T>): T {
   let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
 
   if (record === undefined) {
-    record = { status: "pending" };
-    thenableRecords.set(key, record);
+    const pendingRecord: ThenableRecord<T> = { status: "pending" };
+    record = pendingRecord;
+    thenableRecords.set(key, pendingRecord);
     thenable.then(
       (value) => {
-        record.status = "fulfilled";
-        record.value = value;
+        pendingRecord.status = "fulfilled";
+        pendingRecord.value = value;
       },
       (reason: unknown) => {
-        record.status = "rejected";
-        record.reason = reason;
+        pendingRecord.status = "rejected";
+        pendingRecord.reason = reason;
       },
     );
   }
@@ -126,7 +127,9 @@ export function createStaticDispatcher(
       };
       return [value, dispatch];
     },
-    useId: options.useId,
+    useId() {
+      return options.useId();
+    },
     useMemo(calculate) {
       return calculate();
     },
@@ -147,7 +150,9 @@ export function createStaticDispatcher(
     readContext(context) {
       return readContextValue(options.contextValues, context);
     },
-    readPromise: options.readPromise,
+    readPromise(promise) {
+      return options.readPromise(promise);
+    },
   };
 }
 

@@ -5,7 +5,7 @@ import {
   useOnMount,
   useReactive,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync } from "./index.ts";
 import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 

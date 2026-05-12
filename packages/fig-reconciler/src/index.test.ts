@@ -7,7 +7,7 @@ import {
   useState,
 } from "@bgub/fig";
 import { requestPaint } from "@bgub/fig-scheduler";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   createRenderer,
   type FigDevtoolsGlobalHook,
@@ -217,7 +217,7 @@ describe("reconciler", () => {
     const container = new TestElement("root");
     const root = createRoot(container);
 
-    function Broken() {
+    function Broken(): never {
       throw new Error("boom");
     }
 
@@ -233,8 +233,11 @@ describe("reconciler", () => {
 
     const boundary = commits.at(-1)?.tree.children[0];
     expect(boundary?.kind).toBe("error-boundary");
-    expect((boundary?.capturedError as Error).message).toBe("boom");
-    expect(boundary?.componentStack).toContain("at Broken");
+    if (boundary?.kind !== "error-boundary") {
+      throw new Error("Expected committed error boundary.");
+    }
+    expect((boundary.capturedError as Error).message).toBe("boom");
+    expect(boundary.componentStack).toContain("at Broken");
   });
 
   it("throws a hydration support diagnostic when clearContainer is missing", () => {
@@ -744,7 +747,7 @@ describe("reconciler", () => {
     let setCount: ((updater: (count: number) => number) => void) | null = null;
     let yieldThenFlush = false;
     let textAfterFlush = "";
-    let resolveFlushed = () => undefined;
+    let resolveFlushed: () => void = () => undefined;
     const flushed = new Promise<void>((resolve) => {
       resolveFlushed = resolve;
     });

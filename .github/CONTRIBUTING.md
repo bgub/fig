@@ -21,14 +21,13 @@ pnpm dev
 pnpm test
 ```
 
-## Linting
+## Checks
 
 ```bash
-pnpm lint
-pnpm format
+pnpm check
 ```
 
 ## Pull Requests
 
 - Use [conventional commit](https://www.conventionalcommits.org/) style for PR titles
-- Make sure `pnpm lint` and `pnpm test` pass before submitting
+- Make sure `pnpm check` and `pnpm test` pass before submitting
