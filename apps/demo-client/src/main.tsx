@@ -1,11 +1,13 @@
 import {
   createContext,
   type FigNode,
+  lazy,
   readContext,
   readPromise,
   Suspense,
   transition,
   useBeforePaint,
+  useLaggedValue,
   useOnMount,
   useReactive,
   useState,
@@ -82,7 +84,7 @@ const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
   { id: "state", label: "State + diffing", shortLabel: "State" },
   { id: "effects", label: "Effects + bind", shortLabel: "Effects" },
   { id: "async", label: "Async event signals", shortLabel: "Async" },
-  { id: "resources", label: "Context + promises", shortLabel: "Resources" },
+  { id: "resources", label: "Context + lazy", shortLabel: "Lazy" },
   { id: "hydration", label: "Hydration", shortLabel: "Hydration" },
   { id: "benchmarks", label: "Benchmarks", shortLabel: "Benchmarks" },
 ];
@@ -92,6 +94,8 @@ const initialItems: DemoItem[] = [
   { id: 2, label: "Build fibers", tone: "render" },
   { id: 3, label: "Commit DOM", tone: "dom" },
 ];
+
+const LazyFeatureCard = lazy(() => delayValue(FeatureCard, 650));
 
 const ThemeContext = createContext("light");
 
@@ -293,6 +297,8 @@ function StatePage() {
           <p class="hint">{lastAction}</p>
         </section>
 
+        <LaggedCounterCard />
+
         <section class="card">
           <div class="card-header">
             <h3>Keyed list</h3>
@@ -324,6 +330,44 @@ function StatePage() {
         </section>
       </div>
     </PageFrame>
+  );
+}
+
+function LaggedCounterCard() {
+  const [input, setInput] = useState(0);
+  const lagged = useLaggedValue(input);
+
+  return (
+    <section class="card">
+      <div class="card-header">
+        <h3>Lagged value</h3>
+        <p class="hint">
+          Urgent input updates render immediately while derived output catches
+          up in deferred work.
+        </p>
+      </div>
+      <div class="deferred-meter">
+        <span>
+          Input <strong>{input}</strong>
+        </span>
+        <span>
+          Lagged <strong>{lagged}</strong>
+        </span>
+      </div>
+      <Row>
+        <Command primary run={() => setInput((value) => value + 1)}>
+          Update input
+        </Command>
+        <Command
+          run={() => {
+            setInput((value) => value + 1);
+            setInput((value) => value + 1);
+          }}
+        >
+          Queue two
+        </Command>
+      </Row>
+    </section>
   );
 }
 
@@ -441,48 +485,97 @@ function ResourcesPage() {
 
   return (
     <PageFrame
-      title="Context + promises"
-      lede="Context reads, local fallbacks, and transition retries."
+      title="Context + lazy"
+      lede="Context reads, promise suspension, lazy component loading, and transition retries."
     >
       <ThemeContext value={theme}>
-        <Row>
-          <ContextBadge />
-          <Command
-            primary
-            run={() =>
-              setTheme((value) => (value === "light" ? "dark" : "light"))
-            }
-          >
-            Toggle context
-          </Command>
-          <Command
-            run={() =>
-              setMessagePromise(delayedMessage(messageText("Resolved", theme)))
-            }
-          >
-            Read promise
-          </Command>
-          <Command
-            run={() =>
-              transition(() => {
-                setMessagePromise(
-                  delayedMessage(messageText("Transitioned", theme)),
-                );
-              })
-            }
-          >
-            Transition read
-          </Command>
-        </Row>
-        {messagePromise === null ? (
-          <p class="hint">No promise read yet.</p>
-        ) : (
-          <Suspense fallback={<p class="hint">Loading message...</p>}>
-            <PromiseMessage promise={messagePromise} />
+        <div class="columns">
+          <section class="card">
+            <div class="card-header">
+              <h3>Context + promise reads</h3>
+              <p class="hint">
+                Promise reads suspend locally; transitions keep revealed content
+                visible.
+              </p>
+            </div>
+            <Row>
+              <ContextBadge />
+              <Command
+                primary
+                run={() =>
+                  setTheme((value) => (value === "light" ? "dark" : "light"))
+                }
+              >
+                Toggle context
+              </Command>
+              <Command
+                run={() =>
+                  setMessagePromise(
+                    delayedMessage(messageText("Resolved", theme)),
+                  )
+                }
+              >
+                Read promise
+              </Command>
+              <Command
+                run={() =>
+                  transition(() => {
+                    setMessagePromise(
+                      delayedMessage(messageText("Transitioned", theme)),
+                    );
+                  })
+                }
+              >
+                Transition read
+              </Command>
+            </Row>
+            {messagePromise === null ? (
+              <p class="hint">No promise read yet.</p>
+            ) : (
+              <Suspense fallback={<p class="hint">Loading message...</p>}>
+                <PromiseMessage promise={messagePromise} />
+              </Suspense>
+            )}
+          </section>
+          <Suspense fallback={<LazyFeatureFallback />}>
+            <LazyFeatureCard />
           </Suspense>
-        )}
+        </div>
       </ThemeContext>
     </PageFrame>
+  );
+}
+
+function FeatureCard() {
+  return (
+    <section class="card lazy-card">
+      <div class="card-header">
+        <h3>Lazy component</h3>
+        <p class="hint">
+          `lazy(load)` turns an async component loader into a component that
+          suspends under Suspense.
+        </p>
+      </div>
+      <div class="hydration-status">
+        <span class="tag">loaded</span>
+        <span>Feature module resolved and rendered.</span>
+      </div>
+    </section>
+  );
+}
+
+function LazyFeatureFallback() {
+  return (
+    <section class="card lazy-card">
+      <div class="card-header">
+        <h3>Lazy component</h3>
+        <p class="hint">Loading component module...</p>
+      </div>
+      <div class="hydration-status">
+        <span class="tag">pending</span>
+        <span>Suspense is showing this fallback.</span>
+      </div>
+    </section>
   );
 }
 
@@ -1230,6 +1323,12 @@ function searchResults(query: string): string[] {
 function delayedMessage(message: string): Promise<string> {
   return new Promise((resolve) => {
     window.setTimeout(() => resolve(message), 650);
+  });
+}
+
+function delayValue<T>(value: T, ms: number): Promise<T> {
+  return new Promise((resolve) => {
+    window.setTimeout(() => resolve(value), ms);
   });
 }
 

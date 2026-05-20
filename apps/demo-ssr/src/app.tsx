@@ -1,4 +1,4 @@
-import { type FigNode, readPromise, Suspense, useState } from "@bgub/fig";
+import { type FigNode, lazy, readPromise, Suspense, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 
 type Resource<T> = Promise<T> | T;
@@ -18,6 +18,8 @@ export const demoDataScriptId = "fig-stream-demo-data";
 export const demoRootId = "fig-stream-demo-root";
 export const streamBoundaryDigest = "stream-demo-suspense";
 export const streamIdentifierPrefix = "stream-demo";
+
+const LazyStreamPanel = lazy(() => delay(LazyPanelContent, 1300));
 
 export function App({ request }: { request: DemoRequest }) {
   const isAbort = request.abortDelay !== null;
@@ -81,6 +83,19 @@ export function App({ request }: { request: DemoRequest }) {
               }
             >
               <ErrorRecoveryContent resource={request.resources.broken} />
+            </Suspense>
+            <Suspense
+              fallback={
+                <Panel
+                  class="lazy-panel"
+                  description="Loading an async component module."
+                  tag="lazy"
+                  title="Lazy component"
+                  tone="warn"
+                />
+              }
+            >
+              <LazyStreamPanel />
             </Suspense>
           </section>
         </div>
@@ -152,6 +167,23 @@ function ErrorRecoveryContent({ resource }: { resource: Resource<string> }) {
       <div class="panel-actions">
         <CounterButton id="server-error" label="Error clicks" />
       </div>
+    </Panel>
+  );
+}
+
+function LazyPanelContent() {
+  return (
+    <Panel
+      class="lazy-panel"
+      description="The server streamed this panel after lazy(load) resolved."
+      tag="loaded"
+      title="Lazy component"
+      tone="ok"
+    >
+      <p class="muted">
+        This uses the same Suspense stream path as data reads, but the promise
+        resolves to a component type.
+      </p>
     </Panel>
   );
 }

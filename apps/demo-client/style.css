@@ -191,6 +191,30 @@ button.button {
   font-size: 13px;
 }
 
+.deferred-meter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.deferred-meter span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.deferred-meter strong {
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 .list {
   display: grid;
   gap: 6px;
@@ -394,6 +418,11 @@ button.button {
   border-radius: 8px;
   background: var(--panel);
   padding: 12px;
+}
+
+.lazy-card {
+  min-height: 178px;
+  align-content: start;
 }
 
 .card-header {

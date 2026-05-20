@@ -1,4 +1,4 @@
-import { readPromise, Suspense } from "@bgub/fig";
+import { lazy, readPromise, Suspense } from "@bgub/fig";
 import { RscBoundary } from "@bgub/fig-server/rsc";
 import { feedBoundaryId, RefreshButtonRef } from "./shared.ts";
 import { AppFrame } from "./shell.tsx";
@@ -10,6 +10,8 @@ interface DemoStats {
   revenue: number;
   trend: number;
 }
+
+const LazyServerSummary = lazy(() => delay(ServerSummaryPanel, 700));
 
 export function createDemoData(seed: number) {
   const stats = statsFor(seed);
@@ -46,6 +48,9 @@ export function RscApp({ data }: { data: DemoData }) {
         </RscBoundary>
         <Suspense fallback={<InsightPending />}>
           <InsightPanel insight={data.insight} />
+        </Suspense>
+        <Suspense fallback={<LazyServerSummaryPending />}>
+          <LazyServerSummary stats={data.stats} />
         </Suspense>
       </section>
     </AppFrame>
@@ -124,6 +129,37 @@ function InsightPending() {
           <p class="muted">Streaming a slower server row.</p>
         </div>
         <span class="tag warn">pending</span>
+      </div>
+    </section>
+  );
+}
+
+function ServerSummaryPanel({ stats }: { stats: DemoStats }) {
+  return (
+    <section class="panel tone-ok async-panel">
+      <div class="panel-header">
+        <div>
+          <h3>Lazy server component</h3>
+          <p class="muted">
+            Loaded with lazy(load), then serialized into the RSC stream for{" "}
+            {stats.region}.
+          </p>
+        </div>
+        <span class="tag ok">loaded</span>
+      </div>
+    </section>
+  );
+}
+
+function LazyServerSummaryPending() {
+  return (
+    <section class="panel tone-warn async-panel">
+      <div class="panel-header">
+        <div>
+          <h3>Lazy server component</h3>
+          <p class="muted">Waiting for the component loader.</p>
+        </div>
+        <span class="tag warn">lazy</span>
       </div>
     </section>
   );

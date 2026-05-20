@@ -188,6 +188,12 @@ button[data-demo-control="suspense"] {
   min-height: 120px;
 }
 
+.lazy-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+}
+
 .panel-header {
   display: flex;
   align-items: flex-start;
