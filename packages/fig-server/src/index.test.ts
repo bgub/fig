@@ -4,6 +4,7 @@ import {
   ErrorBoundary,
   type FigNode,
   Fragment,
+  lazy,
   readContext,
   readPromise,
   Suspense,
@@ -289,6 +290,39 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain('nonce="abc"');
     expect(html).toContain('__figSSR.x("test-b-0","","")');
+  });
+
+  it("streams lazy components through Suspense", async () => {
+    function Message() {
+      return createElement("span", null, "Loaded");
+    }
+
+    const pending = deferred<typeof Message>();
+    const LazyMessage = lazy(() => pending.promise);
+    const result = renderToReadableStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(LazyMessage, null),
+      ),
+      { identifierPrefix: "lazy" },
+    );
+
+    await result.shellReady;
+    pending.resolve(Message);
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).toContain(
+      '<div hidden id="lazy-s-0"><template id="lazy-p-1"></template></div>',
+    );
+    expect(html).toContain(
+      '<div hidden id="lazy-s-1"><span>Loaded</span></div>',
+    );
+    expect(html).toContain('__figSSR.s("lazy-p-1","lazy-s-1")');
+    expect(html).toContain('__figSSR.c("lazy-b-0","lazy-s-0")');
   });
 
   it("streams resolved Suspense content and fills partial segments", async () => {

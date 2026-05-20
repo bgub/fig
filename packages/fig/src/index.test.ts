@@ -6,6 +6,7 @@ import {
   ErrorBoundary,
   Fragment,
   isContext,
+  lazy,
   isErrorBoundary,
   isPortal,
   isSuspense,
@@ -68,6 +69,19 @@ describe("@bgub/fig", () => {
       fallback: "Crashed",
       children: "Loaded",
     });
+  });
+
+  it("creates lazy component types", () => {
+    function Message({ label }: { label: string }) {
+      return createElement("span", null, label);
+    }
+
+    const LazyMessage = lazy(() => Promise.resolve(Message));
+    const element = createElement(LazyMessage, { label: "Ready" });
+
+    expect(isValidElement(element)).toBe(true);
+    expect(element.type).toBe(LazyMessage);
+    expect(element.props).toEqual({ label: "Ready" });
   });
 
   it("creates portal nodes", () => {

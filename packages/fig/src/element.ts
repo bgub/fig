@@ -1,3 +1,5 @@
+import { readPromise } from "./hooks.ts";
+
 export type Key = string | number;
 export type Props = Record<string, any>;
 export type ElementType<P = Props> =
@@ -43,6 +45,8 @@ export interface FigClientReference<P = Props> {
   readonly id: string;
   readonly load: () => Promise<unknown>;
 }
+
+export type LazyLoader<P = Props> = () => PromiseLike<ElementType<P>>;
 
 export interface SuspenseProps {
   fallback?: FigNode;
@@ -142,6 +146,16 @@ export function clientReference<P extends Props>(
     id: options.id,
     load: options.load,
   });
+}
+
+export function lazy<P extends Props>(
+  load: LazyLoader<P>,
+): (props: P & { children?: FigNode }) => FigNode {
+  let promise: PromiseLike<ElementType<P>> | null = null;
+
+  return function Lazy(props: P & { children?: FigNode }) {
+    return createElement(readPromise((promise ??= load())), props);
+  };
 }
 
 export function isClientReference(value: unknown): value is FigClientReference {

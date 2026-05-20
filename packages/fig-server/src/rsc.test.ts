@@ -6,6 +6,7 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  lazy,
   isValidElement,
   readContext,
   readPromise,
@@ -310,6 +311,46 @@ describe("RSC rendering", () => {
           $fig: "element",
           key: null,
           props: { children: "Ready" },
+          type: "span",
+        },
+      },
+    ]);
+  });
+
+  it("streams lazy component loaders as lazy rows", async () => {
+    function Message() {
+      return createElement("span", null, "Lazy ready");
+    }
+
+    const pending = deferred<typeof Message>();
+    const LazyMessage = lazy(() => pending.promise);
+    const result = renderToRscStream(
+      createElement("div", null, createElement(LazyMessage, null)),
+    );
+
+    pending.resolve(Message);
+    await result.allReady;
+
+    const rows = parseTestRscRows(await readStream(result.stream));
+
+    expect(rows).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: {
+          $fig: "element",
+          key: null,
+          props: { children: { $fig: "lazy", id: 1 } },
+          type: "div",
+        },
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: {
+          $fig: "element",
+          key: null,
+          props: { children: "Lazy ready" },
           type: "span",
         },
       },

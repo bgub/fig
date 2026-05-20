@@ -1,5 +1,6 @@
 import {
   createElement,
+  lazy,
   readPromise,
   Suspense,
   transition,
@@ -69,6 +70,54 @@ describe("@bgub/fig-dom suspense", () => {
     await delay();
 
     expect(container.textContent).toBe("Loaded");
+  });
+
+  it("renders lazy components after their loader resolves", async () => {
+    let loads = 0;
+
+    function Message({ label }: { label: string }) {
+      return createElement("span", null, label);
+    }
+
+    const pending = deferred<typeof Message>();
+    const LazyMessage = lazy<{ label: string }>(() => {
+      loads += 1;
+      return pending.promise;
+    });
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(LazyMessage, { label: "Ready" }),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+    expect(loads).toBe(1);
+
+    pending.resolve(Message);
+    await delay();
+
+    expect(container.textContent).toBe("Ready");
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(LazyMessage, { label: "Updated" }),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Updated");
+    expect(loads).toBe(1);
   });
 
   it("keeps revealed Suspense content visible while transitions suspend", async () => {

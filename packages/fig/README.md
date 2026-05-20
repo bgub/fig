@@ -58,6 +58,8 @@ createRoot(container).render(<App />);
   stores. Server rendering and hydration require `getServerSnapshot`.
 - `Suspense` catches pending `readPromise(promise)` reads and shows `fallback`
   until the promise settles.
+- `lazy(load)` creates a component that suspends until `load()` resolves to a
+  component type.
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
   reporting and change the boundary key to reset sticky fallback state.
 - `transition(callback)` and `useTransition()` mark updates that may preserve
