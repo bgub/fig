@@ -7,6 +7,7 @@ import {
   useCallback,
   useExternalStore,
   useId,
+  useLaggedValue,
   useMemo,
   useReactive,
   useState,
@@ -256,6 +257,130 @@ describe("@bgub/fig-dom hooks", () => {
     await delay();
 
     expect(container.textContent).toBe("Idle Loaded");
+  });
+
+  it("lags urgent value updates until deferred work catches up", async () => {
+    let setValue: ((value: string) => void) | null = null;
+
+    function App() {
+      const [value, set] = useState("Ready");
+      const lagged = useLaggedValue(value, "Boot");
+      setValue = set;
+      return createElement("main", null, lagged);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Boot");
+
+    await delay();
+    expect(container.textContent).toBe("Ready");
+
+    flushSync(() => setValue?.("Fresh"));
+    expect(container.textContent).toBe("Ready");
+
+    await delay();
+    expect(container.textContent).toBe("Fresh");
+  });
+
+  it("uses the latest urgent value when multiple lagged updates are pending", async () => {
+    let setValue: ((value: string) => void) | null = null;
+
+    function App() {
+      const [value, set] = useState("A");
+      const lagged = useLaggedValue(value);
+      setValue = set;
+      return createElement("main", null, lagged);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("A");
+
+    flushSync(() => setValue?.("B"));
+    expect(container.textContent).toBe("A");
+
+    flushSync(() => setValue?.("C"));
+    expect(container.textContent).toBe("A");
+
+    await delay();
+    expect(container.textContent).toBe("C");
+  });
+
+  it("keeps revealed Suspense content visible while lagged work suspends", async () => {
+    const pending = deferred<string>();
+    let show: ((value: Promise<string>) => void) | null = null;
+
+    function Message({ value }: { value: Promise<string> | null }) {
+      const lagged = useLaggedValue(value);
+      return lagged === null ? "Ready" : readPromise(lagged);
+    }
+
+    function App() {
+      const [value, set] = useState<Promise<string> | null>(null);
+      show = set;
+
+      return createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Message, { value }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Ready");
+
+    flushSync(() => show?.(pending.promise));
+    expect(container.textContent).toBe("Ready");
+
+    await delay();
+    expect(container.textContent).toBe("Ready");
+
+    pending.resolve("Loaded");
+    await delay();
+    expect(container.textContent).toBe("Loaded");
+  });
+
+  it("does not lag transition updates", async () => {
+    let start: ((callback: () => void) => void) | null = null;
+    let setValue: ((value: string) => void) | null = null;
+
+    function App() {
+      const [value, set] = useState("A");
+      const [, startTransition] = useTransition();
+      const lagged = useLaggedValue(value);
+      setValue = set;
+      start = startTransition;
+      return createElement("main", null, lagged);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("A");
+
+    const startTransition = start as ((callback: () => void) => void) | null;
+    const set = setValue as ((value: string) => void) | null;
+    if (startTransition === null || set === null) {
+      throw new Error("Expected transition controls.");
+    }
+
+    startTransition(() => set("B"));
+    await delay();
+
+    expect(container.textContent).toBe("B");
   });
 
   it("subscribes to external stores and updates from emitted snapshots", () => {

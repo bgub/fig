@@ -17,6 +17,7 @@ import {
   useCallback,
   useExternalStore,
   useId,
+  useLaggedValue,
   useMemo,
   useState,
   useTransition,
@@ -100,6 +101,9 @@ describe("@bgub/fig", () => {
       "Hooks can only be called while rendering a component.",
     );
     expect(() => useId()).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useLaggedValue("value")).toThrow(
       "Hooks can only be called while rendering a component.",
     );
     expect(() => useTransition()).toThrow(

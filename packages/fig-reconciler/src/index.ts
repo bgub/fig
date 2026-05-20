@@ -45,6 +45,7 @@ import {
   createLaneMap,
   DefaultHydrationLane,
   DefaultLane,
+  DeferredLane,
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
@@ -433,6 +434,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
     useId() {
       return updateIdHook();
+    },
+    useLaggedValue(value, initialValue, hasInitialValue) {
+      return updateLaggedValueHook(value, initialValue, hasInitialValue);
     },
     useMemo(calculate, deps) {
       return updateMemoHook(calculate, deps);
@@ -1367,6 +1371,48 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     appendHook(createHook("memo", state));
     return state.value;
+  }
+
+  function updateLaggedValueHook<T>(
+    value: T,
+    initialValue: T | undefined,
+    hasInitialValue: boolean,
+  ): T {
+    if (renderingFiber === null) {
+      throw new Error("Hooks can only be called while rendering a component.");
+    }
+
+    const oldHook = updateHook("lagged-value") as Hook<T> | null;
+    let next =
+      oldHook === null
+        ? initialLaggedValue(value, initialValue, hasInitialValue)
+        : oldHook.memoizedState;
+
+    if (!Object.is(next, value)) {
+      if (isTransitionOrDeferredRender(rootOf(renderingFiber))) {
+        next = value;
+      } else {
+        scheduleFiber(renderingFiber, DeferredLane);
+      }
+    }
+
+    appendHook(createHook("lagged-value", next));
+    return next;
+  }
+
+  function initialLaggedValue<T>(
+    value: T,
+    initialValue: T | undefined,
+    hasInitialValue: boolean,
+  ): T {
+    return hasInitialValue ? (initialValue as T) : value;
+  }
+
+  function isTransitionOrDeferredRender(root: R): boolean {
+    return (
+      includesOnlyTransitions(root.renderLanes) ||
+      includesSomeLane(root.renderLanes, DeferredLane)
+    );
   }
 
   function updateTransitionHook(): [boolean, StartTransition] {
@@ -2573,7 +2619,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return (
       boundary.alternate !== null &&
       boundary.alternate.suspenseState === null &&
-      includesOnlyTransitions(root.renderLanes)
+      isTransitionOrDeferredRender(root)
     );
   }
 

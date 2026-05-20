@@ -45,7 +45,8 @@ createRoot(container).render(<App />);
 ## Core API
 
 - Elements: `createElement`, `Fragment`, and the JSX runtime.
-- State and memoization: `useState`, `useMemo`, and `useCallback`.
+- State and memoization: `useState`, `useLaggedValue`, `useMemo`, and
+  `useCallback`.
 - Stable identifiers: `useId()` generates IDs that match server render and
   hydration output.
 - Context: `createContext(defaultValue)` plus render-time

@@ -130,6 +130,9 @@ export function createStaticDispatcher(
     useId() {
       return options.useId();
     },
+    useLaggedValue(value) {
+      return value;
+    },
     useMemo(calculate) {
       return calculate();
     },

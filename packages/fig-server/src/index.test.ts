@@ -9,6 +9,7 @@ import {
   Suspense,
   useExternalStore,
   useId,
+  useLaggedValue,
   useMemo,
   useReactive,
   useState,
@@ -161,6 +162,17 @@ describe("@bgub/fig-server", () => {
         () => "Server",
       );
       return createElement("span", null, snapshot);
+    }
+
+    await expect(renderToString(createElement(App, null))).resolves.toBe(
+      "<span>Server</span>",
+    );
+  });
+
+  it("renders current lagged values on the server", async () => {
+    function App() {
+      const value = useLaggedValue("Server", "Initial");
+      return createElement("span", null, value);
     }
 
     await expect(renderToString(createElement(App, null))).resolves.toBe(

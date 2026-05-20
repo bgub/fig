@@ -9,6 +9,11 @@ type Callback = (...args: never[]) => unknown;
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
   useId(): string;
+  useLaggedValue<T>(
+    value: T,
+    initialValue: T | undefined,
+    hasInitialValue: boolean,
+  ): T;
   useMemo<T>(calculate: () => T, deps: DependencyList): T;
   useTransition(): [boolean, StartTransition];
   useReactive(effect: EffectCallback, deps?: DependencyList): void;
@@ -37,6 +42,14 @@ export function useState<S>(
 
 export function useId(): string {
   return resolveDispatcher().useId();
+}
+
+export function useLaggedValue<T>(value: T, initialValue?: T): T {
+  return resolveDispatcher().useLaggedValue(
+    value,
+    initialValue,
+    arguments.length > 1,
+  );
 }
 
 export function useMemo<T>(calculate: () => T, deps: DependencyList): T {
