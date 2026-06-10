@@ -10,6 +10,7 @@ const isPackCommand = process.argv.some((arg) => arg.includes("pack-bin"));
 const figSourceAliasEntries = [
   ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
+  ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
   ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
@@ -30,7 +31,11 @@ const demoClientBundleDependencies = [
   reactDomPackages,
 ];
 const libraryEntries: Record<string, string[]> = {
-  "packages/fig": ["./src/index.ts", "./src/jsx-runtime.ts"],
+  "packages/fig": [
+    "./src/index.ts",
+    "./src/internal.ts",
+    "./src/jsx-runtime.ts",
+  ],
   "packages/fig-devtools": ["./src/index.ts"],
   "packages/fig-dom": ["./src/index.ts"],
   "packages/fig-reconciler": ["./src/index.ts"],

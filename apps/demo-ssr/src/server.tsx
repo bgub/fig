@@ -5,7 +5,8 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { renderToReadableStream } from "@bgub/fig-server";
+import { meta, resources, title } from "@bgub/fig";
+import { renderToDocumentStream } from "@bgub/fig-server";
 import {
   App,
   clientDataFor,
@@ -28,17 +29,6 @@ const logRecoveredErrors = process.env.FIG_STREAM_DEMO_LOG_ERRORS === "1";
 const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
 const noStore = { "cache-control": "no-store" };
 const textPlain = { "content-type": "text/plain; charset=utf-8" };
-const documentStart = [
-  "<!doctype html>",
-  '<html lang="en">',
-  "<head>",
-  '<meta charset="utf-8">',
-  '<meta name="viewport" content="width=device-width, initial-scale=1">',
-  "<title>Fig Streaming SSR</title>",
-  '<link rel="stylesheet" href="/style.css">',
-  "</head>",
-  "<body>",
-].join("");
 
 watchDevReloadFile(clientScriptUrl);
 
@@ -99,10 +89,28 @@ async function handleRequest(
     abortDelay,
     new Date().toLocaleTimeString(),
   );
-  const render = renderToReadableStream(
-    <div id={demoRootId}>
-      <App request={demoRequest} />
-    </div>,
+  const render = renderToDocumentStream(
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="stylesheet" href="/style.css" />
+      </head>
+      <body>
+        {resources(
+          [
+            title("Fig Streaming SSR"),
+            meta({
+              name: "description",
+              content: "Fig streaming Suspense and hydration demo.",
+            }),
+          ],
+          <div id={demoRootId}>
+            <App request={demoRequest} />
+          </div>,
+        )}
+      </body>
+    </html>,
     {
       identifierPrefix: streamIdentifierPrefix,
       nonce,
@@ -141,7 +149,6 @@ async function handleRequest(
     "content-type": render.contentType,
     "x-accel-buffering": "no",
   });
-  await writeResponse(response, documentStart);
 
   const abortTimer =
     abortDelay === null
@@ -159,9 +166,6 @@ async function handleRequest(
     );
   } finally {
     if (abortTimer !== null) clearTimeout(abortTimer);
-    if (!closed && !response.writableEnded) {
-      await writeResponse(response, documentEnd);
-    }
     if (!closed && !response.writableEnded) response.end();
   }
 }
@@ -175,8 +179,6 @@ function abortDelayFor(url: URL): number | null {
   const delayMs = Number(value);
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null;
 }
-
-const documentEnd = "</body></html>";
 
 function bootstrapScripts(request: DemoRequest, nonce: string): string {
   return [

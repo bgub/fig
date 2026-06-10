@@ -37,6 +37,12 @@ Deliberate divergences:
 - Context reads use `readContext(context)` because context is a render input.
 - Promise reads use `readPromise(promise)` rather than React's broad
   `use(resource)` API.
+- Document resources use explicit `resources([...], children)` wrappers and
+  small helpers such as `stylesheet`, `preload`, `font`, `preconnect`, `title`,
+  `meta`, and `script`; document-mode server rendering also lowers host
+  `<title>`, `<meta>`, `<link>`, and `<script>` tags into the same registry.
+  Metadata is injected into `<head>` while stream-safe assets can be hoisted
+  near dependent segments.
 
 Not goals:
 
@@ -45,8 +51,8 @@ Not goals:
 
 Future goal:
 
-- Resource hoisting for styles, scripts, and other document resources, designed
-  as a smaller Fig API rather than a clone of React DOM's full metadata system.
+- Broader bundler integration for component resource manifests across server and
+  client component modules.
 
 ## Packages
 
@@ -56,7 +62,8 @@ Future goal:
   hydration, delegated events, `bind`, portals, native DOM props, and
   `unsafeHTML`.
 - [`@bgub/fig-server`](./packages/fig-server/README.md): streaming server
-  rendering, Suspense streaming, server errors, and RSC helpers.
+  rendering, Suspense streaming, resource hoisting, server errors, and RSC
+  helpers.
 - [`@bgub/fig-reconciler`](./packages/fig-reconciler/README.md): renderer
   internals for custom host configs.
 - [`@bgub/fig-scheduler`](./packages/fig-scheduler/README.md): cooperative

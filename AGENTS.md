@@ -17,7 +17,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Portals render into explicit DOM targets while preserving Fig context, effects, and delegated event bubbling through the logical tree.
 - DOM node access uses `bind={(node, signal) => ...}` instead of React refs; components forward it as a normal prop.
 - Styling should stay separate from the `events` and `bind` APIs.
-- Render diagnostics throw before commit for duplicate sibling keys, invalid children, and render-phase state updates.
+- Render diagnostics throw before commit for duplicate sibling keys, invalid children, and render-phase state updates; duplicate-key detection and DevTools commit emission are dev-only via inline `process.env.NODE_ENV !== "production"` checks that app bundlers strip.
 - `useMemo` and `useCallback` are supported for stable values and callback identities.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` is the external store API; server render and hydration require `getServerSnapshot`.
 - `useReducer` is intentionally not built in; reducer abstractions can live in libraries on top of `useState`.
@@ -31,3 +31,6 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Server Suspense streams fallbacks first, then completed content and partial segments; server errors recover only through Suspense client-render markers.
 - Hydration is Suspense-boundary selective: server markers can stay dehydrated until background work or interaction hydrates that boundary.
 - Hydration queues replayable events blocked by pending Suspense hydration and replays them after the boundary hydrates.
+- Suspense retries after a committed fallback are scheduled on React-style retry lanes: low priority, excluded from expiration, reusing the boundary's retry lane when a retry suspends again.
+- A dehydrated Suspense boundary whose hydration attempt suspends stays dehydrated — the server DOM is preserved and the attached thenable ping retries hydration; no fallback is rendered over server content.
+- Uncaught render errors rethrow to `flushSync` callers; outside `flushSync` they go to the root's `onUncaughtError`, or rethrow from a detached task when no handler exists, so scheduler ticks never die.

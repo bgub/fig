@@ -1,3 +1,4 @@
+import "./dev-env.ts";
 import { createRoot } from "@bgub/fig-dom";
 import {
   createRscResponse,

@@ -1,3 +1,4 @@
+import "./dev-env.ts";
 import { hydrateRoot } from "@bgub/fig-dom";
 import {
   App,

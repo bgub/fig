@@ -16,19 +16,19 @@
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "5 KB"
+      "limit": "1 kB"
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "18 KB"
+      "limit": "18.5 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "70 KB"
+      "limit": "12 kB"
     },
     {
       "path": "packages/fig-scheduler/dist/index.js",
-      "limit": "7 KB"
+      "limit": "1 kB"
     }
   ],
   "devDependencies": {
