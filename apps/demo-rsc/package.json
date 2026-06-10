@@ -4,10 +4,15 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
-    "dev": "vp run --filter @bgub/fig-demo-rsc... build && sh -c 'vp pack --watch & build=$!; node --watch dist/server.js & server=$!; trap \"kill $build $server\" INT TERM EXIT; wait $server'",
+    "dev": "portless",
+    "dev:app": "node ../dev-server.mjs node",
     "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js"
+  },
+  "portless": {
+    "name": "fig-demo-rsc",
+    "script": "dev:app"
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",

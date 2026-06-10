@@ -40,7 +40,7 @@ createServer((request, response) => {
     response.end(error instanceof Error ? error.message : String(error));
   });
 }).listen(port, "127.0.0.1", () => {
-  console.log(`Fig RSC demo: http://127.0.0.1:${port}/`);
+  console.log(`Fig RSC demo: ${publicUrl(port)}`);
 });
 
 async function handleRequest(
@@ -121,6 +121,10 @@ function requestUrl(request: IncomingMessage): URL {
     : (request.headers.host ?? `127.0.0.1:${port}`);
 
   return new URL(request.url ?? "/", `http://${host}`);
+}
+
+function publicUrl(port: number): string {
+  return process.env.PORTLESS_URL ?? `http://127.0.0.1:${port}/`;
 }
 
 function seedFor(url: URL): number {

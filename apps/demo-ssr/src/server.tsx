@@ -43,7 +43,7 @@ createServer((request, response) => {
     response.end(error instanceof Error ? error.message : String(error));
   });
 }).listen(port, "127.0.0.1", () => {
-  console.log(`Fig streaming SSR demo: http://127.0.0.1:${port}/`);
+  console.log(`Fig streaming SSR demo: ${publicUrl(port)}`);
 });
 
 async function handleRequest(
@@ -178,6 +178,10 @@ function abortDelayFor(url: URL): number | null {
 
   const delayMs = Number(value);
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null;
+}
+
+function publicUrl(port: number): string {
+  return process.env.PORTLESS_URL ?? `http://127.0.0.1:${port}/`;
 }
 
 function bootstrapScripts(request: DemoRequest, nonce: string): string {

@@ -112,6 +112,19 @@ pnpm test
 
 Demo apps live in [`apps/`](./apps).
 
+```bash
+pnpm dev:demos
+```
+
+The demo sites run through Portless:
+
+- `https://fig-demo-client.localhost`
+- `https://fig-demo-ssr.localhost`
+- `https://fig-demo-rsc.localhost`
+
+Use a demo package's `dev:app` script to run the underlying server without
+Portless.
+
 ## License
 
 MIT
