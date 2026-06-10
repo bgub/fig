@@ -257,6 +257,9 @@ const PlacementFlag = 1 << 0;
 const UpdateFlag = 1 << 1;
 const HydrationFlag = 1 << 2;
 const TextContentFlag = 1 << 3;
+// The fiber reused its committed children without cloning; render skips the
+// subtree and commit walks must not re-read its already-committed state.
+const AdoptedFlag = 1 << 4;
 type Flag = number;
 
 const ReactiveEffect = 0;
@@ -908,7 +911,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       return handleThrownValue(node, error);
     }
 
-    if (node.child !== null) return node.child;
+    if ((node.flags & AdoptedFlag) === 0 && node.child !== null) {
+      return node.child;
+    }
 
     return completeUnit(node);
   }
@@ -941,12 +946,26 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function begin(node: F): void {
-    if (canBailout(node)) {
-      cloneChildFibers(node);
-      return;
+    const root = rootOf(node);
+
+    if (canBailout(node, root)) {
+      if (!includesSomeLane(node.childLanes, root.renderLanes)) {
+        // The whole subtree is clean: adopt the committed children without
+        // cloning and skip them entirely.
+        node.flags |= AdoptedFlag;
+        node.child = node.alternate?.child ?? null;
+        return;
+      }
+
+      // Descendants have work but this fiber does not: clone children and
+      // descend without re-rendering, preserving child props identity.
+      // Suspense always runs begin so hidden-primary retries are handled.
+      if (node.tag !== SuspenseTag) {
+        cloneChildFibers(node);
+        return;
+      }
     }
 
-    const root = rootOf(node);
     const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
     node.lanes &= ~root.renderLanes;
 
@@ -1199,12 +1218,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     throw new HydrationMismatchError(error.message);
   }
 
-  function canBailout(node: F): boolean {
+  function canBailout(node: F, root: R): boolean {
     return (
       node.alternate !== null &&
       (node.flags & PlacementFlag) === 0 &&
       node.props === node.alternate.memoizedProps &&
-      !includesSomeLane(node.lanes | node.childLanes, rootOf(node).renderLanes)
+      !includesSomeLane(node.lanes, root.renderLanes)
     );
   }
 
@@ -2112,12 +2131,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
-    commitExternalStores(finishedWork.child);
-    scheduleDehydratedSuspenseRetries(root);
-    commitEffects(finishedWork.child, BeforePaintEffect);
-    flushCaughtBoundaryErrors(root, finishedWork.child);
-    collectReactiveEffects(root, finishedWork.child);
-    scheduleReactiveEffects(root);
+    try {
+      commitExternalStores(finishedWork.child);
+      scheduleDehydratedSuspenseRetries(root);
+      commitEffects(finishedWork.child, BeforePaintEffect);
+      flushCaughtBoundaryErrors(root, finishedWork.child);
+    } finally {
+      // Once the tree is current its flags must be cleared even when a
+      // commit step throws, or a later render would adopt stale flags.
+      collectReactiveEffects(root, finishedWork.child);
+      scheduleReactiveEffects(root);
+    }
     if (process.env.NODE_ENV !== "production") emitDevtoolsCommit(host, root);
     flushRecoverableErrors(root);
   }
@@ -2277,7 +2301,9 @@ export function createRenderer<Container, Instance, TextInstance>(
         commitHostMutation(hostFiber, () => commitUpdate(hostFiber));
       }
 
-      commitMutationEffects(cursor.child);
+      if ((cursor.flags & AdoptedFlag) === 0) {
+        commitMutationEffects(cursor.child);
+      }
 
       if (cursor.tag === SuspenseTag && (cursor.flags & HydrationFlag) !== 0) {
         commitHydratedSuspenseBoundary(cursor);
@@ -2471,7 +2497,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         abortFiberEffects(child);
         remove(child, parent);
       }
+      node.deletions = null;
     }
+
+    if ((node.flags & AdoptedFlag) !== 0) return;
 
     for (let child = node.child; child !== null; child = child.sibling) {
       commitDeletions(child);
@@ -3128,7 +3157,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.effects = null;
-    collectReactiveEffects(root, node.child);
+    const adopted = (node.flags & AdoptedFlag) !== 0;
+    // The last flag consumer in the commit clears them, so committed trees
+    // stay flag-clean and adopted subtrees never expose stale commit state.
+    node.flags = NoFlags;
+    if (!adopted) collectReactiveEffects(root, node.child);
     collectReactiveEffects(root, node.sibling);
   }
 
@@ -3167,10 +3200,12 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (const effect of node.effects ?? []) visitor(effect);
 
-    visitEffects(node.child, visitor);
+    if ((node.flags & AdoptedFlag) === 0) visitEffects(node.child, visitor);
     visitEffects(node.sibling, visitor);
   }
 
+  // Deliberately traverses adopted subtrees: unmount aborts and commit-time
+  // external store checks must reach hooks that did not re-render.
   function visitFiberHooks(
     node: F | null,
     visitor: (owner: F, hook: Hook) => void,
