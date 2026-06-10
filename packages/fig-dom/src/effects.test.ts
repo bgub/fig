@@ -11,6 +11,9 @@ import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
+// Tests run in development mode, where Fig strict-runs first-time effects:
+// run, abort, run again with a fresh signal. Deps-change reruns and unmount
+// aborts stay single.
 describe("@bgub/fig-dom effects", () => {
   it("runs effect phases in commit order", async () => {
     const calls: string[] = [];
@@ -32,12 +35,20 @@ describe("@bgub/fig-dom effects", () => {
     }
 
     flushSync(() => root.render(createElement(App, null)));
-    expect(calls).toEqual(["before-layout:", "before-paint:Committed"]);
+    expect(calls).toEqual([
+      "before-layout:",
+      "before-layout:",
+      "before-paint:Committed",
+      "before-paint:Committed",
+    ]);
 
     await delay();
     expect(calls).toEqual([
       "before-layout:",
+      "before-layout:",
       "before-paint:Committed",
+      "before-paint:Committed",
+      "reactive:Committed",
       "reactive:Committed",
     ]);
   });
@@ -63,19 +74,26 @@ describe("@bgub/fig-dom effects", () => {
 
     root.render(createElement(App, { value: 1 }));
     await delay();
-    expect(calls).toEqual(["run:1"]);
+    expect(calls).toEqual(["run:1", "abort:1", "run:1"]);
 
     root.render(createElement(App, { value: 1 }));
     await delay();
-    expect(calls).toEqual(["run:1"]);
+    expect(calls).toEqual(["run:1", "abort:1", "run:1"]);
 
     root.render(createElement(App, { value: 2 }));
     await delay();
-    expect(calls).toEqual(["run:1", "abort:1", "run:2"]);
+    expect(calls).toEqual(["run:1", "abort:1", "run:1", "abort:1", "run:2"]);
 
     root.unmount();
     await delay();
-    expect(calls).toEqual(["run:1", "abort:1", "run:2", "abort:2"]);
+    expect(calls).toEqual([
+      "run:1",
+      "abort:1",
+      "run:1",
+      "abort:1",
+      "run:2",
+      "abort:2",
+    ]);
   });
 
   it("flushes pending reactive effects before rendering new work", async () => {
@@ -103,7 +121,7 @@ describe("@bgub/fig-dom effects", () => {
     root.render(createElement(App, { value: 2 }));
     await delay();
 
-    expect(calls).toEqual(["run:1", "abort:1", "run:2"]);
+    expect(calls).toEqual(["run:1", "abort:1", "run:1", "abort:1", "run:2"]);
   });
 
   it("aborts before-layout and before-paint signals on deps changes and unmount", () => {
@@ -144,6 +162,10 @@ describe("@bgub/fig-dom effects", () => {
 
     expect(calls).toEqual([
       "layout:1",
+      "abort-layout:1",
+      "layout:1",
+      "paint:1",
+      "abort-paint:1",
       "paint:1",
       "abort-layout:1",
       "layout:2",
@@ -154,7 +176,7 @@ describe("@bgub/fig-dom effects", () => {
     ]);
   });
 
-  it("runs useOnMount only once", async () => {
+  it("does not rerun useOnMount on updates", async () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
@@ -175,11 +197,11 @@ describe("@bgub/fig-dom effects", () => {
     root.render(createElement(App, { value: 2 }));
     await delay();
 
-    expect(calls).toEqual(["mount:1"]);
+    expect(calls).toEqual(["mount:1", "abort:1", "mount:1"]);
 
     root.unmount();
     await delay();
-    expect(calls).toEqual(["mount:1", "abort:1"]);
+    expect(calls).toEqual(["mount:1", "abort:1", "mount:1", "abort:1"]);
   });
 
   it("aborts only the removed subtree effects", async () => {
@@ -213,19 +235,22 @@ describe("@bgub/fig-dom effects", () => {
       );
     }
 
+    const parentMount = ["parent:run", "parent:abort", "parent:run"];
+    const childMount = ["child:run", "child:abort", "child:run"];
+
     root.render(createElement(App, { showChild: true }));
     await delay();
-    expect(calls).toEqual(["parent:run", "child:run"]);
+    expect(calls).toEqual([...parentMount, ...childMount]);
 
     root.render(createElement(App, { showChild: false }));
     await delay();
-    expect(calls).toEqual(["parent:run", "child:run", "child:abort"]);
+    expect(calls).toEqual([...parentMount, ...childMount, "child:abort"]);
 
     root.unmount();
     await delay();
     expect(calls).toEqual([
-      "parent:run",
-      "child:run",
+      ...parentMount,
+      ...childMount,
       "child:abort",
       "parent:abort",
     ]);
@@ -264,6 +289,15 @@ describe("@bgub/fig-dom effects", () => {
     root.render(createElement(App, { a: 2, b: 1 }));
     await delay();
 
-    expect(calls).toEqual(["a:1", "b:1", "abort-a:1", "a:2"]);
+    expect(calls).toEqual([
+      "a:1",
+      "abort-a:1",
+      "a:1",
+      "b:1",
+      "abort-b:1",
+      "b:1",
+      "abort-a:1",
+      "a:2",
+    ]);
   });
 });

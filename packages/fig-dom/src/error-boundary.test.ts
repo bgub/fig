@@ -46,7 +46,9 @@ describe("@bgub/fig-dom error boundaries", () => {
 
     flushSync(() => root.render(createElement(App, { fail: false })));
     expect(container.textContent).toBe("Crashed");
-    expect(renders).toBe(2);
+    // Mount renders twice (strict shadow pass); the failing pass throws in
+    // the shadow render, and the sticky fallback never renders Broken again.
+    expect(renders).toBe(3);
   });
 
   it("reports caught errors with component stacks after fallback commit", () => {

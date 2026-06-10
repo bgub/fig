@@ -154,9 +154,12 @@ describe("@bgub/fig-dom hydration", () => {
     );
 
     expect(container.childNodes).toEqual([input]);
-    expect(calls).toHaveLength(1);
+    // First-time binds strict-run twice in development.
+    expect(calls).toHaveLength(2);
     expect(calls[0][0]).toBe(input);
-    expect(calls[0][1].aborted).toBe(false);
+    expect(calls[0][1].aborted).toBe(true);
+    expect(calls[1][0]).toBe(input);
+    expect(calls[1][1].aborted).toBe(false);
   });
 
   it("hydrates component children followed by host siblings", () => {

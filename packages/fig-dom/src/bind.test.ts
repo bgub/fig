@@ -5,6 +5,9 @@ import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
+// Tests run in development mode, where Fig strict-runs first-time binds:
+// run, abort, run again with a fresh signal. Callback changes and removals
+// stay single.
 describe("@bgub/fig-dom bind", () => {
   it("binds host nodes through normal component props", () => {
     const calls: string[] = [];
@@ -29,8 +32,9 @@ describe("@bgub/fig-dom bind", () => {
 
     const input = container.childNodes[0] as FakeElement;
 
-    expect(calls).toEqual(["input"]);
-    expect(signals[0].aborted).toBe(false);
+    expect(calls).toEqual(["input", "input"]);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
     expect(input.attributes.bind).toBeUndefined();
   });
 
@@ -51,18 +55,19 @@ describe("@bgub/fig-dom bind", () => {
     flushSync(() => root.render(createElement("button", { bind: first })));
     flushSync(() => root.render(createElement("button", { bind: first })));
 
-    expect(calls).toEqual(["first"]);
-    expect(signals[0].aborted).toBe(false);
-
-    flushSync(() => root.render(createElement("button", { bind: second })));
-
-    expect(calls).toEqual(["first", "second"]);
+    expect(calls).toEqual(["first", "first"]);
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
 
+    flushSync(() => root.render(createElement("button", { bind: second })));
+
+    expect(calls).toEqual(["first", "first", "second"]);
+    expect(signals[1].aborted).toBe(true);
+    expect(signals[2].aborted).toBe(false);
+
     flushSync(() => root.render(createElement("button", null)));
 
-    expect(signals[1].aborted).toBe(true);
+    expect(signals[2].aborted).toBe(true);
   });
 
   it("aborts bind signals when bound nodes are removed", () => {
@@ -85,10 +90,11 @@ describe("@bgub/fig-dom bind", () => {
     }
 
     flushSync(() => root.render(createElement(App, { show: true })));
-    expect(signals[0].aborted).toBe(false);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
 
     flushSync(() => root.render(createElement(App, { show: false })));
-    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(true);
   });
 
   it("runs bind before before-paint effects", () => {
@@ -109,6 +115,7 @@ describe("@bgub/fig-dom bind", () => {
       render(createElement(App, null), container as unknown as Element),
     );
 
-    expect(calls).toEqual(["bind", "before-paint"]);
+    // Both the bind and the before-paint effect strict-run twice on mount.
+    expect(calls).toEqual(["bind", "bind", "before-paint", "before-paint"]);
   });
 });

@@ -61,6 +61,9 @@ function expectRenderDiagnostic(node: FigNode, message: string): void {
 }
 
 describe("@bgub/fig-dom hooks", () => {
+  // Tests run in development mode, where Fig renders components twice per
+  // pass and discards the first (strict shadow pass), so render-phase
+  // counters and pushes record both invocations.
   it("runs lazy state initializers only on mount", () => {
     let setCount: ((updater: (count: number) => number) => void) | null = null;
     let initializers = 0;
@@ -78,10 +81,12 @@ describe("@bgub/fig-dom hooks", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() => root.render(createElement(Counter, null)));
+    expect(initializers).toBe(2);
+
     flushSync(() => setCount?.((count) => count + 1));
 
     expect(container.textContent).toBe("Count: 1");
-    expect(initializers).toBe(1);
+    expect(initializers).toBe(2);
   });
 
   it("memoizes computed values while deps are stable", () => {
@@ -110,9 +115,14 @@ describe("@bgub/fig-dom hooks", () => {
     );
 
     expect(container.textContent).toBe("third:6");
-    expect(calculations).toBe(2);
-    expect(values[1]).toBe(values[0]);
-    expect(values[2]).not.toBe(values[1]);
+    expect(calculations).toBe(4);
+    // Slots per pass: [first shadow, first real (committed), second shadow,
+    // second real, third shadow, third real (committed)].
+    expect(values).toHaveLength(6);
+    expect(values[0]).not.toBe(values[1]);
+    expect(values[2]).toBe(values[1]);
+    expect(values[3]).toBe(values[1]);
+    expect(values[5]).not.toBe(values[3]);
   });
 
   it("memoizes callback identities while deps are stable", () => {
@@ -142,12 +152,16 @@ describe("@bgub/fig-dom hooks", () => {
       root.render(createElement(App, { label: "third", value: "b" })),
     );
 
-    callbacks[0]("x");
-    callbacks[2]("y");
+    // Slots per pass: [first shadow, first real (committed), second shadow,
+    // second real, third shadow, third real (committed)].
+    callbacks[1]("x");
+    callbacks[5]("y");
 
     expect(container.textContent).toBe("third");
-    expect(callbacks[1]).toBe(callbacks[0]);
-    expect(callbacks[2]).not.toBe(callbacks[1]);
+    expect(callbacks).toHaveLength(6);
+    expect(callbacks[2]).toBe(callbacks[1]);
+    expect(callbacks[3]).toBe(callbacks[1]);
+    expect(callbacks[5]).not.toBe(callbacks[3]);
     expect(calls).toEqual(["a:x", "b:y"]);
   });
 
@@ -193,8 +207,12 @@ describe("@bgub/fig-dom hooks", () => {
 
     expect(ids).toEqual([
       "app-fig-0-0-0",
+      "app-fig-0-0-0",
+      "app-fig-0-1-0",
       "app-fig-0-1-0",
       "app-fig-0-0-0",
+      "app-fig-0-0-0",
+      "app-fig-0-1-0",
       "app-fig-0-1-0",
     ]);
 

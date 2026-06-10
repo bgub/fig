@@ -54,7 +54,8 @@ describe("@bgub/fig-dom context", () => {
 
     flushSync(() => root.render(createElement(App, { value: "light" })));
     expect(container.textContent).toBe("light");
-    expect(renders).toBe(2);
+    // Each pass renders twice in development (strict shadow pass).
+    expect(renders).toBe(4);
   });
 
   it("does not rerender stable non-consumers when providers change", () => {
@@ -85,8 +86,8 @@ describe("@bgub/fig-dom context", () => {
     flushSync(() => root.render(createElement(App, { value: "light" })));
 
     expect(container.textContent).toBe("Staticlight");
-    expect(childRenders).toBe(1);
-    expect(labelRenders).toBe(2);
+    expect(childRenders).toBe(2);
+    expect(labelRenders).toBe(4);
   });
 
   it("does not propagate outer context changes through inner providers", () => {
@@ -114,7 +115,7 @@ describe("@bgub/fig-dom context", () => {
     flushSync(() => root.render(createElement(App, { value: "second" })));
 
     expect(container.textContent).toBe("inner");
-    expect(renders).toBe(1);
+    expect(renders).toBe(2);
   });
 
   it("allows context reads inside conditional branches", () => {

@@ -292,6 +292,10 @@ interface Effect {
   controller: AbortController | null;
   deps: DependencyList | null;
   owner: Fiber<unknown, unknown, unknown>;
+  // Carried across renders like controller; gates the dev-only strict
+  // re-run to once per hook lifetime so renders nested inside an effect
+  // (e.g. flushSync) cannot re-trigger the cycle.
+  strictRan: boolean;
 }
 
 interface MemoState<T> {
@@ -1195,15 +1199,22 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function renderFunction(node: F): void {
-    renderingFiber = node;
-    currentHook = node.alternate?.memoizedState ?? null;
-    workInProgressHook = null;
-    localIdCounter = 0;
-    node.memoizedState = null;
-    node.contextDependencies = null;
+    prepareHookRender(node);
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     try {
+      if (process.env.NODE_ENV !== "production") {
+        // Strict shadow pass: invoke the component once and discard every
+        // trace so impure renders surface in development. Skipping
+        // reconciliation keeps the pass free of child and deletion effects.
+        const root = rootOf(node);
+        const consumedBefore = root.consumedPendingQueues.length;
+        (node.type as Component)(node.props);
+        if (currentHook !== null) throw hookOrderError("fewer");
+        restoreConsumedPendingQueues(root, consumedBefore);
+        prepareHookRender(node);
+        node.effects = null;
+      }
       reconcileCurrentChildren(node, (node.type as Component)(node.props));
       if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
@@ -1213,6 +1224,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       workInProgressHook = null;
       localIdCounter = 0;
     }
+  }
+
+  function prepareHookRender(node: F): void {
+    renderingFiber = node;
+    currentHook = node.alternate?.memoizedState ?? null;
+    workInProgressHook = null;
+    localIdCounter = 0;
+    node.memoizedState = null;
+    node.contextDependencies = null;
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -1695,6 +1715,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       controller: previousEffect?.controller ?? null,
       deps: nextDeps,
       owner: fiber as Fiber<unknown, unknown, unknown>,
+      strictRan:
+        process.env.NODE_ENV !== "production" &&
+        previousEffect?.strictRan === true,
     };
     const hook = createHook(kind, effect);
 
@@ -3088,10 +3111,24 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function runEffect(effect: Effect): void {
+    let runStrict = false;
+    if (process.env.NODE_ENV !== "production") {
+      // Marked before create so renders nested inside the effect carry it
+      // forward and never re-enter the strict cycle.
+      runStrict = !effect.strictRan;
+      effect.strictRan = true;
+    }
     abortEffect(effect);
     effect.controller = new AbortController();
     try {
       effect.create(effect.controller.signal);
+      if (process.env.NODE_ENV !== "production" && runStrict) {
+        // Strict re-run: abort and re-invoke first-time effects so work that
+        // ignores its AbortSignal surfaces in development.
+        abortEffect(effect);
+        effect.controller = new AbortController();
+        effect.create(effect.controller.signal);
+      }
     } catch (error) {
       abortEffect(effect);
       handleEffectError(effect, error);
@@ -3134,13 +3171,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     state.instance.owner = null;
   }
 
-  function restoreConsumedPendingQueues(root: R): void {
-    for (const { queue, pending } of root.consumedPendingQueues) {
+  function restoreConsumedPendingQueues(root: R, from = 0): void {
+    for (const { queue, pending } of root.consumedPendingQueues.splice(from)) {
       queue.pending =
         queue.pending === null ? pending : mergeQueues(pending, queue.pending);
     }
-
-    root.consumedPendingQueues = [];
   }
 }
 

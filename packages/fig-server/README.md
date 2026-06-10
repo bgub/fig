@@ -37,6 +37,11 @@ return new Response(result.stream, {
 });
 ```
 
+Fig server rendering intentionally uses Web `ReadableStream`s instead of
+Node-specific streams. Web streams give Fig one streaming API for modern Node,
+edge runtimes, Deno, Bun, and browser-like hosts; Node pipeable stream helpers
+would be compatibility adapters rather than the primary SSR surface.
+
 `renderToDocumentStream` is the primary SSR API when Fig owns the whole
 document. The root must render an `<html>` element with a `<head>`. Fig prepends
 `<!doctype html>`, injects collected head resources before `</head>`, and then

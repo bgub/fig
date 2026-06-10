@@ -28,7 +28,8 @@ describe("@bgub/fig-dom scheduling", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() => root.render(createElement(Counter, null)));
-    expect(renders).toBe(1);
+    // Each pass renders twice in development (strict shadow pass).
+    expect(renders).toBe(2);
 
     batchedUpdates(() => {
       setCount?.((count) => count + 1);
@@ -38,7 +39,7 @@ describe("@bgub/fig-dom scheduling", () => {
 
     await delay();
     expect(container.textContent).toBe("2");
-    expect(renders).toBe(2);
+    expect(renders).toBe(4);
   });
 
   it("batches updates inside DOM event handlers", async () => {
@@ -70,11 +71,11 @@ describe("@bgub/fig-dom scheduling", () => {
     const button = container.childNodes[0] as FakeElement;
     button.dispatch("click");
 
-    expect(renders).toBe(1);
+    expect(renders).toBe(2);
 
     await delay();
     expect(container.textContent).toBe("2");
-    expect(renders).toBe(2);
+    expect(renders).toBe(4);
   });
 
   it("rebases skipped lower-priority state updates", async () => {
@@ -136,12 +137,12 @@ describe("@bgub/fig-dom scheduling", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() => root.render(createElement(App, null)));
-    expect([leftRenders, rightRenders]).toEqual([1, 1]);
+    expect([leftRenders, rightRenders]).toEqual([2, 2]);
 
     flushSync(() => setLeft?.((count) => count + 1));
-    expect([leftRenders, rightRenders]).toEqual([2, 1]);
+    expect([leftRenders, rightRenders]).toEqual([4, 2]);
 
     flushSync(() => setRight?.((count) => count + 1));
-    expect([leftRenders, rightRenders]).toEqual([2, 2]);
+    expect([leftRenders, rightRenders]).toEqual([4, 4]);
   });
 });

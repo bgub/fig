@@ -54,6 +54,11 @@ createRoot(container).render(<App />);
 - Effects: `useReactive`, `useBeforePaint`, `useBeforeLayout`, and
   `useOnMount`. Effects receive an `AbortSignal`; attach cleanup to
   `signal.abort`.
+- Strict development semantics, with no `StrictMode` component or opt-out:
+  development builds render components twice per pass (discarding the first
+  result) and run first-time effects and renderer `bind` callbacks twice with
+  an abort in between, so impure renders and signal-ignoring cleanup surface
+  early. Production builds strip these checks.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` reads external
   stores. Server rendering and hydration require `getServerSnapshot`.
 - `Suspense` catches pending `readPromise(promise)` reads and shows `fallback`

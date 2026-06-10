@@ -18,6 +18,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - DOM node access uses `bind={(node, signal) => ...}` instead of React refs; components forward it as a normal prop.
 - Styling should stay separate from the `events` and `bind` APIs.
 - Render diagnostics throw before commit for duplicate sibling keys, invalid children, and render-phase state updates; duplicate-key detection and DevTools commit emission are dev-only via inline `process.env.NODE_ENV !== "production"` checks that app bundlers strip.
+- There is no `StrictMode` component and no opt-out: development builds always strict-render. Each render pass invokes the component twice — a shadow pass whose hooks, effects, and consumed update queues are discarded and restored, with no reconciliation — and commits only the second invocation; effects and fig-dom `bind` callbacks run, abort, and run again with a fresh signal once per lifetime (tracked via `Effect.strictRan` / `BindSlot.strictRan`, set before the first call so re-entrant runs cannot re-enter the cycle). All strict behaviors use the same inline `NODE_ENV` gates and apply on the client only, not during server rendering.
 - `useMemo` and `useCallback` are supported for stable values and callback identities.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` is the external store API; server render and hydration require `getServerSnapshot`.
 - `useReducer` is intentionally not built in; reducer abstractions can live in libraries on top of `useState`.

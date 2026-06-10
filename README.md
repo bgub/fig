@@ -28,6 +28,10 @@ Deliberate divergences:
   `useBeforeLayout`, and `useOnMount`.
 - Effects receive an `AbortSignal`; cleanup attaches to abort instead of being
   returned from the effect.
+- No `StrictMode` component: development builds always strict-render.
+  Components render twice per pass with the first result discarded, and
+  first-time effects and `bind` callbacks run, abort, and run again with a
+  fresh signal. Production builds strip these checks.
 - DOM events use `events={[on("click", handler)]}` with native events and an
   `AbortSignal`, not `onClick` props.
 - DOM node access uses `bind={(node, signal) => ...}` instead of refs.
@@ -37,6 +41,9 @@ Deliberate divergences:
 - Context reads use `readContext(context)` because context is a render input.
 - Promise reads use `readPromise(promise)` rather than React's broad
   `use(resource)` API.
+- Server rendering uses Web `ReadableStream`s as the primary streaming model
+  instead of Node-specific streams. This keeps the same API shape across modern
+  Node, edge runtimes, Deno, Bun, and browser-like environments.
 - Document resources use explicit `resources([...], children)` wrappers and
   small helpers such as `stylesheet`, `preload`, `font`, `preconnect`, `title`,
   `meta`, and `script`; document-mode server rendering also lowers host
@@ -47,6 +54,7 @@ Deliberate divergences:
 Not goals:
 
 - Matching React's legacy or compatibility behavior.
+- Providing Node-specific server stream APIs as the default SSR surface.
 - Adding every React API before a Fig use case proves it belongs.
 
 Future goal:

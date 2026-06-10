@@ -459,24 +459,29 @@ describe("@bgub/fig-dom suspense", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
+    const primaryMount = ["primary:run", "primary:abort", "primary:run"];
+    const fallbackMount = ["fallback:run", "fallback:abort", "fallback:run"];
+
     root.render(createElement(App, { value: null }));
     await delay();
     expect(container.textContent).toBe("Primary");
-    expect(calls).toEqual(["primary:run"]);
+    expect(calls).toEqual(primaryMount);
 
     root.render(createElement(App, { value: pending.promise }));
     await delay();
     expect(container.textContent).toBe("Loading");
-    expect(calls).toEqual(["primary:run", "primary:abort", "fallback:run"]);
+    expect(calls).toEqual([...primaryMount, "primary:abort", ...fallbackMount]);
 
     pending.resolve("Primary loaded");
     await delay();
 
     expect(container.textContent).toBe("Primary loaded");
+    // The restored primary effect already strict-ran at first mount, so the
+    // remount runs it once.
     expect(calls).toEqual([
-      "primary:run",
+      ...primaryMount,
       "primary:abort",
-      "fallback:run",
+      ...fallbackMount,
       "fallback:abort",
       "primary:run",
     ]);
