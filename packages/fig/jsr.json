@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./internal": "./src/internal.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts"
   },
   "publish": {

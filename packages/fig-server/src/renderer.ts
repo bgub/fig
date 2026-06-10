@@ -4,16 +4,25 @@ import {
   type FigContext,
   type FigElement,
   type FigNode,
+  type FigResource,
   Fragment,
+  type Props,
+} from "@bgub/fig";
+import {
+  figResourceKey,
+  isClientReference,
   isContext,
   isErrorBoundary,
+  isFigResource,
   isPortal,
+  isResources,
   isSuspense,
   isValidElement,
-  type Props,
-  type RenderDispatcher,
+  resourceDestination,
+  resourceFromHostProps,
   setCurrentDispatcher,
-} from "@bgub/fig";
+  type RenderDispatcher,
+} from "@bgub/fig/internal";
 import {
   formTextContent,
   hasRenderableChild,
@@ -44,6 +53,7 @@ import {
   type Thenable,
   withContextValue,
 } from "./shared.ts";
+import { ResourceRegistry } from "./resources.ts";
 import type {
   ServerErrorPayload,
   ServerRenderOptions,
@@ -54,6 +64,7 @@ interface Request {
   abortableTasks: Set<Task>;
   allReady: Promise<void>;
   closeAllReady(): void;
+  closeHeadReady(): void;
   closeShellReady(): void;
   completedBoundaries: SuspenseBoundary[];
   completedRootSegment: Segment | null;
@@ -64,19 +75,28 @@ interface Request {
   nextSegmentId: number;
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
+  onResourceError?: ServerRenderOptions["onResourceError"];
   onShellError?: (error: unknown) => void;
   pendingRootTasks: number;
   pendingTasks: number;
   pingedTasks: Task[];
   recoverShellReady(error: unknown): void;
+  recoverHeadReady(error: unknown): void;
   recoverAllReady(error: unknown): void;
+  rootSegment: Segment;
   runtimeWritten: boolean;
+  headReady: Promise<void>;
+  headSealed: boolean;
   shellReady: Promise<void>;
   status: "opening" | "open" | "aborting" | "closed";
   stream: ReadableStream<Uint8Array>;
   textEncoder: TextEncoder;
   clientRenderedBoundaries: SuspenseBoundary[];
   partialBoundaries: SuspenseBoundary[];
+  componentResources?: ServerRenderOptions["resources"];
+  document: DocumentState | null;
+  resourceRegistry: ResourceRegistry;
+  resolveResourceKey?: ServerRenderOptions["resolveResourceKey"];
 }
 
 interface Task {
@@ -97,6 +117,7 @@ interface Segment {
   id: number | null;
   index: number;
   parentFlushed: boolean;
+  resources: FigResource[];
   status: SegmentStatus;
   write(chunk: string): void;
 }
@@ -135,34 +156,43 @@ interface StackFrame {
   parent: StackFrame | null;
 }
 
+interface DocumentState {
+  hasHead: boolean;
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  reject(this: void, error: unknown): void;
+  resolve(this: void): void;
+}
+
+interface ResourceSink {
+  nonce?: string;
+  write(chunk: string): void;
+}
+
 const errorStacks = new WeakMap<object, StackFrame>();
+const documentHeadMarker = "\u0000fig:head\u0000";
 
 export function createServerRenderRequest(
   node: FigNode,
   options: ServerRenderOptions = {},
+  mode: { document?: boolean } = {},
 ): ServerRenderRequest {
   throwIfAborted(options.signal);
 
   const textEncoder = new TextEncoder();
-  let resolveShellReady: () => void = () => undefined;
-  let rejectShellReady: (error: unknown) => void = () => undefined;
-  let resolveAllReady: () => void = () => undefined;
-  let rejectAllReady: (error: unknown) => void = () => undefined;
-
-  const shellReady = new Promise<void>((resolve, reject) => {
-    resolveShellReady = resolve;
-    rejectShellReady = reject;
-  });
-  const allReady = new Promise<void>((resolve, reject) => {
-    resolveAllReady = resolve;
-    rejectAllReady = reject;
-  });
+  const shellReady = deferred();
+  const headReady = deferred();
+  const allReady = deferred();
+  const rootSegment = createSegment(0, null);
 
   const request: Request = {
     abortableTasks: new Set<Task>(),
-    allReady,
-    closeAllReady: resolveAllReady,
-    closeShellReady: resolveShellReady,
+    allReady: allReady.promise,
+    closeAllReady: allReady.resolve,
+    closeHeadReady: headReady.resolve,
+    closeShellReady: shellReady.resolve,
     completedBoundaries: [],
     completedRootSegment: null,
     controller: null,
@@ -172,19 +202,28 @@ export function createServerRenderRequest(
     nextSegmentId: 0,
     nonce: options.nonce,
     onError: options.onError,
+    onResourceError: options.onResourceError,
     onShellError: options.onShellError,
     pendingRootTasks: 0,
     pendingTasks: 0,
     pingedTasks: [],
-    recoverAllReady: rejectAllReady,
-    recoverShellReady: rejectShellReady,
+    recoverAllReady: allReady.reject,
+    recoverHeadReady: headReady.reject,
+    recoverShellReady: shellReady.reject,
+    rootSegment,
     runtimeWritten: false,
-    shellReady,
+    headReady: headReady.promise,
+    headSealed: false,
+    shellReady: shellReady.promise,
     status: "opening",
     stream: null as never,
     textEncoder,
     clientRenderedBoundaries: [],
     partialBoundaries: [],
+    componentResources: options.resources,
+    document: mode.document === true ? { hasHead: false } : null,
+    resourceRegistry: new ResourceRegistry(options.identifierPrefix ?? ""),
+    resolveResourceKey: options.resolveResourceKey,
   };
 
   const stream = new ReadableStream<Uint8Array>({
@@ -198,7 +237,6 @@ export function createServerRenderRequest(
   });
   request.stream = stream;
 
-  const rootSegment = createSegment(0, null);
   rootSegment.parentFlushed = true;
   const rootTask = createTask(
     request,
@@ -225,10 +263,24 @@ export function createServerRenderRequest(
 
   return {
     abort: (reason?: unknown) => abort(request, reason),
-    allReady,
-    shellReady,
+    allReady: allReady.promise,
+    getHead: () => request.resourceRegistry.headHtml(request.nonce),
+    headReady: headReady.promise,
+    shellReady: shellReady.promise,
     stream,
   };
+}
+
+function deferred(): Deferred {
+  let resolve: () => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = () => resolvePromise();
+    reject = (error: unknown) => rejectPromise(error);
+  });
+
+  return { promise, reject, resolve };
 }
 
 function createTask(
@@ -275,6 +327,7 @@ function createSegment(
     id: null,
     index,
     parentFlushed: false,
+    resources: [],
     status: "pending",
     write(chunk) {
       this.chunks.push(chunk);
@@ -390,6 +443,9 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
   }
 
   if (typeof node === "string" || typeof node === "number") {
+    if (frame.request.document !== null && !frame.request.document.hasHead) {
+      if (String(node).trim() !== "") throw invalidDocumentShellError();
+    }
     writeText(String(node), frame.segment);
     return;
   }
@@ -455,6 +511,11 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
     return;
   }
 
+  if (isResources(type)) {
+    renderResources(element.props, frame);
+    return;
+  }
+
   if (isSuspense(type)) {
     renderSuspense(element.props, frame);
     return;
@@ -487,6 +548,7 @@ function renderFunctionComponent(
   frame.localIdCounter = 0;
 
   try {
+    renderComponentResources(type, frame);
     renderChildren(type(props), frame);
   } catch (error) {
     recordErrorStack(error, frame.stack);
@@ -498,6 +560,15 @@ function renderFunctionComponent(
   }
 }
 
+function renderComponentResources(type: ElementType, frame: RenderFrame): void {
+  const key = isClientReference(type)
+    ? type.id
+    : frame.request.resolveResourceKey?.(type);
+  if (key !== undefined) {
+    renderResourceValue(frame.request.componentResources?.[key], frame);
+  }
+}
+
 function renderContextProvider(
   context: FigContext<unknown>,
   props: Props,
@@ -506,6 +577,56 @@ function renderContextProvider(
   withContextValue(frame.contextValues, context, props.value, () =>
     renderChildren(props.children, frame),
   );
+}
+
+function renderResources(props: Props, frame: RenderFrame): void {
+  renderResourceValue(props.resources, frame);
+  renderChildren(props.children, frame);
+}
+
+function renderResourceValue(value: unknown, frame: RenderFrame): void {
+  if (value === undefined || value === null || value === false) return;
+
+  for (const resource of Array.isArray(value) ? value : [value]) {
+    if (!isFigResource(resource)) {
+      throw new Error("The resources prop must contain Fig resources.");
+    }
+
+    try {
+      if (frame.request.resourceRegistry.register(resource)) {
+        reportLateHeadResource(frame.request, resource, frame.stack);
+      }
+    } catch (error) {
+      recordErrorStack(error, frame.stack);
+      throw error;
+    }
+
+    frame.segment.resources.push(resource);
+  }
+}
+
+function reportLateHeadResource(
+  request: Request,
+  resource: FigResource,
+  stack: StackFrame | null,
+): void {
+  if (!request.headSealed || resourceDestination(resource) !== "head") return;
+
+  const key = figResourceKey(resource);
+  const error = new Error(
+    `Fig head resource "${key}" was discovered after headReady. Move required metadata outside pending Suspense boundaries, or wait for allReady before reading getHead().`,
+  );
+
+  try {
+    request.onResourceError?.(error, {
+      componentStack: componentStack(stack),
+      destination: "head",
+      key,
+      resource,
+    });
+  } catch {
+    // Resource diagnostics are recoverable and should not change render output.
+  }
 }
 
 function renderSuspense(props: Props, frame: RenderFrame): void {
@@ -576,6 +697,21 @@ function renderHostElement(
   props: Props,
   frame: RenderFrame,
 ): void {
+  if (renderHostResource(type, props, frame)) return;
+
+  const document = frame.request.document;
+
+  if (document !== null && !document.hasHead) {
+    if (type !== "html" && type !== "head") throw invalidDocumentShellError();
+  }
+
+  if (document !== null && type === "html") {
+    frame.segment.write("<!doctype html>");
+  }
+  if (document !== null && type === "head") {
+    document.hasHead = true;
+  }
+
   const isVoid = isVoidElement(type);
   const unsafeHTML = unsafeHTMLContent(props);
   const hasChildren = hasRenderableChild(props.children);
@@ -620,7 +756,22 @@ function renderHostElement(
   } finally {
     frame.selectProps = previousSelectProps;
   }
+  if (document !== null && type === "head") {
+    frame.segment.write(documentHeadMarker);
+  }
   writeElementEnd(type, frame.segment);
+}
+
+function renderHostResource(
+  type: string,
+  props: Props,
+  frame: RenderFrame,
+): boolean {
+  const resource = resourceFromHostProps(type, props);
+  if (resource === null) return false;
+
+  renderResourceValue(resource, frame);
+  return true;
 }
 
 function spawnSuspendedTask(
@@ -662,14 +813,16 @@ function finishedTask(request: Request, task: Task, segment: Segment): void {
   if (boundary === null) {
     request.pendingRootTasks -= 1;
     request.completedRootSegment = segment;
-    if (request.pendingRootTasks === 0) request.closeShellReady();
+    if (request.pendingRootTasks === 0) finishRootShell(request);
   } else {
     boundary.pendingTasks -= 1;
 
-    if (segment.parentFlushed) queueCompletedSegment(boundary, segment);
+    if (segment.parentFlushed) {
+      enqueueUnique(boundary.completedSegments, segment);
+    }
 
     if (!completeBoundaryIfReady(request, boundary) && boundary.parentFlushed) {
-      enqueuePartialBoundary(request, boundary);
+      enqueueUnique(request.partialBoundaries, boundary);
     }
   }
 
@@ -707,7 +860,7 @@ function abortTask(request: Request, task: Task): void {
   const boundary = task.blockedBoundary;
   if (boundary === null) {
     request.pendingRootTasks -= 1;
-    if (request.pendingRootTasks === 0) request.closeShellReady();
+    if (request.pendingRootTasks === 0) finishRootShell(request);
   } else {
     boundary.pendingTasks -= 1;
     completeBoundaryIfReady(request, boundary);
@@ -762,7 +915,9 @@ function markBoundaryClientRendered(
     abortTask(request, task);
   }
 
-  if (boundary.parentFlushed) enqueueClientRenderedBoundary(request, boundary);
+  if (boundary.parentFlushed) {
+    enqueueUnique(request.clientRenderedBoundaries, boundary);
+  }
 }
 
 function abort(request: Request, reason?: unknown): void {
@@ -795,9 +950,23 @@ function fatalError(request: Request, error: unknown): void {
   request.status = "closed";
   request.fatalError = error;
   request.onShellError?.(error);
+  request.recoverHeadReady(error);
   request.recoverShellReady(error);
   request.recoverAllReady(error);
   request.controller?.error(error);
+}
+
+function finishRootShell(request: Request): void {
+  if (request.document !== null && !request.document.hasHead) {
+    fatalError(request, invalidDocumentShellError());
+    return;
+  }
+
+  if (!request.headSealed) {
+    request.headSealed = true;
+    request.closeHeadReady();
+  }
+  request.closeShellReady();
 }
 
 function flushCompletedQueues(request: Request): void {
@@ -810,23 +979,17 @@ function flushCompletedQueues(request: Request): void {
     request.completedRootSegment = null;
   }
 
-  for (let index = 0; index < request.clientRenderedBoundaries.length; ) {
-    flushClientRenderedBoundary(
-      request,
-      request.clientRenderedBoundaries[index],
-    );
-    request.clientRenderedBoundaries.splice(index, 1);
-  }
-
-  for (let index = 0; index < request.completedBoundaries.length; ) {
-    flushCompletedBoundary(request, request.completedBoundaries[index]);
-    request.completedBoundaries.splice(index, 1);
-  }
-
-  for (let index = 0; index < request.partialBoundaries.length; ) {
-    flushPartialBoundary(request, request.partialBoundaries[index]);
-    request.partialBoundaries.splice(index, 1);
-  }
+  drainBoundaryQueue(
+    request,
+    request.clientRenderedBoundaries,
+    flushClientRenderedBoundary,
+  );
+  drainBoundaryQueue(
+    request,
+    request.completedBoundaries,
+    flushCompletedBoundary,
+  );
+  drainBoundaryQueue(request, request.partialBoundaries, flushPartialBoundary);
 
   if (
     request.pendingTasks === 0 &&
@@ -860,17 +1023,20 @@ function flushSubtree(request: Request, segment: Segment): void {
   if (segment.status === "flushed") return;
 
   segment.status = "flushed";
+  if (request.document === null || segment !== request.rootSegment) {
+    flushSegmentResources(request, segment);
+  }
   let chunkIndex = 0;
 
   for (const child of segment.children) {
     for (; chunkIndex < child.index; chunkIndex += 1) {
-      write(request, segment.chunks[chunkIndex]);
+      writeChunk(request, segment.chunks[chunkIndex], segment);
     }
     flushSegment(request, child);
   }
 
   for (; chunkIndex < segment.chunks.length; chunkIndex += 1) {
-    write(request, segment.chunks[chunkIndex]);
+    writeChunk(request, segment.chunks[chunkIndex], segment);
   }
 }
 
@@ -890,15 +1056,17 @@ function flushSuspenseBoundary(
   }
 
   boundary.id ??= request.nextBoundaryId++;
+  if (boundary.contentSegment !== null)
+    flushSegmentResources(request, boundary.contentSegment);
   write(request, `<!--fig:suspense:pending:${boundary.id}-->`);
   write(request, boundaryPlaceholderMarkup(request, boundary.id));
   flushSubtree(request, segment);
   write(request, "<!--/fig:suspense-->");
 
   if (boundary.status === "client-rendered") {
-    enqueueClientRenderedBoundary(request, boundary);
+    enqueueUnique(request.clientRenderedBoundaries, boundary);
   } else if (boundary.completedSegments.length > 0) {
-    enqueuePartialBoundary(request, boundary);
+    enqueueUnique(request.partialBoundaries, boundary);
   }
 }
 
@@ -944,21 +1112,28 @@ function flushBoundarySegment(
   if (segment === boundary.contentSegment) {
     boundary.contentSegmentId = segment.id;
   }
-  flushSegmentContainer(request, segment);
+  const blockingIds = flushSegmentContainer(request, segment);
 
   if (segment !== boundary.contentSegment) {
-    writeSegmentRevealScript(request, segment);
+    writeSegmentRevealScript(request, segment, blockingIds);
   }
 }
 
-function writeSegmentRevealScript(request: Request, segment: Segment): void {
+function writeSegmentRevealScript(
+  request: Request,
+  segment: Segment,
+  blockingIds: string[],
+): void {
   const id = requireSegmentId(segment);
   writeRuntime(request);
   writeScript(
     request,
-    `__figSSR.s(${jsString(placeholderId(request, id))},${jsString(
-      segmentId(request, id),
-    )})`,
+    withResourceGate(
+      blockingIds,
+      `__figSSR.s(${jsString(placeholderId(request, id))},${jsString(
+        segmentId(request, id),
+      )})`,
+    ),
   );
 }
 
@@ -966,17 +1141,25 @@ function writeBoundaryRevealScript(
   request: Request,
   boundary: SuspenseBoundary,
 ): void {
+  const blockingIds =
+    boundary.contentSegment === null
+      ? []
+      : flushSegmentResources(request, boundary.contentSegment);
   writeRuntime(request);
   writeScript(
     request,
-    `__figSSR.c(${jsString(
-      boundaryId(request, requireBoundaryId(boundary)),
-    )},${jsString(segmentId(request, requireBoundaryContentId(boundary)))})`,
+    withResourceGate(
+      blockingIds,
+      `__figSSR.c(${jsString(
+        boundaryId(request, requireBoundaryId(boundary)),
+      )},${jsString(segmentId(request, requireBoundaryContentId(boundary)))})`,
+    ),
   );
 }
 
-function flushSegmentContainer(request: Request, segment: Segment): void {
-  if (segment.status === "flushed") return;
+function flushSegmentContainer(request: Request, segment: Segment): string[] {
+  if (segment.status === "flushed") return [];
+  const blockingIds = flushSegmentResources(request, segment);
 
   write(
     request,
@@ -984,6 +1167,45 @@ function flushSegmentContainer(request: Request, segment: Segment): void {
   );
   flushSegment(request, segment);
   write(request, "</div>");
+  return blockingIds;
+}
+
+function flushSegmentResources(request: Request, segment: Segment): string[] {
+  const blockingIds = new Set<string>();
+  collectSegmentResources(request, segment, resourceSink(request), blockingIds);
+  return [...blockingIds];
+}
+
+function collectSegmentResources(
+  request: Request,
+  segment: Segment,
+  sink: ResourceSink,
+  blockingIds: Set<string>,
+): void {
+  if (segment.status !== "pending" && segment.status !== "rendering") {
+    flushResourceList(request, segment.resources, sink, blockingIds);
+  }
+
+  for (const child of segment.children) {
+    collectSegmentResources(request, child, sink, blockingIds);
+  }
+}
+
+function flushResourceList(
+  request: Request,
+  resources: FigResource[],
+  sink: ResourceSink,
+  blockingIds: Set<string>,
+): void {
+  for (const resource of resources) {
+    const id = request.resourceRegistry.write(resource, sink);
+    if (id !== null) blockingIds.add(id);
+  }
+}
+
+function withResourceGate(blockingIds: string[], call: string): string {
+  if (blockingIds.length === 0) return call;
+  return `__figSSR.r([${blockingIds.map(jsString).join(",")}],()=>{${call}})`;
 }
 
 function flushClientRenderedBoundary(
@@ -1000,31 +1222,20 @@ function flushClientRenderedBoundary(
   );
 }
 
-function queueCompletedSegment(
-  boundary: SuspenseBoundary,
-  segment: Segment,
+function drainBoundaryQueue(
+  request: Request,
+  queue: SuspenseBoundary[],
+  flush: (request: Request, boundary: SuspenseBoundary) => void,
 ): void {
-  if (!boundary.completedSegments.includes(segment)) {
-    boundary.completedSegments.push(segment);
+  while (queue.length > 0) {
+    const boundary = queue[0];
+    flush(request, boundary);
+    queue.splice(0, 1);
   }
 }
 
-function enqueuePartialBoundary(
-  request: Request,
-  boundary: SuspenseBoundary,
-): void {
-  if (!request.partialBoundaries.includes(boundary)) {
-    request.partialBoundaries.push(boundary);
-  }
-}
-
-function enqueueClientRenderedBoundary(
-  request: Request,
-  boundary: SuspenseBoundary,
-): void {
-  if (!request.clientRenderedBoundaries.includes(boundary)) {
-    request.clientRenderedBoundaries.push(boundary);
-  }
+function enqueueUnique<T>(queue: T[], item: T): void {
+  if (!queue.includes(item)) queue.push(item);
 }
 
 function removeQueuedBoundary(
@@ -1078,8 +1289,36 @@ function writeScript(request: Request, code: string): void {
   writeProtocolScript(request, code, (chunk) => write(request, chunk));
 }
 
+function writeChunk(request: Request, chunk: string, segment: Segment): void {
+  if (request.document === null || chunk !== documentHeadMarker) {
+    write(request, chunk);
+    return;
+  }
+
+  write(request, request.resourceRegistry.headHtml(request.nonce));
+  flushResourceList(
+    request,
+    segment.resources,
+    resourceSink(request),
+    new Set(),
+  );
+}
+
+function resourceSink(request: Request): ResourceSink {
+  return {
+    nonce: request.nonce,
+    write: (chunk) => write(request, chunk),
+  };
+}
+
 function write(request: Request, chunk: string): void {
   request.controller?.enqueue(request.textEncoder.encode(chunk));
+}
+
+function invalidDocumentShellError(): Error {
+  return new Error(
+    "renderToDocumentStream requires the root to render an <html> document with a <head>.",
+  );
 }
 
 function requireSegmentId(segment: Segment): number {

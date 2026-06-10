@@ -5,14 +5,12 @@ import {
   createPortalNode,
   ErrorBoundary,
   Fragment,
-  isContext,
   lazy,
-  isErrorBoundary,
-  isPortal,
-  isSuspense,
-  isValidElement,
   readContext,
   readPromise,
+  resources,
+  stylesheet,
+  title,
   Suspense,
   transition,
   useCallback,
@@ -23,6 +21,18 @@ import {
   useState,
   useTransition,
 } from "./index.ts";
+import {
+  isContext,
+  isErrorBoundary,
+  isPortal,
+  isResources,
+  isSuspense,
+  isValidElement,
+  resourceDestination,
+  resourceFromHostAttributes,
+  resourceFromHostProps,
+  Resources,
+} from "./internal.ts";
 
 describe("@bgub/fig", () => {
   it("creates elements with keys and normalized children", () => {
@@ -82,6 +92,52 @@ describe("@bgub/fig", () => {
     expect(isValidElement(element)).toBe(true);
     expect(element.type).toBe(LazyMessage);
     expect(element.props).toEqual({ label: "Ready" });
+  });
+
+  it("creates resource wrappers", () => {
+    const style = stylesheet("/app.css", { precedence: "app" });
+    const element = resources(style, "child");
+
+    expect(isResources(Resources)).toBe(true);
+    expect(isValidElement(element)).toBe(true);
+    expect(element.type).toBe(Resources);
+    expect(element.props).toEqual({
+      children: "child",
+      resources: style,
+    });
+  });
+
+  it("classifies resource destinations", () => {
+    expect(resourceDestination(title("Fig"))).toBe("head");
+    expect(resourceDestination(stylesheet("/app.css"))).toBe("stream");
+  });
+
+  it("lowers host resource props", () => {
+    expect(
+      resourceFromHostProps("link", {
+        href: "/app.css",
+        precedence: "app",
+        rel: "stylesheet",
+      }),
+    ).toEqual({
+      href: "/app.css",
+      kind: "stylesheet",
+      precedence: "app",
+    });
+    expect(
+      resourceFromHostProps("title", { children: ["Fig", " ", 1] }),
+    ).toEqual({ kind: "title", value: "Fig 1" });
+  });
+
+  it("reads host resources from attributes", () => {
+    const attributes = new Map([
+      ["rel", "stylesheet"],
+      ["href", "/app.css"],
+    ]);
+
+    expect(
+      resourceFromHostAttributes("link", (name) => attributes.get(name)),
+    ).toEqual({ href: "/app.css", kind: "stylesheet" });
   });
 
   it("creates portal nodes", () => {

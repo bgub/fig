@@ -2,12 +2,18 @@ import {
   createPortalNode,
   ErrorBoundary,
   type FigNode,
+  type FigResource,
   Fragment,
   type Key,
   type Props,
   Suspense,
   transition,
 } from "@bgub/fig";
+import {
+  figResourceKey,
+  resourceFromHostAttributes,
+  resourceFromHostProps,
+} from "@bgub/fig/internal";
 import {
   createRenderer,
   type DehydratedSuspenseBoundary,
@@ -69,9 +75,11 @@ export {
 } from "./priority.ts";
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
-  createInstance: (type, _props, parent) => createDomElement(type, parent),
+  createInstance: (type, props, parent) =>
+    createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
   appendInitialChild: (parent, child) => {
+    if (appendDocumentResource(child)) return;
     parent.appendChild(child);
     if (isElementNode(child)) updateParentSelect(child, true);
   },
@@ -101,12 +109,17 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     }
   },
   insertBefore: (parent, child, before) => {
+    if (appendDocumentResource(child)) return;
     parent.insertBefore(child, before);
     if (isElementNode(child)) updateParentSelect(child, true);
     attachBindSubtree(child as Element | Text);
     attachEventSubtree(child as Element | Text);
   },
   removeChild: (parent, child) => {
+    if (isDocumentResource(child)) {
+      releaseDocumentResource(child);
+      return;
+    }
     removeBindSubtree(child as Element | Text);
     removeEventSubtree(child as Element | Text);
     parent.removeChild(child);
@@ -114,8 +127,12 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   commitTextUpdate: (text, value) => {
     if (text.nodeValue !== value) text.nodeValue = value;
   },
-  commitUpdate: (instance, previousProps, nextProps) =>
-    updateElement(instance, previousProps, nextProps),
+  commitUpdate: (instance, previousProps, nextProps) => {
+    if (isDocumentResource(instance)) {
+      rekeyDocumentResource(instance, nextProps);
+    }
+    updateElement(instance, previousProps, nextProps);
+  },
   commitHydratedInstance: (instance, nextProps) =>
     hydrateElement(instance, nextProps),
   getSuspenseBoundary: (node) => suspenseBoundaryFor(node),
@@ -153,6 +170,22 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 
 const renderer = createRenderer(hostConfig);
 setEventBatching(renderer.batchedUpdates);
+
+interface DocumentResourceEntry {
+  count: number;
+  element: Element;
+}
+
+interface DocumentResourceMeta {
+  key: string;
+  kind: FigResource["kind"];
+}
+
+const documentResourceRegistries = new WeakMap<
+  Element,
+  Map<string, DocumentResourceEntry>
+>();
+const documentResourceMeta = new WeakMap<Element, DocumentResourceMeta>();
 
 export const batchedUpdates = renderer.batchedUpdates;
 export const flushSync = renderer.flushSync;
@@ -210,11 +243,134 @@ function isHydratableElement(
   return hasMatchingUnsafeHTML(node, props);
 }
 
-function createDomElement(type: string, parent: Container | Element): Element {
+function createDomElement(
+  type: string,
+  props: Props,
+  parent: Container | Element,
+): Element {
+  const resource = adoptDocumentResource(type, props);
+  if (resource !== null) return resource;
+
   const namespace = namespaceFor(type, parent);
   return namespace === htmlNamespace
     ? document.createElement(type)
     : document.createElementNS(namespace, type);
+}
+
+function adoptDocumentResource(type: string, props: Props): Element | null {
+  const head = documentHead();
+  const resource = resourceFromHostProps(type, props);
+  if (head === null || resource === null) return null;
+
+  const key = figResourceKey(resource);
+  const registry = documentResourceRegistry(head);
+  const adopted = registry.get(key);
+  const element =
+    adopted?.element ??
+    findDocumentResource(head, key) ??
+    document.createElement(type);
+
+  if (resource.kind === "title") element.textContent = "";
+
+  if (adopted === undefined) {
+    registry.set(key, { count: 1, element });
+    documentResourceMeta.set(element, { key, kind: resource.kind });
+  } else {
+    adopted.count += 1;
+  }
+
+  return element;
+}
+
+function documentResourceRegistry(
+  head: Element,
+): Map<string, DocumentResourceEntry> {
+  let registry = documentResourceRegistries.get(head);
+  if (registry === undefined) {
+    registry = new Map();
+    documentResourceRegistries.set(head, registry);
+  }
+  return registry;
+}
+
+function releaseDocumentResource(element: Element): void {
+  const head = documentHead();
+  const meta = documentResourceMeta.get(element);
+  if (head === null || meta === undefined) return;
+
+  const registry = documentResourceRegistries.get(head);
+  const entry = registry?.get(meta.key);
+  if (entry === undefined || entry.element !== element) return;
+
+  entry.count -= 1;
+  if (entry.count > 0) return;
+
+  // Stylesheets, scripts, and fetch hints persist once inserted: removal
+  // cannot undo a load and would unstyle content that still races on it.
+  // Document metadata is removed with its last owner.
+  if (meta.kind !== "title" && meta.kind !== "meta") return;
+
+  registry?.delete(meta.key);
+  documentResourceMeta.delete(element);
+  element.parentNode?.removeChild(element);
+}
+
+function rekeyDocumentResource(element: Element, nextProps: Props): void {
+  const head = documentHead();
+  const meta = documentResourceMeta.get(element);
+  const resource = resourceFromHostProps(elementName(element), nextProps);
+  if (head === null || meta === undefined || resource === null) return;
+
+  const key = figResourceKey(resource);
+  if (key === meta.key) return;
+
+  const registry = documentResourceRegistries.get(head);
+  const entry = registry?.get(meta.key);
+  if (
+    registry !== undefined &&
+    entry !== undefined &&
+    entry.element === element
+  ) {
+    registry.delete(meta.key);
+    if (!registry.has(key)) registry.set(key, entry);
+  }
+
+  meta.key = key;
+  meta.kind = resource.kind;
+}
+
+function appendDocumentResource(node: Element | TextLike): boolean {
+  if (!isDocumentResource(node)) return false;
+
+  const head = documentHead();
+  if (head === null) return true;
+  if (node.parentNode !== head) head.appendChild(node);
+  return true;
+}
+
+function isDocumentResource(node: Element | TextLike): node is Element {
+  return isElementNode(node) && documentResourceMeta.has(node);
+}
+
+function documentHead(): Element | null {
+  return typeof document !== "undefined" && document.head !== undefined
+    ? document.head
+    : null;
+}
+
+function findDocumentResource(head: Element, key: string): Element | null {
+  for (const child of Array.from(head.childNodes)) {
+    if (!isElementNode(child)) continue;
+
+    const resource = resourceFromHostAttributes(child.localName, (name) =>
+      child.getAttribute(name),
+    );
+    if (resource !== null && figResourceKey(resource) === key) {
+      return child;
+    }
+  }
+
+  return null;
 }
 
 function namespaceFor(type: string, parent: Container | Element): string {

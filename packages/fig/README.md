@@ -64,6 +64,12 @@ createRoot(container).render(<App />);
   reporting and change the boundary key to reset sticky fallback state.
 - `transition(callback)` and `useTransition()` mark updates that may preserve
   already-revealed Suspense content while new work is pending.
+- Document resources: `resources([...], children)` attaches resources to a
+  subtree while rendering only `children` on the client. Resource helpers include
+  `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.
+  Server rendering exposes `title` and `meta` as document head output; stream-safe
+  assets such as stylesheets can be emitted near the segments that depend on
+  them.
 
 ## Renderer APIs
 

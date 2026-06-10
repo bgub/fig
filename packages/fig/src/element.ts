@@ -5,6 +5,7 @@ export type Props = Record<string, any>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
+  | FigResources
   | FigClientReference<P>
   | FigErrorBoundary
   | FigSuspense
@@ -73,12 +74,23 @@ export interface FigErrorBoundary {
   readonly $$typeof: symbol;
 }
 
+export interface FigResources {
+  (props: Props & { children?: FigNode }): FigNode;
+  readonly $$typeof: symbol;
+}
+
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
 export const FigClientReferenceSymbol = Symbol.for("fig.client-reference");
 export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigPortalSymbol = Symbol.for("fig.portal");
+export const FigResourcesSymbol = Symbol.for("fig.resources");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
+
+export const Resources: FigResources = Object.assign(
+  (props: Props & { children?: FigNode }) => props.children,
+  { $$typeof: FigResourcesSymbol },
+);
 
 export const ErrorBoundary: FigErrorBoundary = Object.assign(
   (props: ErrorBoundaryProps) => props.children,
@@ -176,5 +188,12 @@ export function isErrorBoundary(value: unknown): value is FigErrorBoundary {
   return (
     typeof value === "function" &&
     (value as FigErrorBoundary).$$typeof === FigErrorBoundarySymbol
+  );
+}
+
+export function isResources(value: unknown): value is FigResources {
+  return (
+    typeof value === "function" &&
+    (value as FigResources).$$typeof === FigResourcesSymbol
   );
 }

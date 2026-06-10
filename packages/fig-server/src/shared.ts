@@ -1,9 +1,5 @@
-import type {
-  Dispatch,
-  FigContext,
-  RenderDispatcher,
-  SetStateAction,
-} from "@bgub/fig";
+import type { Dispatch, FigContext, SetStateAction } from "@bgub/fig";
+import type { RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 export type Thenable<T = unknown> = PromiseLike<T> & object;

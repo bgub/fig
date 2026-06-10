@@ -1,3 +1,5 @@
+import { escapeAttribute } from "./html.ts";
+
 interface ProtocolRequest {
   identifierPrefix: string;
   nonce?: string;
@@ -8,7 +10,7 @@ type WriteChunk = (chunk: string) => void;
 type IdentifierRequest = Pick<ProtocolRequest, "identifierPrefix">;
 
 export const serverRuntimeCode =
-  "globalThis.__figSSR??={s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},c(b,s){b=document.getElementById(b);s=document.getElementById(s);if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode;if(!p)return;while(s.firstChild)p.insertBefore(s.firstChild,b);for(let e=b,d=0;e;){if(e.nodeType===8){if(e.data.indexOf('fig:suspense:')===0)d++;else if(e.data==='/fig:suspense'){if(d===0)break;d--}}let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='fig:suspense:completed';a.__figRetry&&a.__figRetry()}},x(b,d,m){b=document.getElementById(b);if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}}}";
+  "globalThis.__figSSR??={r(a,f){let n=0,d=()=>{--n||f()};for(let i of a){let e=document.getElementById(i);if(e&&e.tagName==='LINK'&&e.rel==='stylesheet'&&!e.sheet){n++;e.addEventListener('load',d,{once:true});e.addEventListener('error',d,{once:true})}}n||f()},s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},c(b,s){b=document.getElementById(b);s=document.getElementById(s);if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode;if(!p)return;while(s.firstChild)p.insertBefore(s.firstChild,b);for(let e=b,d=0;e;){if(e.nodeType===8){if(e.data.indexOf('fig:suspense:')===0)d++;else if(e.data==='/fig:suspense'){if(d===0)break;d--}}let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='fig:suspense:completed';a.__figRetry&&a.__figRetry()}},x(b,d,m){b=document.getElementById(b);if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}}}";
 
 export function writeRuntime(
   request: ProtocolRequest,
@@ -67,15 +69,6 @@ export function boundaryId(request: IdentifierRequest, id: number): string {
 
 export function jsString(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003C");
-}
-
-function escapeAttribute(value: string): string {
-  return value.replace(/[&"<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === '"') return "&quot;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
 }
 
 function prefixedId(

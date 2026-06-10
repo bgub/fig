@@ -8,19 +8,21 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  type Key,
+  type Props,
+  readPromise,
+  Suspense,
+} from "@bgub/fig";
+import {
   isClientReference,
   isContext,
   isErrorBoundary,
   isPortal,
   isSuspense,
   isValidElement,
-  type Key,
-  type Props,
-  type RenderDispatcher,
-  readPromise,
-  Suspense,
   setCurrentDispatcher,
-} from "@bgub/fig";
+  type RenderDispatcher,
+} from "@bgub/fig/internal";
 import {
   type ContextValues,
   cloneContextValues,

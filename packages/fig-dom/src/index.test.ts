@@ -110,4 +110,159 @@ describe("@bgub/fig-dom", () => {
     expect(math.namespaceURI).toBe("http://www.w3.org/1998/Math/MathML");
     expect(mi.namespaceURI).toBe("http://www.w3.org/1998/Math/MathML");
   });
+
+  it("adopts document resources into head without duplicating server tags", () => {
+    const { container, head, root } = documentResourceRoot();
+    const existing = new FakeElement("link");
+    existing.setAttribute("rel", "stylesheet");
+    existing.setAttribute("href", "/app.css");
+    head.appendChild(existing);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("link", {
+            href: "/app.css",
+            rel: "stylesheet",
+          }),
+          "Ready",
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Ready");
+    expect(head.childNodes).toHaveLength(1);
+    expect(head.childNodes[0]).toBe(existing);
+  });
+
+  it("renders identical sibling resources as one head element", () => {
+    const { head, root } = documentResourceRoot();
+    const link = () =>
+      createElement("link", { href: "/app.css", rel: "stylesheet" });
+
+    flushSync(() => root.render(createElement("main", null, link(), link())));
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/app.css",
+      rel: "stylesheet",
+    });
+  });
+
+  it("removes document metadata from the head with its last owner", () => {
+    const { container, head, root } = documentResourceRoot();
+    const description = () =>
+      createElement("meta", { content: "Fig", name: "description" });
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("title", null, "Settings"),
+          description(),
+          description(),
+          "Body",
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(2);
+    expect((head.childNodes[0] as FakeElement).textContent).toBe("Settings");
+
+    flushSync(() =>
+      root.render(createElement("main", null, description(), "Body")),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      content: "Fig",
+      name: "description",
+    });
+
+    flushSync(() => root.render(createElement("main", null, "Body")));
+
+    expect(head.childNodes).toHaveLength(0);
+    expect(container.textContent).toBe("Body");
+  });
+
+  it("keeps stylesheets in the head after their owner unmounts", () => {
+    const { head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("link", { href: "/app.css", rel: "stylesheet" }),
+          "Styled",
+        ),
+      ),
+    );
+    flushSync(() => root.render(createElement("main", null, "Plain")));
+
+    expect(head.childNodes).toHaveLength(1);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("link", { href: "/app.css", rel: "stylesheet" }),
+          "Styled",
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+  });
+
+  it("re-keys document resources when their props change", () => {
+    const { head, root } = documentResourceRoot();
+    const app = (href: string) =>
+      createElement(
+        "main",
+        null,
+        createElement("link", { href, rel: "stylesheet" }),
+      );
+
+    flushSync(() => root.render(app("/one.css")));
+    flushSync(() => root.render(app("/two.css")));
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/two.css",
+      rel: "stylesheet",
+    });
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("link", { href: "/two.css", rel: "stylesheet" }),
+          createElement("link", { href: "/two.css", rel: "stylesheet" }),
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+  });
 });
+
+function documentResourceRoot(): {
+  container: FakeElement;
+  head: FakeElement;
+  root: ReturnType<typeof createRoot>;
+} {
+  const container = new FakeElement("root");
+  const head = new FakeElement("head");
+  (document as unknown as { head: Element }).head = head as unknown as Element;
+  return {
+    container,
+    head,
+    root: createRoot(container as unknown as Element),
+  };
+}

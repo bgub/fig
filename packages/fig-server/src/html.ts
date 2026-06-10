@@ -1,4 +1,5 @@
-import { isPortal, type Props } from "@bgub/fig";
+import type { Props } from "@bgub/fig";
+import { isPortal } from "@bgub/fig/internal";
 
 interface HtmlSink {
   write(chunk: string): void;
@@ -274,7 +275,7 @@ function escapeText(value: string): string {
   });
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return value.replace(/[&"<>]/g, (character) => {
     if (character === "&") return "&amp;";
     if (character === '"') return "&quot;";

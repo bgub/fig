@@ -1,4 +1,9 @@
-import type { FigNode } from "@bgub/fig";
+import type {
+  ElementType,
+  FigNode,
+  FigResource,
+  FigResourceList,
+} from "@bgub/fig";
 
 export interface ServerRenderOptions {
   /**
@@ -11,7 +16,10 @@ export interface ServerRenderOptions {
     error: unknown,
     info: ServerErrorInfo,
   ) => ServerErrorPayload | undefined;
+  onResourceError?: (error: unknown, info: ServerResourceErrorInfo) => void;
   onShellError?: (error: unknown) => void;
+  resolveResourceKey?: (type: ElementType) => string | undefined;
+  resources?: Record<string, FigResourceList>;
   signal?: AbortSignal;
 }
 
@@ -24,15 +32,39 @@ export interface ServerErrorPayload {
   message?: string;
 }
 
-export interface ServerRenderRequest {
+export interface ServerResourceErrorInfo {
+  componentStack: string;
+  destination: ServerResourceDestination;
+  key: string;
+  resource: FigResource;
+}
+
+export type ServerResourceDestination = "head" | "stream";
+
+interface ServerStreamRenderResult {
   abort(reason?: unknown): void;
   allReady: Promise<void>;
+  contentType: "text/html; charset=utf-8";
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;
 }
 
-export interface ServerRenderResult extends ServerRenderRequest {
-  contentType: "text/html; charset=utf-8";
+export interface ServerDocumentRenderResult extends ServerStreamRenderResult {}
+
+export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
+  getHead(): string;
+  headReady: Promise<void>;
 }
+
+export interface ServerRenderRequest {
+  abort(reason?: unknown): void;
+  allReady: Promise<void>;
+  getHead(): string;
+  headReady: Promise<void>;
+  shellReady: Promise<void>;
+  stream: ReadableStream<Uint8Array>;
+}
+
+export type ServerRenderResult = ServerFragmentRenderResult;
 
 export type ServerRenderable = FigNode;

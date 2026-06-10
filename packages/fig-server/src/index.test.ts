@@ -7,7 +7,15 @@ import {
   lazy,
   readContext,
   readPromise,
+  font,
+  meta,
+  preload,
+  preconnect,
+  resources,
+  script,
+  stylesheet,
   Suspense,
+  title,
   useExternalStore,
   useId,
   useLaggedValue,
@@ -17,7 +25,12 @@ import {
   useTransition,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { renderToReadableStream, renderToString } from "./index.ts";
+import {
+  renderDocumentToString,
+  renderToDocumentStream,
+  renderToReadableStream,
+  renderToString,
+} from "./index.ts";
 import { jsString } from "./protocol.ts";
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -261,6 +274,374 @@ describe("@bgub/fig-server", () => {
     );
 
     expect(html).toBe("<section><span>light</span><span>dark</span></section>");
+  });
+
+  it("hoists explicit document resources during server render", async () => {
+    const result = renderToReadableStream(
+      createElement(
+        "main",
+        null,
+        resources(
+          [
+            title("Fig & resources"),
+            meta({ name: "description", content: "Fast < UI" }),
+            preconnect("https://cdn.example.com", { crossOrigin: "anonymous" }),
+            preload("/hero.png", "image", { fetchPriority: "high" }),
+            font("/font.woff2", "font/woff2"),
+            stylesheet("/app.css", { precedence: "app" }),
+            stylesheet("/app.css", { precedence: "app" }),
+            script("/app.js", { module: true }),
+          ],
+          createElement("h1", null, "Ready"),
+        ),
+      ),
+      { nonce: "abc" },
+    );
+
+    await result.headReady;
+    expect(result.getHead()).toBe(
+      '<title>Fig &amp; resources</title><meta name="description" content="Fast &lt; UI">',
+    );
+
+    const html = await readStream(result.stream);
+
+    expect(html).toBe(
+      '<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous" nonce="abc"><link rel="preload" href="/hero.png" as="image" fetchpriority="high" nonce="abc"><link rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin="anonymous" nonce="abc"><link rel="stylesheet" href="/app.css" id="r-0" data-precedence="app" nonce="abc"><script src="/app.js" type="module" async nonce="abc"></script><main><h1>Ready</h1></main>',
+    );
+  });
+
+  it("does not emit head-only resources into the body stream", async () => {
+    const html = await renderToString(
+      resources(
+        [title("Head only"), meta({ name: "robots", content: "noindex" })],
+        createElement("main", null, "Ready"),
+      ),
+    );
+
+    expect(html).toBe("<main>Ready</main>");
+  });
+
+  it("renders full documents with collected head resources", async () => {
+    function Page() {
+      return createElement(
+        "html",
+        { lang: "en" },
+        createElement(
+          "head",
+          null,
+          createElement("meta", { charset: "utf-8" }),
+        ),
+        createElement(
+          "body",
+          null,
+          resources(
+            [
+              title("Document"),
+              meta({ name: "description", content: "SSR" }),
+              stylesheet("/app.css", { precedence: "app" }),
+            ],
+            createElement("main", null, "Ready"),
+          ),
+        ),
+      );
+    }
+
+    await expect(
+      renderDocumentToString(createElement(Page, null)),
+    ).resolves.toBe(
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" id="r-0" data-precedence="app"></head><body><main>Ready</main></body></html>',
+    );
+  });
+
+  it("lowers host document resource tags into the resource registry", async () => {
+    function Page() {
+      return createElement(
+        "html",
+        null,
+        createElement(
+          "head",
+          null,
+          createElement("meta", { charset: "utf-8" }),
+        ),
+        createElement(
+          "body",
+          null,
+          createElement("title", null, "Host Tags"),
+          createElement("meta", { name: "description", content: "Host" }),
+          createElement("link", {
+            href: "/host.css",
+            precedence: "app",
+            rel: "stylesheet",
+          }),
+          createElement("script", {
+            src: "/host.js",
+            type: "module",
+          }),
+          createElement("main", null, "Ready"),
+        ),
+      );
+    }
+
+    await expect(
+      renderDocumentToString(createElement(Page, null)),
+    ).resolves.toBe(
+      '<!doctype html><html><head><meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" id="r-0" data-precedence="app"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>',
+    );
+  });
+
+  it("streams document bodies while injecting head resources once", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return resources(
+        stylesheet("/message.css"),
+        createElement("span", null, readPromise(pending.promise)),
+      );
+    }
+
+    const result = renderToDocumentStream(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          resources(
+            title("Stream"),
+            createElement(
+              Suspense,
+              { fallback: createElement("em", null, "Loading") },
+              createElement(Message, null),
+            ),
+          ),
+        ),
+      ),
+      { identifierPrefix: "doc" },
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain(
+      "<!doctype html><html><head><title>Stream</title></head><body>",
+    );
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).toContain(
+      '<link rel="stylesheet" href="/message.css" id="doc-r-0">',
+    );
+    expect(html).toContain(
+      '__figSSR.r(["doc-r-0"],()=>{__figSSR.c("doc-b-0","doc-s-0")})',
+    );
+    expect(html.indexOf("<title>Stream</title>")).toBe(
+      html.lastIndexOf("<title>Stream</title>"),
+    );
+  });
+
+  it("rejects document streams without an html head shell", async () => {
+    await expect(
+      renderDocumentToString(createElement("main", null, "Ready")),
+    ).rejects.toThrow(
+      "renderToDocumentStream requires the root to render an <html> document with a <head>.",
+    );
+  });
+
+  it("keeps late document metadata out of an already-flushed document head", async () => {
+    const pending = deferred<string>();
+    const diagnostics: string[] = [];
+
+    function Message() {
+      return resources(
+        title(`Late ${readPromise(pending.promise)}`),
+        createElement("span", null, "Ready"),
+      );
+    }
+
+    const result = renderToDocumentStream(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          createElement(
+            Suspense,
+            { fallback: createElement("em", null, "Loading") },
+            createElement(Message, null),
+          ),
+        ),
+      ),
+      {
+        onResourceError(_error, info) {
+          diagnostics.push(info.key);
+        },
+      },
+    );
+
+    await result.shellReady;
+    pending.resolve("Title");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain("<head></head>");
+    expect(html).not.toContain("<title>Late Title</title>");
+    expect(diagnostics).toEqual(["title"]);
+  });
+
+  it("reports late head resources while keeping them out of the stream", async () => {
+    const pending = deferred<string>();
+    const diagnostics: Array<{ componentStack: string; key: string }> = [];
+
+    function Message() {
+      const value = readPromise(pending.promise);
+      return resources(
+        title(`Late ${value}`),
+        createElement("span", null, value),
+      );
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Message, null),
+      ),
+      {
+        onResourceError(error, info) {
+          expect(error).toBeInstanceOf(Error);
+          diagnostics.push({
+            componentStack: info.componentStack,
+            key: info.key,
+          });
+        },
+      },
+    );
+
+    await result.headReady;
+    expect(result.getHead()).toBe("");
+
+    pending.resolve("Ready");
+    await result.allReady;
+    expect(result.getHead()).toBe("<title>Late Ready</title>");
+    expect(diagnostics).toEqual([
+      {
+        componentStack: "\n    at Message",
+        key: "title",
+      },
+    ]);
+
+    const html = await readStream(result.stream);
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).not.toContain("<title>");
+  });
+
+  it("rejects conflicting duplicate document resources", async () => {
+    await expect(
+      renderToString(
+        resources(
+          [stylesheet("/app.css"), stylesheet("/app.css", { media: "print" })],
+          createElement("main", null, "Ready"),
+        ),
+      ),
+    ).rejects.toThrow(
+      'Conflicting Fig resource for key "stylesheet:/app.css".',
+    );
+  });
+
+  it("gates streamed Suspense reveals on hoisted stylesheets", async () => {
+    const pending = deferred<string>();
+
+    function Text() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    function Message() {
+      return resources(stylesheet("/message.css"), createElement(Text, null));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement("div", null, createElement(Message, null)),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+
+    expect(html).toContain(
+      '<link rel="stylesheet" href="/message.css" id="test-r-0">',
+    );
+    expect(html).toContain(
+      '__figSSR.r(["test-r-0"],()=>{__figSSR.c("test-b-0","test-s-0")})',
+    );
+  });
+
+  it("discovers resources from resolved component module ids", async () => {
+    function Card() {
+      return createElement("section", null, "Card");
+    }
+
+    const result = renderToReadableStream(createElement(Card, null), {
+      resolveResourceKey: (type) =>
+        type === Card ? "app/card.tsx" : undefined,
+      resources: {
+        "app/card.tsx": [
+          title("Card"),
+          stylesheet("/card.css", { blocking: "none" }),
+        ],
+      },
+    });
+
+    await result.headReady;
+    expect(result.getHead()).toBe("<title>Card</title>");
+
+    const html = await readStream(result.stream);
+    expect(html).toBe(
+      '<link rel="stylesheet" href="/card.css"><section>Card</section>',
+    );
+  });
+
+  it("gates Suspense reveals on manifest-discovered stylesheets", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Message, null),
+      ),
+      {
+        identifierPrefix: "manifest",
+        resolveResourceKey: (type) =>
+          type === Message ? "app/message.tsx" : undefined,
+        resources: { "app/message.tsx": stylesheet("/message.css") },
+      },
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain(
+      '<link rel="stylesheet" href="/message.css" id="manifest-r-0">',
+    );
+    expect(html).toContain(
+      '__figSSR.r(["manifest-r-0"],()=>{__figSSR.c("manifest-b-0","manifest-s-0")})',
+    );
   });
 
   it("streams Suspense fallback at shell ready", async () => {

@@ -13,6 +13,7 @@ export type FigDevtoolsFiberKind =
   | "text"
   | "function"
   | "fragment"
+  | "resources"
   | "context-provider"
   | "suspense"
   | "error-boundary"

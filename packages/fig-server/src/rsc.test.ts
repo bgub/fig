@@ -7,11 +7,11 @@ import {
   type FigNode,
   Fragment,
   lazy,
-  isValidElement,
   readContext,
   readPromise,
   Suspense,
 } from "@bgub/fig";
+import { isValidElement } from "@bgub/fig/internal";
 import { describe, expect, it } from "vite-plus/test";
 import {
   createRscResponse,
