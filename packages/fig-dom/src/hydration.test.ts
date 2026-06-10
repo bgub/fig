@@ -1,5 +1,6 @@
 import {
   createElement,
+  readPromise,
   Suspense,
   useExternalStore,
   useId,
@@ -247,6 +248,52 @@ describe("@bgub/fig-dom hydration", () => {
 
     button.dispatch("click");
     expect(calls).toEqual(["click"]);
+  });
+
+  it("keeps completed Suspense boundaries dehydrated when hydration suspends", async () => {
+    const { container, content, end, start } = suspenseDom(
+      "completed",
+      "button",
+      "Server",
+    );
+    let resolve: (value: string) => void = () => undefined;
+    const promise = new Promise<string>((done) => {
+      resolve = done;
+    });
+    const errors: string[] = [];
+
+    function Content() {
+      return createElement("button", null, readPromise(promise));
+    }
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Content, null),
+        ),
+        {
+          onRecoverableError(error) {
+            errors.push((error as Error).message);
+          },
+        },
+      ),
+    );
+
+    await delay();
+
+    expect(container.childNodes).toEqual([start, content, end]);
+    expect(content.textContent).toBe("Server");
+    expect(errors).toEqual([]);
+
+    resolve("Client");
+    await delay();
+
+    expect(container.childNodes).toEqual([content]);
+    expect(content.textContent).toBe("Client");
+    expect(errors).toEqual([]);
   });
 
   it("keeps pending Suspense boundaries dehydrated when interaction selects them", () => {

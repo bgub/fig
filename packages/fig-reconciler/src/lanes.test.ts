@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   AllTransitionLanes,
+  claimNextRetryLane,
   createLaneMap,
   DefaultLane,
   getEntangledLanes,
@@ -20,6 +21,7 @@ import {
   NoTimestamp,
   OffscreenLane,
   requestUpdateLane,
+  RetryLanes,
   runWithPriority,
   runWithTransition,
   SyncLane,
@@ -63,6 +65,23 @@ describe("lanes", () => {
     });
 
     expect(requestUpdateLane()).toBe(DefaultLane);
+  });
+
+  it("claims retry lanes round-robin", () => {
+    const first = claimNextRetryLane();
+    const claimed = [
+      first,
+      claimNextRetryLane(),
+      claimNextRetryLane(),
+      claimNextRetryLane(),
+    ];
+
+    for (const lane of claimed) {
+      expect(includesSomeLane(RetryLanes, lane)).toBe(true);
+    }
+
+    expect(new Set(claimed).size).toBe(4);
+    expect(claimNextRetryLane()).toBe(first);
   });
 
   it("tracks scoped transition priority", () => {

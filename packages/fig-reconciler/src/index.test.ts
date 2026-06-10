@@ -1,11 +1,16 @@
 import {
   createElement,
   ErrorBoundary,
+  meta,
   readPromise,
+  resources,
+  stylesheet,
   Suspense,
+  title,
   useMemo,
   useState,
 } from "@bgub/fig";
+import { Resources } from "@bgub/fig/internal";
 import { requestPaint } from "@bgub/fig-scheduler";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
@@ -148,6 +153,45 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("HeaderLoadedFooter");
   });
 
+  it("retries a boundary that suspends again during a retry render", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let resolveFirst: (value: string) => void = () => undefined;
+    let resolveSecond: (value: string) => void = () => undefined;
+    const first = new Promise<string>((done) => {
+      resolveFirst = done;
+    });
+    const second = new Promise<string>((done) => {
+      resolveSecond = done;
+    });
+
+    function Message() {
+      const start = readPromise(first);
+      const rest = readPromise(second);
+      return createElement("span", null, `${start}${rest}`);
+    }
+
+    function App() {
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(Message, null),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Loading");
+
+    resolveFirst("Hello ");
+    await delay();
+    expect(container.textContent).toBe("Loading");
+
+    resolveSecond("World");
+    await delay();
+    expect(container.textContent).toBe("Hello World");
+  });
+
   it("publishes committed fiber snapshots to the Fig DevTools hook", () => {
     const commits = collectDevtoolsCommits();
     const { createRoot, flushSync } = createRenderer(host);
@@ -209,6 +253,71 @@ describe("reconciler", () => {
       name: "Suspense",
     });
     expect(suspense?.children[0]?.name).toBe("span");
+  });
+
+  it("publishes resource wrappers as transparent fibers", () => {
+    const commits = collectDevtoolsCommits();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() =>
+      root.render(
+        resources(stylesheet("/app.css"), createElement("span", null, "Ready")),
+      ),
+    );
+
+    const wrapper = commits.at(-1)?.tree.children[0];
+    expect(wrapper).toMatchObject({
+      kind: "resources",
+      name: "Resources",
+    });
+    expect(wrapper?.children[0]?.name).toBe("span");
+    expect(container.textContent).toBe("Ready");
+  });
+
+  it("preserves child state when keyed resource metadata changes", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let increment = () => undefined;
+
+    function Counter() {
+      const [count, setCount] = useState(0);
+      increment = () => {
+        setCount((value) => value + 1);
+      };
+      return createElement("span", null, `Count ${count}`);
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Resources,
+          { key: "document", resources: title("One") },
+          createElement(Counter, null),
+        ),
+      ),
+    );
+    flushSync(() => increment());
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Resources,
+          {
+            key: "document",
+            resources: [
+              title("Two"),
+              meta({ name: "description", content: "Two" }),
+            ],
+          },
+          createElement(Counter, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Count 1");
   });
 
   it("publishes captured error boundary state to DevTools", () => {

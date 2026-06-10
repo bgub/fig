@@ -111,16 +111,8 @@ export function mergeLanes(a: Lanes, b: Lanes): Lanes {
   return a | b;
 }
 
-export function removeLanes(set: Lanes, subset: Lanes): Lanes {
-  return set & ~subset;
-}
-
 export function includesSomeLane(set: Lanes, subset: Lanes): boolean {
   return (set & subset) !== NoLanes;
-}
-
-export function isSubsetOfLanes(set: Lanes, subset: Lanes): boolean {
-  return (set & subset) === subset;
 }
 
 export function getHighestPriorityLane(lanes: Lanes): Lane {
@@ -295,10 +287,6 @@ export function isSyncLane(lane: Lane): boolean {
 
 export function includesOnlyTransitions(lanes: Lanes): boolean {
   return (lanes & AllTransitionLanes) === lanes;
-}
-
-export function includesOnlyIdleLanes(lanes: Lanes): boolean {
-  return (lanes & IdleLanes) === lanes;
 }
 
 export function getLanePriority(lane: Lane): LanePriority {

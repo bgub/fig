@@ -11,18 +11,21 @@ import {
   type FigNode,
   type FigPortal,
   Fragment,
+  type Props,
+  type SetStateAction,
+  type StartTransition,
+} from "@bgub/fig";
+import {
   isContext,
   isErrorBoundary,
   isPortal,
+  isResources,
   isSuspense,
   isValidElement,
-  type Props,
-  type RenderDispatcher,
-  type SetStateAction,
-  type StartTransition,
   setCurrentDispatcher,
   setTransitionHandler,
-} from "@bgub/fig";
+  type RenderDispatcher,
+} from "@bgub/fig/internal";
 import {
   NormalPriority,
   now,
@@ -41,6 +44,7 @@ import {
   getFigDevtoolsGlobalHook,
 } from "./devtools.ts";
 import {
+  claimNextRetryLane,
   claimNextTransitionLane,
   createLaneMap,
   DefaultHydrationLane,
@@ -65,6 +69,7 @@ import {
   NoLanes,
   NoTimestamp,
   requestUpdateLane,
+  RetryLanes,
   runWithPriority,
   runWithTransition,
   SelectiveHydrationLane,
@@ -73,7 +78,24 @@ import {
 import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
 export * from "./devtools.ts";
-export * from "./lanes.ts";
+export {
+  DefaultLane,
+  DeferredLane,
+  GestureLane,
+  IdleLane,
+  InputContinuousLane,
+  type Lane,
+  type LanePriority,
+  type Lanes,
+  OffscreenLane,
+  requestUpdateLane,
+  runWithPriority,
+  runWithTransition,
+  SyncLane,
+  TransitionLane,
+} from "./lanes.ts";
+
+declare const process: { env: { NODE_ENV?: string } };
 
 setTransitionHandler(runWithTransition);
 
@@ -216,6 +238,7 @@ const ContextProviderTag = 5;
 const SuspenseTag = 6;
 const ErrorBoundaryTag = 7;
 const PortalTag = 8;
+const ResourcesTag = 9;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -225,7 +248,8 @@ type Tag =
   | typeof ContextProviderTag
   | typeof SuspenseTag
   | typeof ErrorBoundaryTag
-  | typeof PortalTag;
+  | typeof PortalTag
+  | typeof ResourcesTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -368,7 +392,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   >;
   consumedPendingQueues: ConsumedPendingQueue[];
   onRecoverableError: (error: unknown, info: RecoverableErrorInfo) => void;
-  onUncaughtError: (error: unknown, info: ErrorInfo) => void;
+  onUncaughtError: ((error: unknown, info: ErrorInfo) => void) | null;
   recoverableErrors: RecoverableErrorRecord[];
   uncaughtErrorInfo: ErrorInfo | null;
   isHydrating: boolean;
@@ -411,12 +435,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   const roots = new WeakMap<object, R>();
   const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
-  const devtoolsFiberIds = new WeakMap<object, number>();
-  const devtoolsRootIds = new WeakMap<object, number>();
+  const abandonedHydrationBoundaries = new WeakSet<object>();
   let batchDepth = 0;
-  let devtoolsRendererId: number | null = null;
-  let nextDevtoolsFiberId = 1;
-  let nextDevtoolsRootId = 1;
+  let flushingSyncWork = false;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -534,7 +555,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       suspendedBoundaries: new WeakMap(),
       consumedPendingQueues: [],
       onRecoverableError: options.onRecoverableError ?? noop,
-      onUncaughtError: options.onUncaughtError ?? noop,
+      onUncaughtError: options.onUncaughtError ?? null,
       recoverableErrors: [],
       uncaughtErrorInfo: null,
       isHydrating: false,
@@ -600,15 +621,20 @@ export function createRenderer<Container, Instance, TextInstance>(
   function flushSync(callback: () => void): void {
     runWithPriority(SyncLane, callback);
 
-    for (const root of pendingRoots) {
-      if (root.pendingLanes !== NoLanes) {
-        root.callback?.cancel();
-        root.callback = null;
-        root.callbackPriority = NoLane;
-        performRoot(root, true);
-      } else {
-        pendingRoots.delete(root);
+    flushingSyncWork = true;
+    try {
+      for (const root of pendingRoots) {
+        if (root.pendingLanes !== NoLanes) {
+          root.callback?.cancel();
+          root.callback = null;
+          root.callbackPriority = NoLane;
+          performRoot(root, true);
+        } else {
+          pendingRoots.delete(root);
+        }
       }
+    } finally {
+      flushingSyncWork = false;
     }
   }
 
@@ -696,7 +722,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       restartRootWork(root);
       clearRootAfterUncaughtError(root);
       reportUncaughtError(root, error, info);
-      throw error;
+
+      // flushSync callers observe the error directly. Outside flushSync the
+      // error must not escape into the scheduler tick (that would stall other
+      // queued tasks), so without an onUncaughtError handler it is rethrown
+      // from a detached task to surface as a global error.
+      if (flushingSyncWork) throw error;
+      if (root.onUncaughtError === null) {
+        setTimeout(() => {
+          throw error;
+        });
+      }
     }
   }
 
@@ -1237,6 +1273,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void {
+    abandonedHydrationBoundaries.delete(node);
+    if (node.alternate !== null) {
+      abandonedHydrationBoundaries.delete(node.alternate);
+    }
+
     if (!boundary.forceClientRender) {
       if (boundary.status === "completed") {
         enterSuspenseHydration(node, boundary);
@@ -1342,14 +1383,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateIdHook(): string {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    const fiber = requireRenderingFiber();
     const oldHook = updateHook("id") as Hook<string> | null;
     const id =
       oldHook === null
-        ? createFiberId(rootOf(renderingFiber), renderingFiber, localIdCounter)
+        ? createFiberId(rootOf(fiber), fiber, localIdCounter)
         : oldHook.memoizedState;
     localIdCounter += 1;
 
@@ -1358,10 +1396,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateMemoHook<T>(calculate: () => T, deps: DependencyList): T {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    requireRenderingFiber();
     const previous = (updateHook("memo") as Hook<MemoState<T>> | null)
       ?.memoizedState;
     const state =
@@ -1378,10 +1413,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     initialValue: T | undefined,
     hasInitialValue: boolean,
   ): T {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    const fiber = requireRenderingFiber();
     const oldHook = updateHook("lagged-value") as Hook<T> | null;
     let next =
       oldHook === null
@@ -1389,10 +1421,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         : oldHook.memoizedState;
 
     if (!Object.is(next, value)) {
-      if (isTransitionOrDeferredRender(rootOf(renderingFiber))) {
+      if (isTransitionOrDeferredRender(rootOf(fiber))) {
         next = value;
       } else {
-        scheduleFiber(renderingFiber, DeferredLane);
+        scheduleFiber(fiber, DeferredLane);
       }
     }
 
@@ -1478,10 +1510,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     kind: QueuedHookKind,
     initialState: S | (() => S),
   ): Hook<S> {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    const fiber = requireRenderingFiber();
     const oldHook = updateHook(kind) as Hook<S> | null;
     const hook: Hook<S> =
       oldHook === null
@@ -1490,7 +1519,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     appendHook(hook);
 
-    const root = rootOf(renderingFiber);
+    const root = rootOf(fiber);
     const pending = hook.queue.pending;
     if (pending !== null) {
       hook.baseQueue = consumePendingHookQueue(root, hook, hook.queue, pending);
@@ -1508,14 +1537,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     getSnapshot: () => T,
     getServerSnapshot?: () => T,
   ): T {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    const fiber = requireRenderingFiber();
     const oldHook = updateHook("external-store") as Hook<
       ExternalStoreState<T, F>
     > | null;
-    const root = rootOf(renderingFiber);
+    const root = rootOf(fiber);
     const value = readExternalStoreSnapshot(
       root,
       getSnapshot,
@@ -1654,10 +1680,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     create: EffectCallback,
     deps?: DependencyList,
   ): void {
-    if (renderingFiber === null) {
-      throw new Error("Hooks can only be called while rendering a component.");
-    }
-
+    const fiber = requireRenderingFiber();
     const oldHook = updateHook(kind) as Hook<Effect> | null;
     const nextDeps = deps ?? null;
     const previousEffect = oldHook?.memoizedState ?? null;
@@ -1671,15 +1694,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       create,
       controller: previousEffect?.controller ?? null,
       deps: nextDeps,
-      owner: renderingFiber as Fiber<unknown, unknown, unknown>,
+      owner: fiber as Fiber<unknown, unknown, unknown>,
     };
     const hook = createHook(kind, effect);
 
     appendHook(hook);
 
     if (hasChanged) {
-      renderingFiber.effects ??= [];
-      renderingFiber.effects.push(effect);
+      fiber.effects ??= [];
+      fiber.effects.push(effect);
     }
   }
 
@@ -2005,7 +2028,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     flushCaughtBoundaryErrors(root, finishedWork.child);
     collectReactiveEffects(root, finishedWork.child);
     scheduleReactiveEffects(root);
-    emitDevtoolsCommit(root);
+    if (process.env.NODE_ENV !== "production") emitDevtoolsCommit(host, root);
     flushRecoverableErrors(root);
   }
 
@@ -2031,11 +2054,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): void {
     if (node === null) return;
 
-    if (
-      node.suspenseState?.kind === "dehydrated" &&
-      dehydratedSuspenseRetryLane(node.suspenseState.boundary) !== NoLane
-    ) {
-      boundaries.push(node);
+    if (node.suspenseState?.kind === "dehydrated") {
+      if (
+        !abandonedHydrationBoundaries.has(node) &&
+        dehydratedSuspenseRetryLane(node.suspenseState.boundary) !== NoLane
+      ) {
+        boundaries.push(node);
+      }
       return;
     }
 
@@ -2103,7 +2128,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function reportUncaughtError(root: R, error: unknown, info: ErrorInfo): void {
     try {
-      root.onUncaughtError(error, info);
+      root.onUncaughtError?.(error, info);
     } catch {
       // Error reporting should not corrupt already-failed recovery work.
     }
@@ -2570,6 +2595,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     const lanes = root.renderLanes;
     attachSuspensePing(root, boundary, thenable, lanes);
 
+    const dehydrated = boundary.alternate?.suspenseState;
+    if (
+      root.hydratingSuspenseBoundary === boundary &&
+      dehydrated?.kind === "dehydrated"
+    ) {
+      // Hydrating this boundary suspended. Abandon the attempt and stay
+      // dehydrated so the server-rendered content survives; the attached ping
+      // retries hydration once the thenable settles, so commit-time retry
+      // scheduling must skip the boundary until then.
+      leaveSuspenseHydration(root, boundary, dehydrated.boundary);
+      boundary.suspenseState = dehydrated;
+      boundary.flags &= ~HydrationFlag;
+      boundary.child = null;
+      abandonedHydrationBoundaries.add(boundary);
+      if (boundary.alternate !== null) {
+        abandonedHydrationBoundaries.add(boundary.alternate);
+      }
+      return completeUnit(boundary);
+    }
+
     if (shouldPreserveSuspenseBoundary(root, boundary)) {
       markRootSuspended(root, lanes);
       throw PreservedSuspense;
@@ -2669,7 +2714,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
 
     if (lanes !== NoLanes) {
-      scheduleFiber(node, getHighestPriorityLane(lanes));
+      scheduleFiber(node, suspenseRetryLane(lanes));
     }
 
     for (let child = node.child; child !== null; child = child.sibling) {
@@ -2887,6 +2932,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "ErrorBoundary";
       case PortalTag:
         return "Portal";
+      case ResourcesTag:
+        return "Resources";
       default:
         return null;
     }
@@ -2921,205 +2968,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       findDehydratedSuspenseBoundaryForTarget(node.child, target) ??
       findDehydratedSuspenseBoundaryForTarget(node.sibling, target)
     );
-  }
-
-  function emitDevtoolsCommit(root: R): void {
-    const hook = getFigDevtoolsGlobalHook();
-    if (hook === null) return;
-
-    try {
-      devtoolsRendererId ??= hook.inject({
-        name: "Fig",
-        packageName: "@bgub/fig-reconciler",
-      });
-      hook.onCommitRoot(
-        devtoolsRendererId,
-        snapshotDevtoolsRoot(root, devtoolsRendererId),
-      );
-    } catch {
-      // DevTools should never affect application rendering.
-    }
-  }
-
-  function snapshotDevtoolsRoot(
-    root: R,
-    rendererId: number,
-  ): FigDevtoolsRootSnapshot {
-    return {
-      id: devtoolsRootId(root),
-      rendererId,
-      committedAt: now(),
-      pendingLanes: root.pendingLanes,
-      suspendedLanes: root.suspendedLanes,
-      pingedLanes: root.pingedLanes,
-      expiredLanes: root.expiredLanes,
-      tree: snapshotDevtoolsFiber(root.current, null),
-    };
-  }
-
-  function snapshotDevtoolsFiber(
-    node: F,
-    parentId: number | null,
-  ): FigDevtoolsFiberSnapshot {
-    const id = devtoolsFiberId(node);
-    const { kind, name } = devtoolsFiberInfo(node);
-    const children: FigDevtoolsFiberSnapshot[] = [];
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      children.push(snapshotDevtoolsFiber(child, id));
-    }
-
-    return {
-      id,
-      parentId,
-      name,
-      kind,
-      key: node.key,
-      index: node.index,
-      props: devtoolsProps(node),
-      lanes: node.lanes,
-      childLanes: node.childLanes,
-      hooks: devtoolsHooks(node.memoizedState),
-      contextDependencies: devtoolsContextDependencies(node),
-      capturedError: node.errorBoundaryState?.error,
-      componentStack: node.errorBoundaryState?.info.componentStack,
-      children,
-    };
-  }
-
-  function devtoolsRootId(root: R): number {
-    const existing = devtoolsRootIds.get(root);
-    if (existing !== undefined) return existing;
-
-    const id = nextDevtoolsRootId;
-    nextDevtoolsRootId += 1;
-    devtoolsRootIds.set(root, id);
-    return id;
-  }
-
-  function devtoolsFiberId(node: F): number {
-    const existing =
-      devtoolsFiberIds.get(node) ??
-      (node.alternate === null
-        ? undefined
-        : devtoolsFiberIds.get(node.alternate));
-
-    if (existing !== undefined) {
-      devtoolsFiberIds.set(node, existing);
-      if (node.alternate !== null)
-        devtoolsFiberIds.set(node.alternate, existing);
-      return existing;
-    }
-
-    const id = nextDevtoolsFiberId;
-    nextDevtoolsFiberId += 1;
-    devtoolsFiberIds.set(node, id);
-    if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, id);
-    return id;
-  }
-
-  function devtoolsProps(node: F): Props {
-    const props: Props = {};
-    const source = node.memoizedProps ?? node.props;
-
-    for (const [key, value] of Object.entries(source)) {
-      if (key !== "children") props[key] = value;
-    }
-
-    return props;
-  }
-
-  function devtoolsHooks(firstHook: Hook | null): FigDevtoolsHookSnapshot[] {
-    const hooks: FigDevtoolsHookSnapshot[] = [];
-    let id = 0;
-
-    for (
-      let hook: Hook<any> | null = firstHook;
-      hook !== null;
-      hook = hook.next
-    ) {
-      id += 1;
-
-      if (isEffectHook(hook.kind)) {
-        const effect = hook.memoizedState as Effect;
-        hooks.push({
-          id,
-          kind: hook.kind,
-          deps: effect.deps,
-          phase: devtoolsEffectPhase(effect.phase),
-          active: effect.controller !== null,
-        });
-      } else if (hook.kind === "memo") {
-        const memo = hook.memoizedState as MemoState<unknown>;
-        hooks.push({
-          id,
-          kind: hook.kind,
-          state: memo.value,
-          deps: memo.deps,
-        });
-      } else if (isExternalStoreHook(hook)) {
-        hooks.push({
-          id,
-          kind: hook.kind,
-          state: hook.memoizedState.value,
-        });
-      } else {
-        const stateHook = hook as Hook<unknown>;
-        hooks.push({
-          id,
-          kind: stateHook.kind,
-          state: stateHook.memoizedState,
-        });
-      }
-    }
-
-    return hooks;
-  }
-
-  function devtoolsContextDependencies(node: F): string[] {
-    return (
-      node.contextDependencies?.map((context) =>
-        devtoolsTypeName(context, "Context"),
-      ) ?? []
-    );
-  }
-
-  function devtoolsFiberInfo(node: F): {
-    kind: FigDevtoolsFiberKind;
-    name: string;
-  } {
-    switch (node.tag) {
-      case RootTag:
-        return { kind: "root", name: "Root" };
-      case HostTag:
-        return { kind: "host", name: String(node.type) };
-      case TextTag:
-        return { kind: "text", name: "#text" };
-      case FunctionTag:
-        return {
-          kind: "function",
-          name: devtoolsTypeName(node.type, "Anonymous"),
-        };
-      case FragmentTag:
-        return { kind: "fragment", name: "Fragment" };
-      case ContextProviderTag:
-        return {
-          kind: "context-provider",
-          name: `${devtoolsTypeName(node.type, "Context")}.Provider`,
-        };
-      case SuspenseTag:
-        return { kind: "suspense", name: "Suspense" };
-      case ErrorBoundaryTag:
-        return { kind: "error-boundary", name: "ErrorBoundary" };
-      case PortalTag:
-        return { kind: "portal", name: "Portal" };
-    }
-  }
-
-  function devtoolsEffectPhase(phase: EffectPhase): FigDevtoolsEffectPhase {
-    if (phase === BeforePaintEffect) return "before-paint";
-    if (phase === BeforeLayoutEffect) return "before-layout";
-    return "reactive";
   }
 
   function commitExternalStores(node: F | null): void {
@@ -3365,6 +3213,7 @@ function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
 function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
   if (element.type === Fragment) return FragmentTag;
+  if (isResources(element.type)) return ResourcesTag;
   if (isContext(element.type)) return ContextProviderTag;
   if (isSuspense(element.type)) return SuspenseTag;
   if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
@@ -3411,7 +3260,9 @@ function childKey(
   }
 
   const key = explicitKey(child.key);
-  if (seenKeys.has(key)) throw duplicateKeyError(child.key);
+  if (process.env.NODE_ENV !== "production" && seenKeys.has(key)) {
+    throw duplicateKeyError(child.key);
+  }
   seenKeys.add(key);
   return key;
 }
@@ -3592,4 +3443,233 @@ function changedContextProvider<Container, Instance, TextInstance>(
   );
 }
 
-export { DefaultLane, runWithPriority, SyncLane };
+// Retries of a committed fallback render at retry-lane priority rather than
+// the lane of the update that originally suspended. A boundary that suspends
+// again while retrying keeps its existing retry lane so successive retries of
+// one boundary stay grouped instead of claiming a new lane per ping.
+function suspenseRetryLane(lanes: Lanes): Lane {
+  const retryLanes = lanes & RetryLanes;
+  return retryLanes === NoLanes
+    ? claimNextRetryLane()
+    : getHighestPriorityLane(retryLanes);
+}
+
+const devtoolsFiberIds = new WeakMap<object, number>();
+const devtoolsRootIds = new WeakMap<object, number>();
+const devtoolsRendererIds = new WeakMap<object, number>();
+let nextDevtoolsFiberId = 1;
+let nextDevtoolsRootId = 1;
+
+function emitDevtoolsCommit<Container, Instance, TextInstance>(
+  renderer: object,
+  root: FiberRoot<Container, Instance, TextInstance>,
+): void {
+  const hook = getFigDevtoolsGlobalHook();
+  if (hook === null) return;
+
+  try {
+    let rendererId = devtoolsRendererIds.get(renderer);
+    if (rendererId === undefined) {
+      rendererId = hook.inject({
+        name: "Fig",
+        packageName: "@bgub/fig-reconciler",
+      });
+      devtoolsRendererIds.set(renderer, rendererId);
+    }
+
+    hook.onCommitRoot(rendererId, snapshotDevtoolsRoot(root, rendererId));
+  } catch {
+    // DevTools should never affect application rendering.
+  }
+}
+
+function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
+  root: FiberRoot<Container, Instance, TextInstance>,
+  rendererId: number,
+): FigDevtoolsRootSnapshot {
+  return {
+    id: devtoolsRootId(root),
+    rendererId,
+    committedAt: now(),
+    pendingLanes: root.pendingLanes,
+    suspendedLanes: root.suspendedLanes,
+    pingedLanes: root.pingedLanes,
+    expiredLanes: root.expiredLanes,
+    tree: snapshotDevtoolsFiber(root.current, null),
+  };
+}
+
+function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+  parentId: number | null,
+): FigDevtoolsFiberSnapshot {
+  const id = devtoolsFiberId(node);
+  const { kind, name } = devtoolsFiberInfo(node);
+  const children: FigDevtoolsFiberSnapshot[] = [];
+
+  for (let child = node.child; child !== null; child = child.sibling) {
+    children.push(snapshotDevtoolsFiber(child, id));
+  }
+
+  return {
+    id,
+    parentId,
+    name,
+    kind,
+    key: node.key,
+    index: node.index,
+    props: devtoolsProps(node),
+    lanes: node.lanes,
+    childLanes: node.childLanes,
+    hooks: devtoolsHooks(node.memoizedState),
+    contextDependencies: devtoolsContextDependencies(node),
+    capturedError: node.errorBoundaryState?.error,
+    componentStack: node.errorBoundaryState?.info.componentStack,
+    children,
+  };
+}
+
+function devtoolsRootId(root: object): number {
+  const existing = devtoolsRootIds.get(root);
+  if (existing !== undefined) return existing;
+
+  const id = nextDevtoolsRootId;
+  nextDevtoolsRootId += 1;
+  devtoolsRootIds.set(root, id);
+  return id;
+}
+
+function devtoolsFiberId<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+): number {
+  const existing =
+    devtoolsFiberIds.get(node) ??
+    (node.alternate === null
+      ? undefined
+      : devtoolsFiberIds.get(node.alternate));
+
+  if (existing !== undefined) {
+    devtoolsFiberIds.set(node, existing);
+    if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, existing);
+    return existing;
+  }
+
+  const id = nextDevtoolsFiberId;
+  nextDevtoolsFiberId += 1;
+  devtoolsFiberIds.set(node, id);
+  if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, id);
+  return id;
+}
+
+function devtoolsProps<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+): Props {
+  const props: Props = {};
+  const source = node.memoizedProps ?? node.props;
+
+  for (const [key, value] of Object.entries(source)) {
+    if (key !== "children") props[key] = value;
+  }
+
+  return props;
+}
+
+function devtoolsHooks(firstHook: Hook | null): FigDevtoolsHookSnapshot[] {
+  const hooks: FigDevtoolsHookSnapshot[] = [];
+  let id = 0;
+
+  for (
+    let hook: Hook<any> | null = firstHook;
+    hook !== null;
+    hook = hook.next
+  ) {
+    id += 1;
+
+    if (isEffectHook(hook.kind)) {
+      const effect = hook.memoizedState as Effect;
+      hooks.push({
+        id,
+        kind: hook.kind,
+        deps: effect.deps,
+        phase: devtoolsEffectPhase(effect.phase),
+        active: effect.controller !== null,
+      });
+    } else if (hook.kind === "memo") {
+      const memo = hook.memoizedState as MemoState<unknown>;
+      hooks.push({
+        id,
+        kind: hook.kind,
+        state: memo.value,
+        deps: memo.deps,
+      });
+    } else if (hook.kind === "external-store") {
+      const store = hook.memoizedState as ExternalStoreState<unknown, unknown>;
+      hooks.push({
+        id,
+        kind: hook.kind,
+        state: store.value,
+      });
+    } else {
+      const stateHook = hook as Hook<unknown>;
+      hooks.push({
+        id,
+        kind: stateHook.kind,
+        state: stateHook.memoizedState,
+      });
+    }
+  }
+
+  return hooks;
+}
+
+function devtoolsContextDependencies<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+): string[] {
+  return (
+    node.contextDependencies?.map((context) =>
+      devtoolsTypeName(context, "Context"),
+    ) ?? []
+  );
+}
+
+function devtoolsFiberInfo<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+): {
+  kind: FigDevtoolsFiberKind;
+  name: string;
+} {
+  switch (node.tag) {
+    case RootTag:
+      return { kind: "root", name: "Root" };
+    case HostTag:
+      return { kind: "host", name: String(node.type) };
+    case TextTag:
+      return { kind: "text", name: "#text" };
+    case FunctionTag:
+      return {
+        kind: "function",
+        name: devtoolsTypeName(node.type, "Anonymous"),
+      };
+    case FragmentTag:
+      return { kind: "fragment", name: "Fragment" };
+    case ContextProviderTag:
+      return {
+        kind: "context-provider",
+        name: `${devtoolsTypeName(node.type, "Context")}.Provider`,
+      };
+    case SuspenseTag:
+      return { kind: "suspense", name: "Suspense" };
+    case ErrorBoundaryTag:
+      return { kind: "error-boundary", name: "ErrorBoundary" };
+    case PortalTag:
+      return { kind: "portal", name: "Portal" };
+    case ResourcesTag:
+      return { kind: "resources", name: "Resources" };
+  }
+}
+
+function devtoolsEffectPhase(phase: EffectPhase): FigDevtoolsEffectPhase {
+  if (phase === BeforePaintEffect) return "before-paint";
+  if (phase === BeforeLayoutEffect) return "before-layout";
+  return "reactive";
+}

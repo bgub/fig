@@ -385,7 +385,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Gone");
   });
 
-  it("throws rejected Suspense promises through the existing error path", async () => {
+  it("reports rejected Suspense promises through the uncaught error path", async () => {
     const pending = deferred<string>();
 
     function Message() {
@@ -393,7 +393,12 @@ describe("@bgub/fig-dom suspense", () => {
     }
 
     const container = new FakeElement("root");
-    const root = createRoot(container as unknown as Element);
+    const uncaught: string[] = [];
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError(error) {
+        uncaught.push((error as Error).message);
+      },
+    });
     const node = createElement(
       Suspense,
       { fallback: createElement("span", null, "Loading") },
@@ -404,9 +409,9 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loading");
 
     pending.reject(new Error("read failed"));
-    await Promise.resolve();
+    await delay();
 
-    expect(() => flushSync(() => root.render(node))).toThrow("read failed");
+    expect(uncaught).toEqual(["read failed"]);
     expect(container.textContent).toBe("");
 
     flushSync(() => root.render(createElement("main", null, "Recovered")));

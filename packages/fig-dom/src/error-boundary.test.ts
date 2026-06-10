@@ -272,8 +272,7 @@ describe("@bgub/fig-dom error boundaries", () => {
     expect(container.textContent).toBe("Loading");
 
     pending.reject(new Error("read failed"));
-    await Promise.resolve();
-    flushSync(() => root.render(node));
+    await delay();
 
     expect(container.textContent).toBe("Crashed");
     expect(reports).toEqual(["read failed"]);
