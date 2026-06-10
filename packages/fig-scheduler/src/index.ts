@@ -237,7 +237,10 @@ function flushWork(currentTime: number): boolean {
       if (typeof continuation === "function") {
         task.callback = continuation;
         task.sortIndex = task.expirationTime;
-      } else {
+      } else if (task === taskQueue.peek()) {
+        // The callback may have scheduled work that sorts ahead of this task,
+        // so only pop when this task is still at the top of the heap; a stale
+        // entry is skipped via its null callback when it surfaces later.
         taskQueue.pop();
       }
     }

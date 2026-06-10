@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   ImmediatePriority,
+  LowPriority,
   NormalPriority,
   requestPaint,
   scheduleCallback,
@@ -38,6 +39,20 @@ describe("@bgub/fig-scheduler", () => {
 
     await delay();
     expect(calls).toEqual([]);
+  });
+
+  it("keeps tasks scheduled by a lower priority callback", async () => {
+    const calls: string[] = [];
+
+    scheduleCallback(LowPriority, () => {
+      calls.push("low");
+      scheduleCallback(NormalPriority, () => {
+        calls.push("normal");
+      });
+    });
+
+    await delay();
+    expect(calls).toEqual(["low", "normal"]);
   });
 
   it("resumes continuation callbacks after yielding for paint", async () => {
