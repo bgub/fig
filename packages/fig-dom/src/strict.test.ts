@@ -1,4 +1,4 @@
-import { createElement, useOnMount, useReactive, useState } from "@bgub/fig";
+import { createElement, useReactive, useState } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync } from "./index.ts";
 import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
@@ -111,11 +111,11 @@ describe("@bgub/fig-dom strict development semantics", () => {
     function App() {
       const [tick, set] = useState(0);
       setTick = set;
-      useOnMount(() => {
+      useReactive(() => {
         effectRuns += 1;
         setTick?.((value) => value + 1);
         flushSync(() => undefined);
-      });
+      }, []);
       return createElement("span", null, tick);
     }
 

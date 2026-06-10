@@ -9,7 +9,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - No legacy React APIs: no class components, string refs, legacy context, or synthetic event pooling.
 - Hooks use Fig names: `useReactive` replaces `useEffect`, `useBeforePaint` replaces `useLayoutEffect`, and `useBeforeLayout` replaces `useInsertionEffect`.
 - Effects receive an `AbortSignal` instead of returning cleanup functions; Fig aborts on dependency changes and unmounts.
-- `useOnMount(fn)` is the mount-only effect API.
+- There is no mount-only effect hook: an empty deps array (`useReactive(fn, [])`) is the mount-once idiom.
 - DOM events use `events={[on("click", (event, signal) => ...)]}` instead of `onClick` props.
 - Event callbacks receive native DOM events plus an `AbortSignal`; Fig aborts the previous signal on re-entry and on listener removal.
 - DOM event listeners are delegated at the root and mapped to lanes/priorities.
@@ -21,6 +21,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - There is no `StrictMode` component and no opt-out: development builds always strict-render. Each render pass invokes the component twice — a shadow pass whose hooks, effects, and consumed update queues are discarded and restored, with no reconciliation — and commits only the second invocation; effects and fig-dom `bind` callbacks run, abort, and run again with a fresh signal once per lifetime (tracked via `Effect.strictRan` / `BindSlot.strictRan`, set before the first call so re-entrant runs cannot re-enter the cycle). All strict behaviors use the same inline `NODE_ENV` gates and apply on the client only, not during server rendering.
 - `useMemo` and `useCallback` are supported for stable values and callback identities.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` is the external store API; server render and hydration require `getServerSnapshot`.
+- `useReactiveEvent(handler)` is Fig's non-reactive event hook (React's `useEffectEvent` shape with the Fig event contract): it returns a stable function whose handler always sees the latest committed render, receives a trailing `AbortSignal`, and aborts the previous invocation's signal on re-entry and on unmount; calls after unmount run the last committed handler with an already-aborted signal. Handlers swap at commit before the before-layout effect phase; calling one during render or server render throws, and the strict shadow pass never publishes.
 - `useReducer` is intentionally not built in; reducer abstractions can live in libraries on top of `useState`.
 - `ErrorBoundary` catches render and Fig effect errors with a sticky fallback; reset by remounting/changing the boundary key.
 - Error boundaries do not catch promises, event handler errors, async callback errors, server render errors, or host commit failures.

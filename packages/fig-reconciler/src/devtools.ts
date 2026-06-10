@@ -26,8 +26,8 @@ export type FigDevtoolsHookKind =
   | "external-store"
   | "memo"
   | "transition"
+  | "reactive-event"
   | "reactive"
-  | "on-mount"
   | "before-paint"
   | "before-layout";
 

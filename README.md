@@ -24,8 +24,8 @@ Deliberate divergences:
 
 - No legacy React APIs: no class components, string refs, legacy context, or
   synthetic event pooling.
-- Effects use Fig names: `useReactive`, `useBeforePaint`,
-  `useBeforeLayout`, and `useOnMount`.
+- Effects use Fig names: `useReactive`, `useBeforePaint`, and
+  `useBeforeLayout`; an empty deps array is the mount-once idiom.
 - Effects receive an `AbortSignal`; cleanup attaches to abort instead of being
   returned from the effect.
 - No `StrictMode` component: development builds always strict-render.
@@ -34,6 +34,10 @@ Deliberate divergences:
   fresh signal. Production builds strip these checks.
 - DOM events use `events={[on("click", handler)]}` with native events and an
   `AbortSignal`, not `onClick` props.
+- `useReactiveEvent(handler)` declares stable, non-reactive event handlers for
+  effect-held callbacks: the handler always sees the latest committed render,
+  receives a trailing `AbortSignal`, and aborts the previous invocation on
+  re-entry and unmount.
 - DOM node access uses `bind={(node, signal) => ...}` instead of refs.
 - Host props use native DOM names such as `class`, `for`, `tabindex`,
   `stroke-width`, and `xlink:href`.

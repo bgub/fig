@@ -9,7 +9,6 @@ import {
   transition,
   useBeforePaint,
   useLaggedValue,
-  useOnMount,
   useReactive,
   useState,
 } from "@bgub/fig";
@@ -185,12 +184,12 @@ function App() {
     window.history.replaceState(null, "", `#${nextPage}`);
   };
 
-  useOnMount((signal) => {
+  useReactive((signal) => {
     const onHashChange = () => {
       setDemoPage(readInitialPage(), setPage);
     };
     window.addEventListener("hashchange", onHashChange, { signal });
-  });
+  }, []);
 
   return (
     <div class="shell">
@@ -386,8 +385,8 @@ function EffectsPage() {
     log(`useBeforePaint for tick ${tick}`);
   }, [tick]);
 
-  useOnMount((signal) => {
-    log("useOnMount");
+  useReactive((signal) => {
+    log("useReactive []");
     signal.addEventListener(
       "abort",
       () => console.log("Effects page unmounted"),
@@ -395,7 +394,7 @@ function EffectsPage() {
         once: true,
       },
     );
-  });
+  }, []);
 
   useReactive(
     (signal) => {
@@ -718,10 +717,10 @@ function HydrationPage() {
     );
   };
 
-  useOnMount((signal) => {
+  useReactive((signal) => {
     void runDemo(false, signal);
     mountPendingBoundary();
-  });
+  }, []);
 
   return (
     <PageFrame

@@ -19,18 +19,29 @@ export interface RenderDispatcher {
   useReactive(effect: EffectCallback, deps?: DependencyList): void;
   useBeforePaint(effect: EffectCallback, deps?: DependencyList): void;
   useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void;
-  useOnMount(effect: EffectCallback): void;
   useExternalStore<T>(
     subscribe: ExternalStoreSubscribe,
     getSnapshot: () => T,
     getServerSnapshot?: () => T,
   ): T;
+  useReactiveEvent<Args extends unknown[], Result>(
+    handler: (...args: Args) => Result,
+  ): (...args: ReactiveEventArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
   readPromise<T>(promise: PromiseLike<T>): T;
 }
 
 export type EffectCallback = (signal: AbortSignal) => undefined;
 export type DependencyList = readonly unknown[];
+
+// Fig appends the AbortSignal when invoking the handler; callers never pass
+// it, so a declared trailing signal is stripped from the callable signature.
+export type ReactiveEventArgs<Args extends unknown[]> = Args extends [
+  ...infer Rest,
+  AbortSignal,
+]
+  ? Rest
+  : Args;
 
 let currentDispatcher: RenderDispatcher | null = null;
 
@@ -88,10 +99,6 @@ export function useBeforeLayout(
   resolveDispatcher().useBeforeLayout(effect, deps);
 }
 
-export function useOnMount(effect: EffectCallback): void {
-  resolveDispatcher().useOnMount(effect);
-}
-
 export function useExternalStore<T>(
   subscribe: ExternalStoreSubscribe,
   getSnapshot: () => T,
@@ -102,6 +109,12 @@ export function useExternalStore<T>(
     getSnapshot,
     getServerSnapshot,
   );
+}
+
+export function useReactiveEvent<Args extends unknown[], Result>(
+  handler: (...args: Args) => Result,
+): (...args: ReactiveEventArgs<Args>) => Result {
+  return resolveDispatcher().useReactiveEvent(handler);
 }
 
 export function readContext<T>(context: FigContext<T>): T {

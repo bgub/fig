@@ -138,13 +138,19 @@ export function createStaticDispatcher(
     useReactive: noopEffect,
     useBeforePaint: noopEffect,
     useBeforeLayout: noopEffect,
-    useOnMount: noopEffect,
     useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
       if (getServerSnapshot === undefined) {
         throw new Error(options.externalStoreError);
       }
 
       return getServerSnapshot();
+    },
+    useReactiveEvent() {
+      return () => {
+        throw new Error(
+          "Reactive events cannot be called during server render.",
+        );
+      };
     },
     readContext(context) {
       return readContextValue(options.contextValues, context);

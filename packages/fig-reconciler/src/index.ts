@@ -12,6 +12,7 @@ import {
   type FigPortal,
   Fragment,
   type Props,
+  type ReactiveEventArgs,
   type SetStateAction,
   type StartTransition,
 } from "@bgub/fig";
@@ -298,6 +299,23 @@ interface Effect {
   strictRan: boolean;
 }
 
+type ReactiveEventHandler = (...args: unknown[]) => unknown;
+
+interface ReactiveEventInstance {
+  controller: AbortController | null;
+  handler: ReactiveEventHandler | null;
+  live: boolean;
+  stable: ReactiveEventHandler;
+}
+
+interface ReactiveEventState {
+  instance: ReactiveEventInstance;
+  // Lives on the per-render hook state, not the persistent instance: commits
+  // republish bailed-out fibers' hooks, so an abandoned render's handler must
+  // never be reachable from the instance.
+  next: ReactiveEventHandler;
+}
+
 interface MemoState<T> {
   value: T;
   deps: DependencyList;
@@ -478,11 +496,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     useBeforeLayout(effect, deps) {
       updateEffectHook("before-layout", BeforeLayoutEffect, effect, deps);
     },
-    useOnMount(effect) {
-      updateEffectHook("on-mount", ReactiveEffect, effect, []);
-    },
     useExternalStore(subscribe, getSnapshot, getServerSnapshot) {
       return updateExternalStoreHook(subscribe, getSnapshot, getServerSnapshot);
+    },
+    useReactiveEvent(handler) {
+      return updateReactiveEventHook(handler);
     },
     readContext(context) {
       return readContextValue(context);
@@ -1585,6 +1603,54 @@ export function createRenderer<Container, Instance, TextInstance>(
     return value;
   }
 
+  function updateReactiveEventHook<Args extends unknown[], Result>(
+    handler: (...args: Args) => Result,
+  ): (...args: ReactiveEventArgs<Args>) => Result {
+    requireRenderingFiber();
+    const oldHook = updateHook(
+      "reactive-event",
+    ) as Hook<ReactiveEventState> | null;
+    const instance =
+      oldHook?.memoizedState.instance ?? createReactiveEventInstance();
+
+    appendHook(
+      createHook("reactive-event", {
+        instance,
+        next: handler as ReactiveEventHandler,
+      }),
+    );
+    return instance.stable as (...args: ReactiveEventArgs<Args>) => Result;
+  }
+
+  function createReactiveEventInstance(): ReactiveEventInstance {
+    const instance: ReactiveEventInstance = {
+      controller: null,
+      handler: null,
+      live: false,
+      stable: (...args) => {
+        if (renderingFiber !== null) {
+          throw new Error(
+            "Reactive events cannot be called while rendering a component.",
+          );
+        }
+
+        const handler = instance.handler;
+        if (handler === null) {
+          throw new Error(
+            "Reactive events cannot be called before their first commit.",
+          );
+        }
+
+        instance.controller?.abort();
+        instance.controller = new AbortController();
+        if (!instance.live) instance.controller.abort();
+        return handler(...args, instance.controller.signal);
+      },
+    };
+
+    return instance;
+  }
+
   function readExternalStoreSnapshot<T>(
     root: R,
     getSnapshot: () => T,
@@ -2033,6 +2099,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitRoot(root: R, finishedWork: F): void {
+    commitReactiveEvents(finishedWork.child);
     commitEffects(finishedWork.child, BeforeLayoutEffect);
     if (root.clearContainerBeforeCommit) {
       requireHydrationHostConfig().clearContainer(root.container);
@@ -2993,6 +3060,20 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
+  function commitReactiveEvents(node: F | null): void {
+    visitFiberHooks(node, (_owner, hook) => {
+      if (isReactiveEventHook(hook)) {
+        const instance = hook.memoizedState.instance;
+        instance.handler = hook.memoizedState.next;
+        instance.live = true;
+      }
+    });
+  }
+
+  function isReactiveEventHook(hook: Hook): hook is Hook<ReactiveEventState> {
+    return hook.kind === "reactive-event";
+  }
+
   function commitExternalStores(node: F | null): void {
     visitFiberHooks(node, (owner, hook) => {
       if (isExternalStoreHook(hook))
@@ -3154,6 +3235,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
       if (isExternalStoreHook(hook))
         unsubscribeExternalStore(hook.memoizedState);
+      if (isReactiveEventHook(hook)) {
+        const instance = hook.memoizedState.instance;
+        instance.controller?.abort();
+        instance.controller = null;
+        // Calls after unmount (or while hidden) still run the last committed
+        // handler, but with a signal that is already aborted.
+        instance.live = false;
+      }
     });
   }
 
@@ -3181,10 +3270,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
 function isEffectHook(kind: FigDevtoolsHookKind): boolean {
   return (
-    kind === "reactive" ||
-    kind === "on-mount" ||
-    kind === "before-paint" ||
-    kind === "before-layout"
+    kind === "reactive" || kind === "before-paint" || kind === "before-layout"
   );
 }
 

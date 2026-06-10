@@ -2,7 +2,6 @@ import {
   createElement,
   useBeforeLayout,
   useBeforePaint,
-  useOnMount,
   useReactive,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
@@ -176,18 +175,18 @@ describe("@bgub/fig-dom effects", () => {
     ]);
   });
 
-  it("does not rerun useOnMount on updates", async () => {
+  it("does not rerun empty-deps effects on updates", async () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
     function App({ value }: { value: number }) {
-      useOnMount((signal) => {
+      useReactive((signal) => {
         calls.push(`mount:${value}`);
         signal.addEventListener("abort", () => calls.push(`abort:${value}`), {
           once: true,
         });
-      });
+      }, []);
 
       return createElement("main", null, value);
     }

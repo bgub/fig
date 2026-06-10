@@ -25,7 +25,7 @@
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "12 kB"
+      "limit": "12.5 kB"
     },
     {
       "path": "packages/fig-scheduler/dist/index.js",

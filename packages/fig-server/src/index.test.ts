@@ -21,6 +21,7 @@ import {
   useLaggedValue,
   useMemo,
   useReactive,
+  useReactiveEvent,
   useState,
   useTransition,
 } from "@bgub/fig";
@@ -180,6 +181,22 @@ describe("@bgub/fig-server", () => {
 
     await expect(renderToString(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
+    );
+  });
+
+  it("returns reactive events that throw if called during server render", async () => {
+    let emit: (() => void) | null = null;
+
+    function App() {
+      emit = useReactiveEvent((_signal: AbortSignal) => undefined);
+      return createElement("span", null, "Server");
+    }
+
+    await expect(renderToString(createElement(App, null))).resolves.toBe(
+      "<span>Server</span>",
+    );
+    expect(() => emit?.()).toThrow(
+      "Reactive events cannot be called during server render.",
     );
   });
 

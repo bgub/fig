@@ -51,9 +51,9 @@ createRoot(container).render(<App />);
   hydration output.
 - Context: `createContext(defaultValue)` plus render-time
   `readContext(context)`.
-- Effects: `useReactive`, `useBeforePaint`, `useBeforeLayout`, and
-  `useOnMount`. Effects receive an `AbortSignal`; attach cleanup to
-  `signal.abort`.
+- Effects: `useReactive`, `useBeforePaint`, and `useBeforeLayout`. Effects
+  receive an `AbortSignal`; attach cleanup to `signal.abort`. An empty deps
+  array runs an effect once per mount.
 - Strict development semantics, with no `StrictMode` component or opt-out:
   development builds render components twice per pass (discarding the first
   result) and run first-time effects and renderer `bind` callbacks twice with
@@ -61,6 +61,12 @@ createRoot(container).render(<App />);
   early. Production builds strip these checks.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` reads external
   stores. Server rendering and hydration require `getServerSnapshot`.
+- `useReactiveEvent(handler)` returns a stable function for effect-held
+  callbacks (subscriptions, sockets, timers). The handler always sees the
+  latest committed render and follows the Fig event contract: it receives a
+  trailing `AbortSignal`, and the previous invocation's signal aborts on
+  re-entry and on unmount. Calls after unmount receive an already-aborted
+  signal; calling it during render throws.
 - `Suspense` catches pending `readPromise(promise)` reads and shows `fallback`
   until the promise settles.
 - `lazy(load)` creates a component that suspends until `load()` resolves to a
