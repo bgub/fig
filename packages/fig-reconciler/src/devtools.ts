@@ -17,7 +17,8 @@ export type FigDevtoolsFiberKind =
   | "context-provider"
   | "suspense"
   | "error-boundary"
-  | "portal";
+  | "portal"
+  | "activity";
 
 export type FigDevtoolsHookKind =
   | "state"

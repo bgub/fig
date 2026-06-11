@@ -45,6 +45,16 @@ export function attachBindSubtree(node: Element | Text): void {
   });
 }
 
+export function suspendBind(element: Element): void {
+  const slot = bindSlots.get(element);
+  if (slot !== undefined) removeBindSlot(slot);
+}
+
+export function resumeBind(element: Element): void {
+  const slot = bindSlots.get(element);
+  if (slot !== undefined) attachBindSlot(element, slot);
+}
+
 export function removeBindSubtree(node: Element | Text): void {
   visitElementSubtree(node, (element) => {
     const slot = bindSlots.get(element);

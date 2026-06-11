@@ -21,6 +21,7 @@ import {
   useLaggedValue,
   useMemo,
   useReactive,
+  Activity,
   useReactiveEvent,
   useState,
   useTransition,
@@ -197,6 +198,29 @@ describe("@bgub/fig-server", () => {
     );
     expect(() => emit?.()).toThrow(
       "Reactive events cannot be called during server render.",
+    );
+  });
+
+  it("streams hidden Activity content host-hidden", async () => {
+    const html = await renderToString(
+      createElement(
+        "main",
+        null,
+        createElement(
+          Activity,
+          { mode: "hidden" },
+          createElement("span", null, "Hidden"),
+        ),
+        createElement(
+          Activity,
+          { mode: "visible" },
+          createElement("span", null, "Visible"),
+        ),
+      ),
+    );
+
+    expect(html).toBe(
+      '<main><span style="display:none">Hidden</span><span>Visible</span></main>',
     );
   });
 

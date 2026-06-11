@@ -17,6 +17,7 @@ import {
   type StartTransition,
 } from "@bgub/fig";
 import {
+  isActivity,
   isContext,
   isErrorBoundary,
   isPortal,
@@ -61,6 +62,7 @@ import {
   type LaneRoot,
   type Lanes,
   markRootFinished,
+  markRootEntangled,
   markRootPinged,
   markRootSuspended,
   markRootUpdated,
@@ -69,6 +71,7 @@ import {
   NoLane,
   NoLanes,
   NoTimestamp,
+  OffscreenLane,
   requestUpdateLane,
   RetryLanes,
   runWithPriority,
@@ -171,6 +174,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     nextProps: Props,
   ): void;
   commitHydratedInstance?(instance: Instance, nextProps: Props): void;
+  hideInstance?(instance: Instance): void;
+  unhideInstance?(instance: Instance, props: Props): void;
+  hideTextInstance?(instance: TextInstance): void;
+  unhideTextInstance?(instance: TextInstance, text: string): void;
   getSuspenseBoundary?(
     node: HostNode<Instance, TextInstance>,
   ): DehydratedSuspenseBoundary<Instance, TextInstance> | null;
@@ -240,6 +247,7 @@ const SuspenseTag = 6;
 const ErrorBoundaryTag = 7;
 const PortalTag = 8;
 const ResourcesTag = 9;
+const ActivityTag = 10;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -250,7 +258,8 @@ type Tag =
   | typeof SuspenseTag
   | typeof ErrorBoundaryTag
   | typeof PortalTag
-  | typeof ResourcesTag;
+  | typeof ResourcesTag
+  | typeof ActivityTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -260,6 +269,9 @@ const TextContentFlag = 1 << 3;
 // The fiber reused its committed children without cloning; render skips the
 // subtree and commit walks must not re-read its already-committed state.
 const AdoptedFlag = 1 << 4;
+// An Activity boundary whose visibility changes this commit (or mounts
+// hidden); the mutation phase applies host hiding and effect deferral.
+const VisibilityFlag = 1 << 5;
 type Flag = number;
 
 const ReactiveEffect = 0;
@@ -396,6 +408,13 @@ interface Fiber<Container, Instance, TextInstance> {
   contextDependencies: FigContext<unknown>[] | null;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
+  // Shared by both fiber generations and updated at commit, so visibility
+  // checks from stale .return chains stay authoritative.
+  activityState: ActivityState | null;
+}
+
+interface ActivityState {
+  hidden: boolean;
 }
 
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
@@ -463,6 +482,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   const abandonedHydrationBoundaries = new WeakSet<object>();
   let batchDepth = 0;
   let flushingSyncWork = false;
+  let hasHiddenActivities = false;
+  let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
+    null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -1011,12 +1033,47 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === ActivityTag) {
+      beginActivity(node);
+      return;
+    }
+
     if (node.tag === PortalTag) {
       beginPortal(node);
       return;
     }
 
     if (changedContextProvider(node)) propagateContextChange(node);
+
+    reconcileCurrentChildren(node, node.props.children);
+  }
+
+  function beginActivity(node: F): void {
+    const hidden = activityHidden(node.props);
+    if (hidden) hasHiddenActivities = true;
+    const previousHidden =
+      node.alternate === null
+        ? false
+        : activityHidden(node.alternate.memoizedProps ?? {});
+
+    node.activityState ??= { hidden: false };
+
+    if (hidden !== previousHidden) {
+      node.flags |= VisibilityFlag;
+    }
+
+    // A reveal with pending offscreen work expands the render lanes so the
+    // revealed subtree commits already up to date. Offscreen work skipped by
+    // earlier bailouts is re-marked pending after commit.
+    if (!hidden && previousHidden) {
+      const root = rootOf(node);
+      if (
+        includesSomeLane(node.childLanes, OffscreenLane) &&
+        !includesSomeLane(root.renderLanes, OffscreenLane)
+      ) {
+        root.renderLanes = mergeLanes(root.renderLanes, OffscreenLane);
+      }
+    }
 
     reconcileCurrentChildren(node, node.props.children);
   }
@@ -1729,10 +1786,28 @@ export function createRenderer<Container, Instance, TextInstance>(
     action: SetStateAction<S>,
     lane: Lane,
   ): void {
+    lane = hiddenActivityLane(fiber, lane);
     const update: HookUpdate<S> = { action, lane, next: null as never };
     update.next = update;
     queue.pending = mergeQueues(queue.pending, update);
     scheduleFiber(fiber, lane);
+  }
+
+  // Updates inside hidden Activity boundaries are downgraded to the
+  // offscreen lane at schedule time, so normal renders never descend for
+  // hidden work and idle renders prerender it. A boundary mid-transition
+  // (generations disagree) is treated as visible so updates are never
+  // wrongly deferred.
+  function hiddenActivityLane(node: F, lane: Lane): Lane {
+    if (!hasHiddenActivities || lane === OffscreenLane) return lane;
+
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if (parent.tag === ActivityTag && parent.activityState?.hidden === true) {
+        return OffscreenLane;
+      }
+    }
+
+    return lane;
   }
 
   function createFiberId(root: R, fiber: F, localId: number): string {
@@ -2119,6 +2194,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitRoot(root: R, finishedWork: F): void {
     commitReactiveEvents(finishedWork.child);
+    if (hasHiddenActivities) armRevealedActivities(finishedWork.child);
     commitEffects(finishedWork.child, BeforeLayoutEffect);
     if (root.clearContainerBeforeCommit) {
       requireHydrationHostConfig().clearContainer(root.container);
@@ -2126,11 +2202,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
     commitDeletions(finishedWork);
     commitMutationEffects(finishedWork.child);
+    if (hasHiddenActivities) commitActivityVisibility(finishedWork.child);
     root.current = finishedWork;
     deactivateHydration(root);
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
     markRootFinished(root, root.pendingLanes & ~root.renderLanes);
+    if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
+      markRootPending(root, OffscreenLane);
+      // A suspension after reveal lane expansion may have marked offscreen
+      // work suspended alongside the visible lanes; let idle retries proceed.
+      root.suspendedLanes &= ~OffscreenLane;
+    }
     try {
       commitExternalStores(finishedWork.child);
       scheduleDehydratedSuspenseRetries(root);
@@ -2280,12 +2363,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     pendingRoots.delete(root);
   }
 
-  function commitMutationEffects(node: F | null): void {
+  function commitMutationEffects(node: F | null, hidden = false): void {
     let cursor = node;
 
     while (cursor !== null) {
       if ((cursor.flags & PlacementFlag) !== 0) {
-        cursor = commitPlacementRun(cursor);
+        cursor = commitPlacementRun(cursor, hidden);
         continue;
       }
 
@@ -2299,10 +2382,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       ) {
         const hostFiber = cursor;
         commitHostMutation(hostFiber, () => commitUpdate(hostFiber));
+        // Prerendered mutations inside hidden trees must stay hidden.
+        if (hidden) hideHostFiber(hostFiber);
       }
 
       if ((cursor.flags & AdoptedFlag) === 0) {
-        commitMutationEffects(cursor.child);
+        commitMutationEffects(cursor.child, hidden || isHiddenActivity(cursor));
       }
 
       if (cursor.tag === SuspenseTag && (cursor.flags & HydrationFlag) !== 0) {
@@ -2313,7 +2398,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function commitPlacementRun(firstPlaced: F): F | null {
+  function commitPlacementRun(firstPlaced: F, hidden: boolean): F | null {
     const lastPlaced = placementRunTail(firstPlaced);
     const afterPlaced = lastPlaced.sibling;
     const before = hostSibling(lastPlaced);
@@ -2324,10 +2409,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       const current: F = placed;
       const next: F | null = current.sibling;
       commitHostMutation(current, () => commitPlacement(current, before));
+      if (hidden) setNodeVisibility(current, true);
       if (!isPreassembledHostSubtree(current)) {
-        commitMutationEffects(current.child);
+        commitMutationEffects(current.child, hidden);
       } else {
-        commitPortalsInPreassembledSubtree(current.child);
+        commitPortalsInPreassembledSubtree(current.child, hidden);
       }
       placed = next;
     }
@@ -2335,13 +2421,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     return afterPlaced;
   }
 
-  function commitPortalsInPreassembledSubtree(node: F | null): void {
+  function commitPortalsInPreassembledSubtree(
+    node: F | null,
+    hidden: boolean,
+  ): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if (cursor.tag === PortalTag) {
         commitHostMutation(cursor, () => commitPlacement(cursor));
-        commitMutationEffects(cursor.child);
+        if (hidden) setNodeVisibility(cursor, true);
+        commitMutationEffects(cursor.child, hidden);
       } else {
-        commitPortalsInPreassembledSubtree(cursor.child);
+        commitPortalsInPreassembledSubtree(cursor.child, hidden);
       }
     }
   }
@@ -2926,6 +3016,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.contextDependencies = current.contextDependencies;
     next.suspenseState = current.suspenseState;
     next.errorBoundaryState = current.errorBoundaryState;
+    next.activityState = current.activityState;
     next.alternate = current;
     current.alternate = next;
 
@@ -3001,6 +3092,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       contextDependencies: null,
       suspenseState: null,
       errorBoundaryState: null,
+      activityState: null,
     };
   }
 
@@ -3089,6 +3181,132 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
+  function isHiddenActivity(node: F): boolean {
+    return node.tag === ActivityTag && activityHidden(node.props);
+  }
+
+  function requireActivityHostConfig(): HostConfig<
+    Container,
+    Instance,
+    TextInstance
+  > &
+    Required<
+      Pick<
+        HostConfig<Container, Instance, TextInstance>,
+        | "hideInstance"
+        | "unhideInstance"
+        | "hideTextInstance"
+        | "unhideTextInstance"
+      >
+    > {
+    if (activityHostConfig !== null) return activityHostConfig;
+
+    if (
+      host.hideInstance === undefined ||
+      host.unhideInstance === undefined ||
+      host.hideTextInstance === undefined ||
+      host.unhideTextInstance === undefined
+    ) {
+      throw new Error("Activity is not supported by this renderer.");
+    }
+
+    activityHostConfig = host as ReturnType<typeof requireActivityHostConfig>;
+    return activityHostConfig;
+  }
+
+  function commitActivityVisibility(node: F | null): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if ((cursor.flags & AdoptedFlag) !== 0) continue;
+
+      if (cursor.tag === ActivityTag && (cursor.flags & VisibilityFlag) !== 0) {
+        const hidden = activityHidden(cursor.props);
+        if (cursor.activityState !== null) cursor.activityState.hidden = hidden;
+        setActivityVisibility(cursor.child, hidden);
+        if (hidden && cursor.child !== null) abortFiberEffects(cursor.child);
+        if (!hidden && includesSomeLane(cursor.childLanes, OffscreenLane)) {
+          // Pending hidden work upgrades to prompt processing on reveal.
+          const root = rootOf(cursor);
+          markRootPending(root, DefaultLane);
+          markRootEntangled(root, DefaultLane | OffscreenLane);
+          scheduleOrBatchRoot(root);
+        }
+      }
+
+      commitActivityVisibility(cursor.child);
+    }
+  }
+
+  function setActivityVisibility(node: F | null, hidden: boolean): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      setNodeVisibility(cursor, hidden);
+    }
+  }
+
+  function setNodeVisibility(cursor: F, hidden: boolean): void {
+    // Subtrees hidden by their own boundary keep their visibility.
+    if (isHiddenActivity(cursor)) return;
+
+    if (cursor.tag === HostTag) {
+      const activityHost = requireActivityHostConfig();
+      if (hidden) activityHost.hideInstance(cursor.stateNode as Instance);
+      else {
+        activityHost.unhideInstance(cursor.stateNode as Instance, cursor.props);
+      }
+    } else if (cursor.tag === TextTag) {
+      const activityHost = requireActivityHostConfig();
+      if (hidden) {
+        activityHost.hideTextInstance(cursor.stateNode as TextInstance);
+      } else {
+        activityHost.unhideTextInstance(
+          cursor.stateNode as TextInstance,
+          String(cursor.props.nodeValue),
+        );
+      }
+    }
+
+    setActivityVisibility(cursor.child, hidden);
+  }
+
+  function hideHostFiber(node: F): void {
+    const activityHost = requireActivityHostConfig();
+    if (node.tag === HostTag) {
+      activityHost.hideInstance(node.stateNode as Instance);
+    } else {
+      activityHost.hideTextInstance(node.stateNode as TextInstance);
+    }
+  }
+
+  function armRevealedActivities(node: F | null): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if ((cursor.flags & AdoptedFlag) !== 0) continue;
+
+      if (
+        cursor.tag === ActivityTag &&
+        (cursor.flags & VisibilityFlag) !== 0 &&
+        !activityHidden(cursor.props) &&
+        cursor.child !== null
+      ) {
+        armDeferredEffects(cursor.child);
+      }
+
+      armRevealedActivities(cursor.child);
+    }
+  }
+
+  // Re-arms effects that were deferred or aborted while hidden so the
+  // regular commit phases run them in order during the reveal commit.
+  function armDeferredEffects(node: F): void {
+    visitFiberHooks(node, (owner, hook) => {
+      if (!isEffectHook(hook.kind)) return;
+
+      const effect = hook.memoizedState as Effect;
+      if (effect.controller !== null) return;
+
+      const effects = (owner.effects ??= []);
+      if (!effects.includes(effect)) effects.push(effect);
+    });
+  }
+
   function commitReactiveEvents(node: F | null): void {
     visitFiberHooks(node, (_owner, hook) => {
       if (isReactiveEventHook(hook)) {
@@ -3104,10 +3322,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitExternalStores(node: F | null): void {
-    visitFiberHooks(node, (owner, hook) => {
+    if (node === null) return;
+
+    for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
       if (isExternalStoreHook(hook))
-        commitExternalStore(owner, hook.memoizedState);
-    });
+        commitExternalStore(node, hook.memoizedState);
+    }
+
+    // Subscriptions under hidden boundaries are deferred until reveal.
+    if (!isHiddenActivity(node)) commitExternalStores(node.child);
+    commitExternalStores(node.sibling);
   }
 
   function commitExternalStore(
@@ -3161,8 +3385,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     // The last flag consumer in the commit clears them, so committed trees
     // stay flag-clean and adopted subtrees never expose stale commit state.
     node.flags = NoFlags;
-    if (!adopted) collectReactiveEffects(root, node.child);
+    if (!adopted) {
+      if (isHiddenActivity(node)) clearHiddenSubtreeFlags(node.child);
+      else collectReactiveEffects(root, node.child);
+    }
     collectReactiveEffects(root, node.sibling);
+  }
+
+  // Hidden subtrees keep their deferred fiber.effects for reveal, but their
+  // flags must still be cleared to keep committed trees flag-clean. Reveal
+  // arming depends on those effect arrays surviving every commit while
+  // hidden; no walk may null them below a hidden boundary.
+  function clearHiddenSubtreeFlags(node: F | null): void {
+    if (node === null) return;
+
+    const adopted = (node.flags & AdoptedFlag) !== 0;
+    node.flags = NoFlags;
+    if (!adopted) clearHiddenSubtreeFlags(node.child);
+    clearHiddenSubtreeFlags(node.sibling);
   }
 
   function scheduleReactiveEffects(root: R): void {
@@ -3200,7 +3440,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (const effect of node.effects ?? []) visitor(effect);
 
-    if ((node.flags & AdoptedFlag) === 0) visitEffects(node.child, visitor);
+    if ((node.flags & AdoptedFlag) === 0 && !isHiddenActivity(node)) {
+      visitEffects(node.child, visitor);
+    }
     visitEffects(node.sibling, visitor);
   }
 
@@ -3303,6 +3545,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 }
 
+function activityHidden(props: Props): boolean {
+  return props.mode === "hidden";
+}
+
 function isEffectHook(kind: FigDevtoolsHookKind): boolean {
   return (
     kind === "reactive" || kind === "before-paint" || kind === "before-layout"
@@ -3372,6 +3618,7 @@ function tagFor(element: FigElement): Tag {
   if (isResources(element.type)) return ResourcesTag;
   if (isContext(element.type)) return ContextProviderTag;
   if (isSuspense(element.type)) return SuspenseTag;
+  if (isActivity(element.type)) return ActivityTag;
   if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
   return FunctionTag;
 }
@@ -3817,6 +4064,8 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "suspense", name: "Suspense" };
     case ErrorBoundaryTag:
       return { kind: "error-boundary", name: "ErrorBoundary" };
+    case ActivityTag:
+      return { kind: "activity", name: "Activity" };
     case PortalTag:
       return { kind: "portal", name: "Portal" };
     case ResourcesTag:

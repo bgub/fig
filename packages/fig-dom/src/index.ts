@@ -22,7 +22,12 @@ import {
   type FigRootOptions,
   type HostConfig,
 } from "@bgub/fig-reconciler";
-import { attachBindSubtree, removeBindSubtree } from "./bind.ts";
+import {
+  attachBindSubtree,
+  removeBindSubtree,
+  resumeBind,
+  suspendBind,
+} from "./bind.ts";
 import {
   attachEventSubtree,
   type Container,
@@ -135,6 +140,27 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   commitHydratedInstance: (instance, nextProps) =>
     hydrateElement(instance, nextProps),
+  hideInstance: (instance) => {
+    suspendBind(instance);
+    (instance as HTMLElement).style.setProperty("display", "none", "important");
+  },
+  unhideInstance: (instance, props) => {
+    const style = (props.style ?? {}) as Record<string, unknown>;
+    const display = style.display;
+    (instance as HTMLElement).style.setProperty(
+      "display",
+      typeof display === "string" || typeof display === "number"
+        ? String(display)
+        : "",
+    );
+    resumeBind(instance);
+  },
+  hideTextInstance: (text) => {
+    text.nodeValue = "";
+  },
+  unhideTextInstance: (text, value) => {
+    if (text.nodeValue !== value) text.nodeValue = value;
+  },
   getSuspenseBoundary: (node) => suspenseBoundaryFor(node),
   isTargetWithinSuspenseBoundary: (target, boundary) =>
     isWithinSuspenseBoundary(target, boundary),

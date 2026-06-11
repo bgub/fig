@@ -16,6 +16,7 @@ import {
 import {
   isClientReference,
   isContext,
+  isActivity,
   isErrorBoundary,
   isPortal,
   isSuspense,
@@ -549,6 +550,10 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
   }
 
   if (isErrorBoundary(type)) {
+    return serializeNode(element.props.children, frame);
+  }
+
+  if (isActivity(type)) {
     return serializeNode(element.props.children, frame);
   }
 

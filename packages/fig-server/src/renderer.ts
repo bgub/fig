@@ -12,6 +12,7 @@ import {
   figResourceKey,
   isClientReference,
   isContext,
+  isActivity,
   isErrorBoundary,
   isFigResource,
   isPortal,
@@ -103,6 +104,7 @@ interface Task {
   abortSet: Set<Task>;
   blockedBoundary: SuspenseBoundary | null;
   contextValues: ContextValues;
+  hiddenActivity: boolean;
   idPath: string;
   node: FigNode;
   selectProps: Props | null;
@@ -143,6 +145,7 @@ interface RenderFrame {
   boundary: SuspenseBoundary | null;
   contextValues: ContextValues;
   dispatcher: RenderDispatcher;
+  hiddenActivity: boolean;
   request: Request;
   segment: Segment;
   idPath: string;
@@ -248,6 +251,7 @@ export function createServerRenderRequest(
     "",
     null,
     null,
+    false,
   );
   request.pingedTasks.push(rootTask);
 
@@ -293,6 +297,7 @@ function createTask(
   idPath: string,
   selectProps: Props | null,
   stack: StackFrame | null,
+  hiddenActivity: boolean,
 ): Task {
   request.pendingTasks += 1;
   if (blockedBoundary === null) {
@@ -305,6 +310,7 @@ function createTask(
     abortSet,
     blockedBoundary,
     contextValues,
+    hiddenActivity,
     idPath,
     node,
     selectProps,
@@ -374,6 +380,7 @@ function retryTask(request: Request, task: Task): void {
     task.idPath,
     task.selectProps,
     task.stack,
+    task.hiddenActivity,
   );
 
   try {
@@ -397,12 +404,14 @@ function createRenderFrame(
   idPath: string,
   selectProps: Props | null,
   stack: StackFrame | null,
+  hiddenActivity: boolean,
 ): RenderFrame {
   const frame = {
     abortSet,
     boundary,
     contextValues,
     dispatcher: null as unknown as RenderDispatcher,
+    hiddenActivity,
     idPath,
     localIdCounter: 0,
     request,
@@ -522,6 +531,21 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
   }
 
   if (isErrorBoundary(type)) {
+    renderChildren(element.props.children, frame);
+    return;
+  }
+
+  if (isActivity(type)) {
+    if (element.props.mode === "hidden" && !frame.hiddenActivity) {
+      frame.hiddenActivity = true;
+      try {
+        renderChildren(element.props.children, frame);
+      } finally {
+        frame.hiddenActivity = false;
+      }
+      return;
+    }
+
     renderChildren(element.props.children, frame);
     return;
   }
@@ -648,6 +672,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.idPath,
     frame.selectProps,
     frame.stack,
+    frame.hiddenActivity,
   );
 
   try {
@@ -677,6 +702,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.idPath,
     frame.selectProps,
     frame.stack,
+    frame.hiddenActivity,
   );
 
   try {
@@ -726,7 +752,13 @@ function renderHostElement(
     throw new Error("Host elements cannot have both unsafeHTML and children.");
   }
 
-  writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
+  writeElementStart(
+    type,
+    props,
+    frame.segment,
+    frame.selectProps ?? {},
+    frame.hiddenActivity,
+  );
   if (isVoid) return;
 
   if (unsafeHTML !== null) {
@@ -793,6 +825,7 @@ function spawnSuspendedTask(
     frame.idPath,
     frame.selectProps,
     frame.stack,
+    frame.hiddenActivity,
   );
   thenable.then(
     () => pingTask(request, task),

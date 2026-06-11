@@ -71,6 +71,12 @@ createRoot(container).render(<App />);
   until the promise settles.
 - `lazy(load)` creates a component that suspends until `load()` resolves to a
   component type.
+- `<Activity mode="visible" | "hidden">` hides a subtree while preserving its
+  state: hiding hides the DOM (through portals) and aborts effects, binds, and
+  reactive events; revealing restores the DOM and re-runs them. Trees that
+  mount hidden defer their effects until first reveal, updates inside hidden
+  trees prerender at idle priority, and server rendering streams hidden
+  content with `display:none` so it never flashes before hydration.
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
   reporting and change the boundary key to reset sticky fallback state.
 - `transition(callback)` and `useTransition()` mark updates that may preserve

@@ -9,6 +9,7 @@ export type ElementType<P = Props> =
   | FigClientReference<P>
   | FigErrorBoundary
   | FigSuspense
+  | FigActivity
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
 export type FigChild =
@@ -59,6 +60,18 @@ export interface FigSuspense {
   readonly $$typeof: symbol;
 }
 
+export type ActivityMode = "visible" | "hidden";
+
+export interface ActivityProps {
+  mode: ActivityMode;
+  children?: FigNode;
+}
+
+export interface FigActivity {
+  (props: ActivityProps): FigNode;
+  readonly $$typeof: symbol;
+}
+
 export interface ErrorBoundaryProps {
   fallback?: FigNode;
   onError?: (error: unknown, info: ErrorInfo) => void;
@@ -82,6 +95,7 @@ export interface FigResources {
 export const Fragment = Symbol.for("fig.fragment");
 export const FigElementSymbol = Symbol.for("fig.element");
 export const FigClientReferenceSymbol = Symbol.for("fig.client-reference");
+export const FigActivitySymbol = Symbol.for("fig.activity");
 export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigPortalSymbol = Symbol.for("fig.portal");
 export const FigResourcesSymbol = Symbol.for("fig.resources");
@@ -100,6 +114,11 @@ export const ErrorBoundary: FigErrorBoundary = Object.assign(
 export const Suspense: FigSuspense = Object.assign(
   (props: SuspenseProps) => props.children,
   { $$typeof: FigSuspenseSymbol },
+);
+
+export const Activity: FigActivity = Object.assign(
+  (props: ActivityProps) => props.children,
+  { $$typeof: FigActivitySymbol },
 );
 
 export function createElement<P extends Props>(
@@ -181,6 +200,13 @@ export function isSuspense(value: unknown): value is FigSuspense {
   return (
     typeof value === "function" &&
     (value as FigSuspense).$$typeof === FigSuspenseSymbol
+  );
+}
+
+export function isActivity(value: unknown): value is FigActivity {
+  return (
+    typeof value === "function" &&
+    (value as FigActivity).$$typeof === FigActivitySymbol
   );
 }
 

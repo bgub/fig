@@ -7,6 +7,7 @@ export {
   ErrorBoundary,
   Fragment,
   lazy,
+  Activity,
   Suspense,
   type ClientReferenceOptions,
   type ElementType,
@@ -21,6 +22,8 @@ export {
   type Key,
   type LazyLoader,
   type Props,
+  type ActivityMode,
+  type ActivityProps,
   type SuspenseProps,
 } from "./element.ts";
 export {
