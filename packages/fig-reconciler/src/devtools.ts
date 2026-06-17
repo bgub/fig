@@ -22,6 +22,7 @@ export type FigDevtoolsFiberKind =
 
 export type FigDevtoolsHookKind =
   | "state"
+  | "action-state"
   | "id"
   | "lagged-value"
   | "external-store"

@@ -1,10 +1,12 @@
 import {
   createElement,
+  ErrorBoundary,
   type FigNode,
   type Props,
   type StartTransition,
   readPromise,
   Suspense,
+  useActionState,
   useCallback,
   useExternalStore,
   useId,
@@ -334,6 +336,132 @@ describe("@bgub/fig-dom hooks", () => {
     content.resolve("Loaded");
     await delay();
     expect(container.textContent).toBe("Idle Loaded");
+  });
+
+  it("updates action state from previous state and dispatch args", async () => {
+    let add: ((amount: number) => void) | null = null;
+    const calls: number[] = [];
+
+    function App() {
+      const [count, dispatch, isPending] = useActionState(
+        (previous: number, amount: number) => {
+          calls.push(previous);
+          return previous + amount;
+        },
+        0,
+      );
+      add = dispatch;
+
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        count,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle 0");
+
+    const addAction = requireTestValue(
+      add as ((amount: number) => void) | null,
+    );
+    addAction(2);
+    await delay();
+    expect(container.textContent).toBe("Idle 2");
+
+    addAction(3);
+    await delay();
+    expect(container.textContent).toBe("Idle 5");
+    expect(calls).toEqual([0, 2]);
+  });
+
+  it("keeps async action state updates in the transition lane", async () => {
+    const gate = deferred<void>();
+    const content = deferred<string>();
+    type MessageResource = { promise: Promise<string> } | null;
+    let submit: ((value: Promise<string>) => void) | null = null;
+
+    function Message({ value }: { value: MessageResource }) {
+      return value === null ? "Ready" : readPromise(value.promise);
+    }
+
+    function App() {
+      const [value, dispatch, isPending] = useActionState(
+        async (_previous: MessageResource, next: Promise<string>) => {
+          await gate.promise;
+          return { promise: next };
+        },
+        null as MessageResource,
+      );
+      submit = dispatch;
+
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Message, { value }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle Ready");
+
+    const submitAction = requireTestValue(
+      submit as ((value: Promise<string>) => void) | null,
+    );
+    submitAction(content.promise);
+    await delay();
+    expect(container.textContent).toBe("Pending Ready");
+
+    gate.resolve(undefined);
+    await delay();
+    expect(container.textContent).toBe("Pending Ready");
+
+    content.resolve("Loaded");
+    await delay();
+    expect(container.textContent).toBe("Idle Loaded");
+  });
+
+  it("throws rejected action state errors through error boundaries", async () => {
+    let submit: (() => void) | null = null;
+
+    function App() {
+      const [message, dispatch] = useActionState(async () => {
+        throw new Error("action failed");
+      }, "Ready");
+      submit = dispatch;
+      return createElement("main", null, message);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("main", null, "Crashed") },
+          createElement(App, null),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("Ready");
+
+    const submitAction = requireTestValue(submit as (() => void) | null);
+    submitAction();
+    await delay();
+    expect(container.textContent).toBe("Crashed");
   });
 
   it("lags urgent value updates until deferred work catches up", async () => {

@@ -3,6 +3,13 @@ import type { FigContext } from "./context.ts";
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
+export type ActionStateAction<S, Args extends unknown[]> = (
+  previousState: S,
+  ...args: Args
+) => S | PromiseLike<S>;
+export type ActionStateDispatch<Args extends unknown[]> = (
+  ...args: Args
+) => void;
 
 /**
  * Runs state updates scheduled by `callback` at transition priority. If
@@ -17,6 +24,10 @@ type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+  useActionState<S, Args extends unknown[]>(
+    action: ActionStateAction<S, Args>,
+    initialState: S,
+  ): [S, ActionStateDispatch<Args>, boolean];
   useId(): string;
   useLaggedValue<T>(
     value: T,
@@ -58,6 +69,19 @@ export function useState<S>(
   initialState: S | (() => S),
 ): [S, Dispatch<SetStateAction<S>>] {
   return resolveDispatcher().useState(initialState);
+}
+
+/**
+ * Tracks state returned by a client-side action. The action receives the
+ * previous committed state first, followed by the dispatch arguments. Async
+ * actions run in a transition priority scope and keep `isPending` true until
+ * they settle.
+ */
+export function useActionState<S, Args extends unknown[]>(
+  action: ActionStateAction<S, Args>,
+  initialState: S,
+): [S, ActionStateDispatch<Args>, boolean] {
+  return resolveDispatcher().useActionState(action, initialState);
 }
 
 export function useId(): string {

@@ -1,4 +1,6 @@
 import {
+  type ActionStateAction,
+  type ActionStateDispatch,
   type DependencyList,
   type Dispatch,
   type EffectCallback,
@@ -350,7 +352,22 @@ interface TransitionState {
   start: StartTransition | null;
 }
 
-type QueuedHookKind = "state" | "transition";
+const NoActionStateError = Symbol();
+
+interface ActionStateInstance<S, Args extends unknown[]> {
+  action: ActionStateAction<S, Args>;
+  value: S;
+}
+
+interface ActionState<S, Args extends unknown[]> {
+  error: unknown;
+  instance: ActionStateInstance<S, Args>;
+  pending: number;
+  action: ActionStateAction<S, Args>;
+  value: S;
+}
+
+type QueuedHookKind = "state" | "transition" | "action-state";
 
 interface ExternalStoreInstance<T, Owner> {
   committedSubscribe: ExternalStoreSubscribe | null;
@@ -528,6 +545,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       return [hook.memoizedState, dispatch];
+    },
+    useActionState(action, initialState) {
+      return updateActionStateHook(action, initialState);
     },
     useId() {
       return updateIdHook();
@@ -1640,6 +1660,98 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hook;
   }
 
+  function updateActionStateHook<S, Args extends unknown[]>(
+    action: ActionStateAction<S, Args>,
+    initialState: S,
+  ): [S, ActionStateDispatch<Args>, boolean] {
+    const hook: Hook<ActionState<S, Args>> = updateQueuedHook(
+      "action-state",
+      () => createActionState(action, initialState),
+    );
+    const queue = hook.queue;
+    const fiber = requireRenderingFiber();
+    const instance = hook.memoizedState.instance;
+    const nextState = { ...hook.memoizedState, action };
+    hook.memoizedState = nextState;
+    if (hook.baseQueue === null) {
+      hook.baseState = nextState;
+    } else {
+      hook.baseState = { ...hook.baseState, action };
+    }
+
+    if (queue.dispatch === null) {
+      const updatePending = (delta: 1 | -1, lane: Lane) => {
+        scheduleHookUpdate(
+          fiber,
+          queue,
+          (state) => ({
+            ...state,
+            pending: Math.max(0, state.pending + delta),
+          }),
+          lane,
+        );
+      };
+      const finish = (lane: Lane, error: unknown, ...value: [] | [S]) => {
+        scheduleHookUpdate(
+          fiber,
+          queue,
+          (state) => ({
+            ...state,
+            error,
+            pending: Math.max(0, state.pending - 1),
+            value: value.length === 0 ? state.value : value[0],
+          }),
+          lane,
+        );
+      };
+
+      queue.dispatch = ((...args: Args) => {
+        if (renderingFiber !== null) {
+          throw new Error(
+            "Action state updates are not allowed during render.",
+          );
+        }
+
+        const lane = claimNextTransitionLane();
+        updatePending(1, SyncLane);
+
+        let result: S | PromiseLike<S>;
+        try {
+          result = runWithTransitionLane(lane, () => {
+            return instance.action(instance.value, ...args);
+          });
+        } catch (error) {
+          finish(lane, error);
+          return;
+        }
+
+        if (!isThenable(result)) {
+          finish(lane, NoActionStateError, result);
+          return;
+        }
+
+        result.then(
+          (value) => {
+            finish(lane, NoActionStateError, value);
+          },
+          (error: unknown) => {
+            finish(lane, error);
+          },
+        );
+      }) as unknown as Dispatch<SetStateAction<ActionState<S, Args>>>;
+    }
+
+    if (hook.memoizedState.error !== NoActionStateError) {
+      throw hook.memoizedState.error;
+    }
+
+    return [
+      hook.memoizedState.value,
+      queue.dispatch as unknown as ActionStateDispatch<Args>,
+      hook.memoizedState.pending > 0,
+    ];
+  }
+
   function updateIdHook(): string {
     const fiber = requireRenderingFiber();
     const oldHook = updateHook("id") as Hook<string> | null;
@@ -2352,7 +2464,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitRoot(root: R, finishedWork: F): void {
-    commitReactiveEvents(finishedWork.child);
+    commitLiveHookInstances(finishedWork.child);
     if (hasHiddenActivities) armRevealedActivities(finishedWork.child);
     commitEffects(finishedWork.child, BeforeLayoutEffect);
     if (root.clearContainerBeforeCommit) {
@@ -3498,12 +3610,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function commitReactiveEvents(node: F | null): void {
+  function commitLiveHookInstances(node: F | null): void {
     visitFiberHooks(node, (_owner, hook) => {
       if (isReactiveEventHook(hook)) {
         const instance = hook.memoizedState.instance;
         instance.handler = hook.memoizedState.next;
         instance.live = true;
+      }
+
+      if (hook.kind === "action-state") {
+        const state = hook.memoizedState as ActionState<unknown, unknown[]>;
+        state.instance.action = state.action;
+        state.instance.value = state.value;
       }
     });
   }
@@ -3754,6 +3872,19 @@ function createHook<S>(kind: FigDevtoolsHookKind, state: S): Hook<S> {
     baseQueue: null,
     queue: { pending: null, dispatch: null },
     next: null,
+  };
+}
+
+function createActionState<S, Args extends unknown[]>(
+  action: ActionStateAction<S, Args>,
+  value: S,
+): ActionState<S, Args> {
+  return {
+    action,
+    error: NoActionStateError,
+    instance: { action, value },
+    pending: 0,
+    value,
   };
 }
 

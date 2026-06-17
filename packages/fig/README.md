@@ -87,6 +87,11 @@ createRoot(container).render(<App />);
   returns a promise, `useTransition()` keeps `isPending` true until it settles.
   Server rendering runs transition callbacks immediately and never exposes
   pending state.
+- `useActionState(action, initialState)` matches React's argument order while
+  staying client-side in Fig today. Actions receive previous state first,
+  return the next state or a promise for it, and expose `isPending` while Fig
+  applies the result in a transition priority scope. Server actions can layer on
+  top later without changing the hook shape.
 - Document resources: `resources([...], children)` attaches resources to a
   subtree while rendering only `children` on the client. Resource helpers include
   `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.

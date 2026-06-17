@@ -13,6 +13,7 @@ import {
   title,
   Suspense,
   transition,
+  useActionState,
   useCallback,
   useExternalStore,
   useId,
@@ -162,6 +163,9 @@ describe("@bgub/fig", () => {
 
   it("throws when hooks are called outside render", () => {
     expect(() => useState(0)).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+    expect(() => useActionState((state: number) => state, 0)).toThrow(
       "Hooks can only be called while rendering a component.",
     );
     expect(() => useMemo(() => 1, [])).toThrow(

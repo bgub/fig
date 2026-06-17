@@ -123,6 +123,15 @@ export function createStaticDispatcher(
       };
       return [value, dispatch];
     },
+    useActionState(_action, initialState) {
+      return [
+        initialState,
+        () => {
+          throw new Error(options.updateError);
+        },
+        false,
+      ];
+    },
     useId() {
       return options.useId();
     },

@@ -29,6 +29,7 @@ export {
 export {
   readContext,
   readPromise,
+  useActionState,
   useBeforeLayout,
   useBeforePaint,
   useCallback,
@@ -40,6 +41,8 @@ export {
   useReactiveEvent,
   useState,
   useTransition,
+  type ActionStateAction,
+  type ActionStateDispatch,
   type DependencyList,
   type Dispatch,
   type EffectCallback,
