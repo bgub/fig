@@ -20,6 +20,7 @@ import {
   hydrateRoot,
   on,
 } from "@bgub/fig-dom";
+import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToString } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
@@ -2068,4 +2069,24 @@ if (container === null) {
   throw new Error("Could not find #root.");
 }
 
+const devtoolsHook = ensureFigDevtoolsGlobalHook();
+const devtoolsContainer = installDemoDevtoolsLayout(container);
+createRoot(devtoolsContainer, { devtools: false }).render(
+  <FigDevtools hook={devtoolsHook} placement="sidebar" />,
+);
+
 createRoot(container).render(<App />);
+
+function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
+  const layout = document.createElement("div");
+  const appPane = document.createElement("div");
+  const devtoolsPane = document.createElement("aside");
+
+  layout.className = "fig-demo-devtools-layout";
+  appPane.className = "fig-demo-app-pane";
+  devtoolsPane.className = "fig-demo-devtools-pane";
+  appRoot.replaceWith(layout);
+  appPane.appendChild(appRoot);
+  layout.append(appPane, devtoolsPane);
+  return devtoolsPane;
+}

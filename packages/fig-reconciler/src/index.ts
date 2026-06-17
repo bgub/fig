@@ -37,9 +37,11 @@ import {
 } from "@bgub/fig-scheduler";
 import {
   devtoolsTypeName,
+  type FigDevtoolsCommitInspection,
   type FigDevtoolsEffectPhase,
   type FigDevtoolsFiberKind,
   type FigDevtoolsFiberSnapshot,
+  type FigDevtoolsHostSnapshot,
   type FigDevtoolsHookKind,
   type FigDevtoolsHookSnapshot,
   type FigDevtoolsRootSnapshot,
@@ -216,6 +218,7 @@ export interface FigRoot {
 
 export interface FigRootOptions {
   identifierPrefix?: string;
+  devtools?: boolean;
   onRecoverableError?: (error: unknown, info: RecoverableErrorInfo) => void;
   onUncaughtError?: (error: unknown, info: ErrorInfo) => void;
 }
@@ -431,6 +434,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   current: Fiber<Container, Instance, TextInstance>;
   element: FigNode;
   identifierPrefix: string;
+  devtools: boolean;
   callback: ScheduledTask | null;
   callbackPriority: Lane;
   wip: Fiber<Container, Instance, TextInstance> | null;
@@ -608,6 +612,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       current,
       element: null,
       identifierPrefix: options.identifierPrefix ?? "",
+      devtools: options.devtools ?? true,
       pendingLanes: NoLanes,
       suspendedLanes: NoLanes,
       pingedLanes: NoLanes,
@@ -2378,7 +2383,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       collectReactiveEffects(root, finishedWork.child);
       scheduleReactiveEffects(root);
     }
-    if (process.env.NODE_ENV !== "production") emitDevtoolsCommit(host, root);
+    if (process.env.NODE_ENV !== "production" && root.devtools) {
+      emitDevtoolsCommit(host, root);
+    }
     flushRecoverableErrors(root);
   }
 
@@ -4046,6 +4053,10 @@ const devtoolsRendererIds = new WeakMap<object, number>();
 let nextDevtoolsFiberId = 1;
 let nextDevtoolsRootId = 1;
 
+interface DevtoolsInspectionState {
+  hostFibers: WeakMap<object, number>;
+}
+
 function emitDevtoolsCommit<Container, Instance, TextInstance>(
   renderer: object,
   root: FiberRoot<Container, Instance, TextInstance>,
@@ -4063,7 +4074,13 @@ function emitDevtoolsCommit<Container, Instance, TextInstance>(
       devtoolsRendererIds.set(renderer, rendererId);
     }
 
-    hook.onCommitRoot(rendererId, snapshotDevtoolsRoot(root, rendererId));
+    const inspection = createDevtoolsInspectionState();
+    const snapshot = snapshotDevtoolsRoot(root, rendererId, inspection);
+    hook.onCommitRoot(
+      rendererId,
+      snapshot,
+      createDevtoolsCommitInspection(snapshot.id, inspection),
+    );
   } catch {
     // DevTools should never affect application rendering.
   }
@@ -4072,6 +4089,7 @@ function emitDevtoolsCommit<Container, Instance, TextInstance>(
 function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
   root: FiberRoot<Container, Instance, TextInstance>,
   rendererId: number,
+  inspection: DevtoolsInspectionState,
 ): FigDevtoolsRootSnapshot {
   return {
     id: devtoolsRootId(root),
@@ -4081,20 +4099,22 @@ function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
     suspendedLanes: root.suspendedLanes,
     pingedLanes: root.pingedLanes,
     expiredLanes: root.expiredLanes,
-    tree: snapshotDevtoolsFiber(root.current, null),
+    tree: snapshotDevtoolsFiber(root.current, null, inspection),
   };
 }
 
 function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
   node: Fiber<Container, Instance, TextInstance>,
   parentId: number | null,
+  inspection: DevtoolsInspectionState,
 ): FigDevtoolsFiberSnapshot {
   const id = devtoolsFiberId(node);
   const { kind, name } = devtoolsFiberInfo(node);
   const children: FigDevtoolsFiberSnapshot[] = [];
+  recordDevtoolsHostFiber(node, id, inspection);
 
   for (let child = node.child; child !== null; child = child.sibling) {
-    children.push(snapshotDevtoolsFiber(child, id));
+    children.push(snapshotDevtoolsFiber(child, id, inspection));
   }
 
   return {
@@ -4109,6 +4129,7 @@ function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
     childLanes: node.childLanes,
     hooks: devtoolsHooks(node.memoizedState),
     contextDependencies: devtoolsContextDependencies(node),
+    host: devtoolsHost(node),
     capturedError: node.errorBoundaryState?.error,
     componentStack: node.errorBoundaryState?.info.componentStack,
     children,
@@ -4123,6 +4144,34 @@ function devtoolsRootId(root: object): number {
   nextDevtoolsRootId += 1;
   devtoolsRootIds.set(root, id);
   return id;
+}
+
+function createDevtoolsInspectionState(): DevtoolsInspectionState {
+  return { hostFibers: new WeakMap() };
+}
+
+function createDevtoolsCommitInspection(
+  rootId: number,
+  inspection: DevtoolsInspectionState,
+): FigDevtoolsCommitInspection {
+  return {
+    inspectElement(target) {
+      if (typeof target !== "object" || target === null) return null;
+
+      const fiberId = inspection.hostFibers.get(target);
+      return fiberId === undefined ? null : { rootId, fiberId };
+    },
+  };
+}
+
+function recordDevtoolsHostFiber<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+  id: number,
+  inspection: DevtoolsInspectionState,
+): void {
+  if (node.tag !== HostTag && node.tag !== TextTag) return;
+  if (typeof node.stateNode !== "object" || node.stateNode === null) return;
+  inspection.hostFibers.set(node.stateNode, id);
 }
 
 function devtoolsFiberId<Container, Instance, TextInstance>(
@@ -4218,6 +4267,52 @@ function devtoolsContextDependencies<Container, Instance, TextInstance>(
   );
 }
 
+function devtoolsHost<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+): FigDevtoolsHostSnapshot | undefined {
+  if (node.tag === TextTag) {
+    const text = node.stateNode as { nodeValue?: unknown } | null;
+    const value =
+      typeof text?.nodeValue === "string"
+        ? text.nodeValue
+        : typeof node.memoizedProps?.nodeValue === "string"
+          ? node.memoizedProps.nodeValue
+          : undefined;
+
+    return {
+      kind: "text",
+      text: value === undefined ? undefined : devtoolsTruncate(value),
+    };
+  }
+
+  if (node.tag !== HostTag) return undefined;
+
+  const instance = node.stateNode as {
+    getAttribute?(name: string): string | null;
+    getAttributeNames?(): string[];
+    localName?: unknown;
+    tagName?: unknown;
+  } | null;
+  const attributes: Record<string, string> = {};
+  const getAttribute = instance?.getAttribute?.bind(instance);
+
+  for (const name of instance?.getAttributeNames?.() ?? []) {
+    const value = getAttribute?.(name);
+    attributes[name] = value === null || value === undefined ? "" : value;
+  }
+
+  return {
+    kind: "element",
+    tagName:
+      typeof instance?.localName === "string"
+        ? instance.localName
+        : typeof instance?.tagName === "string"
+          ? instance.tagName.toLowerCase()
+          : String(node.type),
+    attributes,
+  };
+}
+
 function devtoolsFiberInfo<Container, Instance, TextInstance>(
   node: Fiber<Container, Instance, TextInstance>,
 ): {
@@ -4260,4 +4355,8 @@ function devtoolsEffectPhase(phase: EffectPhase): FigDevtoolsEffectPhase {
   if (phase === BeforePaintEffect) return "before-paint";
   if (phase === BeforeLayoutEffect) return "before-layout";
   return "reactive";
+}
+
+function devtoolsTruncate(value: string): string {
+  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
 }

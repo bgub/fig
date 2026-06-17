@@ -58,9 +58,17 @@ export interface FigDevtoolsFiberSnapshot {
   childLanes: Lanes;
   hooks: FigDevtoolsHookSnapshot[];
   contextDependencies: string[];
+  host?: FigDevtoolsHostSnapshot;
   capturedError?: unknown;
   componentStack?: string;
   children: FigDevtoolsFiberSnapshot[];
+}
+
+export interface FigDevtoolsHostSnapshot {
+  kind: "element" | "text";
+  tagName?: string;
+  attributes?: Record<string, string>;
+  text?: string;
 }
 
 export interface FigDevtoolsRootSnapshot {
@@ -74,6 +82,15 @@ export interface FigDevtoolsRootSnapshot {
   tree: FigDevtoolsFiberSnapshot;
 }
 
+export interface FigDevtoolsElementInspection {
+  rootId: number;
+  fiberId: number;
+}
+
+export interface FigDevtoolsCommitInspection {
+  inspectElement(target: unknown): FigDevtoolsElementInspection | null;
+}
+
 export interface FigDevtoolsRendererInfo {
   name: string;
   packageName: string;
@@ -81,7 +98,11 @@ export interface FigDevtoolsRendererInfo {
 
 export interface FigDevtoolsGlobalHook {
   inject(renderer: FigDevtoolsRendererInfo): number;
-  onCommitRoot(rendererId: number, snapshot: FigDevtoolsRootSnapshot): void;
+  onCommitRoot(
+    rendererId: number,
+    snapshot: FigDevtoolsRootSnapshot,
+    inspection?: FigDevtoolsCommitInspection,
+  ): void;
 }
 
 export function devtoolsTypeName(

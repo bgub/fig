@@ -35,6 +35,35 @@ body {
     sans-serif;
 }
 
+.fig-demo-devtools-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.fig-demo-app-pane {
+  min-width: 0;
+}
+
+.fig-demo-devtools-pane {
+  position: sticky;
+  top: 0;
+  width: min(420px, 34vw);
+  min-width: 360px;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  background: #171923;
+}
+
+.fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
+  width: 0;
+  min-width: 0;
+  overflow: visible;
+  border-left: 0;
+}
+
 a {
   color: inherit;
 }
@@ -574,6 +603,28 @@ button.button {
 }
 
 @media (max-width: 780px) {
+  .fig-demo-devtools-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .fig-demo-devtools-pane,
+  .fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
+    position: static;
+    width: 0;
+    min-width: 0;
+    height: 0;
+    overflow: visible;
+    border-top: 0;
+    border-left: 0;
+  }
+
+  .fig-demo-devtools-pane:not(:has(.fig-devtools.is-closed)) {
+    width: auto;
+    height: min(620px, 70vh);
+    overflow: hidden;
+    border-top: 1px solid var(--line);
+  }
+
   .topbar-inner {
     flex-wrap: wrap;
     height: auto;

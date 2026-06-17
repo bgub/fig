@@ -15,6 +15,7 @@ import { requestPaint } from "@bgub/fig-scheduler";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   createRenderer,
+  type FigDevtoolsCommitInspection,
   type FigDevtoolsGlobalHook,
   type FigDevtoolsRootSnapshot,
   type HostConfig,
@@ -110,6 +111,19 @@ function collectDevtoolsCommits(): FigDevtoolsRootSnapshot[] {
     },
   };
   return commits;
+}
+
+function collectDevtoolsInspections(): FigDevtoolsCommitInspection[] {
+  const inspections: FigDevtoolsCommitInspection[] = [];
+  globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
+    inject() {
+      return 7;
+    },
+    onCommitRoot(_rendererId, _snapshot, inspection) {
+      if (inspection !== undefined) inspections.push(inspection);
+    },
+  };
+  return inspections;
 }
 
 afterEach(() => {
@@ -220,15 +234,51 @@ describe("reconciler", () => {
 
     const span = counter?.children[0];
     expect(span?.name).toBe("span");
+    expect(span?.host).toEqual({
+      kind: "element",
+      tagName: "span",
+      attributes: {},
+    });
     expect(span?.props).toEqual({ id: "count" });
     expect(span?.children.map((child) => child.props.nodeValue)).toEqual([
       "Count 3",
     ]);
+    expect(span?.children[0]?.host).toEqual({
+      kind: "text",
+      text: "Count 3",
+    });
 
     const counterId = counter?.id;
     flushSync(() => root.render(createElement(Counter, { label: "Again " })));
 
     expect(commits.at(-1)?.tree.children[0]?.id).toBe(counterId);
+  });
+
+  it("can disable DevTools publishing for a root", () => {
+    const commits = collectDevtoolsCommits();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container, { devtools: false });
+
+    flushSync(() => root.render(createElement("span", null, "Hidden")));
+
+    expect(container.textContent).toBe("Hidden");
+    expect(commits).toEqual([]);
+  });
+
+  it("maps host instances to DevTools fiber ids for element inspection", () => {
+    const inspections = collectDevtoolsInspections();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() => root.render(createElement("button", null, "Inspect")));
+
+    const button = container.childNodes[0];
+    const inspected = inspections.at(-1)?.inspectElement(button);
+
+    expect(inspected?.rootId).toBeGreaterThan(0);
+    expect(inspected?.fiberId).toBeGreaterThan(0);
   });
 
   it("publishes Suspense fibers to DevTools snapshots", () => {

@@ -88,6 +88,52 @@ test("runs benchmark page and renders summarized results", async ({ page }) => {
   expect(errors()).toEqual([]);
 });
 
+test("devtools hide and select mode inspect Fig host nodes", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.goto("/#state", { waitUntil: "commit" });
+  await expect(
+    page.getByRole("heading", { name: "State + diffing" }),
+  ).toBeVisible();
+
+  const devtools = page.locator("[data-fig-devtools]");
+  await expect(devtools.getByText("Fig DevTools")).toBeVisible();
+  await expect(devtools.locator(".fig-devtools__body")).toBeVisible();
+
+  const commitsToggle = devtools.getByRole("button", { name: /Commits/ });
+  await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(devtools.locator(".fig-devtools__commit-list")).toHaveCount(0);
+  await commitsToggle.click();
+  await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(devtools.locator(".fig-devtools__commit-list")).toBeVisible();
+
+  await devtools.getByRole("button", { exact: true, name: "Hide" }).click();
+  await expect(devtools.locator(".fig-devtools__body")).toHaveCount(0);
+
+  const showButton = devtools.getByRole("button", {
+    name: "Show Fig DevTools",
+  });
+  await expect(showButton).toBeVisible();
+  await expect(showButton).toHaveText("DEV");
+
+  await showButton.click();
+  await expect(devtools.locator(".fig-devtools__body")).toBeVisible();
+  await devtools.getByRole("button", { name: "Select" }).click();
+
+  const increment = page.getByRole("button", { name: "Increment" });
+  await increment.hover();
+  await expect(page.locator(".fig-devtools__inspect-label")).toContainText(
+    "Command - <button>",
+  );
+
+  await increment.click();
+  await expect(devtools.locator(".fig-devtools__name")).toHaveText("button");
+  await expect(devtools.getByRole("button", { name: "Select" })).toBeVisible();
+  expect(errors()).toEqual([]);
+});
+
 async function openReplayPage(page: Page): Promise<void> {
   await page.goto("/#event-replay", { waitUntil: "commit" });
   await expect(

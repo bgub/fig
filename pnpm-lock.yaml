@@ -41,6 +41,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:../../packages/fig-devtools
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
@@ -72,6 +75,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:../../packages/fig-devtools
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
@@ -88,6 +94,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:../../packages/fig-devtools
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
@@ -115,6 +124,12 @@ importers:
 
   packages/fig-devtools:
     dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler

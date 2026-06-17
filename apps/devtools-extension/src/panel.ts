@@ -39,6 +39,7 @@ port.onMessage.addListener((message) => {
 function applyInitMessage(hook: FigDevtoolsHook, message: InitMessage): void {
   hook.renderers.clear();
   hook.roots.clear();
+  hook.clear();
 
   for (const [rendererId, renderer] of message.renderers) {
     hook.renderers.set(rendererId, renderer);
