@@ -31,11 +31,10 @@ export function writeElementStart(
   props: Props,
   sink: HtmlSink,
   inheritedProps: Props = {},
-  hidden = false,
 ): void {
   validateTagName(type);
   sink.write(`<${type}`);
-  writeAttributes(type, props, inheritedProps, sink, hidden);
+  writeAttributes(type, props, inheritedProps, sink);
   sink.write(">");
 }
 
@@ -72,23 +71,13 @@ function writeAttributes(
   props: Props,
   inheritedProps: Props,
   sink: HtmlSink,
-  hidden = false,
 ): void {
-  let wroteStyle = false;
-
   for (const [name, value] of Object.entries(props)) {
     if (reservedProp(name)) continue;
 
     if (name === "style") {
-      let style = serializeStyle(value);
-      // Content inside hidden Activity boundaries streams host-hidden so it
-      // never flashes before hydration re-applies hiding.
-      if (hidden)
-        style = style === "" ? "display:none" : `${style};display:none`;
-      if (style !== "") {
-        writeAttribute(sink, "style", style);
-        wroteStyle = true;
-      }
+      const style = serializeStyle(value);
+      if (style !== "") writeAttribute(sink, "style", style);
       continue;
     }
 
@@ -110,8 +99,6 @@ function writeAttributes(
 
     throw new Error(`Cannot serialize prop "${name}" to HTML.`);
   }
-
-  if (hidden && !wroteStyle) writeAttribute(sink, "style", "display:none");
 
   if (
     type === "option" &&

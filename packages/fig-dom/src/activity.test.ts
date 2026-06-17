@@ -7,7 +7,13 @@ import {
   useState,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { createPortal, createRoot, flushSync, hydrateRoot } from "./index.ts";
+import {
+  createPortal,
+  createRoot,
+  flushSync,
+  hydrateRoot,
+  on,
+} from "./index.ts";
 import {
   deferred,
   delay,
@@ -343,18 +349,20 @@ describe("@bgub/fig-dom activity", () => {
     expect(display(aside)).toBe("");
   });
 
-  it("hydrates server-hidden Activity content and keeps it hidden", async () => {
+  it("keeps server-hidden content dehydrated until reveal", async () => {
     const calls: string[] = [];
+    let childRenders = 0;
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;
 
     function Child() {
+      childRenders += 1;
       useReactive((signal) => {
         calls.push("run");
         signal.addEventListener("abort", () => calls.push("abort"), {
           once: true,
         });
       }, []);
-      return createElement("span", null, "hidden child");
+      return createElement("span", null, "secret tab");
     }
 
     function App() {
@@ -363,28 +371,122 @@ describe("@bgub/fig-dom activity", () => {
       return createElement(Activity, { mode }, createElement(Child, null));
     }
 
-    // Server-rendered DOM: the span streamed with display:none.
+    // Server-rendered DOM: hidden content streams inside an inert template.
     const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
     const span = new FakeElement("span");
-    span.setAttribute("style", "display:none");
-    span.appendChild(new FakeText("hidden child"));
-    container.appendChild(span);
+    span.appendChild(new FakeText("secret tab"));
+    template.appendChild(span);
+    container.appendChild(template);
 
     flushSync(() =>
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
     await delay();
 
-    // The server node was adopted, stays hidden, and effects are deferred.
-    expect(container.childNodes[0]).toBe(span);
-    expect(display(span)).toBe("none");
+    // Dehydrated: the template is untouched and no content work happened.
+    expect(container.childNodes[0]).toBe(template);
+    expect(childRenders).toBe(0);
     expect(calls).toEqual([]);
+
+    // Reveal: content hydrates against the template, adopting its nodes,
+    // and the template unpacks into the live DOM.
+    flushSync(() => setMode?.("visible"));
+    await delay();
+    expect(container.childNodes[0]).toBe(span);
+    expect(container.textContent).toBe("secret tab");
+    expect(childRenders).toBe(2);
+    expect(calls).toEqual(["run", "abort", "run"]);
+  });
+
+  it("hydrates server-hidden content through when the client mode is visible", async () => {
+    function App() {
+      return createElement(
+        Activity,
+        { mode: "visible" },
+        createElement("span", null, "tab"),
+      );
+    }
+
+    // The server hid the content but the client renders it visible.
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const span = new FakeElement("span");
+    span.appendChild(new FakeText("tab"));
+    template.appendChild(span);
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null)),
+    );
+    await delay();
+
+    expect(container.childNodes[0]).toBe(span);
+    expect(container.textContent).toBe("tab");
+  });
+
+  it("unpacks real template content before binding hydrated children", async () => {
+    let childRenders = 0;
+    let clicks = 0;
+    const bindParents: string[] = [];
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Child() {
+      childRenders += 1;
+      return createElement(
+        "button",
+        {
+          bind: (node: Element) => {
+            bindParents.push(
+              (node.parentNode as FakeElement | null)?.tagName ?? "none",
+            );
+          },
+          events: [
+            on("click", () => {
+              clicks += 1;
+            }),
+          ],
+        },
+        "Open",
+      );
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(Activity, { mode }, createElement(Child, null));
+    }
+
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const content = new FakeElement("fragment");
+    (template as FakeElement & { content: FakeElement }).content = content;
+    const button = new FakeElement("button");
+    button.appendChild(new FakeText("Open"));
+    content.appendChild(button);
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null)),
+    );
+    await delay();
+
+    expect(container.childNodes[0]).toBe(template);
+    expect(childRenders).toBe(0);
+    expect(bindParents).toEqual([]);
 
     flushSync(() => setMode?.("visible"));
     await delay();
-    expect(display(span)).toBe("");
-    expect(container.textContent).toBe("hidden child");
-    expect(calls).toEqual(["run", "abort", "run"]);
+
+    expect(container.childNodes[0]).toBe(button);
+    expect(childRenders).toBe(2);
+    expect(bindParents).toEqual(["root", "root"]);
+
+    button.dispatch("click");
+    expect(clicks).toBe(1);
   });
 
   it("keeps Suspense content hidden when it resolves inside a hidden tree", async () => {

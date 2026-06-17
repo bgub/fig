@@ -140,6 +140,23 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   commitHydratedInstance: (instance, nextProps) =>
     hydrateElement(instance, nextProps),
+  getActivityBoundary: (node) =>
+    isActivityTemplate(node) ? (node as Element) : null,
+  getFirstActivityHydratable: (boundary) =>
+    (activityTemplateContent(boundary).firstChild ?? null) as
+      | Element
+      | TextLike
+      | null,
+  commitHydratedActivityBoundary: (boundary) => {
+    const parent = boundary.parentNode;
+    if (parent === null) return;
+
+    const content = activityTemplateContent(boundary);
+    while (content.firstChild !== null) {
+      parent.insertBefore(content.firstChild, boundary);
+    }
+    parent.removeChild(boundary);
+  },
   hideInstance: (instance) => {
     suspendBind(instance);
     (instance as HTMLElement).style.setProperty("display", "none", "important");
@@ -248,6 +265,22 @@ export function createPortal(
   key: Key | null = null,
 ) {
   return createPortalNode(children, container, key);
+}
+
+// Real templates hold children in a content fragment; test doubles hold
+// them directly.
+function activityTemplateContent(boundary: Element): ParentNode {
+  return "content" in boundary
+    ? (boundary.content as ParentNode)
+    : (boundary as ParentNode);
+}
+
+function isActivityTemplate(node: Element | TextLike): boolean {
+  return (
+    elementName(node) === "template" &&
+    "getAttribute" in node &&
+    node.getAttribute("data-fig-activity") !== null
+  );
 }
 
 function isHydratableElement(

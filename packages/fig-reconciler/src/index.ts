@@ -174,6 +174,11 @@ export interface HostConfig<Container, Instance, TextInstance> {
     nextProps: Props,
   ): void;
   commitHydratedInstance?(instance: Instance, nextProps: Props): void;
+  getActivityBoundary?(node: HostNode<Instance, TextInstance>): Instance | null;
+  getFirstActivityHydratable?(
+    boundary: Instance,
+  ): HostNode<Instance, TextInstance> | null;
+  commitHydratedActivityBoundary?(boundary: Instance): void;
   hideInstance?(instance: Instance): void;
   unhideInstance?(instance: Instance, props: Props): void;
   hideTextInstance?(instance: TextInstance): void;
@@ -410,11 +415,15 @@ interface Fiber<Container, Instance, TextInstance> {
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
   // checks from stale .return chains stay authoritative.
-  activityState: ActivityState | null;
+  activityState: ActivityState<Instance> | null;
 }
 
-interface ActivityState {
+interface ActivityState<Instance> {
   hidden: boolean;
+  // The host boundary (an inert template holding server content) while the
+  // boundary is dehydrated, or null; cleared when the content unpacks at
+  // commit.
+  dehydrated: Instance | null;
 }
 
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
@@ -442,6 +451,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   isHydrating: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
   hydratingSuspenseBoundary: Fiber<Container, Instance, TextInstance> | null;
+  hydratingActivityBoundary: Fiber<Container, Instance, TextInstance> | null;
   nextHydratableInstance: HostNode<Instance, TextInstance> | null;
   clearContainerBeforeCommit: boolean;
   hydrationInitialElement: FigNode | typeof NoHydrationInitialElement;
@@ -476,6 +486,19 @@ export function createRenderer<Container, Instance, TextInstance>(
 ) {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
+  type ActivityHydrationHostConfig = HostConfig<
+    Container,
+    Instance,
+    TextInstance
+  > &
+    Required<
+      Pick<
+        HostConfig<Container, Instance, TextInstance>,
+        | "getActivityBoundary"
+        | "getFirstActivityHydratable"
+        | "commitHydratedActivityBoundary"
+      >
+    >;
   const roots = new WeakMap<object, R>();
   const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
@@ -485,6 +508,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   let hasHiddenActivities = false;
   let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
     null;
+  let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -608,6 +632,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       isHydrating: false,
       hydrationParent: null,
       hydratingSuspenseBoundary: null,
+      hydratingActivityBoundary: null,
       nextHydratableInstance: null,
       clearContainerBeforeCommit: false,
       hydrationInitialElement: NoHydrationInitialElement,
@@ -918,6 +943,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function resetHydrationPointers(root: R): void {
     root.hydrationParent = null;
     root.hydratingSuspenseBoundary = null;
+    root.hydratingActivityBoundary = null;
     root.nextHydratableInstance = null;
   }
 
@@ -941,6 +967,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function handleThrownValue(node: F, error: unknown): F | null {
+    const root = rootOf(node);
+    if (root.hydratingActivityBoundary !== null) abandonActivityHydration(root);
+
     if (isThenable(error)) {
       const boundary = findSuspenseBoundary(node);
       if (boundary !== null) return captureSuspenseBoundary(boundary, error);
@@ -1034,7 +1063,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === ActivityTag) {
-      beginActivity(node);
+      beginActivity(root, node);
       return;
     }
 
@@ -1048,7 +1077,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     reconcileCurrentChildren(node, node.props.children);
   }
 
-  function beginActivity(node: F): void {
+  function beginActivity(root: R, node: F): void {
     const hidden = activityHidden(node.props);
     if (hidden) hasHiddenActivities = true;
     const previousHidden =
@@ -1056,7 +1085,24 @@ export function createRenderer<Container, Instance, TextInstance>(
         ? false
         : activityHidden(node.alternate.memoizedProps ?? {});
 
-    node.activityState ??= { hidden: false };
+    node.activityState ??= { hidden: false, dehydrated: null };
+    const state = node.activityState;
+
+    if (
+      state.dehydrated === null &&
+      tryDehydrateActivityBoundary(root, node, state)
+    ) {
+      // Server-hidden content stays dehydrated; if the client wants it
+      // visible, a follow-up render hydrates through.
+      if (!hidden) scheduleFiber(node, DefaultLane);
+      return;
+    }
+
+    if (state.dehydrated !== null) {
+      if (hidden) return;
+      hydrateDehydratedActivityBoundary(root, node);
+      return;
+    }
 
     if (hidden !== previousHidden) {
       node.flags |= VisibilityFlag;
@@ -1066,7 +1112,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     // revealed subtree commits already up to date. Offscreen work skipped by
     // earlier bailouts is re-marked pending after commit.
     if (!hidden && previousHidden) {
-      const root = rootOf(node);
       if (
         includesSomeLane(node.childLanes, OffscreenLane) &&
         !includesSomeLane(root.renderLanes, OffscreenLane)
@@ -1173,6 +1218,21 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (
+      node.tag === ActivityTag &&
+      (node.flags & HydrationFlag) !== 0 &&
+      root.hydratingActivityBoundary === node
+    ) {
+      if (root.nextHydratableInstance !== null) {
+        throwHydrationMismatch(root, node, {
+          actual: "extra DOM node",
+          message: "found an extra DOM node in Activity",
+        });
+      }
+      leaveActivityHydration(root, node);
+      return;
+    }
+
     if (!root.isHydrating || root.hydrationParent !== node) return;
 
     if (root.nextHydratableInstance !== null) {
@@ -1217,7 +1277,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         parent.tag === HostTag ||
         (parent.tag === SuspenseTag &&
           (parent.flags & HydrationFlag) !== 0 &&
-          dehydratedSuspenseBoundary(parent.alternate) !== null)
+          dehydratedSuspenseBoundary(parent.alternate) !== null) ||
+        (parent.tag === ActivityTag &&
+          (parent.flags & HydrationFlag) !== 0 &&
+          parent.activityState?.dehydrated != null)
       ) {
         return parent;
       }
@@ -1437,6 +1500,81 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
+  function requireActivityHydrationHostConfig(): ActivityHydrationHostConfig {
+    if (activityHydrationHostConfig !== null)
+      return activityHydrationHostConfig;
+
+    if (
+      host.getActivityBoundary === undefined ||
+      host.getFirstActivityHydratable === undefined ||
+      host.commitHydratedActivityBoundary === undefined
+    ) {
+      throw new Error(
+        "Activity hydration requires getActivityBoundary, getFirstActivityHydratable, and commitHydratedActivityBoundary.",
+      );
+    }
+
+    activityHydrationHostConfig = host as ActivityHydrationHostConfig;
+    return activityHydrationHostConfig;
+  }
+
+  function tryDehydrateActivityBoundary(
+    root: R,
+    node: F,
+    state: ActivityState<Instance>,
+  ): boolean {
+    if (!shouldHydrateFiber(root, node)) return false;
+    if (host.getActivityBoundary === undefined) return false;
+
+    const hydratable = root.nextHydratableInstance;
+    if (hydratable === null) return false;
+
+    const boundary = host.getActivityBoundary(hydratable);
+    if (boundary === null) return false;
+
+    // A detected boundary commits the host to the full lifecycle; partial
+    // configs fail loudly here instead of silently never revealing content.
+    requireActivityHydrationHostConfig();
+
+    hasHiddenActivities = true;
+    state.dehydrated = boundary;
+    root.nextHydratableInstance =
+      requireHydrationHostConfig().getNextHydratableSibling(boundary);
+    return true;
+  }
+
+  function hydrateDehydratedActivityBoundary(root: R, node: F): void {
+    enterActivityHydration(root, node);
+    node.flags |= HydrationFlag | VisibilityFlag;
+    reconcile(node, node.props.children, null, false);
+  }
+
+  function enterActivityHydration(root: R, node: F): void {
+    const boundary = dehydratedActivityBoundary(node);
+    if (boundary === null) {
+      throw new Error("Expected a dehydrated Activity boundary.");
+    }
+
+    root.isHydrating = true;
+    root.hydrationParent = node;
+    root.hydratingActivityBoundary = node;
+    root.nextHydratableInstance =
+      requireActivityHydrationHostConfig().getFirstActivityHydratable(boundary);
+  }
+
+  function leaveActivityHydration(root: R, node: F): void {
+    root.hydrationParent = nextHydrationParent(node.return);
+    root.nextHydratableInstance = null;
+    root.hydratingActivityBoundary = null;
+    root.isHydrating = false;
+  }
+
+  // Any throw while hydrating a dehydrated Activity abandons the attempt:
+  // the boundary stays dehydrated and a later render retries cleanly.
+  function abandonActivityHydration(root: R): void {
+    deactivateHydration(root);
+  }
+
   function enterSuspenseHydration(
     node: F,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
@@ -1594,13 +1732,28 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
 
         const lane = claimNextTransitionLane();
+        const finish = () => updatePending(-1, lane);
         updatePending(1, SyncLane);
 
+        let result: unknown;
         try {
-          runWithPriority(lane, callback);
-        } finally {
-          updatePending(-1, lane);
+          result = runWithPriority<void | PromiseLike<void>>(lane, callback);
+        } catch (error) {
+          finish();
+          throw error;
         }
+
+        if (!isThenable(result)) {
+          finish();
+          return;
+        }
+
+        result.then(finish, (error: unknown) => {
+          finish();
+          queueMicrotask(() => {
+            throw error;
+          });
+        });
       };
     }
 
@@ -2376,6 +2529,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         commitPortal(cursor);
       }
 
+      if (cursor.tag === ActivityTag && (cursor.flags & HydrationFlag) !== 0) {
+        commitHydratedActivityBoundary(cursor);
+      }
+
       if (
         (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
         isHost(cursor)
@@ -2545,6 +2702,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     host.commitHydratedSuspenseBoundary?.(boundary);
   }
 
+  function commitHydratedActivityBoundary(node: F): void {
+    const state = node.activityState;
+    if (state?.dehydrated == null) return;
+
+    requireActivityHydrationHostConfig().commitHydratedActivityBoundary(
+      state.dehydrated,
+    );
+    state.dehydrated = null;
+  }
+
   function commitHostTextContent(node: F, previousProps: Props): void {
     if (host.setTextContent === undefined || node.tag !== HostTag) return;
 
@@ -2597,7 +2764,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function dehydratedActivityBoundary(node: F): Instance | null {
+    return node.tag === ActivityTag
+      ? (node.activityState?.dehydrated ?? null)
+      : null;
+  }
+
   function remove(node: F, parent: Parent<Container, Instance>): void {
+    const dehydratedActivity = dehydratedActivityBoundary(node);
+    if (dehydratedActivity !== null) {
+      host.removeChild(parent, dehydratedActivity);
+      return;
+    }
+
     const boundary = dehydratedSuspenseBoundary(node);
     if (
       boundary !== null &&
@@ -2683,6 +2862,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       cursor = cursor.sibling;
 
       while (!isHost(cursor)) {
+        const dehydratedActivity = dehydratedActivityBoundary(cursor);
+        if (dehydratedActivity !== null) return dehydratedActivity;
+
         if (
           cursor.tag === PortalTag ||
           (cursor.flags & PlacementFlag) !== 0 ||
@@ -3220,7 +3402,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (cursor.tag === ActivityTag && (cursor.flags & VisibilityFlag) !== 0) {
         const hidden = activityHidden(cursor.props);
-        if (cursor.activityState !== null) cursor.activityState.hidden = hidden;
+        const state = cursor.activityState;
+        if (state !== null) state.hidden = hidden;
         setActivityVisibility(cursor.child, hidden);
         if (hidden && cursor.child !== null) abortFiberEffects(cursor.child);
         if (!hidden && includesSomeLane(cursor.childLanes, OffscreenLane)) {

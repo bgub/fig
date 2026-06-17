@@ -2,6 +2,7 @@ import {
   createElement,
   type FigNode,
   type Props,
+  type StartTransition,
   readPromise,
   Suspense,
   useCallback,
@@ -58,6 +59,11 @@ function expectRenderDiagnostic(node: FigNode, message: string): void {
 
   flushSync(() => root.render(createElement("main", null, "Recovered")));
   expect(container.textContent).toBe("Recovered");
+}
+
+function requireTestValue<T>(value: T | null): T {
+  if (value === null) throw new Error("Expected test value.");
+  return value;
 }
 
 describe("@bgub/fig-dom hooks", () => {
@@ -230,7 +236,7 @@ describe("@bgub/fig-dom hooks", () => {
 
   it("tracks pending transition work until suspended content resolves", async () => {
     const pending = deferred<string>();
-    let start: ((callback: () => void) => void) | null = null;
+    let start: StartTransition | null = null;
     let show: ((value: Promise<string>) => void) | null = null;
 
     function Message({ value }: { value: Promise<string> | null }) {
@@ -261,11 +267,10 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Idle Ready");
 
-    const startTransition = start as ((callback: () => void) => void) | null;
-    const showValue = show as ((value: Promise<string>) => void) | null;
-    if (startTransition === null || showValue === null) {
-      throw new Error("Expected transition controls.");
-    }
+    const startTransition = requireTestValue(start as StartTransition | null);
+    const showValue = requireTestValue(
+      show as ((value: Promise<string>) => void) | null,
+    );
     startTransition(() => showValue(pending.promise));
     await delay();
 
@@ -274,6 +279,60 @@ describe("@bgub/fig-dom hooks", () => {
     pending.resolve("Loaded");
     await delay();
 
+    expect(container.textContent).toBe("Idle Loaded");
+  });
+
+  it("does not mark post-await transition action updates as transitions", async () => {
+    const gate = deferred<void>();
+    const content = deferred<string>();
+    let start: StartTransition | null = null;
+    let show: ((value: Promise<string>) => void) | null = null;
+
+    function Message({ value }: { value: Promise<string> | null }) {
+      return value === null ? "Ready" : readPromise(value);
+    }
+
+    function App() {
+      const [value, setValue] = useState<Promise<string> | null>(null);
+      const [isPending, startTransition] = useTransition();
+      show = setValue;
+      start = startTransition;
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Message, { value }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle Ready");
+
+    const startTransition = requireTestValue(start as StartTransition | null);
+    const showValue = requireTestValue(
+      show as ((value: Promise<string>) => void) | null,
+    );
+
+    startTransition(async () => {
+      await gate.promise;
+      showValue(content.promise);
+    });
+    await delay();
+    expect(container.textContent).toBe("Pending Ready");
+
+    gate.resolve(undefined);
+    await delay();
+    expect(container.textContent).toBe("Idle Loading");
+
+    content.resolve("Loaded");
+    await delay();
     expect(container.textContent).toBe("Idle Loaded");
   });
 
@@ -371,7 +430,7 @@ describe("@bgub/fig-dom hooks", () => {
   });
 
   it("does not lag transition updates", async () => {
-    let start: ((callback: () => void) => void) | null = null;
+    let start: StartTransition | null = null;
     let setValue: ((value: string) => void) | null = null;
 
     function App() {
@@ -389,11 +448,8 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("A");
 
-    const startTransition = start as ((callback: () => void) => void) | null;
-    const set = setValue as ((value: string) => void) | null;
-    if (startTransition === null || set === null) {
-      throw new Error("Expected transition controls.");
-    }
+    const startTransition = requireTestValue(start as StartTransition | null);
+    const set = requireTestValue(setValue as ((value: string) => void) | null);
 
     startTransition(() => set("B"));
     await delay();

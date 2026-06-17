@@ -21,11 +21,11 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "19.5 kB"
+      "limit": "20 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "13 kB"
+      "limit": "13.5 kB"
     },
     {
       "path": "packages/fig-scheduler/dist/index.js",

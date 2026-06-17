@@ -133,7 +133,7 @@ export function createStaticDispatcher(
       return calculate();
     },
     useTransition() {
-      return [false, (callback) => callback()];
+      return [false, (callback) => void callback()];
     },
     useReactive: noopEffect,
     useBeforePaint: noopEffect,

@@ -536,13 +536,19 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
   }
 
   if (isActivity(type)) {
-    if (element.props.mode === "hidden" && !frame.hiddenActivity) {
+    if (element.props.mode === "hidden") {
+      // Hidden Activity content streams inside an inert template so neither
+      // elements nor bare text render before hydration; the client keeps the
+      // boundary dehydrated until reveal.
+      frame.segment.write('<template data-fig-activity="">');
+      const wasHidden = frame.hiddenActivity;
       frame.hiddenActivity = true;
       try {
         renderChildren(element.props.children, frame);
       } finally {
-        frame.hiddenActivity = false;
+        frame.hiddenActivity = wasHidden;
       }
+      frame.segment.write("</template>");
       return;
     }
 
@@ -683,9 +689,20 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   } catch (error) {
     contentSegment.status = "completed";
 
-    if (isThenable(error)) {
+    if (isThenable(error) && !frame.hiddenActivity) {
       spawnSuspendedTask(contentFrame, props.children, error);
       boundary.completedSegments.push(contentSegment);
+    } else if (isThenable(error)) {
+      // Streamed completions cannot reach template content, so Suspense
+      // inside hidden Activity content client-renders after reveal.
+      markBoundaryClientRendered(
+        frame.request,
+        boundary,
+        new Error(
+          "Suspense inside a hidden Activity is client-rendered after reveal.",
+        ),
+        frame.stack,
+      );
     } else {
       markBoundaryClientRendered(frame.request, boundary, error, frame.stack);
     }
@@ -752,13 +769,7 @@ function renderHostElement(
     throw new Error("Host elements cannot have both unsafeHTML and children.");
   }
 
-  writeElementStart(
-    type,
-    props,
-    frame.segment,
-    frame.selectProps ?? {},
-    frame.hiddenActivity,
-  );
+  writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
   if (isVoid) return;
 
   if (unsafeHTML !== null) {

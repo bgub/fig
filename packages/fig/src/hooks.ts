@@ -3,7 +3,9 @@ import type { FigContext } from "./context.ts";
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
-export type StartTransition = (callback: () => void) => void;
+export type StartTransition = (
+  callback: () => void | PromiseLike<void>,
+) => void;
 type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {

@@ -201,7 +201,7 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("streams hidden Activity content host-hidden", async () => {
+  it("streams hidden Activity content inside an inert template", async () => {
     const html = await renderToString(
       createElement(
         "main",
@@ -209,6 +209,7 @@ describe("@bgub/fig-server", () => {
         createElement(
           Activity,
           { mode: "hidden" },
+          "secret ",
           createElement("span", null, "Hidden"),
         ),
         createElement(
@@ -219,8 +220,9 @@ describe("@bgub/fig-server", () => {
       ),
     );
 
+    // Bare text and elements alike stay invisible until hydration.
     expect(html).toBe(
-      '<main><span style="display:none">Hidden</span><span>Visible</span></main>',
+      '<main><template data-fig-activity="">secret <span>Hidden</span></template><span>Visible</span></main>',
     );
   });
 
