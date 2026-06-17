@@ -81,7 +81,12 @@ createRoot(container).render(<App />);
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
   reporting and change the boundary key to reset sticky fallback state.
 - `transition(callback)` and `useTransition()` mark updates that may preserve
-  already-revealed Suspense content while new work is pending.
+  already-revealed Suspense content while new work is pending. Updates scheduled
+  inside the callback run at transition priority, including updates after an
+  `await` while an async transition callback is still pending. If the callback
+  returns a promise, `useTransition()` keeps `isPending` true until it settles.
+  Server rendering runs transition callbacks immediately and never exposes
+  pending state.
 - Document resources: `resources([...], children)` attaches resources to a
   subtree while rendering only `children` on the client. Resource helpers include
   `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.

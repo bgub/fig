@@ -102,6 +102,11 @@ const transitionLaneExpirationMs = 5_000;
 let currentUpdateLane: Lane = DefaultLane;
 let nextTransitionLane: Lane = TransitionLane1;
 let nextRetryLane: Lane = RetryLane1;
+// JavaScript does not expose per-continuation async context in browsers yet, so
+// async transitions keep their lane ambient while the returned thenable is
+// pending. Explicit event/sync priorities still override this fallback.
+let asyncTransitionLanes: Lanes = NoLanes;
+const asyncTransitionLaneCounts = createLaneMap<number>(0);
 
 export function createLaneMap<T extends number>(initial: T): LaneMap<T> {
   return Array.from({ length: TotalLanes }, () => initial);
@@ -326,6 +331,10 @@ export function getLaneSchedulerPriority(lane: Lane): PriorityLevel {
 }
 
 export function requestUpdateLane(): Lane {
+  if (currentUpdateLane === DefaultLane && asyncTransitionLanes !== NoLanes) {
+    return getHighestPriorityLane(asyncTransitionLanes);
+  }
+
   return currentUpdateLane;
 }
 
@@ -345,7 +354,44 @@ export function runWithTransition<T>(callback: () => T): T {
     ? currentUpdateLane
     : claimNextTransitionLane();
 
-  return runWithPriority(lane, callback);
+  return runWithTransitionLane(lane, callback);
+}
+
+export function runWithTransitionLane<T>(lane: Lane, callback: () => T): T {
+  const result = runWithPriority(lane, callback);
+  if (isThenable(result)) {
+    const release = trackAsyncTransitionLane(lane);
+    result.then(release, release);
+  }
+
+  return result;
+}
+
+function trackAsyncTransitionLane(lane: Lane): () => void {
+  const index = laneToIndex(lane);
+  asyncTransitionLaneCounts[index] += 1;
+  asyncTransitionLanes |= lane;
+
+  return () => releaseAsyncTransitionLane(lane, index);
+}
+
+function releaseAsyncTransitionLane(lane: Lane, index: number): void {
+  asyncTransitionLaneCounts[index] = Math.max(
+    0,
+    asyncTransitionLaneCounts[index] - 1,
+  );
+
+  if (asyncTransitionLaneCounts[index] === 0) {
+    asyncTransitionLanes &= ~lane;
+  }
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }
 
 function computeExpirationTime(lane: Lane, currentTime: number): number {

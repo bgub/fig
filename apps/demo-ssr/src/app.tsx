@@ -1,4 +1,11 @@
-import { type FigNode, lazy, readPromise, Suspense, useState } from "@bgub/fig";
+import {
+  type FigNode,
+  lazy,
+  readPromise,
+  Suspense,
+  useState,
+  useTransition,
+} from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 
 type Resource<T> = Promise<T> | T;
@@ -97,6 +104,7 @@ export function App({ request }: { request: DemoRequest }) {
             >
               <LazyStreamPanel />
             </Suspense>
+            <ClientTransitionPanel />
           </section>
         </div>
       </main>
@@ -186,6 +194,54 @@ function LazyPanelContent() {
       </p>
     </Panel>
   );
+}
+
+function ClientTransitionPanel() {
+  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState<Resource<string>>(
+    "Hydrated transition content is ready.",
+  );
+
+  return (
+    <Panel
+      class="transition-panel"
+      description={
+        <Suspense fallback="Loading transition content...">
+          <TransitionMessage message={message} />
+        </Suspense>
+      }
+      tag={isPending ? "pending" : "idle"}
+      title="Client transition"
+      tone={isPending ? "warn" : "ok"}
+    >
+      <div class="panel-actions">
+        <button
+          class="button primary"
+          data-demo-control="transition"
+          events={[
+            on("click", () => {
+              startTransition(async () => {
+                await delay(undefined, 250);
+                setMessage(
+                  delay(
+                    `Transition committed at ${new Date().toLocaleTimeString()}.`,
+                    1200,
+                  ),
+                );
+              });
+            }),
+          ]}
+          type="button"
+        >
+          {isPending ? "Transition pending" : "Start transition"}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function TransitionMessage({ message }: { message: Resource<string> }) {
+  return readResource(message);
 }
 
 function Panel({

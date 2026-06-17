@@ -45,6 +45,10 @@ Deliberate divergences:
 - Context reads use `readContext(context)` because context is a render input.
 - Promise reads use `readPromise(promise)` rather than React's broad
   `use(resource)` API.
+- Transitions are explicit priority scopes: `transition(callback)` and
+  `useTransition()` mark updates scheduled inside the callback, including
+  post-`await` updates while an async transition callback is still pending.
+  Async callbacks keep `useTransition()` pending until they settle.
 - Server rendering uses Web `ReadableStream`s as the primary streaming model
   instead of Node-specific streams. This keeps the same API shape across modern
   Node, edge runtimes, Deno, Bun, and browser-like environments.

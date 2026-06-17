@@ -162,6 +162,52 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loaded");
   });
 
+  it("keeps post-await transition helper updates in the transition lane", async () => {
+    const gate = deferred<void>();
+    const pending = deferred<string>();
+    let setValue: ((value: Promise<string> | null) => void) | null = null;
+
+    function Message({ value }: { value: Promise<string> | null }) {
+      return createElement(
+        "span",
+        null,
+        value === null ? "Ready" : readPromise(value),
+      );
+    }
+
+    function App() {
+      const [value, set] = useState<Promise<string> | null>(null);
+      setValue = set;
+
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(Message, { value }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Ready");
+
+    void transition(async () => {
+      await gate.promise;
+      setValue?.(pending.promise);
+    });
+    await delay();
+    expect(container.textContent).toBe("Ready");
+
+    gate.resolve(undefined);
+    await delay();
+    expect(container.textContent).toBe("Ready");
+
+    pending.resolve("Loaded");
+    await delay();
+    expect(container.textContent).toBe("Loaded");
+  });
+
   it("renders Suspense fallback for initial transition suspension", async () => {
     const pending = deferred<string>();
 

@@ -7,11 +7,11 @@ import {
   readContext,
   readPromise,
   Suspense,
-  transition,
   useBeforePaint,
   useLaggedValue,
   useReactive,
   useState,
+  useTransition,
 } from "@bgub/fig";
 import {
   type Bind,
@@ -42,6 +42,8 @@ interface DemoItem {
   label: string;
   tone: string;
 }
+
+type AsyncMessage = Promise<string> | string;
 
 interface BenchmarkOperations {
   createInstance: number;
@@ -487,9 +489,10 @@ function AsyncPage() {
 
 function ResourcesPage() {
   const [theme, setTheme] = useState("light");
-  const [messagePromise, setMessagePromise] = useState<Promise<string> | null>(
-    null,
+  const [message, setMessage] = useState<AsyncMessage>(() =>
+    messageText("Ready", "light"),
   );
+  const [isPending, startTransition] = useTransition();
 
   return (
     <PageFrame
@@ -508,6 +511,9 @@ function ResourcesPage() {
             </div>
             <Row>
               <ContextBadge />
+              <span class={`tag ${isPending ? "warn" : "ok"}`}>
+                {isPending ? "transition pending" : "transition idle"}
+              </span>
               <Command
                 primary
                 run={() =>
@@ -518,17 +524,16 @@ function ResourcesPage() {
               </Command>
               <Command
                 run={() =>
-                  setMessagePromise(
-                    delayedMessage(messageText("Resolved", theme)),
-                  )
+                  setMessage(delayedMessage(messageText("Resolved", theme)))
                 }
               >
                 Read promise
               </Command>
               <Command
                 run={() =>
-                  transition(() => {
-                    setMessagePromise(
+                  startTransition(async () => {
+                    await delayValue(undefined, 250);
+                    setMessage(
                       delayedMessage(messageText("Transitioned", theme)),
                     );
                   })
@@ -537,13 +542,9 @@ function ResourcesPage() {
                 Transition read
               </Command>
             </Row>
-            {messagePromise === null ? (
-              <p class="hint">No promise read yet.</p>
-            ) : (
-              <Suspense fallback={<p class="hint">Loading message...</p>}>
-                <PromiseMessage promise={messagePromise} />
-              </Suspense>
-            )}
+            <Suspense fallback={<p class="hint">Loading message...</p>}>
+              <PromiseMessage message={message} />
+            </Suspense>
           </section>
           <Suspense fallback={<LazyFeatureFallback />}>
             <LazyFeatureCard />
@@ -1432,8 +1433,12 @@ function ContextBadge() {
   return <span class="metric">{theme}</span>;
 }
 
-function PromiseMessage({ promise }: { promise: Promise<string> }) {
-  return <p class="hint">{readPromise(promise)}</p>;
+function PromiseMessage({ message }: { message: AsyncMessage }) {
+  return (
+    <p class="hint">
+      {typeof message === "string" ? message : readPromise(message)}
+    </p>
+  );
 }
 
 function DemoList({ items }: { items: DemoItem[] }) {

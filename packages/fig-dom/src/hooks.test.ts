@@ -282,7 +282,7 @@ describe("@bgub/fig-dom hooks", () => {
     expect(container.textContent).toBe("Idle Loaded");
   });
 
-  it("does not mark post-await transition action updates as transitions", async () => {
+  it("keeps post-await async transition updates in the transition lane", async () => {
     const gate = deferred<void>();
     const content = deferred<string>();
     let start: StartTransition | null = null;
@@ -329,7 +329,7 @@ describe("@bgub/fig-dom hooks", () => {
 
     gate.resolve(undefined);
     await delay();
-    expect(container.textContent).toBe("Idle Loading");
+    expect(container.textContent).toBe("Pending Ready");
 
     content.resolve("Loaded");
     await delay();

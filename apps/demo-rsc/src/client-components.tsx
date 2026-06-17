@@ -1,4 +1,4 @@
-import { useState } from "@bgub/fig";
+import { useState, useTransition } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import type { RefreshButtonProps } from "./shared.ts";
 
@@ -13,30 +13,34 @@ export function setRefreshHandler(handler: RefreshHandler): void {
 export function RefreshButton({ boundary, seed }: RefreshButtonProps) {
   const [status, setStatus] = useState<"idle" | "pending" | "failed">("idle");
   const [refreshes, setRefreshes] = useState(0);
+  const [isPending, startTransition] = useTransition();
+  const displayStatus = isPending ? "pending" : status;
 
   return (
     <button
       class="action-button"
-      data-refresh-state={status}
+      data-refresh-state={displayStatus}
       events={[
         on("click", () => {
           const nextSeed = seed + refreshes + 1;
-          setStatus("pending");
+          startTransition(async () => {
+            setStatus("pending");
 
-          void refreshHandler(boundary, nextSeed).then(
-            () => {
+            try {
+              await refreshHandler(boundary, nextSeed);
               setRefreshes((value) => value + 1);
               setStatus("idle");
-            },
-            () => setStatus("failed"),
-          );
+            } catch {
+              setStatus("failed");
+            }
+          });
         }),
       ]}
       type="button"
     >
-      {status === "pending"
+      {displayStatus === "pending"
         ? "Refreshing..."
-        : status === "failed"
+        : displayStatus === "failed"
           ? "Retry refresh"
           : `Refresh feed (${refreshes})`}
     </button>

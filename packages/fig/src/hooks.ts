@@ -3,6 +3,13 @@ import type { FigContext } from "./context.ts";
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
+
+/**
+ * Runs state updates scheduled by `callback` at transition priority. If
+ * `callback` returns a thenable, `useTransition` keeps `isPending` true until
+ * it settles and updates after an `await` remain in the transition priority
+ * scope.
+ */
 export type StartTransition = (
   callback: () => void | PromiseLike<void>,
 ) => void;

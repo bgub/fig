@@ -136,7 +136,8 @@ button[data-demo-control="shell"] {
 }
 
 button[data-demo-control="server-error"],
-button[data-demo-control="suspense"] {
+button[data-demo-control="suspense"],
+button[data-demo-control="transition"] {
   min-width: 144px;
 }
 
@@ -218,6 +219,12 @@ button[data-demo-control="suspense"] {
 }
 
 .lazy-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+}
+
+.transition-panel {
   display: flex;
   flex-direction: column;
   min-height: 120px;

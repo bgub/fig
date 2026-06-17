@@ -78,6 +78,7 @@ import {
   RetryLanes,
   runWithPriority,
   runWithTransition,
+  runWithTransitionLane,
   SelectiveHydrationLane,
   SyncLane,
 } from "./lanes.ts";
@@ -1742,7 +1743,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
         let result: unknown;
         try {
-          result = runWithPriority<void | PromiseLike<void>>(lane, callback);
+          result = runWithTransitionLane(lane, callback);
         } catch (error) {
           finish();
           throw error;

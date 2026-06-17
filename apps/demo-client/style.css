@@ -277,6 +277,16 @@ button.button {
   white-space: nowrap;
 }
 
+.tag.ok {
+  background: #dff3e8;
+  color: var(--ok);
+}
+
+.tag.warn {
+  background: #fff0d8;
+  color: var(--warn);
+}
+
 .input {
   width: min(100%, 420px);
   min-height: 32px;
