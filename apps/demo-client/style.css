@@ -311,11 +311,44 @@ button.button {
   font-size: 11px;
 }
 
+.benchmark-spread {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
 .benchmark-table th {
   color: var(--ink);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.benchmark-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.benchmark-summary div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  padding: 10px;
+}
+
+.benchmark-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.benchmark-summary strong {
+  font-size: 16px;
+  line-height: 1.2;
 }
 
 .runtime {
@@ -558,5 +591,9 @@ button.button {
 
   .columns {
     grid-template-columns: 1fr;
+  }
+
+  .benchmark-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -1,5 +1,6 @@
 import "./dev-env.ts";
 import {
+  Activity,
   createContext,
   type FigNode,
   lazy,
@@ -58,6 +59,7 @@ interface BenchmarkResult {
   rows: number;
   iterations: number;
   samples: number[];
+  mean: number;
   median: number;
   min: number;
   max: number;
@@ -114,6 +116,11 @@ const replayDemo = {
   sandbox: null as HTMLDivElement | null,
   start: null as ReplaySuspenseMarker | null,
   target: null as HTMLDivElement | null,
+};
+
+const activityHydrationDemo = {
+  root: null as ReturnType<typeof createRoot> | null,
+  sandbox: null as HTMLDivElement | null,
 };
 
 const focusBoundInput: Bind<HTMLInputElement> = (node, signal) => {
@@ -584,14 +591,24 @@ function HydrationPage() {
   const [hydrationStatus, setHydrationStatus] = useState(
     "Rendering matching server HTML...",
   );
+  const [activityStatus, setActivityStatus] = useState(
+    "Rendering hidden Activity HTML...",
+  );
   const [replayStatus, setReplayStatus] = useState(
     "Mounting a pending Suspense boundary...",
   );
   const [recoverableErrors, setRecoverableErrors] = useState<string[]>([]);
+  const [activityLogs, setActivityLogs] = useState<string[]>([]);
   const [replayLogs, setReplayLogs] = useState<string[]>([]);
 
   const logReplay = (message: string) => {
     setReplayLogs((value) =>
+      [...value, `${new Date().toLocaleTimeString()}  ${message}`].slice(-8),
+    );
+  };
+
+  const logActivity = (message: string) => {
+    setActivityLogs((value) =>
       [...value, `${new Date().toLocaleTimeString()}  ${message}`].slice(-8),
     );
   };
@@ -685,6 +702,45 @@ function HydrationPage() {
     setReplayStatus("Pending boundary mounted.");
   };
 
+  const runActivityDemo = async (signal?: AbortSignal) => {
+    const sandbox = activityHydrationDemo.sandbox;
+    if (sandbox === null) {
+      setActivityStatus("Activity sandbox is not mounted yet.");
+      return;
+    }
+
+    setActivityStatus("Rendering hidden Activity HTML...");
+    setActivityLogs([]);
+    resetActivityHydrationDemoRoot();
+    sandbox.replaceChildren();
+
+    const html = await renderToString(
+      <ActivityHydrationIsland
+        initialMode="hidden"
+        onChildAction={() => undefined}
+      />,
+    );
+    if (signal?.aborted === true || activityHydrationDemo.sandbox !== sandbox) {
+      return;
+    }
+
+    const target = hydrationTarget(html);
+    sandbox.replaceChildren(target);
+
+    flushSync(() => {
+      activityHydrationDemo.root = hydrateRoot(
+        target,
+        <ActivityHydrationIsland
+          initialMode="hidden"
+          onChildAction={() => logActivity("activity child event")}
+          onReveal={() => setActivityStatus("Activity content revealed.")}
+        />,
+      );
+    });
+
+    setActivityStatus("Hidden Activity is dehydrated.");
+  };
+
   const dispatchPendingClick = () => {
     if (replayDemo.button === null) {
       setReplayStatus("Mount a pending boundary first.");
@@ -719,6 +775,7 @@ function HydrationPage() {
 
   useReactive((signal) => {
     void runDemo(false, signal);
+    void runActivityDemo(signal);
     mountPendingBoundary();
   }, []);
 
@@ -763,6 +820,38 @@ function HydrationPage() {
           <div class="hydration-output">
             <h4>Hydrated DOM</h4>
             <div class="hydration-sandbox" bind={hydrationSandboxBind} />
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h3>Activity template hydration</h3>
+            <p class="hint">
+              Hidden server Activity content stays in an inert template until
+              reveal, then binds and events attach to live DOM.
+            </p>
+            <Row>
+              <Command run={() => void runActivityDemo()}>
+                Reset Activity
+              </Command>
+            </Row>
+          </div>
+          <div class="hydration-status">
+            <span class="tag">Status</span>
+            <span>{activityStatus}</span>
+          </div>
+          <div class="hydration-output">
+            <h4>Activity target</h4>
+            <div
+              class="hydration-sandbox"
+              bind={activityHydrationSandboxBind}
+            />
+          </div>
+          <div class="hydration-output">
+            <h4>Activity log</h4>
+            <pre class="log">
+              {activityLogs.join("\n") || "No Activity child events yet."}
+            </pre>
           </div>
         </section>
 
@@ -871,6 +960,66 @@ function HydrationIsland({
   );
 }
 
+function ActivityHydrationIsland({
+  initialMode,
+  onChildAction,
+  onReveal,
+}: {
+  initialMode: "visible" | "hidden";
+  onChildAction: () => void;
+  onReveal?: () => void;
+}) {
+  const [mode, setMode] = useState<"visible" | "hidden">(initialMode);
+
+  return (
+    <section class="hydration-card activity-hydration-card">
+      <div class="row">
+        <span class="metric">Activity</span>
+        <span class="tag">{mode}</span>
+      </div>
+      <button
+        type="button"
+        class="button primary"
+        events={[
+          on("click", () => {
+            setMode("visible");
+            onReveal?.();
+          }),
+        ]}
+      >
+        Reveal Activity
+      </button>
+      <Activity mode={mode}>
+        <ActivityHydrationChild onAction={onChildAction} />
+      </Activity>
+    </section>
+  );
+}
+
+function ActivityHydrationChild({ onAction }: { onAction: () => void }) {
+  return (
+    <button
+      type="button"
+      class="button activity-child-action"
+      bind={(node: HTMLButtonElement, signal: AbortSignal) => {
+        node.setAttribute("data-activity-bound", "true");
+        signal.addEventListener(
+          "abort",
+          () => node.removeAttribute("data-activity-bound"),
+          { once: true },
+        );
+      }}
+      events={[
+        on("click", () => {
+          onAction();
+        }),
+      ]}
+    >
+      Secret Activity Button
+    </button>
+  );
+}
+
 function ReplayIsland({
   onChildAction,
   onParentAction,
@@ -925,6 +1074,19 @@ const hydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   );
 };
 
+const activityHydrationSandboxBind: Bind<HTMLDivElement> = (node, signal) => {
+  activityHydrationDemo.sandbox = node;
+  signal.addEventListener(
+    "abort",
+    () => {
+      if (activityHydrationDemo.sandbox === node) {
+        activityHydrationDemo.sandbox = null;
+      }
+    },
+    { once: true },
+  );
+};
+
 const replaySandboxBind: Bind<HTMLDivElement> = (node, signal) => {
   replayDemo.sandbox = node;
   signal.addEventListener(
@@ -949,6 +1111,7 @@ function setDemoPage(nextPage: Page, setPage: (page: Page) => void): boolean {
 function cleanupDemoPage(page: Page): void {
   if (page === "hydration") {
     resetHydrationDemoRoot();
+    resetActivityHydrationDemoRoot();
     resetReplayDemoRoot();
   }
 }
@@ -958,6 +1121,14 @@ function resetHydrationDemoRoot(): void {
   if (root === null) return;
 
   hydrationDemo.root = null;
+  flushSync(() => root.unmount());
+}
+
+function resetActivityHydrationDemoRoot(): void {
+  const root = activityHydrationDemo.root;
+  if (root === null) return;
+
+  activityHydrationDemo.root = null;
   flushSync(() => root.unmount());
 }
 
@@ -1087,13 +1258,50 @@ function BenchmarksPage() {
       {results.length === 0 ? (
         <p class="hint">
           Results measure median synchronous `flushSync` time across five
-          batched samples for both Fig and React. Use them for relative
-          comparisons, not absolute browser benchmarks.
+          batched samples for both Fig and React. DOM operations are counted in
+          one extra untimed pass per scenario.
         </p>
       ) : (
-        <BenchmarkTable results={results} />
+        <>
+          <BenchmarkRunSummary results={results} />
+          <BenchmarkTable results={results} />
+        </>
       )}
     </PageFrame>
+  );
+}
+
+function BenchmarkRunSummary({ results }: { results: BenchmarkResult[] }) {
+  const comparisons = benchmarkComparisons(results);
+  const figWins = comparisons.filter(
+    (comparison) => benchmarkDelta(comparison).kind === "faster",
+  ).length;
+  const reactWins = comparisons.filter(
+    (comparison) => benchmarkDelta(comparison).kind === "slower",
+  ).length;
+  const rows = comparisons[0]?.rows ?? 0;
+
+  return (
+    <div class="benchmark-summary">
+      <div>
+        <span>Rows</span>
+        <strong>{rows}</strong>
+      </div>
+      <div>
+        <span>Scenarios</span>
+        <strong>{comparisons.length}</strong>
+      </div>
+      <div>
+        <span>Samples</span>
+        <strong>{benchmarkSampleCount}</strong>
+      </div>
+      <div>
+        <span>Median wins</span>
+        <strong>
+          Fig {figWins} / React {reactWins}
+        </strong>
+      </div>
+    </div>
   );
 }
 
@@ -1109,6 +1317,7 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
           <th>Fig median</th>
           <th>React median</th>
           <th>Fig vs React</th>
+          <th>Spread</th>
           <th>Ops</th>
           <th>Notes</th>
         </tr>
@@ -1129,6 +1338,10 @@ function BenchmarkTable({ results }: { results: BenchmarkResult[] }) {
               </td>
               <td>
                 <BenchmarkDelta comparison={comparison} />
+              </td>
+              <td class="benchmark-spread">
+                <BenchmarkSpread result={comparison.fig} />
+                <BenchmarkSpread result={comparison.react} />
               </td>
               <td class="ops-cell">
                 <BenchmarkOps
@@ -1175,8 +1388,7 @@ function BenchmarkMeasure({
         />
       </div>
       <div class="benchmark-range">
-        {formatMs(result.min)} – {formatMs(result.max)} · ×{result.iterations}
-        /sample
+        mean {formatMs(result.mean)} · ×{result.iterations}/sample
       </div>
     </div>
   );
@@ -1185,6 +1397,17 @@ function BenchmarkMeasure({
 function BenchmarkDelta({ comparison }: { comparison: BenchmarkComparison }) {
   const delta = benchmarkDelta(comparison);
   return <span class={`benchmark-delta ${delta.kind}`}>{delta.text}</span>;
+}
+
+function BenchmarkSpread({ result }: { result: BenchmarkResult | null }) {
+  if (result === null) return <div class="hint">—</div>;
+
+  return (
+    <div>
+      <strong>{result.runtime}</strong> {formatMs(result.min)}–
+      {formatMs(result.max)}
+    </div>
+  );
 }
 
 function BenchmarkOps({
@@ -1196,7 +1419,8 @@ function BenchmarkOps({
 }) {
   return (
     <div>
-      <strong>{label}</strong> {formatOperations(operations)}
+      <strong>{label}</strong> {formatOperationTotal(operations)} ops ·{" "}
+      {formatOperations(operations)}
     </div>
   );
 }
@@ -1481,12 +1705,15 @@ function measureBenchmark(
   }
 
   const sorted = [...samples].sort((a, b) => a - b);
+  const mean =
+    samples.reduce((total, sample) => total + sample, 0) / samples.length;
   return {
     runtime,
     name,
     rows,
     iterations,
     samples,
+    mean,
     median: sorted[Math.floor(sorted.length / 2)],
     min: sorted[0],
     max: sorted[sorted.length - 1],
@@ -1825,6 +2052,15 @@ function formatOperations(operations: BenchmarkOperations | undefined): string {
   if (operations.removeChild > 0)
     entries.push(`remove:${operations.removeChild}`);
   return entries.length === 0 ? "none" : entries.join(", ");
+}
+
+function formatOperationTotal(
+  operations: BenchmarkOperations | undefined,
+): string {
+  if (operations === undefined) return "0";
+  return String(
+    Object.values(operations).reduce((total, value) => total + value, 0),
+  );
 }
 
 const container = document.getElementById("root");
