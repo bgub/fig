@@ -111,15 +111,6 @@ importers:
         specifier: ^20.19.0
         version: 20.19.41
 
-  apps/devtools-extension:
-    dependencies:
-      '@bgub/fig-devtools':
-        specifier: workspace:*
-        version: link:../../packages/fig-devtools
-      '@bgub/fig-reconciler':
-        specifier: workspace:*
-        version: link:../../packages/fig-reconciler
-
   packages/fig: {}
 
   packages/fig-devtools:

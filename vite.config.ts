@@ -22,7 +22,6 @@ const figSourceAliasEntries = [
 const sourceAliases = figSourceAliasMap();
 const outExtensions = () => ({ js: ".js", dts: ".d.ts" });
 const figPackages = /^@bgub\/fig/;
-const figDevtoolsPackages = /^@bgub\/fig-devtools/;
 const reactPackages = /^react/;
 const reactDomPackages = /^react-dom/;
 const demoClientBundleDependencies = [
@@ -198,20 +197,6 @@ function packConfigFor(path: string): PackConfig | undefined {
           clean: false,
         },
       ];
-    case "apps/devtools-extension":
-      return {
-        entry: [
-          "./src/devtools.ts",
-          "./src/panel.ts",
-          "./src/content-script.ts",
-          "./src/service-worker.ts",
-          "./src/hook.ts",
-        ],
-        platform: "browser",
-        deps: {
-          alwaysBundle: [figDevtoolsPackages],
-        },
-      };
     default:
       return undefined;
   }
