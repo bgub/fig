@@ -5,6 +5,7 @@ import {
   Fragment,
   type Props,
 } from "@bgub/fig";
+import type { FigDataStoreEntrySnapshot } from "@bgub/fig/internal";
 import type { Lanes } from "./lanes.ts";
 
 export type FigDevtoolsFiberKind =
@@ -76,6 +77,7 @@ export interface FigDevtoolsRootSnapshot {
   id: number;
   rendererId: number;
   committedAt: number;
+  dataResources: FigDataStoreEntrySnapshot[];
   pendingLanes: Lanes;
   suspendedLanes: Lanes;
   pingedLanes: Lanes;

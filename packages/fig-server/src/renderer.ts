@@ -22,8 +22,10 @@ import {
   resourceDestination,
   resourceFromHostProps,
   setCurrentDispatcher,
+  setCurrentDataStore,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
+import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
   formTextContent,
   hasRenderableChild,
@@ -70,6 +72,7 @@ interface Request {
   completedBoundaries: SuspenseBoundary[];
   completedRootSegment: Segment | null;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
+  dataStore: DataStore<object, null>;
   fatalError: unknown;
   identifierPrefix: string;
   nextBoundaryId: number;
@@ -199,6 +202,12 @@ export function createServerRenderRequest(
     completedBoundaries: [],
     completedRootSegment: null,
     controller: null,
+    dataStore: createDataStore<object, null>({
+      context: options.dataContext ?? {},
+      getLane: () => null,
+      partition: options.dataPartition,
+      schedule: () => undefined,
+    }),
     fatalError: null,
     identifierPrefix: options.identifierPrefix ?? "",
     nextBoundaryId: 0,
@@ -268,6 +277,7 @@ export function createServerRenderRequest(
   return {
     abort: (reason?: unknown) => abort(request, reason),
     allReady: allReady.promise,
+    getData: () => request.dataStore.snapshot(),
     getHead: () => request.resourceRegistry.headHtml(request.nonce),
     headReady: headReady.promise,
     shellReady: shellReady.promise,
@@ -432,6 +442,14 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
       throwIfAborting(frame.request);
       return readThenable(promise);
     },
+    readData(resource, args) {
+      throwIfAborting(frame.request);
+      return frame.request.dataStore.readData(resource, args, frame);
+    },
+    preloadData(resource, args) {
+      throwIfAborting(frame.request);
+      frame.request.dataStore.preloadData(resource, args);
+    },
     useId() {
       const id = `${frame.request.identifierPrefix}fig-${frame.idPath}-${frame.localIdCounter.toString(32)}`;
       frame.localIdCounter += 1;
@@ -572,6 +590,7 @@ function renderFunctionComponent(
   frame: RenderFrame,
 ): void {
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
+  const previousDataStore = setCurrentDataStore(frame.request.dataStore);
   const previousStack = frame.stack;
   const previousLocalIdCounter = frame.localIdCounter;
   frame.stack = { name: type.name || "Anonymous", parent: previousStack };
@@ -586,6 +605,7 @@ function renderFunctionComponent(
   } finally {
     frame.stack = previousStack;
     frame.localIdCounter = previousLocalIdCounter;
+    setCurrentDataStore(previousDataStore);
     setCurrentDispatcher(previousDispatcher);
   }
 }
@@ -967,6 +987,7 @@ function markBoundaryClientRendered(
 function abort(request: Request, reason?: unknown): void {
   if (request.status === "closed") return;
   request.status = "aborting";
+  request.dataStore.dispose();
   const error = abortError(reason);
   request.fatalError = error;
 

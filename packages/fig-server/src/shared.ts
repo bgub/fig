@@ -1,5 +1,5 @@
 import type { Dispatch, FigContext, SetStateAction } from "@bgub/fig";
-import type { RenderDispatcher } from "@bgub/fig/internal";
+import type { FigDataResource, RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 export type Thenable<T = unknown> = PromiseLike<T> & object;
@@ -13,6 +13,14 @@ type ThenableRecord<T> = {
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
+  preloadData?<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    args: TArgs,
+  ): void;
+  readData?<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    args: TArgs,
+  ): TValue;
   readPromise<T>(promise: PromiseLike<T>): T;
   updateError: string;
   useId(): string;
@@ -163,6 +171,20 @@ export function createStaticDispatcher(
     },
     readContext(context) {
       return readContextValue(options.contextValues, context);
+    },
+    readData(resource, args) {
+      if (options.readData === undefined) {
+        throw new Error("readData is not supported during server render.");
+      }
+
+      return options.readData(resource, args);
+    },
+    preloadData(resource, args) {
+      if (options.preloadData === undefined) {
+        throw new Error("preloadData is not supported during server render.");
+      }
+
+      options.preloadData(resource, args);
     },
     readPromise(promise) {
       return options.readPromise(promise);

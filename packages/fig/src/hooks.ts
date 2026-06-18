@@ -1,4 +1,10 @@
 import type { FigContext } from "./context.ts";
+import type {
+  DataRefreshResult,
+  FigDataResource,
+  FigDataStore,
+} from "./data.ts";
+import { resolveCurrentDataStore } from "./data.ts";
 
 export type SetStateAction<S> = S | ((previousState: S) => S);
 export type Dispatch<A> = (action: A) => void;
@@ -48,6 +54,14 @@ export interface RenderDispatcher {
     handler: (...args: Args) => Result,
   ): (...args: ReactiveEventArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
+  readData<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    args: TArgs,
+  ): TValue;
+  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    args: TArgs,
+  ): void;
   readPromise<T>(promise: PromiseLike<T>): T;
 }
 
@@ -162,6 +176,51 @@ export function readPromise<T>(promise: PromiseLike<T>): T {
   ).readPromise(promise);
 }
 
+export function readDataResource<
+  TArgs extends unknown[],
+  TValue,
+  TStoreContext,
+>(
+  resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  args: TArgs,
+): TValue {
+  return resolveDispatcher(
+    "readData can only be called while rendering a component.",
+  ).readData(resource, args);
+}
+
+export function preloadDataResource<
+  TArgs extends unknown[],
+  TValue,
+  TStoreContext,
+>(resource: FigDataResource<TArgs, TValue, TStoreContext>, args: TArgs): void {
+  if (currentDispatcher !== null) {
+    currentDispatcher.preloadData(resource, args);
+    return;
+  }
+
+  resolveDataStore().preloadData(resource, args);
+}
+
+export function invalidateDataResource<
+  TArgs extends unknown[],
+  TValue,
+  TStoreContext,
+>(resource: FigDataResource<TArgs, TValue, TStoreContext>, args: TArgs): void {
+  resolveDataStore().invalidateData(resource, args);
+}
+
+export function refreshDataResource<
+  TArgs extends unknown[],
+  TValue,
+  TStoreContext,
+>(
+  resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  args: TArgs,
+): Promise<DataRefreshResult<TValue>> {
+  return resolveDataStore().refreshData(resource, args);
+}
+
 export function setCurrentDispatcher(
   dispatcher: RenderDispatcher | null,
 ): RenderDispatcher | null {
@@ -178,4 +237,10 @@ function resolveDispatcher(
   }
 
   return currentDispatcher;
+}
+
+function resolveDataStore(): FigDataStore {
+  return resolveCurrentDataStore(
+    "Data resource APIs require a Fig data store.",
+  );
 }

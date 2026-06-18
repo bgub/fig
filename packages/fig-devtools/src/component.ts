@@ -36,7 +36,8 @@ export type FigDevtoolsPosition =
   | "TopRight"
   | "TopLeft";
 
-type DetailTab = "inspect" | "props" | "hooks" | "context";
+type DetailTab = "inspect" | "props" | "hooks" | "context" | "data";
+type DataResourceSnapshot = FigDevtoolsRootSnapshot["dataResources"][number];
 
 interface Selection {
   selectedCommitId: number | null;
@@ -70,7 +71,13 @@ interface RenderSnapshot {
   live: boolean;
 }
 
-const DetailTabs: DetailTab[] = ["inspect", "props", "hooks", "context"];
+const DetailTabs: DetailTab[] = [
+  "inspect",
+  "props",
+  "hooks",
+  "context",
+  "data",
+];
 const InitialSelection: Selection = {
   selectedCommitId: null,
   selectedRootId: null,
@@ -651,7 +658,7 @@ function detailsPane(
       h("span", { class: "fig-devtools__chip" }, fiber.kind),
     ),
     tabBar(selection, setSelection),
-    detailTab(selection.tab, fiber),
+    detailTab(selection.tab, fiber, snapshot.root),
   );
 }
 
@@ -680,11 +687,16 @@ function tabBar(selection: Selection, setSelection: SetSelection): FigNode {
   );
 }
 
-function detailTab(tab: DetailTab, fiber: FigDevtoolsFiberSnapshot): FigNode {
+function detailTab(
+  tab: DetailTab,
+  fiber: FigDevtoolsFiberSnapshot,
+  root: FigDevtoolsRootSnapshot | null,
+): FigNode {
   if (tab === "props") return recordSection("Props", fiber.props);
   if (tab === "hooks") return hooksSection(fiber.hooks);
   if (tab === "context")
     return listSection("Context reads", fiber.contextDependencies);
+  if (tab === "data") return dataResourcesSection(root?.dataResources ?? []);
 
   return h(
     "div",
@@ -749,6 +761,46 @@ function hooksSection(hooks: FigDevtoolsHookSnapshot[]): FigNode {
       ? h("p", { class: "fig-devtools__empty" }, "None")
       : hooks.map((hook) => row(`#${hook.id} ${hook.kind}`, hookValue(hook))),
   );
+}
+
+function dataResourcesSection(
+  entries: FigDevtoolsRootSnapshot["dataResources"],
+): FigNode {
+  return h(
+    "section",
+    { class: "fig-devtools__section" },
+    h("h3", { class: "fig-devtools__section-title" }, "Data resources"),
+    entries.length === 0
+      ? h("p", { class: "fig-devtools__empty" }, "None")
+      : entries.map(dataResourceSection),
+  );
+}
+
+function dataResourceSection(entry: DataResourceSnapshot): FigNode {
+  return h(
+    "div",
+    { class: "fig-devtools__section", key: entry.canonicalKey },
+    dataResourceRows(entry),
+  );
+}
+
+function dataResourceRows(entry: DataResourceSnapshot): FigNode[] {
+  const rows = [
+    row(entry.name ?? entry.canonicalKey, entry.status),
+    row("Key", formatValue(entry.key)),
+    row("Subscribers", String(entry.subscriberCount)),
+    row("Stale", entry.stale ? "yes" : "no"),
+  ];
+
+  if (entry.pending) rows.push(row("Pending", "yes"));
+  if (entry.hasValue) rows.push(row("Value", formatValue(entry.value)));
+  if (entry.error !== undefined)
+    rows.push(row("Error", formatValue(entry.error)));
+  if (entry.refreshError !== undefined) {
+    rows.push(row("Refresh error", formatValue(entry.refreshError)));
+  }
+
+  return rows;
 }
 
 function listSection(title: string, items: string[]): FigNode {
@@ -970,7 +1022,8 @@ function tabLabel(tab: DetailTab): string {
   if (tab === "inspect") return "Inspect";
   if (tab === "props") return "Props";
   if (tab === "hooks") return "Hooks";
-  return "Context";
+  if (tab === "context") return "Context";
+  return "Data";
 }
 
 function classNames(...values: Array<string | false>): string {

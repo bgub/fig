@@ -10,6 +10,7 @@ import {
   useMemo,
   useState,
 } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig-data";
 import { Resources } from "@bgub/fig/internal";
 import { requestPaint } from "@bgub/fig-scheduler";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -303,6 +304,38 @@ describe("reconciler", () => {
       name: "Suspense",
     });
     expect(suspense?.children[0]?.name).toBe("span");
+  });
+
+  it("publishes data resource entries to DevTools snapshots", () => {
+    const commits = collectDevtoolsCommits();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const messageResource = dataResource({
+      key: (id: string) => ["devtools-message", id],
+      load: () => "Loaded",
+      name: "Message",
+    });
+
+    function Message() {
+      return createElement("span", null, readData(messageResource, "one"));
+    }
+
+    flushSync(() => root.render(createElement(Message, null)));
+
+    expect(commits.at(-1)?.dataResources).toMatchObject([
+      {
+        canonicalKey: '["devtools-message","one"]',
+        hasValue: true,
+        key: ["devtools-message", "one"],
+        name: "Message",
+        pending: false,
+        stale: false,
+        status: "fulfilled",
+        subscriberCount: 1,
+        value: "Loaded",
+      },
+    ]);
   });
 
   it("publishes resource wrappers as transparent fibers", () => {

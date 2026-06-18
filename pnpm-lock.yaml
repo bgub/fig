@@ -113,6 +113,12 @@ importers:
 
   packages/fig: {}
 
+  packages/fig-data:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+
   packages/fig-devtools:
     dependencies:
       '@bgub/fig':
@@ -130,6 +136,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../fig-data
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
@@ -139,6 +148,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../fig-data
       '@bgub/fig-scheduler':
         specifier: workspace:*
         version: link:../fig-scheduler
@@ -150,6 +162,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../fig-data
 
 packages:
 

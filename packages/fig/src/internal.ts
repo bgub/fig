@@ -43,5 +43,28 @@ export {
   resourceFromHostProps,
   type ResourceDestination,
 } from "./resource.ts";
-export { setCurrentDispatcher, type RenderDispatcher } from "./hooks.ts";
+export {
+  invalidateDataResource,
+  preloadDataResource,
+  readDataResource,
+  refreshDataResource,
+  setCurrentDispatcher,
+  type RenderDispatcher,
+} from "./hooks.ts";
+export {
+  dataResourceKeysForError,
+  markDataResourceError,
+  resolveCurrentDataStore,
+  setCurrentDataStore,
+  type DataRefreshResult,
+  type DataResourceKey,
+  type DataResourceKeyInput,
+  type DataResourceLoadContext,
+  type FigDataEntryStatus,
+  type FigDataHydrationEntry,
+  type FigDataResource,
+  type FigDataStore,
+  type FigDataStoreEntrySnapshot,
+  type FigDataStoreHandle,
+} from "./data.ts";
 export { setTransitionHandler } from "./transition.ts";

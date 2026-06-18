@@ -4,6 +4,8 @@ import type {
   FigResource,
   FigResourceList,
 } from "@bgub/fig";
+import type { FigDataHydrationEntry } from "@bgub/fig/internal";
+import type { DataResourceKeyInput } from "@bgub/fig-data";
 
 export interface ServerRenderOptions {
   /**
@@ -19,6 +21,8 @@ export interface ServerRenderOptions {
   onResourceError?: (error: unknown, info: ServerResourceErrorInfo) => void;
   onShellError?: (error: unknown) => void;
   resolveResourceKey?: (type: ElementType) => string | undefined;
+  dataContext?: unknown;
+  dataPartition?: DataResourceKeyInput;
   resources?: Record<string, FigResourceList>;
   signal?: AbortSignal;
 }
@@ -45,6 +49,7 @@ interface ServerStreamRenderResult {
   abort(reason?: unknown): void;
   allReady: Promise<void>;
   contentType: "text/html; charset=utf-8";
+  getData(): FigDataHydrationEntry[];
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;
 }
@@ -59,6 +64,7 @@ export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
 export interface ServerRenderRequest {
   abort(reason?: unknown): void;
   allReady: Promise<void>;
+  getData(): FigDataHydrationEntry[];
   getHead(): string;
   headReady: Promise<void>;
   shellReady: Promise<void>;

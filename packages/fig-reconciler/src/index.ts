@@ -19,6 +19,7 @@ import {
   type StartTransition,
 } from "@bgub/fig";
 import {
+  dataResourceKeysForError,
   isActivity,
   isContext,
   isErrorBoundary,
@@ -27,9 +28,14 @@ import {
   isSuspense,
   isValidElement,
   setCurrentDispatcher,
+  setCurrentDataStore,
   setTransitionHandler,
+  type FigDataHydrationEntry,
+  type FigDataStoreHandle,
+  type DataResourceKeyInput,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
+import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
   NormalPriority,
   now,
@@ -215,11 +221,15 @@ export interface HostConfig<Container, Instance, TextInstance> {
 }
 
 export interface FigRoot {
+  data: FigDataStoreHandle;
   render(children: FigNode): void;
   unmount(): void;
 }
 
 export interface FigRootOptions {
+  dataContext?: unknown;
+  dataPartition?: DataResourceKeyInput;
+  initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
   devtools?: boolean;
   onRecoverableError?: (error: unknown, info: RecoverableErrorInfo) => void;
@@ -432,6 +442,8 @@ interface Fiber<Container, Instance, TextInstance> {
   childLanes: Lanes;
   effects: Effect[] | null;
   contextDependencies: FigContext<unknown>[] | null;
+  dataDependencies: string[] | null;
+  dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
@@ -458,6 +470,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
+  dataStore: DataStore<Fiber<Container, Instance, TextInstance>, Lane>;
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
@@ -579,6 +592,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     readContext(context) {
       return readContextValue(context);
     },
+    readData(resource, args) {
+      const fiber = requireRenderingFiber();
+      return rootOf(fiber).dataStore.readData(resource, args, fiber);
+    },
+    preloadData(resource, args) {
+      const fiber = requireRenderingFiber();
+      rootOf(fiber).dataStore.preloadData(resource, args);
+    },
     readPromise(promise) {
       return readThenable(promise);
     },
@@ -628,6 +649,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function createFiberRoot(container: Container, options: FigRootOptions): R {
     const current = fiber(RootTag, null, null, { children: null }, null);
+    const dataStore = createDataStore<F, Lane>({
+      context: options.dataContext ?? {},
+      getLane: requestUpdateLane,
+      partition: options.dataPartition,
+      schedule(owner, lane) {
+        scheduleFiber(owner, hiddenActivityLane(owner, lane));
+      },
+    });
     const root: R = {
       container,
       current,
@@ -646,6 +675,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       wip: null,
       finishedWork: null,
       renderLanes: NoLanes,
+      dataStore,
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
@@ -663,6 +693,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       clearContainerBeforeCommit: false,
       hydrationInitialElement: NoHydrationInitialElement,
     };
+    if (options.initialData !== undefined)
+      dataStore.hydrate(options.initialData);
     current.stateNode = root;
     return root;
   }
@@ -678,6 +710,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function rootHandle(root: R): FigRoot {
     return {
+      data: root.dataStore,
       render: (children) => updateRoot(root, children),
       unmount: () => updateRoot(root, null),
     };
@@ -816,7 +849,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         return;
       }
 
-      const info = root.uncaughtErrorInfo ?? errorInfoFor(root.current);
+      const info = root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
       restartRootWork(root);
       clearRootAfterUncaughtError(root);
       reportUncaughtError(root, error, info);
@@ -1008,7 +1041,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const boundary = findErrorBoundary(node);
     if (boundary !== null) return captureErrorBoundary(boundary, error, node);
 
-    rootOf(node).uncaughtErrorInfo = errorInfoFor(node);
+    rootOf(node).uncaughtErrorInfo = errorInfoFor(node, error);
     throw error;
   }
 
@@ -1385,6 +1418,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     prepareHookRender(node);
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
+    const previousDataStore = setCurrentDataStore(rootOf(node).dataStore);
     try {
       if (process.env.NODE_ENV !== "production") {
         // Strict shadow pass: invoke the component once and discard every
@@ -1401,6 +1435,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       reconcileCurrentChildren(node, (node.type as Component)(node.props));
       if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
+      setCurrentDataStore(previousDataStore);
       setCurrentDispatcher(previousDispatcher);
       renderingFiber = null;
       currentHook = null;
@@ -1416,6 +1451,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
+    node.dataDependencies = [];
+    node.dataDependenciesDirty = true;
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -1717,9 +1754,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
         let result: S | PromiseLike<S>;
         try {
-          result = runWithTransitionLane(lane, () => {
-            return instance.action(instance.value, ...args);
-          });
+          result = rootOf(fiber).dataStore.run(() =>
+            runWithTransitionLane(lane, () => {
+              return instance.action(instance.value, ...args);
+            }),
+          );
         } catch (error) {
           finish(lane, error);
           return;
@@ -1855,7 +1894,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
         let result: unknown;
         try {
-          result = runWithTransitionLane(lane, callback);
+          result = rootOf(fiber).dataStore.run(() =>
+            runWithTransitionLane(lane, callback),
+          );
         } catch (error) {
           finish();
           throw error;
@@ -2472,6 +2513,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       root.clearContainerBeforeCommit = false;
     }
     commitDeletions(finishedWork);
+    commitDataDependencies(finishedWork.child);
     commitMutationEffects(finishedWork.child);
     if (hasHiddenActivities) commitActivityVisibility(finishedWork.child);
     root.current = finishedWork;
@@ -2592,7 +2634,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         state.info,
       );
     } catch (error) {
-      reportUncaughtError(root, error, errorInfoFor(node));
+      reportUncaughtError(root, error, errorInfoFor(node, error));
     }
   }
 
@@ -2610,7 +2652,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.pendingReactiveEffects = [];
     root.element = null;
 
-    if (root.current.child !== null) abortFiberEffects(root.current);
+    if (root.current.child !== null) {
+      deleteFiberData(root.current.child);
+      abortFiberEffects(root.current);
+    }
 
     if (host.clearContainer !== undefined) {
       removePortalDescendants(root.current.child);
@@ -2717,7 +2762,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       mutation();
     } catch (error) {
-      rootOf(source).uncaughtErrorInfo = errorInfoFor(source);
+      rootOf(source).uncaughtErrorInfo = errorInfoFor(source, error);
       throw error;
     }
   }
@@ -2871,6 +2916,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         ? hostParentFor(node)
         : hostParent(node);
       for (const child of node.deletions) {
+        deleteFiberData(child);
         abortFiberEffects(child);
         remove(child, parent);
       }
@@ -2881,6 +2927,43 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (let child = node.child; child !== null; child = child.sibling) {
       commitDeletions(child);
+    }
+  }
+
+  function commitDataDependencies(node: F | null): void {
+    let cursor = node;
+
+    while (cursor !== null) {
+      if (cursor.dataDependenciesDirty) {
+        rootOf(cursor).dataStore.commitDataDependencies(
+          cursor,
+          cursor.alternate,
+          cursor.dataDependencies,
+        );
+        cursor.dataDependenciesDirty = false;
+        if (cursor.alternate !== null)
+          cursor.alternate.dataDependenciesDirty = false;
+      }
+
+      if ((cursor.flags & AdoptedFlag) === 0) {
+        commitDataDependencies(cursor.child);
+      }
+
+      cursor = cursor.sibling;
+    }
+  }
+
+  function deleteFiberData(node: F): void {
+    const store = rootOf(node).dataStore;
+    deleteFiberDataFromStore(node, store);
+  }
+
+  function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
+    store.deleteDataOwner(node);
+    if (node.alternate !== null) store.deleteDataOwner(node.alternate);
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      deleteFiberDataFromStore(child, store);
     }
   }
 
@@ -3166,7 +3249,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): ErrorBoundaryState {
     return {
       error,
-      info: errorInfoFor(source),
+      info: errorInfoFor(source, error),
       didReport: false,
     };
   }
@@ -3316,6 +3399,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
+    next.dataDependencies = current.dataDependencies;
+    next.dataDependenciesDirty = false;
     next.suspenseState = current.suspenseState;
     next.errorBoundaryState = current.errorBoundaryState;
     next.activityState = current.activityState;
@@ -3392,6 +3477,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
+      dataDependencies: null,
+      dataDependenciesDirty: false,
       suspenseState: null,
       errorBoundaryState: null,
       activityState: null,
@@ -3406,8 +3493,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     throw new Error("Could not find a root for fiber.");
   }
 
-  function errorInfoFor(node: F): ErrorInfo {
-    return { componentStack: componentStackFor(node) };
+  function errorInfoFor(node: F, error?: unknown): ErrorInfo {
+    const dataResourceKeys =
+      error === undefined ? undefined : dataResourceKeysForError(error);
+
+    return dataResourceKeys === undefined
+      ? { componentStack: componentStackFor(node) }
+      : { componentStack: componentStackFor(node), dataResourceKeys };
   }
 
   function queueRecoverableError(
@@ -3812,7 +3904,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    rootOf(owner).uncaughtErrorInfo = errorInfoFor(owner);
+    rootOf(owner).uncaughtErrorInfo = errorInfoFor(owner, error);
     throw error;
   }
 
@@ -4227,6 +4319,7 @@ function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
     id: devtoolsRootId(root),
     rendererId,
     committedAt: now(),
+    dataResources: root.dataStore.inspectDataEntries(),
     pendingLanes: root.pendingLanes,
     suspendedLanes: root.suspendedLanes,
     pingedLanes: root.pingedLanes,

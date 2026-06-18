@@ -73,6 +73,44 @@ Pass `identifierPrefix` when multiple streaming renders share a document. Fig
 uses it in generated Suspense marker and script identifiers, and it defaults to
 an empty string.
 
+## Data Resources
+
+Server render requests have their own data-resource store. Reads through
+`@bgub/fig-data` dedupe by key within the request and fulfilled entries are
+available through `result.getData()`:
+
+```tsx
+import { dataResource, readData } from "@bgub/fig-data";
+import { renderToReadableStream } from "@bgub/fig-server";
+
+const userResource = dataResource.server(
+  dataResource.identity<[string], { name: string }>({
+    key: (id) => ["user", id],
+    name: "User",
+  }),
+  {
+    load: async (id, { context }) => context.users.find(id),
+  },
+);
+
+function Profile({ id }: { id: string }) {
+  const user = readData(userResource, id);
+  return <h1>{user.name}</h1>;
+}
+
+const result = renderToReadableStream(<Profile id="one" />, {
+  dataContext: { users },
+});
+await result.allReady;
+
+const initialData = result.getData();
+```
+
+Pass `initialData` to `createRoot(...)` or `hydrateRoot(...)` on the client to
+hydrate those values by key. Client imports can use the identity-only resource;
+if no client loader exists, `refreshData(...)` reports `unsupported` and a
+framework/RSC refresh path should revalidate the key.
+
 ## Resources
 
 Use `resources([...], children)` from `@bgub/fig` to attach document resources to

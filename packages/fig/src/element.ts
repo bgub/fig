@@ -1,4 +1,5 @@
 import { readPromise } from "./hooks.ts";
+import type { DataResourceKey } from "./data.ts";
 
 export type Key = string | number;
 export type Props = Record<string, any>;
@@ -80,6 +81,7 @@ export interface ErrorBoundaryProps {
 
 export interface ErrorInfo {
   componentStack: string;
+  dataResourceKeys?: DataResourceKey[];
 }
 
 export interface FigErrorBoundary {

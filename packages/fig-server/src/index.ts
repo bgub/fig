@@ -33,6 +33,7 @@ export function renderToDocumentStream(
     abort: (reason) => request.abort(reason),
     allReady: request.allReady,
     contentType,
+    getData: () => request.getData(),
     shellReady: request.shellReady,
     stream: request.stream,
   };

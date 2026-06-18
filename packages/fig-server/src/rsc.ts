@@ -22,8 +22,17 @@ import {
   isSuspense,
   isValidElement,
   setCurrentDispatcher,
+  setCurrentDataStore,
+  type FigDataHydrationEntry,
+  type FigDataStoreHandle,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
+import {
+  createDataStore,
+  type DataResourceKeyInput,
+  normalizeDataResourceKey,
+  type DataStore,
+} from "@bgub/fig-data";
 import {
   type ContextValues,
   cloneContextValues,
@@ -42,15 +51,19 @@ export interface RscRenderResult {
 }
 
 export interface RscRenderOptions {
+  dataContext?: unknown;
+  dataPartition?: DataResourceKeyInput;
   refreshBoundary?: string;
 }
 
 export interface RscRootLike {
+  data?: FigDataStoreHandle;
   render(node: FigNode): void;
 }
 
 type RscRow =
   | { id: number; tag: "client"; value: { id: string } }
+  | { tag: "data"; value: FigDataHydrationEntry[] }
   | { id: number; tag: "error"; value: { message: string } }
   | { id: number; tag: "model"; value: RscModel }
   | { boundary: string; tag: "refresh"; value: RscModel };
@@ -116,6 +129,8 @@ type RscRequest = {
   clientReferenceRows: Map<string, number>;
   closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
+  dataStore: DataStore<object, null>;
+  emittedDataKeys: Set<string>;
   nextId: number;
   nextRowId: number;
   pendingTasks: number;
@@ -175,7 +190,12 @@ export function renderToRscStream(
   node: FigNode,
   options: RscRenderOptions = {},
 ): RscRenderResult {
-  const request = createRscRequest(node, options.refreshBoundary ?? null);
+  const request = createRscRequest(
+    node,
+    options.refreshBoundary ?? null,
+    options.dataContext,
+    options.dataPartition,
+  );
   return { allReady: request.allReady, contentType, stream: request.stream };
 }
 
@@ -244,6 +264,8 @@ export async function fetchRsc(
 function createRscRequest(
   node: FigNode,
   refreshBoundary: string | null,
+  dataContext: unknown,
+  dataPartition: DataResourceKeyInput | undefined,
 ): RscRequest {
   let resolveAllReady: () => void = () => undefined;
   let rejectAllReady: (error: unknown) => void = () => undefined;
@@ -257,6 +279,13 @@ function createRscRequest(
     clientReferenceRows: new Map(),
     closeAllReady: resolveAllReady,
     controller: null,
+    dataStore: createDataStore<object, null>({
+      context: dataContext ?? {},
+      getLane: () => null,
+      partition: dataPartition,
+      schedule: () => undefined,
+    }),
+    emittedDataKeys: new Set(),
     nextId: 0,
     nextRowId: 1,
     pendingTasks: 0,
@@ -290,11 +319,15 @@ class RscResponseImpl implements RscResponse {
   private readonly boundaries = new Map<string, RscModel>();
   private readonly chunks = new Map<number, DecodedChunk>();
   private listeners = new Set<() => void>();
+  private pendingData: FigDataHydrationEntry[] = [];
+  private rootData: FigDataStoreHandle | null = null;
   private stringBuffer = "";
 
   constructor(private readonly options: RscResponseOptions) {}
 
   bindRoot(root: RscRootLike): () => void {
+    this.rootData = root.data ?? null;
+    this.hydratePendingData();
     const render = () => root.render(this.getRoot());
     const unsubscribe = this.subscribe(render);
     render();
@@ -308,6 +341,12 @@ class RscResponseImpl implements RscResponse {
   }
 
   private processRow(row: RscRow): void {
+    if (row.tag === "data") {
+      this.pendingData.push(...row.value);
+      this.hydratePendingData();
+      return;
+    }
+
     if (row.tag === "refresh") {
       this.boundaries.set(row.boundary, row.value);
       this.notify();
@@ -382,6 +421,14 @@ class RscResponseImpl implements RscResponse {
     for (const listener of this.listeners) listener();
   }
 
+  private hydratePendingData(): void {
+    if (this.rootData === null || this.pendingData.length === 0) return;
+
+    const entries = this.pendingData;
+    this.pendingData = [];
+    this.rootData.hydrate(entries);
+  }
+
   private processLine(line: string): void {
     if (line.length > 0) this.processRow(JSON.parse(line) as RscRow);
   }
@@ -421,6 +468,7 @@ function retryTask(request: RscRequest, task: Task): void {
       task.kind === "node"
         ? serializeNode(task.value as FigNode, frame)
         : serializeValue(readThenable(task.value as Thenable), frame);
+    emitDataRows(request);
     if (request.refreshBoundary !== null && task.id === 0) {
       emitRow(request, {
         boundary: request.refreshBoundary,
@@ -454,6 +502,18 @@ function finishTask(request: RscRequest): void {
   if (request.pendingTasks === 0) request.closeAllReady();
 }
 
+function emitDataRows(request: RscRequest): void {
+  const entries = request.dataStore.snapshot().filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    if (request.emittedDataKeys.has(key)) return false;
+
+    request.emittedDataKeys.add(key);
+    return true;
+  });
+
+  if (entries.length > 0) emitRow(request, { tag: "data", value: entries });
+}
+
 function createRenderFrame(
   request: RscRequest,
   contextValues: ContextValues,
@@ -467,6 +527,12 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
     externalStoreError:
       "useExternalStore requires getServerSnapshot during RSC render.",
     readPromise: readThenable,
+    readData(resource, args) {
+      return frame.request.dataStore.readData(resource, args, frame);
+    },
+    preloadData(resource, args) {
+      frame.request.dataStore.preloadData(resource, args);
+    },
     useId() {
       const id = `fig-rsc-${frame.request.nextId.toString(32)}`;
       frame.request.nextId += 1;
@@ -583,12 +649,14 @@ function serializeFunctionComponent(
   frame: RenderFrame,
 ): RscModel {
   const previousDispatcher = setCurrentDispatcher(createRscDispatcher(frame));
+  const previousDataStore = setCurrentDataStore(frame.request.dataStore);
 
   try {
     const result = type(props);
     const node = isThenable(result) ? readThenable(result) : result;
     return serializeNode(node as FigNode, frame);
   } finally {
+    setCurrentDataStore(previousDataStore);
     setCurrentDispatcher(previousDispatcher);
   }
 }
@@ -747,6 +815,7 @@ function flushRows(request: RscRequest): void {
 function closeWithError(request: RscRequest, error: unknown): void {
   if (request.status === "closed") return;
   request.status = "closed";
+  request.dataStore.dispose();
   request.recoverAllReady(error);
   request.controller?.error(error);
 }

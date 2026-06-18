@@ -11,6 +11,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
+  ["@bgub/fig-data", "packages/fig-data/src/index.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
   ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
@@ -35,6 +36,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
   ],
+  "packages/fig-data": ["./src/index.ts"],
   "packages/fig-devtools": ["./src/index.ts"],
   "packages/fig-dom": ["./src/index.ts"],
   "packages/fig-reconciler": ["./src/index.ts"],
@@ -44,6 +46,7 @@ const libraryEntries: Record<string, string[]> = {
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const packWorkspacePaths = [
   "packages/fig",
+  "packages/fig-data",
   "packages/fig-scheduler",
   "packages/fig-server",
   "packages/fig-reconciler",

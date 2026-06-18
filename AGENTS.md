@@ -4,6 +4,12 @@ Fig is a TypeScript re-implementation of React: the core ideas remain, including
 
 The goal is to keep React's modern model while dropping legacy cruft such as class components and adopting Fig-specific APIs where they are clearer.
 
+## Resource Terminology
+
+- Use **data resources** for keyed async values, cache entries, server reads, and the APIs that refresh, invalidate, revalidate, or recompute them.
+- Use **asset resources** for CSS, scripts, module preloads, fonts, preconnects, and other render-discovered assets that are discovered, deduped, loaded, retained, and sometimes gated before reveal.
+- Avoid the unqualified term "resources" when discussing APIs, protocol work, or implementation plans where the distinction matters.
+
 ## Design Choices
 
 - No legacy React APIs: no class components, string refs, legacy context, or synthetic event pooling.

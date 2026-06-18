@@ -16,8 +16,8 @@ export function App() {
 ```
 
 The component subscribes to the Fig DevTools global hook and renders committed
-fiber snapshots, commit history, props, hooks, context reads, and host HTML
-inspection.
+fiber snapshots, commit history, props, hooks, context reads, data-resource
+entries, and host HTML inspection.
 
 You can also mount it imperatively before the first root render:
 

@@ -239,8 +239,9 @@ export function createRoot(
   container: Container,
   options?: FigRootOptions,
 ): FigRoot {
-  registerRoot(container);
-  return renderer.createRoot(container, options);
+  const root = renderer.createRoot(container, options);
+  registerRoot(container, undefined, (callback) => root.data.run(callback));
+  return root;
 }
 
 export function hydrateRoot(
@@ -251,12 +252,20 @@ export function hydrateRoot(
   registerRoot(container, (target, lane) =>
     renderer.hydrateTarget(container, target, lane),
   );
-  return renderer.hydrateRoot(container, children, options);
+  const root = renderer.hydrateRoot(container, children, options);
+  registerRoot(
+    container,
+    (target, lane) => renderer.hydrateTarget(container, target, lane),
+    (callback) => root.data.run(callback),
+  );
+  return root;
 }
 
 export function render(children: FigNode, container: Container): FigRoot {
   registerRoot(container);
-  return renderer.render(children, container);
+  const root = renderer.render(children, container);
+  registerRoot(container, undefined, (callback) => root.data.run(callback));
+  return root;
 }
 
 export function createPortal(

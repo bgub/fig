@@ -69,6 +69,9 @@ createRoot(container).render(<App />);
   signal; calling it during render throws.
 - `Suspense` catches pending `readPromise(promise)` reads and shows `fallback`
   until the promise settles.
+- Data resources live in `@bgub/fig-data`. Use `dataResource(...)` plus
+  render-time `readData(...)` for keyed async values that need Suspense,
+  deduping, invalidation, refresh, server hydration, and DevTools visibility.
 - `lazy(load)` creates a component that suspends until `load()` resolves to a
   component type.
 - `<Activity mode="visible" | "hidden">` hides a subtree while preserving its
@@ -79,7 +82,9 @@ createRoot(container).render(<App />);
   content inside an inert template; the client keeps it dehydrated — zero
   hydration cost — until reveal, then adopts the server DOM.
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
-  reporting and change the boundary key to reset sticky fallback state.
+  reporting and change the boundary key to reset sticky fallback state. Data
+  resource load failures report failed keys on `info.dataResourceKeys`, so
+  recovery flows can refresh or invalidate those keys before resetting.
 - `transition(callback)` and `useTransition()` mark updates that may preserve
   already-revealed Suspense content while new work is pending. Updates scheduled
   inside the callback run at transition priority, including updates after an

@@ -18,6 +18,7 @@ export type EventCallback<E extends Event = Event> = (
   signal: AbortSignal,
 ) => void;
 type Batch = <T>(callback: () => T) => T;
+type RootScope = <T>(callback: () => T) => T;
 
 export interface EventDescriptor<E extends Event = Event> {
   readonly $$typeof: symbol;
@@ -58,6 +59,7 @@ const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const portalOwners = new WeakMap<Container, PortalOwner>();
 const rootContainers = new WeakSet<Container>();
+const rootScopes = new WeakMap<Container, RootScope>();
 const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
 const rootHydrationCallbacks = new WeakMap<Container, HydrationCallback>();
 const rootsWithHydrationListeners = new WeakSet<Container>();
@@ -113,8 +115,10 @@ export function setEventBatching(nextBatch: Batch): void {
 export function registerRoot(
   container: Container,
   hydrate?: HydrationCallback,
+  scope?: RootScope,
 ): void {
   rootContainers.add(container);
+  if (scope !== undefined) rootScopes.set(container, scope);
   if (hydrate === undefined) return;
 
   rootHydrationCallbacks.set(container, hydrate);
@@ -439,12 +443,19 @@ function dispatchEventSlot(
   const signal = slot.controller.signal;
 
   batch(() => {
-    runWithPriority(eventLane(slot.type), () => {
-      withCurrentTarget(event, element, (currentEvent) => {
-        slot.callback(currentEvent, signal);
-      });
-    });
+    runWithRootScope(slot.root, () =>
+      runWithPriority(eventLane(slot.type), () => {
+        withCurrentTarget(event, element, (currentEvent) => {
+          slot.callback(currentEvent, signal);
+        });
+      }),
+    );
   });
+}
+
+function runWithRootScope<T>(root: Container | null, callback: () => T): T {
+  const scope = root === null ? undefined : rootScopes.get(root);
+  return scope === undefined ? callback() : scope(callback);
 }
 
 function abortEventSlot(slot: EventSlot): void {

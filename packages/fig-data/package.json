@@ -1,7 +1,7 @@
 {
-  "name": "@bgub/fig-reconciler",
+  "name": "@bgub/fig-data",
   "version": "0.0.1",
-  "description": "Fig reconciler",
+  "description": "Fig data resources",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
   "type": "module",
@@ -25,16 +25,14 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/bgub/fig",
-    "directory": "packages/fig-reconciler"
+    "directory": "packages/fig-data"
   },
   "bugs": {
     "url": "https://github.com/bgub/fig/issues"
   },
   "license": "MIT",
   "dependencies": {
-    "@bgub/fig": "workspace:*",
-    "@bgub/fig-data": "workspace:*",
-    "@bgub/fig-scheduler": "workspace:*"
+    "@bgub/fig": "workspace:*"
   },
   "devDependencies": {}
 }
