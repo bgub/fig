@@ -6,7 +6,7 @@
     "build": "vp run -r build",
     "check": "vp check",
     "dev": "vp run -r --parallel dev",
-    "dev:demos": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-rsc --parallel dev",
+    "dev:demos": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-rsc --filter @bgub/fig-demo-start --parallel dev",
     "test": "vp test",
     "test:dom": "vp run --filter @bgub/fig-dom test",
     "test:e2e": "vp run --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client test:e2e",

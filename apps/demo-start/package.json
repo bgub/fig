@@ -1,0 +1,28 @@
+{
+  "name": "@bgub/fig-demo-start",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vp pack",
+    "dev": "portless",
+    "dev:app": "node ../dev-server.mjs node",
+    "dev:build": "vp pack --watch",
+    "serve": "node dist/server.js",
+    "serve:watch": "node --watch dist/server.js",
+    "test": "vp test run"
+  },
+  "portless": {
+    "name": "fig-demo-start",
+    "script": "dev:app"
+  },
+  "dependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-data": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*",
+    "@bgub/fig-start": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0"
+  }
+}

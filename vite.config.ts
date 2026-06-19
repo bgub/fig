@@ -18,6 +18,9 @@ const figSourceAliasEntries = [
   ["@bgub/fig-scheduler", "packages/fig-scheduler/src/index.ts"],
   ["@bgub/fig-server/rsc", "packages/fig-server/src/rsc.ts"],
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
+  ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
+  ["@bgub/fig-start/client", "packages/fig-start/src/client.ts"],
+  ["@bgub/fig-start", "packages/fig-start/src/index.ts"],
   ["@bgub/fig", "packages/fig/src/index.ts"],
 ] as const;
 const sourceAliases = figSourceAliasMap();
@@ -42,6 +45,11 @@ const libraryEntries: Record<string, string[]> = {
   "packages/fig-reconciler": ["./src/index.ts"],
   "packages/fig-scheduler": ["./src/index.ts"],
   "packages/fig-server": ["./src/index.ts", "./src/rsc.ts"],
+  "packages/fig-start": [
+    "./src/index.ts",
+    "./src/server.ts",
+    "./src/client.ts",
+  ],
 };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const packWorkspacePaths = [
@@ -52,6 +60,7 @@ const packWorkspacePaths = [
   "packages/fig-reconciler",
   "packages/fig-dom",
   "packages/fig-devtools",
+  "packages/fig-start",
 ];
 
 export default defineConfig({
@@ -173,6 +182,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         },
       ];
     case "apps/demo-ssr":
+    case "apps/demo-start":
       return [
         {
           entry: ["./src/server.tsx"],

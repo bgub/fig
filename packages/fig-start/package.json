@@ -1,0 +1,51 @@
+{
+  "name": "@bgub/fig-start",
+  "version": "0.0.1",
+  "description": "Fig full-stack framework runtime",
+  "keywords": [],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-start"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-data": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0"
+  }
+}

@@ -117,6 +117,28 @@ importers:
         specifier: ^20.19.0
         version: 20.19.41
 
+  apps/demo-start:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../../packages/fig-data
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../../packages/fig-server
+      '@bgub/fig-start':
+        specifier: workspace:*
+        version: link:../../packages/fig-start
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.41
+
   packages/fig: {}
 
   packages/fig-data:
@@ -171,6 +193,25 @@ importers:
       '@bgub/fig-data':
         specifier: workspace:*
         version: link:../fig-data
+
+  packages/fig-start:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../fig-data
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../fig-server
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.41
 
 packages:
 
