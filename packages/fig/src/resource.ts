@@ -182,6 +182,11 @@ export function clientReferenceResources(
 }
 
 export function figResourceKey(resource: FigResource): string {
+  // A document carries a single <title>; collapse every title to one key even
+  // when an author supplies an explicit key, so the singleton invariant cannot
+  // be bypassed into emitting multiple <title> elements (invalid HTML).
+  if (resource.kind === "title") return "title";
+
   if (resource.key !== undefined) return `${resource.kind}:${resource.key}`;
 
   switch (resource.kind) {
@@ -192,11 +197,13 @@ export function figResourceKey(resource: FigResource): string {
     case "script":
       return `script:${resource.src}`;
     case "font":
-      return `font:${resource.href}`;
+      // A font is loaded as <link rel="preload" as="font">, so it must share the
+      // preload-font key space across every package (SSR registry, RSC record,
+      // client insert) — otherwise a font() and an equivalent preload(href,
+      // "font") would key separately and fail to dedupe.
+      return `preload:font:${resource.href}`;
     case "preconnect":
       return `preconnect:${resource.href}`;
-    case "title":
-      return "title";
     case "meta":
       return metaResourceKey(resource);
   }

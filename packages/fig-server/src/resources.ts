@@ -209,9 +209,13 @@ function resourceSignature(resource: FigResource): string {
         resource.fetchPriority ?? "",
       );
     case "font":
+      // Mirror the preload-as-font signature: a font shares the preload-font key
+      // space (see figResourceKey), so an equivalent preload(href, "font") must
+      // produce the same signature and dedupe rather than raising a conflict.
       return signature(
-        resource.kind,
+        "preload",
         resource.href,
+        "font",
         resource.type,
         resource.crossOrigin ?? "anonymous",
         resource.fetchPriority ?? "",

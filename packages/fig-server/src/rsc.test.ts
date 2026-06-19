@@ -5,6 +5,7 @@ import {
   type ElementType,
   type FigElement,
   type FigNode,
+  font,
   Fragment,
   lazy,
   preload,
@@ -351,6 +352,52 @@ describe("RSC rendering", () => {
       { href: "/assets/shared.css", kind: "stylesheet" },
       { href: "/assets/Header.css", kind: "stylesheet" },
       { href: "/assets/Footer.css", kind: "stylesheet" },
+    ]);
+  });
+
+  it("dedupes a font against an equivalent preload-as-font on a client row", async () => {
+    const Text = clientReference({
+      id: "app/Text.client.tsx#Text",
+      load: () => Promise.resolve({}),
+      resources: [
+        font("/assets/Inter.woff2", "font/woff2"),
+        // Same asset, expressed as a preload: both share the preload-font key
+        // space, so only the first survives serialization.
+        preload("/assets/Inter.woff2", "font", {
+          type: "font/woff2",
+          crossOrigin: "anonymous",
+        }),
+      ],
+    });
+
+    const rows = await renderToRscRows(createElement(Text, {}));
+
+    expect(rows.find((row) => row.tag === "client")).toEqual({
+      id: 1,
+      tag: "client",
+      value: {
+        id: "app/Text.client.tsx#Text",
+        resources: [
+          { href: "/assets/Inter.woff2", kind: "font", type: "font/woff2" },
+        ],
+      },
+    });
+  });
+
+  it("does not hang when a client reference resource thunk throws", async () => {
+    const Broken = clientReference({
+      id: "app/Broken.client.tsx#Broken",
+      load: () => Promise.resolve({}),
+      // A bundler-manifest thunk may throw (missing entry). Resolving assets
+      // before reserving the row id surfaces this as an ordinary error row
+      // instead of a reserved-but-unemitted client row that suspends forever.
+      resources: () => {
+        throw new Error("manifest missing");
+      },
+    });
+
+    await expect(renderToRscRows(createElement(Broken, {}))).resolves.toEqual([
+      { id: 0, tag: "error", value: { message: "manifest missing" } },
     ]);
   });
 
@@ -717,6 +764,63 @@ describe("RSC rendering", () => {
     });
 
     unsubscribe();
+  });
+
+  it("namespaces refresh-payload row ids so they cannot clobber initial chunks", async () => {
+    const First = clientReference({
+      id: "first",
+      load: () => Promise.resolve({}),
+    });
+    const Second = clientReference({
+      id: "second",
+      load: () => Promise.resolve({}),
+    });
+
+    const response = createRscResponse({
+      resolveClientReference: ({ id }) =>
+        function Resolved() {
+          return id;
+        },
+    });
+
+    const rendered: FigNode[] = [];
+    response.bindRoot({
+      render(node) {
+        rendered.push(node);
+      },
+    });
+
+    // Initial payload: a client reference outlined to chunk 1, beside a
+    // refreshable boundary.
+    processTestRscRows(
+      response,
+      await renderToRscRows(
+        createElement(
+          "section",
+          null,
+          createElement(First, {}),
+          createElement(RscBoundary, { id: "slot" }, "before"),
+        ),
+      ),
+    );
+
+    // Refresh the boundary with a DIFFERENT client reference. Its outlined row
+    // restarts at id 1 on the server and would overwrite chunk 1 (First) in the
+    // shared chunks Map without per-payload namespacing.
+    response.beginRefreshPayload();
+    processTestRscRows(
+      response,
+      await renderToRscRows(createElement(Second, {}), {
+        refreshBoundary: "slot",
+      }),
+    );
+
+    // First still resolves to "first" (chunk 1 intact); the boundary shows the
+    // refreshed "second".
+    expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
+      props: { children: ["first", "second"] },
+      type: "section",
+    });
   });
 
   it("pipes readable streams into an RSC response", async () => {

@@ -1,4 +1,5 @@
 import {
+  font,
   meta,
   preload,
   script,
@@ -73,6 +74,36 @@ describe("ResourceRegistry", () => {
     expect(() =>
       registry.register(meta({ name: "description", content: "Two" })),
     ).toThrow('Conflicting Fig resource for key "meta:name:description".');
+  });
+
+  it("dedupes a font against an equivalent preload-as-font under one key", () => {
+    const registry = new ResourceRegistry("");
+
+    // font() and preload(href, "font") emit byte-identical markup and now share
+    // the preload-font key space, so the second must dedupe rather than conflict.
+    expect(write(registry, font("/a.woff2", "font/woff2"))).toBe(
+      '<link rel="preload" href="/a.woff2" as="font" type="font/woff2" crossorigin="anonymous">',
+    );
+    expect(
+      write(
+        registry,
+        preload("/a.woff2", "font", {
+          type: "font/woff2",
+          crossOrigin: "anonymous",
+        }),
+      ),
+    ).toBe("");
+  });
+
+  it("keeps the title singleton even when a title carries an explicit key", () => {
+    const registry = new ResourceRegistry("");
+
+    registry.register(title("Dashboard", "primary"));
+
+    // An explicit key must not let a second title escape the one-<title> model.
+    expect(() => registry.register(title("Settings", "secondary"))).toThrow(
+      'Conflicting Fig resource for key "title".',
+    );
   });
 
   it("dedupes identical preloads and keeps different preload targets distinct", () => {

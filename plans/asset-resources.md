@@ -391,13 +391,25 @@ with data cache behavior.
   when empty.
 - Because `emitClientReference` already emits each reference once (keyed by
   id), unrendered client references contribute no row and no resources.
+- Asset resolution runs _before_ the client row id is reserved: a lazy resource
+  thunk (Phase 5 manifest resolution) may throw, and reserving the id first
+  would strand a reserved-but-unemitted row that suspends the client forever.
+  Resolving first lets the throw surface as an ordinary serialization error with
+  no poisoned id mapping, so the reference retries cleanly.
 - `createRscResponse` decodes them: a client row records its resources into
   the response, deduped per payload by key, exposed via
   `RscResponse.getAssetResources(): readonly FigResource[]` for Phase 3 to
   insert/gate.
+- A refresh reuses the response's chunks Map, but its server row ids restart at
+  1; `beginRefreshPayload()` (called by `fetchRsc` on a refresh) namespaces an
+  incoming payload's row ids past every id seen so far, so its outlined
+  client/lazy/promise rows cannot collide with — and clobber — still-mounted
+  chunks from the initial or an earlier refresh payload.
 - Tests cover serialization on rendered rows, the omitted-when-empty field,
-  per-reference and per-payload dedupe (including a shared asset), head-only
-  exclusion, and that unrendered references emit nothing.
+  per-reference and per-payload dedupe (including a shared asset and a
+  font/preload-as-font collapse), head-only exclusion, that unrendered
+  references emit nothing, throwing-thunk safety, and refresh row-id
+  namespacing.
 
   Embedding on client rows (vs. separate asset rows) is the chosen first
   version, as recommended above.
@@ -414,14 +426,18 @@ with data cache behavior.
   stylesheet has loaded or errored (errors resolve the gate so a failed sheet
   never blocks reveal forever). Stylesheets are critical by default; opt out
   with `blocking: "none"`. Preloads, preconnects, scripts, and fonts are
-  inserted but never gate. The RSC client gates reveal by awaiting this before
-  rendering newly decoded content.
+  inserted but never gate. No production consumer wires
+  `getAssetResources()` → `insertAssetResources()` yet; awaiting this promise to
+  gate reveal of newly decoded RSC content is the headline Phase 4/5 deliverable.
 - Tests cover head insertion, within-call/cross-call/SSR dedupe, critical
   stylesheet load gating, error-resolves-the-gate, and non-critical
   non-gating.
 
   Fonts are inserted (and deduped) as their `<link rel="preload" as="font">`
-  form so they share one key space with font preloads from SSR/host renders.
+  form. `figResourceKey` keys a `font` under that same `preload:font:<href>`
+  space, so a `font()` and an equivalent `preload(href, "font")` share one key
+  across every package — the SSR registry, the RSC record, and client insertion
+  all dedupe them together rather than emitting two identical links.
 
   Known limitation: a critical stylesheet found already present (e.g. streamed
   by SSR) is deduped but not re-gated, so the promise can resolve before an
@@ -436,6 +452,26 @@ with data cache behavior.
 - Carry newly discovered asset resources in RSC refresh payloads.
 - Gate refreshed boundaries before commit/reveal.
 - Dedupe against SSR initial asset resources and earlier RSC payloads.
+
+Deferred review findings to resolve alongside the consumer wiring (each is only
+reachable once a consumer awaits the gate, so they ride with this work):
+
+- Author-supplied `key` does not round-trip through SSR/host DOM, so a keyed
+  stream asset never dedupes against a server/host-rendered element (default
+  `href`/`src` keys round-trip fine). Emit a `data-fig-resource-key` attribute
+  and parse it back, or fall keyed stream assets back to the `href`/`src` key
+  space for DOM reconciliation.
+- The wire `resources` array is decoded as trusted `SerializedAssetResource[]`
+  with no runtime guard; an unknown `kind` yields an `undefined` key. Guard
+  `recordAssetResources`/`insertAssetResources` with `isFigResource` and drop
+  unknown kinds (mirroring the render-side guard).
+- `serializeClientReferenceAssets` ships the live `FigResource` via an unchecked
+  cast, so `blocking`/`key` travel the wire beyond the documented shape. Add an
+  explicit field projection/whitelist and pin the serialized field set with a
+  test.
+- `isCriticalStylesheet` ignores `media`, so a media-mismatched sheet (e.g.
+  `print`) needlessly delays reveal; refine it with `matchMedia` when gating is
+  wired.
 
 ### Phase 5: Bundler Manifest Integration
 

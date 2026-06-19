@@ -6,8 +6,10 @@ import {
   createElement,
   createPortalNode,
   ErrorBoundary,
+  font,
   Fragment,
   lazy,
+  meta,
   preload,
   readContext,
   readPromise,
@@ -26,6 +28,7 @@ import {
   useTransition,
 } from "./index.ts";
 import {
+  figResourceKey,
   isContext,
   isErrorBoundary,
   isPortal,
@@ -178,6 +181,24 @@ describe("@bgub/fig", () => {
 
     expect(Counter.resources).toBeUndefined();
     expect(clientReferenceResources(Counter)).toEqual([]);
+  });
+
+  it("keys a font in the shared preload-font space", () => {
+    // A font is loaded as <link rel="preload" as="font">, so it must key
+    // identically to an equivalent preload across every package.
+    expect(figResourceKey(font("/a.woff2", "font/woff2"))).toBe(
+      "preload:font:/a.woff2",
+    );
+    expect(figResourceKey(preload("/a.woff2", "font"))).toBe(
+      "preload:font:/a.woff2",
+    );
+  });
+
+  it("collapses every title to the singleton key, ignoring an explicit key", () => {
+    expect(figResourceKey(title("A"))).toBe("title");
+    expect(figResourceKey(title("B", "explicit"))).toBe("title");
+    // Other kinds still honor an explicit key.
+    expect(figResourceKey(meta({ name: "robots", key: "r" }))).toBe("meta:r");
   });
 
   it("classifies resource destinations", () => {

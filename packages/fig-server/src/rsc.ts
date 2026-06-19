@@ -123,6 +123,7 @@ export interface RscResponseOptions {
 }
 
 export interface RscResponse {
+  beginRefreshPayload(): void;
   bindRoot(root: RscRootLike): () => void;
   getAssetResources(): readonly FigResource[];
   getRoot(): FigNode;
@@ -281,6 +282,10 @@ export async function fetchRsc(
     throw new Error("RSC response did not include a body.");
   }
 
+  // A refresh reuses this response's chunks Map but its row ids restart at 1 on
+  // the server; namespace them past existing chunks before decoding the stream.
+  if (refreshBoundary !== undefined) response.beginRefreshPayload();
+
   await processRscStream(response, result.body, signal);
   return result;
 }
@@ -344,11 +349,22 @@ class RscResponseImpl implements RscResponse {
   private readonly boundaries = new Map<string, RscModel>();
   private readonly chunks = new Map<number, DecodedChunk>();
   private listeners = new Set<() => void>();
+  private maxRowId = 0;
   private pendingData: FigDataHydrationEntry[] = [];
   private rootData: FigDataStoreHandle | null = null;
+  private rowIdBase = 0;
   private stringBuffer = "";
 
   constructor(private readonly options: RscResponseOptions) {}
+
+  beginRefreshPayload(): void {
+    // Refresh payloads restart their row ids at 1 on the server, but every
+    // payload shares one chunks Map here. Offset an incoming refresh payload's
+    // ids past every id seen so far so its outlined client/lazy/promise rows
+    // cannot collide with — and clobber — still-mounted chunks from the initial
+    // (or an earlier refresh) payload.
+    this.rowIdBase = this.maxRowId;
+  }
 
   getAssetResources(): readonly FigResource[] {
     return [...this.assetResources.values()];
@@ -383,6 +399,8 @@ class RscResponseImpl implements RscResponse {
   }
 
   private processRow(row: RscRow): void {
+    if (this.rowIdBase > 0) shiftRowIds(row, this.rowIdBase);
+
     if (row.tag === "data") {
       this.pendingData.push(...row.value);
       this.hydratePendingData();
@@ -456,6 +474,7 @@ class RscResponseImpl implements RscResponse {
   }
 
   getChunk(id: number): DecodedChunk {
+    if (id > this.maxRowId) this.maxRowId = id;
     return getOrCreateChunk(this.chunks, id);
   }
 
@@ -830,9 +849,15 @@ function emitClientReference(
   const existing = request.clientReferenceRows.get(reference.id);
   if (existing !== undefined) return existing;
 
+  // Resolve assets BEFORE reserving the row id and recording the mapping. A lazy
+  // resource thunk (bundler-manifest resolution) may throw; reserving first would
+  // leave a row id mapped but never emitted, so a later retry returns the cached
+  // id and the client suspends on a chunk that never arrives. Resolving first
+  // lets the throw propagate as an ordinary serialization error with no poisoned
+  // mapping, so the reference can be retried cleanly.
+  const resources = serializeClientReferenceAssets(reference);
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
-  const resources = serializeClientReferenceAssets(reference);
   emitRow(request, {
     id,
     tag: "client",
@@ -986,6 +1011,49 @@ function resolveDecodedRow(
   chunk.status = "fulfilled";
   chunk.value = value;
   chunk.resolve(value);
+}
+
+function shiftRowIds(row: RscRow, offset: number): void {
+  if (row.tag === "client" || row.tag === "error" || row.tag === "model") {
+    // The row's own chunk id. A client row's value.id is a string module id and
+    // must not be shifted.
+    row.id += offset;
+  }
+  if (row.tag === "model" || row.tag === "refresh") {
+    shiftModelIds(row.value, offset);
+  }
+}
+
+function shiftModelIds(model: RscModel, offset: number): void {
+  if (model === null || typeof model !== "object") return;
+
+  if (Array.isArray(model)) {
+    for (const item of model) shiftModelIds(item, offset);
+    return;
+  }
+
+  if ("$fig" in model) {
+    const special = model as RscElementModel | RscSpecialModel;
+    switch (special.$fig) {
+      case "client":
+      case "lazy":
+      case "promise":
+        special.id += offset;
+        return;
+      case "element":
+        shiftModelIds(special.type, offset);
+        shiftModelIds(special.props, offset);
+        return;
+      case "boundary":
+        // boundary.id is a string boundary name, not a numeric chunk id.
+        shiftModelIds(special.child, offset);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const value of Object.values(model)) shiftModelIds(value, offset);
 }
 
 function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
