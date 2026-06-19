@@ -19,7 +19,6 @@ export interface FigDataResource<
   TStoreContext = unknown,
 > {
   readonly $$typeof: symbol;
-  readonly clientOnly: boolean;
   readonly debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   readonly key: (...args: TArgs) => DataResourceKey;
   readonly load?: (
@@ -69,12 +68,9 @@ export interface FigDataStoreHandle {
 }
 
 export interface FigDataStore extends FigDataStoreHandle {
-  commitDataDependencies(
-    owner: object,
-    previousOwner: object | null,
-    keys: readonly string[] | null,
-  ): void;
+  commitDataDependencies(owner: object, previousOwner: object | null): void;
   deleteDataOwner(owner: object): void;
+  resetDataDependencies(owner: object): void;
   dispose(): void;
   inspectDataEntries(): FigDataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];

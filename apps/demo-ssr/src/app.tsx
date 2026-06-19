@@ -7,8 +7,37 @@ import {
   useTransition,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
+import { dataResource, readData } from "@bgub/fig-data";
 
 type Resource<T> = Promise<T> | T;
+
+export interface ServerInfo {
+  region: string;
+  renderedAt: string;
+  runtime: string;
+}
+
+export interface ServerDataContext {
+  info?: ServerInfo;
+}
+
+// Read on the server with request-scoped context, fulfilled into the store, and
+// streamed to the client via getData() -> initialData. The client reads the
+// hydrated value synchronously instead of recomputing it.
+export const serverInfoResource = dataResource<
+  [],
+  ServerInfo,
+  ServerDataContext
+>({
+  name: "ServerInfo",
+  key: () => ["server-info"],
+  load: ({ context }) =>
+    context.info ?? {
+      region: "unknown",
+      renderedAt: new Date().toLocaleTimeString(),
+      runtime: "client fallback (not hydrated)",
+    },
+});
 
 export interface DemoRequest {
   abortDelay: number | null;
@@ -22,6 +51,7 @@ export interface DemoRequest {
 export type ClientData = Pick<DemoRequest, "abortDelay" | "startedAt">;
 
 export const demoDataScriptId = "fig-stream-demo-data";
+export const demoDataResourceScriptId = "fig-stream-demo-data-resources";
 export const demoRootId = "fig-stream-demo-root";
 export const streamBoundaryDigest = "stream-demo-suspense";
 export const streamIdentifierPrefix = "stream-demo";
@@ -65,6 +95,7 @@ export function App({ request }: { request: DemoRequest }) {
             </div>
           </header>
           <section class="grid">
+            <ServerInfoPanel />
             <Suspense
               fallback={
                 <Panel
@@ -145,6 +176,25 @@ export function clientDataFor(request: DemoRequest): ClientData {
     abortDelay: request.abortDelay,
     startedAt: request.startedAt,
   };
+}
+
+function ServerInfoPanel() {
+  const info = readData(serverInfoResource);
+
+  return (
+    <Panel
+      class="data-panel"
+      description={`${info.region} · rendered at ${info.renderedAt}`}
+      tag="hydrated"
+      title="Server data resource"
+      tone="ok"
+    >
+      <p class="muted">
+        Loaded on the server ({info.runtime}) and hydrated by key, so the client
+        reuses this value without a refetch.
+      </p>
+    </Panel>
+  );
 }
 
 function SuspenseContent({ resource }: { resource: Resource<string> }) {

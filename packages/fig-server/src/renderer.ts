@@ -1013,6 +1013,7 @@ function fatalError(request: Request, error: unknown): void {
   if (request.status === "closed") return;
 
   request.status = "closed";
+  request.dataStore.dispose();
   request.fatalError = error;
   request.onShellError?.(error);
   request.recoverHeadReady(error);
@@ -1063,6 +1064,7 @@ function flushCompletedQueues(request: Request): void {
     request.partialBoundaries.length === 0
   ) {
     request.status = "closed";
+    request.dataStore.dispose();
     request.controller.close();
   }
 }

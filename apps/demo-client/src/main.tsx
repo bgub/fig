@@ -20,6 +20,13 @@ import {
   hydrateRoot,
   on,
 } from "@bgub/fig-dom";
+import {
+  dataResource,
+  invalidateData,
+  preloadData,
+  readData,
+  refreshData,
+} from "@bgub/fig-data";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToString } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
@@ -103,6 +110,41 @@ const initialItems: DemoItem[] = [
 const LazyFeatureCard = lazy(() => delayValue(FeatureCard, 650));
 
 const ThemeContext = createContext("light");
+
+interface Profile {
+  handle: string;
+  name: string;
+  loadedAt: string;
+  requests: number;
+}
+
+const profiles: Record<string, { name: string }> = {
+  ada: { name: "Ada Lovelace" },
+  grace: { name: "Grace Hopper" },
+  alan: { name: "Alan Turing" },
+};
+
+let profileLoadCount = 0;
+
+// A client data resource: keyed by handle, deduped across reads, and wired to
+// Suspense. The loader runs once per key and the result is cached until it is
+// invalidated, refreshed, or evicted.
+const profileResource = dataResource<[string], Profile>({
+  name: "Profile",
+  key: (handle) => ["profile", handle],
+  load: async (handle, { signal }) => {
+    profileLoadCount += 1;
+    await delayValue(undefined, 700, signal);
+    return {
+      handle,
+      name: profiles[handle]?.name ?? `Unknown (${handle})`,
+      loadedAt: new Date().toLocaleTimeString(),
+      requests: profileLoadCount,
+    };
+  },
+});
+
+const profileHandles = Object.keys(profiles);
 
 type HydrationWrapper = "section" | "article";
 type ReplaySuspenseMarker = Comment & { __figRetry?: () => void };
@@ -487,6 +529,90 @@ function AsyncPage() {
   );
 }
 
+function DataResourceCard() {
+  const [handle, setHandle] = useState("ada");
+  const [status, setStatus] = useState("Reading the cached profile resource.");
+
+  const nextHandle = (current: string) => {
+    const index = profileHandles.indexOf(current);
+    return profileHandles[(index + 1) % profileHandles.length];
+  };
+
+  return (
+    <section class="card">
+      <div class="card-header">
+        <h3>Data resources</h3>
+        <p class="hint">
+          `readData` suspends on the first read per key, then serves the cached
+          value. Refresh, invalidate, and preload drive the same store.
+        </p>
+      </div>
+      <Row>
+        {profileHandles.map((id) => (
+          <button
+            key={id}
+            type="button"
+            class={id === handle ? "button primary" : "button"}
+            events={[
+              on("click", () => {
+                setHandle(id);
+                setStatus(`Reading "${id}" (cached after first load).`);
+              }),
+            ]}
+          >
+            {profiles[id]?.name ?? id}
+          </button>
+        ))}
+      </Row>
+      <Row>
+        <Command
+          run={() => {
+            void refreshData(profileResource, handle);
+            setStatus(`Refreshing "${handle}" while showing the stale value.`);
+          }}
+        >
+          Refresh
+        </Command>
+        <Command
+          run={() => {
+            invalidateData(profileResource, handle);
+            setStatus(`Invalidated "${handle}"; a reload is scheduled.`);
+          }}
+        >
+          Invalidate
+        </Command>
+        <Command
+          run={() => {
+            const upcoming = nextHandle(handle);
+            preloadData(profileResource, upcoming);
+            setStatus(`Preloaded "${upcoming}" so switching is instant.`);
+          }}
+        >
+          Preload next
+        </Command>
+      </Row>
+      <p class="hint">{status}</p>
+      <Suspense fallback={<p class="hint">Loading profile "{handle}"...</p>}>
+        <ProfileView handle={handle} />
+      </Suspense>
+    </section>
+  );
+}
+
+function ProfileView({ handle }: { handle: string }) {
+  const profile = readData(profileResource, handle);
+
+  return (
+    <div class="hydration-status">
+      <span class="tag">{profile.handle}</span>
+      <span>
+        <strong>{profile.name}</strong> · loaded at {profile.loadedAt} (load #
+        {profile.requests})
+      </span>
+    </div>
+  );
+}
+
 function ResourcesPage() {
   const [theme, setTheme] = useState("light");
   const [message, setMessage] = useState<AsyncMessage>(() =>
@@ -549,6 +675,7 @@ function ResourcesPage() {
           <Suspense fallback={<LazyFeatureFallback />}>
             <LazyFeatureCard />
           </Suspense>
+          <DataResourceCard />
         </div>
       </ThemeContext>
     </PageFrame>
@@ -1556,9 +1683,22 @@ function delayedMessage(message: string): Promise<string> {
   });
 }
 
-function delayValue<T>(value: T, ms: number): Promise<T> {
-  return new Promise((resolve) => {
-    window.setTimeout(() => resolve(value), ms);
+function delayValue<T>(value: T, ms: number, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const timeout = window.setTimeout(() => resolve(value), ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeout);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
   });
 }
 

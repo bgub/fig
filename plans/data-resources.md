@@ -86,7 +86,6 @@ The initial helper set stays small:
 
 ```ts
 dataResource(options);
-dataResource.client(options);
 
 readData(resource, ...args);
 preloadData(resource, ...args);
@@ -129,7 +128,10 @@ Variants communicate runtime constraints:
 
 - `dataResource(...)`: shared definition. The loader must be safe in every
   runtime where it can be read.
-- `dataResource.client(...)`: client-only definition. Server reads throw.
+- `dataResource.client(...)`: deferred. A client-only definition needs real SSR
+  semantics — a server read must degrade its Suspense boundary to client render
+  and stay out of serialization — none of which an unenforced flag provided, so
+  the variant was removed until that behavior is built.
 - `dataResource.server(...)`: deferred until the server-only packaging strategy
   exists (see Packaging And Layering). A runtime throw is enough for
   experimentation but not for a stable server-only guarantee.
@@ -685,8 +687,7 @@ precise.
 
 ### Phase 1: Core Types And Store
 
-- `dataResource` and `dataResource.client` definitions with required,
-  string-headed keys.
+- `dataResource` definitions with required, string-headed keys.
 - Canonical key normalization and dev diagnostics for invalid keys, namespace
   collisions, and key/argument drift fingerprints.
 - The dispatcher/store-bridge layering contract: `readData`/`preloadData` on

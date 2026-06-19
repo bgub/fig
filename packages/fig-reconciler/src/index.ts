@@ -442,7 +442,6 @@ interface Fiber<Container, Instance, TextInstance> {
   childLanes: Lanes;
   effects: Effect[] | null;
   contextDependencies: FigContext<unknown>[] | null;
-  dataDependencies: string[] | null;
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
@@ -712,7 +711,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     return {
       data: root.dataStore,
       render: (children) => updateRoot(root, children),
-      unmount: () => updateRoot(root, null),
+      unmount: () => {
+        updateRoot(root, null);
+        root.dataStore.dispose();
+      },
     };
   }
 
@@ -1451,7 +1453,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
-    node.dataDependencies = [];
+    rootOf(node).dataStore.resetDataDependencies(node);
     node.dataDependenciesDirty = true;
   }
 
@@ -2938,7 +2940,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         rootOf(cursor).dataStore.commitDataDependencies(
           cursor,
           cursor.alternate,
-          cursor.dataDependencies,
         );
         cursor.dataDependenciesDirty = false;
         if (cursor.alternate !== null)
@@ -3399,7 +3400,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
-    next.dataDependencies = current.dataDependencies;
     next.dataDependenciesDirty = false;
     next.suspenseState = current.suspenseState;
     next.errorBoundaryState = current.errorBoundaryState;
@@ -3477,7 +3477,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
-      dataDependencies: null,
       dataDependenciesDirty: false,
       suspenseState: null,
       errorBoundaryState: null,

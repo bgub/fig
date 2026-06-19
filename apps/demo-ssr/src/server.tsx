@@ -7,13 +7,16 @@ import {
 } from "node:http";
 import { meta, resources, title } from "@bgub/fig";
 import { renderToDocumentStream } from "@bgub/fig-server";
+import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import {
   App,
   clientDataFor,
   createServerRequest,
   type DemoRequest,
+  demoDataResourceScriptId,
   demoDataScriptId,
   demoRootId,
+  type ServerInfo,
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
@@ -89,6 +92,11 @@ async function handleRequest(
     abortDelay,
     new Date().toLocaleTimeString(),
   );
+  const serverInfo: ServerInfo = {
+    region: "us-west (origin)",
+    renderedAt: new Date().toLocaleTimeString(),
+    runtime: `Node ${process.version}`,
+  };
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -112,6 +120,7 @@ async function handleRequest(
       </body>
     </html>,
     {
+      dataContext: { info: serverInfo },
       identifierPrefix: streamIdentifierPrefix,
       nonce,
       onError(error, info) {
@@ -144,6 +153,10 @@ async function handleRequest(
     return;
   }
 
+  // The shell read fulfilled the server-info entry, so it is available to
+  // serialize for client hydration alongside the streamed shell.
+  const dataEntries = render.getData();
+
   response.writeHead(200, {
     ...noStore,
     "content-type": render.contentType,
@@ -162,7 +175,7 @@ async function handleRequest(
     await pipeStream(
       render.stream,
       response,
-      bootstrapScripts(demoRequest, nonce),
+      bootstrapScripts(demoRequest, dataEntries, nonce),
     );
   } finally {
     if (abortTimer !== null) clearTimeout(abortTimer);
@@ -184,11 +197,18 @@ function publicUrl(port: number): string {
   return process.env.PORTLESS_URL ?? `http://127.0.0.1:${port}/`;
 }
 
-function bootstrapScripts(request: DemoRequest, nonce: string): string {
+function bootstrapScripts(
+  request: DemoRequest,
+  dataEntries: readonly FigDataHydrationEntry[],
+  nonce: string,
+): string {
   return [
     `<script id="${demoDataScriptId}" type="application/json" nonce="${escapeAttribute(
       nonce,
     )}">${escapeJson(clientDataFor(request))}</script>`,
+    `<script id="${demoDataResourceScriptId}" type="application/json" nonce="${escapeAttribute(
+      nonce,
+    )}">${escapeJson(dataEntries)}</script>`,
     devReloadScript(nonce),
     `<script type="module" async nonce="${escapeAttribute(nonce)}" src="/client.js"></script>`,
   ].join("");

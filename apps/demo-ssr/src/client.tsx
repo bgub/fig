@@ -1,15 +1,18 @@
 import "./dev-env.ts";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
+import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   App,
   type ClientData,
   createClientRequest,
+  demoDataResourceScriptId,
   demoDataScriptId,
   demoRootId,
 } from "./app.tsx";
 
 const data = readClientData();
+const initialData = readInitialData();
 const root = document.getElementById(demoRootId);
 if (root === null) {
   throw new Error("Missing streaming demo root.");
@@ -22,6 +25,7 @@ createRoot(devtoolsContainer, { devtools: false }).render(
 );
 
 hydrateRoot(root, <App request={createClientRequest(data)} />, {
+  initialData,
   onRecoverableError(error) {
     document.body.dataset.recoverableHydrationError =
       error instanceof Error ? error.message : String(error);
@@ -37,6 +41,13 @@ function readClientData(): ClientData {
   }
 
   return JSON.parse(script.textContent ?? "{}") as ClientData;
+}
+
+function readInitialData(): FigDataHydrationEntry[] {
+  const script = document.getElementById(demoDataResourceScriptId);
+  if (script === null) return [];
+
+  return JSON.parse(script.textContent ?? "[]") as FigDataHydrationEntry[];
 }
 
 function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {

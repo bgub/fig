@@ -808,6 +808,7 @@ function flushRows(request: RscRequest): void {
 
   if (request.pendingTasks === 0) {
     request.status = "closed";
+    request.dataStore.dispose();
     request.controller.close();
   }
 }

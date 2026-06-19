@@ -41,6 +41,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../../packages/fig-data
       '@bgub/fig-devtools':
         specifier: workspace:*
         version: link:../../packages/fig-devtools
@@ -94,6 +97,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../../packages/fig-data
       '@bgub/fig-devtools':
         specifier: workspace:*
         version: link:../../packages/fig-devtools

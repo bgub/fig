@@ -43,11 +43,45 @@ describe("@bgub/fig-data", () => {
     });
 
     expect(store.readData(labelResource, ["one"], owner)).toBe("ready");
-    store.commitDataDependencies(owner, null, null);
+    store.commitDataDependencies(owner, null);
     store.deleteDataOwner(owner);
     await delay();
 
     expect(evicted).toEqual(['["label","one"]']);
+  });
+
+  it("drops dependencies from abandoned render attempts on reset", () => {
+    const scheduled: object[] = [];
+    const owner = {};
+    const resource = dataResource({
+      key: (id: string) => ["reset", id],
+      load: (id: string) => id,
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    // First render attempt reads "a", then is abandoned before commit. The
+    // work-in-progress owner is reused, so the next attempt starts with a reset.
+    expect(store.readData(resource, ["a"], owner)).toBe("a");
+    store.resetDataDependencies(owner);
+    expect(store.readData(resource, ["b"], owner)).toBe("b");
+    store.commitDataDependencies(owner, null);
+
+    const byKey = new Map(
+      store.inspectDataEntries().map((entry) => [entry.canonicalKey, entry]),
+    );
+    expect(byKey.get('["reset","a"]')?.subscriberCount).toBe(0);
+    expect(byKey.get('["reset","b"]')?.subscriberCount).toBe(1);
+
+    // The owner no longer reads "a", so invalidating it must not schedule it.
+    store.invalidateData(resource, ["a"]);
+    expect(scheduled).toEqual([]);
+
+    store.invalidateData(resource, ["b"]);
+    expect(scheduled).toEqual([owner]);
   });
 
   it("aborts abandoned preloads after their grace window", async () => {
@@ -191,7 +225,7 @@ describe("@bgub/fig-data", () => {
     });
 
     expect(store.readData(valueResource, ["one"], owner)).toBe("initial");
-    store.commitDataDependencies(owner, null, null);
+    store.commitDataDependencies(owner, null);
 
     const first = store.refreshData(valueResource, ["one"]);
     const second = store.refreshData(valueResource, ["one"]);

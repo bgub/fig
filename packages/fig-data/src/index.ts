@@ -69,10 +69,7 @@ export interface DataStore<
 export type DataStoreEntrySnapshot = FigDataStoreEntrySnapshot;
 
 export interface DataResourceFactory {
-  <TArgs extends unknown[], TValue, TStoreContext>(
-    options: DataResourceOptions<TArgs, TValue, TStoreContext>,
-  ): DataResource<TArgs, TValue, TStoreContext>;
-  client<TArgs extends unknown[], TValue, TStoreContext>(
+  <TArgs extends unknown[], TValue, TStoreContext = unknown>(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext>;
   identity<TArgs extends unknown[], TValue, TStoreContext = unknown>(
@@ -145,32 +142,24 @@ export const dataResource: DataResourceFactory = Object.assign(
   function sharedDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext> {
-    return createDataResource(options, false);
+    return createDataResource(options);
   },
   {
-    client<TArgs extends unknown[], TValue, TStoreContext>(
-      options: DataResourceOptions<TArgs, TValue, TStoreContext>,
-    ): DataResource<TArgs, TValue, TStoreContext> {
-      return createDataResource(options, true);
-    },
     identity<TArgs extends unknown[], TValue, TStoreContext = unknown>(
       options: DataResourceIdentityOptions<TArgs>,
     ): DataResource<TArgs, TValue, TStoreContext> {
-      return createDataResource(options, false);
+      return createDataResource(options);
     },
     server<TArgs extends unknown[], TValue, TStoreContext>(
       identity: DataResource<TArgs, TValue, TStoreContext>,
       options: DataResourceServerOptions<TArgs, TValue, TStoreContext>,
     ): DataResource<TArgs, TValue, TStoreContext> {
-      return createDataResource(
-        {
-          debugArgs: identity.debugArgs,
-          key: identity.key,
-          load: options.load,
-          name: identity.name,
-        },
-        false,
-      );
+      return createDataResource({
+        debugArgs: identity.debugArgs,
+        key: identity.key,
+        load: options.load,
+        name: identity.name,
+      });
     },
   },
 );
@@ -217,11 +206,9 @@ function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
   options:
     | DataResourceIdentityOptions<TArgs>
     | DataResourceOptions<TArgs, TValue, TStoreContext>,
-  clientOnly: boolean,
 ): DataResource<TArgs, TValue, TStoreContext> {
   return {
     $$typeof: DataResourceSymbol,
-    clientOnly,
     debugArgs: options.debugArgs,
     key: options.key,
     load: "load" in options ? options.load : undefined,
@@ -252,15 +239,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
 
-  commitDataDependencies(
-    owner: Owner,
-    previousOwner: object | null,
-    keys: readonly string[] | null,
-  ): void {
-    const pendingKeys = this.pendingOwnerKeys.get(owner);
-    const nextKeys =
-      pendingKeys ??
-      (keys === null || keys.length === 0 ? null : new Set(keys));
+  commitDataDependencies(owner: Owner, previousOwner: object | null): void {
+    const nextKeys = this.pendingOwnerKeys.get(owner) ?? null;
 
     this.pendingOwnerKeys.delete(owner);
     this.deleteDataOwner(owner);
@@ -278,6 +258,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         this.notifyEntryChange(entry);
       }
     }
+  }
+
+  resetDataDependencies(owner: object): void {
+    // Reads accumulate into pendingOwnerKeys as a render runs. A render attempt
+    // can be abandoned before commit (suspense retry, concurrent interruption,
+    // the strict shadow pass), and the work-in-progress fiber object is reused
+    // across attempts, so the keys must be cleared at the start of each render
+    // or stale dependencies from a discarded attempt would be committed.
+    this.pendingOwnerKeys.delete(owner);
   }
 
   deleteDataOwner(owner: object): void {
