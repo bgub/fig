@@ -7,9 +7,12 @@ import {
   type FigNode,
   Fragment,
   lazy,
+  preload,
   readContext,
   readPromise,
+  stylesheet,
   Suspense,
+  title,
 } from "@bgub/fig";
 import { isValidElement } from "@bgub/fig/internal";
 import { describe, expect, it } from "vite-plus/test";
@@ -31,7 +34,11 @@ type TestRscModel =
   | { [key: string]: TestRscModel };
 
 type TestRscRow =
-  | { id: number; tag: "client"; value: { id: string } }
+  | {
+      id: number;
+      tag: "client";
+      value: { id: string; resources?: TestRscModel[] };
+    }
   | { id: number; tag: "error"; value: { message: string } }
   | { id: number; tag: "model"; value: TestRscModel }
   | { boundary: string; tag: "refresh"; value: TestRscModel };
@@ -234,6 +241,94 @@ describe("RSC rendering", () => {
           type: { $fig: "client", id: 1 },
         },
       },
+    ]);
+  });
+
+  it("serializes stream-safe asset resources on rendered client rows", async () => {
+    const Counter = clientReference({
+      id: "app/Counter.client.tsx#Counter",
+      load: () => Promise.resolve({}),
+      resources: [
+        stylesheet("/assets/Counter.css", { precedence: "app" }),
+        preload("/assets/Counter.js", "script"),
+        stylesheet("/assets/Counter.css"), // duplicate key, dropped
+        title("ignored"), // head-only, not stream-safe
+      ],
+    });
+
+    const rows = await renderToRscRows(createElement(Counter, {}));
+    const clientRow = rows.find((row) => row.tag === "client");
+
+    expect(clientRow).toEqual({
+      id: 1,
+      tag: "client",
+      value: {
+        id: "app/Counter.client.tsx#Counter",
+        resources: [
+          {
+            href: "/assets/Counter.css",
+            kind: "stylesheet",
+            precedence: "app",
+          },
+          { as: "script", href: "/assets/Counter.js", kind: "preload" },
+        ],
+      },
+    });
+  });
+
+  it("omits the resources field for client references with no assets", async () => {
+    const Plain = clientReference({
+      id: "app/Plain.client.tsx#Plain",
+      load: () => Promise.resolve({}),
+    });
+
+    const rows = await renderToRscRows(createElement(Plain, {}));
+
+    expect(rows.find((row) => row.tag === "client")).toEqual({
+      id: 1,
+      tag: "client",
+      value: { id: "app/Plain.client.tsx#Plain" },
+    });
+  });
+
+  it("sends and dedupes assets only for client references that render", async () => {
+    const shared = stylesheet("/assets/shared.css");
+    const Header = clientReference({
+      id: "app/Header.client.tsx#Header",
+      load: () => Promise.resolve({}),
+      resources: [shared, stylesheet("/assets/Header.css")],
+    });
+    const Footer = clientReference({
+      id: "app/Footer.client.tsx#Footer",
+      load: () => Promise.resolve({}),
+      resources: [shared, stylesheet("/assets/Footer.css")],
+    });
+    // Defined but never rendered: must contribute nothing.
+    clientReference({
+      id: "app/Unused.client.tsx#Unused",
+      load: () => Promise.resolve({}),
+      resources: [stylesheet("/assets/Unused.css")],
+    });
+
+    const text = await renderToRscText(
+      createElement(
+        Fragment,
+        null,
+        createElement(Header, {}),
+        createElement(Footer, {}),
+      ),
+    );
+
+    expect(text).not.toContain("Unused.css");
+
+    const response = createRscResponse();
+    response.processStringChunk(text);
+
+    // Shared asset deduped across the two references that rendered.
+    expect(response.getAssetResources()).toEqual([
+      { href: "/assets/shared.css", kind: "stylesheet" },
+      { href: "/assets/Header.css", kind: "stylesheet" },
+      { href: "/assets/Footer.css", kind: "stylesheet" },
     ]);
   });
 

@@ -7,13 +7,21 @@ import {
   type FigContext,
   type FigElement,
   type FigNode,
+  type FigResource,
+  type FontResource,
   Fragment,
   type Key,
+  type PreconnectResource,
+  type PreloadResource,
   type Props,
   readPromise,
+  type ScriptResource,
+  type StylesheetResource,
   Suspense,
 } from "@bgub/fig";
 import {
+  clientReferenceResources,
+  figResourceKey,
   isClientReference,
   isContext,
   isActivity,
@@ -21,6 +29,7 @@ import {
   isPortal,
   isSuspense,
   isValidElement,
+  resourceDestination,
   setCurrentDispatcher,
   setCurrentDataStore,
   type FigDataHydrationEntry,
@@ -61,8 +70,22 @@ export interface RscRootLike {
   render(node: FigNode): void;
 }
 
+// Stream-safe asset resources only (no head-only title/meta). These are the
+// FigResource subtypes whose fields are already JSON scalars, so they travel as
+// plain data with no implementation detail exposed.
+type SerializedAssetResource =
+  | StylesheetResource
+  | PreloadResource
+  | ScriptResource
+  | FontResource
+  | PreconnectResource;
+
 type RscRow =
-  | { id: number; tag: "client"; value: { id: string } }
+  | {
+      id: number;
+      tag: "client";
+      value: { id: string; resources?: SerializedAssetResource[] };
+    }
   | { tag: "data"; value: FigDataHydrationEntry[] }
   | { id: number; tag: "error"; value: { message: string } }
   | { id: number; tag: "model"; value: RscModel }
@@ -101,6 +124,7 @@ export interface RscResponseOptions {
 
 export interface RscResponse {
   bindRoot(root: RscRootLike): () => void;
+  getAssetResources(): readonly FigResource[];
   getRoot(): FigNode;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
   processStringChunk(chunk: string): void;
@@ -316,6 +340,7 @@ function createRscRequest(
 }
 
 class RscResponseImpl implements RscResponse {
+  private readonly assetResources = new Map<string, FigResource>();
   private readonly boundaries = new Map<string, RscModel>();
   private readonly chunks = new Map<number, DecodedChunk>();
   private listeners = new Set<() => void>();
@@ -324,6 +349,23 @@ class RscResponseImpl implements RscResponse {
   private stringBuffer = "";
 
   constructor(private readonly options: RscResponseOptions) {}
+
+  getAssetResources(): readonly FigResource[] {
+    return [...this.assetResources.values()];
+  }
+
+  recordAssetResources(
+    resources: readonly SerializedAssetResource[] | undefined,
+  ): void {
+    if (resources === undefined) return;
+
+    // Dedupe per payload by resource key: a shared asset referenced by several
+    // client references is recorded once.
+    for (const resource of resources) {
+      const key = figResourceKey(resource);
+      if (!this.assetResources.has(key)) this.assetResources.set(key, resource);
+    }
+  }
 
   bindRoot(root: RscRootLike): () => void {
     this.rootData = root.data ?? null;
@@ -790,8 +832,36 @@ function emitClientReference(
 
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
-  emitRow(request, { id, tag: "client", value: { id: reference.id } });
+  const resources = serializeClientReferenceAssets(reference);
+  emitRow(request, {
+    id,
+    tag: "client",
+    value:
+      resources.length > 0
+        ? { id: reference.id, resources }
+        : { id: reference.id },
+  });
   return id;
+}
+
+function serializeClientReferenceAssets(
+  reference: FigClientReference,
+): SerializedAssetResource[] {
+  const resources: SerializedAssetResource[] = [];
+  const seen = new Set<string>();
+
+  for (const resource of clientReferenceResources(reference)) {
+    // Only stream-safe assets travel on the wire; head-only title/meta are
+    // document state, not client-component assets (see the asset-resources plan).
+    if (resourceDestination(resource) !== "stream") continue;
+
+    const key = figResourceKey(resource);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resources.push(resource as SerializedAssetResource);
+  }
+
+  return resources;
 }
 
 function emitRow(request: RscRequest, row: RscRow): void {
@@ -902,10 +972,13 @@ function resolveDecodedRow(
     return;
   }
 
-  const value =
-    row.tag === "client"
-      ? response.decodeClientReference(row.value)
-      : decodeModel(response, row.value);
+  let value: unknown;
+  if (row.tag === "client") {
+    response.recordAssetResources(row.value.resources);
+    value = response.decodeClientReference(row.value);
+  } else {
+    value = decodeModel(response, row.value);
+  }
 
   chunk.model = row.tag === "model" ? row.value : null;
   chunk.status = "fulfilled";

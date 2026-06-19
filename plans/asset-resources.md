@@ -380,12 +380,27 @@ with data cache behavior.
 - Tests cover eager list, single-resource normalization, lazy resolution
   (deferred + re-resolved per call), and the empty default.
 
-### Phase 2: RSC Serialization
+### Phase 2: RSC Serialization — implemented
 
-- Serialize client-reference asset resources in RSC client rows.
-- Decode asset resources in `createRscResponse`.
-- Dedupe asset resources within one payload.
-- Add RSC tests proving unrendered client references do not emit resources.
+- Client rows carry asset resources: the `client` row value is
+  `{ id: string; resources?: SerializedAssetResource[] }`, where
+  `SerializedAssetResource` is the stream-safe `FigResource` subset
+  (stylesheet, preload, script, font, preconnect). Head-only `title`/`meta`
+  are dropped via `resourceDestination`, and resources are deduped by
+  `figResourceKey` within a reference before emitting. The field is omitted
+  when empty.
+- Because `emitClientReference` already emits each reference once (keyed by
+  id), unrendered client references contribute no row and no resources.
+- `createRscResponse` decodes them: a client row records its resources into
+  the response, deduped per payload by key, exposed via
+  `RscResponse.getAssetResources(): readonly FigResource[]` for Phase 3 to
+  insert/gate.
+- Tests cover serialization on rendered rows, the omitted-when-empty field,
+  per-reference and per-payload dedupe (including a shared asset), head-only
+  exclusion, and that unrendered references emit nothing.
+
+  Embedding on client rows (vs. separate asset rows) is the chosen first
+  version, as recommended above.
 
 ### Phase 3: Client Insertion And Gating
 
