@@ -462,7 +462,13 @@ export function insertAssetResources(
   for (const resource of resources) {
     if (resource.kind === "title" || resource.kind === "meta") continue;
 
-    const key = figResourceKey(resource);
+    // A font is delivered as <link rel="preload" as="font">, which parses back
+    // to a preload resource. Normalize it to that shape so its key and DOM
+    // round-trip match and it dedupes against SSR/host-rendered font preloads
+    // (otherwise the font:<href> lookup key never matches the preload:font:<href>
+    // a head <link> parses to, and a duplicate is appended).
+    const asset = asInsertableResource(resource);
+    const key = figResourceKey(asset);
     const existing =
       registry.get(key)?.element ?? findDocumentResource(head, key);
 
@@ -471,23 +477,36 @@ export function insertAssetResources(
       // it into the registry for O(1) future lookups, but do not re-gate.
       if (!registry.has(key)) {
         registry.set(key, { count: 1, element: existing });
-        documentResourceMeta.set(existing, { key, kind: resource.kind });
+        documentResourceMeta.set(existing, { key, kind: asset.kind });
       }
       continue;
     }
 
-    const element = createAssetResourceElement(resource);
+    const element = createAssetResourceElement(asset);
     registry.set(key, { count: 1, element });
-    documentResourceMeta.set(element, { key, kind: resource.kind });
+    documentResourceMeta.set(element, { key, kind: asset.kind });
     head.appendChild(element);
 
-    if (isCriticalStylesheet(resource))
-      gates.push(whenResourceSettled(element));
+    if (isCriticalStylesheet(asset)) gates.push(whenResourceSettled(element));
   }
 
   return gates.length === 0
     ? Promise.resolve()
     : Promise.all(gates).then(() => undefined);
+}
+
+function asInsertableResource(resource: FigResource): FigResource {
+  // Fonts share the DOM representation (and therefore the key space) of a
+  // font-targeted preload; everything else is already in its own key space.
+  if (resource.kind !== "font") return resource;
+
+  return {
+    as: "font",
+    crossOrigin: resource.crossOrigin ?? "anonymous",
+    href: resource.href,
+    kind: "preload",
+    type: resource.type,
+  };
 }
 
 function isCriticalStylesheet(resource: FigResource): boolean {

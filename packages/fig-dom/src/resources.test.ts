@@ -59,6 +59,21 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(links()).toHaveLength(1);
   });
 
+  it("dedupes a font against a server-rendered font preload", () => {
+    const ssr = new FakeElement("link");
+    ssr.setAttribute("rel", "preload");
+    ssr.setAttribute("as", "font");
+    ssr.setAttribute("href", "/a.woff2");
+    head.appendChild(ssr);
+
+    // A font is inserted as <link rel="preload" as="font">, so it must dedupe
+    // against an existing font preload under one key space.
+    void insertAssetResources([font("/a.woff2", "font/woff2")]);
+    void insertAssetResources([preload("/a.woff2", "font")]);
+
+    expect(links()).toHaveLength(1);
+  });
+
   it("gates reveal on a critical stylesheet load", async () => {
     let settled = false;
     const ready = insertAssetResources([stylesheet("/a.css")]);

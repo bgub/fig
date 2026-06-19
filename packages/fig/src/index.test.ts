@@ -158,6 +158,18 @@ describe("@bgub/fig", () => {
     expect(calls).toBe(2);
   });
 
+  it("normalizes a lazy resource thunk that yields nothing to an empty list", () => {
+    const Counter = clientReference({
+      id: "./Counter.tsx",
+      load: () => Promise.resolve({}),
+      // A missing manifest entry can make a typed thunk return undefined at
+      // runtime; the resolver must not leak a non-array.
+      resources: () => undefined as never,
+    });
+
+    expect(clientReferenceResources(Counter)).toEqual([]);
+  });
+
   it("defaults client-reference resources to an empty list", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",

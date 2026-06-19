@@ -175,7 +175,10 @@ export function clientReferenceResources(
   // manifest that is not loaded until serialization, and a consumer that wants
   // to cache can do so against the stable reference identity.
   const list = typeof value === "function" ? value() : value;
-  return isFigResource(list) ? [list] : list;
+  if (isFigResource(list)) return [list];
+  // A thunk that yields nothing (e.g. a missing manifest entry) normalizes to an
+  // empty list rather than leaking a non-array through the readonly contract.
+  return Array.isArray(list) ? list : [];
 }
 
 export function figResourceKey(resource: FigResource): string {

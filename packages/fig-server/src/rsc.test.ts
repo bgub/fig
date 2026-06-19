@@ -291,6 +291,28 @@ describe("RSC rendering", () => {
     });
   });
 
+  it("passes only the id to client reference resolvers", async () => {
+    const Counter = clientReference({
+      id: "app/Counter.client.tsx#Counter",
+      load: () => Promise.resolve({}),
+      resources: [stylesheet("/assets/Counter.css")],
+    });
+
+    const rows = await renderToRscRows(createElement(Counter, {}));
+    const seen: Array<Record<string, unknown>> = [];
+    const response = createRscResponse({
+      resolveClientReference(metadata) {
+        seen.push(metadata);
+        return () => null;
+      },
+    });
+    processTestRscRows(response, rows);
+
+    // The wire row carries resources, but resolver hooks see the documented
+    // { id } shape only.
+    expect(seen).toEqual([{ id: "app/Counter.client.tsx#Counter" }]);
+  });
+
   it("sends and dedupes assets only for client references that render", async () => {
     const shared = stylesheet("/assets/shared.css");
     const Header = clientReference({

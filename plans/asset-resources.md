@@ -420,8 +420,16 @@ with data cache behavior.
   stylesheet load gating, error-resolves-the-gate, and non-critical
   non-gating.
 
-  Precedence-based ordering and client-document-lifetime ownership tracking
-  remain future refinements (see Visibility And Retention).
+  Fonts are inserted (and deduped) as their `<link rel="preload" as="font">`
+  form so they share one key space with font preloads from SSR/host renders.
+
+  Known limitation: a critical stylesheet found already present (e.g. streamed
+  by SSR) is deduped but not re-gated, so the promise can resolve before an
+  in-flight copy finishes loading. Re-gating it naively would hang on an
+  already-loaded sheet (its `load` event has already fired), so robust gating
+  needs load-state detection; deferred until a caller actually wires reveal to
+  this promise. Precedence-based ordering and client-document-lifetime
+  ownership tracking remain future refinements (see Visibility And Retention).
 
 ### Phase 4: Refresh Integration
 

@@ -975,7 +975,9 @@ function resolveDecodedRow(
   let value: unknown;
   if (row.tag === "client") {
     response.recordAssetResources(row.value.resources);
-    value = response.decodeClientReference(row.value);
+    // Hand resolver hooks only the documented { id } shape; resources are an
+    // internal decode concern, not resolver input.
+    value = response.decodeClientReference({ id: row.value.id });
   } else {
     value = decodeModel(response, row.value);
   }
