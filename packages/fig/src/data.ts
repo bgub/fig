@@ -32,7 +32,7 @@ export type DataRefreshResult<T> =
   | { status: "rejected"; error: unknown; staleValue?: T }
   | {
       status: "aborted";
-      reason: "superseded" | "store-disposed";
+      reason: "superseded" | "store-disposed" | "evicted";
       staleValue?: T;
     }
   | { status: "unsupported"; reason: "no-client-loader"; staleValue?: T };
@@ -70,6 +70,7 @@ export interface FigDataStoreHandle {
 export interface FigDataStore extends FigDataStoreHandle {
   commitDataDependencies(owner: object, previousOwner: object | null): void;
   deleteDataOwner(owner: object): void;
+  releaseDataOwner(owner: object): void;
   resetDataDependencies(owner: object): void;
   dispose(): void;
   inspectDataEntries(): FigDataStoreEntrySnapshot[];
@@ -93,13 +94,7 @@ export interface FigDataStore extends FigDataStoreHandle {
   ): Promise<DataRefreshResult<TValue>>;
 }
 
-interface DataErrorRegistry<TKey> {
-  get(key: TKey): DataResourceKey[] | undefined;
-  set(key: TKey, value: DataResourceKey[]): unknown;
-}
-
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
-const primitiveDataErrors = new Map<unknown, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;
 
@@ -122,7 +117,18 @@ export function markDataResourceError(
   error: unknown,
   key: DataResourceKey,
 ): void {
-  const keys = dataErrorKeys(error);
+  // Only object errors are attributed: the WeakMap keys them by identity, so the
+  // registry is GC-safe and cannot cross-attribute. Primitive rejection values
+  // would collide by value and accumulate forever in a plain Map, so a thrown
+  // primitive simply carries no resource-key metadata.
+  if (!isObjectKey(error)) return;
+
+  let keys = objectDataErrors.get(error);
+  if (keys === undefined) {
+    keys = [];
+    objectDataErrors.set(error, keys);
+  }
+
   if (keys.some((existing) => sameDataResourceKey(existing, key))) return;
 
   keys.push(key);
@@ -131,31 +137,10 @@ export function markDataResourceError(
 export function dataResourceKeysForError(
   error: unknown,
 ): DataResourceKey[] | undefined {
-  const keys = isObjectKey(error)
-    ? objectDataErrors.get(error)
-    : primitiveDataErrors.get(error);
+  if (!isObjectKey(error)) return undefined;
 
+  const keys = objectDataErrors.get(error);
   return keys === undefined || keys.length === 0 ? undefined : [...keys];
-}
-
-function dataErrorKeys(error: unknown): DataResourceKey[] {
-  if (isObjectKey(error)) {
-    return getOrCreateDataErrorKeys(objectDataErrors, error);
-  }
-
-  return getOrCreateDataErrorKeys(primitiveDataErrors, error);
-}
-
-function getOrCreateDataErrorKeys<TKey>(
-  registry: DataErrorRegistry<TKey>,
-  key: TKey,
-): DataResourceKey[] {
-  let keys = registry.get(key);
-  if (keys === undefined) {
-    keys = [];
-    registry.set(key, keys);
-  }
-  return keys;
 }
 
 function sameDataResourceKey(a: DataResourceKey, b: DataResourceKey): boolean {

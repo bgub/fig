@@ -132,6 +132,11 @@ interface LoadOptions<Lane> {
   refresh: boolean;
 }
 
+// Why an in-flight load was aborted: "superseded" by a newer load, the store was
+// "store-disposed", or the entry was "evicted" from a live store because nothing
+// retained it (retention window elapsed, or last subscriber released).
+type AbortReason = "superseded" | "store-disposed" | "evicted";
+
 const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
@@ -242,22 +247,44 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   commitDataDependencies(owner: Owner, previousOwner: object | null): void {
     const nextKeys = this.pendingOwnerKeys.get(owner) ?? null;
 
+    // Capture the entries this fiber's generations subscribed to before the
+    // delete, then abort any that end up with no retainer once the new owner has
+    // re-subscribed. Keys the owner still reads keep at least one subscriber, so
+    // only genuinely dropped keys are orphaned.
+    const orphanCandidates = new Set<Entry<Owner, Lane>>();
+    this.collectSubscribedEntries(owner, orphanCandidates);
+    if (previousOwner !== null) {
+      this.collectSubscribedEntries(previousOwner, orphanCandidates);
+    }
+
     this.pendingOwnerKeys.delete(owner);
     this.deleteDataOwner(owner);
     if (previousOwner !== null) this.deleteDataOwner(previousOwner);
 
-    if (nextKeys === null || nextKeys.size === 0) return;
+    if (nextKeys !== null && nextKeys.size > 0) {
+      this.ownerKeys.set(owner, nextKeys);
 
-    this.ownerKeys.set(owner, nextKeys);
-
-    for (const key of nextKeys) {
-      const entry = this.entries.get(key);
-      if (entry !== undefined) {
-        this.clearInactiveTimer(entry);
-        entry.subscribers.add(owner);
-        this.notifyEntryChange(entry);
+      for (const key of nextKeys) {
+        const entry = this.entries.get(key);
+        if (entry !== undefined) {
+          this.clearInactiveTimer(entry);
+          entry.subscribers.add(owner);
+          this.notifyEntryChange(entry);
+        }
       }
     }
+
+    for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+  }
+
+  releaseDataOwner(owner: object): void {
+    // The genuine-deletion path (fiber unmount). Unlike deleteDataOwner, which
+    // is also used for transient commit churn, this aborts in-flight loads left
+    // with no retainer so an unmounted subtree does not keep fetching.
+    const orphanCandidates = new Set<Entry<Owner, Lane>>();
+    this.collectSubscribedEntries(owner, orphanCandidates);
+    this.deleteDataOwner(owner);
+    for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
   }
 
   resetDataDependencies(owner: object): void {
@@ -283,6 +310,41 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       this.notifyEntryChange(entry);
       this.scheduleInactiveCleanup(entry);
     }
+  }
+
+  private collectSubscribedEntries(
+    owner: object,
+    into: Set<Entry<Owner, Lane>>,
+  ): void {
+    const keys = this.ownerKeys.get(owner);
+    if (keys === undefined) return;
+
+    for (const key of keys) {
+      const entry = this.entries.get(key);
+      if (entry !== undefined) into.add(entry);
+    }
+  }
+
+  private abortOrphanedLoad(entry: Entry<Owner, Lane>): void {
+    // Only a value-less in-flight load (a cache-miss "pending" entry) with no
+    // committed subscriber and no preload retainer is safe to drop: it has no
+    // value to lose, and any reader of such a key suspends rather than commits,
+    // so it cannot be handed off to a sibling mid-commit. Value-bearing entries
+    // are left alone — a "refreshing" entry still serves a usable value, and its
+    // refresh settles into the normal inactive-retention path. Evicting those
+    // would discard a live value or strand a sibling that read it without
+    // suspending.
+    if (this.entries.get(entry.storeKey) !== entry) return;
+    if (
+      entry.subscribers.size > 0 ||
+      entry.preloadTimer !== null ||
+      entry.pending === null ||
+      entryHasValue(entry)
+    ) {
+      return;
+    }
+
+    this.evictEntry(entry, "evicted");
   }
 
   dispose(): void {
@@ -342,10 +404,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
   ): void {
+    if (this.disposed) return;
+
     const { entry } = this.entryFor(resource, args, false);
     if (entry === null) return;
 
     entry.stale = true;
+    // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
+    // explicit invalidation is a fresh "this is stale, fetch again" intent.
+    entry.refreshError = undefined;
     this.notifyEntryChange(entry);
     if (entry.subscribers.size === 0) return;
 
@@ -356,7 +423,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
   ): void {
-    if (resource.load === undefined) return;
+    if (this.disposed || resource.load === undefined) return;
 
     const { entry } = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
@@ -384,8 +451,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.status === "fulfilled" &&
       entry.stale &&
       entry.pending === null &&
+      entry.refreshError === undefined &&
       resource.load !== undefined
     ) {
+      // A failed background refresh keeps the stale value and records
+      // refreshError; do not auto-retry on every subsequent read or a
+      // persistently-failing loader becomes a render/fetch storm. An explicit
+      // invalidateData/refreshData clears refreshError to retry.
       void this.startLoad(entry, resource, args, {
         lane: this.host.getLane(),
         refresh: true,
@@ -406,6 +478,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
   ): Promise<DataRefreshResult<TValue>> {
+    if (this.disposed) {
+      return Promise.resolve({
+        reason: "store-disposed",
+        staleValue: undefined,
+        status: "aborted",
+      });
+    }
+
     if (resource.load === undefined) {
       const { entry } = this.entryFor(resource, args, false);
       if (entry === null) {
@@ -483,6 +563,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       "pending",
       undefined,
     );
+    // A disposed store is terminal: hand back a transient entry but never
+    // register it, so post-dispose reads cannot resurrect the cache.
+    if (this.disposed) return { entry, key };
+
     this.entries.set(key, entry);
     this.notifyEntryChange(entry);
     return { entry, key };
@@ -665,7 +749,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private abortActiveLoad(
     entry: Entry<Owner, Lane>,
-    reason: "superseded" | "store-disposed",
+    reason: AbortReason,
   ): void {
     const pending = entry.pending;
     if (pending === null) return;
@@ -678,13 +762,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private retainPreload(entry: Entry<Owner, Lane>): void {
     this.clearPreloadTimer(entry);
-    if (!Number.isFinite(this.preloadRetentionMs)) return;
+    if (this.disposed || !Number.isFinite(this.preloadRetentionMs)) return;
 
     entry.preloadTimer = scheduleStoreTimer(
       () => {
         entry.preloadTimer = null;
         if (entry.subscribers.size === 0 && entry.pending !== null) {
-          this.evictEntry(entry, "store-disposed");
+          this.evictEntry(entry, "evicted");
           return;
         }
         this.scheduleInactiveCleanup(entry);
@@ -715,16 +799,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         ) {
           return;
         }
-        this.evictEntry(entry, "store-disposed");
+        this.evictEntry(entry, "evicted");
       },
       Math.max(0, this.inactiveRetentionMs),
     );
   }
 
-  private evictEntry(
-    entry: Entry<Owner, Lane>,
-    reason: "superseded" | "store-disposed",
-  ): void {
+  private evictEntry(entry: Entry<Owner, Lane>, reason: AbortReason): void {
     if (this.entries.get(entry.storeKey) !== entry) return;
 
     this.clearInactiveTimer(entry);
@@ -817,7 +898,7 @@ function throwDataResourceError<Owner extends object, Lane>(
 
 function abortedRefreshResult<T, Owner extends object, Lane>(
   entry: Entry<Owner, Lane>,
-  reason: "superseded" | "store-disposed",
+  reason: AbortReason,
 ): DataRefreshResult<T> {
   return {
     reason,

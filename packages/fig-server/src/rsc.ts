@@ -503,13 +503,21 @@ function finishTask(request: RscRequest): void {
 }
 
 function emitDataRows(request: RscRequest): void {
-  const entries = request.dataStore.snapshot().filter((entry) => {
-    const key = normalizeDataResourceKey(entry.key);
-    if (request.emittedDataKeys.has(key)) return false;
+  const entries: FigDataHydrationEntry[] = [];
+
+  for (const snapshot of request.dataStore.inspectDataEntries()) {
+    // Stream only settled values. A "refreshing" entry exposes a transient stale
+    // value while its background refresh is in flight; emitting it would mark the
+    // key emitted forever and permanently suppress the fresh value. Skipping it
+    // lets the entry stream once its refresh settles.
+    if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
+
+    const key = normalizeDataResourceKey(snapshot.key);
+    if (request.emittedDataKeys.has(key)) continue;
 
     request.emittedDataKeys.add(key);
-    return true;
-  });
+    entries.push({ key: snapshot.key, value: snapshot.value });
+  }
 
   if (entries.length > 0) emitRow(request, { tag: "data", value: entries });
 }

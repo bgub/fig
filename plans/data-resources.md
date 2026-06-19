@@ -344,7 +344,11 @@ is just the key, not the in-memory server object identity.
 4. Returns the fulfilled value if available, including stale or refreshing
    values.
 5. If fulfilled but stale (and loader-backed), starts a background refresh if
-   none is pending.
+   none is pending and the previous background refresh did not fail. A failed
+   background refresh records `refreshError` and suppresses auto-refresh on
+   subsequent reads so a persistently-failing loader cannot become a render/fetch
+   storm; an explicit `invalidateData`/`refreshData` clears `refreshError` and
+   re-enables it.
 6. Throws the stored error if the entry is rejected with no usable fulfilled
    value.
 7. On a cache miss, starts the loader, stores the pending entry, and suspends by
@@ -392,6 +396,23 @@ increments the generation and supersedes older loads independent of retainer
 accounting. The strict shadow pass adds no committed-subscriber but participates
 as a render-attempt retainer of the shared generation, which is why it dedupes
 rather than orphaning a second load.
+
+**Current implementation.** The store tracks committed-subscriber and preloader
+retainers explicitly; render-attempt and framework retainers are not yet
+counted. When a fiber's last committed subscription to a key is released — on
+unmount (`releaseDataOwner`) or when a re-render stops reading the key
+(`commitDataDependencies`, evaluated after the new subscriptions are added so
+keys the fiber still reads keep a retainer) — the orphan check aborts and evicts
+only a **value-less** in-flight load: a cache-miss `pending` entry with no value
+to lose. Value-bearing entries (`fulfilled`, or `refreshing` with an in-flight
+background refresh) are left alone — their refresh settles into the normal
+inactive-retention window, and a sibling that read the value without suspending
+keeps the entry it depends on. Restricting eviction to value-less loads is safe
+because any reader of a value-less key suspends rather than commits, so such a
+load cannot be handed off to a sibling mid-commit; the suspended reader
+self-heals if its load is evicted (the settled thenable pings it and the retry
+recreates the entry). This is a deliberate approximation of the full retainer
+model, not the final form.
 
 ### Store Resolution
 
@@ -484,10 +505,12 @@ happen to align, so each has a coherent role rather than overlapping:
 | `invalidateData(resource, ...args)` | only if the key is currently observed | `void`                       | declarative "this is stale, update what's on screen" |
 | `refreshData(resource, ...args)`    | always, now                           | `Promise<DataRefreshResult>` | imperative "reload and let me await it"              |
 
-`invalidateData(...)` marks the key stale and schedules subscribed fibers on the
-normal update lane, routed through the hidden-Activity lane downgrade so
-hidden-only keys schedule offscreen. On re-render, `readData(...)` returns the
-last fulfilled value and starts a background refresh if none is pending. With no
+`invalidateData(...)` marks the key stale, clears any recorded `refreshError`
+(re-arming auto-refresh after an earlier background-refresh failure), and
+schedules subscribed fibers on the normal update lane, routed through the
+hidden-Activity lane downgrade so hidden-only keys schedule offscreen. On
+re-render, `readData(...)` returns the last fulfilled value and starts a
+background refresh if none is pending. With no
 current subscribers it is a no-op beyond marking stale, so unobserved data is not
 fetched until something reads it again. This matches the common expectation that
 invalidating visible data updates the screen, without replacing visible content
@@ -509,7 +532,7 @@ type DataRefreshResult<T> =
   | { status: "rejected"; error: unknown; staleValue?: T }
   | {
       status: "aborted";
-      reason: "superseded" | "store-disposed";
+      reason: "superseded" | "store-disposed" | "evicted";
       staleValue?: T;
     }
   | { status: "unsupported"; reason: "no-client-loader"; staleValue?: T };
@@ -522,12 +545,15 @@ function refreshData<TArgs extends unknown[], TValue>(
 
 The promise resolves after the attempt this call joined or started and never
 rejects, so handlers and actions avoid unhandled rejections. Loader errors
-resolve to `rejected`. A newer explicit refresh resolving the joined callers
-gives `aborted` with `"superseded"`; store disposal gives `aborted` with
-`"store-disposed"`. A hydrate-only entry has no client loader, so the call
-resolves to `unsupported` rather than a silent no-op — revalidating that key
-requires an RSC dependency refresh. A framework adapter may expose a stricter
-variant that throws.
+resolve to `rejected`. The three `aborted` reasons are distinct: a newer explicit
+refresh resolving the joined callers gives `"superseded"`; disposing the store
+(for example on root unmount) gives `"store-disposed"`; and an entry dropped from
+a still-live store because nothing retained it — its retention window elapsed, or
+its last committed subscriber was released — gives `"evicted"`. A caller
+branching on `"store-disposed"` therefore never misfires on a live store. A
+hydrate-only entry has no client loader, so the call resolves to `unsupported`
+rather than a silent no-op — revalidating that key requires an RSC dependency
+refresh. A framework adapter may expose a stricter variant that throws.
 
 ### Suspense, Transitions, And Activity
 
@@ -568,7 +594,10 @@ rejected -> pending
 If a refresh from a fulfilled value rejects, the default preserves the last
 fulfilled value and stores the refresh error separately; reads expose the stale
 value while DevTools, a store listener, or the refresh result surface the
-failure. If the entry never fulfilled, rejection is the entry value and reads
+failure. `refreshError` is a non-fatal sideband, not a re-fetch trigger: while it
+is set, auto-refresh-on-read stays suppressed (the entry keeps serving its stale
+value) until an explicit `invalidateData`/`refreshData` clears it or a refresh
+succeeds. If the entry never fulfilled, rejection is the entry value and reads
 throw. Concurrent refreshes coalesce per key when they target the same
 generation; a newer explicit refresh supersedes older loads by incrementing the
 generation, and older fulfill/reject callbacks must check the generation before
@@ -645,17 +674,35 @@ refresh, `readPromise(...)` is simpler.
 
 Loaders receive an `AbortSignal`. Server signals abort when the render request is
 abandoned, a Suspense attempt is superseded such that the entry is unneeded, or
-the request store lifetime ends. Client signals abort when a refresh is
-superseded by a newer one for the same key, the root unmounts, or policy cancels
-an unobserved pending entry. Aborted loads must not overwrite newer entries:
-every load captures the entry generation at start and verifies it before
-publishing.
+the request store lifetime ends — completion is gated on outstanding render tasks
+(suspended reads), so the request always terminates. A consequence and known
+limitation: a load with no in-render reader (an async preload warmed but never
+read during the render) is aborted at completion rather than streamed; safely
+holding the request open for such loads needs a bounded deadline the RSC path
+does not yet have. Client signals abort when a refresh is
+superseded by a newer one for the same key, the root unmounts, or a value-less
+in-flight load loses its last retainer (its committed subscriber is released with
+no preload retainer holding it). Unmount tears the tree down synchronously and then disposes
+the store, so per-fiber subscription cleanup runs while the store is still live
+and disposal is the final step. Disposal is terminal: a disposed store aborts
+in-flight loads, clears timers, and treats every later mutator as a no-op so it
+cannot resurrect entries or re-arm timers. Aborted loads must not
+overwrite newer entries: every load captures the entry generation at start and
+verifies it before publishing.
 
 ## Error Handling
 
 Initial read errors behave like promise read errors: pending entries suspend,
 rejected entries throw to the nearest ErrorBoundary, and errors are keyed so
 repeated reads see the same error until invalidated or refreshed.
+
+The error-to-keys attribution that carries this metadata to ErrorBoundary is
+registered only for object errors, keyed by identity in a `WeakMap` so it stays
+garbage-collected and never cross-attributes. A thrown primitive (string,
+number, etc.) carries no resource-key metadata: keying a registry by the
+primitive value would both leak (a plain `Map` never collected) and conflate
+unrelated failures that happen to throw the same value. Loaders that want
+boundary key attribution should reject with an `Error` (or any object).
 
 Refresh errors differ because replacing visible UI with an error is jarring: if
 the entry has a fulfilled value, Fig preserves it, stores the refresh error

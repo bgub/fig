@@ -56,6 +56,32 @@ describe("@bgub/fig-dom data resources", () => {
     expect(loads).toBe(1);
   });
 
+  it("frees the container for a new root after unmount", () => {
+    const container = new FakeElement("root");
+    const first = createRoot(container as unknown as Element);
+    flushSync(() => first.render(createElement("span", null, "hi")));
+    expect(container.textContent).toBe("hi");
+
+    first.unmount();
+
+    // Previously the container kept its (now disposed) root forever, so this
+    // threw a duplicate-root error and any reuse hit a disposed data store.
+    expect(() => createRoot(container as unknown as Element)).not.toThrow();
+  });
+
+  it("tears down synchronously on unmount", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement("span", null, "hi")));
+    expect(container.textContent).toBe("hi");
+
+    root.unmount();
+
+    // The teardown render is flushed synchronously, so the tree is gone
+    // immediately rather than on a later tick.
+    expect(container.textContent).toBe("");
+  });
+
   it("refreshes from delegated event handlers using the root data store", async () => {
     const values = ["Ada", "Grace"];
     const userResource = dataResource({

@@ -243,6 +243,163 @@ describe("@bgub/fig-data", () => {
       value: "updated",
     });
   });
+
+  it("does not auto-retry a stale entry after a failed background refresh", async () => {
+    let loads = 0;
+    let failNext = false;
+    const owner = {};
+    const valueResource = dataResource({
+      key: (id: string) => ["refresh-fail", id],
+      load: () => {
+        loads += 1;
+        if (failNext) return Promise.reject(new Error("boom"));
+        return "value";
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    store.commitDataDependencies(owner, null);
+    expect(loads).toBe(1);
+
+    // A failing background refresh keeps the stale value but must not retry on
+    // every subsequent read.
+    failNext = true;
+    store.invalidateData(valueResource, ["one"]);
+    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    await delay();
+    expect(loads).toBe(2);
+
+    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    expect(loads).toBe(2);
+
+    // An explicit invalidation is a fresh intent and re-enables auto-refresh.
+    failNext = false;
+    store.invalidateData(valueResource, ["one"]);
+    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    await delay();
+    expect(loads).toBe(3);
+  });
+
+  it("aborts an in-flight load when its last subscriber is released", () => {
+    const signals: AbortSignal[] = [];
+    const owner = {};
+    const pendingResource = dataResource({
+      key: (id: string) => ["release-abort", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return never;
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    expect(() => store.readData(pendingResource, ["one"], owner)).toThrow();
+    store.commitDataDependencies(owner, null);
+    expect(signals[0]?.aborted).toBe(false);
+
+    store.releaseDataOwner(owner);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(store.inspectDataEntries()).toEqual([]);
+  });
+
+  it("keeps a refreshing entry's value when its last subscriber is released", () => {
+    let loads = 0;
+    const owner = {};
+    const valueResource = dataResource({
+      key: (id: string) => ["refreshing-release", id],
+      load: () => {
+        loads += 1;
+        return loads === 1 ? "first" : never;
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    expect(store.readData(valueResource, ["one"], owner)).toBe("first");
+    store.commitDataDependencies(owner, null);
+
+    // Start a background refresh, leaving the entry value-bearing and in flight.
+    store.invalidateData(valueResource, ["one"]);
+    expect(store.readData(valueResource, ["one"], owner)).toBe("first");
+    expect(loads).toBe(2);
+
+    // Releasing the last subscriber must not evict a value-bearing entry: only
+    // value-less cache-miss loads are dropped.
+    store.releaseDataOwner(owner);
+    const entries = store.inspectDataEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.hasValue).toBe(true);
+    expect(entries[0]?.value).toBe("first");
+  });
+
+  it("ignores store mutations after dispose", async () => {
+    let loads = 0;
+    const valueResource = dataResource({
+      key: (id: string) => ["post-dispose", id],
+      load: () => {
+        loads += 1;
+        return "value";
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    store.dispose();
+    store.run(() => preloadData(valueResource, "one"));
+    store.run(() => invalidateData(valueResource, "one"));
+
+    await expect(
+      store.run(() => refreshData(valueResource, "one")),
+    ).resolves.toEqual({
+      reason: "store-disposed",
+      staleValue: undefined,
+      status: "aborted",
+    });
+
+    expect(loads).toBe(0);
+    expect(store.inspectDataEntries()).toEqual([]);
+  });
+
+  it("reports retention eviction as 'evicted', not 'store-disposed'", async () => {
+    const pendingResource = dataResource({
+      key: (id: string) => ["evicted-reason", id],
+      load: () => never,
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      inactiveRetentionMs: Number.POSITIVE_INFINITY,
+      preloadRetentionMs: 0,
+      schedule: () => undefined,
+    });
+
+    // A refresh coalesces onto the in-flight preload; when the preload retention
+    // window elapses on a live store, the awaiter learns it was evicted.
+    store.run(() => preloadData(pendingResource, "one"));
+    const result = store.run(() => refreshData(pendingResource, "one"));
+    await delay();
+
+    await expect(result).resolves.toEqual({
+      reason: "evicted",
+      staleValue: undefined,
+      status: "aborted",
+    });
+  });
 });
 
 function delay(): Promise<void> {

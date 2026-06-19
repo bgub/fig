@@ -712,8 +712,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       data: root.dataStore,
       render: (children) => updateRoot(root, children),
       unmount: () => {
-        updateRoot(root, null);
+        // Tear the tree down synchronously so per-fiber data cleanup runs while
+        // the store is still live; dispose is then the final teardown step.
+        flushSync(() => updateRoot(root, null));
         root.dataStore.dispose();
+        // Free the container so a later createRoot/render starts a fresh root
+        // instead of reusing this one's now-disposed store.
+        roots.delete(root.container as object);
       },
     };
   }
@@ -754,6 +759,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   function flushSync(callback: () => void): void {
     runWithPriority(SyncLane, callback);
 
+    // Save/restore rather than force false: a nested flushSync (e.g. unmount()
+    // from a commit-phase effect) must not clear the flag while an outer flush is
+    // still running, or the outer flush's uncaught errors get misrouted.
+    const previousFlushingSyncWork = flushingSyncWork;
     flushingSyncWork = true;
     try {
       for (const root of pendingRoots) {
@@ -767,7 +776,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
     } finally {
-      flushingSyncWork = false;
+      flushingSyncWork = previousFlushingSyncWork;
     }
   }
 
@@ -2960,8 +2969,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
-    store.deleteDataOwner(node);
-    if (node.alternate !== null) store.deleteDataOwner(node.alternate);
+    store.releaseDataOwner(node);
+    if (node.alternate !== null) store.releaseDataOwner(node.alternate);
 
     for (let child = node.child; child !== null; child = child.sibling) {
       deleteFiberDataFromStore(child, store);
