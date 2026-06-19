@@ -1,0 +1,94 @@
+import { font, preconnect, preload, stylesheet } from "@bgub/fig";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { insertAssetResources } from "./index.ts";
+import { FakeElement } from "./test-utils.ts";
+
+describe("@bgub/fig-dom asset resources", () => {
+  let head: FakeElement;
+  let previousDocument: typeof globalThis.document;
+
+  beforeEach(() => {
+    previousDocument = globalThis.document;
+    head = new FakeElement("head");
+    globalThis.document = {
+      head,
+      createElement: (tag: string) => new FakeElement(tag),
+    } as unknown as Document;
+  });
+
+  afterEach(() => {
+    globalThis.document = previousDocument;
+  });
+
+  function links(): FakeElement[] {
+    return head.childNodes.filter(
+      (child): child is FakeElement => child instanceof FakeElement,
+    );
+  }
+
+  it("inserts asset resources into the document head", () => {
+    void insertAssetResources([
+      stylesheet("/a.css"),
+      preload("/a.js", "script"),
+    ]);
+
+    const inserted = links();
+    expect(inserted).toHaveLength(2);
+    expect(inserted[0]?.tagName).toBe("link");
+    expect(inserted[0]?.getAttribute("rel")).toBe("stylesheet");
+    expect(inserted[0]?.getAttribute("href")).toBe("/a.css");
+    expect(inserted[1]?.getAttribute("rel")).toBe("preload");
+    expect(inserted[1]?.getAttribute("as")).toBe("script");
+  });
+
+  it("dedupes by key within a call and across calls", () => {
+    void insertAssetResources([stylesheet("/a.css"), stylesheet("/a.css")]);
+    void insertAssetResources([stylesheet("/a.css")]);
+
+    expect(links()).toHaveLength(1);
+  });
+
+  it("dedupes against a server-rendered head element", () => {
+    const ssr = new FakeElement("link");
+    ssr.setAttribute("rel", "stylesheet");
+    ssr.setAttribute("href", "/a.css");
+    head.appendChild(ssr);
+
+    void insertAssetResources([stylesheet("/a.css")]);
+
+    expect(links()).toHaveLength(1);
+  });
+
+  it("gates reveal on a critical stylesheet load", async () => {
+    let settled = false;
+    const ready = insertAssetResources([stylesheet("/a.css")]);
+    void ready.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    links()[0]?.dispatch("load");
+    await ready;
+    expect(settled).toBe(true);
+  });
+
+  it("resolves the gate when a stylesheet fails to load", async () => {
+    const ready = insertAssetResources([stylesheet("/a.css")]);
+    links()[0]?.dispatch("error");
+
+    await expect(ready).resolves.toBeUndefined();
+  });
+
+  it("does not gate on non-critical resources", async () => {
+    await expect(
+      insertAssetResources([
+        preload("/a.js", "script"),
+        preconnect("https://cdn.example.com"),
+        stylesheet("/b.css", { blocking: "none" }),
+        font("/a.woff2", "font/woff2"),
+      ]),
+    ).resolves.toBeUndefined();
+  });
+});

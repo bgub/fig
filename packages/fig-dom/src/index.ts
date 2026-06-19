@@ -441,6 +441,122 @@ function findDocumentResource(head: Element, key: string): Element | null {
   return null;
 }
 
+/**
+ * Insert render-discovered asset resources (e.g. from an RSC response's
+ * `getAssetResources()`) into the document head, deduped against resources
+ * already inserted by SSR, a host-rendered element, or an earlier call — using
+ * the same key semantics as host resources. Returns a promise that resolves once
+ * every freshly inserted *critical* stylesheet has loaded or errored, so callers
+ * can gate revealing the dependent content. Non-critical hints (preload,
+ * preconnect, scripts, fonts, `blocking: "none"` stylesheets) never block.
+ */
+export function insertAssetResources(
+  resources: readonly FigResource[],
+): Promise<void> {
+  const head = documentHead();
+  if (head === null) return Promise.resolve();
+
+  const registry = documentResourceRegistry(head);
+  const gates: Promise<void>[] = [];
+
+  for (const resource of resources) {
+    if (resource.kind === "title" || resource.kind === "meta") continue;
+
+    const key = figResourceKey(resource);
+    const existing =
+      registry.get(key)?.element ?? findDocumentResource(head, key);
+
+    if (existing !== null) {
+      // Already present (SSR, a host-rendered element, or a prior call): adopt
+      // it into the registry for O(1) future lookups, but do not re-gate.
+      if (!registry.has(key)) {
+        registry.set(key, { count: 1, element: existing });
+        documentResourceMeta.set(existing, { key, kind: resource.kind });
+      }
+      continue;
+    }
+
+    const element = createAssetResourceElement(resource);
+    registry.set(key, { count: 1, element });
+    documentResourceMeta.set(element, { key, kind: resource.kind });
+    head.appendChild(element);
+
+    if (isCriticalStylesheet(resource))
+      gates.push(whenResourceSettled(element));
+  }
+
+  return gates.length === 0
+    ? Promise.resolve()
+    : Promise.all(gates).then(() => undefined);
+}
+
+function isCriticalStylesheet(resource: FigResource): boolean {
+  // Client-reference stylesheets gate reveal by default; opt out with
+  // blocking: "none". Every other kind is a hint that must never block.
+  return resource.kind === "stylesheet" && resource.blocking !== "none";
+}
+
+function whenResourceSettled(element: Element): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const settle = () => {
+      element.removeEventListener("load", settle);
+      element.removeEventListener("error", settle);
+      resolve();
+    };
+    // Resolve on error too: a failed stylesheet must not block reveal forever.
+    element.addEventListener("load", settle);
+    element.addEventListener("error", settle);
+  });
+}
+
+function createAssetResourceElement(resource: FigResource): Element {
+  const element = document.createElement(
+    resource.kind === "script" ? "script" : "link",
+  );
+  const set = (name: string, value: string | undefined): void => {
+    if (value !== undefined) element.setAttribute(name, value);
+  };
+
+  switch (resource.kind) {
+    case "stylesheet":
+      set("rel", "stylesheet");
+      set("href", resource.href);
+      set("media", resource.media);
+      set("precedence", resource.precedence);
+      set("crossorigin", resource.crossOrigin);
+      break;
+    case "preload":
+      set("rel", "preload");
+      set("href", resource.href);
+      set("as", resource.as);
+      set("type", resource.type);
+      set("crossorigin", resource.crossOrigin);
+      set("fetchpriority", resource.fetchPriority);
+      break;
+    case "script":
+      set("src", resource.src);
+      if (resource.module === true) set("type", "module");
+      if (resource.async === true) set("async", "");
+      if (resource.defer === true) set("defer", "");
+      set("crossorigin", resource.crossOrigin);
+      break;
+    case "font":
+      set("rel", "preload");
+      set("as", "font");
+      set("href", resource.href);
+      set("type", resource.type);
+      set("crossorigin", resource.crossOrigin ?? "anonymous");
+      break;
+    case "preconnect":
+      set("rel", "preconnect");
+      set("href", resource.href);
+      set("crossorigin", resource.crossOrigin);
+      break;
+  }
+
+  return element;
+}
+
 function namespaceFor(type: string, parent: Container | Element): string {
   const normalizedType = type.toLowerCase();
   if (normalizedType === "svg") return svgNamespace;

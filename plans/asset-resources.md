@@ -402,12 +402,26 @@ with data cache behavior.
   Embedding on client rows (vs. separate asset rows) is the chosen first
   version, as recommended above.
 
-### Phase 3: Client Insertion And Gating
+### Phase 3: Client Insertion And Gating — implemented
 
-- Add client-side asset-resource insertion and document-level dedupe.
-- Gate dependent content on stylesheet load.
-- Reuse or mirror SSR asset-resource key semantics.
-- Add tests for duplicate resources and stylesheet failures.
+- `insertAssetResources(resources)` (in `@bgub/fig-dom`) inserts
+  render-discovered assets — e.g. an RSC response's `getAssetResources()` —
+  into the document head as `<link>`/`<script>` elements. It reuses the
+  existing client document-resource registry and `figResourceKey`, so it
+  dedupes against SSR-rendered head elements, host-rendered resources, and
+  earlier calls under one key space.
+- It returns a promise that resolves once every freshly inserted _critical_
+  stylesheet has loaded or errored (errors resolve the gate so a failed sheet
+  never blocks reveal forever). Stylesheets are critical by default; opt out
+  with `blocking: "none"`. Preloads, preconnects, scripts, and fonts are
+  inserted but never gate. The RSC client gates reveal by awaiting this before
+  rendering newly decoded content.
+- Tests cover head insertion, within-call/cross-call/SSR dedupe, critical
+  stylesheet load gating, error-resolves-the-gate, and non-critical
+  non-gating.
+
+  Precedence-based ordering and client-document-lifetime ownership tracking
+  remain future refinements (see Visibility And Retention).
 
 ### Phase 4: Refresh Integration
 
