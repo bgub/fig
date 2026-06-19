@@ -1,5 +1,6 @@
 import { readPromise } from "./hooks.ts";
 import type { DataResourceKey } from "./data.ts";
+import type { ClientReferenceResources } from "./resource.ts";
 
 export type Key = string | number;
 export type Props = Record<string, any>;
@@ -40,6 +41,7 @@ export interface FigPortal<Target = unknown> {
 export interface ClientReferenceOptions {
   id: string;
   load: () => Promise<unknown>;
+  resources?: ClientReferenceResources;
 }
 
 export interface FigClientReference<P = Props> {
@@ -47,6 +49,7 @@ export interface FigClientReference<P = Props> {
   readonly $$typeof: symbol;
   readonly id: string;
   readonly load: () => Promise<unknown>;
+  readonly resources?: ClientReferenceResources;
 }
 
 export type LazyLoader<P = Props> = () => PromiseLike<ElementType<P>>;
@@ -178,6 +181,7 @@ export function clientReference<P extends Props>(
     $$typeof: FigClientReferenceSymbol,
     id: options.id,
     load: options.load,
+    resources: options.resources,
   });
 }
 

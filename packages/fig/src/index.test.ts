@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  clientReference,
+  clientReferenceResources,
   createContext,
   createElement,
   createPortalNode,
   ErrorBoundary,
   Fragment,
   lazy,
+  preload,
   readContext,
   readPromise,
   resources,
@@ -106,6 +109,63 @@ describe("@bgub/fig", () => {
       children: "child",
       resources: style,
     });
+  });
+
+  it("retains eager asset resources on a client reference", () => {
+    const css = stylesheet("/assets/Counter.css");
+    const js = preload("/assets/Counter.js", "script");
+    const Counter = clientReference({
+      id: "./Counter.tsx",
+      load: () => Promise.resolve({}),
+      resources: [css, js],
+    });
+
+    expect(Counter.id).toBe("./Counter.tsx");
+    expect(clientReferenceResources(Counter)).toEqual([css, js]);
+  });
+
+  it("normalizes a single client-reference resource to a list", () => {
+    const css = stylesheet("/assets/Counter.css");
+    const Counter = clientReference({
+      id: "./Counter.tsx",
+      load: () => Promise.resolve({}),
+      resources: css,
+    });
+
+    expect(clientReferenceResources(Counter)).toEqual([css]);
+  });
+
+  it("resolves lazy client-reference resources at read time", () => {
+    let calls = 0;
+    const Counter = clientReference({
+      id: "./Counter.tsx",
+      load: () => Promise.resolve({}),
+      resources: () => {
+        calls += 1;
+        return [stylesheet(`/assets/Counter.${calls}.css`)];
+      },
+    });
+
+    // Not resolved until read, then resolved on each call (a manifest may load
+    // after the reference is defined).
+    expect(calls).toBe(0);
+    expect(clientReferenceResources(Counter)).toEqual([
+      stylesheet("/assets/Counter.1.css"),
+    ]);
+    expect(clientReferenceResources(Counter)).toEqual([
+      stylesheet("/assets/Counter.2.css"),
+    ]);
+    expect(calls).toBe(2);
+  });
+
+  it("defaults client-reference resources to an empty list", () => {
+    const Counter = clientReference({
+      id: "./Counter.tsx",
+      load: () => Promise.resolve({}),
+    });
+
+    expect(Counter.resources).toBeUndefined();
+    expect(clientReferenceResources(Counter)).toEqual([]);
   });
 
   it("classifies resource destinations", () => {

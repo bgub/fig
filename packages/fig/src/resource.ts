@@ -1,5 +1,6 @@
 import {
   createElement,
+  type FigClientReference,
   type FigElement,
   type FigNode,
   type Props,
@@ -81,6 +82,13 @@ export interface MetaResource extends ResourceBase {
 
 export type FigResourceList = FigResource | readonly FigResource[];
 
+// Asset resources a client reference contributes when it renders. Eager for
+// hand-written lists; a thunk for bundler-manifest resolution that may not be
+// available until serialization time, or that maps paths differently per build.
+export type ClientReferenceResources =
+  | FigResourceList
+  | (() => FigResourceList);
+
 export interface ResourcesOptions {
   children?: FigNode;
   resources: FigResourceList;
@@ -155,6 +163,19 @@ export function isFigResource(value: unknown): value is FigResource {
     default:
       return false;
   }
+}
+
+export function clientReferenceResources(
+  reference: FigClientReference,
+): readonly FigResource[] {
+  const value = reference.resources;
+  if (value === undefined) return [];
+
+  // Resolved on each call rather than memoized: a lazy resolver may read a
+  // manifest that is not loaded until serialization, and a consumer that wants
+  // to cache can do so against the stable reference identity.
+  const list = typeof value === "function" ? value() : value;
+  return isFigResource(list) ? [list] : list;
 }
 
 export function figResourceKey(resource: FigResource): string {

@@ -53,6 +53,7 @@ export {
 } from "./hooks.ts";
 export {
   font,
+  clientReferenceResources,
   meta,
   preconnect,
   preload,
@@ -60,6 +61,7 @@ export {
   script,
   stylesheet,
   title,
+  type ClientReferenceResources,
   type CrossOrigin,
   type FetchPriority,
   type FigResource,

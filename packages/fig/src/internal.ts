@@ -36,11 +36,13 @@ export {
   type SuspenseProps,
 } from "./element.ts";
 export {
+  clientReferenceResources,
   figResourceKey,
   isFigResource,
   resourceDestination,
   resourceFromHostAttributes,
   resourceFromHostProps,
+  type ClientReferenceResources,
   type ResourceDestination,
 } from "./resource.ts";
 export {

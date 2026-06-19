@@ -366,11 +366,19 @@ with data cache behavior.
 
 ## Implementation Phases
 
-### Phase 1: Client Reference Metadata
+### Phase 1: Client Reference Metadata — implemented
 
-- Add optional asset resources to `clientReference(...)`.
-- Keep the existing SSR asset-resource APIs unchanged.
-- Add tests that client references retain asset-resource metadata.
+- `ClientReferenceOptions.resources?: ClientReferenceResources` where
+  `ClientReferenceResources = FigResourceList | (() => FigResourceList)`. The
+  value is retained verbatim on the `FigClientReference`.
+- `clientReferenceResources(reference)` resolves it to a flat
+  `readonly FigResource[]` — calling the lazy thunk on each read (not memoized,
+  so a manifest loaded after definition is still picked up) and normalizing a
+  single resource to a one-element list. Exported publicly and via
+  `@bgub/fig/internal` for the server to consume in Phase 2.
+- The existing SSR asset-resource APIs are unchanged.
+- Tests cover eager list, single-resource normalization, lazy resolution
+  (deferred + re-resolved per call), and the empty default.
 
 ### Phase 2: RSC Serialization
 
