@@ -534,6 +534,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       >
     >;
   const roots = new WeakMap<object, R>();
+  // Iterable view of live roots, only populated when a refresh handler is set,
+  // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
+  const mountedRoots = new Set<R>();
   const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
   const abandonedHydrationBoundaries = new WeakSet<object>();
@@ -640,6 +643,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const root = createFiberRoot(container, request.options ?? {});
     roots.set(container as object, root);
+    if (resolveFamily !== null) mountedRoots.add(root);
 
     if (request.kind === "hydration") root.isHydrating = true;
 
@@ -719,6 +723,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // Free the container so a later createRoot/render starts a fresh root
         // instead of reusing this one's now-disposed store.
         roots.delete(root.container as object);
+        mountedRoots.delete(root);
       },
     };
   }
@@ -1426,6 +1431,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function renderFunction(node: F): void {
+    // Hot reload: run the latest version of this component's family. In
+    // production no handler is set, so this is a no-op.
+    if (resolveFamily !== null) {
+      node.type = resolveLatestType(node.type) as F["type"];
+    }
     prepareHookRender(node);
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
@@ -3559,7 +3569,59 @@ export function createRenderer<Container, Instance, TextInstance>(
     hydrateTarget,
     render,
     flushSync,
+    scheduleRefresh,
   };
+
+  // Re-render every mounted instance of a changed component family. Updated
+  // families re-render in place (hook state preserved); stale families (hook
+  // signature changed) remount via their parent. The refresh runtime swaps each
+  // family's `current` before calling this.
+  function scheduleRefresh(update: RefreshUpdate): void {
+    if (resolveFamily === null || mountedRoots.size === 0) return;
+
+    staleFamilies = update.staleFamilies;
+    try {
+      flushSync(() => {
+        for (const root of mountedRoots) {
+          scheduleFamilyRefresh(root.current.child, update);
+        }
+      });
+    } finally {
+      staleFamilies = null;
+    }
+  }
+
+  function scheduleFamilyRefresh(node: F | null, update: RefreshUpdate): void {
+    if (node === null) return;
+
+    if (node.tag === FunctionTag && resolveFamily !== null) {
+      const family = resolveFamily(node.type);
+      if (family !== undefined) {
+        if (update.staleFamilies.has(family)) {
+          remountForRefresh(node);
+        } else if (update.updatedFamilies.has(family)) {
+          // Mark the instance dirty so render bailouts don't skip it.
+          scheduleFiber(node, SyncLane);
+        }
+      }
+    }
+
+    scheduleFamilyRefresh(node.child, update);
+    scheduleFamilyRefresh(node.sibling, update);
+  }
+
+  // A stale component must drop its hook state. Re-render its parent so the
+  // child reconciles as an incompatible type and remounts; for a top-level
+  // component re-render the whole root.
+  function remountForRefresh(node: F): void {
+    const parent = node.return;
+    if (parent === null || parent.tag === RootTag) {
+      const root = rootOf(node);
+      updateRoot(root, root.element);
+    } else {
+      scheduleFiber(parent, SyncLane);
+    }
+  }
 
   function findDehydratedSuspenseBoundaryForTarget(
     node: F | null,
@@ -4045,6 +4107,52 @@ function tagFor(element: FigElement): Tag {
   return FunctionTag;
 }
 
+// --- Fast Refresh (HMR) ----------------------------------------------------
+// A family groups every version of a component across hot edits; `current` is
+// the latest implementation. The handler is module-global (one refresh runtime
+// per app) so module-level reconcile helpers can consult it. In production no
+// handler is ever set, so all of this collapses to the identity/equality paths.
+
+export interface RefreshFamily {
+  current: unknown;
+}
+
+export interface RefreshUpdate {
+  staleFamilies: Set<RefreshFamily>;
+  updatedFamilies: Set<RefreshFamily>;
+}
+
+let resolveFamily: ((type: unknown) => RefreshFamily | undefined) | null = null;
+let staleFamilies: Set<RefreshFamily> | null = null;
+
+export function setRefreshHandler(
+  handler: ((type: unknown) => RefreshFamily | undefined) | null,
+): void {
+  resolveFamily = handler;
+}
+
+function resolveLatestType(type: unknown): unknown {
+  if (resolveFamily === null) return type;
+  const family = resolveFamily(type);
+  return family === undefined ? type : family.current;
+}
+
+// Whether an existing fiber can be reused for the next element's type (reuse =
+// preserve hook state). Without a refresh handler this is plain reference
+// equality. For a tracked component, two types match when they share a family —
+// but a family marked stale this refresh pass (its hook signature changed) never
+// matches, forcing a remount even when the type reference is unchanged.
+function matchesComponentFamily(
+  fiberType: unknown,
+  childType: unknown,
+): boolean {
+  if (resolveFamily === null) return fiberType === childType;
+  const family = resolveFamily(fiberType);
+  if (family === undefined) return fiberType === childType;
+  if (family !== resolveFamily(childType)) return false;
+  return staleFamilies === null || !staleFamilies.has(family);
+}
+
 function sameType<Container, Instance, TextInstance>(
   fiber: Fiber<Container, Instance, TextInstance>,
   child: FigChild,
@@ -4057,7 +4165,9 @@ function sameType<Container, Instance, TextInstance>(
     return fiber.tag === PortalTag && fiber.props.target === child.target;
   }
 
-  return isValidElement(child) && fiber.type === child.type;
+  return (
+    isValidElement(child) && matchesComponentFamily(fiber.type, child.type)
+  );
 }
 
 function propsFor(child: FigChild): Props {

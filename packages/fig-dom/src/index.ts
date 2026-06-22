@@ -21,6 +21,9 @@ import {
   type FigRoot,
   type FigRootOptions,
   type HostConfig,
+  type RefreshFamily,
+  type RefreshUpdate,
+  setRefreshHandler,
 } from "@bgub/fig-reconciler";
 import {
   attachBindSubtree,
@@ -232,6 +235,10 @@ const documentResourceMeta = new WeakMap<Element, DocumentResourceMeta>();
 
 export const batchedUpdates = renderer.batchedUpdates;
 export const flushSync = renderer.flushSync;
+
+// Fast Refresh (HMR) plumbing — used by the refresh runtime, not app code.
+export const scheduleRefresh = renderer.scheduleRefresh;
+export { type RefreshFamily, type RefreshUpdate, setRefreshHandler };
 
 export type { FigRootOptions };
 

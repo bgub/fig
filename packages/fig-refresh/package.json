@@ -1,0 +1,38 @@
+{
+  "name": "@bgub/fig-refresh",
+  "version": "0.0.1",
+  "description": "Fig Fast Refresh runtime (HMR)",
+  "keywords": [],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-refresh"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@bgub/fig-reconciler": "workspace:*"
+  },
+  "devDependencies": {}
+}

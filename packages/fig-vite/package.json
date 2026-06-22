@@ -1,0 +1,41 @@
+{
+  "name": "@bgub/fig-vite",
+  "version": "0.0.1",
+  "description": "Fig Vite plugin (Fast Refresh / HMR transform)",
+  "keywords": [],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-vite"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-typescript": "^7.25.0"
+  },
+  "devDependencies": {
+    "@types/babel__core": "^7.20.5"
+  }
+}
