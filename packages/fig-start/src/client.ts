@@ -18,6 +18,7 @@ import {
   type SerializedRscPayload,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
+import type { Router } from "./core.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
 
@@ -83,18 +84,7 @@ function mountServerRoute(
   const slot = findSlot(container, payload.routeId);
   if (slot === null) return;
 
-  if (
-    options.loadClientReference === undefined &&
-    options.resolveClientReference === undefined &&
-    hasClientReferences(payload.rows)
-  ) {
-    throw new Error(
-      `Server route "${payload.routeId}" renders client components, but ` +
-        `hydrateStart() received no client-reference resolver. Pass ` +
-        `loadClientReference from "virtual:fig-start/client-manifest" (the ` +
-        `@bgub/fig-start/vite plugin).`,
-    );
-  }
+  requireClientReferenceResolver(payload, options);
 
   const response = createRscResponse({
     loadClientReference: options.loadClientReference,
@@ -128,14 +118,46 @@ function mountServerRoute(
 
   // Tear the nested root down when the user navigates away from the server
   // route, so the root, its data store, and the response listener don't leak.
-  const unsubscribeRouter = router.subscribe(() => {
-    const active = router
-      .getState()
-      .matches.some((match) => match.routeId === payload.routeId);
-    if (active) return;
-    unsubscribeRouter();
+  watchServerRouteLifetime(router, payload.routeId, () => {
     unsubscribeResponse();
     root.unmount();
+  });
+}
+
+// Exported for testing: the missing-resolver guard and the navigation-teardown
+// watcher are pure logic, so they're verified without a DOM.
+export function requireClientReferenceResolver(
+  payload: SerializedRscPayload,
+  options: Pick<
+    StartClientOptions,
+    "loadClientReference" | "resolveClientReference"
+  >,
+): void {
+  if (
+    options.loadClientReference === undefined &&
+    options.resolveClientReference === undefined &&
+    hasClientReferences(payload.rows)
+  ) {
+    throw new Error(
+      `Server route "${payload.routeId}" renders client components, but ` +
+        `hydrateStart() received no client-reference resolver. Pass ` +
+        `loadClientReference from "virtual:fig-start/client-manifest" (the ` +
+        `@bgub/fig-start/vite plugin).`,
+    );
+  }
+}
+
+export function watchServerRouteLifetime(
+  router: Pick<Router, "getState" | "subscribe">,
+  routeId: string,
+  dispose: () => void,
+): void {
+  const unsubscribe = router.subscribe(() => {
+    if (router.getState().matches.some((match) => match.routeId === routeId)) {
+      return;
+    }
+    unsubscribe();
+    dispose();
   });
 }
 
