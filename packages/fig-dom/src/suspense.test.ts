@@ -8,7 +8,7 @@ import {
   useState,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { createRoot, flushSync } from "./index.ts";
+import { createRoot, flushSync, on } from "./index.ts";
 import {
   deferred,
   delay,
@@ -17,6 +17,10 @@ import {
 } from "./test-utils.ts";
 
 installFakeDocument();
+
+function display(node: FakeElement): string {
+  return node.style.display ?? "";
+}
 
 describe("@bgub/fig-dom suspense", () => {
   it("suspends on pending promises and retries when they settle", async () => {
@@ -387,7 +391,11 @@ describe("@bgub/fig-dom suspense", () => {
       root.render(createElement(App, { value: pending.promise }));
     });
 
-    expect(container.textContent).toBe("Loading");
+    const [count, ready, fallback] = container.childNodes as FakeElement[];
+    expect(display(count)).toBe("none");
+    expect(display(ready)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("Loading");
 
     pending.resolve("Loaded");
     await delay();
@@ -515,7 +523,10 @@ describe("@bgub/fig-dom suspense", () => {
 
     root.render(createElement(App, { value: pending.promise }));
     await delay();
-    expect(container.textContent).toBe("Loading");
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("Loading");
     expect(calls).toEqual([...primaryMount, "primary:abort", ...fallbackMount]);
 
     pending.resolve("Primary loaded");
@@ -729,7 +740,10 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     // the boundary shows the fallback again, then reveals a second time.
     const second = deferred<string>();
     flushSync(() => setGate?.(second.promise));
-    expect(container.textContent).toBe("load");
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
     await delay();
@@ -771,7 +785,10 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
 
     const second = deferred<string>();
     flushSync(() => setGate?.(second.promise));
-    expect(container.textContent).toBe("load");
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
     await delay();
@@ -782,6 +799,60 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       "P",
       "TWO",
     ]);
+  });
+
+  it("does not commit the failed primary shape while re-suspended", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    let setShowExtra: ((value: boolean) => void) | null = null;
+    const first = deferred<string>();
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, setGateState] = useState(initial);
+      const [showExtra, setShowExtraState] = useState(false);
+      setGate = setGateState;
+      setShowExtra = setShowExtraState;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement("p", null, "A"),
+          showExtra ? createElement("p", null, "X") : null,
+          createElement(Slow, { gate }),
+          createElement("p", null, "B"),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("AONEB");
+
+    const second = deferred<string>();
+    flushSync(() => {
+      setShowExtra?.(true);
+      setGate?.(second.promise);
+    });
+
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(primary.textContent).toBe("AB");
+    expect(fallback.textContent).toBe("load");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("AXTWOB");
   });
 
   it("preserves sibling component state across a re-suspension", async () => {
@@ -828,10 +899,131 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     // Counter keeps its committed state (its fiber is reused, not rebuilt).
     const second = deferred<string>();
     flushSync(() => setGate?.(second.promise));
-    expect(container.textContent).toBe("load");
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
     await delay();
     expect(container.textContent).toBe("1TWO");
+  });
+
+  it("re-runs effects when preserved primary content reveals after re-suspension", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const calls: string[] = [];
+    const first = deferred<string>();
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+
+    function StableEffect() {
+      useReactive((signal) => {
+        calls.push("run");
+        signal.addEventListener("abort", () => calls.push("abort"), {
+          once: true,
+        });
+      }, []);
+      return createElement("p", null, "P");
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement(StableEffect, null),
+          createElement(Slow, { gate }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    root.render(createElement(App, { initial: first.promise }));
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("PONE");
+    expect(calls).toEqual(["run", "abort", "run"]);
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    await delay();
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("load");
+    expect(calls).toEqual(["run", "abort", "run", "abort"]);
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("PTWO");
+    expect(calls).toEqual(["run", "abort", "run", "abort", "run"]);
+  });
+
+  it("reattaches binds and events when preserved primary content reveals after re-suspension", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const signals: AbortSignal[] = [];
+    let clicks = 0;
+    const first = deferred<string>();
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "button",
+          {
+            bind: (_node: Element, signal: AbortSignal) => {
+              signals.push(signal);
+            },
+            events: [on("click", () => clicks++)],
+          },
+          "P",
+          createElement(Slow, { gate }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    root.render(createElement(App, { initial: first.promise }));
+    first.resolve("ONE");
+    await delay();
+    const button = container.childNodes[0] as FakeElement;
+    expect(container.textContent).toBe("PONE");
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+
+    button.dispatch("click");
+    expect(clicks).toBe(1);
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    expect(container.textContent).toBe("load");
+    expect(signals[1]?.aborted).toBe(true);
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("PTWO");
+    expect(signals).toHaveLength(3);
+    expect(signals[2]?.aborted).toBe(false);
+
+    button.dispatch("click");
+    expect(clicks).toBe(2);
   });
 });

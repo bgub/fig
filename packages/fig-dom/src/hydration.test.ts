@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
+  deferred,
   delay,
   FakeComment,
   FakeElement,
@@ -17,6 +18,10 @@ import {
 } from "./test-utils.ts";
 
 installFakeDocument();
+
+function display(node: FakeElement): string {
+  return node.style.display ?? "";
+}
 
 describe("@bgub/fig-dom hydration", () => {
   it("hydrates existing host elements without duplicating nodes", () => {
@@ -251,6 +256,61 @@ describe("@bgub/fig-dom hydration", () => {
 
     button.dispatch("click");
     expect(calls).toEqual(["click"]);
+  });
+
+  it("preserves hydrated Suspense primary content across re-suspension", async () => {
+    const { container, content: button } = suspenseDom(
+      "completed",
+      "button",
+      "PONE",
+    );
+    button.textContent = "";
+    button.appendChild(new FakeText("P"));
+    button.appendChild(new FakeText("ONE"));
+    let setGate: ((value: string | Promise<string>) => void) | null = null;
+
+    function Slow({ value }: { value: string | Promise<string> }) {
+      return typeof value === "string" ? value : readPromise(value);
+    }
+
+    function App() {
+      const [gate, set] = useState<string | Promise<string>>("ONE");
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(
+          "button",
+          null,
+          "P",
+          createElement(Slow, { value: gate }),
+        ),
+      );
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null)),
+    );
+
+    await delay();
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.childNodes[0]).toBe(button);
+    expect(button.textContent).toBe("PONE");
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+
+    const fallback = container.childNodes[1] as FakeElement;
+    expect(container.childNodes).toEqual([button, fallback]);
+    expect(display(button)).toBe("none");
+    expect(fallback.textContent).toBe("Loading");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.childNodes[0]).toBe(button);
+    expect(display(button)).toBe("");
+    expect(button.textContent).toBe("PTWO");
   });
 
   it("keeps completed Suspense boundaries dehydrated when hydration suspends", async () => {

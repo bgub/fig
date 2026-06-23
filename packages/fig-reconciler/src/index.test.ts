@@ -24,17 +24,19 @@ import {
 
 class TestText {
   parentNode: TestElement | null = null;
+  hidden = false;
 
   constructor(public nodeValue: string) {}
 
   get textContent(): string {
-    return this.nodeValue;
+    return this.hidden ? "" : this.nodeValue;
   }
 }
 
 class TestElement {
   childNodes: Array<TestElement | TestText> = [];
   parentNode: TestElement | null = null;
+  hidden = false;
 
   constructor(public type: string) {}
 
@@ -62,6 +64,7 @@ class TestElement {
   }
 
   get textContent(): string {
+    if (this.hidden) return "";
     return this.childNodes.map((child) => child.textContent).join("");
   }
 
@@ -84,6 +87,18 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
   finalizeInitialInstance: () => undefined,
   insertBefore: (parent, child, before) => parent.insertBefore(child, before),
   removeChild: (parent, child) => parent.removeChild(child),
+  hideInstance: (instance) => {
+    instance.hidden = true;
+  },
+  unhideInstance: (instance) => {
+    instance.hidden = false;
+  },
+  hideTextInstance: (text) => {
+    text.hidden = true;
+  },
+  unhideTextInstance: (text) => {
+    text.hidden = false;
+  },
   commitUpdate: () => undefined,
   commitTextUpdate: (text, value) => {
     text.nodeValue = value;

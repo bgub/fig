@@ -533,6 +533,124 @@ describe("@bgub/fig-dom activity", () => {
     expect(container.textContent).toBe("Ready");
   });
 
+  it("keeps Suspense work hidden while its parent Activity is hidden", async () => {
+    const first = deferred<string>();
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return createElement("span", null, readPromise(gate));
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, setGateState] = useState(initial);
+      const [mode, setModeState] = useState<"visible" | "hidden">("visible");
+      setGate = setGateState;
+      setMode = setModeState;
+      return createElement(
+        Activity,
+        { mode },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(
+            "div",
+            null,
+            createElement("span", null, "P"),
+            createElement(Slow, { gate }),
+          ),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    root.render(createElement(App, { initial: first.promise }));
+    first.resolve("ONE");
+    await delay();
+
+    const div = container.childNodes[0] as FakeElement;
+    expect(container.textContent).toBe("PONE");
+    expect(display(div)).toBe("");
+
+    flushSync(() => setMode?.("hidden"));
+    expect(display(div)).toBe("none");
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    const fallback = container.childNodes[1] as FakeElement;
+    expect(display(div)).toBe("none");
+    expect(display(fallback)).toBe("none");
+    expect(fallback.textContent).toBe("Loading");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("PTWO");
+    expect(display(div)).toBe("none");
+
+    flushSync(() => setMode?.("visible"));
+    expect(display(div)).toBe("");
+  });
+
+  it("keeps nested Activity hidden when parent Suspense re-suspends and reveals", async () => {
+    const first = deferred<string>();
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return createElement("span", null, readPromise(gate));
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, setGateState] = useState(initial);
+      const [mode, setModeState] = useState<"visible" | "hidden">("visible");
+      setGate = setGateState;
+      setMode = setModeState;
+      return createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(
+          Activity,
+          { mode },
+          createElement(
+            "section",
+            null,
+            createElement("span", null, "P"),
+            createElement(Slow, { gate }),
+          ),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    root.render(createElement(App, { initial: first.promise }));
+    first.resolve("ONE");
+    await delay();
+
+    const section = container.childNodes[0] as FakeElement;
+    expect(container.textContent).toBe("PONE");
+    expect(display(section)).toBe("");
+
+    flushSync(() => setMode?.("hidden"));
+    expect(display(section)).toBe("none");
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    const fallback = container.childNodes[1] as FakeElement;
+    expect(display(section)).toBe("none");
+    expect(display(fallback)).toBe("");
+    expect(fallback.textContent).toBe("Loading");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("PTWO");
+    expect(display(section)).toBe("none");
+
+    flushSync(() => setMode?.("visible"));
+    expect(display(section)).toBe("");
+  });
+
   it("keeps nested hidden activities hidden when the outer reveals", () => {
     let setOuter: ((mode: "visible" | "hidden") => void) | null = null;
 

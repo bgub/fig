@@ -269,6 +269,7 @@ const ErrorBoundaryTag = 7;
 const PortalTag = 8;
 const ResourcesTag = 9;
 const ActivityTag = 10;
+const HiddenTag = 11;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -280,7 +281,8 @@ type Tag =
   | typeof ErrorBoundaryTag
   | typeof PortalTag
   | typeof ResourcesTag
-  | typeof ActivityTag;
+  | typeof ActivityTag
+  | typeof HiddenTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -413,6 +415,12 @@ type SuspenseState<Container, Instance, TextInstance> =
   | SuspenseFallbackState<Container, Instance, TextInstance>
   | DehydratedSuspenseState<Instance, TextInstance>;
 
+interface HiddenState<Container, Instance, TextInstance> {
+  currentFirstChild: Fiber<Container, Instance, TextInstance> | null;
+  forcePlacement: boolean;
+  armOnReveal: boolean;
+}
+
 interface ErrorBoundaryState {
   error: unknown;
   info: ErrorInfo;
@@ -449,6 +457,7 @@ interface Fiber<Container, Instance, TextInstance> {
   contextDependencies: FigContext<unknown>[] | null;
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
+  hiddenState: HiddenState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
   // checks from stale .return chains stay authoritative.
@@ -547,7 +556,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   const abandonedHydrationBoundaries = new WeakSet<object>();
   let batchDepth = 0;
   let flushingSyncWork = false;
-  let hasHiddenActivities = false;
+  let hasHiddenBoundaries = false;
   let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
     null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
@@ -662,7 +671,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       getLane: requestUpdateLane,
       partition: options.dataPartition,
       schedule(owner, lane) {
-        scheduleFiber(owner, hiddenActivityLane(owner, lane));
+        scheduleFiber(owner, hiddenSubtreeLane(owner, lane));
       },
     });
     const root: R = {
@@ -1147,6 +1156,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === HiddenTag) {
+      beginHiddenBoundary(root, node);
+      return;
+    }
+
     if (node.tag === PortalTag) {
       beginPortal(node);
       return;
@@ -1159,11 +1173,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function beginActivity(root: R, node: F): void {
     const hidden = activityHidden(node.props);
-    if (hidden) hasHiddenActivities = true;
-    const previousHidden =
-      node.alternate === null
-        ? false
-        : activityHidden(node.alternate.memoizedProps ?? {});
+    if (hidden) hasHiddenBoundaries = true;
 
     node.activityState ??= { hidden: false, dehydrated: null };
     const state = node.activityState;
@@ -1184,7 +1194,24 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    beginHiddenBoundary(root, node);
+  }
+
+  function beginHiddenBoundary(root: R, node: F): void {
+    const hidden = activityHidden(node.props);
+    if (hidden) hasHiddenBoundaries = true;
+    const hiddenState = node.hiddenState;
+    const previousHidden =
+      node.alternate === null
+        ? false
+        : activityHidden(node.alternate.memoizedProps ?? {});
+
+    node.activityState ??= { hidden: false, dehydrated: null };
+
     if (hidden !== previousHidden) {
+      node.flags |= VisibilityFlag;
+    }
+    if (hiddenState?.armOnReveal === true) {
       node.flags |= VisibilityFlag;
     }
 
@@ -1200,7 +1227,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    reconcileCurrentChildren(node, node.props.children);
+    reconcile(
+      node,
+      node.props.children,
+      hiddenState?.currentFirstChild ?? node.alternate?.child ?? null,
+      hiddenState?.forcePlacement === true,
+    );
+    node.hiddenState = null;
   }
 
   function prepareToHydrateRoot(root: R): void {
@@ -1498,40 +1531,128 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (tryDehydrateSuspenseBoundary(node)) return;
 
     if (previousSuspenseState === null) {
-      reconcileCurrentChildren(node, node.props.children);
+      beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
       return;
     }
 
-    if (previousSuspenseState.kind !== "fallback") {
-      reconcileCurrentChildren(node, node.props.children);
-      return;
-    }
-
-    // The captured primary's host DOM is never in the live tree once the
-    // fallback shows — committed primaries are deleted, and a never-committed
-    // primary was never attached. So force every captured host node to
-    // re-assemble on reveal (clearing any children left in a reused instance),
-    // while the captured fibers still seed hook state/effects for the reconcile
-    // below — that's what keeps component state across a re-suspension.
-    markCapturedHostsForReassembly(previousSuspenseState.primaryChild);
-    reconcile(
+    const currentPrimary = suspensePrimaryFiber(node.alternate);
+    beginSuspensePrimary(
       node,
-      node.props.children,
+      currentPrimary,
+      currentPrimary === null,
       previousSuspenseState.primaryChild,
-      true,
     );
-    appendDeletions(node, node.alternate?.child ?? null);
+    appendDeletions(node, suspenseFallbackFiber(node.alternate));
   }
 
-  function markCapturedHostsForReassembly(node: F | null): void {
-    for (let child = node; child !== null; child = child.sibling) {
-      // Force every host node to re-assemble on reveal (committedProps null →
-      // isNewHostInstance). A previously-committed node's stateNode may still
-      // hold stale children (its DOM was detached, not cleared, when the
-      // fallback showed); re-assembly clears it before re-appending.
-      if (isHost(child)) child.committedProps = null;
-      markCapturedHostsForReassembly(child.child);
+  function beginSuspensePrimary(
+    boundary: F,
+    currentPrimary: F | null,
+    forcePlacement: boolean,
+    capturedPrimary: F | null = null,
+  ): void {
+    if (capturedPrimary !== null) hasHiddenBoundaries = true;
+    const primary = suspensePrimaryWorkInProgress(
+      boundary,
+      currentPrimary,
+      "visible",
+      capturedPrimary,
+      forcePlacement,
+    );
+    boundary.child = primary;
+  }
+
+  function suspensePrimaryWorkInProgress(
+    boundary: F,
+    currentPrimary: F | null,
+    mode: "visible" | "hidden",
+    capturedPrimary: F | null = null,
+    forcePlacement = false,
+  ): F {
+    const props = suspensePrimaryProps(boundary, currentPrimary, mode);
+
+    const primary =
+      currentPrimary === null
+        ? fiber(HiddenTag, null, null, props, null)
+        : createWorkInProgress(currentPrimary, props);
+
+    primary.hiddenState = {
+      currentFirstChild: capturedPrimary,
+      forcePlacement,
+      armOnReveal: capturedPrimary !== null && mode === "visible",
+    };
+    primary.index = 0;
+    primary.return = boundary;
+    primary.sibling = null;
+    return primary;
+  }
+
+  function suspensePrimaryProps(
+    boundary: F,
+    currentPrimary: F | null,
+    mode: "visible" | "hidden",
+  ): Props {
+    const currentProps = currentPrimary?.memoizedProps ?? currentPrimary?.props;
+
+    if (
+      currentPrimary !== null &&
+      currentProps !== undefined &&
+      currentProps.mode === mode &&
+      currentProps.children === boundary.props.children
+    ) {
+      return currentPrimary.props;
     }
+
+    return { mode, children: boundary.props.children };
+  }
+
+  function suspenseFallbackWorkInProgress(
+    boundary: F,
+    currentFallback: F | null,
+    index: number,
+  ): F {
+    const props: Props = { children: boundary.props.fallback };
+    const fallback =
+      currentFallback?.tag === FragmentTag
+        ? createWorkInProgress(currentFallback, props)
+        : fiber(FragmentTag, null, null, props, null);
+
+    fallback.index = index;
+    fallback.return = boundary;
+    fallback.sibling = null;
+    if (currentFallback === null) fallback.flags |= PlacementFlag;
+    return fallback;
+  }
+
+  function capturedSuspensePrimaryChild(primary: F | null): F | null {
+    return primary?.tag === HiddenTag ? primary.child : primary;
+  }
+
+  function suspensePrimaryFiber(node: F | null | undefined): F | null {
+    const child = node?.child ?? null;
+    return child?.tag === HiddenTag ? child : null;
+  }
+
+  function suspenseFallbackFiber(node: F | null | undefined): F | null {
+    const primary = suspensePrimaryFiber(node);
+    return primary === null ? (node?.child ?? null) : primary.sibling;
+  }
+
+  function cloneSuspendedPrimary(node: F | null, parent: F): F | null {
+    let first: F | null = null;
+    let previous: F | null = null;
+
+    for (let current = node; current !== null; current = current.sibling) {
+      const clone = createWorkInProgress(current, current.props);
+      clone.return = parent;
+      clone.child = cloneSuspendedPrimary(current.child, clone);
+      clone.sibling = null;
+      if (previous === null) first = clone;
+      else previous.sibling = clone;
+      previous = clone;
+    }
+
+    return first;
   }
 
   function tryDehydrateSuspenseBoundary(node: F): boolean {
@@ -1567,7 +1688,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         enterSuspenseHydration(node, boundary);
         node.suspenseState = null;
         node.flags |= HydrationFlag;
-        reconcile(node, node.props.children, null, false);
+        beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
         return;
       }
 
@@ -1583,7 +1704,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.suspenseState = null;
     node.flags |= HydrationFlag;
-    reconcile(node, node.props.children, null, false);
+    beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
   }
 
   function queueClientRenderedSuspenseError(
@@ -1643,7 +1764,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // configs fail loudly here instead of silently never revealing content.
     requireActivityHydrationHostConfig();
 
-    hasHiddenActivities = true;
+    hasHiddenBoundaries = true;
     state.dehydrated = boundary;
     root.nextHydratableInstance =
       requireHydrationHostConfig().getNextHydratableSibling(boundary);
@@ -2142,23 +2263,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     action: SetStateAction<S>,
     lane: Lane,
   ): void {
-    lane = hiddenActivityLane(fiber, lane);
+    lane = hiddenSubtreeLane(fiber, lane);
     const update: HookUpdate<S> = { action, lane, next: null as never };
     update.next = update;
     queue.pending = mergeQueues(queue.pending, update);
     scheduleFiber(fiber, lane);
   }
 
-  // Updates inside hidden Activity boundaries are downgraded to the
+  // Updates inside hidden boundaries are downgraded to the
   // offscreen lane at schedule time, so normal renders never descend for
   // hidden work and idle renders prerender it. A boundary mid-transition
   // (generations disagree) is treated as visible so updates are never
   // wrongly deferred.
-  function hiddenActivityLane(node: F, lane: Lane): Lane {
-    if (!hasHiddenActivities || lane === OffscreenLane) return lane;
+  function hiddenSubtreeLane(node: F, lane: Lane): Lane {
+    if (!hasHiddenBoundaries || lane === OffscreenLane) return lane;
 
     for (let parent = node.return; parent !== null; parent = parent.return) {
-      if (parent.tag === ActivityTag && parent.activityState?.hidden === true) {
+      if (
+        isHiddenBoundaryTag(parent) &&
+        parent.activityState?.hidden === true
+      ) {
         return OffscreenLane;
       }
     }
@@ -2564,7 +2688,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitRoot(root: R, finishedWork: F): void {
     commitLiveHookInstances(finishedWork.child);
-    if (hasHiddenActivities) armRevealedActivities(finishedWork.child);
+    if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
     commitEffects(finishedWork.child, BeforeLayoutEffect);
     if (root.clearContainerBeforeCommit) {
       requireHydrationHostConfig().clearContainer(root.container);
@@ -2573,7 +2697,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitDeletions(finishedWork);
     commitDataDependencies(finishedWork.child);
     commitMutationEffects(finishedWork.child);
-    if (hasHiddenActivities) commitActivityVisibility(finishedWork.child);
+    if (hasHiddenBoundaries) commitHiddenBoundaryVisibility(finishedWork.child);
     root.current = finishedWork;
     deactivateHydration(root);
     root.hydrationInitialElement = NoHydrationInitialElement;
@@ -2767,7 +2891,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       if ((cursor.flags & AdoptedFlag) === 0) {
-        commitMutationEffects(cursor.child, hidden || isHiddenActivity(cursor));
+        commitMutationEffects(cursor.child, hidden || isHiddenBoundary(cursor));
       }
 
       if (cursor.tag === SuspenseTag && (cursor.flags & HydrationFlag) !== 0) {
@@ -3182,17 +3306,28 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function scheduleFiber(node: F, lane: Lane): void {
     markLanes(node, lane);
+    const root = scheduleParentPath(node.return, lane);
+    const alternateRoot = scheduleParentPath(
+      node.alternate?.return ?? null,
+      lane,
+    );
+    const scheduledRoot = root ?? alternateRoot;
+    if (scheduledRoot === null) return;
 
-    for (let parent = node.return; parent !== null; parent = parent.return) {
+    markRootPending(scheduledRoot, lane);
+    scheduleOrBatchRoot(scheduledRoot);
+  }
+
+  function scheduleParentPath(parent: F | null, lane: Lane): R | null {
+    for (; parent !== null; parent = parent.return) {
       markChildLanes(parent, lane);
 
       if (parent.tag === RootTag) {
-        const root = parent.stateNode as R;
-        markRootPending(root, lane);
-        scheduleOrBatchRoot(root);
-        return;
+        return parent.stateNode as R;
       }
     }
+
+    return null;
   }
 
   function attachPing(root: R, thenable: Thenable, lanes: Lanes): void {
@@ -3271,12 +3406,40 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw PreservedSuspense;
     }
 
+    const currentPrimary = suspensePrimaryFiber(boundary.alternate);
+    if (currentPrimary !== null) {
+      boundary.suspenseState = { kind: "fallback", primaryChild: null };
+      restoreConsumedPendingQueuesForRetry(root);
+      hasHiddenBoundaries = true;
+      const primary = suspensePrimaryWorkInProgress(
+        boundary,
+        currentPrimary,
+        "hidden",
+      );
+      primary.child = cloneSuspendedPrimary(currentPrimary.child, primary);
+      primary.flags |= VisibilityFlag;
+      primary.memoizedProps = primary.props;
+      boundary.child = primary;
+
+      const fallback = suspenseFallbackWorkInProgress(
+        boundary,
+        currentPrimary.sibling,
+        1,
+      );
+      primary.sibling = fallback;
+      return fallback;
+    }
+
+    // There is no committed primary on an initial suspension. Keep the partial
+    // render only as retry input; committing it hidden would publish an
+    // incomplete host tree.
     boundary.suspenseState = {
       kind: "fallback",
-      primaryChild: boundary.child,
+      primaryChild: capturedSuspensePrimaryChild(boundary.child),
     };
-    reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
-    return boundary.child ?? completeUnit(boundary);
+    const fallback = suspenseFallbackWorkInProgress(boundary, null, 0);
+    boundary.child = fallback;
+    return fallback;
   }
 
   function captureErrorBoundary(
@@ -3458,6 +3621,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.contextDependencies = current.contextDependencies;
     next.dataDependenciesDirty = false;
     next.suspenseState = current.suspenseState;
+    next.hiddenState = null;
     next.errorBoundaryState = current.errorBoundaryState;
     next.activityState = current.activityState;
     next.alternate = current;
@@ -3535,6 +3699,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       contextDependencies: null,
       dataDependenciesDirty: false,
       suspenseState: null,
+      hiddenState: null,
       errorBoundaryState: null,
       activityState: null,
     };
@@ -3682,8 +3847,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function isHiddenActivity(node: F): boolean {
-    return node.tag === ActivityTag && activityHidden(node.props);
+  function isHiddenBoundary(node: F): boolean {
+    return (
+      (node.tag === ActivityTag || node.tag === HiddenTag) &&
+      activityHidden(node.props)
+    );
+  }
+
+  function isHiddenBoundaryTag(node: F): boolean {
+    return node.tag === ActivityTag || node.tag === HiddenTag;
   }
 
   function requireActivityHostConfig(): HostConfig<
@@ -3715,17 +3887,27 @@ export function createRenderer<Container, Instance, TextInstance>(
     return activityHostConfig;
   }
 
-  function commitActivityVisibility(node: F | null): void {
+  function commitHiddenBoundaryVisibility(
+    node: F | null,
+    hidden = false,
+  ): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
 
-      if (cursor.tag === ActivityTag && (cursor.flags & VisibilityFlag) !== 0) {
-        const hidden = activityHidden(cursor.props);
+      const boundary = isHiddenBoundaryTag(cursor);
+      const boundaryHidden = boundary && activityHidden(cursor.props);
+
+      if (boundary && (cursor.flags & VisibilityFlag) !== 0) {
+        const effectiveHidden = hidden || boundaryHidden;
         const state = cursor.activityState;
-        if (state !== null) state.hidden = hidden;
-        setActivityVisibility(cursor.child, hidden);
-        if (hidden && cursor.child !== null) abortFiberEffects(cursor.child);
-        if (!hidden && includesSomeLane(cursor.childLanes, OffscreenLane)) {
+        if (state !== null) state.hidden = effectiveHidden;
+        setSubtreeVisibility(cursor.child, effectiveHidden);
+        if (effectiveHidden && cursor.child !== null)
+          abortFiberEffects(cursor.child);
+        if (
+          !effectiveHidden &&
+          includesSomeLane(cursor.childLanes, OffscreenLane)
+        ) {
           // Pending hidden work upgrades to prompt processing on reveal.
           const root = rootOf(cursor);
           markRootPending(root, DefaultLane);
@@ -3734,11 +3916,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
 
-      commitActivityVisibility(cursor.child);
+      commitHiddenBoundaryVisibility(cursor.child, hidden || boundaryHidden);
     }
   }
 
-  function setActivityVisibility(node: F | null, hidden: boolean): void {
+  function setSubtreeVisibility(node: F | null, hidden: boolean): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       setNodeVisibility(cursor, hidden);
     }
@@ -3746,7 +3928,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function setNodeVisibility(cursor: F, hidden: boolean): void {
     // Subtrees hidden by their own boundary keep their visibility.
-    if (isHiddenActivity(cursor)) return;
+    if (isHiddenBoundary(cursor)) return;
 
     if (cursor.tag === HostTag) {
       const activityHost = requireActivityHostConfig();
@@ -3766,7 +3948,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    setActivityVisibility(cursor.child, hidden);
+    setSubtreeVisibility(cursor.child, hidden);
   }
 
   function hideHostFiber(node: F): void {
@@ -3778,12 +3960,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function armRevealedActivities(node: F | null): void {
+  function armRevealedHiddenBoundaries(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
 
       if (
-        cursor.tag === ActivityTag &&
+        isHiddenBoundaryTag(cursor) &&
         (cursor.flags & VisibilityFlag) !== 0 &&
         !activityHidden(cursor.props) &&
         cursor.child !== null
@@ -3791,7 +3973,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         armDeferredEffects(cursor.child);
       }
 
-      armRevealedActivities(cursor.child);
+      armRevealedHiddenBoundaries(cursor.child);
     }
   }
 
@@ -3838,7 +4020,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     // Subscriptions under hidden boundaries are deferred until reveal.
-    if (!isHiddenActivity(node)) commitExternalStores(node.child);
+    if (!isHiddenBoundary(node)) commitExternalStores(node.child);
     commitExternalStores(node.sibling);
   }
 
@@ -3894,7 +4076,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // stay flag-clean and adopted subtrees never expose stale commit state.
     node.flags = NoFlags;
     if (!adopted) {
-      if (isHiddenActivity(node)) clearHiddenSubtreeFlags(node.child);
+      if (isHiddenBoundary(node)) clearHiddenSubtreeFlags(node.child);
       else collectReactiveEffects(root, node.child);
     }
     collectReactiveEffects(root, node.sibling);
@@ -3948,7 +4130,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (const effect of node.effects ?? []) visitor(effect);
 
-    if ((node.flags & AdoptedFlag) === 0 && !isHiddenActivity(node)) {
+    if ((node.flags & AdoptedFlag) === 0 && !isHiddenBoundary(node)) {
       visitEffects(node.child, visitor);
     }
     visitEffects(node.sibling, visitor);
@@ -4050,6 +4232,21 @@ export function createRenderer<Container, Instance, TextInstance>(
       queue.pending =
         queue.pending === null ? pending : mergeQueues(pending, queue.pending);
     }
+  }
+
+  function restoreConsumedPendingQueuesForRetry(root: R): void {
+    for (const consumed of root.consumedPendingQueues) {
+      markHookQueueNoLane(consumed.pending);
+    }
+    restoreConsumedPendingQueues(root);
+  }
+
+  function markHookQueueNoLane(queue: HookUpdate<unknown>): void {
+    let update = queue.next;
+    do {
+      update.lane = NoLane;
+      update = update.next;
+    } while (update !== queue.next);
   }
 }
 
@@ -4494,7 +4691,7 @@ function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
   recordDevtoolsHostFiber(node, id, inspection);
 
   for (let child = node.child; child !== null; child = child.sibling) {
-    children.push(snapshotDevtoolsFiber(child, id, inspection));
+    appendDevtoolsChildSnapshots(child, id, inspection, children);
   }
 
   return {
@@ -4514,6 +4711,22 @@ function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
     componentStack: node.errorBoundaryState?.info.componentStack,
     children,
   };
+}
+
+function appendDevtoolsChildSnapshots<Container, Instance, TextInstance>(
+  node: Fiber<Container, Instance, TextInstance>,
+  parentId: number,
+  inspection: DevtoolsInspectionState,
+  children: FigDevtoolsFiberSnapshot[],
+): void {
+  if (node.tag === HiddenTag) {
+    for (let child = node.child; child !== null; child = child.sibling) {
+      appendDevtoolsChildSnapshots(child, parentId, inspection, children);
+    }
+    return;
+  }
+
+  children.push(snapshotDevtoolsFiber(node, parentId, inspection));
 }
 
 function devtoolsRootId(root: object): number {
@@ -4724,6 +4937,8 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "error-boundary", name: "ErrorBoundary" };
     case ActivityTag:
       return { kind: "activity", name: "Activity" };
+    case HiddenTag:
+      return { kind: "hidden", name: "Hidden" };
     case PortalTag:
       return { kind: "portal", name: "Portal" };
     case ResourcesTag:
