@@ -1,9 +1,15 @@
-import { createElement, type ElementType, Suspense } from "@bgub/fig";
+import {
+  createElement,
+  type ElementType,
+  ErrorBoundary,
+  Suspense,
+} from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { createRscResponse } from "@bgub/fig-server/rsc";
 import {
   DATA_SCRIPT_ID,
+  hasClientReferences,
   ROOT_ELEMENT_ID,
   RSC_PAYLOAD_SCRIPT_ID,
   RSC_SLOT_ATTR,
@@ -58,7 +64,9 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     RSC_PAYLOAD_SCRIPT_ID,
     null,
   );
-  if (rscPayload !== null) mountServerRoute(container, rscPayload, options);
+  if (rscPayload !== null) {
+    mountServerRoute(container, rscPayload, options, router);
+  }
 
   installLinkInterceptor(router);
   installPopStateHandler(router);
@@ -70,9 +78,23 @@ function mountServerRoute(
   container: Element,
   payload: SerializedRscPayload,
   options: StartClientOptions,
+  router: FigRouter,
 ): void {
-  const slot = container.querySelector(`[${RSC_SLOT_ATTR}]`);
+  const slot = findSlot(container, payload.routeId);
   if (slot === null) return;
+
+  if (
+    options.loadClientReference === undefined &&
+    options.resolveClientReference === undefined &&
+    hasClientReferences(payload.rows)
+  ) {
+    throw new Error(
+      `Server route "${payload.routeId}" renders client components, but ` +
+        `hydrateStart() received no client-reference resolver. Pass ` +
+        `loadClientReference from "virtual:fig-start/client-manifest" (the ` +
+        `@bgub/fig-start/vite plugin).`,
+    );
+  }
 
   const response = createRscResponse({
     loadClientReference: options.loadClientReference,
@@ -80,16 +102,49 @@ function mountServerRoute(
   });
   response.processStringChunk(payload.rows);
 
-  // The RSC tree renders in its own root nested in the slot; client references
-  // suspend while their chunks load, so wrap it in Suspense.
-  const root = createRoot(slot);
+  // The RSC tree renders in its own root nested in the slot. Client references
+  // suspend while their chunks load (Suspense); a render/decode error surfaces
+  // via the boundary instead of escaping as a detached uncaught error.
+  const root = createRoot(slot, {
+    onRecoverableError: options.onRecoverableError,
+    onUncaughtError: (error) => {
+      console.error(
+        `[fig-start] server route "${payload.routeId}" render error:`,
+        error,
+      );
+    },
+  });
   const render = (): void => {
     root.render(
-      createElement(Suspense, { fallback: null }, response.getRoot()),
+      createElement(
+        ErrorBoundary,
+        { fallback: createElement("div", { "data-fig-rsc-error": "" }) },
+        createElement(Suspense, { fallback: null }, response.getRoot()),
+      ),
     );
   };
-  response.subscribe(render);
+  const unsubscribeResponse = response.subscribe(render);
   render();
+
+  // Tear the nested root down when the user navigates away from the server
+  // route, so the root, its data store, and the response listener don't leak.
+  const unsubscribeRouter = router.subscribe(() => {
+    const active = router
+      .getState()
+      .matches.some((match) => match.routeId === payload.routeId);
+    if (active) return;
+    unsubscribeRouter();
+    unsubscribeResponse();
+    root.unmount();
+  });
+}
+
+function findSlot(container: Element, routeId: string): Element | null {
+  const escaped =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(routeId)
+      : routeId;
+  return container.querySelector(`[${RSC_SLOT_ATTR}="${escaped}"]`);
 }
 
 function browserHistory(): RouterHistory {

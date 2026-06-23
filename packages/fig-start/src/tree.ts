@@ -87,6 +87,16 @@ export function buildRouteTree(routes: readonly AnyRoute[]): RouteNode {
     urlLenOf.set(node, entry.url.length);
   }
 
+  for (const { node } of created) {
+    if (node.route.options.server === true && node.children.length > 0) {
+      throw new Error(
+        `Server route "${node.id}" (.server.tsx) cannot have child routes — a ` +
+          `server component renders as a single RSC payload and does not nest an ` +
+          `<Outlet>. Make it a leaf route, or use an isomorphic layout.`,
+      );
+    }
+  }
+
   return root;
 
   function findParent(entry: ParsedRoute): RouteNode {

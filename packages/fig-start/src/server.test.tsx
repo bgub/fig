@@ -1,6 +1,7 @@
 import { clientReference, createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  hasClientReferences,
   RSC_PAYLOAD_SCRIPT_ID,
   RSC_SLOT_ATTR,
   ROUTER_STATE_SCRIPT_ID,
@@ -137,5 +138,28 @@ describe("@bgub/fig-start server handler", () => {
     );
     const html = await response.text();
     expect(html).not.toContain(RSC_PAYLOAD_SCRIPT_ID);
+  });
+
+  it("builds the data context once per server-route request", async () => {
+    let calls = 0;
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      context: () => ({ allow: true }),
+      dataContext: () => {
+        calls += 1;
+        return {};
+      },
+      routes,
+    });
+    await handler(new Request("http://localhost/dashboard"));
+    // One context shared by the RSC render and the document render.
+    expect(calls).toBe(1);
+  });
+
+  it("detects client references in an RSC payload", () => {
+    expect(hasClientReferences('{"tag":"client","value":{"id":"x"}}')).toBe(
+      true,
+    );
+    expect(hasClientReferences('{"tag":"model","value":null}')).toBe(false);
   });
 });

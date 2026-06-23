@@ -58,6 +58,16 @@ export function Dashboard() {
     expect(out.code).not.toContain("__figClientRef");
   });
 
+  it("errors on a namespace import of a client module", async () => {
+    await expect(
+      transformServerModule(
+        `import * as Widgets from "./Widget.tsx";\nexport function P(){ return <Widgets.X/>; }`,
+        "/project/src/p.server.tsx",
+        root,
+      ),
+    ).rejects.toThrow(/import \* as/);
+  });
+
   it("derives a stable id from root-relative path + export", () => {
     expect(clientRefId(rootRelative(root, "/project/src/a/B.tsx"), "B")).toBe(
       "/src/a/B.tsx#B",

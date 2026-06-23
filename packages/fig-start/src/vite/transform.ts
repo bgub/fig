@@ -101,7 +101,13 @@ function serverComponentBabelPlugin(state: {
                 ? spec.imported.name
                 : spec.imported.value;
             } else {
-              continue; // namespace imports are unsupported for client refs
+              // Namespace imports (import * as) of a client module can't become a
+              // client reference; fail loudly instead of leaking the import across
+              // the server/client boundary.
+              throw path.buildCodeFrameError(
+                `A .server.tsx cannot "import * as" a client module ("${source}"). ` +
+                  `Import the components by name instead.`,
+              );
             }
 
             const id = clientRefId(specifier, exportName);

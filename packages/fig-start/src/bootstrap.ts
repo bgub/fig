@@ -22,3 +22,9 @@ export interface SerializedRscPayload {
   routeId: string;
   rows: string;
 }
+
+// Whether an RSC payload contains any client references (needs a client-reference
+// resolver to render on the client).
+export function hasClientReferences(rows: string): boolean {
+  return rows.includes('"tag":"client"');
+}

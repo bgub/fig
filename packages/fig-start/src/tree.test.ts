@@ -71,4 +71,14 @@ describe("@bgub/fig-start route matching", () => {
   it("returns null for an unmatched path", () => {
     expect(matchIds("/nope/nope")).toBeNull();
   });
+
+  it("rejects a server route that has child routes", () => {
+    expect(() =>
+      buildRouteTree([
+        createRootRoute(),
+        createFileRoute("/dash")({ server: true }),
+        createFileRoute("/dash/settings")(),
+      ]),
+    ).toThrow(/cannot have child routes/);
+  });
 });

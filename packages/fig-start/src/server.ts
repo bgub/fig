@@ -65,10 +65,13 @@ export function createRequestHandler(
     router.commit(location, result);
     const status = result.status === "notFound" ? 404 : 200;
     const nonce = options.nonce?.(request);
+    // Build the per-request data context once and share it across both the RSC
+    // render and the document render (a side-effecting factory must run once).
+    const dataContext = options.dataContext?.(request);
 
     // A `.server.tsx` leaf renders through the RSC stream; its payload is inlined
     // on the document and the SSR tree leaves an empty slot for it.
-    const rscPayload = await renderServerRoutePayload(result, options, request);
+    const rscPayload = await renderServerRoutePayload(result, dataContext);
 
     const document = createElement(
       "html",
@@ -95,7 +98,7 @@ export function createRequestHandler(
     );
 
     const render = renderToDocumentStream(document, {
-      dataContext: options.dataContext?.(request),
+      dataContext,
       nonce,
       onError: () => ({ digest: "fig-start-error" }),
     });
@@ -288,8 +291,7 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
 
 async function renderServerRoutePayload(
   result: LoadResult,
-  options: StartHandlerOptions,
-  request: Request,
+  dataContext: unknown,
 ): Promise<SerializedRscPayload | undefined> {
   if (result.status !== "match") return undefined;
   const leaf = result.matches[result.matches.length - 1];
@@ -307,10 +309,35 @@ async function renderServerRoutePayload(
       loaderData: leaf.loaderData,
       params: leaf.params,
     }),
-    { dataContext: options.dataContext?.(request) },
+    { dataContext },
   );
   await rsc.allReady;
-  return { routeId: leaf.routeId, rows: await drainStream(rsc.stream) };
+  const rows = await drainStream(rsc.stream);
+  reportServerRouteErrors(leaf.routeId, rows);
+  return { routeId: leaf.routeId, rows };
+}
+
+// A throw inside a server component becomes an RSC "error" row (it doesn't reject
+// allReady), so the request would otherwise return 200 with no server log. Surface
+// it; the client error boundary renders it on its side.
+function reportServerRouteErrors(routeId: string, rows: string): void {
+  if (!rows.includes('"tag":"error"')) return;
+  for (const line of rows.split("\n")) {
+    if (line.length === 0) continue;
+    let row: { tag?: string; value?: { message?: string } };
+    try {
+      row = JSON.parse(line) as typeof row;
+    } catch {
+      continue;
+    }
+    if (row.tag === "error") {
+      console.error(
+        `[fig-start] server route "${routeId}" failed to render: ${
+          row.value?.message ?? "unknown error"
+        }`,
+      );
+    }
+  }
 }
 
 async function drainStream(
