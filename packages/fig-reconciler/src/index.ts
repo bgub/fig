@@ -293,6 +293,11 @@ const AdoptedFlag = 1 << 4;
 // An Activity boundary whose visibility changes this commit (or mounts
 // hidden); the mutation phase applies host hiding and effect deferral.
 const VisibilityFlag = 1 << 5;
+// A host fiber that assembled its children at complete-time (appendInitialChild
+// path), so commit inserts the whole subtree once instead of placing children
+// individually. Recorded at complete-time because commit mutates the underlying
+// signal (committedProps) before the placement walk reads it.
+const AssembledFlag = 1 << 6;
 type Flag = number;
 
 const ReactiveEffect = 0;
@@ -2301,6 +2306,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (!setInitialHostTextContent(node)) {
         appendAllHostChildren(node.stateNode as Instance, node.child);
       }
+      if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;
     }
 
     node.childLanes = childLanes;
@@ -2308,9 +2314,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isNewHostInstance(node: F): boolean {
+    // A host instance needs initial assembly until it has actually committed —
+    // tracked by committedProps, not by alternate. A reused fiber from a
+    // never-committed render (e.g. a Suspense primary subtree captured when a
+    // child suspended, then revealed) has an alternate but null committedProps:
+    // its host children were never appended into it, so it must assemble like a
+    // fresh instance or its non-suspending descendants are dropped on reveal.
     return (
       node.tag === HostTag &&
-      node.alternate === null &&
+      node.committedProps === null &&
       (node.flags & HydrationFlag) === 0
     );
   }
@@ -2789,7 +2801,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isPreassembledHostSubtree(node: F): boolean {
-    return isNewHostInstance(node) && host.appendInitialChild !== undefined;
+    return (node.flags & AssembledFlag) !== 0;
   }
 
   function placementRunTail(node: F): F {

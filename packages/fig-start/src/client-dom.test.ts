@@ -26,7 +26,13 @@ const routes = [
   }),
   createFileRoute("/dash")({
     server: true,
-    component: () => createElement("section", null, createElement(Island, {})),
+    component: () =>
+      createElement(
+        "section",
+        null,
+        createElement("p", { class: "static" }, "static markup"),
+        createElement(Island, {}),
+      ),
   }),
 ];
 
@@ -69,6 +75,10 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
 
     // The island resolved through the resolver and client-rendered into the slot.
     expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+
+    // Static markup rendered beside the (async, suspending) island survives the
+    // Suspense reveal — the sibling-drop bug this harness originally caught.
+    expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
 
     // Navigating away tears the nested root down — the island is gone, no leak/stale.
     await router.navigate("/");

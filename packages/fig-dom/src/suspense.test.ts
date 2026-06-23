@@ -533,3 +533,213 @@ describe("@bgub/fig-dom suspense", () => {
     ]);
   });
 });
+
+describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () => {
+  function makeSlow(gate: Promise<string>) {
+    return function Slow() {
+      return readPromise(gate);
+    };
+  }
+
+  it("keeps a host sibling rendered before the suspending child", async () => {
+    const gate = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(
+            "div",
+            null,
+            createElement("p", null, "P"),
+            createElement(makeSlow(gate.promise), null),
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("DONE");
+    await delay();
+
+    expect(container.textContent).toBe("PDONE");
+  });
+
+  it("keeps a host sibling rendered after the suspending child", async () => {
+    const gate = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(
+            "div",
+            null,
+            createElement(makeSlow(gate.promise), null),
+            createElement("p", null, "P"),
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("DONE");
+    await delay();
+
+    expect(container.textContent).toBe("DONEP");
+  });
+
+  it("keeps multiple non-suspending siblings around a suspending child", async () => {
+    const gate = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(
+            "div",
+            null,
+            createElement("p", null, "A"),
+            createElement(makeSlow(gate.promise), null),
+            createElement("p", null, "B"),
+            createElement("span", null, "C"),
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("X");
+    await delay();
+
+    expect(container.textContent).toBe("AXBC");
+  });
+
+  it("assembles nested host wrappers around a deeper suspending child", async () => {
+    const gate = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(
+            "div",
+            null,
+            createElement(
+              "section",
+              null,
+              createElement("p", null, "P"),
+              createElement(makeSlow(gate.promise), null),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("DONE");
+    await delay();
+
+    const div = container.childNodes[0] as FakeElement;
+    const section = div.childNodes[0] as FakeElement;
+    // The whole nested subtree is assembled and inserted once on reveal.
+    expect(section.childNodes.map((child) => child.textContent)).toEqual([
+      "P",
+      "DONE",
+    ]);
+    expect(container.textContent).toBe("PDONE");
+  });
+
+  it("keeps a non-suspending component sibling", async () => {
+    const gate = deferred<string>();
+
+    function Stable() {
+      return createElement("p", null, "stable");
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(
+            "div",
+            null,
+            createElement(Stable, null),
+            createElement(makeSlow(gate.promise), null),
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("DONE");
+    await delay();
+
+    expect(container.textContent).toBe("stableDONE");
+  });
+
+  // KNOWN FAILURE (distinct, pre-existing bug): when a primary subtree that has
+  // ALREADY committed is deleted to show the fallback and then revealed again,
+  // the reused host wrapper is re-inserted with its stale committed children
+  // still inside it (the boundary deletion detaches the wrapper but does not
+  // clear its DOM), so the previous reveal's content lingers (e.g. "PONETWO").
+  // This is a different failure mode from the sibling-drop-on-first-reveal bug
+  // fixed here (stale retention vs. dropped siblings) and is tracked separately.
+  it.fails("keeps siblings across a re-suspension after a committed reveal", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const first = deferred<string>();
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement("p", null, "P"),
+          createElement(makeSlow(gate), null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    expect(container.textContent).toBe("load");
+
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("PONE");
+
+    // Update the suspending child to a fresh pending promise: it re-suspends,
+    // the boundary shows the fallback again, then reveals a second time.
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    expect(container.textContent).toBe("load");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("PTWO");
+  });
+});
