@@ -23,6 +23,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: 4.1.5
         version: 4.1.5(vitest@4.1.6)
+      happy-dom:
+        specifier: ^15.11.7
+        version: 15.11.7
       portless:
         specifier: ^0.14.0
         version: 0.14.0
@@ -34,7 +37,7 @@ importers:
         version: 5.9.3
       vite-plus:
         specifier: 'catalog:'
-        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
+        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
 
   apps/demo-client:
     dependencies:
@@ -178,7 +181,7 @@ importers:
         version: 20.19.41
       vite-plus:
         specifier: 'catalog:'
-        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
+        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
 
   packages/fig: {}
 
@@ -1478,6 +1481,10 @@ packages:
   electron-to-chromium@1.5.353:
     resolution: {integrity: sha512-kOrWphBi8TOZyiJZqsgqIle0lw+tzmnQK83pV9dZUd01Nm2POECSyFQMAuarzZdYqQW7FH9RaYOuaRo3h+bQ3w==}
 
+  entities@4.5.0:
+    resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
+    engines: {node: '>=0.12'}
+
   es-module-lexer@1.7.0:
     resolution: {integrity: sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA==}
 
@@ -1546,6 +1553,10 @@ packages:
   globby@11.1.0:
     resolution: {integrity: sha512-jhIXaOzy1sb8IyocaruWSn1TjmnBVs8Ayhcy83rmxNJ8q2uWKCAj3CnJY+KpGSXCueAPc0i05kVvVKtP1t9S3g==}
     engines: {node: '>=10'}
+
+  happy-dom@15.11.7:
+    resolution: {integrity: sha512-KyrFvnl+J9US63TEzwoiJOQzZBJY7KgBushJA8X61DMbNsH+2ONkDuLDnCnwUiPTF42tLoEmrPyoqbenVA5zrg==}
+    engines: {node: '>=18.0.0'}
 
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
@@ -1988,6 +1999,14 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  webidl-conversions@7.0.0:
+    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
+    engines: {node: '>=12'}
+
+  whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
 
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
@@ -2732,7 +2751,7 @@ snapshots:
       magicast: 0.5.2
       obug: 2.1.1
       tinyrainbow: 3.1.0
-      vitest: 4.1.6(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
+      vitest: 4.1.6(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(happy-dom@15.11.7)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -2808,7 +2827,7 @@ snapshots:
   '@voidzero-dev/vite-plus-linux-x64-musl@0.1.20':
     optional: true
 
-  '@voidzero-dev/vite-plus-test@0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))':
+  '@voidzero-dev/vite-plus-test@0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/chai': 5.2.3
@@ -2827,6 +2846,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 20.19.41
       '@vitest/coverage-istanbul': 4.1.5(vitest@4.1.6)
+      happy-dom: 15.11.7
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@tsdown/css'
@@ -2912,6 +2932,8 @@ snapshots:
       path-type: 4.0.0
 
   electron-to-chromium@1.5.353: {}
+
+  entities@4.5.0: {}
 
   es-module-lexer@1.7.0: {}
 
@@ -3019,6 +3041,12 @@ snapshots:
       ignore: 5.3.2
       merge2: 1.4.1
       slash: 3.0.0
+
+  happy-dom@15.11.7:
+    dependencies:
+      entities: 4.5.0
+      webidl-conversions: 7.0.0
+      whatwg-mimetype: 3.0.0
 
   has-flag@4.0.0: {}
 
@@ -3360,11 +3388,11 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite-plus@0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0)):
+  vite-plus@0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0)):
     dependencies:
       '@oxc-project/types': 0.127.0
       '@voidzero-dev/vite-plus-core': 0.1.20(@types/node@20.19.41)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)
-      '@voidzero-dev/vite-plus-test': 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
+      '@voidzero-dev/vite-plus-test': 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
       oxfmt: 0.46.0
       oxlint: 1.61.0(oxlint-tsgolint@0.22.0)
       oxlint-tsgolint: 0.22.0
@@ -3421,7 +3449,7 @@ snapshots:
       jiti: 2.6.1
       lightningcss: 1.32.0
 
-  vitest@4.1.6(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0)):
+  vitest@4.1.6(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(happy-dom@15.11.7)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0)):
     dependencies:
       '@vitest/expect': 4.1.6
       '@vitest/mocker': 4.1.6(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
@@ -3446,8 +3474,13 @@ snapshots:
     optionalDependencies:
       '@types/node': 20.19.41
       '@vitest/coverage-istanbul': 4.1.5(vitest@4.1.6)
+      happy-dom: 15.11.7
     transitivePeerDependencies:
       - msw
+
+  webidl-conversions@7.0.0: {}
+
+  whatwg-mimetype@3.0.0: {}
 
   why-is-node-running@2.3.0:
     dependencies:
