@@ -155,6 +155,31 @@ importers:
         specifier: ^20.19.0
         version: 20.19.41
 
+  apps/demo-start-rsc:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../../packages/fig-data
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../../packages/fig-server
+      '@bgub/fig-start':
+        specifier: workspace:*
+        version: link:../../packages/fig-start
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.41
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
+
   packages/fig: {}
 
   packages/fig-data:
@@ -218,6 +243,12 @@ importers:
 
   packages/fig-start:
     dependencies:
+      '@babel/core':
+        specifier: ^7.25.0
+        version: 7.29.0
+      '@babel/preset-typescript':
+        specifier: ^7.25.0
+        version: 7.29.7(@babel/core@7.29.0)
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
@@ -231,6 +262,9 @@ importers:
         specifier: workspace:*
         version: link:../fig-server
     devDependencies:
+      '@types/babel__core':
+        specifier: ^7.20.5
+        version: 7.20.5
       '@types/node':
         specifier: ^20.19.0
         version: 20.19.41

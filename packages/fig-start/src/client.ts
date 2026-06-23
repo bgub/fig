@@ -1,11 +1,15 @@
-import { createElement } from "@bgub/fig";
+import { createElement, type ElementType, Suspense } from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
-import { hydrateRoot } from "@bgub/fig-dom";
+import { createRoot, hydrateRoot } from "@bgub/fig-dom";
+import { createRscResponse } from "@bgub/fig-server/rsc";
 import {
   DATA_SCRIPT_ID,
   ROOT_ELEMENT_ID,
+  RSC_PAYLOAD_SCRIPT_ID,
+  RSC_SLOT_ATTR,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedRouterState,
+  type SerializedRscPayload,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
@@ -14,7 +18,11 @@ import type { AnyRoute } from "./route.ts";
 export interface StartClientOptions {
   container?: Element | null;
   context?: unknown;
+  // Resolve a server route's client-reference ids back to components. With the
+  // @bgub/fig-start/vite plugin, pass the generated manifest's loadClientReference.
+  loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
   onRecoverableError?: (error: unknown) => void;
+  resolveClientReference?: (metadata: { id: string }) => ElementType;
   routes: readonly AnyRoute[];
 }
 
@@ -44,10 +52,44 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     onRecoverableError: options.onRecoverableError,
   });
 
+  // If the matched route was a `.server.tsx`, the document carries its RSC
+  // payload; mount it into the slot the SSR'd layout left behind.
+  const rscPayload = readJson<SerializedRscPayload | null>(
+    RSC_PAYLOAD_SCRIPT_ID,
+    null,
+  );
+  if (rscPayload !== null) mountServerRoute(container, rscPayload, options);
+
   installLinkInterceptor(router);
   installPopStateHandler(router);
 
   return router;
+}
+
+function mountServerRoute(
+  container: Element,
+  payload: SerializedRscPayload,
+  options: StartClientOptions,
+): void {
+  const slot = container.querySelector(`[${RSC_SLOT_ATTR}]`);
+  if (slot === null) return;
+
+  const response = createRscResponse({
+    loadClientReference: options.loadClientReference,
+    resolveClientReference: options.resolveClientReference,
+  });
+  response.processStringChunk(payload.rows);
+
+  // The RSC tree renders in its own root nested in the slot; client references
+  // suspend while their chunks load, so wrap it in Suspense.
+  const root = createRoot(slot);
+  const render = (): void => {
+    root.render(
+      createElement(Suspense, { fallback: null }, response.getRoot()),
+    );
+  };
+  response.subscribe(render);
+  render();
 }
 
 function browserHistory(): RouterHistory {

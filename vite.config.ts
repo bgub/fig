@@ -22,6 +22,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
   ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
   ["@bgub/fig-start/client", "packages/fig-start/src/client.ts"],
+  ["@bgub/fig-start/vite", "packages/fig-start/src/vite/index.ts"],
   ["@bgub/fig-start", "packages/fig-start/src/index.ts"],
   ["@bgub/fig", "packages/fig/src/index.ts"],
 ] as const;
@@ -53,6 +54,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/index.ts",
     "./src/server.ts",
     "./src/client.ts",
+    "./src/vite/index.ts",
   ],
 };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);

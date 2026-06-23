@@ -1,12 +1,20 @@
-import { createElement, type FigNode, Fragment } from "@bgub/fig";
+import {
+  createElement,
+  type ElementType,
+  type FigNode,
+  Fragment,
+} from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
+import { renderToRscStream } from "@bgub/fig-server/rsc";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
   ROOT_ELEMENT_ID,
+  RSC_PAYLOAD_SCRIPT_ID,
   ROUTER_STATE_SCRIPT_ID,
+  type SerializedRscPayload,
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
@@ -58,6 +66,10 @@ export function createRequestHandler(
     const status = result.status === "notFound" ? 404 : 200;
     const nonce = options.nonce?.(request);
 
+    // A `.server.tsx` leaf renders through the RSC stream; its payload is inlined
+    // on the document and the SSR tree leaves an empty slot for it.
+    const rscPayload = await renderServerRoutePayload(result, options, request);
+
     const document = createElement(
       "html",
       { lang: options.htmlLang ?? "en" },
@@ -107,6 +119,7 @@ export function createRequestHandler(
       location: location.href,
       loaderData: collectLoaderData(result),
       nonce,
+      rsc: rscPayload,
     });
 
     return new Response(injectBeforeBodyClose(render.stream, bootstrap), {
@@ -273,12 +286,56 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
   return loaderData;
 }
 
+async function renderServerRoutePayload(
+  result: LoadResult,
+  options: StartHandlerOptions,
+  request: Request,
+): Promise<SerializedRscPayload | undefined> {
+  if (result.status !== "match") return undefined;
+  const leaf = result.matches[result.matches.length - 1];
+  if (leaf === undefined || leaf.node.route.options.server !== true) {
+    return undefined;
+  }
+
+  const Component = leaf.node.route.options.component;
+  if (Component === undefined) return undefined;
+
+  // Server route components receive { params, loaderData } as props (they cannot
+  // use router hooks — they render in an isolated RSC pass).
+  const rsc = renderToRscStream(
+    createElement(Component as ElementType, {
+      loaderData: leaf.loaderData,
+      params: leaf.params,
+    }),
+    { dataContext: options.dataContext?.(request) },
+  );
+  await rsc.allReady;
+  return { routeId: leaf.routeId, rows: await drainStream(rsc.stream) };
+}
+
+async function drainStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let output = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      output += decoder.decode();
+      return output;
+    }
+    output += decoder.decode(value, { stream: true });
+  }
+}
+
 function renderBootstrap(input: {
   clientEntry: string;
   dataEntries: readonly FigDataHydrationEntry[];
   location: string;
   loaderData: Record<string, unknown>;
   nonce: string | undefined;
+  rsc: SerializedRscPayload | undefined;
 }): string {
   const state: SerializedRouterState = {
     href: input.location,
@@ -287,6 +344,13 @@ function renderBootstrap(input: {
   const nonceAttr =
     input.nonce === undefined ? "" : ` nonce="${escapeAttribute(input.nonce)}"`;
 
+  const rscScript =
+    input.rsc === undefined
+      ? ""
+      : `<script id="${RSC_PAYLOAD_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
+          input.rsc,
+        )}</script>`;
+
   return [
     `<script id="${ROUTER_STATE_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       state,
@@ -294,6 +358,7 @@ function renderBootstrap(input: {
     `<script id="${DATA_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       input.dataEntries,
     )}</script>`,
+    rscScript,
     `<script type="module"${nonceAttr} src="${escapeAttribute(
       input.clientEntry,
     )}"></script>`,

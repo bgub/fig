@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@bgub/fig",
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts"]
+}

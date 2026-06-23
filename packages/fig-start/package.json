@@ -17,6 +17,10 @@
     "./client": {
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
+    },
+    "./vite": {
+      "import": "./dist/vite/index.js",
+      "types": "./dist/vite/index.d.ts"
     }
   },
   "types": "./dist/index.d.ts",
@@ -40,12 +44,15 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-typescript": "^7.25.0",
     "@bgub/fig": "workspace:*",
     "@bgub/fig-data": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*"
   },
   "devDependencies": {
+    "@types/babel__core": "^7.20.5",
     "@types/node": "^20.19.0"
   }
 }

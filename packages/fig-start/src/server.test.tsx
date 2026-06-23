@@ -1,10 +1,28 @@
-import { createElement, type FigNode } from "@bgub/fig";
+import { clientReference, createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { ROUTER_STATE_SCRIPT_ID } from "./bootstrap.ts";
+import {
+  RSC_PAYLOAD_SCRIPT_ID,
+  RSC_SLOT_ATTR,
+  ROUTER_STATE_SCRIPT_ID,
+} from "./bootstrap.ts";
 import { Outlet } from "./components.tsx";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRequestHandler } from "./server.ts";
+
+// A manually-declared client reference (the @bgub/fig-start/vite plugin will
+// generate these from `.tsx` imports inside `.server.tsx`).
+const islandId = "test/Island.tsx#Island";
+const Island = clientReference({
+  id: islandId,
+  load: () => Promise.resolve({}),
+});
+
+const dashboardRoute = createFileRoute("/dashboard")({
+  server: true,
+  component: () =>
+    createElement("section", null, "server markup ", createElement(Island, {})),
+});
 
 const postRoute = createFileRoute("/posts/$postId")({
   loader: ({ params }) => ({ id: params.postId }),
@@ -39,6 +57,7 @@ const routes = [
     component: () => createElement("h1", null, "Secret"),
   }),
   postRoute,
+  dashboardRoute,
 ];
 
 function handlerFor(allow: boolean) {
@@ -95,5 +114,28 @@ describe("@bgub/fig-start server handler", () => {
     const html = await response.text();
     expect(response.status).toBe(404);
     expect(html).toContain("Nothing here");
+  });
+
+  it("inlines an RSC payload + empty slot for a .server.tsx route", async () => {
+    const response = await handlerFor(true)(
+      new Request("http://localhost/dashboard"),
+    );
+    const html = await response.text();
+
+    // SSR leaves an empty slot in the isomorphic layout (the server component
+    // is not rendered into the document — it has client refs that can't SSR).
+    expect(html).toContain(`${RSC_SLOT_ATTR}="/dashboard"></div>`);
+    // The RSC payload is inlined, carrying a client row for the island.
+    expect(html).toContain(RSC_PAYLOAD_SCRIPT_ID);
+    expect(html).toContain(islandId);
+    expect(html).toContain('"routeId":"/dashboard"');
+  });
+
+  it("omits the RSC payload for ordinary isomorphic routes", async () => {
+    const response = await handlerFor(true)(
+      new Request("http://localhost/about"),
+    );
+    const html = await response.text();
+    expect(html).not.toContain(RSC_PAYLOAD_SCRIPT_ID);
   });
 });
