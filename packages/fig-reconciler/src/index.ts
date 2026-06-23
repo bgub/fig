@@ -1507,6 +1507,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    // The captured primary's host DOM is never in the live tree once the
+    // fallback shows — committed primaries are deleted, and a never-committed
+    // primary was never attached. So force every captured host node to
+    // re-assemble on reveal (clearing any children left in a reused instance),
+    // while the captured fibers still seed hook state/effects for the reconcile
+    // below — that's what keeps component state across a re-suspension.
+    markCapturedHostsForReassembly(previousSuspenseState.primaryChild);
     reconcile(
       node,
       node.props.children,
@@ -1514,6 +1521,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       true,
     );
     appendDeletions(node, node.alternate?.child ?? null);
+  }
+
+  function markCapturedHostsForReassembly(node: F | null): void {
+    for (let child = node; child !== null; child = child.sibling) {
+      // Force every host node to re-assemble on reveal (committedProps null →
+      // isNewHostInstance). A previously-committed node's stateNode may still
+      // hold stale children (its DOM was detached, not cleared, when the
+      // fallback showed); re-assembly clears it before re-appending.
+      if (isHost(child)) child.committedProps = null;
+      markCapturedHostsForReassembly(child.child);
+    }
   }
 
   function tryDehydrateSuspenseBoundary(node: F): boolean {
@@ -2304,6 +2322,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (isNewHostInstance(node)) {
       finalizeInitialHostInstance(node);
       if (!setInitialHostTextContent(node)) {
+        // A reused instance (re-assembled on Suspense reveal) may still hold
+        // stale children from before the fallback; clear before re-appending.
+        // Gated on a reused node (alternate) with child fibers, so fresh mounts
+        // and content set via props (innerHTML/textarea) are left untouched.
+        if (node.alternate !== null && node.child !== null) {
+          host.setTextContent?.(node.stateNode as Instance, "");
+        }
         appendAllHostChildren(node.stateNode as Instance, node.child);
       }
       if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;

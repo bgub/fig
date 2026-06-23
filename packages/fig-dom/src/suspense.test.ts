@@ -694,14 +694,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("stableDONE");
   });
 
-  // KNOWN FAILURE (distinct, pre-existing bug): when a primary subtree that has
-  // ALREADY committed is deleted to show the fallback and then revealed again,
-  // the reused host wrapper is re-inserted with its stale committed children
-  // still inside it (the boundary deletion detaches the wrapper but does not
-  // clear its DOM), so the previous reveal's content lingers (e.g. "PONETWO").
-  // This is a different failure mode from the sibling-drop-on-first-reveal bug
-  // fixed here (stale retention vs. dropped siblings) and is tracked separately.
-  it.fails("keeps siblings across a re-suspension after a committed reveal", async () => {
+  it("keeps siblings across a re-suspension after a committed reveal", async () => {
     let setGate: ((value: Promise<string>) => void) | null = null;
     const first = deferred<string>();
 
@@ -741,5 +734,104 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     second.resolve("TWO");
     await delay();
     expect(container.textContent).toBe("PTWO");
+  });
+
+  it("clears stale nested host wrappers across a re-suspension", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const first = deferred<string>();
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement(
+            "section",
+            null,
+            createElement("p", null, "P"),
+            createElement(makeSlow(gate), null),
+          ),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("PONE");
+
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    expect(container.textContent).toBe("load");
+
+    second.resolve("TWO");
+    await delay();
+    // The deeper <section> wrapper is also rebuilt cleanly, with no stale "ONE".
+    const div = container.childNodes[0] as FakeElement;
+    const section = div.childNodes[0] as FakeElement;
+    expect(section.childNodes.map((child) => child.textContent)).toEqual([
+      "P",
+      "TWO",
+    ]);
+  });
+
+  it("preserves sibling component state across a re-suspension", async () => {
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    let increment: (() => void) | null = null;
+    const first = deferred<string>();
+
+    function Counter() {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("p", null, count);
+    }
+
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement(Counter, null),
+          createElement(makeSlow(gate), null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("0ONE");
+
+    // Bump the sibling's state while content is revealed.
+    flushSync(() => increment?.());
+    expect(container.textContent).toBe("1ONE");
+
+    // Re-suspend and reveal: the suspending child rebuilds, but the sibling
+    // Counter keeps its committed state (its fiber is reused, not rebuilt).
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    expect(container.textContent).toBe("load");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("1TWO");
   });
 });
