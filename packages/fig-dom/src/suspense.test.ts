@@ -1026,4 +1026,64 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     button.dispatch("click");
     expect(clicks).toBe(2);
   });
+
+  it("applies an update dispatched into the hidden re-suspended primary on reveal", async () => {
+    let counterSet: ((value: number) => void) | null = null;
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const first = deferred<string>();
+
+    function Counter() {
+      const [count, set] = useState(0);
+      counterSet = set;
+      return createElement("span", null, `c${count}`);
+    }
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+    function App({ initial }: { initial: Promise<string> }) {
+      const [gate, set] = useState(initial);
+      setGate = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(
+          "div",
+          null,
+          createElement(Counter, null),
+          createElement(Slow, { gate }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    first.resolve("A");
+    await delay();
+    expect(container.textContent).toBe("c0A");
+
+    // Re-suspend: the committed primary is kept hidden, fallback shows.
+    const second = deferred<string>();
+    flushSync(() => setGate?.(second.promise));
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(fallback.textContent).toBe("load");
+
+    // Dispatch a state update to a component INSIDE the hidden primary. This
+    // must NOT hang the scheduler (the update is downgraded to the offscreen
+    // lane; it cannot make progress until the boundary reveals).
+    flushSync(() => counterSet?.(5));
+    await delay();
+    // Still suspended — fallback stays, primary stays hidden, no busy loop.
+    expect(fallback.textContent).toBe("load");
+    expect(display(primary)).toBe("none");
+
+    // Reveal: the parked update is applied to the now-visible primary.
+    second.resolve("B");
+    await delay();
+    expect(container.textContent).toBe("c5B");
+  });
 });

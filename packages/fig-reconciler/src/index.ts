@@ -1647,6 +1647,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       clone.return = parent;
       clone.child = cloneSuspendedPrimary(current.child, clone);
       clone.sibling = null;
+      // The cloned primary is committed hidden while the boundary stays
+      // suspended; it has no schedulable work. Any pending update inside it is
+      // parked in its hook queue (restored as NoLane) and applied when the
+      // suspense ping retries the reveal — clearing the lanes here keeps a
+      // downgraded (OffscreenLane) update from busy-looping the scheduler via
+      // the post-commit "let idle retries proceed" re-mark.
+      clone.lanes = NoLanes;
+      clone.childLanes = NoLanes;
       if (previous === null) first = clone;
       else previous.sibling = clone;
       previous = clone;
@@ -3419,6 +3427,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       primary.child = cloneSuspendedPrimary(currentPrimary.child, primary);
       primary.flags |= VisibilityFlag;
       primary.memoizedProps = primary.props;
+      // The hidden primary is committed but not begun/completed this pass, so
+      // its lanes are not recomputed — clear them (and the boundary will not see
+      // OffscreenLane work blocked behind the still-suspended boundary).
+      primary.lanes = NoLanes;
+      primary.childLanes = NoLanes;
       boundary.child = primary;
 
       const fallback = suspenseFallbackWorkInProgress(
