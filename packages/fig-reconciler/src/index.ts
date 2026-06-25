@@ -1536,6 +1536,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     const currentPrimary = suspensePrimaryFiber(node.alternate);
+    if (currentPrimary !== null) {
+      // Reveal of a re-suspended boundary: the committed primary was kept hidden
+      // and its lanes were cleared (so blocked offscreen work could not busy-loop
+      // the scheduler while suspended). Updates dispatched during the fallback
+      // were parked in their hook queues. Mark the kept-hidden subtree with the
+      // current render lanes so it re-renders instead of bailing out and adopting
+      // the frozen clone — that re-render is what applies the parked updates.
+      markSubtreeLanes(currentPrimary.child, rootOf(node).renderLanes);
+    }
     beginSuspensePrimary(
       node,
       currentPrimary,
@@ -1543,6 +1552,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       previousSuspenseState.primaryChild,
     );
     appendDeletions(node, suspenseFallbackFiber(node.alternate));
+  }
+
+  function markSubtreeLanes(node: F | null, lanes: Lanes): void {
+    for (let child = node; child !== null; child = child.sibling) {
+      child.lanes = mergeLanes(child.lanes, lanes);
+      child.childLanes = mergeLanes(child.childLanes, lanes);
+      markSubtreeLanes(child.child, lanes);
+    }
   }
 
   function beginSuspensePrimary(

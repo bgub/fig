@@ -1086,4 +1086,56 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     await delay();
     expect(container.textContent).toBe("c5B");
   });
+
+  it("reveals the new state when re-suspension is driven from inside the boundary", async () => {
+    let setInner:
+      | ((value: { promise: Promise<string>; label: string }) => void)
+      | null = null;
+    const first = deferred<string>();
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+    function Inner({ initial }: { initial: Promise<string> }) {
+      const [state, set] = useState({ promise: initial, label: "ONE" });
+      setInner = set;
+      return createElement(
+        "div",
+        null,
+        createElement("span", null, state.label),
+        createElement(Slow, { gate: state.promise }),
+      );
+    }
+    function App({ initial }: { initial: Promise<string> }) {
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        createElement(Inner, { initial }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise })),
+    );
+    first.resolve("X");
+    await delay();
+    expect(container.textContent).toBe("ONEX");
+
+    // setState INSIDE the boundary changes BOTH the suspending promise and the
+    // rendered label, with no parent re-render (the Suspense children element is
+    // unchanged). The committed primary is kept hidden; the update is parked.
+    const second = deferred<string>();
+    flushSync(() => setInner?.({ promise: second.promise, label: "TWO" }));
+    const [primary, fallback] = container.childNodes as FakeElement[];
+    expect(display(primary)).toBe("none");
+    expect(fallback.textContent).toBe("load");
+
+    // On reveal the kept-hidden primary must re-render and apply the parked
+    // update — not adopt the stale committed content (regression: was "ONEX").
+    second.resolve("Y");
+    await delay();
+    expect(container.textContent).toBe("TWOY");
+  });
 });
