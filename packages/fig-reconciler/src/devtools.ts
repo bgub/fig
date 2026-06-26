@@ -19,8 +19,7 @@ export type FigDevtoolsFiberKind =
   | "suspense"
   | "error-boundary"
   | "portal"
-  | "activity"
-  | "hidden";
+  | "activity";
 
 export type FigDevtoolsHookKind =
   | "state"

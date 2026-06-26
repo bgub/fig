@@ -269,7 +269,6 @@ const ErrorBoundaryTag = 7;
 const PortalTag = 8;
 const ResourcesTag = 9;
 const ActivityTag = 10;
-const HiddenTag = 11;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -281,8 +280,7 @@ type Tag =
   | typeof ErrorBoundaryTag
   | typeof PortalTag
   | typeof ResourcesTag
-  | typeof ActivityTag
-  | typeof HiddenTag;
+  | typeof ActivityTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -417,8 +415,6 @@ type SuspenseState<Container, Instance, TextInstance> =
 
 interface HiddenState<Container, Instance, TextInstance> {
   currentFirstChild: Fiber<Container, Instance, TextInstance> | null;
-  forcePlacement: boolean;
-  armOnReveal: boolean;
 }
 
 interface ErrorBoundaryState {
@@ -457,6 +453,7 @@ interface Fiber<Container, Instance, TextInstance> {
   contextDependencies: FigContext<unknown>[] | null;
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
+  suspenseQueueStart?: number;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
@@ -1151,13 +1148,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    if (node.tag === ActivityTag) {
-      beginActivity(root, node);
+    if (node.tag === ActivityTag && node.type === null) {
+      beginHiddenBoundary(root, node);
       return;
     }
 
-    if (node.tag === HiddenTag) {
-      beginHiddenBoundary(root, node);
+    if (node.tag === ActivityTag) {
+      beginActivity(root, node);
       return;
     }
 
@@ -1211,7 +1208,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (hidden !== previousHidden) {
       node.flags |= VisibilityFlag;
     }
-    if (hiddenState?.armOnReveal === true) {
+    if (!hidden && hiddenState?.currentFirstChild != null) {
       node.flags |= VisibilityFlag;
     }
 
@@ -1231,7 +1228,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       node,
       node.props.children,
       hiddenState?.currentFirstChild ?? node.alternate?.child ?? null,
-      hiddenState?.forcePlacement === true,
+      hiddenState?.currentFirstChild != null && node.alternate === null,
     );
     node.hiddenState = null;
   }
@@ -1515,6 +1512,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
+    const root = rootOf(node);
     const previousSuspenseState = node.alternate?.suspenseState ?? null;
 
     node.suspenseState = null;
@@ -1530,8 +1528,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (tryDehydrateSuspenseBoundary(node)) return;
 
+    node.suspenseQueueStart = root.consumedPendingQueues.length;
+
     if (previousSuspenseState === null) {
-      beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
+      beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
       return;
     }
 
@@ -1543,12 +1543,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       // were parked in their hook queues. Mark the kept-hidden subtree with the
       // current render lanes so it re-renders instead of bailing out and adopting
       // the frozen clone — that re-render is what applies the parked updates.
-      markSubtreeLanes(currentPrimary.child, rootOf(node).renderLanes);
+      markSubtreeLanes(currentPrimary.child, root.renderLanes);
     }
     beginSuspensePrimary(
       node,
       currentPrimary,
-      currentPrimary === null,
       previousSuspenseState.primaryChild,
     );
     appendDeletions(node, suspenseFallbackFiber(node.alternate));
@@ -1565,7 +1564,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   function beginSuspensePrimary(
     boundary: F,
     currentPrimary: F | null,
-    forcePlacement: boolean,
     capturedPrimary: F | null = null,
   ): void {
     if (capturedPrimary !== null) hasHiddenBoundaries = true;
@@ -1574,7 +1572,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       currentPrimary,
       "visible",
       capturedPrimary,
-      forcePlacement,
     );
     boundary.child = primary;
   }
@@ -1584,43 +1581,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     currentPrimary: F | null,
     mode: "visible" | "hidden",
     capturedPrimary: F | null = null,
-    forcePlacement = false,
   ): F {
-    const props = suspensePrimaryProps(boundary, currentPrimary, mode);
+    const props: Props = { mode, children: boundary.props.children };
 
     const primary =
       currentPrimary === null
-        ? fiber(HiddenTag, null, null, props, null)
+        ? fiber(ActivityTag, null, null, props, null)
         : createWorkInProgress(currentPrimary, props);
 
     primary.hiddenState = {
       currentFirstChild: capturedPrimary,
-      forcePlacement,
-      armOnReveal: capturedPrimary !== null && mode === "visible",
     };
     primary.index = 0;
     primary.return = boundary;
     primary.sibling = null;
     return primary;
-  }
-
-  function suspensePrimaryProps(
-    boundary: F,
-    currentPrimary: F | null,
-    mode: "visible" | "hidden",
-  ): Props {
-    const currentProps = currentPrimary?.memoizedProps ?? currentPrimary?.props;
-
-    if (
-      currentPrimary !== null &&
-      currentProps !== undefined &&
-      currentProps.mode === mode &&
-      currentProps.children === boundary.props.children
-    ) {
-      return currentPrimary.props;
-    }
-
-    return { mode, children: boundary.props.children };
   }
 
   function suspenseFallbackWorkInProgress(
@@ -1641,13 +1616,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     return fallback;
   }
 
-  function capturedSuspensePrimaryChild(primary: F | null): F | null {
-    return primary?.tag === HiddenTag ? primary.child : primary;
-  }
-
   function suspensePrimaryFiber(node: F | null | undefined): F | null {
     const child = node?.child ?? null;
-    return child?.tag === HiddenTag ? child : null;
+    return child?.tag === ActivityTag && child.type === null ? child : null;
   }
 
   function suspenseFallbackFiber(node: F | null | undefined): F | null {
@@ -1713,7 +1684,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         enterSuspenseHydration(node, boundary);
         node.suspenseState = null;
         node.flags |= HydrationFlag;
-        beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
+        beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
         return;
       }
 
@@ -1729,7 +1700,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.suspenseState = null;
     node.flags |= HydrationFlag;
-    beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate), false);
+    beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
   }
 
   function queueClientRenderedSuspenseError(
@@ -2138,7 +2109,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const root = rootOf(fiber);
     const pending = hook.queue.pending;
     if (pending !== null) {
-      hook.baseQueue = consumePendingHookQueue(root, hook, hook.queue, pending);
+      hook.baseQueue = consumePendingHookQueue(root, hook, pending);
     }
 
     if (hook.baseQueue !== null) {
@@ -2336,9 +2307,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   function consumePendingHookQueue<S>(
     root: R,
     hook: Hook<S>,
-    queue: HookQueue<S>,
     pending: HookUpdate<S>,
   ): HookUpdate<S> | null {
+    const queue = hook.queue;
     queue.pending = null;
     root.consumedPendingQueues.push({
       queue: queue as HookQueue<unknown>,
@@ -3434,7 +3405,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     const currentPrimary = suspensePrimaryFiber(boundary.alternate);
     if (currentPrimary !== null) {
       boundary.suspenseState = { kind: "fallback", primaryChild: null };
-      restoreConsumedPendingQueuesForRetry(root);
+      restoreConsumedPendingQueuesForRetry(
+        root,
+        boundary.suspenseQueueStart ?? root.consumedPendingQueues.length,
+      );
       hasHiddenBoundaries = true;
       const primary = suspensePrimaryWorkInProgress(
         boundary,
@@ -3465,7 +3439,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     // incomplete host tree.
     boundary.suspenseState = {
       kind: "fallback",
-      primaryChild: capturedSuspensePrimaryChild(boundary.child),
+      primaryChild:
+        boundary.child?.tag === ActivityTag && boundary.child.type === null
+          ? boundary.child.child
+          : boundary.child,
     };
     const fallback = suspenseFallbackWorkInProgress(boundary, null, 0);
     boundary.child = fallback;
@@ -3878,14 +3855,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isHiddenBoundary(node: F): boolean {
-    return (
-      (node.tag === ActivityTag || node.tag === HiddenTag) &&
-      activityHidden(node.props)
-    );
+    return isHiddenBoundaryTag(node) && activityHidden(node.props);
   }
 
   function isHiddenBoundaryTag(node: F): boolean {
-    return node.tag === ActivityTag || node.tag === HiddenTag;
+    return node.tag === ActivityTag;
   }
 
   function requireActivityHostConfig(): HostConfig<
@@ -4022,11 +3996,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitLiveHookInstances(node: F | null): void {
-    visitFiberHooks(node, (_owner, hook) => {
+    visitFiberHooks(node, (owner, hook) => {
       if (isReactiveEventHook(hook)) {
         const instance = hook.memoizedState.instance;
         instance.handler = hook.memoizedState.next;
-        instance.live = true;
+        instance.live = !isInsideHiddenBoundary(owner);
       }
 
       if (hook.kind === "action-state") {
@@ -4035,6 +4009,14 @@ export function createRenderer<Container, Instance, TextInstance>(
         state.instance.value = state.value;
       }
     });
+  }
+
+  function isInsideHiddenBoundary(node: F): boolean {
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if (isHiddenBoundary(parent)) return true;
+    }
+
+    return false;
   }
 
   function isReactiveEventHook(hook: Hook): hook is Hook<ReactiveEventState> {
@@ -4258,17 +4240,24 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function restoreConsumedPendingQueues(root: R, from = 0): void {
-    for (const { queue, pending } of root.consumedPendingQueues.splice(from)) {
-      queue.pending =
-        queue.pending === null ? pending : mergeQueues(pending, queue.pending);
+    for (const consumed of root.consumedPendingQueues.splice(from)) {
+      restoreConsumedPendingQueue(consumed);
     }
   }
 
-  function restoreConsumedPendingQueuesForRetry(root: R): void {
-    for (const consumed of root.consumedPendingQueues) {
+  function restoreConsumedPendingQueuesForRetry(root: R, from: number): void {
+    for (const consumed of root.consumedPendingQueues.splice(from)) {
       markHookQueueNoLane(consumed.pending);
+      restoreConsumedPendingQueue(consumed);
     }
-    restoreConsumedPendingQueues(root);
+  }
+
+  function restoreConsumedPendingQueue({
+    queue,
+    pending,
+  }: ConsumedPendingQueue): void {
+    queue.pending =
+      queue.pending === null ? pending : mergeQueues(pending, queue.pending);
   }
 
   function markHookQueueNoLane(queue: HookUpdate<unknown>): void {
@@ -4749,7 +4738,7 @@ function appendDevtoolsChildSnapshots<Container, Instance, TextInstance>(
   inspection: DevtoolsInspectionState,
   children: FigDevtoolsFiberSnapshot[],
 ): void {
-  if (node.tag === HiddenTag) {
+  if (node.tag === ActivityTag && node.type === null) {
     for (let child = node.child; child !== null; child = child.sibling) {
       appendDevtoolsChildSnapshots(child, parentId, inspection, children);
     }
@@ -4967,8 +4956,6 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "error-boundary", name: "ErrorBoundary" };
     case ActivityTag:
       return { kind: "activity", name: "Activity" };
-    case HiddenTag:
-      return { kind: "hidden", name: "Hidden" };
     case PortalTag:
       return { kind: "portal", name: "Portal" };
     case ResourcesTag:

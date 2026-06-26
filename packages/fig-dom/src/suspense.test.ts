@@ -1087,6 +1087,70 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("c5B");
   });
 
+  it("does not replay outside updates after a Suspense re-suspension", async () => {
+    let increment: (() => void) | null = null;
+    let rerenderRoot: (() => void) | null = null;
+    let setGate: ((value: Promise<string>) => void) | null = null;
+    const first = deferred<string>();
+
+    function Counter({ label }: { label: string }) {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("span", null, `${label}:${count}`);
+    }
+
+    function Slow({ gate }: { gate: Promise<string> }) {
+      return readPromise(gate);
+    }
+
+    function App({
+      initial,
+      label,
+    }: {
+      initial: Promise<string>;
+      label: string;
+    }) {
+      const [gate, setGateState] = useState(initial);
+      setGate = setGateState;
+      return createElement(
+        "main",
+        null,
+        createElement(Counter, { label }),
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "load") },
+          createElement(Slow, { gate }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    rerenderRoot = () =>
+      root.render(createElement(App, { initial: first.promise, label: "B" }));
+
+    flushSync(() =>
+      root.render(createElement(App, { initial: first.promise, label: "A" })),
+    );
+    first.resolve("ONE");
+    await delay();
+    expect(container.textContent).toBe("A:0ONE");
+
+    const second = deferred<string>();
+    flushSync(() => {
+      increment?.();
+      setGate?.(second.promise);
+    });
+    expect(container.textContent).toBe("A:1load");
+
+    second.resolve("TWO");
+    await delay();
+    expect(container.textContent).toBe("A:1TWO");
+
+    flushSync(() => rerenderRoot?.());
+    expect(container.textContent).toBe("B:1TWO");
+  });
+
   it("reveals the new state when re-suspension is driven from inside the boundary", async () => {
     let setInner:
       | ((value: { promise: Promise<string>; label: string }) => void)

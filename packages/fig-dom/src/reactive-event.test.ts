@@ -1,4 +1,5 @@
 import {
+  Activity,
   createElement,
   useBeforeLayout,
   useReactive,
@@ -86,6 +87,52 @@ describe("@bgub/fig-dom reactive events", () => {
     fire();
     expect(signals).toHaveLength(3);
     expect(signals[2].aborted).toBe(true);
+  });
+
+  it("keeps hidden reactive event calls aborted across unrelated commits", () => {
+    const signals: AbortSignal[] = [];
+    let fire: (() => void) | null = null;
+    let bump: (() => void) | null = null;
+
+    function HiddenChild() {
+      fire = useReactiveEvent((signal: AbortSignal) => {
+        signals.push(signal);
+      });
+      return createElement("span", null, "hidden");
+    }
+
+    function OutsideCounter() {
+      const [count, setCount] = useState(0);
+      bump = () => setCount((value) => value + 1);
+      return createElement("span", null, count);
+    }
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        createElement(OutsideCounter, null),
+        createElement(
+          Activity,
+          { mode: "hidden" },
+          createElement(HiddenChild, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    const fireHidden = fire as unknown as () => void;
+    const bumpOutside = bump as unknown as () => void;
+
+    fireHidden();
+    expect(signals.at(-1)?.aborted).toBe(true);
+
+    flushSync(() => bumpOutside());
+    fireHidden();
+    expect(signals.at(-1)?.aborted).toBe(true);
   });
 
   it("accepts handlers that take args but omit the trailing signal", async () => {
