@@ -27,6 +27,7 @@ import {
 } from "@bgub/fig/internal";
 import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
+  escapeAttribute,
   formTextContent,
   hasRenderableChild,
   isVoidElement,
@@ -36,6 +37,7 @@ import {
   writeText,
 } from "./html.ts";
 import {
+  activityId,
   boundaryId,
   boundaryPlaceholderMarkup,
   jsString,
@@ -77,6 +79,7 @@ interface Request {
   identifierPrefix: string;
   nextBoundaryId: number;
   nextSegmentId: number;
+  nextActivityId: number;
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
   onResourceError?: ServerRenderOptions["onResourceError"];
@@ -108,6 +111,10 @@ interface Task {
   blockedBoundary: SuspenseBoundary | null;
   contextValues: ContextValues;
   hiddenActivity: boolean;
+  // The nearest enclosing hidden Activity's template id, or null when not inside
+  // one. Threaded so suspended content streamed for that boundary can be revealed
+  // into the activity template's inert content.
+  hiddenActivityId: string | null;
   idPath: string;
   node: FigNode;
   selectProps: Props | null;
@@ -128,6 +135,10 @@ interface Segment {
 }
 
 interface SuspenseBoundary {
+  // Non-null when this boundary lives inside a hidden Activity: the activity
+  // template id its streamed completion must be revealed into. See `ac`/`ax` in
+  // protocol.ts.
+  activityId: string | null;
   completedSegments: Segment[];
   contentSegment: Segment | null;
   contentSegmentId: number | null;
@@ -149,6 +160,7 @@ interface RenderFrame {
   contextValues: ContextValues;
   dispatcher: RenderDispatcher;
   hiddenActivity: boolean;
+  hiddenActivityId: string | null;
   request: Request;
   segment: Segment;
   idPath: string;
@@ -212,6 +224,7 @@ export function createServerRenderRequest(
     identifierPrefix: options.identifierPrefix ?? "",
     nextBoundaryId: 0,
     nextSegmentId: 0,
+    nextActivityId: 0,
     nonce: options.nonce,
     onError: options.onError,
     onResourceError: options.onResourceError,
@@ -261,6 +274,7 @@ export function createServerRenderRequest(
     null,
     null,
     false,
+    null,
   );
   request.pingedTasks.push(rootTask);
 
@@ -308,6 +322,7 @@ function createTask(
   selectProps: Props | null,
   stack: StackFrame | null,
   hiddenActivity: boolean,
+  hiddenActivityId: string | null,
 ): Task {
   request.pendingTasks += 1;
   if (blockedBoundary === null) {
@@ -321,6 +336,7 @@ function createTask(
     blockedBoundary,
     contextValues,
     hiddenActivity,
+    hiddenActivityId,
     idPath,
     node,
     selectProps,
@@ -353,6 +369,7 @@ function createSegment(
 
 function createBoundary(fallbackAbortableTasks: Set<Task>): SuspenseBoundary {
   return {
+    activityId: null,
     completedSegments: [],
     contentSegment: null,
     contentSegmentId: null,
@@ -391,6 +408,7 @@ function retryTask(request: Request, task: Task): void {
     task.selectProps,
     task.stack,
     task.hiddenActivity,
+    task.hiddenActivityId,
   );
 
   try {
@@ -415,6 +433,7 @@ function createRenderFrame(
   selectProps: Props | null,
   stack: StackFrame | null,
   hiddenActivity: boolean,
+  hiddenActivityId: string | null,
 ): RenderFrame {
   const frame = {
     abortSet,
@@ -422,6 +441,7 @@ function createRenderFrame(
     contextValues,
     dispatcher: null as unknown as RenderDispatcher,
     hiddenActivity,
+    hiddenActivityId,
     idPath,
     localIdCounter: 0,
     request,
@@ -557,14 +577,22 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
     if (element.props.mode === "hidden") {
       // Hidden Activity content streams inside an inert template so neither
       // elements nor bare text render before hydration; the client keeps the
-      // boundary dehydrated until reveal.
-      frame.segment.write('<template data-fig-activity="">');
+      // boundary dehydrated until reveal. The template carries an id so Suspense
+      // boundaries that suspend inside it can stream their completions into this
+      // inert content (see `ac`/`ax` in protocol.ts).
+      const id = activityId(frame.request, frame.request.nextActivityId++);
+      frame.segment.write(
+        `<template data-fig-activity="" id="${escapeAttribute(id)}">`,
+      );
       const wasHidden = frame.hiddenActivity;
+      const wasHiddenId = frame.hiddenActivityId;
       frame.hiddenActivity = true;
+      frame.hiddenActivityId = id;
       try {
         renderChildren(element.props.children, frame);
       } finally {
         frame.hiddenActivity = wasHidden;
+        frame.hiddenActivityId = wasHiddenId;
       }
       frame.segment.write("</template>");
       return;
@@ -682,6 +710,7 @@ function reportLateHeadResource(
 function renderSuspense(props: Props, frame: RenderFrame): void {
   const fallbackAbortableTasks = new Set<Task>();
   const boundary = createBoundary(fallbackAbortableTasks);
+  boundary.activityId = frame.hiddenActivityId;
   const parentSegment = frame.segment;
   const boundarySegment = createSegment(parentSegment.chunks.length, boundary);
   parentSegment.children.push(boundarySegment);
@@ -699,6 +728,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.selectProps,
     frame.stack,
     frame.hiddenActivity,
+    frame.hiddenActivityId,
   );
 
   try {
@@ -709,20 +739,14 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   } catch (error) {
     contentSegment.status = "completed";
 
-    if (isThenable(error) && !frame.hiddenActivity) {
+    if (isThenable(error)) {
+      // Suspended content streams in later. Inside a hidden Activity the
+      // boundary's markers live in the activity's inert template; its
+      // completion is revealed into that template content (boundary.activityId
+      // drives the Activity-aware flush variants) instead of
+      // degrading to a client render.
       spawnSuspendedTask(contentFrame, props.children, error);
       boundary.completedSegments.push(contentSegment);
-    } else if (isThenable(error)) {
-      // Streamed completions cannot reach template content, so Suspense
-      // inside hidden Activity content client-renders after reveal.
-      markBoundaryClientRendered(
-        frame.request,
-        boundary,
-        new Error(
-          "Suspense inside a hidden Activity is client-rendered after reveal.",
-        ),
-        frame.stack,
-      );
     } else {
       markBoundaryClientRendered(frame.request, boundary, error, frame.stack);
     }
@@ -740,6 +764,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.selectProps,
     frame.stack,
     frame.hiddenActivity,
+    frame.hiddenActivityId,
   );
 
   try {
@@ -857,6 +882,7 @@ function spawnSuspendedTask(
     frame.selectProps,
     frame.stack,
     frame.hiddenActivity,
+    frame.hiddenActivityId,
   );
   thenable.then(
     () => pingTask(request, task),
@@ -1193,6 +1219,9 @@ function writeSegmentRevealScript(
 ): void {
   const id = requireSegmentId(segment);
   writeRuntime(request);
+  // Partial segments — including those of a hidden-Activity boundary — stage and
+  // fill in light-DOM hidden divs; only the boundary's final reveal (`ac`) moves
+  // the assembled content into the inert activity template.
   writeScript(
     request,
     withResourceGate(
@@ -1213,15 +1242,19 @@ function writeBoundaryRevealScript(
       ? []
       : flushSegmentResources(request, boundary.contentSegment);
   writeRuntime(request);
-  writeScript(
-    request,
-    withResourceGate(
-      blockingIds,
-      `__figSSR.c(${jsString(
-        boundaryId(request, requireBoundaryId(boundary)),
-      )},${jsString(segmentId(request, requireBoundaryContentId(boundary)))})`,
-    ),
+  const boundaryRef = jsString(
+    boundaryId(request, requireBoundaryId(boundary)),
   );
+  const contentRef = jsString(
+    segmentId(request, requireBoundaryContentId(boundary)),
+  );
+  // Inside a hidden Activity the boundary markers live in the activity
+  // template's inert content; reveal the completion there with `ac`.
+  const call =
+    boundary.activityId === null
+      ? `__figSSR.c(${boundaryRef},${contentRef})`
+      : `__figSSR.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef})`;
+  writeScript(request, withResourceGate(blockingIds, call));
 }
 
 function flushSegmentContainer(request: Request, segment: Segment): string[] {
@@ -1281,12 +1314,14 @@ function flushClientRenderedBoundary(
 ): void {
   if (boundary.id === null) return;
   writeRuntime(request);
-  writeScript(
-    request,
-    `__figSSR.x(${jsString(boundaryId(request, boundary.id))},${jsString(
-      boundary.error?.digest ?? "",
-    )},${jsString(boundary.error?.message ?? "")})`,
-  );
+  const boundaryRef = jsString(boundaryId(request, boundary.id));
+  const digest = jsString(boundary.error?.digest ?? "");
+  const message = jsString(boundary.error?.message ?? "");
+  const call =
+    boundary.activityId === null
+      ? `__figSSR.x(${boundaryRef},${digest},${message})`
+      : `__figSSR.ax(${jsString(boundary.activityId)},${boundaryRef},${digest},${message})`;
+  writeScript(request, call);
 }
 
 function drainBoundaryQueue(

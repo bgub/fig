@@ -1,4 +1,5 @@
 import {
+  Activity,
   type FigNode,
   lazy,
   readPromise,
@@ -44,6 +45,8 @@ export interface DemoRequest {
   resources: {
     broken: Resource<string>;
     suspense: Resource<string>;
+    hidden: Resource<string>;
+    hiddenBroken: Resource<string>;
   };
   startedAt: string;
 }
@@ -136,6 +139,10 @@ export function App({ request }: { request: DemoRequest }) {
               <LazyStreamPanel />
             </Suspense>
             <ClientTransitionPanel />
+            <HiddenActivityPanel
+              resource={request.resources.hidden}
+              errorResource={request.resources.hiddenBroken}
+            />
           </section>
         </div>
       </main>
@@ -152,6 +159,8 @@ export function createServerRequest(
     resources: {
       broken: rejectAfter(new Error("server error demo"), 900),
       suspense: delay("Content resolved on the server after 5 seconds.", 5000),
+      hidden: delay("Hidden Activity content rendered on the server.", 800),
+      hiddenBroken: rejectAfter(new Error("hidden activity server error"), 700),
     },
     startedAt,
   };
@@ -166,6 +175,11 @@ export function createClientRequest(data: ClientData): DemoRequest {
         data.abortDelay !== null
           ? "Content resolved on the client after server abort."
           : "Content resolved on the server after 5 seconds.",
+      // The client never resolves this: any content visible after the hidden
+      // Activity reveals must be the server stream preserved in the template.
+      hidden: new Promise<string>(() => {}),
+      // The server rejected this boundary; the client recovers it on reveal.
+      hiddenBroken: "Recovered on the client after hidden server error.",
     },
     startedAt: data.startedAt,
   };
@@ -292,6 +306,63 @@ function ClientTransitionPanel() {
 
 function TransitionMessage({ message }: { message: Resource<string> }) {
   return readResource(message);
+}
+
+// Two Suspense boundaries that suspend inside a hidden Activity. The success one
+// resolves on the server: its completion streams into the activity's inert
+// <template> (via the `ac` runtime op) and hydrates on reveal — the client
+// promise never resolves, so any revealed content must be the server stream. The
+// error one rejects on the server: it is marked client-render inside the template
+// (via the `ax` runtime op) and recovers on the client when revealed.
+function HiddenActivityPanel({
+  resource,
+  errorResource,
+}: {
+  resource: Resource<string>;
+  errorResource: Resource<string>;
+}) {
+  const [revealed, setRevealed] = useState(false);
+
+  return (
+    <Panel
+      class="hidden-activity-panel"
+      description="Suspense content rendered on the server inside a hidden Activity."
+      tag={revealed ? "revealed" : "hidden"}
+      title="Hidden Activity"
+      tone="ok"
+    >
+      <div class="panel-actions">
+        <button
+          class="button primary"
+          data-demo-control="reveal-hidden"
+          events={[on("click", () => setRevealed(true))]}
+          type="button"
+        >
+          {revealed ? "Hidden activity revealed" : "Reveal hidden activity"}
+        </button>
+      </div>
+      <Activity mode={revealed ? "visible" : "hidden"}>
+        <Suspense
+          fallback={<p data-hidden-fallback="">Hidden activity fallback.</p>}
+        >
+          <HiddenActivityContent resource={resource} />
+        </Suspense>
+        <Suspense
+          fallback={<p data-hidden-error-fallback="">Hidden error fallback.</p>}
+        >
+          <HiddenErrorContent resource={errorResource} />
+        </Suspense>
+      </Activity>
+    </Panel>
+  );
+}
+
+function HiddenActivityContent({ resource }: { resource: Resource<string> }) {
+  return <p data-hidden-content="">{readResource(resource)}</p>;
+}
+
+function HiddenErrorContent({ resource }: { resource: Resource<string> }) {
+  return <p data-hidden-error="">{readResource(resource)}</p>;
 }
 
 function Panel({

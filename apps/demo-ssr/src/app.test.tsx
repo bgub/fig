@@ -51,6 +51,8 @@ function demoRequest(
     resources: {
       broken: "Server error panel ready.",
       suspense,
+      hidden: "Hidden activity panel ready.",
+      hiddenBroken: "Hidden activity error panel ready.",
     },
     startedAt: "test",
   };

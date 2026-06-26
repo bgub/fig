@@ -3,6 +3,7 @@ import {
   createElement,
   readPromise,
   Suspense,
+  useExternalStore,
   useReactive,
   useState,
 } from "@bgub/fig";
@@ -17,6 +18,7 @@ import {
 import {
   deferred,
   delay,
+  FakeComment,
   FakeElement,
   FakeText,
   installFakeDocument,
@@ -489,6 +491,221 @@ describe("@bgub/fig-dom activity", () => {
     expect(clicks).toBe(1);
   });
 
+  it("hydrates a completed Suspense boundary filled into a hidden Activity template on reveal", async () => {
+    // Simulates the post-fill DOM: the server streamed the inner Suspense
+    // completion into the hidden Activity's inert template content (via the `ac`
+    // runtime op), so the template content holds a COMPLETED boundary. On reveal
+    // the client must hydrate that server content — preserving node identity and
+    // never showing the fallback — instead of client-rendering it.
+    const pending = deferred<string>();
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        Activity,
+        { mode },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(Message, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const content = new FakeElement("fragment");
+    (template as FakeElement & { content: FakeElement }).content = content;
+    const start = new FakeComment("fig:suspense:completed");
+    const serverSpan = new FakeElement("span");
+    serverSpan.appendChild(new FakeText("Ready"));
+    const end = new FakeComment("/fig:suspense");
+    content.appendChild(start);
+    content.appendChild(serverSpan);
+    content.appendChild(end);
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null)),
+    );
+    await delay();
+
+    // Dehydrated while hidden: the template is untouched, no fallback rendered.
+    expect(container.childNodes[0]).toBe(template);
+    expect(container.textContent).not.toContain("Loading");
+
+    // The client promise resolves (the data the server already had).
+    pending.resolve("Ready");
+
+    flushSync(() => setMode?.("visible"));
+    await delay();
+
+    // Server content is preserved with node identity, never client-rendered to a
+    // fresh node, and the fallback never appeared.
+    expect(container.childNodes[0]).toBe(serverSpan);
+    expect(container.textContent).toBe("Ready");
+  });
+
+  it("client-renders a failed Suspense marked client inside a hidden Activity template on reveal", async () => {
+    // Simulates the post-`ax` DOM: a Suspense boundary inside the hidden Activity
+    // failed on the server, so its marker was flipped to client-render inside the
+    // template content. On reveal the client must discard the server fallback and
+    // render the boundary fresh.
+    const recovered: string[] = [];
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Message() {
+      return createElement("span", null, "client content");
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        Activity,
+        { mode },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(Message, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const content = new FakeElement("fragment");
+    (template as FakeElement & { content: FakeElement }).content = content;
+    const start = new FakeComment("fig:suspense:client");
+    const placeholder = new FakeElement("template");
+    placeholder.dataset.dgst = "hidden-digest";
+    placeholder.dataset.msg = "hidden activity server error";
+    const serverFallback = new FakeElement("em");
+    serverFallback.appendChild(new FakeText("Loading"));
+    const end = new FakeComment("/fig:suspense");
+    content.appendChild(start);
+    content.appendChild(placeholder);
+    content.appendChild(serverFallback);
+    content.appendChild(end);
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null), {
+        onRecoverableError: (error) =>
+          recovered.push(
+            error instanceof Error ? error.message : String(error),
+          ),
+      }),
+    );
+    await delay();
+
+    expect(container.childNodes[0]).toBe(template);
+
+    flushSync(() => setMode?.("visible"));
+    await delay();
+
+    // The boundary recovers on the client: fresh content, not the server
+    // fallback, and the failure surfaces through onRecoverableError.
+    expect(container.textContent).toBe("client content");
+    expect(recovered).toContain("hidden activity server error");
+  });
+
+  it("recovers a client-render sibling when an earlier hidden-Activity boundary stays suspended on reveal", async () => {
+    // Mirrors the e2e: one boundary's server content is preserved but its client
+    // promise never resolves (so its hydration suspends and abandons), and a
+    // sibling boundary was marked client-render. The suspended sibling must not
+    // prevent the client-render sibling from recovering.
+    const recovered: string[] = [];
+    const neverResolves = new Promise<string>(() => {});
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Preserved() {
+      return createElement("span", null, readPromise(neverResolves));
+    }
+
+    function Recovered() {
+      return createElement("span", null, "recovered content");
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        Activity,
+        { mode },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "L0") },
+          createElement(Preserved, null),
+        ),
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "L1") },
+          createElement(Recovered, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const content = new FakeElement("fragment");
+    (template as FakeElement & { content: FakeElement }).content = content;
+
+    // Boundary 0: completed, server content preserved.
+    const start0 = new FakeComment("fig:suspense:completed");
+    const preservedSpan = new FakeElement("span");
+    preservedSpan.appendChild(new FakeText("server preserved"));
+    const end0 = new FakeComment("/fig:suspense");
+    // Boundary 1: client-render marker.
+    const start1 = new FakeComment("fig:suspense:client");
+    const placeholder1 = new FakeElement("template");
+    placeholder1.dataset.dgst = "d";
+    placeholder1.dataset.msg = "boundary failed";
+    const fallback1 = new FakeElement("em");
+    fallback1.appendChild(new FakeText("L1"));
+    const end1 = new FakeComment("/fig:suspense");
+    for (const node of [
+      start0,
+      preservedSpan,
+      end0,
+      start1,
+      placeholder1,
+      fallback1,
+      end1,
+    ]) {
+      content.appendChild(node);
+    }
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null), {
+        onRecoverableError: (error) =>
+          recovered.push(
+            error instanceof Error ? error.message : String(error),
+          ),
+      }),
+    );
+    await delay();
+
+    flushSync(() => setMode?.("visible"));
+    await delay();
+
+    // The suspended boundary keeps its preserved server content; the sibling
+    // recovers on the client.
+    expect(container.textContent).toContain("server preserved");
+    expect(container.textContent).toContain("recovered content");
+    expect(recovered).toContain("boundary failed");
+  });
+
   it("keeps Suspense content hidden when it resolves inside a hidden tree", async () => {
     const pending = deferred<string>();
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;
@@ -685,5 +902,159 @@ describe("@bgub/fig-dom activity", () => {
     flushSync(() => setOuter?.("visible"));
     expect(display(section)).toBe("");
     expect(display(aside)).toBe("none");
+  });
+
+  it("does not busy-loop when a hidden subtree with queued offscreen work unmounts before reveal", async () => {
+    let appRenders = 0;
+    let setCount: ((updater: (count: number) => number) => void) | null = null;
+    let setShow: ((show: boolean) => void) | null = null;
+    let setOuter: ((value: number) => void) | null = null;
+
+    function Counter() {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("span", null, count);
+    }
+
+    function App() {
+      appRenders += 1;
+      const [show, setShowState] = useState(true);
+      const [outer, setOuterState] = useState(0);
+      setShow = setShowState;
+      setOuter = setOuterState;
+      return createElement(
+        "main",
+        null,
+        createElement("i", null, `o${outer}`),
+        show
+          ? createElement(
+              Activity,
+              { mode: "hidden" },
+              createElement(Counter, null),
+            )
+          : null,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    // Queue an update into the hidden subtree: it is downgraded to the
+    // offscreen lane, so the root now has pending offscreen work that can only
+    // make progress after a reveal.
+    const queueHidden = setCount as unknown as (
+      updater: (count: number) => number,
+    ) => void;
+    queueHidden((count) => count + 1);
+
+    // Unmount the hidden Activity before the idle offscreen prerender runs:
+    // the fiber carrying the offscreen lane is deleted while still pending.
+    flushSync(() => setShow?.(false));
+    const rendersAfterUnmount = appRenders;
+
+    // The orphaned offscreen lane must not keep waking the scheduler.
+    await delay();
+    await delay();
+    expect(appRenders).toBe(rendersAfterUnmount);
+
+    // The scheduler is still healthy: a normal update still commits.
+    flushSync(() => setOuter?.(5));
+    expect(container.textContent).toBe("o5");
+  });
+
+  it("still defers updates for a hidden boundary mounted after all others unmount", async () => {
+    let setCount: ((updater: (count: number) => number) => void) | null = null;
+    let setPhase: ((phase: "first" | "none" | "second") => void) | null = null;
+
+    function Counter() {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("span", null, count);
+    }
+
+    function App() {
+      const [phase, set] = useState<"first" | "none" | "second">("first");
+      setPhase = set;
+      if (phase === "none") return createElement("p", null, "idle");
+      return createElement(
+        Activity,
+        { mode: "hidden" },
+        createElement(Counter, null),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    // Remove every hidden boundary: the internal latch can now reset to false.
+    flushSync(() => setPhase?.("none"));
+    expect(container.textContent).toBe("idle");
+
+    // Mount a fresh hidden boundary. Its update must still be downgraded to the
+    // offscreen lane (committed hidden, not revealed), proving the latch re-arms.
+    flushSync(() => setPhase?.("second"));
+    const span = container.childNodes[0] as FakeElement;
+    expect(display(span)).toBe("none");
+
+    flushSync(() => setCount?.((count) => count + 1));
+    expect(container.textContent).toBe("1");
+    expect(display(span)).toBe("none");
+  });
+
+  it("reveals the latest external store value after it changes while hidden", async () => {
+    let value = "a";
+    const listeners = new Set<() => void>();
+    const store = {
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      getSnapshot: () => value,
+      emit: (next: string) => {
+        value = next;
+        for (const listener of listeners) listener();
+      },
+    };
+
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Display() {
+      const snapshot = useExternalStore(store.subscribe, store.getSnapshot);
+      return createElement("span", null, snapshot);
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("visible");
+      setMode = set;
+      return createElement(Activity, { mode }, createElement(Display, null));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("a");
+    // Subscription is live while visible.
+    expect(listeners.size).toBeGreaterThan(0);
+
+    // Hide: the subscription is torn down so changes do not schedule work.
+    flushSync(() => setMode?.("hidden"));
+    expect(listeners.size).toBe(0);
+
+    // The store changes while the boundary is hidden and unsubscribed.
+    store.emit("b");
+    await delay();
+
+    // Reveal: the boundary must show the current store value, not the stale
+    // snapshot captured before hiding, and re-subscribe for future changes.
+    flushSync(() => setMode?.("visible"));
+    expect(container.textContent).toBe("b");
+    expect(listeners.size).toBeGreaterThan(0);
+
+    // A post-reveal change schedules normally again.
+    store.emit("c");
+    await delay();
+    expect(container.textContent).toBe("c");
   });
 });

@@ -9,8 +9,14 @@ interface ProtocolRequest {
 type WriteChunk = (chunk: string) => void;
 type IdentifierRequest = Pick<ProtocolRequest, "identifierPrefix">;
 
+// Runtime ops, in order: r=resource gate, s=fill partial segment, c=reveal
+// boundary, x=client-render boundary, ac/ax=the Activity-aware variants. The
+// boundary markers sit in the activity's inert <template>, whose `.content`
+// DocumentFragment is unreachable by getElementById, so Activity-aware ops first
+// search that fragment and then fall back to the light DOM if the activity has
+// already revealed and unpacked.
 export const serverRuntimeCode =
-  "globalThis.__figSSR??={r(a,f){let n=0,d=()=>{--n||f()};for(let i of a){let e=document.getElementById(i);if(e&&e.tagName==='LINK'&&e.rel==='stylesheet'&&!e.sheet){n++;e.addEventListener('load',d,{once:true});e.addEventListener('error',d,{once:true})}}n||f()},s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},c(b,s){b=document.getElementById(b);s=document.getElementById(s);if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode;if(!p)return;while(s.firstChild)p.insertBefore(s.firstChild,b);for(let e=b,d=0;e;){if(e.nodeType===8){if(e.data.indexOf('fig:suspense:')===0)d++;else if(e.data==='/fig:suspense'){if(d===0)break;d--}}let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='fig:suspense:completed';a.__figRetry&&a.__figRetry()}},x(b,d,m){b=document.getElementById(b);if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}}}";
+  "globalThis.__figSSR??={r(a,f){let n=0,d=()=>{--n||f()};for(let i of a){let e=document.getElementById(i);if(e&&e.tagName==='LINK'&&e.rel==='stylesheet'&&!e.sheet){n++;e.addEventListener('load',d,{once:true});e.addEventListener('error',d,{once:true})}}n||f()},s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},f(r,i){if(!r)return null;if(r.id===i)return r;for(let e of r.querySelectorAll?r.querySelectorAll('[id]'):[])if(e.id===i)return e;return null},b(t,b){let e=document.getElementById(t),r=e&&(e.content||e);return this.f(r,b)||document.getElementById(b)},c(b,s){this.o(document.getElementById(b),document.getElementById(s))},o(b,s){if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode,c=s.content||s;if(!p)return;while(c.firstChild)p.insertBefore(c.firstChild,b);for(let e=b,d=0;e;){if(e.nodeType===8){if(e.data.indexOf('fig:suspense:')===0)d++;else if(e.data==='/fig:suspense'){if(d===0)break;d--}}let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='fig:suspense:completed';a.__figRetry&&a.__figRetry()}},x(b,d,m){this.y(document.getElementById(b),d,m)},y(b,d,m){if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='fig:suspense:client';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}},ac(t,b,s){this.o(this.b(t,b),document.getElementById(s))},ax(t,b,d,m){this.y(this.b(t,b),d,m)}}";
 
 export function writeRuntime(
   request: ProtocolRequest,
@@ -53,6 +59,10 @@ export function segmentContainerStartMarkup(
 ): string {
   const escapedId = escapeAttribute(segmentId(request, id));
   return `<div hidden id="${escapedId}">`;
+}
+
+export function activityId(request: IdentifierRequest, id: number): string {
+  return prefixedId(request, "a", id);
 }
 
 export function placeholderId(request: IdentifierRequest, id: number): string {

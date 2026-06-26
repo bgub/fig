@@ -553,7 +553,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   const abandonedHydrationBoundaries = new WeakSet<object>();
   let batchDepth = 0;
   let flushingSyncWork = false;
+  // `hasHiddenBoundaries` gates the parent-walk in `hiddenSubtreeLane`: while it
+  // is false no update can need the offscreen downgrade, so the walk is skipped.
+  // It is set eagerly true whenever a hidden boundary is begun (covering the
+  // in-flight render before its commit) and recomputed from `hiddenStates` at
+  // the end of every commit, so it resets to false once the last hidden boundary
+  // is revealed or unmounted. `hiddenStates` tracks the live committed
+  // `ActivityState`s that are currently hidden; keying on the state object (which
+  // both fiber generations share) makes membership generation-agnostic.
   let hasHiddenBoundaries = false;
+  const hiddenStates = new Set<ActivityState<Instance>>();
   let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
     null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
@@ -2694,6 +2703,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitDataDependencies(finishedWork.child);
     commitMutationEffects(finishedWork.child);
     if (hasHiddenBoundaries) commitHiddenBoundaryVisibility(finishedWork.child);
+    // Recompute from committed reality: the eager render-time set is sticky, so
+    // once the last hidden boundary reveals or unmounts this clears the flag and
+    // the per-update parent-walk is skipped again.
+    hasHiddenBoundaries = hiddenStates.size > 0;
     root.current = finishedWork;
     deactivateHydration(root);
     root.hydrationInitialElement = NoHydrationInitialElement;
@@ -2742,20 +2755,22 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F | null,
     boundaries: F[],
   ): void {
-    if (node === null) return;
-
-    if (node.suspenseState?.kind === "dehydrated") {
-      if (
-        !abandonedHydrationBoundaries.has(node) &&
-        dehydratedSuspenseRetryLane(node.suspenseState.boundary) !== NoLane
-      ) {
-        boundaries.push(node);
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if (cursor.suspenseState?.kind === "dehydrated") {
+        // A dehydrated boundary has no live children to descend into, but its
+        // siblings may be retriable too (e.g. several boundaries inside one
+        // revealed Activity), so keep walking the sibling chain.
+        if (
+          !abandonedHydrationBoundaries.has(cursor) &&
+          dehydratedSuspenseRetryLane(cursor.suspenseState.boundary) !== NoLane
+        ) {
+          boundaries.push(cursor);
+        }
+        continue;
       }
-      return;
-    }
 
-    collectRetriableDehydratedSuspense(node.child, boundaries);
-    collectRetriableDehydratedSuspense(node.sibling, boundaries);
+      collectRetriableDehydratedSuspense(cursor.child, boundaries);
+    }
   }
 
   function dehydratedSuspenseRetryLane(
@@ -3138,6 +3153,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
     store.releaseDataOwner(node);
     if (node.alternate !== null) store.releaseDataOwner(node.alternate);
+    // A hidden boundary removed from the tree stops counting toward
+    // `hasHiddenBoundaries`; both generations share the one state object.
+    if (node.activityState !== null) hiddenStates.delete(node.activityState);
 
     for (let child = node.child; child !== null; child = child.sibling) {
       deleteFiberDataFromStore(child, store);
@@ -3904,7 +3922,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (boundary && (cursor.flags & VisibilityFlag) !== 0) {
         const effectiveHidden = hidden || boundaryHidden;
         const state = cursor.activityState;
-        if (state !== null) state.hidden = effectiveHidden;
+        if (state !== null) {
+          state.hidden = effectiveHidden;
+          if (effectiveHidden) hiddenStates.add(state);
+          else hiddenStates.delete(state);
+        }
         setSubtreeVisibility(cursor.child, effectiveHidden);
         if (effectiveHidden && cursor.child !== null)
           abortFiberEffects(cursor.child);

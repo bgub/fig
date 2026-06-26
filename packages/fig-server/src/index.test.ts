@@ -222,7 +222,7 @@ describe("@bgub/fig-server", () => {
 
     // Bare text and elements alike stay invisible until hydration.
     expect(html).toBe(
-      '<main><template data-fig-activity="">secret <span>Hidden</span></template><span>Visible</span></main>',
+      '<main><template data-fig-activity="" id="a-0">secret <span>Hidden</span></template><span>Visible</span></main>',
     );
   });
 
@@ -889,6 +889,136 @@ describe("@bgub/fig-server", () => {
     expect(clientRenderIndex).toBeGreaterThan(-1);
     expect(html).not.toContain('__figSSR.c("test-b-0"');
     expect(html.slice(clientRenderIndex)).not.toContain("__figSSR.s(");
+  });
+
+  it("reveals a completed boundary while a sibling boundary client-renders", async () => {
+    const ok = deferred<string>();
+    const bad = deferred<string>();
+
+    function Ok() {
+      return createElement("span", null, readPromise(ok.promise));
+    }
+
+    function Bad() {
+      return createElement("span", null, readPromise(bad.promise));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "L0") },
+          createElement(Ok, null),
+        ),
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "L1") },
+          createElement(Bad, null),
+        ),
+      ),
+      {
+        identifierPrefix: "test",
+        onError() {
+          return { digest: "d" };
+        },
+      },
+    );
+
+    await result.shellReady;
+    ok.resolve("OK");
+    await waitForMicrotasks();
+    bad.reject(new Error("bad failed"));
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+
+    // The healthy boundary reveals (its content streams in a partial segment
+    // that fills the boundary placeholder); the failed sibling client-renders.
+    // The two boundary ids must not cross-contaminate.
+    expect(html).toContain("<span>OK</span>");
+    expect(html).toContain('__figSSR.c("test-b-0","test-s-0")');
+    expect(html).toContain('__figSSR.x("test-b-1","d","")');
+    expect(html).not.toContain('__figSSR.c("test-b-1"');
+    expect(html).not.toContain('__figSSR.x("test-b-0"');
+  });
+
+  it("streams Suspense completion into a hidden Activity template instead of client-rendering", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Activity,
+        { mode: "hidden" },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement("div", null, "Before ", createElement(Message, null)),
+        ),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+
+    // The hidden Activity template carries an id and holds the pending boundary.
+    expect(html).toContain('<template data-fig-activity="" id="test-a-0">');
+    expect(html).toContain("<!--fig:suspense:pending:0-->");
+    expect(html).toContain("<em>Loading</em>");
+    // The completion is revealed into the activity template content via `ac` —
+    // not a client render (`x`) as the old degradation did.
+    expect(html).toContain("<span>Ready</span>");
+    expect(html).toMatch(/__figSSR\.ac\("test-a-0",/);
+    expect(html).not.toContain("__figSSR.x(");
+    expect(html).not.toContain("is client-rendered after reveal");
+  });
+
+  it("marks failed Suspense inside hidden Activity with an Activity-aware client render script", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Activity,
+        { mode: "hidden" },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(Message, null),
+        ),
+      ),
+      {
+        identifierPrefix: "test",
+        onError() {
+          return { digest: "hidden-digest" };
+        },
+      },
+    );
+
+    await result.shellReady;
+    pending.reject(new Error("Hidden failed"));
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+
+    expect(html).toContain('<template data-fig-activity="" id="test-a-0">');
+    expect(html).toContain("<!--fig:suspense:pending:0-->");
+    expect(html).toContain(
+      '__figSSR.ax("test-a-0","test-b-0","hidden-digest","")',
+    );
+    expect(html).not.toContain('__figSSR.x("test-b-0"');
   });
 
   it("renders error boundary children on the server", async () => {

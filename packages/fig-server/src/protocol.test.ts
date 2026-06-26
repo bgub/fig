@@ -52,6 +52,20 @@ class TestNode {
     if (index !== -1) siblings.splice(index, 1);
     this.parentNode = null;
   }
+
+  querySelectorAll(selector: string): TestNode[] {
+    if (selector !== "[id]")
+      throw new Error(`Unsupported selector ${selector}.`);
+
+    const matches: TestNode[] = [];
+    const visit = (node: TestNode): void => {
+      if (node.id !== null) matches.push(node);
+      for (const child of node.childNodes) visit(child);
+    };
+
+    for (const child of this.childNodes) visit(child);
+    return matches;
+  }
 }
 
 class TestDocument {
@@ -68,6 +82,13 @@ class TestDocument {
 }
 
 interface TestRuntime {
+  ac(activityId: string, boundaryId: string, segmentId: string): void;
+  ax(
+    activityId: string,
+    boundaryId: string,
+    digest: string,
+    message: string,
+  ): void;
   c(boundaryId: string, segmentId: string): void;
   x(boundaryId: string, digest: string, message: string): void;
 }
@@ -190,6 +211,91 @@ describe("server streaming protocol", () => {
       createPendingBoundary(document);
 
     installRuntime(document).x("b", "digest-1", "Server failed");
+
+    expect(start.data).toBe("fig:suspense:client");
+    expect(boundaryPlaceholder.dataset).toEqual({
+      dgst: "digest-1",
+      msg: "Server failed",
+    });
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("completes Activity-hidden boundaries inside template content by id comparison", () => {
+    const document = new TestDocument();
+    const calls: string[] = [];
+    const root = new TestNode(elementNode, "root");
+    const activity = document.register(new TestNode(elementNode, "a"));
+    const start = new TestNode(
+      commentNode,
+      null,
+      "fig:suspense:pending:0",
+    ) as RetriableTestNode;
+    const boundaryPlaceholder = new TestNode(elementNode, 'bad"id]');
+    const fallback = new TestNode(elementNode, "fallback");
+    const end = new TestNode(commentNode, null, "/fig:suspense");
+    const segment = document.register(new TestNode(elementNode, "s"));
+    const completed = new TestNode(elementNode, "completed");
+
+    start.__figRetry = () => calls.push("retry");
+    root.appendChild(activity);
+    root.appendChild(segment);
+    activity.appendChild(start);
+    activity.appendChild(boundaryPlaceholder);
+    activity.appendChild(fallback);
+    activity.appendChild(end);
+    segment.appendChild(completed);
+
+    installRuntime(document).ac("a", 'bad"id]', "s");
+
+    expect(activity.childNodes).toEqual([start, completed, end]);
+    expect(segment.parentNode).toBeNull();
+    expect(boundaryPlaceholder.parentNode).toBeNull();
+    expect(fallback.parentNode).toBeNull();
+    expect(start.data).toBe("fig:suspense:completed");
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("completes Activity-hidden boundaries from light DOM after Activity reveal", () => {
+    const document = new TestDocument();
+    const { boundaryPlaceholder, calls, end, fallback, root, start } =
+      createPendingBoundary(document);
+    const { after, completed, segment } = appendCompletedSegment(
+      document,
+      root,
+    );
+
+    installRuntime(document).ac("already-revealed", "b", "s");
+
+    expect(root.childNodes).toEqual([start, completed, end, after]);
+    expect(segment.parentNode).toBeNull();
+    expect(boundaryPlaceholder.parentNode).toBeNull();
+    expect(fallback.parentNode).toBeNull();
+    expect(start.data).toBe("fig:suspense:completed");
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("marks Activity-hidden client-rendered boundaries inside template content", () => {
+    const document = new TestDocument();
+    const calls: string[] = [];
+    const root = new TestNode(elementNode, "root");
+    const activity = document.register(new TestNode(elementNode, "a"));
+    const start = new TestNode(
+      commentNode,
+      null,
+      "fig:suspense:pending:0",
+    ) as RetriableTestNode;
+    const boundaryPlaceholder = new TestNode(elementNode, 'bad"id]');
+    const fallback = new TestNode(elementNode, "fallback");
+    const end = new TestNode(commentNode, null, "/fig:suspense");
+
+    start.__figRetry = () => calls.push("retry");
+    root.appendChild(activity);
+    activity.appendChild(start);
+    activity.appendChild(boundaryPlaceholder);
+    activity.appendChild(fallback);
+    activity.appendChild(end);
+
+    installRuntime(document).ax("a", 'bad"id]', "digest-1", "Server failed");
 
     expect(start.data).toBe("fig:suspense:client");
     expect(boundaryPlaceholder.dataset).toEqual({
