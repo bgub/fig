@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
-import { clientReference, createElement, type FigNode } from "@bgub/fig";
+import {
+  clientReference,
+  createElement,
+  type FigNode,
+  readPromise,
+} from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { hydrateStart } from "./client.ts";
 import { Outlet } from "./components.tsx";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRequestHandler } from "./server.ts";
+import type { AnyRoute } from "./route.ts";
 
 // A manual client reference (the @bgub/fig-start/vite plugin generates these).
 const islandId = "test/Island.tsx#Island";
@@ -49,16 +55,45 @@ async function flush(): Promise<void> {
 
 // Render the document on the server, then install it as the live DOM (as the
 // browser would on first load) so hydrateStart hydrates against real SSR markup.
-async function installServerRenderedDocument(path: string): Promise<void> {
-  const handler = createRequestHandler({ clientEntry: "/client.js", routes });
+async function installServerRenderedDocument(
+  path: string,
+  routeSet: readonly AnyRoute[] = routes,
+): Promise<void> {
+  const handler = createRequestHandler({
+    clientEntry: "/client.js",
+    routes: routeSet,
+  });
   const response = await handler(new Request(`http://localhost${path}`));
   const html = await response.text();
   document.documentElement.innerHTML = html
     .replace(/^<!doctype[^>]*>/i, "")
     .replace(/^\s*<html[^>]*>/i, "")
     .replace(/<\/html>\s*$/i, "")
-    // Drop the client bootstrap module script (happy-dom would try to fetch it).
-    .replace(/<script type="module"[^>]*><\/script>/gi, "");
+    // Drop the client bootstrap import script; hydrateStart is called manually.
+    .replace(
+      /<script(?:\s+nonce="[^"]*")?>import\("\/client\.js"\);<\/script>/gi,
+      "",
+    );
+}
+
+function installHandlerFetch(
+  routeSet: readonly AnyRoute[] = routes,
+): () => void {
+  const handler = createRequestHandler({
+    clientEntry: "/client.js",
+    routes: routeSet,
+  });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const request =
+      input instanceof Request
+        ? input
+        : new Request(new URL(String(input), "http://localhost").href, init);
+    return handler(request);
+  };
+  return () => {
+    globalThis.fetch = previousFetch;
+  };
 }
 
 describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
@@ -86,4 +121,95 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     expect(document.body.textContent).toContain("Home");
     expect(document.querySelector(".island")).toBeNull();
   });
+
+  it("fetches a server route's RSC payload when navigating on the client", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+
+    try {
+      const router = hydrateStart({ routes, loadClientReference });
+      await flush();
+      expect(document.body.textContent).toContain("Home");
+
+      await router.navigate("/dash");
+      await flush();
+
+      const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+      expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
+      expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("reports missing client-reference resolvers during server route navigation", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+    const errors: unknown[] = [];
+
+    try {
+      const router = hydrateStart({
+        onRecoverableError: (error) => errors.push(error),
+        routes,
+      });
+
+      await router.navigate("/dash");
+      await flush();
+
+      expect(
+        errors.some((error) =>
+          String(error).includes("client-reference resolver"),
+        ),
+      ).toBe(true);
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("aborts stale server route fetches when navigating away", async () => {
+    const pending = deferred<string>();
+    const slowRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => createElement("h1", null, "Home"),
+      }),
+      createFileRoute("/slow")({
+        server: true,
+        component: () =>
+          createElement("section", null, readPromise(pending.promise)),
+      }),
+    ];
+
+    await installServerRenderedDocument("/", slowRoutes);
+    const restoreFetch = installHandlerFetch(slowRoutes);
+
+    try {
+      const router = hydrateStart({ routes: slowRoutes });
+      await router.navigate("/slow");
+      await flush();
+      expect(
+        document.querySelector('[data-fig-rsc-slot="/slow"]'),
+      ).not.toBeNull();
+
+      await router.navigate("/");
+      pending.resolve("too late");
+      await flush();
+
+      expect(document.body.textContent).toContain("Home");
+      expect(document.body.textContent).not.toContain("too late");
+    } finally {
+      restoreFetch();
+    }
+  });
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}

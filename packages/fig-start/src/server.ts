@@ -11,10 +11,15 @@ import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
+  RSC_FRAME_ATTR,
+  RSC_ROUTE_ID_HEADER,
+  RSC_SEGMENT_ID_HEADER,
   ROOT_ELEMENT_ID,
-  RSC_PAYLOAD_SCRIPT_ID,
+  RSC_SEGMENTS_SCRIPT_ID,
+  RSC_STREAM_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
-  type SerializedRscPayload,
+  type SerializedRscFrame,
+  type SerializedRscSegment,
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
@@ -69,9 +74,24 @@ export function createRequestHandler(
     // render and the document render (a side-effecting factory must run once).
     const dataContext = options.dataContext?.(request);
 
-    // A `.server.tsx` leaf renders through the RSC stream; its payload is inlined
-    // on the document and the SSR tree leaves an empty slot for it.
-    const rscPayload = await renderServerRoutePayload(result, dataContext);
+    // A `.server.tsx` leaf renders through the RSC stream; the SSR tree leaves an
+    // empty slot for that segment, and row chunks stream into it as inline frames.
+    const rscSegment = renderServerRouteSegment(result, dataContext);
+
+    if (isRscRouteRequest(request)) {
+      if (rscSegment === undefined) {
+        return new Response("No RSC segment for route.", { status: 404 });
+      }
+
+      return new Response(streamRscSegmentRows(rscSegment), {
+        headers: {
+          "content-type": rscSegment.contentType,
+          [RSC_ROUTE_ID_HEADER]: rscSegment.metadata.routeId,
+          [RSC_SEGMENT_ID_HEADER]: rscSegment.metadata.id,
+        },
+        status,
+      });
+    }
 
     const document = createElement(
       "html",
@@ -116,19 +136,28 @@ export function createRequestHandler(
       });
     }
 
+    const rscSegments = rscSegment === undefined ? [] : [rscSegment.metadata];
+    const rscFrameStream =
+      rscSegment === undefined
+        ? undefined
+        : streamRscSegmentFrames(rscSegment, nonce);
+
     const bootstrap = renderBootstrap({
       clientEntry: options.clientEntry,
       dataEntries: render.getData(),
       location: location.href,
       loaderData: collectLoaderData(result),
       nonce,
-      rsc: rscPayload,
+      rscSegments,
     });
 
-    return new Response(injectBeforeBodyClose(render.stream, bootstrap), {
-      headers: { "content-type": render.contentType },
-      status,
-    });
+    return new Response(
+      injectBeforeBodyClose(render.stream, bootstrap, rscFrameStream),
+      {
+        headers: { "content-type": render.contentType },
+        status,
+      },
+    );
   };
 }
 
@@ -289,10 +318,16 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
   return loaderData;
 }
 
-async function renderServerRoutePayload(
+interface ServerRscSegment {
+  contentType: string;
+  metadata: SerializedRscSegment;
+  stream: ReadableStream<Uint8Array>;
+}
+
+function renderServerRouteSegment(
   result: LoadResult,
   dataContext: unknown,
-): Promise<SerializedRscPayload | undefined> {
+): ServerRscSegment | undefined {
   if (result.status !== "match") return undefined;
   const leaf = result.matches[result.matches.length - 1];
   if (leaf === undefined || leaf.node.route.options.server !== true) {
@@ -311,48 +346,114 @@ async function renderServerRoutePayload(
     }),
     { dataContext },
   );
-  await rsc.allReady;
-  const rows = await drainStream(rsc.stream);
-  reportServerRouteErrors(leaf.routeId, rows);
-  return { routeId: leaf.routeId, rows };
+  void rsc.allReady.catch(() => undefined);
+  return {
+    contentType: rsc.contentType,
+    metadata: { id: leaf.routeId, routeId: leaf.routeId },
+    stream: rsc.stream,
+  };
+}
+
+function isRscRouteRequest(request: Request): boolean {
+  return request.headers.get("accept")?.includes("text/x-component") === true;
 }
 
 // A throw inside a server component becomes an RSC "error" row (it doesn't reject
 // allReady), so the request would otherwise return 200 with no server log. Surface
 // it; the client error boundary renders it on its side.
-function reportServerRouteErrors(routeId: string, rows: string): void {
-  if (!rows.includes('"tag":"error"')) return;
-  for (const line of rows.split("\n")) {
-    if (line.length === 0) continue;
-    let row: { tag?: string; value?: { message?: string } };
-    try {
-      row = JSON.parse(line) as typeof row;
-    } catch {
-      continue;
-    }
-    if (row.tag === "error") {
-      console.error(
-        `[fig-start] server route "${routeId}" failed to render: ${
-          row.value?.message ?? "unknown error"
-        }`,
-      );
-    }
+function reportServerRouteError(routeId: string, line: string): void {
+  let row: { tag?: string; value?: { message?: string } };
+  try {
+    row = JSON.parse(line) as typeof row;
+  } catch {
+    return;
   }
+  if (row.tag !== "error") return;
+  console.error(
+    `[fig-start] server route "${routeId}" failed to render: ${
+      row.value?.message ?? "unknown error"
+    }`,
+  );
 }
 
-async function drainStream(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
+function streamRscSegmentFrames(
+  segment: ServerRscSegment,
+  nonce: string | undefined,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return streamRscSegment(segment, (chunk) =>
+    chunk.length === 0
+      ? undefined
+      : encoder.encode(rscFrameScript(segment.metadata.id, chunk, nonce)),
+  );
+}
+
+function streamRscSegmentRows(
+  segment: ServerRscSegment,
+): ReadableStream<Uint8Array> {
+  return streamRscSegment(segment, (_chunk, value) => value);
+}
+
+function streamRscSegment(
+  segment: ServerRscSegment,
+  emit: (
+    chunk: string,
+    value: Uint8Array | undefined,
+  ) => Uint8Array | undefined,
+): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
-  let output = "";
-  for (;;) {
-    const { done, value } = await reader.read();
+  const reportErrors = createRscErrorReporter(segment.metadata.routeId);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      reader = segment.stream.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        const chunk =
+          done && value === undefined
+            ? decoder.decode()
+            : decoder.decode(value, { stream: !done });
+
+        if (chunk.length > 0 || done) {
+          reportErrors(chunk, done);
+        }
+
+        const output = emit(chunk, value);
+        if (output !== undefined) controller.enqueue(output);
+
+        if (done) {
+          controller.close();
+          return;
+        }
+      }
+    },
+    cancel(reason) {
+      void reader?.cancel(reason).catch(() => undefined);
+    },
+  });
+}
+
+function createRscErrorReporter(
+  routeId: string,
+): (chunk: string, done: boolean) => void {
+  let bufferedLine = "";
+
+  return (chunk, done) => {
+    bufferedLine += chunk;
+    const lines = bufferedLine.split("\n");
+    bufferedLine = lines.pop() ?? "";
+
+    for (const line of lines) reportServerRouteErrorLine(routeId, line);
     if (done) {
-      output += decoder.decode();
-      return output;
+      reportServerRouteErrorLine(routeId, bufferedLine);
+      bufferedLine = "";
     }
-    output += decoder.decode(value, { stream: true });
+  };
+
+  function reportServerRouteErrorLine(routeId: string, line: string): void {
+    if (line.length > 0 && line.includes('"tag":"error"')) {
+      reportServerRouteError(routeId, line);
+    }
   }
 }
 
@@ -362,7 +463,7 @@ function renderBootstrap(input: {
   location: string;
   loaderData: Record<string, unknown>;
   nonce: string | undefined;
-  rsc: SerializedRscPayload | undefined;
+  rscSegments: readonly SerializedRscSegment[];
 }): string {
   const state: SerializedRouterState = {
     href: input.location,
@@ -371,24 +472,20 @@ function renderBootstrap(input: {
   const nonceAttr =
     input.nonce === undefined ? "" : ` nonce="${escapeAttribute(input.nonce)}"`;
 
-  const rscScript =
-    input.rsc === undefined
-      ? ""
-      : `<script id="${RSC_PAYLOAD_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
-          input.rsc,
-        )}</script>`;
-
   return [
+    ...(input.rscSegments.length === 0
+      ? []
+      : [rscStreamBootstrapScript(input.nonce)]),
     `<script id="${ROUTER_STATE_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       state,
     )}</script>`,
     `<script id="${DATA_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       input.dataEntries,
     )}</script>`,
-    rscScript,
-    `<script type="module"${nonceAttr} src="${escapeAttribute(
-      input.clientEntry,
-    )}"></script>`,
+    `<script id="${RSC_SEGMENTS_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
+      input.rscSegments,
+    )}</script>`,
+    `<script${nonceAttr}>import(${escapeJson(input.clientEntry)});</script>`,
   ].join("");
 }
 
@@ -397,6 +494,7 @@ function renderBootstrap(input: {
 function injectBeforeBodyClose(
   stream: ReadableStream<Uint8Array>,
   html: string,
+  beforeBodyClose?: ReadableStream<Uint8Array>,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -411,7 +509,12 @@ function injectBeforeBodyClose(
         const { done, value } = await reader.read();
         if (done) {
           if (buffer.length > 0) controller.enqueue(encoder.encode(buffer));
-          if (!injected) controller.enqueue(encoder.encode(html));
+          if (!injected) {
+            controller.enqueue(encoder.encode(html));
+            if (beforeBodyClose !== undefined) {
+              await pipeStream(beforeBodyClose, controller);
+            }
+          }
           controller.close();
           return;
         }
@@ -436,14 +539,50 @@ function injectBeforeBodyClose(
           continue;
         }
 
-        controller.enqueue(
-          encoder.encode(buffer.slice(0, index) + html + buffer.slice(index)),
-        );
+        controller.enqueue(encoder.encode(buffer.slice(0, index) + html));
+        if (beforeBodyClose !== undefined) {
+          await pipeStream(beforeBodyClose, controller);
+        }
+        controller.enqueue(encoder.encode(buffer.slice(index)));
         injected = true;
         buffer = "";
       }
     },
   });
+}
+
+async function pipeStream(
+  stream: ReadableStream<Uint8Array>,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+): Promise<void> {
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    controller.enqueue(value);
+  }
+}
+
+function rscStreamBootstrapScript(nonce: string | undefined): string {
+  const nonceAttr =
+    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
+  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${RSC_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${RSC_STREAM_GLOBAL}={q:q,p:function(f){q.push(f);for(var i=0;i<l.length;i++)l[i](f)},s:function(fn){l.push(fn);for(var i=0;i<q.length;i++)fn(q[i]);return function(){var n=[];for(var j=0;j<l.length;j++)if(l[j]!==fn)n.push(l[j]);l=n}}};})();</script>`;
+}
+
+function rscFrameScript(
+  segmentId: string,
+  chunk: string,
+  nonce: string | undefined,
+): string {
+  const nonceAttr =
+    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
+  const frame: SerializedRscFrame = { chunk, id: segmentId };
+  return (
+    `<script type="application/json" ${RSC_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
+      frame,
+    )}</script>` +
+    `<script${nonceAttr}>globalThis.${RSC_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
+  );
 }
 
 function shellErrorHtml(error: unknown): string {

@@ -1,8 +1,16 @@
-import { clientReference, createElement, type FigNode } from "@bgub/fig";
+import {
+  clientReference,
+  createElement,
+  type FigNode,
+  readPromise,
+} from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import {
   hasClientReferences,
-  RSC_PAYLOAD_SCRIPT_ID,
+  RSC_FRAME_ATTR,
+  RSC_ROUTE_ID_HEADER,
+  RSC_SEGMENTS_SCRIPT_ID,
+  RSC_SEGMENT_ID_HEADER,
   RSC_SLOT_ATTR,
   ROUTER_STATE_SCRIPT_ID,
 } from "./bootstrap.ts";
@@ -117,7 +125,7 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).toContain("Nothing here");
   });
 
-  it("inlines an RSC payload + empty slot for a .server.tsx route", async () => {
+  it("streams an RSC segment + empty slot for a .server.tsx route", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/dashboard"),
     );
@@ -126,18 +134,108 @@ describe("@bgub/fig-start server handler", () => {
     // SSR leaves an empty slot in the isomorphic layout (the server component
     // is not rendered into the document — it has client refs that can't SSR).
     expect(html).toContain(`${RSC_SLOT_ATTR}="/dashboard"></div>`);
-    // The RSC payload is inlined, carrying a client row for the island.
-    expect(html).toContain(RSC_PAYLOAD_SCRIPT_ID);
+    // The RSC payload is streamed as segment metadata plus row frame scripts.
+    expect(html).toContain(RSC_SEGMENTS_SCRIPT_ID);
+    expect(html).toContain(RSC_FRAME_ATTR);
     expect(html).toContain(islandId);
     expect(html).toContain('"routeId":"/dashboard"');
   });
 
-  it("omits the RSC payload for ordinary isomorphic routes", async () => {
+  it("serves raw RSC rows for client navigation requests", async () => {
+    const response = await handlerFor(true)(
+      new Request("http://localhost/dashboard", {
+        headers: { accept: "text/x-component; charset=utf-8" },
+      }),
+    );
+    const rows = await response.text();
+
+    expect(response.headers.get("content-type")).toContain("text/x-component");
+    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/dashboard");
+    expect(response.headers.get(RSC_SEGMENT_ID_HEADER)).toBe("/dashboard");
+    expect(rows).toContain(islandId);
+    expect(rows).not.toContain(RSC_FRAME_ATTR);
+    expect(rows).not.toContain("<html");
+  });
+
+  it("omits RSC frames for ordinary isomorphic routes", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/about"),
     );
     const html = await response.text();
-    expect(html).not.toContain(RSC_PAYLOAD_SCRIPT_ID);
+    expect(html).toContain(`<script id="${RSC_SEGMENTS_SCRIPT_ID}"`);
+    expect(html).toContain("[]");
+    expect(html).not.toContain(RSC_FRAME_ATTR);
+  });
+
+  it("sends the document bootstrap before a slow RSC segment completes", async () => {
+    const pending = deferred<string>();
+    const slowRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "root-layout" }, createElement(Outlet)),
+      }),
+      createFileRoute("/slow")({
+        server: true,
+        component: () =>
+          createElement("section", null, readPromise(pending.promise)),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: slowRoutes,
+    });
+
+    const response = await handler(new Request("http://localhost/slow"));
+    const reader = response.body?.getReader();
+    if (reader === undefined) throw new Error("Expected response body.");
+
+    const decoder = new TextDecoder();
+    const firstText = await readUntil(reader, decoder, RSC_SEGMENTS_SCRIPT_ID);
+
+    expect(firstText).toContain(`${RSC_SLOT_ATTR}="/slow"></div>`);
+    expect(firstText).toContain(RSC_SEGMENTS_SCRIPT_ID);
+    expect(firstText).not.toContain("slow ready");
+
+    pending.resolve("slow ready");
+    const rest = await readRemaining(reader, decoder);
+    expect(rest).toContain("slow ready");
+  });
+
+  it("logs streamed RSC render errors", async () => {
+    const errorRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "root-layout" }, createElement(Outlet)),
+      }),
+      createFileRoute("/broken")({
+        server: true,
+        component: () => {
+          throw new Error("rsc exploded");
+        },
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: errorRoutes,
+    });
+    const previousError = console.error;
+    const messages: string[] = [];
+    console.error = (...args: unknown[]) => {
+      messages.push(args.map(String).join(" "));
+    };
+
+    try {
+      const response = await handler(new Request("http://localhost/broken"));
+      const html = await response.text();
+      expect(html).toContain(RSC_FRAME_ATTR);
+      expect(html).toContain("rsc exploded");
+    } finally {
+      console.error = previousError;
+    }
+
+    expect(messages.some((message) => message.includes("rsc exploded"))).toBe(
+      true,
+    );
   });
 
   it("builds the data context once per server-route request", async () => {
@@ -163,3 +261,40 @@ describe("@bgub/fig-start server handler", () => {
     expect(hasClientReferences('{"tag":"model","value":null}')).toBe(false);
   });
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+async function readRemaining(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: TextDecoder,
+): Promise<string> {
+  let output = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      output += decoder.decode();
+      return output;
+    }
+    output += decoder.decode(value, { stream: true });
+  }
+}
+
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: TextDecoder,
+  marker: string,
+): Promise<string> {
+  let output = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error(`Stream ended before ${marker}.`);
+    output += decoder.decode(value, { stream: true });
+    if (output.includes(marker)) return output;
+  }
+}
