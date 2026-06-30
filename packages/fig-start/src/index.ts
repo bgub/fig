@@ -4,12 +4,23 @@
 //   }
 // Route `beforeLoad`/`loader` args then see the typed context with no codegen.
 // The framework owns the plumbing only; the app decides what the context holds.
+import type { StartClientOptions } from "./client.ts";
+import type { StartServerOptions } from "./server.ts";
+
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface Register {}
 
 export type RegisteredContext = Register extends { context: infer C }
   ? C
   : unknown;
+
+export type StartConfig = Pick<
+  StartClientOptions,
+  "onRecoverableError" | "routes"
+> &
+  Omit<StartServerOptions, "appUrl" | "context" | "routes"> & {
+    appName: string;
+  };
 
 export {
   Link,

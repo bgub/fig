@@ -223,7 +223,7 @@ function packConfigFor(path: string): PackConfig | undefined {
     case "apps/demo-start":
       return [
         {
-          entry: ["./src/server.tsx"],
+          entry: { server: "virtual:fig-start/server-entry" },
           deps: {
             neverBundle: [figPackages],
           },
@@ -236,7 +236,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           sourcemap: true,
         },
         {
-          entry: ["./src/client.tsx"],
+          entry: { client: "virtual:fig-start/client-entry" },
           alias: sourceAliases,
           platform: "browser",
           format: "esm",
@@ -245,6 +245,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           },
           dts: false,
           minify: false,
+          outExtensions,
           plugins: [figStart({ target: "client" })],
           sourcemap: true,
           clean: false,

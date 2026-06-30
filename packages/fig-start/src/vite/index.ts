@@ -7,7 +7,19 @@ import {
 } from "./transform.ts";
 
 const MANIFEST_ID = "virtual:fig-start/client-manifest";
-const RESOLVED_MANIFEST_ID = `\0${MANIFEST_ID}`;
+const CLIENT_ENTRY_ID = "virtual:fig-start/client-entry";
+const SERVER_ENTRY_ID = "virtual:fig-start/server-entry";
+const VIRTUAL_MODULES: Record<
+  string,
+  (root: string) => string | Promise<string>
+> = {
+  [MANIFEST_ID]: (root) => renderManifest(root),
+  [CLIENT_ENTRY_ID]: () => renderClientEntry(),
+  [SERVER_ENTRY_ID]: () => renderServerEntry(),
+};
+const ROOT_RELATIVE_IMPORTERS = new Set(
+  Object.keys(VIRTUAL_MODULES).map(resolvedVirtualId),
+);
 
 export interface FigStartPlugin {
   configResolved(config: { root?: string }): void;
@@ -41,9 +53,10 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       if (typeof config.root === "string") root = config.root;
     },
     resolveId(id, importer) {
-      if (id === MANIFEST_ID) return RESOLVED_MANIFEST_ID;
+      if (id in VIRTUAL_MODULES) return resolvedVirtualId(id);
       if (
-        importer === RESOLVED_MANIFEST_ID &&
+        importer !== undefined &&
+        ROOT_RELATIVE_IMPORTERS.has(importer) &&
         id.startsWith("/") &&
         !id.includes("?")
       ) {
@@ -52,7 +65,8 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       return null;
     },
     async load(id) {
-      return id === RESOLVED_MANIFEST_ID ? renderManifest(root) : null;
+      const render = id.startsWith("\0") ? VIRTUAL_MODULES[id.slice(1)] : undefined;
+      return render === undefined ? null : render(root);
     },
     async transform(code, id, options) {
       const clean = id.split("?")[0] ?? id;
@@ -71,6 +85,10 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       return { code: result.code, map: result.map };
     },
   };
+}
+
+function resolvedVirtualId(id: string): string {
+  return `\0${id}`;
 }
 
 function transformTarget(
@@ -108,6 +126,35 @@ export function loadClientReference(metadata) {
   }
   return load();
 }
+`;
+}
+
+function renderClientEntry(): string {
+  return `import { hydrateStart } from "@bgub/fig-start/client";
+import { loadClientReference } from "virtual:fig-start/client-manifest";
+import { start } from "/src/start.tsx";
+
+hydrateStart({
+  context: { appName: start.appName },
+  loadClientReference,
+  onRecoverableError: start.onRecoverableError,
+  routes: start.routes,
+});
+`;
+}
+
+function renderServerEntry(): string {
+  // Strip client-only fields so the rest spread forwards just server options.
+  return `import { startServer } from "@bgub/fig-start/server";
+import { start } from "/src/start.tsx";
+
+const { appName, onRecoverableError, ...serverOptions } = start;
+
+startServer({
+  ...serverOptions,
+  appUrl: import.meta.url,
+  context: () => ({ appName }),
+});
 `;
 }
 
