@@ -366,21 +366,28 @@ import { modulepreload, preload, stylesheet } from "@bgub/fig";
 const refs = {\n${entries}\n};
 const routes = {\n${routeEntries}\n};
 let clientAssetManifest;
+let warnedClientAssetManifest = false;
 
 function readClientAssetManifest() {
-  if (clientAssetManifest !== undefined) return clientAssetManifest;
+  const shouldCache = process.env.NODE_ENV === "production";
+  if (shouldCache && clientAssetManifest !== undefined) return clientAssetManifest;
   try {
-    clientAssetManifest = JSON.parse(readFileSync(new URL(${JSON.stringify(
+    const manifest = JSON.parse(readFileSync(new URL(${JSON.stringify(
       `./${CLIENT_ASSET_MANIFEST_FILE}`,
     )}, import.meta.url), "utf8"));
+    if (shouldCache) clientAssetManifest = manifest;
+    return manifest;
   } catch (error) {
-    console.warn(
-      "[fig-start] Client asset manifest is unavailable; falling back to source-specifier client-reference assets.",
-      error,
-    );
-    clientAssetManifest = {};
+    if (!warnedClientAssetManifest) {
+      warnedClientAssetManifest = true;
+      console.warn(
+        "[fig-start] Client asset manifest is unavailable; falling back to source-specifier client-reference assets.",
+        error,
+      );
+    }
+    if (shouldCache) clientAssetManifest = {};
+    return {};
   }
-  return clientAssetManifest;
 }
 
 export function resolveClientReferenceAssets(metadata) {

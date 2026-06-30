@@ -137,6 +137,10 @@ Demo apps live in [`apps/`](./apps).
 pnpm dev:demos
 ```
 
+`pnpm dev:demos` uses Turbo only as a development-time terminal UI for the demo
+apps. Vite Plus remains the build, test, and package task runner; use
+`pnpm dev:demos:stream` for the non-TUI labeled stream output.
+
 The demo sites run through Portless:
 
 - `https://fig-demo-client.localhost`

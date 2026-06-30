@@ -5,8 +5,9 @@
   "scripts": {
     "build": "vp run -r build",
     "check": "vp check",
-    "dev": "vp run -r --parallel dev",
-    "dev:demos": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-rsc --filter @bgub/fig-demo-start --parallel dev",
+    "dev": "vp run -r --parallel --log labeled dev",
+    "dev:demos": "turbo run dev --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-rsc --filter @bgub/fig-demo-start --ui=tui",
+    "dev:demos:stream": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-rsc --filter @bgub/fig-demo-start --parallel --log labeled dev",
     "test": "vp test",
     "test:dom": "vp run --filter @bgub/fig-dom test",
     "test:e2e": "vp run --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client test:e2e",
@@ -44,6 +45,7 @@
     "happy-dom": "^15.11.7",
     "portless": "^0.14.0",
     "size-limit": "^8.2.4",
+    "turbo": "^2.10.2",
     "typescript": "^5.9.2",
     "vite-plus": "catalog:"
   },

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { createLogger, portlessUrlFor } from "./dev/logging.mjs";
+import { startStaticServer } from "./dev/static-server.mjs";
+import { createTaskGroup } from "./dev/tasks.mjs";
 
 const mode = process.argv[2];
 
@@ -11,81 +13,52 @@ if (mode !== "node" && mode !== "static") {
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const packageName = packageJson.name;
-
 if (typeof packageName !== "string") {
   throw new Error("Expected package.json to have a name.");
 }
 
-const children = new Set();
-let shuttingDown = false;
+const logger = createLogger({ portlessUrl: portlessUrlFor(packageJson) });
+const tasks = createTaskGroup();
 
 process.on("SIGINT", () => stopAndExit("SIGINT"));
 process.on("SIGTERM", () => stopAndExit("SIGTERM"));
 
-await run("vp", ["run", "--filter", `${packageName}...`, "build"]);
+await tasks.run("setup", "vp", [
+  "run",
+  "--filter",
+  `${packageName}...`,
+  "build",
+], logger);
 
-const devProcesses = [
-  start("vp", ["pack", "--watch"]),
+const running = [
+  tasks.startProcess("build", "vp", ["pack", "--watch"], logger),
   mode === "node"
-    ? start(process.execPath, ["--watch", "dist/server.js"])
-    : start("python3", [
-        "-m",
-        "http.server",
-        process.env.PORT ?? "4173",
-        "--bind",
-        "127.0.0.1",
-      ]),
+    ? tasks.startProcess(
+        "server",
+        process.execPath,
+        ["--watch", "--watch-preserve-output", "dist/server.js"],
+        logger,
+      )
+    : tasks.track(
+        startStaticServer({
+          logger,
+          port: process.env.PORT,
+          publicUrl: portlessUrlFor(packageJson),
+          root: process.cwd(),
+        }),
+      ),
 ];
 
-for (const child of devProcesses) {
-  child.on("exit", (code, signal) => {
-    if (shuttingDown) return;
+for (const task of running) {
+  task.onExit((code, signal) => {
+    if (tasks.shuttingDown) return;
 
-    stopChildren(signal === null ? "SIGTERM" : signal);
+    tasks.stop(signal === null ? "SIGTERM" : signal);
     process.exit(code ?? 1);
   });
 }
 
-function run(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = start(command, args);
-    child.on("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(
-        new Error(
-          `${command} ${args.join(" ")} exited with ${signal ?? code}.`,
-        ),
-      );
-    });
-  });
-}
-
-function start(command, args) {
-  const child = spawn(command, args, {
-    shell: process.platform === "win32",
-    stdio: "inherit",
-  });
-
-  children.add(child);
-  child.on("exit", () => children.delete(child));
-
-  return child;
-}
-
 function stopAndExit(signal) {
-  stopChildren(signal);
+  tasks.stop(signal);
   process.exit(0);
-}
-
-function stopChildren(signal) {
-  shuttingDown = true;
-  for (const child of children) {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(signal);
-    }
-  }
 }

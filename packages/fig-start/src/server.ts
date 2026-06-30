@@ -214,8 +214,10 @@ export type StartStaticAssetInput = string | Uint8Array | StartStaticAsset;
 // is just `startServer({ routes, appUrl: import.meta.url, ... })`.
 export function startServer(options: StartServerOptions): Server {
   const clientEntry = options.clientEntry ?? "/client.js";
+  const cacheClientAssets = process.env.NODE_ENV === "production";
   const clientAssets = createClientAssetResolver({
     appUrl: options.appUrl,
+    cache: cacheClientAssets,
     clientEntry,
   });
   const handler = createRequestHandler({ ...options, clientEntry });
@@ -230,6 +232,7 @@ export function startServer(options: StartServerOptions): Server {
       request,
       response,
       listener,
+      cacheClientAssets,
     );
   });
 
@@ -279,6 +282,7 @@ async function serveClientAssetOrRoute(
   request: NodeRequestLike,
   response: NodeResponseLike,
   listener: (request: NodeRequestLike, response: NodeResponseLike) => void,
+  cacheClientAssets: boolean,
 ): Promise<void> {
   let assetUrl: URL | null;
   try {
@@ -289,7 +293,7 @@ async function serveClientAssetOrRoute(
   }
 
   if (assetUrl !== null) {
-    await serveClientAsset(assetUrl, response);
+    await serveClientAsset(assetUrl, response, cacheClientAssets);
     return;
   }
 
@@ -352,10 +356,12 @@ function nodeListener(
 async function serveClientAsset(
   url: URL,
   response: NodeResponseLike,
+  cache: boolean,
 ): Promise<void> {
   try {
     const code = await readFile(url);
     response.writeHead(200, {
+      "cache-control": cache ? "public, max-age=31536000, immutable" : "no-store",
       "content-type": contentTypeFor(url.pathname),
     });
     response.end(code);

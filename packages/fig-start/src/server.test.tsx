@@ -423,6 +423,41 @@ describe("@bgub/fig-start server handler", () => {
       await rm(dir, { force: true, recursive: true });
     }
   });
+
+  it("re-discovers client chunks when asset caching is disabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fig-start-"));
+    await mkdir(join(dir, "assets"));
+    await writeFile(join(dir, "server.js"), "server");
+    await writeFile(join(dir, "assets", "client.js"), 'import("./old.js");');
+    await writeFile(join(dir, "assets", "old.js"), "export const old = true;");
+
+    const resolver = createClientAssetResolver({
+      appUrl: pathToFileURL(join(dir, "server.js")).href,
+      cache: false,
+      clientEntry: "/assets/client.js",
+    });
+
+    try {
+      expect((await resolver.resolve("/assets/old.js"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "old.js")).href,
+      );
+
+      await writeFile(
+        join(dir, "assets", "client.js"),
+        'import("./new.js");',
+      );
+      await writeFile(
+        join(dir, "assets", "new.js"),
+        "export const updated = true;",
+      );
+
+      expect((await resolver.resolve("/assets/new.js"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "new.js")).href,
+      );
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
 });
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

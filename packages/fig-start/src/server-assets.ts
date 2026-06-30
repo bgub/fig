@@ -6,20 +6,30 @@ export interface ClientAssetResolver {
 
 export function createClientAssetResolver(input: {
   appUrl: string;
+  cache?: boolean;
   clientEntry: string;
 }): ClientAssetResolver {
   const clientEntryPath = requestPathname(input.clientEntry);
   const basePath = publicDirname(clientEntryPath);
   const baseUrl = new URL(`.${basePath}`, new URL("./", input.appUrl));
   const clientEntryAsset = clientEntryPath.slice(basePath.length);
+  const cache = input.cache ?? process.env.NODE_ENV === "production";
   let assetsPromise: Promise<ReadonlySet<string>> | null = null;
 
   return {
     async resolve(requestUrl) {
       const assetPath = assetPathFromRequest(requestUrl, basePath);
       if (assetPath === null) return null;
-      assetsPromise ??= discoverClientAssets(baseUrl, clientEntryAsset);
-      return (await assetsPromise).has(assetPath)
+      if (cache) {
+        assetsPromise ??= discoverClientAssets(baseUrl, clientEntryAsset);
+        return (await assetsPromise).has(assetPath)
+          ? new URL(assetPath, baseUrl)
+          : null;
+      }
+
+      return (await discoverClientAssets(baseUrl, clientEntryAsset)).has(
+        assetPath,
+      )
         ? new URL(assetPath, baseUrl)
         : null;
     },
