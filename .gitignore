@@ -16,5 +16,6 @@ package-lock.json
 yarn.lock
 
 .turbo
+.repos/effect
 playwright-report
 test-results
