@@ -13,7 +13,14 @@ export interface ClientRef {
 export interface ServerTransformResult {
   clientRefs: ClientRef[];
   code: string;
+  marksServerRoute: boolean;
   map: unknown;
+}
+
+export interface ClientRouteStubResult {
+  code: string;
+  map: unknown;
+  routePath: string | null;
 }
 
 export function rootRelative(root: string, absolutePath: string): string {
@@ -38,48 +45,149 @@ export async function transformServerModule(
 ): Promise<ServerTransformResult> {
   const importerDir = dirname(id.split("?")[0] ?? id);
   const clientRefs: ClientRef[] = [];
+  let marksServerRoute = false;
 
-  const result = await babel.transformAsync(code, {
+  const result = await transformTypeScript(code, id, {
+    plugins: [
+      serverComponentBabelPlugin({
+        clientRefs,
+        importerDir,
+        markServerRoute: () => {
+          marksServerRoute = true;
+        },
+        root,
+      }),
+    ],
+    sourceMaps: true,
+  });
+
+  return {
+    clientRefs,
+    code: result?.code ?? code,
+    marksServerRoute,
+    map: result?.map,
+  };
+}
+
+export async function transformServerRouteClientStub(
+  code: string,
+  id: string,
+): Promise<ClientRouteStubResult> {
+  let routePath: string | null = null;
+
+  await transformTypeScript(code, id, {
+    plugins: [routePathBabelPlugin((path) => (routePath = path))],
+    sourceMaps: false,
+  });
+
+  if (routePath === null) {
+    const stubCode =
+      `throw new Error(${JSON.stringify(
+        `Cannot import server module "${id}" in a browser bundle.`,
+      )});\n` + `export {};`;
+    return {
+      code: stubCode,
+      map: generatedSourceMap(id, stubCode),
+      routePath,
+    };
+  }
+
+  const stubCode =
+    `import { createFileRoute } from "@bgub/fig-start";\n` +
+    `import { markServerRoute as __figMarkServerRoute } from "@bgub/fig-start/internal";\n` +
+    `export const Route = __figMarkServerRoute(createFileRoute(${JSON.stringify(
+      routePath,
+    )})());\n`;
+  return {
+    code: stubCode,
+    map: generatedSourceMap(id, stubCode),
+    routePath,
+  };
+}
+
+function generatedSourceMap(
+  id: string,
+  code: string,
+): {
+  mappings: "";
+  names: [];
+  sources: [string];
+  sourcesContent: [string];
+  version: 3;
+} {
+  return {
+    mappings: "",
+    names: [],
+    sources: [`${id}?fig-start-client-stub`],
+    sourcesContent: [code],
+    version: 3,
+  };
+}
+
+function transformTypeScript(
+  code: string,
+  id: string,
+  options: {
+    plugins: Array<(api: typeof babel) => PluginObj>;
+    sourceMaps: boolean;
+  },
+): Promise<babel.BabelFileResult | null> {
+  return babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
     filename: id,
-    sourceMaps: true,
+    sourceMaps: options.sourceMaps,
     presets: [
       [
         presetTypescript,
         { allExtensions: true, isTSX: true, onlyRemoveTypeImports: true },
       ],
     ],
-    plugins: [serverComponentBabelPlugin({ clientRefs, importerDir, root })],
+    plugins: options.plugins,
   });
-
-  return {
-    clientRefs,
-    code: result?.code ?? code,
-    map: result?.map,
-  };
 }
 
 function serverComponentBabelPlugin(state: {
   clientRefs: ClientRef[];
   importerDir: string;
+  markServerRoute: () => void;
   root: string;
 }): (api: typeof babel) => PluginObj {
   return (api) => {
     const t = api.types;
-    let needsImport = false;
+    let needsClientReferenceImport = false;
+    let needsServerRouteImport = false;
 
     return {
       name: "fig-start-server",
       visitor: {
         Program: {
           exit(path) {
-            if (!needsImport) return;
-            path.node.body.unshift(
-              api.template.statement.ast(
-                `import { clientReference as __figClientRef } from "@bgub/fig";`,
-              ),
-            );
+            if (routePathFromLocalRouteBinding(path, t) !== null) {
+              needsServerRouteImport = true;
+              state.markServerRoute();
+              path.pushContainer(
+                "body",
+                api.template.statement.ast("__figMarkServerRoute(Route);"),
+              );
+            }
+
+            const imports = [];
+            if (needsClientReferenceImport) {
+              imports.push(
+                api.template.statement.ast(
+                  `import { clientReference as __figClientRef } from "@bgub/fig";`,
+                ),
+              );
+            }
+            if (needsServerRouteImport) {
+              imports.push(
+                api.template.statement.ast(
+                  `import { markServerRoute as __figMarkServerRoute } from "@bgub/fig-start/internal";`,
+                ),
+              );
+            }
+            path.node.body.unshift(...(imports as never[]));
           },
         },
         ImportDeclaration(path) {
@@ -122,10 +230,74 @@ function serverComponentBabelPlugin(state: {
           }
 
           if (declarations.length === 0) return;
-          needsImport = true;
+          needsClientReferenceImport = true;
           path.replaceWithMultiple(declarations as never[]);
         },
       },
     };
   };
+}
+
+function routePathFromLocalRouteBinding(
+  path: babel.NodePath<babel.types.Program>,
+  t: typeof babel.types,
+): string | null {
+  const binding = path.scope.getBinding("Route");
+  if (binding === undefined) return null;
+  return routePathFromBinding(binding, t);
+}
+
+function routePathFromBinding(
+  binding: { path: babel.NodePath },
+  t: typeof babel.types,
+): string | null {
+  if (binding.path.isVariableDeclarator()) {
+    return routePathFromDeclarator(binding.path.node, t);
+  }
+
+  if (!binding.path.isIdentifier()) return null;
+  if (!binding.path.parentPath.isVariableDeclarator()) return null;
+  return routePathFromDeclarator(binding.path.parentPath.node, t);
+}
+
+function routePathBabelPlugin(
+  setRoutePath: (path: string) => void,
+): (api: typeof babel) => PluginObj {
+  return (api) => {
+    const t = api.types;
+
+    return {
+      name: "fig-start-server-route-stub",
+      visitor: {
+        VariableDeclarator(path) {
+          const routePath = routePathFromDeclarator(path.node, t);
+          if (routePath !== null) setRoutePath(routePath);
+        },
+      },
+    };
+  };
+}
+
+function routePathFromDeclarator(
+  node: babel.types.VariableDeclarator,
+  t: typeof babel.types,
+): string | null {
+  return t.isIdentifier(node.id, { name: "Route" })
+    ? routePathFromInitializer(node.init, t)
+    : null;
+}
+
+function routePathFromInitializer(
+  init: babel.types.Expression | null | undefined,
+  t: typeof babel.types,
+): string | null {
+  if (!t.isCallExpression(init)) return null;
+  const createRouteCall = init.callee;
+  if (!t.isCallExpression(createRouteCall)) return null;
+  if (!t.isIdentifier(createRouteCall.callee, { name: "createFileRoute" })) {
+    return null;
+  }
+
+  const [pathArg] = createRouteCall.arguments;
+  return t.isStringLiteral(pathArg) ? pathArg.value : null;
 }

@@ -2,6 +2,7 @@ import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 import type { UserConfig } from "vite-plus";
+import { figStart } from "./packages/fig-start/src/vite/index.ts";
 
 const workspaceRoot = workspacePath(".");
 const packagePath =
@@ -22,6 +23,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
   ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
   ["@bgub/fig-start/client", "packages/fig-start/src/client.ts"],
+  ["@bgub/fig-start/internal", "packages/fig-start/src/internal.ts"],
   ["@bgub/fig-start/vite", "packages/fig-start/src/vite/index.ts"],
   ["@bgub/fig-start", "packages/fig-start/src/index.ts"],
   ["@bgub/fig", "packages/fig/src/index.ts"],
@@ -54,6 +56,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/index.ts",
     "./src/server.ts",
     "./src/client.ts",
+    "./src/internal.ts",
     "./src/vite/index.ts",
   ],
 };
@@ -190,7 +193,6 @@ function packConfigFor(path: string): PackConfig | undefined {
         },
       ];
     case "apps/demo-ssr":
-    case "apps/demo-start":
       return [
         {
           entry: ["./src/server.tsx"],
@@ -214,6 +216,36 @@ function packConfigFor(path: string): PackConfig | undefined {
           },
           dts: false,
           minify: false,
+          sourcemap: true,
+          clean: false,
+        },
+      ];
+    case "apps/demo-start":
+      return [
+        {
+          entry: ["./src/server.tsx"],
+          deps: {
+            neverBundle: [figPackages],
+          },
+          platform: "node",
+          format: "esm",
+          dts: false,
+          minify: false,
+          outExtensions,
+          plugins: [figStart({ target: "server" })],
+          sourcemap: true,
+        },
+        {
+          entry: ["./src/client.tsx"],
+          alias: sourceAliases,
+          platform: "browser",
+          format: "esm",
+          deps: {
+            alwaysBundle: [figPackages],
+          },
+          dts: false,
+          minify: false,
+          plugins: [figStart({ target: "client" })],
           sourcemap: true,
           clean: false,
         },

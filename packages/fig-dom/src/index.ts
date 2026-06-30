@@ -490,11 +490,14 @@ export function insertAssetResources(
     }
 
     const element = createAssetResourceElement(asset);
+    const gate = isCriticalStylesheet(asset)
+      ? whenResourceSettled(element)
+      : null;
     registry.set(key, { count: 1, element });
     documentResourceMeta.set(element, { key, kind: asset.kind });
     head.appendChild(element);
 
-    if (isCriticalStylesheet(asset)) gates.push(whenResourceSettled(element));
+    if (gate !== null) gates.push(gate);
   }
 
   return gates.length === 0

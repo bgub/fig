@@ -1,8 +1,8 @@
 import { type FigNode, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 
-// A client island: imported by a `.server.tsx`, it becomes a client reference
-// and hydrates into the server-rendered payload.
+// Imported by a `.server.tsx` route, so the Start Vite plugin rewrites this
+// component into a client reference for the RSC payload.
 export function Island(): FigNode {
   const [count, setCount] = useState(0);
   return (

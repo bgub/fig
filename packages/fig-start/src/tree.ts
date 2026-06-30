@@ -1,4 +1,5 @@
 import type { RouteNode, RouteSegment } from "./core.ts";
+import { isServerRoute } from "./internal.ts";
 import { type AnyRoute } from "./route.ts";
 
 interface ParsedRoute {
@@ -88,7 +89,7 @@ export function buildRouteTree(routes: readonly AnyRoute[]): RouteNode {
   }
 
   for (const { node } of created) {
-    if (node.route.options.server === true && node.children.length > 0) {
+    if (isServerRoute(node.route) && node.children.length > 0) {
       throw new Error(
         `Server route "${node.id}" (.server.tsx) cannot have child routes — a ` +
           `server component renders as a single RSC payload and does not nest an ` +

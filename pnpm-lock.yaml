@@ -158,31 +158,6 @@ importers:
         specifier: ^20.19.0
         version: 20.19.41
 
-  apps/demo-start-rsc:
-    dependencies:
-      '@bgub/fig':
-        specifier: workspace:*
-        version: link:../../packages/fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../../packages/fig-data
-      '@bgub/fig-dom':
-        specifier: workspace:*
-        version: link:../../packages/fig-dom
-      '@bgub/fig-server':
-        specifier: workspace:*
-        version: link:../../packages/fig-server
-      '@bgub/fig-start':
-        specifier: workspace:*
-        version: link:../../packages/fig-start
-    devDependencies:
-      '@types/node':
-        specifier: ^20.19.0
-        version: 20.19.41
-      vite-plus:
-        specifier: 'catalog:'
-        version: 0.1.20(@types/node@20.19.41)(@vitest/coverage-istanbul@4.1.5)(esbuild@0.27.7)(happy-dom@15.11.7)(jiti@2.6.1)(typescript@5.9.3)(vite@7.3.2(@types/node@20.19.41)(jiti@2.6.1)(lightningcss@1.32.0))
-
   packages/fig: {}
 
   packages/fig-data:

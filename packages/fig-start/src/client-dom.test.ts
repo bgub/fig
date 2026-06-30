@@ -4,10 +4,12 @@ import {
   createElement,
   type FigNode,
   readPromise,
+  stylesheet,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { hydrateStart } from "./client.ts";
 import { Outlet } from "./components.tsx";
+import { markServerRoute } from "./internal.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRequestHandler } from "./server.ts";
 import type { AnyRoute } from "./route.ts";
@@ -18,9 +20,20 @@ const Island = clientReference({
   id: islandId,
   load: () => Promise.resolve({}),
 });
+const styledIslandId = "test/StyledIsland.tsx#StyledIsland";
+const styledIslandHref = "http://[::1";
+const StyledIsland = clientReference({
+  id: styledIslandId,
+  load: () => Promise.resolve({}),
+  resources: [stylesheet(styledIslandHref)],
+});
 
 function RealIsland(): FigNode {
   return createElement("span", { class: "island" }, "island!");
+}
+
+function RealStyledIsland(): FigNode {
+  return createElement("span", { class: "styled-island" }, "styled!");
 }
 
 const routes = [
@@ -30,22 +43,31 @@ const routes = [
   createFileRoute("/")({
     component: () => createElement("h1", null, "Home"),
   }),
-  createFileRoute("/dash")({
-    server: true,
-    component: () =>
-      createElement(
-        "section",
-        null,
-        createElement("p", { class: "static" }, "static markup"),
-        createElement(Island, {}),
-      ),
-  }),
+  markServerRoute(
+    createFileRoute("/dash")({
+      component: () =>
+        createElement(
+          "section",
+          null,
+          createElement("p", { class: "static" }, "static markup"),
+          createElement(Island, {}),
+        ),
+    }),
+  ),
+  markServerRoute(
+    createFileRoute("/styled")({
+      component: () =>
+        createElement("section", null, createElement(StyledIsland, {})),
+    }),
+  ),
 ];
 
 const loadClientReference = ({ id }: { id: string }): Promise<unknown> =>
   id === islandId
     ? Promise.resolve({ Island: RealIsland })
-    : Promise.reject(new Error(`unknown client reference ${id}`));
+    : id === styledIslandId
+      ? Promise.resolve({ StyledIsland: RealStyledIsland })
+      : Promise.reject(new Error(`unknown client reference ${id}`));
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
@@ -166,6 +188,56 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     }
   });
 
+  it("inserts and gates server route client-reference stylesheets", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+
+    try {
+      const router = hydrateStart({ routes, loadClientReference });
+      await router.navigate("/styled");
+      await flush();
+
+      const link = document.head.querySelector('link[rel="stylesheet"]');
+      const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
+      expect(link).not.toBeNull();
+      expect(link?.getAttribute("href")).toBe(styledIslandHref);
+      expect(slot?.querySelector(".styled-island")).toBeNull();
+
+      link?.dispatchEvent(new Event("load"));
+      await flush();
+
+      expect(slot?.querySelector(".styled-island")?.textContent).toBe(
+        "styled!",
+      );
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("ignores server route stylesheet gates after navigation away", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+
+    try {
+      const router = hydrateStart({ routes, loadClientReference });
+      await router.navigate("/styled");
+      await flush();
+
+      const link = document.head.querySelector('link[rel="stylesheet"]');
+      expect(link).not.toBeNull();
+      expect(document.querySelector(".styled-island")).toBeNull();
+
+      await router.navigate("/");
+      link?.dispatchEvent(new Event("load"));
+      await flush();
+
+      expect(document.body.textContent).toContain("Home");
+      expect(document.querySelector(".styled-island")).toBeNull();
+    } finally {
+      restoreFetch();
+    }
+  });
+
   it("aborts stale server route fetches when navigating away", async () => {
     const pending = deferred<string>();
     const slowRoutes = [
@@ -176,11 +248,12 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       createFileRoute("/")({
         component: () => createElement("h1", null, "Home"),
       }),
-      createFileRoute("/slow")({
-        server: true,
-        component: () =>
-          createElement("section", null, readPromise(pending.promise)),
-      }),
+      markServerRoute(
+        createFileRoute("/slow")({
+          component: () =>
+            createElement("section", null, readPromise(pending.promise)),
+        }),
+      ),
     ];
 
     await installServerRenderedDocument("/", slowRoutes);

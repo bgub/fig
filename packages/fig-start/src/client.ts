@@ -1,11 +1,12 @@
 import {
   createElement,
   type ElementType,
+  type FigNode,
   ErrorBoundary,
   Suspense,
 } from "@bgub/fig";
-import type { FigDataHydrationEntry } from "@bgub/fig/internal";
-import { createRoot, hydrateRoot } from "@bgub/fig-dom";
+import { figResourceKey, type FigDataHydrationEntry } from "@bgub/fig/internal";
+import { createRoot, hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
   createRscResponse,
   fetchRsc,
@@ -28,9 +29,12 @@ import {
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
 import type { Router } from "./core.ts";
+import { isServerRoute } from "./internal.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
 import type { RouterLocation } from "./types.ts";
+
+type ServerRouteResponse = ReturnType<typeof createRscResponse>;
 
 export interface StartClientOptions {
   container?: Element | null;
@@ -140,7 +144,7 @@ function mountServerRouteSegment(
   };
   const unsubscribeStream = stream.s(processFrame);
 
-  mounts.mount(slot, segment.routeId, response, unsubscribeStream);
+  mounts.mount(slot, segment.routeId, response, { dispose: unsubscribeStream });
 }
 
 function mountBufferedServerRoute(
@@ -161,7 +165,7 @@ function mountBufferedServerRoute(
 
 function createServerRouteResponse(
   options: StartClientOptions,
-): ReturnType<typeof createRscResponse> {
+): ServerRouteResponse {
   return createRscResponse({
     loadClientReference: options.loadClientReference,
     resolveClientReference: options.resolveClientReference,
@@ -173,10 +177,21 @@ interface ServerRouteMounts {
   mount(
     slot: Element,
     routeId: string,
-    response: ReturnType<typeof createRscResponse>,
-    dispose?: () => void,
-  ): void;
+    response: ServerRouteResponse,
+    options?: ServerRouteMountOptions,
+  ): ServerRouteMount;
 }
+
+interface ServerRouteMount {
+  complete(): void;
+}
+
+interface ServerRouteMountOptions {
+  dispose?: () => void;
+  payloadComplete?: boolean;
+}
+
+const noopServerRouteMount: ServerRouteMount = { complete: () => undefined };
 
 function createServerRouteMounts(
   options: StartClientOptions,
@@ -186,13 +201,20 @@ function createServerRouteMounts(
 
   return {
     has: (routeId) => mountedRoutes.has(routeId),
-    mount(slot, routeId, response, dispose = () => undefined) {
+    mount(slot, routeId, response, mountOptions = {}) {
+      const dispose = mountOptions.dispose ?? (() => undefined);
       if (mountedRoutes.has(routeId)) {
         dispose();
-        return;
+        return noopServerRouteMount;
       }
 
-      const root = createServerRouteRoot(slot, routeId, response, options);
+      const root = createServerRouteRoot(
+        slot,
+        routeId,
+        response,
+        options,
+        mountOptions.payloadComplete ?? true,
+      );
       const unsubscribeResponse = response.subscribe(root.render);
       mountedRoutes.add(routeId);
       root.render();
@@ -203,6 +225,8 @@ function createServerRouteMounts(
         unsubscribeResponse();
         root.unmount();
       });
+
+      return { complete: root.complete };
     },
   };
 }
@@ -210,9 +234,17 @@ function createServerRouteMounts(
 function createServerRouteRoot(
   slot: Element,
   routeId: string,
-  response: ReturnType<typeof createRscResponse>,
+  response: ServerRouteResponse,
   options: StartClientOptions,
-): { render: () => void; unmount: () => void } {
+  initialPayloadComplete: boolean,
+): { complete: () => void; render: () => void; unmount: () => void } {
+  let assetGate: Promise<void> | null = null;
+  let revealed = false;
+  let mounted = true;
+  let payloadComplete = initialPayloadComplete;
+  // Mirrors fig-dom's resource key so repeated RSC rows avoid re-scanning head;
+  // insertAssetResources remains the authoritative DOM-level deduper.
+  const insertedAssetKeys = new Set<string>();
   // The RSC tree renders in its own root nested in the slot. Client references
   // suspend while their chunks load (Suspense); a render/decode error surfaces
   // via the boundary instead of escaping as a detached uncaught error.
@@ -225,16 +257,92 @@ function createServerRouteRoot(
       );
     },
   });
-  const render = (): void => {
-    root.render(
-      createElement(
-        ErrorBoundary,
-        { fallback: createElement("div", { "data-fig-rsc-error": "" }) },
-        createElement(Suspense, { fallback: null }, response.getRoot()),
-      ),
+  function settleGate(currentGate: Promise<void>, error?: unknown): void {
+    if (error !== undefined) options.onRecoverableError?.(error);
+    if (assetGate !== currentGate) return;
+    assetGate = null;
+    render();
+  }
+
+  function armGate(nextGate: Promise<void>): void {
+    assetGate = combineAssetGates(assetGate, nextGate);
+    const currentGate = assetGate;
+    void currentGate.then(
+      () => settleGate(currentGate),
+      (error: unknown) => settleGate(currentGate, error),
     );
+  }
+
+  function complete(): void {
+    payloadComplete = true;
+    render();
+  }
+
+  const render = (): void => {
+    if (!mounted) return;
+
+    const nextGate = insertNewServerRouteAssets(response, insertedAssetKeys);
+    if (nextGate !== null) armGate(nextGate);
+
+    if ((assetGate !== null && !revealed) || !payloadComplete) {
+      root.render(null);
+      return;
+    }
+
+    root.render(serverRouteNode(response));
+    // Rendering can synchronously decode client-reference rows and surface their
+    // asset resources, so scan once more before the first reveal.
+    const postRenderGate = insertNewServerRouteAssets(
+      response,
+      insertedAssetKeys,
+    );
+    if (postRenderGate !== null) armGate(postRenderGate);
+    if (assetGate !== null && !revealed) {
+      root.render(null);
+      return;
+    }
+
+    revealed = true;
   };
-  return { render, unmount: () => root.unmount() };
+  return {
+    complete,
+    render,
+    unmount: () => {
+      mounted = false;
+      root.unmount();
+    },
+  };
+}
+
+function serverRouteNode(response: ServerRouteResponse): FigNode {
+  return createElement(
+    ErrorBoundary,
+    { fallback: createElement("div", { "data-fig-rsc-error": "" }) },
+    createElement(Suspense, { fallback: null }, response.getRoot()),
+  );
+}
+
+function insertNewServerRouteAssets(
+  response: ServerRouteResponse,
+  insertedAssetKeys: Set<string>,
+): Promise<void> | null {
+  const newAssets = response.getAssetResources().filter((resource) => {
+    const key = figResourceKey(resource);
+    if (insertedAssetKeys.has(key)) return false;
+    insertedAssetKeys.add(key);
+    return true;
+  });
+
+  return newAssets.length === 0 ? null : insertAssetResources(newAssets);
+}
+
+function combineAssetGates(
+  current: Promise<void> | null,
+  next: Promise<void>,
+): Promise<void> {
+  return current === null
+    ? next
+    : Promise.all([current, next]).then(() => undefined);
 }
 
 function installServerRouteFetcher(
@@ -267,7 +375,7 @@ function mountActiveServerRouteSegments(
   let retryMissingSlot = false;
 
   for (const match of state.matches) {
-    if (match.node.route.options.server !== true) continue;
+    if (!isServerRoute(match.node.route)) continue;
     if (mounts.has(match.routeId)) continue;
 
     const slot = findSlot(container, match.routeId);
@@ -278,18 +386,21 @@ function mountActiveServerRouteSegments(
 
     const response = createServerRouteResponse(options);
     const controller = new AbortController();
-    mounts.mount(slot, match.routeId, response, () => controller.abort());
+    const mount = mounts.mount(slot, match.routeId, response, {
+      dispose: () => controller.abort(),
+      // Client navigation reveals server routes atomically after the RSC fetch;
+      // initial document streams keep their default progressive reveal behavior.
+      payloadComplete: false,
+    });
 
-    void fetchServerRouteRsc(
+    loadServerRouteRsc(
       response,
       match.routeId,
       rscRouteUrl(state.location),
       options,
       controller.signal,
-    ).catch((error: unknown) => {
-      if (isRscRequestCancelled(error)) return;
-      reportRscFetchError(match.routeId, error, options);
-    });
+      mount,
+    );
   }
 
   if (retryMissingSlot) {
@@ -299,8 +410,26 @@ function mountActiveServerRouteSegments(
   }
 }
 
+function loadServerRouteRsc(
+  response: ServerRouteResponse,
+  routeId: string,
+  url: string,
+  options: StartClientOptions,
+  signal: AbortSignal,
+  mount: ServerRouteMount,
+): void {
+  void fetchServerRouteRsc(response, routeId, url, options, signal).then(
+    () => mount.complete(),
+    (error: unknown) => {
+      if (isRscRequestCancelled(error)) return;
+      reportRscFetchError(routeId, error, options);
+      mount.complete();
+    },
+  );
+}
+
 function fetchServerRouteRsc(
-  response: ReturnType<typeof createRscResponse>,
+  response: ServerRouteResponse,
   routeId: string,
   url: string,
   options: StartClientOptions,

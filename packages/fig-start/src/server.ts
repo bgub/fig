@@ -23,9 +23,15 @@ import {
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
+import { isServerRoute } from "./internal.ts";
 import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
+import {
+  type ClientAssetResolver,
+  createClientAssetResolver,
+  requestPathname,
+} from "./server-assets.ts";
 
 export interface StartHandlerOptions {
   // URL of the built client entry module, as served (e.g. "/client.js").
@@ -180,7 +186,10 @@ export interface StartServerOptions extends Omit<
 export function startServer(options: StartServerOptions): Server {
   const clientEntry = options.clientEntry ?? "/client.js";
   const stylePath = "/style.css";
-  const clientUrl = new URL("./client.js", options.appUrl);
+  const clientAssets = createClientAssetResolver({
+    appUrl: options.appUrl,
+    clientEntry,
+  });
 
   const head =
     options.styles === undefined
@@ -197,25 +206,21 @@ export function startServer(options: StartServerOptions): Server {
 
   const server = createServer((request, response) => {
     const url = request.url ?? "/";
+    const pathname = requestPathname(url);
 
-    if (options.styles !== undefined && url === stylePath) {
+    if (options.styles !== undefined && pathname === stylePath) {
       response.writeHead(200, { "content-type": "text/css; charset=utf-8" });
       response.end(options.styles);
       return;
     }
 
-    if (url === clientEntry) {
-      void serveClientBundle(clientUrl, response);
-      return;
-    }
-
-    if (url === "/favicon.ico") {
-      response.writeHead(204);
-      response.end();
-      return;
-    }
-
-    listener(request, response);
+    void serveClientAssetOrRoute(
+      clientAssets,
+      url,
+      request,
+      response,
+      listener,
+    );
   });
 
   const port = options.port ?? Number(process.env.PORT ?? 3000);
@@ -223,6 +228,35 @@ export function startServer(options: StartServerOptions): Server {
     console.log(`Fig Start: http://localhost:${port}/`);
   });
   return server;
+}
+
+async function serveClientAssetOrRoute(
+  clientAssets: ClientAssetResolver,
+  url: string,
+  request: NodeRequestLike,
+  response: NodeResponseLike,
+  listener: (request: NodeRequestLike, response: NodeResponseLike) => void,
+): Promise<void> {
+  let assetUrl: URL | null;
+  try {
+    assetUrl = await clientAssets.resolve(url);
+  } catch {
+    listener(request, response);
+    return;
+  }
+
+  if (assetUrl !== null) {
+    await serveClientAsset(assetUrl, response);
+    return;
+  }
+
+  if (requestPathname(url) === "/favicon.ico") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
+  listener(request, response);
 }
 
 interface NodeRequestLike {
@@ -272,7 +306,7 @@ function nodeListener(
   };
 }
 
-async function serveClientBundle(
+async function serveClientAsset(
   url: URL,
   response: NodeResponseLike,
 ): Promise<void> {
@@ -330,7 +364,7 @@ function renderServerRouteSegment(
 ): ServerRscSegment | undefined {
   if (result.status !== "match") return undefined;
   const leaf = result.matches[result.matches.length - 1];
-  if (leaf === undefined || leaf.node.route.options.server !== true) {
+  if (leaf === undefined || !isServerRoute(leaf.node.route)) {
     return undefined;
   }
 

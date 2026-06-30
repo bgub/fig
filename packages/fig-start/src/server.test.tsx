@@ -4,6 +4,10 @@ import {
   type FigNode,
   readPromise,
 } from "@bgub/fig";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import {
   hasClientReferences,
@@ -15,8 +19,10 @@ import {
   ROUTER_STATE_SCRIPT_ID,
 } from "./bootstrap.ts";
 import { Outlet } from "./components.tsx";
+import { markServerRoute } from "./internal.ts";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
+import { createClientAssetResolver } from "./server-assets.ts";
 import { createRequestHandler } from "./server.ts";
 
 // A manually-declared client reference (the @bgub/fig-start/vite plugin will
@@ -27,11 +33,17 @@ const Island = clientReference({
   load: () => Promise.resolve({}),
 });
 
-const dashboardRoute = createFileRoute("/dashboard")({
-  server: true,
-  component: () =>
-    createElement("section", null, "server markup ", createElement(Island, {})),
-});
+const dashboardRoute = markServerRoute(
+  createFileRoute("/dashboard")({
+    component: () =>
+      createElement(
+        "section",
+        null,
+        "server markup ",
+        createElement(Island, {}),
+      ),
+  }),
+);
 
 const postRoute = createFileRoute("/posts/$postId")({
   loader: ({ params }) => ({ id: params.postId }),
@@ -174,11 +186,12 @@ describe("@bgub/fig-start server handler", () => {
         component: () =>
           createElement("div", { id: "root-layout" }, createElement(Outlet)),
       }),
-      createFileRoute("/slow")({
-        server: true,
-        component: () =>
-          createElement("section", null, readPromise(pending.promise)),
-      }),
+      markServerRoute(
+        createFileRoute("/slow")({
+          component: () =>
+            createElement("section", null, readPromise(pending.promise)),
+        }),
+      ),
     ];
     const handler = createRequestHandler({
       clientEntry: "/client.js",
@@ -207,12 +220,13 @@ describe("@bgub/fig-start server handler", () => {
         component: () =>
           createElement("div", { id: "root-layout" }, createElement(Outlet)),
       }),
-      createFileRoute("/broken")({
-        server: true,
-        component: () => {
-          throw new Error("rsc exploded");
-        },
-      }),
+      markServerRoute(
+        createFileRoute("/broken")({
+          component: () => {
+            throw new Error("rsc exploded");
+          },
+        }),
+      ),
     ];
     const handler = createRequestHandler({
       clientEntry: "/client.js",
@@ -259,6 +273,42 @@ describe("@bgub/fig-start server handler", () => {
       true,
     );
     expect(hasClientReferences('{"tag":"model","value":null}')).toBe(false);
+  });
+
+  it("resolves only built client chunks next to the client entry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fig-start-"));
+    await mkdir(join(dir, "assets"));
+    await writeFile(join(dir, "server.js"), "server secret");
+    await writeFile(join(dir, "server-helper.js"), "server helper secret");
+    await writeFile(
+      join(dir, "assets", "client.js"),
+      'import("./Island-test.js");',
+    );
+    await writeFile(
+      join(dir, "assets", "Island-test.js"),
+      "export const value = 1;",
+    );
+
+    const resolver = createClientAssetResolver({
+      appUrl: pathToFileURL(join(dir, "server.js")).href,
+      clientEntry: "/assets/client.js",
+    });
+
+    try {
+      expect((await resolver.resolve("/assets/client.js"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "client.js")).href,
+      );
+      expect((await resolver.resolve("/assets/Island-test.js"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "Island-test.js")).href,
+      );
+      expect(await resolver.resolve("/dashboard")).toBe(null);
+      expect(await resolver.resolve("/server.js")).toBe(null);
+      expect(await resolver.resolve("/server-helper.js")).toBe(null);
+      expect(await resolver.resolve("/%73erver.js")).toBe(null);
+      expect(await resolver.resolve("/assets/%2e%2e/server.js")).toBe(null);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
   });
 });
 

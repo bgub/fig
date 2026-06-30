@@ -7,6 +7,7 @@ import {
 } from "@bgub/fig";
 import { RSC_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
+import { isServerRoute } from "./internal.ts";
 import { hrefFrom } from "./location.ts";
 import type { RouterLocation } from "./types.ts";
 import { RouterContext, useRouter, useRouterState } from "./router-context.ts";
@@ -37,7 +38,7 @@ export function Outlet(): FigNode {
     return null;
   }
 
-  if (match.node.route.options.server === true) {
+  if (isServerRoute(match.node.route)) {
     // A server (RSC) route renders nothing in the isomorphic tree: it leaves an
     // empty slot that the client mounts the streamed RSC payload into. (Its
     // component contains client references that cannot run under SSR.)

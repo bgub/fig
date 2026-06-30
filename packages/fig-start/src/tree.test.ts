@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { markServerRoute } from "./internal.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { buildRouteTree, matchRoutes } from "./tree.ts";
 
@@ -76,7 +77,7 @@ describe("@bgub/fig-start route matching", () => {
     expect(() =>
       buildRouteTree([
         createRootRoute(),
-        createFileRoute("/dash")({ server: true }),
+        markServerRoute(createFileRoute("/dash")()),
         createFileRoute("/dash/settings")(),
       ]),
     ).toThrow(/cannot have child routes/);

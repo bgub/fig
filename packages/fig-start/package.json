@@ -18,6 +18,10 @@
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
     },
+    "./internal": {
+      "import": "./dist/internal.js",
+      "types": "./dist/internal.d.ts"
+    },
     "./vite": {
       "import": "./dist/vite/index.js",
       "types": "./dist/vite/index.d.ts"
