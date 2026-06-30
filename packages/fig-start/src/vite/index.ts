@@ -12,7 +12,6 @@ const CLIENT_ENTRY_ID = "virtual:fig-start/client-entry";
 const SERVER_ENTRY_ID = "virtual:fig-start/server-entry";
 const DEV_ENV_ID = "virtual:fig-start/dev-env";
 const CLIENT_ASSET_MANIFEST_FILE = "fig-start-client-assets.json";
-const RAW_SUFFIX = "?raw";
 const ROOT_RELATIVE_VIRTUAL_IDS = [
   MANIFEST_ID,
   CLIENT_ENTRY_ID,
@@ -58,6 +57,9 @@ interface OutputChunk {
   fileName: string;
   moduleIds?: string[];
   type: "chunk";
+  viteMetadata?: {
+    importedCss?: Iterable<string>;
+  };
 }
 
 interface ClientAssetManifestEntry {
@@ -106,7 +108,6 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
     },
     resolveId(id, importer) {
       if (id in virtualModules) return resolvedVirtualId(id);
-      if (id.endsWith(RAW_SUFFIX)) return resolveRawId(root, id, importer);
       if (
         importer !== undefined &&
         rootRelativeImporters.has(importer) &&
@@ -122,20 +123,12 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
         ? virtualModules[id.slice(1)]
         : undefined;
       if (render !== undefined) return render();
-      if (id.endsWith(RAW_SUFFIX)) return renderRawFile(id);
       return null;
     },
     async transform(code, id, options) {
       const clean = id.split("?")[0] ?? id;
-      if (
-        tailwind !== false &&
-        isCssModuleId(clean) &&
-        !id.endsWith(RAW_SUFFIX)
-      ) {
-        return {
-          code: await transformTailwindCss(code, clean, root, tailwind),
-          map: null,
-        };
+      if (tailwind !== false && isCssId(clean) && isTailwindCssEntry(code)) {
+        return transformTailwindCss(code, clean, root, tailwind);
       }
 
       if (!clean.endsWith(".server.tsx") || clean.includes("/node_modules/")) {
@@ -155,32 +148,12 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
   };
 }
 
-function isCssModuleId(id: string): boolean {
+function isCssId(id: string): boolean {
   return id.endsWith(".css");
 }
 
 function resolvedVirtualId(id: string): string {
   return `\0${id}`;
-}
-
-function resolveRawId(
-  root: string,
-  id: string,
-  importer: string | undefined,
-): string | null {
-  const path = id.slice(0, -RAW_SUFFIX.length);
-  if (path.startsWith("/")) return `${resolve(root, path.slice(1))}${RAW_SUFFIX}`;
-  if (importer === undefined) return `${resolve(root, path)}${RAW_SUFFIX}`;
-
-  const importerPath = importer.split("?")[0] ?? importer;
-  const resolved = resolve(dirname(importerPath), path);
-  return `${resolved}${RAW_SUFFIX}`;
-}
-
-async function renderRawFile(id: string): Promise<string> {
-  const path = id.slice(0, -RAW_SUFFIX.length);
-  const content = await readFile(path, "utf8");
-  return `export default ${JSON.stringify(content)};\n`;
 }
 
 function transformTarget(
@@ -236,7 +209,11 @@ function readClientAssetManifest() {
     clientAssetManifest = JSON.parse(readFileSync(new URL(${JSON.stringify(
       `./${CLIENT_ASSET_MANIFEST_FILE}`,
     )}, import.meta.url), "utf8"));
-  } catch {
+  } catch (error) {
+    console.warn(
+      "[fig-start] Client asset manifest is unavailable; falling back to source-specifier client-reference assets.",
+      error,
+    );
     clientAssetManifest = {};
   }
   return clientAssetManifest;
@@ -268,33 +245,12 @@ async function collectClientRefs(root: string): Promise<ClientRef[]> {
   return [...refs.values()];
 }
 
-async function clientReferenceImportsCss(
-  root: string,
-  specifier: string,
-): Promise<boolean> {
-  const code = await readFile(rootAbsolutePath(root, specifier), "utf8").catch(
-    () => null,
-  );
-  if (code === null) return false;
-
-  return cssImportSpecifiers(code).length > 0;
-}
-
-function cssImportSpecifiers(code: string): string[] {
-  return [...code.matchAll(CSS_IMPORT_PATTERN)]
-    .map((match) => match[1] ?? match[2])
-    .filter((specifier): specifier is string => specifier !== undefined);
-}
-
-const CSS_IMPORT_PATTERN =
-  /\bimport\s*\(\s*["']([^"']+\.css)["']\s*\)|\b(?:from|import)\s*["']([^"']+\.css)["']/g;
-
 async function transformTailwindCss(
   code: string,
   id: string,
   root: string,
   options: Exclude<FigStartPluginOptions["tailwind"], false | undefined>,
-): Promise<string> {
+): Promise<{ code: string; map: unknown }> {
   const [{ default: postcss }, { default: tailwindcss }] = await Promise.all([
     import("postcss"),
     import("@tailwindcss/postcss"),
@@ -302,8 +258,16 @@ async function transformTailwindCss(
   const base = typeof options === "object" ? options.base : undefined;
   const result = await postcss([
     tailwindcss({ base: base ?? root }),
-  ]).process(code, { from: id, to: id });
-  return result.css;
+  ]).process(code, {
+    from: id,
+    map: { annotation: false, inline: false },
+    to: id,
+  });
+  return { code: result.css, map: result.map?.toJSON() ?? null };
+}
+
+function isTailwindCssEntry(code: string): boolean {
+  return /@import\s+["']tailwindcss["']|@tailwind\b/.test(code);
 }
 
 async function renderClientAssetManifest(
@@ -311,7 +275,6 @@ async function renderClientAssetManifest(
   bundle: OutputBundle,
 ): Promise<ClientAssetManifest> {
   const refs = await collectClientRefs(root);
-  const css = outputCssHrefs(bundle);
   const manifest: ClientAssetManifest = {};
 
   for (const ref of refs) {
@@ -321,17 +284,16 @@ async function renderClientAssetManifest(
     );
     const entry: ClientAssetManifestEntry = {};
     if (chunk !== null) entry.module = outputHref(chunk.fileName);
-    if (await clientReferenceImportsCss(root, ref.specifier)) entry.css = css;
+    const css = chunk === null ? [] : outputCssHrefsForChunk(chunk);
+    if (css.length > 0) entry.css = css;
     manifest[ref.id] = entry;
   }
 
   return manifest;
 }
 
-function outputCssHrefs(bundle: OutputBundle): string[] {
-  return Object.values(bundle)
-    .filter((file): file is OutputAsset => file.type === "asset")
-    .map((file) => file.fileName)
+function outputCssHrefsForChunk(chunk: OutputChunk): string[] {
+  return [...(chunk.viteMetadata?.importedCss ?? [])]
     .filter((fileName) => fileName.endsWith(".css"))
     .map(outputHref);
 }

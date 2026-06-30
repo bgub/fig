@@ -528,6 +528,8 @@ function isCriticalStylesheet(resource: FigResource): boolean {
     return false;
   }
   if (resource.media === undefined || resource.media === "") return true;
+  // Outside browsers there is no reliable media evaluation, so keep media
+  // stylesheets conservative and gate them as potentially critical.
   return (
     typeof matchMedia !== "function" || matchMedia(resource.media).matches
   );

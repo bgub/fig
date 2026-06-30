@@ -86,25 +86,6 @@ export {};
     ).toBe("/project/src/start.tsx");
   });
 
-  it("loads raw files as string modules", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
-    await mkdir(join(root, "src"), { recursive: true });
-    await writeFile(join(root, "src", "styles.css"), ".app { color: red; }");
-
-    const plugin = figStart();
-    plugin.configResolved({ root });
-    const id = plugin.resolveId("./styles.css?raw", join(root, "src/start.tsx"));
-
-    try {
-      expect(id).toBe(`${join(root, "src", "styles.css")}?raw`);
-      await expect(plugin.load(id ?? "")).resolves.toBe(
-        `export default ${JSON.stringify(".app { color: red; }")};\n`,
-      );
-    } finally {
-      await rm(root, { force: true, recursive: true });
-    }
-  });
-
   it("transforms Tailwind CSS before the CSS bundler sees imports", async () => {
     const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
     await mkdir(join(root, "src"), { recursive: true });
@@ -126,10 +107,22 @@ export {};
 
       expect(result?.code).toContain(".text-3xl");
       expect(result?.code).toContain(".font-semibold");
+      expect(result?.map).not.toBe(null);
       expect(result?.code).not.toContain("@tailwind");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
+  });
+
+  it("does not transform ordinary CSS when Tailwind support is enabled", async () => {
+    const plugin = figStart({ tailwind: true });
+
+    await expect(
+      plugin.transform(
+        ".root { color: red; }",
+        "/project/src/Island.module.css",
+      ),
+    ).resolves.toBe(null);
   });
 
   it("serves a server manifest that resolves client-reference assets", async () => {
@@ -177,8 +170,12 @@ export function Island() {
     await writeFile(
       join(root, "src", "routes", "dashboard.server.tsx"),
       `import { Island } from "./Island.tsx";
+import { Other } from "./Other.tsx";
 export function Dashboard() {
-  return <Island />;
+  return <>
+    <Island />
+    <Other />
+  </>;
 }`,
     );
     await writeFile(
@@ -186,6 +183,13 @@ export function Dashboard() {
       `import styles from "./Island.module.css";
 export function Island() {
   return <button class={styles.root}>Island</button>;
+}`,
+    );
+    await writeFile(
+      join(root, "src", "routes", "Other.tsx"),
+      `import styles from "./Other.module.css";
+export function Other() {
+  return <button class={styles.root}>Other</button>;
 }`,
     );
 
@@ -200,9 +204,30 @@ export function Island() {
             fileName: "Island-abc.js",
             moduleIds: [join(root, "src", "routes", "Island.tsx")],
             type: "chunk",
+            viteMetadata: {
+              importedCss: new Set(["assets/island-def.css"]),
+            },
           },
-          "style-def.css": {
-            fileName: "style-def.css",
+          "Other-abc.js": {
+            fileName: "Other-abc.js",
+            moduleIds: [join(root, "src", "routes", "Other.tsx")],
+            type: "chunk",
+            viteMetadata: {
+              importedCss: new Set(["assets/other-def.css"]),
+            },
+          },
+          "assets/global.css": {
+            fileName: "assets/global.css",
+            source: "body{}",
+            type: "asset",
+          },
+          "assets/island-def.css": {
+            fileName: "assets/island-def.css",
+            source: ".root{}",
+            type: "asset",
+          },
+          "assets/other-def.css": {
+            fileName: "assets/other-def.css",
             source: ".root{}",
             type: "asset",
           },
@@ -215,8 +240,12 @@ export function Island() {
       );
       expect(JSON.parse(manifest)).toEqual({
         "/src/routes/Island.tsx#Island": {
-          css: ["/style-def.css"],
+          css: ["/assets/island-def.css"],
           module: "/Island-abc.js",
+        },
+        "/src/routes/Other.tsx#Other": {
+          css: ["/assets/other-def.css"],
+          module: "/Other-abc.js",
         },
       });
     } finally {
