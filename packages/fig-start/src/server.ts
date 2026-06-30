@@ -2,7 +2,7 @@ import {
   createElement,
   type ElementType,
   type FigNode,
-  Fragment,
+  type FigResourceList,
 } from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
@@ -34,6 +34,8 @@ import {
 } from "./server-assets.ts";
 
 export interface StartHandlerOptions {
+  assets?: Record<string, StartStaticAssetInput>;
+  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
   // URL of the built client entry module, as served (e.g. "/client.js").
   clientEntry: string;
   // Per-request context for beforeLoad/loader (e.g. a data/query client). May
@@ -56,8 +58,19 @@ export type StartHandler = (request: Request) => Promise<Response>;
 export function createRequestHandler(
   options: StartHandlerOptions,
 ): StartHandler {
+  const assets = normalizeStaticAssets(options.assets);
+
   return async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const asset = assets.get(url.pathname);
+    if (asset !== undefined) {
+      return new Response(asset.content as BodyInit, {
+        headers: {
+          "content-type": asset.contentType ?? contentTypeFor(url.pathname),
+        },
+      });
+    }
+
     const routerContext = (await options.context?.(request)) ?? {};
     const router = createRouter({
       context: routerContext,
@@ -82,7 +95,11 @@ export function createRequestHandler(
 
     // A `.server.tsx` leaf renders through the RSC stream; the SSR tree leaves an
     // empty slot for that segment, and row chunks stream into it as inline frames.
-    const rscSegment = renderServerRouteSegment(result, dataContext);
+    const rscSegment = renderServerRouteSegment(
+      result,
+      dataContext,
+      options.clientReferenceAssets,
+    );
 
     if (isRscRouteRequest(request)) {
       if (rscSegment === undefined) {
@@ -176,43 +193,29 @@ export interface StartServerOptions extends Omit<
   appUrl: string;
   clientEntry?: string;
   port?: number;
-  // CSS served at /style.css and linked into <head> automatically.
-  styles?: string;
 }
 
-// The batteries-included entry: builds the request handler, serves the client
-// bundle and stylesheet, handles status codes and headers, and listens. An app's
-// server entry is just `startServer({ routes, appUrl: import.meta.url, ... })`.
+export interface StartStaticAsset {
+  content: string | Uint8Array;
+  contentType?: string;
+}
+
+export type StartStaticAssetInput = string | Uint8Array | StartStaticAsset;
+
+// The batteries-included entry: builds the request handler, serves built client
+// assets, handles status codes and headers, and listens. An app's server entry
+// is just `startServer({ routes, appUrl: import.meta.url, ... })`.
 export function startServer(options: StartServerOptions): Server {
   const clientEntry = options.clientEntry ?? "/client.js";
-  const stylePath = "/style.css";
   const clientAssets = createClientAssetResolver({
     appUrl: options.appUrl,
     clientEntry,
   });
-
-  const head =
-    options.styles === undefined
-      ? options.head
-      : createElement(
-          Fragment,
-          null,
-          createElement("link", { href: stylePath, rel: "stylesheet" }),
-          options.head ?? null,
-        );
-
-  const handler = createRequestHandler({ ...options, clientEntry, head });
+  const handler = createRequestHandler({ ...options, clientEntry });
   const listener = nodeListener(handler);
 
   const server = createServer((request, response) => {
     const url = request.url ?? "/";
-    const pathname = requestPathname(url);
-
-    if (options.styles !== undefined && pathname === stylePath) {
-      response.writeHead(200, { "content-type": "text/css; charset=utf-8" });
-      response.end(options.styles);
-      return;
-    }
 
     void serveClientAssetOrRoute(
       clientAssets,
@@ -228,6 +231,39 @@ export function startServer(options: StartServerOptions): Server {
     console.log(`Fig Start: http://localhost:${port}/`);
   });
   return server;
+}
+
+function normalizeStaticAssets(
+  assets: Record<string, StartStaticAssetInput> | undefined,
+): Map<string, StartStaticAsset> {
+  const result = new Map<string, StartStaticAsset>();
+  if (assets === undefined) return result;
+
+  for (const [path, value] of Object.entries(assets)) {
+    const pathname = path.startsWith("/") ? path : `/${path}`;
+    result.set(pathname, normalizeStaticAsset(value));
+  }
+
+  return result;
+}
+
+function normalizeStaticAsset(value: StartStaticAssetInput): StartStaticAsset {
+  return typeof value === "object" && !(value instanceof Uint8Array)
+    ? value
+    : { content: value };
+}
+
+function contentTypeFor(pathname: string): string {
+  if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (pathname.endsWith(".css")) return "text/css; charset=utf-8";
+  if (pathname.endsWith(".svg")) return "image/svg+xml";
+  if (pathname.endsWith(".png")) return "image/png";
+  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg"))
+    return "image/jpeg";
+  if (pathname.endsWith(".webp")) return "image/webp";
+  if (pathname.endsWith(".avif")) return "image/avif";
+  if (pathname.endsWith(".woff2")) return "font/woff2";
+  return "application/octet-stream";
 }
 
 async function serveClientAssetOrRoute(
@@ -313,7 +349,7 @@ async function serveClientAsset(
   try {
     const code = await readFile(url);
     response.writeHead(200, {
-      "content-type": "text/javascript; charset=utf-8",
+      "content-type": contentTypeFor(url.pathname),
     });
     response.end(code);
   } catch {
@@ -361,6 +397,9 @@ interface ServerRscSegment {
 function renderServerRouteSegment(
   result: LoadResult,
   dataContext: unknown,
+  clientReferenceAssets:
+    | ((metadata: { id: string }) => FigResourceList)
+    | undefined,
 ): ServerRscSegment | undefined {
   if (result.status !== "match") return undefined;
   const leaf = result.matches[result.matches.length - 1];
@@ -378,7 +417,7 @@ function renderServerRouteSegment(
       loaderData: leaf.loaderData,
       params: leaf.params,
     }),
-    { dataContext },
+    { clientReferenceAssets, dataContext },
   );
   void rsc.allReady.catch(() => undefined);
   return {

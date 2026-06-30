@@ -8,9 +8,11 @@ import {
   type FigElement,
   type FigNode,
   type FigResource,
+  type FigResourceList,
   type FontResource,
   Fragment,
   type Key,
+  type ModulePreloadResource,
   type PreconnectResource,
   type PreloadResource,
   type Props,
@@ -22,6 +24,7 @@ import {
 import {
   clientReferenceResources,
   figResourceKey,
+  isFigResource,
   isClientReference,
   isContext,
   isActivity,
@@ -60,6 +63,7 @@ export interface RscRenderResult {
 }
 
 export interface RscRenderOptions {
+  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
   refreshBoundary?: string;
@@ -74,11 +78,27 @@ export interface RscRootLike {
 // FigResource subtypes whose fields are already JSON scalars, so they travel as
 // plain data with no implementation detail exposed.
 type SerializedAssetResource =
-  | StylesheetResource
-  | PreloadResource
-  | ScriptResource
-  | FontResource
-  | PreconnectResource;
+  | Pick<
+      StylesheetResource,
+      "crossOrigin" | "href" | "kind" | "media" | "precedence"
+    >
+  | Pick<
+      PreloadResource,
+      "as" | "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
+    >
+  | Pick<
+      ModulePreloadResource,
+      "crossOrigin" | "fetchPriority" | "href" | "kind"
+    >
+  | Pick<
+      ScriptResource,
+      "async" | "crossOrigin" | "defer" | "kind" | "module" | "src"
+    >
+  | Pick<
+      FontResource,
+      "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
+    >
+  | Pick<PreconnectResource, "crossOrigin" | "href" | "kind">;
 
 type RscRow =
   | {
@@ -152,6 +172,7 @@ class RscRequestCancelledError extends Error {
 type RscRequest = {
   allReady: Promise<void>;
   clientReferenceRows: Map<string, number>;
+  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
   closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
@@ -218,6 +239,7 @@ export function renderToRscStream(
   const request = createRscRequest(
     node,
     options.refreshBoundary ?? null,
+    options.clientReferenceAssets,
     options.dataContext,
     options.dataPartition,
   );
@@ -293,6 +315,9 @@ export async function fetchRsc(
 function createRscRequest(
   node: FigNode,
   refreshBoundary: string | null,
+  clientReferenceAssets:
+    | ((metadata: { id: string }) => FigResourceList)
+    | undefined,
   dataContext: unknown,
   dataPartition: DataResourceKeyInput | undefined,
 ): RscRequest {
@@ -306,6 +331,7 @@ function createRscRequest(
   const request: RscRequest = {
     allReady,
     clientReferenceRows: new Map(),
+    clientReferenceAssets,
     closeAllReady: resolveAllReady,
     controller: null,
     dataStore: createDataStore<object, null>({
@@ -378,6 +404,12 @@ class RscResponseImpl implements RscResponse {
     // Dedupe per payload by resource key: a shared asset referenced by several
     // client references is recorded once.
     for (const resource of resources) {
+      if (
+        !isFigResource(resource) ||
+        resourceDestination(resource) !== "stream"
+      ) {
+        continue;
+      }
       const key = figResourceKey(resource);
       if (!this.assetResources.has(key)) this.assetResources.set(key, resource);
     }
@@ -855,7 +887,7 @@ function emitClientReference(
   // id and the client suspends on a chunk that never arrives. Resolving first
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
-  const resources = serializeClientReferenceAssets(reference);
+  const resources = serializeClientReferenceAssets(request, reference);
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
   emitRow(request, {
@@ -870,12 +902,14 @@ function emitClientReference(
 }
 
 function serializeClientReferenceAssets(
+  request: RscRequest,
   reference: FigClientReference,
 ): SerializedAssetResource[] {
   const resources: SerializedAssetResource[] = [];
   const seen = new Set<string>();
 
-  for (const resource of clientReferenceResources(reference)) {
+  for (const resource of collectClientReferenceAssets(request, reference)) {
+    if (!isFigResource(resource)) continue;
     // Only stream-safe assets travel on the wire; head-only title/meta are
     // document state, not client-component assets (see the asset-resources plan).
     if (resourceDestination(resource) !== "stream") continue;
@@ -883,10 +917,89 @@ function serializeClientReferenceAssets(
     const key = figResourceKey(resource);
     if (seen.has(key)) continue;
     seen.add(key);
-    resources.push(resource as SerializedAssetResource);
+    resources.push(serializeAssetResource(resource));
   }
 
   return resources;
+}
+
+function collectClientReferenceAssets(
+  request: RscRequest,
+  reference: FigClientReference,
+): readonly FigResource[] {
+  const resources = [...clientReferenceResources(reference)];
+  const resolved = request.clientReferenceAssets?.({ id: reference.id });
+  if (resolved === undefined) return resources;
+  if (isFigResource(resolved)) return [...resources, resolved];
+  return Array.isArray(resolved) ? [...resources, ...resolved] : resources;
+}
+
+function serializeAssetResource(
+  resource: FigResource,
+): SerializedAssetResource {
+  // The RSC asset wire format is descriptor-only and intentionally does not
+  // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
+  // SSR/head resources still round-trip keys through data-fig-resource-key.
+  switch (resource.kind) {
+    case "stylesheet":
+      return optionalFields({
+        crossOrigin: resource.crossOrigin,
+        href: resource.href,
+        kind: resource.kind,
+        media: resource.media,
+        precedence: resource.precedence,
+      });
+    case "preload":
+      return optionalFields({
+        as: resource.as,
+        crossOrigin: resource.crossOrigin,
+        fetchPriority: resource.fetchPriority,
+        href: resource.href,
+        kind: resource.kind,
+        type: resource.type,
+      });
+    case "modulepreload":
+      return optionalFields({
+        crossOrigin: resource.crossOrigin,
+        fetchPriority: resource.fetchPriority,
+        href: resource.href,
+        kind: resource.kind,
+      });
+    case "script":
+      return optionalFields({
+        async: resource.async,
+        crossOrigin: resource.crossOrigin,
+        defer: resource.defer,
+        kind: resource.kind,
+        module: resource.module,
+        src: resource.src,
+      });
+    case "font":
+      return optionalFields({
+        crossOrigin: resource.crossOrigin,
+        fetchPriority: resource.fetchPriority,
+        href: resource.href,
+        kind: resource.kind,
+        type: resource.type,
+      });
+    case "preconnect":
+      return optionalFields({
+        crossOrigin: resource.crossOrigin,
+        href: resource.href,
+        kind: resource.kind,
+      });
+    case "title":
+    case "meta":
+      throw new Error("Head-only resources cannot be serialized to RSC.");
+  }
+}
+
+function optionalFields<T extends object>(input: T): T {
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) output[key] = value;
+  }
+  return output as T;
 }
 
 function emitRow(request: RscRequest, row: RscRow): void {

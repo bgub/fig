@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 export interface ClientAssetResolver {
   resolve(requestUrl: string): Promise<URL | null>;
@@ -50,7 +50,7 @@ function assetPathFromRequest(
 }
 
 function safeAssetPath(relativePath: string): string | null {
-  if (!relativePath.endsWith(".js")) return null;
+  if (!isServableAssetPath(relativePath)) return null;
 
   let decoded;
   try {
@@ -69,7 +69,7 @@ async function discoverClientAssets(
   baseUrl: URL,
   entryAsset: string,
 ): Promise<ReadonlySet<string>> {
-  const assets = new Set<string>();
+  const assets = new Set<string>(await discoverSiblingCssAssets(baseUrl));
   const pending = [entryAsset];
 
   for (;;) {
@@ -85,6 +85,17 @@ async function discoverClientAssets(
       const child = assetPathFromSpecifier(baseUrl, asset, specifier);
       if (child !== null && !assets.has(child)) pending.push(child);
     }
+  }
+}
+
+async function discoverSiblingCssAssets(baseUrl: URL): Promise<string[]> {
+  if (baseUrl.protocol !== "file:") return [];
+
+  try {
+    const entries = await readdir(baseUrl);
+    return entries.filter((entry) => safeAssetPath(entry)?.endsWith(".css"));
+  } catch {
+    return [];
   }
 }
 
@@ -106,6 +117,10 @@ const JS_SPECIFIER_PATTERN =
   // Tracks vp pack's current ESM output for client chunks: literal relative
   // `.js` specifiers in static imports and dynamic `import(...)` calls.
   /\bimport\s*\(\s*["']([^"']+\.js)["']\s*\)|\b(?:from|import)\s*["']([^"']+\.js)["']/g;
+
+function isServableAssetPath(path: string): boolean {
+  return path.endsWith(".js") || path.endsWith(".css");
+}
 
 function assetPathFromSpecifier(
   baseUrl: URL,

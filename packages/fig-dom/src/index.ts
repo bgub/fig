@@ -11,6 +11,7 @@ import {
 } from "@bgub/fig";
 import {
   figResourceKey,
+  isFigResource,
   resourceFromHostAttributes,
   resourceFromHostProps,
 } from "@bgub/fig/internal";
@@ -467,6 +468,7 @@ export function insertAssetResources(
   const gates: Promise<void>[] = [];
 
   for (const resource of resources) {
+    if (!isFigResource(resource)) continue;
     if (resource.kind === "title" || resource.kind === "meta") continue;
 
     // A font is delivered as <link rel="preload" as="font">, which parses back
@@ -522,7 +524,13 @@ function asInsertableResource(resource: FigResource): FigResource {
 function isCriticalStylesheet(resource: FigResource): boolean {
   // Client-reference stylesheets gate reveal by default; opt out with
   // blocking: "none". Every other kind is a hint that must never block.
-  return resource.kind === "stylesheet" && resource.blocking !== "none";
+  if (resource.kind !== "stylesheet" || resource.blocking === "none") {
+    return false;
+  }
+  if (resource.media === undefined || resource.media === "") return true;
+  return (
+    typeof matchMedia !== "function" || matchMedia(resource.media).matches
+  );
 }
 
 function whenResourceSettled(element: Element): Promise<void> {
@@ -553,6 +561,7 @@ function createAssetResourceElement(resource: FigResource): Element {
       set("media", resource.media);
       set("precedence", resource.precedence);
       set("crossorigin", resource.crossOrigin);
+      set("data-fig-resource-key", resource.key);
       break;
     case "preload":
       set("rel", "preload");
@@ -561,6 +570,14 @@ function createAssetResourceElement(resource: FigResource): Element {
       set("type", resource.type);
       set("crossorigin", resource.crossOrigin);
       set("fetchpriority", resource.fetchPriority);
+      set("data-fig-resource-key", resource.key);
+      break;
+    case "modulepreload":
+      set("rel", "modulepreload");
+      set("href", resource.href);
+      set("crossorigin", resource.crossOrigin);
+      set("fetchpriority", resource.fetchPriority);
+      set("data-fig-resource-key", resource.key);
       break;
     case "script":
       set("src", resource.src);
@@ -568,6 +585,7 @@ function createAssetResourceElement(resource: FigResource): Element {
       if (resource.async === true) set("async", "");
       if (resource.defer === true) set("defer", "");
       set("crossorigin", resource.crossOrigin);
+      set("data-fig-resource-key", resource.key);
       break;
     case "font":
       set("rel", "preload");
@@ -575,11 +593,13 @@ function createAssetResourceElement(resource: FigResource): Element {
       set("href", resource.href);
       set("type", resource.type);
       set("crossorigin", resource.crossOrigin ?? "anonymous");
+      set("data-fig-resource-key", resource.key);
       break;
     case "preconnect":
       set("rel", "preconnect");
       set("href", resource.href);
       set("crossorigin", resource.crossOrigin);
+      set("data-fig-resource-key", resource.key);
       break;
   }
 

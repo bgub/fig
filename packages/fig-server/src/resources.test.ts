@@ -1,6 +1,7 @@
 import {
   font,
   meta,
+  modulepreload,
   preload,
   script,
   stylesheet,
@@ -115,6 +116,34 @@ describe("ResourceRegistry", () => {
     expect(write(registry, preload("/asset", "image"))).toBe("");
     expect(write(registry, preload("/asset", "script"))).toBe(
       '<link rel="preload" href="/asset" as="script">',
+    );
+  });
+
+  it("writes and dedupes modulepreloads", () => {
+    const registry = new ResourceRegistry("");
+
+    expect(
+      write(
+        registry,
+        modulepreload("/chunk.js", {
+          crossOrigin: "anonymous",
+          fetchPriority: "high",
+        }),
+      ),
+    ).toBe(
+      '<link rel="modulepreload" href="/chunk.js" crossorigin="anonymous" fetchpriority="high">',
+    );
+    expect(
+      write(
+        registry,
+        modulepreload("/chunk.js", {
+          crossOrigin: "anonymous",
+          fetchPriority: "high",
+        }),
+      ),
+    ).toBe("");
+    expect(() => write(registry, modulepreload("/chunk.js"))).toThrow(
+      'Conflicting Fig resource for key "modulepreload:/chunk.js".',
     );
   });
 

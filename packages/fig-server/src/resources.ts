@@ -105,12 +105,14 @@ function writeResourceTag(
   resource: FigResource,
   id: string | null,
 ): void {
+  const resourceKey = resource.key;
   switch (resource.kind) {
     case "stylesheet":
       writeLink(sink, {
         rel: "stylesheet",
         href: resource.href,
         id: id ?? undefined,
+        "data-fig-resource-key": resourceKey,
         "data-precedence": resource.precedence,
         media: resource.media,
         crossorigin: resource.crossOrigin,
@@ -121,7 +123,17 @@ function writeResourceTag(
         rel: "preload",
         href: resource.href,
         as: resource.as,
+        "data-fig-resource-key": resourceKey,
         type: resource.type,
+        crossorigin: resource.crossOrigin,
+        fetchpriority: resource.fetchPriority,
+      });
+      return;
+    case "modulepreload":
+      writeLink(sink, {
+        rel: "modulepreload",
+        href: resource.href,
+        "data-fig-resource-key": resourceKey,
         crossorigin: resource.crossOrigin,
         fetchpriority: resource.fetchPriority,
       });
@@ -131,6 +143,7 @@ function writeResourceTag(
         rel: "preload",
         href: resource.href,
         as: "font",
+        "data-fig-resource-key": resourceKey,
         type: resource.type,
         crossorigin: resource.crossOrigin ?? "anonymous",
         fetchpriority: resource.fetchPriority,
@@ -140,6 +153,7 @@ function writeResourceTag(
       writeLink(sink, {
         rel: "preconnect",
         href: resource.href,
+        "data-fig-resource-key": resourceKey,
         crossorigin: resource.crossOrigin,
       });
       return;
@@ -149,6 +163,7 @@ function writeResourceTag(
         withNonce(sink, {
           src: resource.src,
           type: resource.module === true ? "module" : undefined,
+          "data-fig-resource-key": resourceKey,
           // Hoisted scripts default to async, but an explicit defer opts into
           // ordered execution and must not be overridden (async wins over
           // defer in browsers).
@@ -174,6 +189,7 @@ function writeResourceTag(
           property: resource.property,
           "http-equiv": resource.httpEquiv,
           content: resource.content,
+          "data-fig-resource-key": resourceKey,
         },
         sink,
       );
@@ -205,6 +221,13 @@ function resourceSignature(resource: FigResource): string {
         resource.href,
         resource.as,
         resource.type ?? "",
+        resource.crossOrigin ?? "",
+        resource.fetchPriority ?? "",
+      );
+    case "modulepreload":
+      return signature(
+        resource.kind,
+        resource.href,
         resource.crossOrigin ?? "",
         resource.fetchPriority ?? "",
       );

@@ -15,6 +15,7 @@ export type ResourceDestination = "head" | "stream";
 export type FigResource =
   | StylesheetResource
   | PreloadResource
+  | ModulePreloadResource
   | ScriptResource
   | FontResource
   | PreconnectResource
@@ -41,6 +42,13 @@ export interface PreloadResource extends ResourceBase {
   href: string;
   kind: "preload";
   type?: string;
+}
+
+export interface ModulePreloadResource extends ResourceBase {
+  crossOrigin?: CrossOrigin;
+  fetchPriority?: FetchPriority;
+  href: string;
+  kind: "modulepreload";
 }
 
 export interface ScriptResource extends ResourceBase {
@@ -116,6 +124,13 @@ export function preload(
   return { ...options, as, href, kind: "preload" };
 }
 
+export function modulepreload(
+  href: string,
+  options: Omit<ModulePreloadResource, "href" | "kind"> = {},
+): ModulePreloadResource {
+  return { ...options, href, kind: "modulepreload" };
+}
+
 export function script(
   src: string,
   options: Omit<ScriptResource, "kind" | "src"> = {},
@@ -154,6 +169,7 @@ export function isFigResource(value: unknown): value is FigResource {
   switch ((value as { kind?: unknown }).kind) {
     case "stylesheet":
     case "preload":
+    case "modulepreload":
     case "script":
     case "font":
     case "preconnect":
@@ -194,6 +210,8 @@ export function figResourceKey(resource: FigResource): string {
       return `stylesheet:${resource.href}`;
     case "preload":
       return `preload:${resource.as}:${resource.href}`;
+    case "modulepreload":
+      return `modulepreload:${resource.href}`;
     case "script":
       return `script:${resource.src}`;
     case "font":
@@ -236,25 +254,30 @@ function resourceFromHost(
   prop: (name: string) => unknown,
   children?: FigNode,
 ): FigResource | null {
+  const withKey = (resource: FigResource): FigResource => {
+    const key = readProp(prop, "data-fig-resource-key");
+    return key === undefined ? resource : { ...resource, key };
+  };
+
   switch (type.toLowerCase()) {
     case "title":
-      return { kind: "title", value: textResourceValue(children) };
+      return withKey({ kind: "title", value: textResourceValue(children) });
     case "meta":
       if (readProp(prop, "itemProp", "itemprop") !== undefined) return null;
-      return {
+      return withKey({
         charset: readProp(prop, "charset", "charSet"),
         content: readProp(prop, "content"),
         httpEquiv: readProp(prop, "httpEquiv", "http-equiv"),
         kind: "meta",
         name: readProp(prop, "name"),
         property: readProp(prop, "property"),
-      };
+      });
     case "link":
-      return linkResourceFromHost(prop);
+      return withNullableKey(linkResourceFromHost(prop), withKey);
     case "script": {
       const src = readProp(prop, "src");
       if (src === undefined) return null;
-      return {
+      return withKey({
         async:
           prop("async") === true
             ? true
@@ -266,11 +289,18 @@ function resourceFromHost(
         kind: "script",
         module: prop("module") === true || prop("type") === "module",
         src,
-      };
+      });
     }
     default:
       return null;
   }
+}
+
+function withNullableKey(
+  resource: FigResource | null,
+  withKey: (resource: FigResource) => FigResource,
+): FigResource | null {
+  return resource === null ? null : withKey(resource);
 }
 
 function linkResourceFromHost(
@@ -297,7 +327,18 @@ function linkResourceFromHost(
     };
   }
 
-  if (rel === "preload" || rel === "modulepreload") {
+  if (rel === "modulepreload") {
+    return {
+      crossOrigin: readCrossOrigin(prop),
+      fetchPriority: fetchPriorityProp(
+        readProp(prop, "fetchPriority", "fetchpriority"),
+      ),
+      href,
+      kind: "modulepreload",
+    };
+  }
+
+  if (rel === "preload") {
     const as = readProp(prop, "as");
     if (as === undefined) return null;
     return {

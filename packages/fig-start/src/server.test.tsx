@@ -3,6 +3,7 @@ import {
   createElement,
   type FigNode,
   readPromise,
+  stylesheet,
 } from "@bgub/fig";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -169,6 +170,52 @@ describe("@bgub/fig-start server handler", () => {
     expect(rows).not.toContain("<html");
   });
 
+  it("serves configured static assets", async () => {
+    const handler = createRequestHandler({
+      assets: {
+        "/assets/chunk.js": "export const value = 1;",
+        "/assets/card.css": ".card { color: red; }",
+        "/assets/mark.svg": {
+          content: "<svg></svg>",
+          contentType: "image/svg+xml",
+        },
+      },
+      clientEntry: "/client.js",
+      routes,
+    });
+
+    const js = await handler(new Request("http://localhost/assets/chunk.js"));
+    const css = await handler(new Request("http://localhost/assets/card.css"));
+    const svg = await handler(new Request("http://localhost/assets/mark.svg"));
+
+    expect(js.headers.get("content-type")).toContain("text/javascript");
+    expect(await js.text()).toBe("export const value = 1;");
+    expect(css.headers.get("content-type")).toContain("text/css");
+    expect(await css.text()).toBe(".card { color: red; }");
+    expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await svg.text()).toBe("<svg></svg>");
+  });
+
+  it("uses client-reference asset resolvers for server route RSC rows", async () => {
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      clientReferenceAssets: ({ id }) =>
+        id === islandId ? stylesheet("/assets/island.css") : [],
+      context: () => ({ allow: true }),
+      routes,
+    });
+
+    const response = await handler(
+      new Request("http://localhost/dashboard", {
+        headers: { accept: "text/x-component; charset=utf-8" },
+      }),
+    );
+    const rows = await response.text();
+
+    expect(rows).toContain(islandId);
+    expect(rows).toContain("/assets/island.css");
+  });
+
   it("omits RSC frames for ordinary isomorphic routes", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/about"),
@@ -284,6 +331,7 @@ describe("@bgub/fig-start server handler", () => {
       join(dir, "assets", "client.js"),
       'import("./Island-test.js");',
     );
+    await writeFile(join(dir, "assets", "style.css"), ".island{}");
     await writeFile(
       join(dir, "assets", "Island-test.js"),
       "export const value = 1;",
@@ -300,6 +348,9 @@ describe("@bgub/fig-start server handler", () => {
       );
       expect((await resolver.resolve("/assets/Island-test.js"))?.href).toBe(
         pathToFileURL(join(dir, "assets", "Island-test.js")).href,
+      );
+      expect((await resolver.resolve("/assets/style.css"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "style.css")).href,
       );
       expect(await resolver.resolve("/dashboard")).toBe(null);
       expect(await resolver.resolve("/server.js")).toBe(null);

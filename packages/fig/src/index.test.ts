@@ -10,6 +10,7 @@ import {
   Fragment,
   lazy,
   meta,
+  modulepreload,
   preload,
   readContext,
   readPromise,
@@ -194,6 +195,15 @@ describe("@bgub/fig", () => {
     );
   });
 
+  it("keys modulepreloads separately from classic script preloads", () => {
+    expect(figResourceKey(modulepreload("/chunk.js"))).toBe(
+      "modulepreload:/chunk.js",
+    );
+    expect(figResourceKey(preload("/chunk.js", "script"))).toBe(
+      "preload:script:/chunk.js",
+    );
+  });
+
   it("collapses every title to the singleton key, ignoring an explicit key", () => {
     expect(figResourceKey(title("A"))).toBe("title");
     expect(figResourceKey(title("B", "explicit"))).toBe("title");
@@ -204,6 +214,7 @@ describe("@bgub/fig", () => {
   it("classifies resource destinations", () => {
     expect(resourceDestination(title("Fig"))).toBe("head");
     expect(resourceDestination(stylesheet("/app.css"))).toBe("stream");
+    expect(resourceDestination(modulepreload("/chunk.js"))).toBe("stream");
   });
 
   it("lowers host resource props", () => {
@@ -221,6 +232,17 @@ describe("@bgub/fig", () => {
     expect(
       resourceFromHostProps("title", { children: ["Fig", " ", 1] }),
     ).toEqual({ kind: "title", value: "Fig 1" });
+    expect(
+      resourceFromHostProps("link", {
+        fetchPriority: "high",
+        href: "/chunk.js",
+        rel: "modulepreload",
+      }),
+    ).toEqual({
+      fetchPriority: "high",
+      href: "/chunk.js",
+      kind: "modulepreload",
+    });
   });
 
   it("reads host resources from attributes", () => {

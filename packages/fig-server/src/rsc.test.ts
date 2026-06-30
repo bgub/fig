@@ -8,6 +8,7 @@ import {
   font,
   Fragment,
   lazy,
+  modulepreload,
   preload,
   readContext,
   readPromise,
@@ -250,8 +251,11 @@ describe("RSC rendering", () => {
       id: "app/Counter.client.tsx#Counter",
       load: () => Promise.resolve({}),
       resources: [
-        stylesheet("/assets/Counter.css", { precedence: "app" }),
-        preload("/assets/Counter.js", "script"),
+        stylesheet("/assets/Counter.css", {
+          blocking: "none",
+          precedence: "app",
+        }),
+        modulepreload("/assets/Counter.js", { key: "counter-script" }),
         stylesheet("/assets/Counter.css"), // duplicate key, dropped
         title("ignored"), // head-only, not stream-safe
       ],
@@ -271,7 +275,36 @@ describe("RSC rendering", () => {
             kind: "stylesheet",
             precedence: "app",
           },
-          { as: "script", href: "/assets/Counter.js", kind: "preload" },
+          { href: "/assets/Counter.js", kind: "modulepreload" },
+        ],
+      },
+    });
+  });
+
+  it("serializes assets from the render-level client reference resolver", async () => {
+    const Counter = clientReference({
+      id: "app/Counter.client.tsx#Counter",
+      load: () => Promise.resolve({}),
+    });
+
+    const rows = await renderToRscRows(createElement(Counter, {}), {
+      clientReferenceAssets: ({ id }) =>
+        id === "app/Counter.client.tsx#Counter"
+          ? [
+              stylesheet("/assets/Counter.css"),
+              modulepreload("/assets/Counter.js"),
+            ]
+          : [],
+    });
+
+    expect(rows.find((row) => row.tag === "client")).toEqual({
+      id: 1,
+      tag: "client",
+      value: {
+        id: "app/Counter.client.tsx#Counter",
+        resources: [
+          { href: "/assets/Counter.css", kind: "stylesheet" },
+          { href: "/assets/Counter.js", kind: "modulepreload" },
         ],
       },
     });
@@ -312,6 +345,28 @@ describe("RSC rendering", () => {
     // The wire row carries resources, but resolver hooks see the documented
     // { id } shape only.
     expect(seen).toEqual([{ id: "app/Counter.client.tsx#Counter" }]);
+  });
+
+  it("ignores invalid asset descriptors while decoding client rows", () => {
+    const response = createRscResponse();
+
+    response.processStringChunk(
+      `${JSON.stringify({
+        id: 1,
+        tag: "client",
+        value: {
+          id: "app/Counter.client.tsx#Counter",
+          resources: [
+            { href: "/assets/Counter.css", kind: "stylesheet" },
+            { href: "/assets/Unknown.asset", kind: "unknown" },
+          ],
+        },
+      })}\n`,
+    );
+
+    expect(response.getAssetResources()).toEqual([
+      { href: "/assets/Counter.css", kind: "stylesheet" },
+    ]);
   });
 
   it("sends and dedupes assets only for client references that render", async () => {

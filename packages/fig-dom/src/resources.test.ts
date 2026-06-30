@@ -1,4 +1,10 @@
-import { font, preconnect, preload, stylesheet } from "@bgub/fig";
+import {
+  font,
+  modulepreload,
+  preconnect,
+  preload,
+  stylesheet,
+} from "@bgub/fig";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { insertAssetResources } from "./index.ts";
 import { FakeElement } from "./test-utils.ts";
@@ -6,9 +12,11 @@ import { FakeElement } from "./test-utils.ts";
 describe("@bgub/fig-dom asset resources", () => {
   let head: FakeElement;
   let previousDocument: typeof globalThis.document;
+  let previousMatchMedia: typeof globalThis.matchMedia;
 
   beforeEach(() => {
     previousDocument = globalThis.document;
+    previousMatchMedia = globalThis.matchMedia;
     head = new FakeElement("head");
     globalThis.document = {
       head,
@@ -18,6 +26,7 @@ describe("@bgub/fig-dom asset resources", () => {
 
   afterEach(() => {
     globalThis.document = previousDocument;
+    globalThis.matchMedia = previousMatchMedia;
   });
 
   function links(): FakeElement[] {
@@ -30,15 +39,18 @@ describe("@bgub/fig-dom asset resources", () => {
     void insertAssetResources([
       stylesheet("/a.css"),
       preload("/a.js", "script"),
+      modulepreload("/b.js"),
     ]);
 
     const inserted = links();
-    expect(inserted).toHaveLength(2);
+    expect(inserted).toHaveLength(3);
     expect(inserted[0]?.tagName).toBe("link");
     expect(inserted[0]?.getAttribute("rel")).toBe("stylesheet");
     expect(inserted[0]?.getAttribute("href")).toBe("/a.css");
     expect(inserted[1]?.getAttribute("rel")).toBe("preload");
     expect(inserted[1]?.getAttribute("as")).toBe("script");
+    expect(inserted[2]?.getAttribute("rel")).toBe("modulepreload");
+    expect(inserted[2]?.getAttribute("href")).toBe("/b.js");
   });
 
   it("dedupes by key within a call and across calls", () => {
@@ -55,6 +67,20 @@ describe("@bgub/fig-dom asset resources", () => {
     head.appendChild(ssr);
 
     void insertAssetResources([stylesheet("/a.css")]);
+
+    expect(links()).toHaveLength(1);
+  });
+
+  it("dedupes keyed assets against server-rendered head elements", () => {
+    const ssr = new FakeElement("link");
+    ssr.setAttribute("rel", "stylesheet");
+    ssr.setAttribute("href", "/hashed.css");
+    ssr.setAttribute("data-fig-resource-key", "component-style");
+    head.appendChild(ssr);
+
+    void insertAssetResources([
+      stylesheet("/hashed.css", { key: "component-style" }),
+    ]);
 
     expect(links()).toHaveLength(1);
   });
@@ -100,10 +126,32 @@ describe("@bgub/fig-dom asset resources", () => {
     await expect(
       insertAssetResources([
         preload("/a.js", "script"),
+        modulepreload("/b.js"),
         preconnect("https://cdn.example.com"),
         stylesheet("/b.css", { blocking: "none" }),
         font("/a.woff2", "font/woff2"),
       ]),
     ).resolves.toBeUndefined();
+  });
+
+  it("does not gate on media-mismatched stylesheets", async () => {
+    globalThis.matchMedia = (query: string) =>
+      ({
+        matches: query === "screen",
+      }) as MediaQueryList;
+
+    await expect(
+      insertAssetResources([stylesheet("/print.css", { media: "print" })]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores invalid asset descriptors", async () => {
+    await expect(
+      insertAssetResources([
+        { href: "/unknown.asset", kind: "unknown" } as never,
+      ]),
+    ).resolves.toBeUndefined();
+
+    expect(links()).toHaveLength(0);
   });
 });

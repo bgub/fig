@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "@bgub/fig",
+    "allowArbitraryExtensions": true,
     "types": ["node"],
     "noEmit": true
   },
