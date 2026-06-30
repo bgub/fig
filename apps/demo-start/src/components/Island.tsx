@@ -1,6 +1,6 @@
 import { type FigNode, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { islandMarkHref } from "./Island.assets.ts";
+import islandMarkHref from "./fig-mark.svg";
 
 // Imported by a `.server.tsx` route, so the Start Vite plugin rewrites this
 // component into a client reference for the RSC payload.

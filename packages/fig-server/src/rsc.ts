@@ -27,6 +27,7 @@ import {
   isFigResource,
   isClientReference,
   isContext,
+  isResources,
   isActivity,
   isErrorBoundary,
   isPortal,
@@ -101,6 +102,7 @@ type SerializedAssetResource =
   | Pick<PreconnectResource, "crossOrigin" | "href" | "kind">;
 
 type RscRow =
+  | { tag: "assets"; value: SerializedAssetResource[] }
   | {
       id: number;
       tag: "client";
@@ -176,6 +178,7 @@ type RscRequest = {
   closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
+  emittedAssetKeys: Set<string>;
   emittedDataKeys: Set<string>;
   nextId: number;
   nextRowId: number;
@@ -340,6 +343,7 @@ function createRscRequest(
       partition: dataPartition,
       schedule: () => undefined,
     }),
+    emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
     nextId: 0,
     nextRowId: 1,
@@ -436,6 +440,12 @@ class RscResponseImpl implements RscResponse {
     if (row.tag === "data") {
       this.pendingData.push(...row.value);
       this.hydratePendingData();
+      return;
+    }
+
+    if (row.tag === "assets") {
+      this.recordAssetResources(row.value);
+      this.notify();
       return;
     }
 
@@ -712,6 +722,10 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
     return serializeContextProvider(type, element.props, frame);
   }
 
+  if (isResources(type)) {
+    return serializeResources(element.props, frame);
+  }
+
   if (isSuspense(type)) {
     return serializeElementModel(element, { $fig: "suspense" }, frame);
   }
@@ -770,6 +784,14 @@ function serializeContextProvider(
   return withContextValue(frame.contextValues, context, props.value, () =>
     serializeNode(props.children, frame),
   );
+}
+
+function serializeResources(props: Props, frame: RenderFrame): RscModel {
+  const serialized = serializeAssetResources(frame.request, props.resources);
+  if (serialized.length > 0) {
+    emitRow(frame.request, { tag: "assets", value: serialized });
+  }
+  return serializeNode(props.children, frame);
 }
 
 function serializeProps(
@@ -905,18 +927,32 @@ function serializeClientReferenceAssets(
   request: RscRequest,
   reference: FigClientReference,
 ): SerializedAssetResource[] {
-  const resources: SerializedAssetResource[] = [];
-  const seen = new Set<string>();
+  return serializeAssetResources(
+    request,
+    collectClientReferenceAssets(request, reference),
+  );
+}
 
-  for (const resource of collectClientReferenceAssets(request, reference)) {
+function serializeAssetResources(
+  request: RscRequest,
+  value: unknown,
+): SerializedAssetResource[] {
+  const input = isFigResource(value)
+    ? [value]
+    : Array.isArray(value)
+      ? value
+      : [];
+  const resources: SerializedAssetResource[] = [];
+
+  for (const resource of input) {
     if (!isFigResource(resource)) continue;
     // Only stream-safe assets travel on the wire; head-only title/meta are
     // document state, not client-component assets (see the asset-resources plan).
     if (resourceDestination(resource) !== "stream") continue;
 
     const key = figResourceKey(resource);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (request.emittedAssetKeys.has(key)) continue;
+    request.emittedAssetKeys.add(key);
     resources.push(serializeAssetResource(resource));
   }
 

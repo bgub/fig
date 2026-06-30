@@ -1,12 +1,9 @@
 import type { StartConfig } from "@bgub/fig-start";
-import { clientReferenceAssets, demoAssets } from "./client-assets.ts";
 import { routes } from "./routes.ts";
 import "./styles.css";
 
 export const start = {
   appName: "Fig Start",
-  assets: demoAssets,
-  clientReferenceAssets,
   head: (
     <>
       <title>Fig Start</title>

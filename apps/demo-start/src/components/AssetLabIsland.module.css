@@ -1,0 +1,42 @@
+.root {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  color: #134e4a;
+  cursor: pointer;
+  display: inline-grid;
+  font: inherit;
+  gap: 12px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  justify-self: start;
+  max-width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.root:hover {
+  background: #f0fdfa;
+  border-color: #14b8a6;
+}
+
+.mark {
+  display: block;
+  height: 40px;
+  width: 40px;
+}
+
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.count {
+  color: #0f766e;
+  font-size: 0.875rem;
+}

@@ -17,6 +17,7 @@ export interface ServerTransformResult {
   code: string;
   marksServerRoute: boolean;
   map: unknown;
+  serverRouteId: string | null;
 }
 
 export interface ClientRouteStubResult {
@@ -48,6 +49,7 @@ export async function transformServerModule(
   const importerDir = dirname(id.split("?")[0] ?? id);
   const clientRefs: ClientRef[] = [];
   let marksServerRoute = false;
+  let serverRouteId: string | null = null;
 
   const result = await transformTypeScript(code, id, {
     plugins: [
@@ -56,6 +58,9 @@ export async function transformServerModule(
         importerDir,
         markServerRoute: () => {
           marksServerRoute = true;
+        },
+        setServerRouteId: (id) => {
+          serverRouteId = id;
         },
         root,
       }),
@@ -68,6 +73,7 @@ export async function transformServerModule(
     code: result?.code ?? code,
     marksServerRoute,
     map: result?.map,
+    serverRouteId,
   };
 }
 
@@ -154,6 +160,7 @@ function serverComponentBabelPlugin(state: {
   importerDir: string;
   markServerRoute: () => void;
   root: string;
+  setServerRouteId: (id: string) => void;
 }): (api: typeof babel) => PluginObj {
   return (api) => {
     const t = api.types;
@@ -165,9 +172,11 @@ function serverComponentBabelPlugin(state: {
       visitor: {
         Program: {
           exit(path) {
-            if (routePathFromLocalRouteBinding(path, t) !== null) {
+            const routePath = routePathFromLocalRouteBinding(path, t);
+            if (routePath !== null) {
               needsServerRouteImport = true;
               state.markServerRoute();
+              state.setServerRouteId(routePath);
               path.pushContainer(
                 "body",
                 api.template.statement.ast("__figMarkServerRoute(Route);"),

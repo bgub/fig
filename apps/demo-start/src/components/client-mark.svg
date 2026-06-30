@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Client island asset">
+  <rect width="48" height="48" rx="10" fill="#f0fdfa"/>
+  <path d="M24 10v28M10 24h28" stroke="#0f766e" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="24" cy="24" r="7" fill="#f59e0b"/>
+</svg>

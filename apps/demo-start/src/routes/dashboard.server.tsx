@@ -1,6 +1,6 @@
 import type { FigNode } from "@bgub/fig";
 import { createFileRoute } from "@bgub/fig-start";
-import { Island } from "./Island.tsx";
+import { Island } from "../components/Island.tsx";
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,

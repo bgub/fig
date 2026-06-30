@@ -14,7 +14,17 @@ declare namespace FigStart {
   }
 }
 
+declare module "*.module.css" {
+  const classes: Record<string, string>;
+  export default classes;
+}
+
 declare module "*.css";
+
+declare module "*.svg" {
+  const href: string;
+  export default href;
+}
 
 declare module "virtual:fig-start/client-manifest" {
   export function loadClientReference(metadata: {

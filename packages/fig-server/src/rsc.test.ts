@@ -12,6 +12,7 @@ import {
   preload,
   readContext,
   readPromise,
+  resources,
   stylesheet,
   Suspense,
   title,
@@ -366,6 +367,22 @@ describe("RSC rendering", () => {
 
     expect(response.getAssetResources()).toEqual([
       { href: "/assets/Counter.css", kind: "stylesheet" },
+    ]);
+  });
+
+  it("sends explicit resources from RSC subtrees", async () => {
+    const rows = await renderToRscText(
+      resources(
+        [stylesheet("/assets/ServerRoute.css"), preload("/mark.svg", "image")],
+        createElement("article", null, "Server route"),
+      ),
+    );
+    const response = createRscResponse();
+    response.processStringChunk(rows);
+
+    expect(response.getAssetResources()).toEqual([
+      { href: "/assets/ServerRoute.css", kind: "stylesheet" },
+      { as: "image", href: "/mark.svg", kind: "preload" },
     ]);
   });
 

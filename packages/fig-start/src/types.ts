@@ -27,8 +27,9 @@ export interface LoaderArgs<TParams> {
 
 export interface RouteOptions<TPath extends string, TLoaderData> {
   beforeLoad?: (args: BeforeLoadArgs<RouteParams<TPath>>) => unknown;
-  // In `.server.tsx` route files, `component` renders through Fig's RSC stream
-  // and receives { params, loaderData } as props rather than using router hooks.
+  // In `.server.tsx` route files, `component` renders through Fig's RSC stream.
+  // It receives { params, loaderData } as props and can also use typed route
+  // hooks such as Route.useParams() / Route.useLoaderData().
   component?: RouteComponent;
   errorComponent?: (props: { error: unknown }) => FigNode;
   loader?: (args: LoaderArgs<RouteParams<TPath>>) => TLoaderData;

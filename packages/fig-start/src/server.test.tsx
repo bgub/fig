@@ -5,6 +5,7 @@ import {
   readPromise,
   stylesheet,
 } from "@bgub/fig";
+import { createRscResponse } from "@bgub/fig-server/rsc";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,6 +52,13 @@ const postRoute = createFileRoute("/posts/$postId")({
   component: PostView,
 });
 
+const serverPostRoute = markServerRoute(
+  createFileRoute("/server-posts/$postId")({
+    loader: ({ params }) => ({ id: params.postId }),
+    component: ServerPostView,
+  }),
+);
+
 // Annotate the return type to break the self-reference cycle (the component
 // reads its own route's typed hooks).
 function PostView(): FigNode {
@@ -58,6 +66,16 @@ function PostView(): FigNode {
   const data = postRoute.useLoaderData();
   const params = postRoute.useParams();
   return createElement("h1", null, `Post ${data.id} (${params.postId})`);
+}
+
+function ServerPostView(): FigNode {
+  const data = serverPostRoute.useLoaderData();
+  const params = serverPostRoute.useParams();
+  return createElement(
+    "article",
+    null,
+    `Server post ${data.id} (${params.postId})`,
+  );
 }
 
 const routes = [
@@ -79,6 +97,7 @@ const routes = [
     component: () => createElement("h1", null, "Secret"),
   }),
   postRoute,
+  serverPostRoute,
   dashboardRoute,
 ];
 
@@ -170,6 +189,22 @@ describe("@bgub/fig-start server handler", () => {
     expect(rows).not.toContain("<html");
   });
 
+  it("provides route hook context while rendering server route RSC rows", async () => {
+    const response = await handlerFor(true)(
+      new Request("http://localhost/server-posts/42", {
+        headers: { accept: "text/x-component; charset=utf-8" },
+      }),
+    );
+    const rows = await response.text();
+
+    expect(response.headers.get("content-type")).toContain("text/x-component");
+    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe(
+      "/server-posts/$postId",
+    );
+    expect(rows).toContain("Server post 42 (42)");
+    expect(rows).not.toContain("Router hooks must be used");
+  });
+
   it("serves configured static assets", async () => {
     const handler = createRequestHandler({
       assets: {
@@ -214,6 +249,33 @@ describe("@bgub/fig-start server handler", () => {
 
     expect(rows).toContain(islandId);
     expect(rows).toContain("/assets/island.css");
+  });
+
+  it("uses server-route asset resolvers for server route RSC rows", async () => {
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      clientReferenceAssets: ({ id }) =>
+        id === islandId ? stylesheet("/assets/island.css") : [],
+      context: () => ({ allow: true }),
+      routes,
+      serverRouteAssets: ({ id }) =>
+        id === "/dashboard" ? stylesheet("/assets/dashboard.css") : [],
+    });
+
+    const response = await handler(
+      new Request("http://localhost/dashboard", {
+        headers: { accept: "text/x-component; charset=utf-8" },
+      }),
+    );
+    const rows = await response.text();
+    const rsc = createRscResponse();
+    rsc.processStringChunk(rows);
+
+    expect(rows).toContain("/assets/dashboard.css");
+    expect(rsc.getAssetResources()).toEqual([
+      stylesheet("/assets/dashboard.css"),
+      stylesheet("/assets/island.css"),
+    ]);
   });
 
   it("omits RSC frames for ordinary isomorphic routes", async () => {

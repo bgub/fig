@@ -1,0 +1,24 @@
+.root {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+}
+
+.header {
+  display: block;
+}
+
+.title {
+  font-size: 1.875rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.copy {
+  color: #475569;
+  margin: 6px 0 0;
+}

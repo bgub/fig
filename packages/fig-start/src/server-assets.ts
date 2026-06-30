@@ -69,7 +69,7 @@ async function discoverClientAssets(
   baseUrl: URL,
   entryAsset: string,
 ): Promise<ReadonlySet<string>> {
-  const assets = new Set<string>(await discoverSiblingCssAssets(baseUrl));
+  const assets = new Set<string>(await discoverSiblingAssets(baseUrl));
   const pending = [entryAsset];
 
   for (;;) {
@@ -88,15 +88,37 @@ async function discoverClientAssets(
   }
 }
 
-async function discoverSiblingCssAssets(baseUrl: URL): Promise<string[]> {
+async function discoverSiblingAssets(baseUrl: URL): Promise<string[]> {
   if (baseUrl.protocol !== "file:") return [];
 
   try {
-    const entries = await readdir(baseUrl);
-    return entries.filter((entry) => safeAssetPath(entry)?.endsWith(".css"));
+    return await discoverAssetsInDirectory(baseUrl, "");
   } catch {
     return [];
   }
+}
+
+async function discoverAssetsInDirectory(
+  baseUrl: URL,
+  relativeDir: string,
+): Promise<string[]> {
+  const entries = await readdir(new URL(relativeDir, baseUrl), {
+    withFileTypes: true,
+  });
+  const assets: string[] = [];
+
+  for (const entry of entries) {
+    const relativePath = `${relativeDir}${entry.name}`;
+    if (entry.isDirectory()) {
+      assets.push(
+        ...(await discoverAssetsInDirectory(baseUrl, `${relativePath}/`)),
+      );
+    } else if (safeAssetPath(relativePath) !== null) {
+      assets.push(relativePath);
+    }
+  }
+
+  return assets;
 }
 
 async function readAsset(url: URL): Promise<string | null> {
@@ -119,7 +141,7 @@ const JS_SPECIFIER_PATTERN =
   /\bimport\s*\(\s*["']([^"']+\.js)["']\s*\)|\b(?:from|import)\s*["']([^"']+\.js)["']/g;
 
 function isServableAssetPath(path: string): boolean {
-  return path.endsWith(".js") || path.endsWith(".css");
+  return /\.(?:avif|css|gif|jpe?g|js|png|svg|webp|woff2?)$/i.test(path);
 }
 
 function assetPathFromSpecifier(

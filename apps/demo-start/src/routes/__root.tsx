@@ -14,6 +14,7 @@ function RootLayout(): FigNode {
         <nav class="flex gap-3 text-sm font-medium text-teal-700">
           <Link to="/">Home</Link>
           <Link to="/about">About</Link>
+          <Link to="/asset-lab">Assets</Link>
           <Link to="/dashboard">Dashboard</Link>
           <Link to="/posts">Posts</Link>
         </nav>

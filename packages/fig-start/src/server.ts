@@ -3,6 +3,8 @@ import {
   type ElementType,
   type FigNode,
   type FigResourceList,
+  Fragment,
+  resources,
 } from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
@@ -23,9 +25,11 @@ import {
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import { RouterProvider } from "./components.tsx";
+import type { Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
 import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
+import { RouterContext } from "./router-context.ts";
 import type { AnyRoute } from "./route.ts";
 import {
   type ClientAssetResolver,
@@ -49,6 +53,7 @@ export interface StartHandlerOptions {
   htmlLang?: string;
   nonce?: (request: Request) => string;
   routes: readonly AnyRoute[];
+  serverRouteAssets?: (metadata: { id: string }) => FigResourceList;
 }
 
 export type StartHandler = (request: Request) => Promise<Response>;
@@ -97,8 +102,10 @@ export function createRequestHandler(
     // empty slot for that segment, and row chunks stream into it as inline frames.
     const rscSegment = renderServerRouteSegment(
       result,
+      router,
       dataContext,
       options.clientReferenceAssets,
+      options.serverRouteAssets,
     );
 
     if (isRscRouteRequest(request)) {
@@ -396,8 +403,12 @@ interface ServerRscSegment {
 
 function renderServerRouteSegment(
   result: LoadResult,
+  router: Router,
   dataContext: unknown,
   clientReferenceAssets:
+    | ((metadata: { id: string }) => FigResourceList)
+    | undefined,
+  serverRouteAssets:
     | ((metadata: { id: string }) => FigResourceList)
     | undefined,
 ): ServerRscSegment | undefined {
@@ -410,13 +421,24 @@ function renderServerRouteSegment(
   const Component = leaf.node.route.options.component;
   if (Component === undefined) return undefined;
 
-  // Server route components receive { params, loaderData } as props (they cannot
-  // use router hooks — they render in an isolated RSC pass).
-  const rsc = renderToRscStream(
+  // Server route components receive { params, loaderData } as props and the
+  // same router context as the document render, so typed route hooks work in
+  // both isomorphic and server-route leaves.
+  const routeAssets = serverRouteAssets?.({ id: leaf.routeId });
+  const routeNode = createElement(
+    RouterContext,
+    { value: router },
     createElement(Component as ElementType, {
       loaderData: leaf.loaderData,
       params: leaf.params,
     }),
+  );
+  const rsc = renderToRscStream(
+    createElement(
+      Fragment,
+      null,
+      routeAssets === undefined ? routeNode : resources(routeAssets, routeNode),
+    ),
     { clientReferenceAssets, dataContext },
   );
   void rsc.allReady.catch(() => undefined);
