@@ -68,12 +68,12 @@ function validatePort(
   field: string,
   port: number,
 ): Effect.Effect<number, StartConfigError> {
-  return Number.isInteger(port) && port > 0 && port <= 65_535
+  return Number.isInteger(port) && port >= 0 && port <= 65_535
     ? Effect.succeed(port)
     : Effect.fail(
         new StartConfigError({
           field,
-          message: "Expected an integer port between 1 and 65535.",
+          message: "Expected an integer port between 0 and 65535.",
         }),
       );
 }

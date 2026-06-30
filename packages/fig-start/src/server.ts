@@ -9,7 +9,6 @@ import {
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import { renderToRscStream } from "@bgub/fig-server/rsc";
-import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
@@ -31,11 +30,9 @@ import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
 import { RouterContext } from "./router-context.ts";
 import type { AnyRoute } from "./route.ts";
-import {
-  type ClientAssetResolver,
-  createClientAssetResolver,
-  requestPathname,
-} from "./server-assets.ts";
+import { createClientAssetResolver } from "./server-assets.ts";
+import { contentTypeFor } from "./server-runtime/content-type.ts";
+import { createStartNodeRequestListener } from "./server-runtime/request-listener.ts";
 
 export interface StartHandlerOptions {
   assets?: Record<string, StartStaticAssetInput>;
@@ -221,20 +218,12 @@ export function startServer(options: StartServerOptions): Server {
     clientEntry,
   });
   const handler = createRequestHandler({ ...options, clientEntry });
-  const listener = nodeListener(handler);
-
-  const server = createServer((request, response) => {
-    const url = request.url ?? "/";
-
-    void serveClientAssetOrRoute(
-      clientAssets,
-      url,
-      request,
-      response,
-      listener,
-      cacheClientAssets,
-    );
+  const listener = createStartNodeRequestListener({
+    cacheClientAssets,
+    clientAssets,
+    handler,
   });
+  const server = createServer(listener);
 
   const port = options.port ?? Number(process.env.PORT ?? 3000);
   server.listen(port, () => {
@@ -261,133 +250,6 @@ function normalizeStaticAsset(value: StartStaticAssetInput): StartStaticAsset {
   return typeof value === "object" && !(value instanceof Uint8Array)
     ? value
     : { content: value };
-}
-
-function contentTypeFor(pathname: string): string {
-  if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8";
-  if (pathname.endsWith(".css")) return "text/css; charset=utf-8";
-  if (pathname.endsWith(".svg")) return "image/svg+xml";
-  if (pathname.endsWith(".png")) return "image/png";
-  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg"))
-    return "image/jpeg";
-  if (pathname.endsWith(".webp")) return "image/webp";
-  if (pathname.endsWith(".avif")) return "image/avif";
-  if (pathname.endsWith(".woff2")) return "font/woff2";
-  return "application/octet-stream";
-}
-
-async function serveClientAssetOrRoute(
-  clientAssets: ClientAssetResolver,
-  url: string,
-  request: NodeRequestLike,
-  response: NodeResponseLike,
-  listener: (request: NodeRequestLike, response: NodeResponseLike) => void,
-  cacheClientAssets: boolean,
-): Promise<void> {
-  let assetUrl: URL | null;
-  try {
-    assetUrl = await clientAssets.resolve(url);
-  } catch {
-    listener(request, response);
-    return;
-  }
-
-  if (assetUrl !== null) {
-    await serveClientAsset(assetUrl, response, cacheClientAssets);
-    return;
-  }
-
-  if (requestPathname(url) === "/favicon.ico") {
-    response.writeHead(204);
-    response.end();
-    return;
-  }
-
-  listener(request, response);
-}
-
-interface NodeRequestLike {
-  headers: Record<string, string | string[] | undefined>;
-  method?: string;
-  url?: string;
-}
-
-interface NodeResponseLike {
-  end(chunk?: Uint8Array | string): void;
-  setHeader(name: string, value: string): void;
-  statusCode: number;
-  write(chunk: Uint8Array | string): void;
-  writeHead(status: number, headers?: Record<string, string>): void;
-}
-
-function nodeListener(
-  handler: StartHandler,
-): (request: NodeRequestLike, response: NodeResponseLike) => void {
-  return (request, response) => {
-    void run();
-
-    async function run(): Promise<void> {
-      const host = headerValue(request.headers.host) ?? "localhost";
-      const webRequest = new Request(`http://${host}${request.url ?? "/"}`, {
-        headers: toWebHeaders(request.headers),
-        method: request.method ?? "GET",
-      });
-
-      const result = await handler(webRequest);
-      response.statusCode = result.status;
-      result.headers.forEach((value, name) => response.setHeader(name, value));
-
-      if (result.body === null) {
-        response.end();
-        return;
-      }
-
-      const reader = result.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        response.write(value);
-      }
-      response.end();
-    }
-  };
-}
-
-async function serveClientAsset(
-  url: URL,
-  response: NodeResponseLike,
-  cache: boolean,
-): Promise<void> {
-  try {
-    const code = await readFile(url);
-    response.writeHead(200, {
-      "cache-control": cache ? "public, max-age=31536000, immutable" : "no-store",
-      "content-type": contentTypeFor(url.pathname),
-    });
-    response.end(code);
-  } catch {
-    response.writeHead(404);
-    response.end("client bundle not built");
-  }
-}
-
-function headerValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function toWebHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): Headers {
-  const result = new Headers();
-  for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) result.append(name, item);
-    } else {
-      result.set(name, value);
-    }
-  }
-  return result;
 }
 
 function collectLoaderData(result: LoadResult): Record<string, unknown> {

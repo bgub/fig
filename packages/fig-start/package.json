@@ -18,6 +18,10 @@
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
     },
+    "./dev-server": {
+      "import": "./dist/dev-server.js",
+      "types": "./dist/dev-server.d.ts"
+    },
     "./internal": {
       "import": "./dist/internal.js",
       "types": "./dist/internal.d.ts"
