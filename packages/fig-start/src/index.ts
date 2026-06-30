@@ -2,13 +2,24 @@
 //   declare module "@bgub/fig-start" {
 //     interface Register { context: { queryClient: QueryClient } }
 //   }
+// A pure ambient app types file can also use:
+//   declare namespace FigStart {
+//     interface Register { context: { queryClient: QueryClient } }
+//   }
 // Route `beforeLoad`/`loader` args then see the typed context with no codegen.
 // The framework owns the plumbing only; the app decides what the context holds.
 import type { StartClientOptions } from "./client.ts";
 import type { StartServerOptions } from "./server.ts";
 
+declare global {
+  namespace FigStart {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Register {}
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface Register {}
+export interface Register extends FigStart.Register {}
 
 export type RegisteredContext = Register extends { context: infer C }
   ? C

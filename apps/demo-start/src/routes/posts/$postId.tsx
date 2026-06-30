@@ -19,14 +19,16 @@ function PostPage(): FigNode {
   const post = readData(postResource, postId);
 
   return (
-    <article class="post">
-      <h2>{post.title}</h2>
-      <p>{post.body}</p>
-      <p class="meta">
+    <article class="space-y-4 rounded-lg border border-slate-300 bg-white p-5">
+      <h2 class="text-2xl font-semibold tracking-tight">{post.title}</h2>
+      <p class="text-slate-700">{post.body}</p>
+      <p class="text-sm text-slate-500">
         route param: {postId} · loader requestedId: {requestedId}
       </p>
       <p>
-        <Link to="/posts">← Back to posts</Link>
+        <Link class="font-medium text-teal-700" to="/posts">
+          ← Back to posts
+        </Link>
       </p>
     </article>
   );

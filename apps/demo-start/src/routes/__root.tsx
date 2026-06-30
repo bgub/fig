@@ -8,18 +8,18 @@ export const Route = createRootRoute({
 
 function RootLayout(): FigNode {
   return (
-    <div class="app">
-      <header class="nav">
-        <strong>Fig Start</strong>
-        <nav>
+    <div class="mx-auto max-w-3xl p-6">
+      <header class="mb-6 flex items-baseline gap-4 border-b border-slate-300 pb-3">
+        <strong class="text-slate-950">Fig Start</strong>
+        <nav class="flex gap-3 text-sm font-medium text-teal-700">
           <Link to="/">Home</Link>
           <Link to="/about">About</Link>
           <Link to="/dashboard">Dashboard</Link>
           <Link to="/posts">Posts</Link>
         </nav>
       </header>
-      <main>
-        <Suspense fallback={<p class="loading">Loading…</p>}>
+      <main class="min-w-0">
+        <Suspense fallback={<p class="italic text-slate-500">Loading…</p>}>
           <Outlet />
         </Suspense>
       </main>
@@ -29,11 +29,13 @@ function RootLayout(): FigNode {
 
 function NotFound(): FigNode {
   return (
-    <section>
-      <h1>404</h1>
-      <p>That page does not exist.</p>
+    <section class="space-y-4">
+      <h1 class="text-3xl font-semibold tracking-tight">404</h1>
+      <p class="text-slate-700">That page does not exist.</p>
       <p>
-        <Link to="/">Go home</Link>
+        <Link class="font-medium text-teal-700" to="/">
+          Go home
+        </Link>
       </p>
     </section>
   );

@@ -173,6 +173,9 @@ function packConfigFor(path: string): PackConfig | undefined {
           deps: {
             alwaysBundle: [figPackages],
           },
+          css: {
+            transformer: "postcss",
+          },
           dts: false,
           minify: false,
           outExtensions,
@@ -185,6 +188,9 @@ function packConfigFor(path: string): PackConfig | undefined {
           format: "esm",
           deps: {
             alwaysBundle: [figPackages],
+          },
+          css: {
+            transformer: "postcss",
           },
           dts: false,
           minify: false,
@@ -232,7 +238,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           dts: false,
           minify: false,
           outExtensions,
-          plugins: [figStart({ target: "server" })],
+          plugins: [figStart({ tailwind: true, target: "server" })],
           sourcemap: true,
         },
         {
@@ -246,7 +252,13 @@ function packConfigFor(path: string): PackConfig | undefined {
           dts: false,
           minify: false,
           outExtensions,
-          plugins: [figStart({ target: "client" })],
+          plugins: [
+            figStart({
+              clientNodeEnv: "development",
+              tailwind: true,
+              target: "client",
+            }),
+          ],
           sourcemap: true,
           clean: false,
         },

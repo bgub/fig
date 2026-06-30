@@ -8,9 +8,9 @@ export const Route = createFileRoute("/dashboard")({
 
 function Dashboard(): FigNode {
   return (
-    <section class="dashboard">
-      <h1>Dashboard</h1>
-      <p>
+    <section class="space-y-4 rounded-lg border border-slate-300 bg-white p-5">
+      <h1 class="text-3xl font-semibold tracking-tight">Dashboard</h1>
+      <p class="text-slate-700">
         This route is a `.server.tsx` leaf. Its markup is delivered through the
         Fig RSC stream, and the button below is a client reference.
       </p>

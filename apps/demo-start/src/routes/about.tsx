@@ -7,9 +7,9 @@ export const Route = createFileRoute("/about")({
 
 function About(): FigNode {
   return (
-    <section>
-      <h1>About</h1>
-      <p>
+    <section class="space-y-4">
+      <h1 class="text-3xl font-semibold tracking-tight">About</h1>
+      <p class="text-slate-700">
         This demo exercises the fig-start runtime end to end: server rendering,
         client hydration, client-side navigation, nested layouts, and a route
         whose data streams in.

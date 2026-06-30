@@ -8,8 +8,8 @@ export const Route = createFileRoute("/posts")({
 
 function PostsLayout(): FigNode {
   return (
-    <section class="posts">
-      <h1>Posts</h1>
+    <section class="space-y-4">
+      <h1 class="text-3xl font-semibold tracking-tight">Posts</h1>
       <Outlet />
     </section>
   );

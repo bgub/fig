@@ -10,20 +10,15 @@ const MANIFEST_ID = "virtual:fig-start/client-manifest";
 const SERVER_MANIFEST_ID = "virtual:fig-start/server-manifest";
 const CLIENT_ENTRY_ID = "virtual:fig-start/client-entry";
 const SERVER_ENTRY_ID = "virtual:fig-start/server-entry";
+const DEV_ENV_ID = "virtual:fig-start/dev-env";
 const CLIENT_ASSET_MANIFEST_FILE = "fig-start-client-assets.json";
 const RAW_SUFFIX = "?raw";
-const VIRTUAL_MODULES: Record<
-  string,
-  (root: string) => string | Promise<string>
-> = {
-  [MANIFEST_ID]: (root) => renderManifest(root),
-  [SERVER_MANIFEST_ID]: (root) => renderServerManifest(root),
-  [CLIENT_ENTRY_ID]: () => renderClientEntry(),
-  [SERVER_ENTRY_ID]: () => renderServerEntry(),
-};
-const ROOT_RELATIVE_IMPORTERS = new Set(
-  Object.keys(VIRTUAL_MODULES).map(resolvedVirtualId),
-);
+const ROOT_RELATIVE_VIRTUAL_IDS = [
+  MANIFEST_ID,
+  CLIENT_ENTRY_ID,
+  SERVER_ENTRY_ID,
+  SERVER_MANIFEST_ID,
+] as const;
 
 export interface FigStartPlugin {
   configResolved(config: { root?: string }): void;
@@ -40,7 +35,9 @@ export interface FigStartPlugin {
 }
 
 export interface FigStartPluginOptions {
+  clientNodeEnv?: "development" | "production";
   target?: "auto" | "client" | "server";
+  tailwind?: boolean | { base?: string };
 }
 
 type OutputBundle = Record<string, OutputAsset | OutputChunk>;
@@ -76,7 +73,19 @@ type ClientAssetManifest = Record<string, ClientAssetManifestEntry>;
 // modules. The manifest reuses the same transform, so ids always match.
 export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
   let root = process.cwd();
+  const clientNodeEnv = options.clientNodeEnv;
+  const tailwind = options.tailwind ?? false;
   const target = options.target ?? "auto";
+  const rootRelativeImporters = new Set(
+    ROOT_RELATIVE_VIRTUAL_IDS.map(resolvedVirtualId),
+  );
+  const virtualModules: Record<string, () => string | Promise<string>> = {
+    [MANIFEST_ID]: () => renderManifest(root),
+    [SERVER_MANIFEST_ID]: () => renderServerManifest(root),
+    [CLIENT_ENTRY_ID]: () => renderClientEntry(clientNodeEnv),
+    [SERVER_ENTRY_ID]: () => renderServerEntry(),
+    [DEV_ENV_ID]: () => renderDevEnv(clientNodeEnv),
+  };
 
   return {
     name: "fig-start",
@@ -96,11 +105,11 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       );
     },
     resolveId(id, importer) {
-      if (id in VIRTUAL_MODULES) return resolvedVirtualId(id);
+      if (id in virtualModules) return resolvedVirtualId(id);
       if (id.endsWith(RAW_SUFFIX)) return resolveRawId(root, id, importer);
       if (
         importer !== undefined &&
-        ROOT_RELATIVE_IMPORTERS.has(importer) &&
+        rootRelativeImporters.has(importer) &&
         id.startsWith("/") &&
         !id.includes("?")
       ) {
@@ -109,13 +118,26 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       return null;
     },
     async load(id) {
-      const render = id.startsWith("\0") ? VIRTUAL_MODULES[id.slice(1)] : undefined;
-      if (render !== undefined) return render(root);
+      const render = id.startsWith("\0")
+        ? virtualModules[id.slice(1)]
+        : undefined;
+      if (render !== undefined) return render();
       if (id.endsWith(RAW_SUFFIX)) return renderRawFile(id);
       return null;
     },
     async transform(code, id, options) {
       const clean = id.split("?")[0] ?? id;
+      if (
+        tailwind !== false &&
+        isCssModuleId(clean) &&
+        !id.endsWith(RAW_SUFFIX)
+      ) {
+        return {
+          code: await transformTailwindCss(code, clean, root, tailwind),
+          map: null,
+        };
+      }
+
       if (!clean.endsWith(".server.tsx") || clean.includes("/node_modules/")) {
         return null;
       }
@@ -131,6 +153,10 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       return { code: result.code, map: result.map };
     },
   };
+}
+
+function isCssModuleId(id: string): boolean {
+  return id.endsWith(".css");
 }
 
 function resolvedVirtualId(id: string): string {
@@ -166,7 +192,7 @@ function transformTarget(
 }
 
 async function renderManifest(root: string): Promise<string> {
-  const refs = await collectClientRefs(root, false);
+  const refs = await collectClientRefs(root);
   const entries = refs
     .map(
       (ref) =>
@@ -188,13 +214,13 @@ export function loadClientReference(metadata) {
 }
 
 async function renderServerManifest(root: string): Promise<string> {
-  const refs = await collectClientRefs(root, true);
+  const refs = await collectClientRefs(root);
   const entries = refs
     .map(
       (ref) =>
-        `  ${JSON.stringify(ref.id)}: { css: ${JSON.stringify(
-          ref.css ?? [],
-        )}, module: ${JSON.stringify(ref.specifier)} }`,
+        `  ${JSON.stringify(ref.id)}: { css: [], module: ${JSON.stringify(
+          ref.specifier,
+        )} }`,
     )
     .join(",\n");
 
@@ -230,22 +256,14 @@ export function resolveClientReferenceAssets(metadata) {
 `;
 }
 
-async function collectClientRefs(
-  root: string,
-  includeCss: boolean,
-): Promise<ClientRef[]> {
+async function collectClientRefs(root: string): Promise<ClientRef[]> {
   const files = await findServerModules(join(root, "src"));
   const refs = new Map<string, ClientRef>();
 
   for (const file of files) {
     const code = await readFile(file, "utf8");
     const { clientRefs } = await transformServerModule(code, file, root);
-    for (const ref of clientRefs) {
-      refs.set(
-        ref.id,
-        includeCss ? { ...ref, css: [] } : ref,
-      );
-    }
+    for (const ref of clientRefs) refs.set(ref.id, ref);
   }
   return [...refs.values()];
 }
@@ -271,11 +289,28 @@ function cssImportSpecifiers(code: string): string[] {
 const CSS_IMPORT_PATTERN =
   /\bimport\s*\(\s*["']([^"']+\.css)["']\s*\)|\b(?:from|import)\s*["']([^"']+\.css)["']/g;
 
+async function transformTailwindCss(
+  code: string,
+  id: string,
+  root: string,
+  options: Exclude<FigStartPluginOptions["tailwind"], false | undefined>,
+): Promise<string> {
+  const [{ default: postcss }, { default: tailwindcss }] = await Promise.all([
+    import("postcss"),
+    import("@tailwindcss/postcss"),
+  ]);
+  const base = typeof options === "object" ? options.base : undefined;
+  const result = await postcss([
+    tailwindcss({ base: base ?? root }),
+  ]).process(code, { from: id, to: id });
+  return result.css;
+}
+
 async function renderClientAssetManifest(
   root: string,
   bundle: OutputBundle,
 ): Promise<ClientAssetManifest> {
-  const refs = await collectClientRefs(root, true);
+  const refs = await collectClientRefs(root);
   const css = outputCssHrefs(bundle);
   const manifest: ClientAssetManifest = {};
 
@@ -341,8 +376,13 @@ function normalizePath(path: string): string {
   return path.split("\\").join("/");
 }
 
-function renderClientEntry(): string {
-  return `import { hydrateStart } from "@bgub/fig-start/client";
+function renderClientEntry(
+  clientNodeEnv: FigStartPluginOptions["clientNodeEnv"],
+): string {
+  const devEnvImport =
+    clientNodeEnv === undefined ? "" : `import "${DEV_ENV_ID}";\n`;
+
+  return `${devEnvImport}import { hydrateStart } from "@bgub/fig-start/client";
 import { loadClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
@@ -352,6 +392,18 @@ hydrateStart({
   onRecoverableError: start.onRecoverableError,
   routes: start.routes,
 });
+`;
+}
+
+function renderDevEnv(
+  clientNodeEnv: FigStartPluginOptions["clientNodeEnv"],
+): string {
+  if (clientNodeEnv === undefined) return "export {};\n";
+
+  return `globalThis.process ??= { env: {} };
+globalThis.process.env ??= {};
+globalThis.process.env.NODE_ENV ??= ${JSON.stringify(clientNodeEnv)};
+export {};
 `;
 }
 

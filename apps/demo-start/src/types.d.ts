@@ -1,20 +1,29 @@
-import type { FigNode } from "@bgub/fig";
-import "@bgub/fig-start";
+declare namespace JSX {
+  type Element = import("@bgub/fig").FigNode;
 
-declare global {
-  namespace JSX {
-    type Element = FigNode;
-
-    interface IntrinsicElements {
-      [name: string]: Record<string, unknown>;
-    }
+  interface IntrinsicElements {
+    [name: string]: Record<string, unknown>;
   }
 }
 
 // Register the app's router context type once, app-wide. Route beforeLoad/loader
 // args then see this typed context with no codegen.
-declare module "@bgub/fig-start" {
+declare namespace FigStart {
   interface Register {
     context: { appName: string };
   }
+}
+
+declare module "*.css";
+
+declare module "virtual:fig-start/client-manifest" {
+  export function loadClientReference(metadata: {
+    id: string;
+  }): Promise<unknown>;
+}
+
+declare module "virtual:fig-start/server-manifest" {
+  export function resolveClientReferenceAssets(metadata: {
+    id: string;
+  }): import("@bgub/fig").FigResourceList;
 }

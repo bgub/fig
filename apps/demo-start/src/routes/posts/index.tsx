@@ -7,7 +7,7 @@ export const Route = createFileRoute("/posts/")({
 
 function PostsIndex(): FigNode {
   return (
-    <ul class="post-list">
+    <ul class="list-disc space-y-1 pl-5 leading-8 text-teal-700">
       <li>
         <Link to="/posts/1">Hello Fig</Link>
       </li>

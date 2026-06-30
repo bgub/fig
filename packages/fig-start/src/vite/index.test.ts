@@ -49,6 +49,25 @@ startServer({
     );
   });
 
+  it("can inject a browser NODE_ENV shim into the generated client entry", async () => {
+    const plugin = figStart({ clientNodeEnv: "development" });
+    const clientId = plugin.resolveId("virtual:fig-start/client-entry");
+    const devEnvId = plugin.resolveId("virtual:fig-start/dev-env");
+
+    expect(clientId).toBe("\0virtual:fig-start/client-entry");
+    expect(devEnvId).toBe("\0virtual:fig-start/dev-env");
+    await expect(plugin.load(clientId ?? "")).resolves.toContain(
+      'import "virtual:fig-start/dev-env";\nimport { hydrateStart }',
+    );
+    await expect(plugin.load(devEnvId ?? "")).resolves.toBe(
+      `globalThis.process ??= { env: {} };
+globalThis.process.env ??= {};
+globalThis.process.env.NODE_ENV ??= "development";
+export {};
+`,
+    );
+  });
+
   it("resolves root-relative imports from generated virtual modules", () => {
     const plugin = figStart();
     plugin.configResolved({ root: "/project" });
@@ -81,6 +100,33 @@ startServer({
       await expect(plugin.load(id ?? "")).resolves.toBe(
         `export default ${JSON.stringify(".app { color: red; }")};\n`,
       );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("transforms Tailwind CSS before the CSS bundler sees imports", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(
+      join(root, "src", "index.tsx"),
+      `export function App() {
+  return <h1 class="text-3xl font-semibold">Ready</h1>;
+}`,
+    );
+
+    const plugin = figStart({ tailwind: true });
+    plugin.configResolved({ root });
+
+    try {
+      const result = await plugin.transform(
+        `@import "tailwindcss";\n@source "./";\n`,
+        join(root, "src", "styles.css"),
+      );
+
+      expect(result?.code).toContain(".text-3xl");
+      expect(result?.code).toContain(".font-semibold");
+      expect(result?.code).not.toContain("@tailwind");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
