@@ -53,7 +53,8 @@
     "@bgub/fig": "workspace:*",
     "@bgub/fig-data": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
-    "@bgub/fig-server": "workspace:*"
+    "@bgub/fig-server": "workspace:*",
+    "effect": "4.0.0-beta.92"
   },
   "peerDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
