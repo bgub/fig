@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { figStart } from "./index.ts";
+import { CLIENT_ENTRY_ID, resolvedVirtualId } from "./ids.ts";
 
 describe("@bgub/fig-start/vite plugin", () => {
   it("serves generated client and server entries", async () => {
@@ -18,12 +19,20 @@ import { hydrateStart } from "@bgub/fig-start/client";
 import { loadClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
-hydrateStart({
-  context: { appName: start.appName },
-  loadClientReference,
-  onRecoverableError: start.onRecoverableError,
-  routes: start.routes,
-});
+function __figStartHydrate() {
+  hydrateStart({
+    context: { appName: start.appName },
+    loadClientReference,
+    onRecoverableError: start.onRecoverableError,
+    routes: start.routes,
+  });
+}
+
+if (globalThis["__figStartPreloadingClientReferences"] === true) {
+  globalThis["__figStartHydrate"] = __figStartHydrate;
+} else {
+  __figStartHydrate();
+}
 `,
     );
     await expect(plugin.load(serverId ?? "")).resolves.toBe(
@@ -68,6 +77,9 @@ startServer({
     await expect(plugin.load(clientId ?? "")).resolves.toContain(
       'import "virtual:fig-start/dev-env";\nimport "virtual:fig-start/server-route-assets";\nimport { hydrateStart }',
     );
+    await expect(plugin.load(clientId ?? "")).resolves.toContain(
+      'globalThis["__figStartPreloadingClientReferences"] === true',
+    );
     await expect(plugin.load(devEnvId ?? "")).resolves.toBe(
       `globalThis.process ??= { env: {} };
 globalThis.process.env ??= {};
@@ -88,10 +100,7 @@ export {};
       plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/server-entry"),
     ).toBe("/project/src/start.tsx");
     expect(
-      plugin.resolveId(
-        "/src/start.tsx",
-        "\0virtual:fig-start/server-manifest",
-      ),
+      plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/server-manifest"),
     ).toBe("/project/src/start.tsx");
   });
 
@@ -163,12 +172,14 @@ export function Island() {
     try {
       const code = await plugin.load(id ?? "");
       expect(code).toContain('"/src/routes/Island.tsx#Island"');
-      expect(code).toContain('const routes = {');
+      expect(code).toContain("const routes = {");
       expect(code).toContain('"/dashboard": { assets: [], css: [] }');
-      expect(code).toContain('css: []');
-      expect(code).toContain('assets: []');
+      expect(code).toContain("css: []");
+      expect(code).toContain("assets: []");
       expect(code).toContain('module: "/src/routes/Island.tsx"');
-      expect(code).toContain('readFileSync(new URL("./fig-start-client-assets.json"');
+      expect(code).toContain(
+        'readFileSync(new URL("./fig-start-client-assets.json"',
+      );
       expect(code).toContain("readClientAssetManifest().clientReferences");
       expect(code).toContain("readClientAssetManifest().serverRoutes");
       expect(code).toContain("modulepreload(module)");
@@ -226,6 +237,20 @@ export function Other() {
       await plugin.writeBundle?.(
         { dir: join(root, "dist") },
         {
+          "client.js": {
+            fileName: "client.js",
+            imports: ["start-abc.js"],
+            moduleIds: [resolvedVirtualId(CLIENT_ENTRY_ID)],
+            type: "chunk",
+          },
+          "start-abc.js": {
+            fileName: "start-abc.js",
+            moduleIds: [join(root, "src", "start.tsx")],
+            type: "chunk",
+            viteMetadata: {
+              importedCss: new Set(["assets/global.css"]),
+            },
+          },
           "Island-abc.js": {
             fileName: "Island-abc.js",
             moduleIds: [join(root, "src", "routes", "Island.tsx")],
@@ -283,6 +308,17 @@ export function Other() {
         "utf8",
       );
       expect(JSON.parse(manifest)).toEqual({
+        assets: [
+          "/assets/global.css",
+          "/assets/island-def.css",
+          "/assets/island-mark.svg",
+          "/assets/other-def.css",
+          "/assets/dashboard-def.css",
+        ],
+        client: {
+          css: ["/assets/global.css"],
+          module: "/client.js",
+        },
         clientReferences: {
           "/src/routes/Island.tsx#Island": {
             assets: ["/assets/island-mark.svg"],

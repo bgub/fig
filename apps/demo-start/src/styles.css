@@ -10,7 +10,10 @@
     margin: 0;
     background: #f5f7f8;
     color: #182025;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      sans-serif;
     line-height: 1.5;
   }
 

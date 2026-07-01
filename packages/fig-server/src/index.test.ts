@@ -1,6 +1,7 @@
 import {
   createContext,
   createElement,
+  clientReference,
   ErrorBoundary,
   type FigNode,
   Fragment,
@@ -591,6 +592,28 @@ describe("@bgub/fig-server", () => {
       ),
     ).rejects.toThrow(
       'Conflicting Fig resource for key "stylesheet:/app.css".',
+    );
+  });
+
+  it("renders a fallback for client references when configured", async () => {
+    const Island = clientReference({
+      id: "app/Island.tsx#Island",
+      load: () => Promise.resolve({}),
+    });
+
+    const html = await renderToString(
+      createElement("section", null, "Before", createElement(Island, {})),
+      {
+        clientReferenceFallback: (reference) =>
+          createElement("template", {
+            "data-client-reference": reference.id,
+          }),
+      },
+    );
+
+    expect(html).toContain("Before");
+    expect(html).toContain(
+      '<template data-client-reference="app/Island.tsx#Island"></template>',
     );
   });
 

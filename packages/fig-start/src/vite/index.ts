@@ -136,7 +136,9 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
         return renderCssModule(
           this,
           root,
-          decodeIdPath(clean.slice(resolvedVirtualId(CSS_MODULE_PREFIX).length)),
+          decodeIdPath(
+            clean.slice(resolvedVirtualId(CSS_MODULE_PREFIX).length),
+          ),
         );
       }
       if (isAssetId(clean)) {
@@ -191,7 +193,10 @@ function resolveCssModuleId(
       ? resolve(root, id.slice(1))
       : id;
   }
-  if (importer === undefined || (!id.startsWith("./") && !id.startsWith("../"))) {
+  if (
+    importer === undefined ||
+    (!id.startsWith("./") && !id.startsWith("../"))
+  ) {
     return null;
   }
   return resolve(dirname(importer.split("?")[0] ?? importer), id);

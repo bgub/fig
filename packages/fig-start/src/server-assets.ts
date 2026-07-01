@@ -141,6 +141,8 @@ interface ClientAssetManifestEntry {
 }
 
 interface ClientAssetManifest {
+  assets: readonly string[];
+  client: ClientAssetManifestEntry;
   clientReferences: Record<string, ClientAssetManifestEntry>;
   serverRoutes: Record<string, ClientAssetManifestEntry>;
 }
@@ -149,8 +151,20 @@ function decodeClientAssetManifest(value: unknown): ClientAssetManifest | null {
   if (!isRecord(value)) return null;
 
   return {
+    assets: stringArray(value.assets) ?? [],
+    client: decodeManifestEntry(value.client),
     clientReferences: decodeManifestEntries(value.clientReferences),
     serverRoutes: decodeManifestEntries(value.serverRoutes),
+  };
+}
+
+function decodeManifestEntry(value: unknown): ClientAssetManifestEntry {
+  if (!isRecord(value)) return {};
+
+  return {
+    assets: stringArray(value.assets),
+    css: stringArray(value.css),
+    module: typeof value.module === "string" ? value.module : undefined,
   };
 }
 
@@ -162,18 +176,15 @@ function decodeManifestEntries(
   const result: Record<string, ClientAssetManifestEntry> = {};
   for (const [id, entry] of Object.entries(value)) {
     if (!isRecord(entry)) continue;
-    result[id] = {
-      assets: stringArray(entry.assets),
-      css: stringArray(entry.css),
-      module: typeof entry.module === "string" ? entry.module : undefined,
-    };
+    result[id] = decodeManifestEntry(entry);
   }
   return result;
 }
 
 function clientAssetManifestHrefs(manifest: ClientAssetManifest): string[] {
-  const hrefs: string[] = [];
+  const hrefs: string[] = [...manifest.assets];
   for (const entry of [
+    manifest.client,
     ...Object.values(manifest.clientReferences),
     ...Object.values(manifest.serverRoutes),
   ]) {

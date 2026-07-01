@@ -12,7 +12,11 @@ import {
   isPreloadableAsset,
   staticAssetHref,
 } from "./static-assets.ts";
-import { SERVER_ROUTE_ASSET_MODULE_PREFIX, resolvedVirtualId } from "./ids.ts";
+import {
+  CLIENT_ENTRY_ID,
+  SERVER_ROUTE_ASSET_MODULE_PREFIX,
+  resolvedVirtualId,
+} from "./ids.ts";
 import { assetImportSpecifiers } from "./asset-imports.ts";
 
 export type OutputBundle = Record<string, OutputAsset | OutputChunk>;
@@ -26,6 +30,7 @@ interface OutputAsset {
 export interface OutputChunk {
   facadeModuleId?: string | null;
   fileName: string;
+  imports?: string[];
   moduleIds?: string[];
   type: "chunk";
   viteMetadata?: {
@@ -41,6 +46,8 @@ interface ClientAssetManifestEntry {
 }
 
 interface ClientAssetManifest {
+  assets: string[];
+  client: ClientAssetManifestEntry;
   clientReferences: Record<string, ClientAssetManifestEntry>;
   serverRoutes: Record<string, ClientAssetManifestEntry>;
 }
@@ -51,6 +58,12 @@ export async function renderClientAssetManifest(
 ): Promise<ClientAssetManifest> {
   const refs = await collectClientRefs(root);
   const routes = await collectServerRoutes(root);
+  const assets = outputAssetAllowlistHrefsForBundle(bundle);
+  const client = clientAssetEntryForChunkTree(
+    root,
+    bundle,
+    outputChunkForModule(bundle, resolvedVirtualId(CLIENT_ENTRY_ID)),
+  );
   const clientReferences: Record<string, ClientAssetManifestEntry> = {};
   const serverRoutes: Record<string, ClientAssetManifestEntry> = {};
 
@@ -59,19 +72,16 @@ export async function renderClientAssetManifest(
       bundle,
       rootAbsolutePath(root, ref.specifier),
     );
-    const entry: ClientAssetManifestEntry = {};
-    if (chunk !== null) entry.module = outputHref(chunk.fileName);
-    const css = chunk === null ? [] : outputCssHrefsForChunk(root, chunk);
-    const assets = chunk === null ? [] : outputAssetHrefsForChunk(root, chunk);
-    if (css.length > 0) entry.css = css;
-    if (assets.length > 0) entry.assets = assets;
+    const entry = clientAssetEntryForChunk(root, chunk);
     clientReferences[ref.id] = entry;
   }
 
   for (const route of routes) {
     const chunk = outputChunkForModule(
       bundle,
-      resolvedVirtualId(`${SERVER_ROUTE_ASSET_MODULE_PREFIX}${route.specifier}`),
+      resolvedVirtualId(
+        `${SERVER_ROUTE_ASSET_MODULE_PREFIX}${route.specifier}`,
+      ),
     );
     const sourceAssets = await sourceAssetHrefsForModule(root, route.specifier);
     const entry: ClientAssetManifestEntry = {};
@@ -88,7 +98,69 @@ export async function renderClientAssetManifest(
     serverRoutes[route.id] = entry;
   }
 
-  return { clientReferences, serverRoutes };
+  return { assets, client, clientReferences, serverRoutes };
+}
+
+function clientAssetEntryForChunkTree(
+  root: string,
+  bundle: OutputBundle,
+  chunk: OutputChunk | null,
+): ClientAssetManifestEntry {
+  const entry: ClientAssetManifestEntry = {};
+  if (chunk === null) return entry;
+
+  entry.module = outputHref(chunk.fileName);
+  const chunks = outputChunksForChunkTree(bundle, chunk);
+  const css = unique(
+    chunks.flatMap((item) => outputCssHrefsForChunk(root, item)),
+  );
+  const assets = unique(
+    chunks.flatMap((item) => outputAssetHrefsForChunk(root, item)),
+  );
+  if (css.length > 0) entry.css = css;
+  if (assets.length > 0) entry.assets = assets;
+  return entry;
+}
+
+function clientAssetEntryForChunk(
+  root: string,
+  chunk: OutputChunk | null,
+): ClientAssetManifestEntry {
+  const entry: ClientAssetManifestEntry = {};
+  if (chunk === null) return entry;
+
+  entry.module = outputHref(chunk.fileName);
+  const css = outputCssHrefsForChunk(root, chunk);
+  const assets = outputAssetHrefsForChunk(root, chunk);
+  if (css.length > 0) entry.css = css;
+  if (assets.length > 0) entry.assets = assets;
+  return entry;
+}
+
+function outputChunksForChunkTree(
+  bundle: OutputBundle,
+  chunk: OutputChunk,
+): OutputChunk[] {
+  const chunksByFileName = new Map<string, OutputChunk>();
+  for (const file of Object.values(bundle)) {
+    if (file.type === "chunk") chunksByFileName.set(file.fileName, file);
+  }
+
+  const seen = new Set<string>();
+  const chunks: OutputChunk[] = [];
+  const visit = (item: OutputChunk): void => {
+    if (seen.has(item.fileName)) return;
+    seen.add(item.fileName);
+    chunks.push(item);
+
+    for (const importedFileName of item.imports ?? []) {
+      const imported = chunksByFileName.get(importedFileName);
+      if (imported !== undefined) visit(imported);
+    }
+  };
+
+  visit(chunk);
+  return chunks;
 }
 
 function outputCssHrefsForChunk(root: string, chunk: OutputChunk): string[] {
@@ -112,6 +184,18 @@ function outputAssetHrefsForChunk(root: string, chunk: OutputChunk): string[] {
       .filter(isAssetId)
       .map((id) => staticAssetHref(root, id)),
   ]);
+}
+
+function outputAssetAllowlistHrefsForBundle(bundle: OutputBundle): string[] {
+  return unique(
+    Object.values(bundle)
+      .filter((file) => file.type === "asset")
+      .map((file) => file.fileName)
+      .filter(
+        (fileName) => fileName.endsWith(".css") || isPreloadableAsset(fileName),
+      )
+      .map(outputHref),
+  );
 }
 
 async function sourceAssetHrefsForModule(

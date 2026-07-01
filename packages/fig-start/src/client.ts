@@ -3,23 +3,33 @@ import {
   type ElementType,
   type FigNode,
   ErrorBoundary,
+  type Props,
+  readPromise,
   Suspense,
+  useExternalStore,
 } from "@bgub/fig";
-import { figResourceKey, type FigDataHydrationEntry } from "@bgub/fig/internal";
-import { createRoot, hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
+import {
+  figResourceKey,
+  type FigDataHydrationEntry,
+  type FigDataStoreHandle,
+} from "@bgub/fig/internal";
+import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
   createRscResponse,
   fetchRsc,
   isRscRequestCancelled,
+  type RscClientReferenceMetadata,
 } from "@bgub/fig-server/rsc";
 import {
+  CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_SCRIPT_ID,
+  DATA_FRAME_ATTR,
+  DATA_STREAM_GLOBAL,
   hasClientReferences,
   ROOT_ELEMENT_ID,
   RSC_FRAME_ATTR,
   RSC_PAYLOAD_SCRIPT_ID,
   RSC_SEGMENTS_SCRIPT_ID,
-  RSC_SLOT_ATTR,
   RSC_STREAM_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedRscFrame,
@@ -27,8 +37,12 @@ import {
   type SerializedRscPayload,
   type SerializedRscSegment,
 } from "./bootstrap.ts";
-import { RouterProvider } from "./components.tsx";
-import type { Router } from "./core.ts";
+import {
+  RouterProvider,
+  ServerRouteContentProvider,
+  type ServerRouteContentStore,
+} from "./components.tsx";
+import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
@@ -41,9 +55,13 @@ export interface StartClientOptions {
   context?: unknown;
   // Resolve a server route's client-reference ids back to components. With the
   // @bgub/fig-start/vite plugin, pass the generated manifest's loadClientReference.
-  loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
+  loadClientReference?: (
+    metadata: RscClientReferenceMetadata,
+  ) => Promise<unknown>;
   onRecoverableError?: (error: unknown) => void;
-  resolveClientReference?: (metadata: { id: string }) => ElementType;
+  resolveClientReference?: (
+    metadata: RscClientReferenceMetadata,
+  ) => ElementType | undefined;
   routes: readonly AnyRoute[];
 }
 
@@ -68,17 +86,11 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
 
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
-  hydrateRoot(container, createElement(RouterProvider, { router }), {
-    initialData,
-    onRecoverableError: options.onRecoverableError,
-  });
-
-  const serverRouteMounts = createServerRouteMounts(options, router);
+  const serverRouteContent = createServerRouteContent(options, router);
 
   // If the matched route was a `.server.tsx`, the document carries its RSC
-  // payload; mount it into the slot the SSR'd layout left behind. Newer payloads
-  // arrive as streamed segment frames; keep the old buffered script as a fallback
-  // so tests/apps using older server output still hydrate.
+  // payload. Newer payloads arrive as streamed segment frames; keep the old
+  // buffered script as a fallback so older server output still hydrates.
   const rscSegments = readJson<SerializedRscSegment[]>(
     RSC_SEGMENTS_SCRIPT_ID,
     [],
@@ -86,12 +98,10 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   if (rscSegments.length > 0) {
     const stream = getRscStream();
     for (const segment of rscSegments) {
-      mountServerRouteSegment(
-        container,
+      serverRouteContent.receiveSegment(
         segment,
         stream,
-        options,
-        serverRouteMounts,
+        rscRouteUrl(router.getState().location),
       );
     }
   }
@@ -101,15 +111,28 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     null,
   );
   if (legacyRscPayload !== null) {
-    mountBufferedServerRoute(
-      container,
+    serverRouteContent.receiveBuffered(
       legacyRscPayload,
-      options,
-      serverRouteMounts,
+      rscRouteUrl(router.getState().location),
     );
   }
 
-  installServerRouteFetcher(container, options, router, serverRouteMounts);
+  const root = hydrateRoot(
+    container,
+    createElement(
+      ServerRouteContentProvider,
+      { store: serverRouteContent },
+      createElement(RouterProvider, { router }),
+    ),
+    {
+      initialData,
+      onRecoverableError: options.onRecoverableError,
+    },
+  );
+  serverRouteContent.bindRootData(root.data);
+  getDataStream().s((entries) => root.data.hydrate(entries));
+
+  installServerRouteFetcher(router, serverRouteContent);
   installLinkInterceptor(router);
   installPopStateHandler(router);
 
@@ -122,204 +145,482 @@ interface RscStream {
   s(listener: (frame: SerializedRscFrame) => void): () => void;
 }
 
-function mountServerRouteSegment(
-  container: Element,
-  segment: SerializedRscSegment,
-  stream: RscStream,
-  options: StartClientOptions,
-  mounts: ServerRouteMounts,
-): void {
-  const slot = findSlot(container, segment.routeId);
-  if (slot === null) return;
-
-  const response = createServerRouteResponse(options);
-  const processFrame = (frame: SerializedRscFrame): void => {
-    if (frame.id !== segment.id) return;
-    requireClientReferenceResolverForRows(
-      segment.routeId,
-      frame.chunk,
-      options,
-    );
-    response.processStringChunk(frame.chunk);
-  };
-  const unsubscribeStream = stream.s(processFrame);
-
-  mounts.mount(slot, segment.routeId, response, { dispose: unsubscribeStream });
-}
-
-function mountBufferedServerRoute(
-  container: Element,
-  payload: SerializedRscPayload,
-  options: StartClientOptions,
-  mounts: ServerRouteMounts,
-): void {
-  const slot = findSlot(container, payload.routeId);
-  if (slot === null) return;
-
-  requireClientReferenceResolverForRows(payload.routeId, payload.rows, options);
-  const response = createServerRouteResponse(options);
-  response.processStringChunk(payload.rows);
-
-  mounts.mount(slot, payload.routeId, response);
+interface DataStream {
+  p(entries: readonly FigDataHydrationEntry[]): void;
+  q: FigDataHydrationEntry[];
+  s(listener: (entries: readonly FigDataHydrationEntry[]) => void): () => void;
 }
 
 function createServerRouteResponse(
   options: StartClientOptions,
+  clientReferenceHydrationGate?: ClientReferenceHydrationGate,
 ): ServerRouteResponse {
+  if (clientReferenceHydrationGate !== undefined) {
+    return createRscResponse({
+      resolveClientReference: (metadata) =>
+        createHydratableClientReference(
+          options,
+          metadata,
+          clientReferenceHydrationGate,
+        ),
+    });
+  }
+
   return createRscResponse({
     loadClientReference: options.loadClientReference,
     resolveClientReference: options.resolveClientReference,
   });
 }
 
-interface ServerRouteMounts {
-  has(routeId: string): boolean;
-  mount(
-    slot: Element,
-    routeId: string,
-    response: ServerRouteResponse,
-    options?: ServerRouteMountOptions,
-  ): ServerRouteMount;
+function createHydratableClientReference(
+  options: StartClientOptions,
+  metadata: RscClientReferenceMetadata,
+  hydrationGate: ClientReferenceHydrationGate,
+): ElementType {
+  if (metadata.ssr === true) {
+    return createSsrHydratableClientReference(options, metadata);
+  }
+
+  const resolved =
+    resolvePreloadedClientReference(metadata) ??
+    options.resolveClientReference?.(metadata);
+  const loaded =
+    resolved === undefined
+      ? options.loadClientReference?.(metadata)
+      : undefined;
+
+  return function StartHydratableClientReference(
+    props: Props & { children?: FigNode },
+  ): FigNode {
+    const hydrated = useExternalStore(
+      (listener) => hydrationGate.subscribe(listener),
+      () => hydrationGate.getSnapshot(),
+      () => hydrationGate.getServerSnapshot(),
+    );
+    if (!hydrated) return clientReferencePlaceholder(metadata);
+
+    if (resolved !== undefined) return createElement(resolved, props);
+    if (loaded !== undefined) {
+      const type = resolveClientReferenceExport(
+        readPromise(loaded),
+        metadata.id,
+      );
+      return createElement(type, props);
+    }
+
+    throw new Error(
+      `Cannot render client reference "${metadata.id}" without a client-reference resolver.`,
+    );
+  };
 }
 
-interface ServerRouteMount {
-  complete(): void;
+function createSsrHydratableClientReference(
+  options: StartClientOptions,
+  metadata: RscClientReferenceMetadata,
+): ElementType {
+  const resolved =
+    resolvePreloadedClientReference(metadata) ??
+    options.resolveClientReference?.(metadata);
+
+  return function StartSsrHydratableClientReference(
+    props: Props & { children?: FigNode },
+  ): FigNode {
+    if (resolved !== undefined) return createElement(resolved, props);
+    throw new Error(
+      `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`,
+    );
+  };
 }
 
-interface ServerRouteMountOptions {
+function clientReferencePlaceholder(metadata: { id: string }): FigNode {
+  return createElement("template", {
+    "data-fig-client-reference": metadata.id,
+  });
+}
+
+function resolvePreloadedClientReference(
+  metadata: RscClientReferenceMetadata,
+): ElementType | undefined {
+  const registry = (globalThis as Record<string, unknown>)[
+    CLIENT_REFERENCE_MODULES_GLOBAL
+  ];
+  if (typeof registry !== "object" || registry === null) return undefined;
+
+  const moduleValue = (registry as Record<string, unknown>)[metadata.id];
+  if (moduleValue === undefined) return undefined;
+  return resolveClientReferenceExport(moduleValue, metadata.id);
+}
+
+function createClientReferenceHydrationGate(): ClientReferenceHydrationGate {
+  let hydrated = false;
+  const listeners = new Set<() => void>();
+
+  return {
+    getServerSnapshot: () => false,
+    getSnapshot: () => hydrated,
+    reveal() {
+      if (hydrated) return;
+      hydrated = true;
+      for (const listener of listeners) listener();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+function resolveClientReferenceExport(
+  moduleValue: unknown,
+  id: string,
+): ElementType {
+  if (typeof moduleValue === "function") return moduleValue as ElementType;
+
+  if (typeof moduleValue === "object" && moduleValue !== null) {
+    const exportName = id.includes("#")
+      ? id.slice(id.lastIndexOf("#") + 1)
+      : "";
+    const candidate =
+      exportName === ""
+        ? undefined
+        : (moduleValue as Record<string, unknown>)[exportName];
+    if (typeof candidate === "function") return candidate as ElementType;
+  }
+
+  throw new Error(`Client reference "${id}" did not resolve to a component.`);
+}
+
+interface ServerRouteContent extends ServerRouteContentStore {
+  bindRootData(data: FigDataStoreHandle): void;
+  receiveBuffered(payload: SerializedRscPayload, url: string): void;
+  receiveSegment(
+    segment: SerializedRscSegment,
+    stream: RscStream,
+    url: string,
+  ): void;
+  renderActiveRoute(): void;
+}
+
+interface ServerRouteEntry {
+  activeRefresh: AbortController | null;
+  assetGate: Promise<void> | null;
+  clientReferenceHydrationGate: ClientReferenceHydrationGate | null;
+  currentUrl: string;
+  dispose: () => void;
+  hydrateWithPendingAssets: boolean;
+  insertedAssetKeys: Set<string>;
+  listeners: Set<() => void>;
+  node: FigNode;
+  onRecoverableError?: (error: unknown) => void;
+  payloadComplete: boolean;
+  response: ServerRouteResponse;
+  revealed: boolean;
+  routeId: string;
+  unsubscribeResponse: (() => void) | null;
+  version: number;
+}
+
+interface ServerRouteEntryOptions {
+  clientReferenceHydrationGate?: ClientReferenceHydrationGate;
   dispose?: () => void;
+  hydrateWithPendingAssets?: boolean;
   payloadComplete?: boolean;
+  url?: string;
 }
 
-const noopServerRouteMount: ServerRouteMount = { complete: () => undefined };
+interface ServerRouteControl {
+  complete(): void;
+  refresh(url: string): void;
+}
 
-function createServerRouteMounts(
+interface ClientReferenceHydrationGate {
+  getServerSnapshot(): boolean;
+  getSnapshot(): boolean;
+  reveal(): void;
+  subscribe(listener: () => void): () => void;
+}
+
+function createServerRouteContent(
   options: StartClientOptions,
   router: FigRouter,
-): ServerRouteMounts {
-  const mountedRoutes = new Set<string>();
+): ServerRouteContent {
+  const entries = new Map<string, ServerRouteEntry>();
+  const pendingListeners = new Map<string, Set<() => void>>();
+  let rootData: FigDataStoreHandle | null = null;
+
+  function notify(entry: ServerRouteEntry): void {
+    entry.version += 1;
+    for (const listener of entry.listeners) listener();
+  }
+
+  function bindEntry(entry: ServerRouteEntry): void {
+    if (rootData === null || entry.unsubscribeResponse !== null) return;
+
+    entry.unsubscribeResponse = entry.response.bindRoot({
+      data: rootData,
+      render: (node) => {
+        entry.node = node;
+        ensureEntryAssets(entry);
+        notify(entry);
+      },
+    });
+  }
+
+  function createEntry(
+    routeId: string,
+    response: ServerRouteResponse,
+    entryOptions: ServerRouteEntryOptions = {},
+  ): ServerRouteEntry {
+    const dispose = entryOptions.dispose ?? (() => undefined);
+    const existing = entries.get(routeId);
+    if (existing !== undefined) {
+      dispose();
+      return existing;
+    }
+
+    const listeners = pendingListeners.get(routeId) ?? new Set<() => void>();
+    pendingListeners.delete(routeId);
+
+    const entry: ServerRouteEntry = {
+      activeRefresh: null,
+      assetGate: null,
+      currentUrl: entryOptions.url ?? "",
+      dispose,
+      hydrateWithPendingAssets: entryOptions.hydrateWithPendingAssets ?? false,
+      insertedAssetKeys: new Set(),
+      clientReferenceHydrationGate:
+        entryOptions.clientReferenceHydrationGate ?? null,
+      listeners,
+      node: response.getRoot(),
+      onRecoverableError: options.onRecoverableError,
+      payloadComplete: entryOptions.payloadComplete ?? true,
+      response,
+      revealed: false,
+      routeId,
+      unsubscribeResponse: null,
+      version: 0,
+    };
+    entries.set(routeId, entry);
+    bindEntry(entry);
+
+    watchServerRouteLifetime(router, routeId, () => {
+      entries.delete(routeId);
+      entry.activeRefresh?.abort();
+      entry.dispose();
+      entry.unsubscribeResponse?.();
+      notify(entry);
+    });
+
+    return entry;
+  }
+
+  function control(entry: ServerRouteEntry): ServerRouteControl {
+    return {
+      complete() {
+        entry.payloadComplete = true;
+        notify(entry);
+      },
+      refresh(url) {
+        if (url === entry.currentUrl) return;
+        entry.currentUrl = url;
+        entry.activeRefresh?.abort();
+        const controller = new AbortController();
+        entry.activeRefresh = controller;
+        loadServerRouteRsc(
+          entry.response,
+          entry.routeId,
+          url,
+          options,
+          controller.signal,
+          {
+            complete() {
+              if (entry.activeRefresh === controller)
+                entry.activeRefresh = null;
+            },
+            refresh: () => undefined,
+          },
+          entry.routeId,
+        );
+      },
+    };
+  }
+
+  function entryForRoute(routeId: string): ServerRouteEntry | undefined {
+    return entries.get(routeId);
+  }
+
+  function receiveRows(
+    entry: ServerRouteEntry,
+    rows: string,
+    requireResolver: boolean,
+  ): void {
+    if (requireResolver) {
+      requireClientReferenceResolverForRows(entry.routeId, rows, options);
+    }
+    entry.response.processStringChunk(rows);
+    ensureEntryAssets(entry);
+    notify(entry);
+  }
 
   return {
-    has: (routeId) => mountedRoutes.has(routeId),
-    mount(slot, routeId, response, mountOptions = {}) {
-      const dispose = mountOptions.dispose ?? (() => undefined);
-      if (mountedRoutes.has(routeId)) {
-        dispose();
-        return noopServerRouteMount;
+    bindRootData(data) {
+      rootData = data;
+      for (const entry of entries.values()) bindEntry(entry);
+    },
+    commit(routeId) {
+      const entry = entries.get(routeId);
+      if (entry === undefined) return;
+      ensureEntryAssets(entry);
+      revealEntryClientReferences(entry);
+    },
+    getSnapshot(routeId) {
+      return entries.get(routeId)?.version ?? 0;
+    },
+    receiveBuffered(payload, url) {
+      const clientReferenceHydrationGate = createClientReferenceHydrationGate();
+      const entry = createEntry(
+        payload.routeId,
+        createServerRouteResponse(options, clientReferenceHydrationGate),
+        {
+          clientReferenceHydrationGate,
+          hydrateWithPendingAssets: true,
+          url,
+        },
+      );
+      receiveRows(entry, payload.rows, true);
+    },
+    receiveSegment(segment, stream, url) {
+      const clientReferenceHydrationGate = createClientReferenceHydrationGate();
+      const entry = createEntry(
+        segment.routeId,
+        createServerRouteResponse(options, clientReferenceHydrationGate),
+        {
+          clientReferenceHydrationGate,
+          hydrateWithPendingAssets: true,
+          url,
+        },
+      );
+      const unsubscribe = stream.s((frame) => {
+        if (frame.id !== segment.id) return;
+        receiveRows(entry, frame.chunk, true);
+      });
+      entry.dispose = combineDisposers(entry.dispose, unsubscribe);
+    },
+    render(routeId) {
+      const entry = entries.get(routeId);
+      if (entry === undefined) return null;
+      if (
+        (entry.assetGate !== null &&
+          !entry.revealed &&
+          !entry.hydrateWithPendingAssets) ||
+        !entry.payloadComplete
+      )
+        return null;
+      entry.revealed = true;
+      return serverRouteNode(entry.node);
+    },
+    renderActiveRoute() {
+      const state = router.getState();
+      if (state.status !== "idle") return;
+      const match = firstServerRouteMatch(state.matches);
+      if (match === undefined) return;
+      const url = rscRouteUrl(state.location);
+      const existing = entryForRoute(match.routeId);
+      if (existing !== undefined) {
+        control(existing).refresh(url);
+        return;
       }
 
-      const root = createServerRouteRoot(
-        slot,
-        routeId,
-        response,
-        options,
-        mountOptions.payloadComplete ?? true,
-      );
-      const unsubscribeResponse = response.subscribe(root.render);
-      mountedRoutes.add(routeId);
-      root.render();
-
-      watchServerRouteLifetime(router, routeId, () => {
-        mountedRoutes.delete(routeId);
-        dispose();
-        unsubscribeResponse();
-        root.unmount();
+      const response = createServerRouteResponse(options);
+      const controller = new AbortController();
+      const entry = createEntry(match.routeId, response, {
+        dispose: () => controller.abort(),
+        // Client navigation reveals server routes atomically after the RSC fetch;
+        // initial document streams keep their default progressive reveal behavior.
+        payloadComplete: false,
+        url,
       });
 
-      return { complete: root.complete };
-    },
-  };
-}
-
-function createServerRouteRoot(
-  slot: Element,
-  routeId: string,
-  response: ServerRouteResponse,
-  options: StartClientOptions,
-  initialPayloadComplete: boolean,
-): { complete: () => void; render: () => void; unmount: () => void } {
-  let assetGate: Promise<void> | null = null;
-  let revealed = false;
-  let mounted = true;
-  let payloadComplete = initialPayloadComplete;
-  // Mirrors fig-dom's resource key so repeated RSC rows avoid re-scanning head;
-  // insertAssetResources remains the authoritative DOM-level deduper.
-  const insertedAssetKeys = new Set<string>();
-  // The RSC tree renders in its own root nested in the slot. Client references
-  // suspend while their chunks load (Suspense); a render/decode error surfaces
-  // via the boundary instead of escaping as a detached uncaught error.
-  const root = createRoot(slot, {
-    onRecoverableError: options.onRecoverableError,
-    onUncaughtError: (error) => {
-      console.error(
-        `[fig-start] server route "${routeId}" render error:`,
-        error,
+      loadServerRouteRsc(
+        response,
+        match.routeId,
+        url,
+        options,
+        controller.signal,
+        control(entry),
       );
     },
-  });
-  function settleGate(currentGate: Promise<void>, error?: unknown): void {
-    if (error !== undefined) options.onRecoverableError?.(error);
-    if (assetGate !== currentGate) return;
-    assetGate = null;
-    render();
-  }
+    subscribe(routeId, listener) {
+      const entry = entries.get(routeId);
+      if (entry !== undefined) {
+        entry.listeners.add(listener);
+        return () => {
+          entry.listeners.delete(listener);
+        };
+      }
 
-  function armGate(nextGate: Promise<void>): void {
-    assetGate = combineAssetGates(assetGate, nextGate);
-    const currentGate = assetGate;
-    void currentGate.then(
-      () => settleGate(currentGate),
-      (error: unknown) => settleGate(currentGate, error),
-    );
-  }
-
-  function complete(): void {
-    payloadComplete = true;
-    render();
-  }
-
-  const render = (): void => {
-    if (!mounted) return;
-
-    const nextGate = insertNewServerRouteAssets(response, insertedAssetKeys);
-    if (nextGate !== null) armGate(nextGate);
-
-    if ((assetGate !== null && !revealed) || !payloadComplete) {
-      root.render(null);
-      return;
-    }
-
-    root.render(serverRouteNode(response));
-    // Rendering can synchronously decode client-reference rows and surface their
-    // asset resources, so scan once more before the first reveal.
-    const postRenderGate = insertNewServerRouteAssets(
-      response,
-      insertedAssetKeys,
-    );
-    if (postRenderGate !== null) armGate(postRenderGate);
-    if (assetGate !== null && !revealed) {
-      root.render(null);
-      return;
-    }
-
-    revealed = true;
-  };
-  return {
-    complete,
-    render,
-    unmount: () => {
-      mounted = false;
-      root.unmount();
+      let listeners = pendingListeners.get(routeId);
+      if (listeners === undefined) {
+        listeners = new Set();
+        pendingListeners.set(routeId, listeners);
+      }
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) pendingListeners.delete(routeId);
+      };
     },
   };
 }
 
-function serverRouteNode(response: ServerRouteResponse): FigNode {
+function serverRouteNode(node: FigNode): FigNode {
   return createElement(
     ErrorBoundary,
     { fallback: createElement("div", { "data-fig-rsc-error": "" }) },
-    createElement(Suspense, { fallback: null }, response.getRoot()),
+    createElement(Suspense, { fallback: null }, node),
   );
+}
+
+function combineDisposers(first: () => void, second: () => void): () => void {
+  return () => {
+    first();
+    second();
+  };
+}
+
+function ensureEntryAssets(entry: ServerRouteEntry): void {
+  const nextGate = insertNewServerRouteAssets(
+    entry.response,
+    entry.insertedAssetKeys,
+  );
+  if (nextGate !== null) armEntryGate(entry, nextGate);
+}
+
+function armEntryGate(entry: ServerRouteEntry, nextGate: Promise<void>): void {
+  entry.assetGate = combineAssetGates(entry.assetGate, nextGate);
+  const currentGate = entry.assetGate;
+  void currentGate.then(
+    () => settleEntryGate(entry, currentGate),
+    (error: unknown) => settleEntryGate(entry, currentGate, error),
+  );
+}
+
+function settleEntryGate(
+  entry: ServerRouteEntry,
+  currentGate: Promise<void>,
+  error?: unknown,
+): void {
+  if (error !== undefined) entry.onRecoverableError?.(error);
+  if (entry.assetGate !== currentGate) return;
+  entry.assetGate = null;
+  revealEntryClientReferences(entry);
+  entry.version += 1;
+  for (const listener of entry.listeners) listener();
+}
+
+function revealEntryClientReferences(entry: ServerRouteEntry): void {
+  if (entry.assetGate !== null) return;
+  entry.clientReferenceHydrationGate?.reveal();
 }
 
 function insertNewServerRouteAssets(
@@ -346,10 +647,8 @@ function combineAssetGates(
 }
 
 function installServerRouteFetcher(
-  container: Element,
-  options: StartClientOptions,
   router: FigRouter,
-  mounts: ServerRouteMounts,
+  content: ServerRouteContent,
 ): void {
   let scheduled = false;
 
@@ -359,55 +658,15 @@ function installServerRouteFetcher(
     scheduled = true;
     queueMicrotask(() => {
       scheduled = false;
-      mountActiveServerRouteSegments(container, options, router, mounts);
+      content.renderActiveRoute();
     });
   });
 }
 
-function mountActiveServerRouteSegments(
-  container: Element,
-  options: StartClientOptions,
-  router: FigRouter,
-  mounts: ServerRouteMounts,
-): void {
-  const state = router.getState();
-  if (state.status !== "idle") return;
-  let retryMissingSlot = false;
-
-  for (const match of state.matches) {
-    if (!isServerRoute(match.node.route)) continue;
-    if (mounts.has(match.routeId)) continue;
-
-    const slot = findSlot(container, match.routeId);
-    if (slot === null) {
-      retryMissingSlot = true;
-      continue;
-    }
-
-    const response = createServerRouteResponse(options);
-    const controller = new AbortController();
-    const mount = mounts.mount(slot, match.routeId, response, {
-      dispose: () => controller.abort(),
-      // Client navigation reveals server routes atomically after the RSC fetch;
-      // initial document streams keep their default progressive reveal behavior.
-      payloadComplete: false,
-    });
-
-    loadServerRouteRsc(
-      response,
-      match.routeId,
-      rscRouteUrl(state.location),
-      options,
-      controller.signal,
-      mount,
-    );
-  }
-
-  if (retryMissingSlot) {
-    setTimeout(() => {
-      mountActiveServerRouteSegments(container, options, router, mounts);
-    }, 0);
-  }
+function firstServerRouteMatch(
+  matches: readonly RouteMatch[],
+): RouteMatch | undefined {
+  return matches.find((match) => isServerRoute(match.node.route));
 }
 
 function loadServerRouteRsc(
@@ -416,14 +675,22 @@ function loadServerRouteRsc(
   url: string,
   options: StartClientOptions,
   signal: AbortSignal,
-  mount: ServerRouteMount,
+  control: ServerRouteControl,
+  refreshBoundary?: string,
 ): void {
-  void fetchServerRouteRsc(response, routeId, url, options, signal).then(
-    () => mount.complete(),
+  void fetchServerRouteRsc(
+    response,
+    routeId,
+    url,
+    options,
+    signal,
+    refreshBoundary,
+  ).then(
+    () => control.complete(),
     (error: unknown) => {
       if (isRscRequestCancelled(error)) return;
       reportRscFetchError(routeId, error, options);
-      mount.complete();
+      control.complete();
     },
   );
 }
@@ -434,6 +701,7 @@ function fetchServerRouteRsc(
   url: string,
   options: StartClientOptions,
   signal: AbortSignal,
+  refreshBoundary?: string,
 ): Promise<Response> {
   return fetchRsc(response, url, {
     fetch: async (input, init) => {
@@ -447,6 +715,7 @@ function fetchServerRouteRsc(
         statusText: result.statusText,
       });
     },
+    refreshBoundary,
     signal,
   });
 }
@@ -580,12 +849,62 @@ export function watchServerRouteLifetime(
   });
 }
 
-function findSlot(container: Element, routeId: string): Element | null {
-  const escaped =
-    typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? CSS.escape(routeId)
-      : routeId;
-  return container.querySelector(`[${RSC_SLOT_ATTR}="${escaped}"]`);
+function readDataStream(): DataStream | null {
+  const value = (globalThis as Record<string, unknown>)[DATA_STREAM_GLOBAL];
+  return isDataStream(value) ? value : null;
+}
+
+function getDataStream(): DataStream {
+  const current = readDataStream();
+  if (current !== null) {
+    appendMissingDataEntries(current, readDataFramesFromDocument());
+    return current;
+  }
+
+  const stream = createDataStream(readDataFramesFromDocument());
+  (globalThis as Record<string, unknown>)[DATA_STREAM_GLOBAL] = stream;
+  return stream;
+}
+
+function createDataStream(
+  initialEntries: readonly FigDataHydrationEntry[],
+): DataStream {
+  let listeners: Array<(entries: readonly FigDataHydrationEntry[]) => void> =
+    [];
+  const stream: DataStream = {
+    q: [...initialEntries],
+    p(entries) {
+      const next = [...entries];
+      stream.q.push(...next);
+      for (const listener of listeners) listener(next);
+    },
+    s(listener) {
+      listeners.push(listener);
+      if (stream.q.length > 0) listener([...stream.q]);
+      return () => {
+        listeners = listeners.filter((item) => item !== listener);
+      };
+    },
+  };
+  return stream;
+}
+
+function isDataStream(value: unknown): value is DataStream {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { q?: unknown }).q) &&
+    typeof (value as { p?: unknown }).p === "function" &&
+    typeof (value as { s?: unknown }).s === "function"
+  );
+}
+
+function readDataFramesFromDocument(): FigDataHydrationEntry[] {
+  return Array.from(
+    document.querySelectorAll(`script[${DATA_FRAME_ATTR}]`),
+    (element) =>
+      JSON.parse(element.textContent ?? "[]") as FigDataHydrationEntry[],
+  ).flat();
 }
 
 function readRscStream(): RscStream | null {
@@ -595,11 +914,41 @@ function readRscStream(): RscStream | null {
 
 function getRscStream(): RscStream {
   const current = readRscStream();
-  if (current !== null) return current;
+  if (current !== null) {
+    appendMissingRscFrames(current, readRscFramesFromDocument());
+    return current;
+  }
 
   const stream = createRscStream(readRscFramesFromDocument());
   (globalThis as Record<string, unknown>)[RSC_STREAM_GLOBAL] = stream;
   return stream;
+}
+
+function appendMissingDataEntries(
+  stream: DataStream,
+  entries: readonly FigDataHydrationEntry[],
+): void {
+  const seen = new Set(stream.q.map((entry) => JSON.stringify(entry)));
+  const next = entries.filter((entry) => {
+    const key = JSON.stringify(entry);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (next.length > 0) stream.p(next);
+}
+
+function appendMissingRscFrames(
+  stream: RscStream,
+  frames: readonly SerializedRscFrame[],
+): void {
+  const seen = new Set(stream.q.map((frame) => JSON.stringify(frame)));
+  for (const frame of frames) {
+    const key = JSON.stringify(frame);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    stream.p(frame);
+  }
 }
 
 function createRscStream(

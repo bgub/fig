@@ -73,13 +73,15 @@ describe("@bgub/fig-start route matching", () => {
     expect(matchIds("/nope/nope")).toBeNull();
   });
 
-  it("rejects a server route that has child routes", () => {
-    expect(() =>
-      buildRouteTree([
-        createRootRoute(),
-        markServerRoute(createFileRoute("/dash")()),
-        createFileRoute("/dash/settings")(),
-      ]),
-    ).toThrow(/cannot have child routes/);
+  it("allows server routes to have child routes", () => {
+    const tree = buildRouteTree([
+      createRootRoute(),
+      markServerRoute(createFileRoute("/dash")()),
+      createFileRoute("/dash/settings")(),
+    ]);
+
+    expect(
+      matchRoutes(tree, "/dash/settings")?.map((match) => match.node.id),
+    ).toEqual(["__root__", "/dash", "/dash/settings"]);
   });
 });

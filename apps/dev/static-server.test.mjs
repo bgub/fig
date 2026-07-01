@@ -14,7 +14,10 @@ describe("dev static server helpers", () => {
     await writeFile(join(root, "docs", "index.html"), "docs");
 
     try {
-      assert.equal(await resolveStaticFile(root, "/"), join(root, "index.html"));
+      assert.equal(
+        await resolveStaticFile(root, "/"),
+        join(root, "index.html"),
+      );
       assert.equal(
         await resolveStaticFile(root, "/main.js"),
         join(root, "main.js"),
@@ -34,7 +37,10 @@ describe("dev static server helpers", () => {
     assert.equal(contentTypeFor("index.html"), "text/html; charset=utf-8");
     assert.equal(contentTypeFor("style.css"), "text/css; charset=utf-8");
     assert.equal(contentTypeFor("main.js"), "text/javascript; charset=utf-8");
-    assert.equal(contentTypeFor("data.json"), "application/json; charset=utf-8");
+    assert.equal(
+      contentTypeFor("data.json"),
+      "application/json; charset=utf-8",
+    );
     assert.equal(
       contentTypeFor("main.js.map"),
       "application/json; charset=utf-8",

@@ -42,6 +42,7 @@ export interface ClientReferenceOptions {
   id: string;
   load: () => Promise<unknown>;
   resources?: ClientReferenceResources;
+  ssr?: ElementType;
 }
 
 export interface FigClientReference<P = Props> {
@@ -50,6 +51,7 @@ export interface FigClientReference<P = Props> {
   readonly id: string;
   readonly load: () => Promise<unknown>;
   readonly resources?: ClientReferenceResources;
+  readonly ssr?: ElementType;
 }
 
 export type LazyLoader<P = Props> = () => PromiseLike<ElementType<P>>;
@@ -182,6 +184,7 @@ export function clientReference<P extends Props>(
     id: options.id,
     load: options.load,
     resources: options.resources,
+    ssr: options.ssr,
   });
 }
 

@@ -1,6 +1,7 @@
 import {
   type ElementType,
   type FigChild,
+  type FigClientReference,
   type FigContext,
   type FigElement,
   type FigNode,
@@ -99,6 +100,7 @@ interface Request {
   stream: ReadableStream<Uint8Array>;
   textEncoder: TextEncoder;
   clientRenderedBoundaries: SuspenseBoundary[];
+  clientReferenceFallback?: ServerRenderOptions["clientReferenceFallback"];
   partialBoundaries: SuspenseBoundary[];
   componentResources?: ServerRenderOptions["resources"];
   document: DocumentState | null;
@@ -244,6 +246,7 @@ export function createServerRenderRequest(
     stream: null as never,
     textEncoder,
     clientRenderedBoundaries: [],
+    clientReferenceFallback: options.clientReferenceFallback,
     partialBoundaries: [],
     componentResources: options.resources,
     document: mode.document === true ? { hasHead: false } : null,
@@ -573,6 +576,11 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
     return;
   }
 
+  if (isClientReference(type)) {
+    renderClientReference(type, element.props, frame);
+    return;
+  }
+
   if (isActivity(type)) {
     if (element.props.mode === "hidden") {
       // Hidden Activity content streams inside an inert template so neither
@@ -636,6 +644,21 @@ function renderFunctionComponent(
     setCurrentDataStore(previousDataStore);
     setCurrentDispatcher(previousDispatcher);
   }
+}
+
+function renderClientReference(
+  type: FigClientReference,
+  props: Props,
+  frame: RenderFrame,
+): void {
+  const fallback = frame.request.clientReferenceFallback;
+  if (fallback === undefined) {
+    renderFunctionComponent(type as Component, props, frame);
+    return;
+  }
+
+  renderComponentResources(type, frame);
+  renderChildren(fallback(type, props), frame);
 }
 
 function renderComponentResources(type: ElementType, frame: RenderFrame): void {

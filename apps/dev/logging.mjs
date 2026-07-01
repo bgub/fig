@@ -46,11 +46,16 @@ function pipeLines(label, stream, output, portlessUrl) {
   });
 }
 
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ERASE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;?]*[HJ]`, "g");
+const ANSI_CURSOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;?]*[ABCDG]`, "g");
+const ANSI_RESET_PATTERN = new RegExp(`${ANSI_ESCAPE}c`, "g");
+
 function sanitizeOutput(value) {
   return value
-    .replace(/\x1B\[[0-9;?]*[HJ]/g, "")
-    .replace(/\x1B\[[0-9;?]*[ABCDG]/g, "")
-    .replace(/\x1Bc/g, "")
+    .replace(ANSI_ERASE_PATTERN, "")
+    .replace(ANSI_CURSOR_PATTERN, "")
+    .replace(ANSI_RESET_PATTERN, "")
     .replace(/\r/g, "\n");
 }
 

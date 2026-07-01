@@ -26,11 +26,13 @@ export function Dashboard() {
         specifier: "/src/routes/Island.tsx",
       },
     ]);
-    expect(out.code).toContain("clientReference as __figClientRef");
+    expect(out.code).toContain("serverClientReference as __figClientRef");
     expect(out.code).toContain("__figClientRef(");
+    expect(out.code).toContain("ssr:");
     expect(out.code).toContain('"/src/routes/Island.tsx#Island"');
-    // the original import binding is gone (the island never enters the graph here)
-    expect(out.code).not.toContain('from "./Island.tsx"');
+    // The original module stays in the server graph under a private alias so
+    // the document render can SSR the island while RSC still sees a client ref.
+    expect(out.code).toContain('from "./Island.tsx"');
   });
 
   it("uses the exported name for an aliased import", async () => {

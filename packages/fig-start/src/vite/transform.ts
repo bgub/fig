@@ -187,7 +187,7 @@ function serverComponentBabelPlugin(state: {
             if (needsClientReferenceImport) {
               imports.push(
                 api.template.statement.ast(
-                  `import { clientReference as __figClientRef } from "@bgub/fig";`,
+                  `import { serverClientReference as __figClientRef } from "@bgub/fig-start/internal";`,
                 ),
               );
             }
@@ -213,12 +213,18 @@ function serverComponentBabelPlugin(state: {
           const declarations = [];
           for (const spec of path.node.specifiers) {
             let exportName: string;
+            const publicName = spec.local.name;
+            const implementation = path.scope.generateUidIdentifier(
+              `figClientImpl_${publicName}`,
+            );
             if (t.isImportDefaultSpecifier(spec)) {
               exportName = "default";
+              spec.local = implementation;
             } else if (t.isImportSpecifier(spec)) {
               exportName = t.isIdentifier(spec.imported)
                 ? spec.imported.name
                 : spec.imported.value;
+              spec.local = implementation;
             } else {
               // Namespace imports (import * as) of a client module can't become a
               // client reference; fail loudly instead of leaking the import across
@@ -233,16 +239,18 @@ function serverComponentBabelPlugin(state: {
             state.clientRefs.push({ id, specifier });
             declarations.push(
               api.template.statement.ast(
-                `const ${spec.local.name} = __figClientRef({ id: ${JSON.stringify(
+                `const ${publicName} = __figClientRef({ id: ${JSON.stringify(
                   id,
-                )}, load: () => Promise.resolve({}) });`,
+                )}, load: () => Promise.resolve({ ${JSON.stringify(
+                  exportName,
+                )}: ${implementation.name} }), ssr: ${implementation.name} });`,
               ),
             );
           }
 
           if (declarations.length === 0) return;
           needsClientReferenceImport = true;
-          path.replaceWithMultiple(declarations as never[]);
+          path.insertAfter(declarations as never[]);
         },
       },
     };

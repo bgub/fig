@@ -3,15 +3,23 @@
 
 export const ROUTER_STATE_SCRIPT_ID = "__fig_start_state__";
 export const DATA_SCRIPT_ID = "__fig_start_data__";
+export const DATA_FRAME_ATTR = "data-fig-data-frame";
+export const DATA_STREAM_GLOBAL = "__figStartData";
 export const RSC_PAYLOAD_SCRIPT_ID = "__fig_start_rsc__";
 export const RSC_SEGMENTS_SCRIPT_ID = "__fig_start_rsc_segments__";
 export const RSC_FRAME_ATTR = "data-fig-rsc-frame";
 export const RSC_STREAM_GLOBAL = "__figStartRSC";
+export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
+export const CLIENT_REFERENCE_PRELOAD_GLOBAL =
+  "__figStartPreloadingClientReferences";
+export const CLIENT_HYDRATE_GLOBAL = "__figStartHydrate";
+export const RSC_BOUNDARY_HEADER = "x-fig-rsc-boundary";
 export const RSC_ROUTE_ID_HEADER = "x-fig-rsc-route-id";
 export const RSC_SEGMENT_ID_HEADER = "x-fig-rsc-segment-id";
 export const ROOT_ELEMENT_ID = "fig-root";
-// Marks the empty DOM slot a `.server.tsx` (RSC) route leaves in the SSR'd
-// layout; the client mounts the streamed RSC payload into it.
+// Marks the DOM slot owned by the active `.server.tsx` route segment; the
+// server may stream renderable HTML there, and the client mounts/refreshes the
+// corresponding RSC payload in that slot.
 export const RSC_SLOT_ATTR = "data-fig-rsc-slot";
 
 export interface SerializedRouterState {

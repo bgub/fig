@@ -3,13 +3,20 @@ import {
   clientReference,
   createElement,
   type FigNode,
+  modulepreload,
   readPromise,
   stylesheet,
+  Suspense,
 } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig-data";
 import { describe, expect, it } from "vite-plus/test";
 import { hydrateStart } from "./client.ts";
 import { Outlet } from "./components.tsx";
-import { markServerRoute } from "./internal.ts";
+import {
+  CLIENT_REFERENCE_MODULES_GLOBAL,
+  RSC_BOUNDARY_HEADER,
+} from "./bootstrap.ts";
+import { markServerRoute, serverClientReference } from "./internal.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRequestHandler } from "./server.ts";
 import type { AnyRoute } from "./route.ts";
@@ -27,6 +34,13 @@ const StyledIsland = clientReference({
   load: () => Promise.resolve({}),
   resources: [stylesheet(styledIslandHref)],
 });
+const ssrIslandId = "test/SsrIsland.tsx#SsrIsland";
+const SsrIsland = serverClientReference({
+  id: ssrIslandId,
+  load: () => Promise.resolve({ SsrIsland: RealSsrIsland }),
+  resources: [modulepreload("/assets/ssr-island.js")],
+  ssr: RealSsrIsland,
+});
 
 function RealIsland(): FigNode {
   return createElement("span", { class: "island" }, "island!");
@@ -34,6 +48,10 @@ function RealIsland(): FigNode {
 
 function RealStyledIsland(): FigNode {
   return createElement("span", { class: "styled-island" }, "styled!");
+}
+
+function RealSsrIsland(): FigNode {
+  return createElement("button", { class: "ssr-island" }, "SSR island");
 }
 
 const routes = [
@@ -60,6 +78,17 @@ const routes = [
         createElement("section", null, createElement(StyledIsland, {})),
     }),
   ),
+  markServerRoute(
+    createFileRoute("/ssr")({
+      component: () =>
+        createElement(
+          "section",
+          null,
+          createElement("p", { class: "static" }, "static markup"),
+          createElement(SsrIsland, {}),
+        ),
+    }),
+  ),
 ];
 
 const loadClientReference = ({ id }: { id: string }): Promise<unknown> =>
@@ -67,10 +96,14 @@ const loadClientReference = ({ id }: { id: string }): Promise<unknown> =>
     ? Promise.resolve({ Island: RealIsland })
     : id === styledIslandId
       ? Promise.resolve({ StyledIsland: RealStyledIsland })
-      : Promise.reject(new Error(`unknown client reference ${id}`));
+      : id === ssrIslandId
+        ? Promise.resolve({ SsrIsland: RealSsrIsland })
+        : Promise.reject(new Error(`unknown client reference ${id}`));
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -122,31 +155,88 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
   it("mounts a server route's RSC payload, resolves its island, and tears down on nav", async () => {
     await installServerRenderedDocument("/dash");
 
-    // The SSR'd document has an empty slot for the server route.
+    // The SSR'd document includes server-renderable RSC markup immediately.
     const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
     expect(slot).not.toBeNull();
-    expect(slot?.textContent).toBe("");
+    expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
+    expect(slot?.querySelector("[data-fig-client-reference]")).not.toBeNull();
 
-    const router = hydrateStart({ routes, loadClientReference });
+    const errors: unknown[] = [];
+    const router = hydrateStart({
+      loadClientReference,
+      onRecoverableError: (error) => errors.push(error),
+      routes,
+    });
     await flush();
+    const mountedSlot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+    expect(mountedSlot).toBe(slot);
+    expect(errors).toEqual([]);
 
     // The island resolved through the resolver and client-rendered into the slot.
-    expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+    expect(mountedSlot?.querySelector(".island")?.textContent).toBe("island!");
 
     // Static markup rendered beside the (async, suspending) island survives the
     // Suspense reveal — the sibling-drop bug this harness originally caught.
-    expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
+    expect(mountedSlot?.querySelector(".static")?.textContent).toBe(
+      "static markup",
+    );
 
-    // Navigating away tears the nested root down — the island is gone, no leak/stale.
+    // Navigating away tears the route content down — the island is gone, no leak/stale.
     await router.navigate("/");
     await flush();
     expect(document.body.textContent).toContain("Home");
     expect(document.querySelector(".island")).toBeNull();
   });
 
+  it("hydrates SSR-rendered client references without replacing them with templates", async () => {
+    await installServerRenderedDocument("/ssr");
+    (globalThis as Record<string, unknown>)[CLIENT_REFERENCE_MODULES_GLOBAL] = {
+      [ssrIslandId]: { SsrIsland: RealSsrIsland },
+    };
+
+    try {
+      const slot = document.querySelector('[data-fig-rsc-slot="/ssr"]');
+      const button = slot?.querySelector(".ssr-island");
+      expect(button?.textContent).toBe("SSR island");
+      expect(slot?.querySelector("[data-fig-client-reference]")).toBeNull();
+
+      const errors: unknown[] = [];
+      hydrateStart({
+        loadClientReference,
+        onRecoverableError: (error) => errors.push(error),
+        routes,
+      });
+      await flush();
+
+      const hydratedSlot = document.querySelector('[data-fig-rsc-slot="/ssr"]');
+      expect(hydratedSlot?.querySelector(".ssr-island")).toBe(button);
+      expect(hydratedSlot?.querySelector(".ssr-island")?.textContent).toBe(
+        "SSR island",
+      );
+      expect(
+        hydratedSlot?.querySelector("[data-fig-client-reference]"),
+      ).toBeNull();
+      expect(errors).toEqual([]);
+    } finally {
+      delete (globalThis as Record<string, unknown>)[
+        CLIENT_REFERENCE_MODULES_GLOBAL
+      ];
+    }
+  });
+
   it("fetches a server route's RSC payload when navigating on the client", async () => {
     await installServerRenderedDocument("/");
     const restoreFetch = installHandlerFetch();
+    const requests: Request[] = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), "http://localhost").href, init);
+      requests.push(request);
+      return previousFetch(input, init);
+    };
 
     try {
       const router = hydrateStart({ routes, loadClientReference });
@@ -159,9 +249,165 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
       expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
       expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+      expect(requests.at(-1)?.headers.get(RSC_BOUNDARY_HEADER)).toBeNull();
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreFetch();
+    }
+  });
+
+  it("refreshes an existing server route segment when navigating between its child routes", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => createElement("h1", null, "Home"),
+      }),
+      markServerRoute(
+        createFileRoute("/rsc-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement("h2", null, "Server layout"),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/rsc-layout/a")({
+        component: () => createElement("p", { class: "child" }, "Child A"),
+      }),
+      createFileRoute("/rsc-layout/b")({
+        component: () => createElement("p", { class: "child" }, "Child B"),
+      }),
+    ];
+    await installServerRenderedDocument("/", nestedRoutes);
+    const restoreFetch = installHandlerFetch(nestedRoutes);
+
+    try {
+      const router = hydrateStart({ routes: nestedRoutes });
+      await router.navigate("/rsc-layout/a");
+      await flush();
+      expect(document.querySelector(".child")?.textContent).toBe("Child A");
+
+      await router.navigate("/rsc-layout/b");
+      await flush();
+
+      expect(document.querySelector(".child")?.textContent).toBe("Child B");
+      expect(document.body.textContent).not.toContain("Child AChild B");
     } finally {
       restoreFetch();
     }
+  });
+
+  it("mounts an initial server route document payload without relying on client-reference suspension", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      markServerRoute(
+        createFileRoute("/rsc-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement("h2", null, "Server layout"),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/rsc-layout/a")({
+        component: () => createElement("p", { class: "child" }, "Child A"),
+      }),
+    ];
+
+    await installServerRenderedDocument("/rsc-layout/a", nestedRoutes);
+    hydrateStart({ routes: nestedRoutes });
+    await flush();
+
+    expect(document.querySelector(".child")?.textContent).toBe("Child A");
+  });
+
+  it("hydrates initial server route content with hoisted client-reference stylesheets", async () => {
+    await installServerRenderedDocument("/styled");
+    const errors: unknown[] = [];
+
+    hydrateStart({
+      loadClientReference,
+      onRecoverableError: (error) => errors.push(error),
+      routes,
+    });
+    await flush();
+
+    const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
+    const link = document.head.querySelector('link[rel="stylesheet"]');
+    expect(errors).toEqual([]);
+    expect(slot).not.toBeNull();
+    expect(link).not.toBeNull();
+    expect(slot?.querySelector(".styled-island")?.textContent).toBe("styled!");
+  });
+
+  it("hydrates document data streamed after the bootstrap snapshot", async () => {
+    const pending = deferred<string>();
+    let loadCalls = 0;
+    const identity = dataResource.identity<[string], string>({
+      key: (id) => ["client-document-stream", id],
+    });
+    const resource = dataResource.server(identity, {
+      load: () => {
+        loadCalls += 1;
+        return pending.promise;
+      },
+    });
+    function SlowData(): FigNode {
+      return createElement(
+        "span",
+        { class: "data" },
+        readData(resource, "one"),
+      );
+    }
+    const dataRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/data")({
+        component: () =>
+          createElement(
+            Suspense,
+            { fallback: createElement("p", null, "Loading") },
+            createElement(SlowData),
+          ),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: dataRoutes,
+    });
+    const response = await handler(new Request("http://localhost/data"));
+    const text = response.text();
+    await flush();
+    expect(loadCalls).toBe(1);
+    pending.resolve("Streamed data");
+    const html = await text;
+
+    document.documentElement.innerHTML = html
+      .replace(/^<!doctype[^>]*>/i, "")
+      .replace(/^\s*<html[^>]*>/i, "")
+      .replace(/<\/html>\s*$/i, "")
+      .replace(
+        /<script(?:\s+nonce="[^"]*")?>import\("\/client\.js"\);<\/script>/gi,
+        "",
+      );
+
+    hydrateStart({ routes: dataRoutes });
+    await flush();
+
+    expect(document.querySelector(".data")?.textContent).toBe("Streamed data");
+    expect(loadCalls).toBe(1);
   });
 
   it("reports missing client-reference resolvers during server route navigation", async () => {

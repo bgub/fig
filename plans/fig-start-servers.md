@@ -48,7 +48,9 @@ typed errors, scoped resources, structured logging, and traceable workflows.
 The public surface should stay plain TypeScript:
 
 ```ts
-export function createRequestHandler(options: StartHandlerOptions): StartHandler;
+export function createRequestHandler(
+  options: StartHandlerOptions,
+): StartHandler;
 export function startServer(options: StartServerOptions): Server;
 ```
 

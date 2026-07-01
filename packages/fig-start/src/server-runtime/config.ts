@@ -26,7 +26,7 @@ export interface StartRuntimeConfig {
 
 export const normalizeStartRuntimeConfig = Effect.fn(
   "normalizeStartRuntimeConfig",
-)(function*(input: StartRuntimeConfigInput) {
+)(function* (input: StartRuntimeConfigInput) {
   const env = input.env ?? process.env;
   const mode = input.mode ?? modeFromEnv(env.NODE_ENV);
   const port = yield* normalizePort(input.port, env.PORT);

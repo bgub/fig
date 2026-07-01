@@ -23,12 +23,12 @@ const tasks = createTaskGroup();
 process.on("SIGINT", () => stopAndExit("SIGINT"));
 process.on("SIGTERM", () => stopAndExit("SIGTERM"));
 
-await tasks.run("setup", "vp", [
-  "run",
-  "--filter",
-  `${packageName}...`,
-  "build",
-], logger);
+await tasks.run(
+  "setup",
+  "vp",
+  ["run", "--filter", `${packageName}...`, "build"],
+  logger,
+);
 
 const running = [
   tasks.startProcess("build", "vp", ["pack", "--watch"], logger),

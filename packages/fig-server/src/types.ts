@@ -1,8 +1,10 @@
 import type {
   ElementType,
+  FigClientReference,
   FigNode,
   FigResource,
   FigResourceList,
+  Props,
 } from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import type { DataResourceKeyInput } from "@bgub/fig-data";
@@ -20,6 +22,10 @@ export interface ServerRenderOptions {
   ) => ServerErrorPayload | undefined;
   onResourceError?: (error: unknown, info: ServerResourceErrorInfo) => void;
   onShellError?: (error: unknown) => void;
+  clientReferenceFallback?: (
+    reference: FigClientReference,
+    props: Props,
+  ) => FigNode;
   resolveResourceKey?: (type: ElementType) => string | undefined;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;

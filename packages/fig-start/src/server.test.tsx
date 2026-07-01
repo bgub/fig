@@ -2,9 +2,12 @@ import {
   clientReference,
   createElement,
   type FigNode,
+  modulepreload,
   readPromise,
   stylesheet,
+  Suspense,
 } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig-data";
 import { createRscResponse } from "@bgub/fig-server/rsc";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +15,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  CLIENT_HYDRATE_GLOBAL,
+  CLIENT_REFERENCE_MODULES_GLOBAL,
+  CLIENT_REFERENCE_PRELOAD_GLOBAL,
+  DATA_FRAME_ATTR,
+  DATA_SCRIPT_ID,
   hasClientReferences,
+  RSC_BOUNDARY_HEADER,
   RSC_FRAME_ATTR,
   RSC_ROUTE_ID_HEADER,
   RSC_SEGMENTS_SCRIPT_ID,
@@ -21,7 +30,7 @@ import {
   ROUTER_STATE_SCRIPT_ID,
 } from "./bootstrap.ts";
 import { Outlet } from "./components.tsx";
-import { markServerRoute } from "./internal.ts";
+import { markServerRoute, serverClientReference } from "./internal.ts";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createClientAssetResolver } from "./server-assets.ts";
@@ -34,6 +43,16 @@ const Island = clientReference({
   id: islandId,
   load: () => Promise.resolve({}),
 });
+const ssrIslandId = "test/SsrIsland.tsx#SsrIsland";
+function SsrIslandImpl(): FigNode {
+  return createElement("button", { class: "ssr-island" }, "SSR island");
+}
+const SsrIsland = serverClientReference({
+  id: ssrIslandId,
+  load: () => Promise.resolve({ SsrIsland: SsrIslandImpl }),
+  resources: [modulepreload("/assets/ssr-island.js")],
+  ssr: SsrIslandImpl,
+});
 
 const dashboardRoute = markServerRoute(
   createFileRoute("/dashboard")({
@@ -43,6 +62,19 @@ const dashboardRoute = markServerRoute(
         null,
         "server markup ",
         createElement(Island, {}),
+      ),
+  }),
+);
+
+const ssrIslandRoute = markServerRoute(
+  createFileRoute("/ssr-island")({
+    component: () =>
+      createElement(
+        "section",
+        null,
+        "before ",
+        createElement(SsrIsland, {}),
+        " after",
       ),
   }),
 );
@@ -99,6 +131,7 @@ const routes = [
   postRoute,
   serverPostRoute,
   dashboardRoute,
+  ssrIslandRoute,
 ];
 
 function handlerFor(allow: boolean) {
@@ -157,20 +190,43 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).toContain("Nothing here");
   });
 
-  it("streams an RSC segment + empty slot for a .server.tsx route", async () => {
+  it("streams an RSC segment + SSR slot for a .server.tsx route", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/dashboard"),
     );
     const html = await response.text();
 
-    // SSR leaves an empty slot in the isomorphic layout (the server component
-    // is not rendered into the document — it has client refs that can't SSR).
-    expect(html).toContain(`${RSC_SLOT_ATTR}="/dashboard"></div>`);
+    expect(html).toContain(`${RSC_SLOT_ATTR}="/dashboard"`);
+    expect(html).toContain("server markup ");
+    expect(html).toContain("data-fig-client-reference");
     // The RSC payload is streamed as segment metadata plus row frame scripts.
     expect(html).toContain(RSC_SEGMENTS_SCRIPT_ID);
     expect(html).toContain(RSC_FRAME_ATTR);
     expect(html).toContain(islandId);
     expect(html).toContain('"routeId":"/dashboard"');
+  });
+
+  it("server-renders SSR-capable client references and preloads their modules", async () => {
+    const response = await handlerFor(true)(
+      new Request("http://localhost/ssr-island"),
+    );
+    const html = await response.text();
+
+    expect(html).toContain('<button class="ssr-island">SSR island</button>');
+    expect(html).not.toContain(`data-fig-client-reference="${ssrIslandId}"`);
+    expect(html).toContain(ssrIslandId);
+    expect(html).toContain('\\"ssr\\":true');
+    expect(html).toContain(
+      `globalThis["${CLIENT_REFERENCE_PRELOAD_GLOBAL}"] = true;`,
+    );
+    expect(html).toContain('const m0 = await import("/assets/ssr-island.js");');
+    expect(html).toContain(`globalThis["${CLIENT_REFERENCE_MODULES_GLOBAL}"]`);
+    expect(html).toContain(`registry["${ssrIslandId}"] = m0;`);
+    expect(html).toContain('await import("/client.js");');
+    expect(html).toContain(`globalThis["${CLIENT_HYDRATE_GLOBAL}"]?.();`);
+    expect(html.indexOf(`registry["${ssrIslandId}"] = m0;`)).toBeLessThan(
+      html.indexOf('await import("/client.js");'),
+    );
   });
 
   it("serves raw RSC rows for client navigation requests", async () => {
@@ -203,6 +259,139 @@ describe("@bgub/fig-start server handler", () => {
     );
     expect(rows).toContain("Server post 42 (42)");
     expect(rows).not.toContain("Router hooks must be used");
+  });
+
+  it("renders child routes under a server route layout", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () => createElement("main", null, createElement(Outlet)),
+      }),
+      markServerRoute(
+        createFileRoute("/rsc-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement("h1", null, "Server layout"),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/rsc-layout/child")({
+        component: () => createElement("p", null, "Nested child"),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: nestedRoutes,
+    });
+
+    const document = await handler(
+      new Request("http://localhost/rsc-layout/child"),
+    );
+    const html = await document.text();
+    expect(html).toContain("Server layout");
+    expect(html).toContain("Nested child");
+    expect(html).toContain(`${RSC_SLOT_ATTR}="/rsc-layout"`);
+
+    const rsc = await handler(
+      new Request("http://localhost/rsc-layout/child", {
+        headers: { accept: "text/x-component; charset=utf-8" },
+      }),
+    );
+    const rows = await rsc.text();
+    expect(rsc.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/rsc-layout");
+    expect(rows).toContain("Server layout");
+    expect(rows).toContain("Nested child");
+  });
+
+  it("renders same-segment RSC refreshes as boundary rows", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () => createElement("main", null, createElement(Outlet)),
+      }),
+      markServerRoute(
+        createFileRoute("/rsc-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement("h1", null, "Server layout"),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/rsc-layout/a")({
+        component: () => createElement("p", null, "Child A"),
+      }),
+      createFileRoute("/rsc-layout/b")({
+        component: () => createElement("p", null, "Child B"),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: nestedRoutes,
+    });
+
+    const response = await handler(
+      new Request("http://localhost/rsc-layout/b", {
+        headers: {
+          accept: "text/x-component; charset=utf-8",
+          [RSC_BOUNDARY_HEADER]: "/rsc-layout",
+        },
+      }),
+    );
+    const rows = await response.text();
+
+    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/rsc-layout");
+    expect(rows).toContain('"tag":"refresh"');
+    expect(rows).toContain('"boundary":"/rsc-layout"');
+    expect(rows).toContain("Child B");
+  });
+
+  it("streams document data discovered after the bootstrap snapshot", async () => {
+    const pending = deferred<string>();
+    const identity = dataResource.identity<[string], string>({
+      key: (id) => ["document-stream", id],
+    });
+    const resource = dataResource.server(identity, {
+      load: () => pending.promise,
+    });
+    function SlowData(): FigNode {
+      return createElement("span", null, readData(resource, "one"));
+    }
+    const dataRoutes = [
+      createRootRoute({
+        component: () => createElement("main", null, createElement(Outlet)),
+      }),
+      createFileRoute("/data")({
+        component: () =>
+          createElement(
+            Suspense,
+            { fallback: createElement("p", null, "Loading") },
+            createElement(SlowData),
+          ),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: dataRoutes,
+    });
+
+    const response = await handler(new Request("http://localhost/data"));
+    const reader = response.body?.getReader();
+    if (reader === undefined) throw new Error("Expected response body.");
+    const decoder = new TextDecoder();
+    const firstText = await readUntil(reader, decoder, DATA_SCRIPT_ID);
+
+    expect(firstText).toContain("Loading");
+    expect(firstText).not.toContain("Streamed value");
+
+    pending.resolve("Streamed value");
+    const rest = await readRemaining(reader, decoder);
+
+    expect(rest).toContain(DATA_FRAME_ATTR);
+    expect(rest).toContain("Streamed value");
   });
 
   it("serves configured static assets", async () => {
@@ -278,6 +467,27 @@ describe("@bgub/fig-start server handler", () => {
     ]);
   });
 
+  it("hoists initial server-route assets into the document head", async () => {
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      clientReferenceAssets: ({ id }) =>
+        id === islandId ? stylesheet("/assets/island.css") : [],
+      context: () => ({ allow: true }),
+      routes,
+      serverRouteAssets: ({ id }) =>
+        id === "/dashboard" ? stylesheet("/assets/dashboard.css") : [],
+    });
+
+    const response = await handler(new Request("http://localhost/dashboard"));
+    const html = await response.text();
+    const head = html.slice(0, html.indexOf("</head>"));
+
+    expect(head).toContain(
+      '<link rel="stylesheet" href="/assets/dashboard.css"',
+    );
+    expect(head).toContain('<link rel="stylesheet" href="/assets/island.css"');
+  });
+
   it("omits RSC frames for ordinary isomorphic routes", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/about"),
@@ -314,7 +524,8 @@ describe("@bgub/fig-start server handler", () => {
     const decoder = new TextDecoder();
     const firstText = await readUntil(reader, decoder, RSC_SEGMENTS_SCRIPT_ID);
 
-    expect(firstText).toContain(`${RSC_SLOT_ATTR}="/slow"></div>`);
+    expect(firstText).toContain(`${RSC_SLOT_ATTR}="/slow"`);
+    expect(firstText).toContain("fig:suspense:pending");
     expect(firstText).toContain(RSC_SEGMENTS_SCRIPT_ID);
     expect(firstText).not.toContain("slow ready");
 
@@ -377,6 +588,34 @@ describe("@bgub/fig-start server handler", () => {
     expect(calls).toBe(1);
   });
 
+  it("renders server route components once for document HTML and RSC frames", async () => {
+    let renders = 0;
+    const singlePassRoutes = [
+      createRootRoute({
+        component: () => createElement("main", null, createElement(Outlet)),
+      }),
+      markServerRoute(
+        createFileRoute("/single-pass")({
+          component: () => {
+            renders += 1;
+            return createElement("h1", null, "Single pass");
+          },
+        }),
+      ),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: singlePassRoutes,
+    });
+
+    const response = await handler(new Request("http://localhost/single-pass"));
+    const html = await response.text();
+
+    expect(html).toContain("Single pass");
+    expect(html).toContain(RSC_FRAME_ATTR);
+    expect(renders).toBe(1);
+  });
+
   it("detects client references in an RSC payload", () => {
     expect(hasClientReferences('{"tag":"client","value":{"id":"x"}}')).toBe(
       true,
@@ -390,6 +629,7 @@ describe("@bgub/fig-start server handler", () => {
     await writeFile(join(dir, "server.js"), "server secret");
     await writeFile(join(dir, "server-helper.js"), "server helper secret");
     await writeFile(join(dir, "assets", "client.js"), "client entry");
+    await writeFile(join(dir, "assets", "client.css"), ".app{}");
     await writeFile(join(dir, "assets", "style.css"), ".island{}");
     await writeFile(
       join(dir, "assets", "Island-test.js"),
@@ -398,6 +638,10 @@ describe("@bgub/fig-start server handler", () => {
     await writeFile(
       join(dir, "fig-start-client-assets.json"),
       JSON.stringify({
+        assets: ["/assets/client.css"],
+        client: {
+          module: "/assets/client.js",
+        },
         clientReferences: {
           Island: {
             css: ["/assets/style.css"],
@@ -416,6 +660,9 @@ describe("@bgub/fig-start server handler", () => {
     try {
       expect((await resolver.resolve("/assets/client.js"))?.href).toBe(
         pathToFileURL(join(dir, "assets", "client.js")).href,
+      );
+      expect((await resolver.resolve("/assets/client.css"))?.href).toBe(
+        pathToFileURL(join(dir, "assets", "client.css")).href,
       );
       expect((await resolver.resolve("/assets/Island-test.js"))?.href).toBe(
         pathToFileURL(join(dir, "assets", "Island-test.js")).href,

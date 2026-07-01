@@ -1,32 +1,52 @@
 import {
   createElement,
-  type ElementType,
+  type FigClientReference,
   type FigNode,
+  type FigResource,
   type FigResourceList,
   Fragment,
   resources,
+  type Props,
 } from "@bgub/fig";
-import type { FigDataHydrationEntry } from "@bgub/fig/internal";
+import { figResourceKey, type FigDataHydrationEntry } from "@bgub/fig/internal";
+import { normalizeDataResourceKey } from "@bgub/fig-data";
 import { renderToDocumentStream } from "@bgub/fig-server";
-import { renderToRscStream } from "@bgub/fig-server/rsc";
+import {
+  createRscResponse,
+  RscBoundary,
+  type RscClientReferenceRecord,
+  renderToRscStream,
+} from "@bgub/fig-server/rsc";
 import { Effect } from "effect";
 import { createServer, type Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
+  DATA_FRAME_ATTR,
+  DATA_STREAM_GLOBAL,
+  RSC_BOUNDARY_HEADER,
   RSC_FRAME_ATTR,
   RSC_ROUTE_ID_HEADER,
   RSC_SEGMENT_ID_HEADER,
   ROOT_ELEMENT_ID,
   RSC_SEGMENTS_SCRIPT_ID,
   RSC_STREAM_GLOBAL,
+  CLIENT_HYDRATE_GLOBAL,
+  CLIENT_REFERENCE_MODULES_GLOBAL,
+  CLIENT_REFERENCE_PRELOAD_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedRscFrame,
   type SerializedRscSegment,
   type SerializedRouterState,
 } from "./bootstrap.ts";
-import { RouterProvider } from "./components.tsx";
-import type { Router } from "./core.ts";
-import { isServerRoute } from "./internal.ts";
+import {
+  Outlet,
+  RouterProvider,
+  ServerRouteContentProvider,
+  ServerRouteRenderProvider,
+  type ServerRouteContentStore,
+} from "./components.tsx";
+import type { RouteMatch, Router } from "./core.ts";
+import { isServerRoute, resolveServerClientReference } from "./internal.ts";
 import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
 import { RouterContext } from "./router-context.ts";
@@ -97,19 +117,33 @@ export function createRequestHandler(
     // render and the document render (a side-effecting factory must run once).
     const dataContext = options.dataContext?.(request);
 
-    // A `.server.tsx` leaf renders through the RSC stream; the SSR tree leaves an
-    // empty slot for that segment, and row chunks stream into it as inline frames.
+    const isRscRequest = isRscRouteRequest(request);
+    const refreshBoundary = isRscRequest
+      ? rscBoundaryHeader(request)
+      : undefined;
+    // A `.server.tsx` route segment renders through the RSC stream. The document
+    // render can stream server-renderable HTML into the same slot, then the client
+    // mounts and refreshes the RSC payload for that segment.
     const rscSegment = renderServerRouteSegment(
       result,
       router,
       dataContext,
       options.clientReferenceAssets,
       options.serverRouteAssets,
+      refreshBoundary,
     );
 
-    if (isRscRouteRequest(request)) {
+    if (isRscRequest) {
       if (rscSegment === undefined) {
         return new Response("No RSC segment for route.", { status: 404 });
+      }
+      if (
+        refreshBoundary !== undefined &&
+        refreshBoundary !== rscSegment.metadata.routeId
+      ) {
+        return new Response("RSC boundary does not match the route segment.", {
+          status: 400,
+        });
       }
 
       return new Response(streamRscSegmentRows(rscSegment), {
@@ -122,6 +156,28 @@ export function createRequestHandler(
       });
     }
 
+    const documentRsc =
+      rscSegment === undefined
+        ? undefined
+        : createDocumentRscSegment(rscSegment);
+    await documentRsc?.initialRootReady;
+    const hoistedServerRouteResources = uniqueResources([
+      ...(rscSegment?.initialResources ?? []),
+      ...(documentRsc?.assetResources() ?? []),
+    ]);
+    const routerTree = createElement(
+      ServerRouteRenderProvider,
+      { mode: "document" },
+      createElement(RouterProvider, { router }),
+    );
+    const appTree =
+      documentRsc === undefined
+        ? routerTree
+        : createElement(
+            ServerRouteContentProvider,
+            { store: documentRsc.store },
+            routerTree,
+          );
     const document = createElement(
       "html",
       { lang: options.htmlLang ?? "en" },
@@ -133,31 +189,27 @@ export function createRequestHandler(
           content: "width=device-width, initial-scale=1",
           name: "viewport",
         }),
+        hoistedServerRouteResources.length === 0
+          ? null
+          : resources(hoistedServerRouteResources),
         options.head ?? null,
       ),
       createElement(
         "body",
         null,
-        createElement(
-          "div",
-          { id: ROOT_ELEMENT_ID },
-          createElement(RouterProvider, { router }),
-        ),
+        createElement("div", { id: ROOT_ELEMENT_ID }, appTree),
       ),
     );
 
     const render = renderToDocumentStream(document, {
+      clientReferenceFallback: clientReferencePlaceholder,
       dataContext,
       nonce,
       onError: () => ({ digest: "fig-start-error" }),
     });
 
     try {
-      // Await all work (not just the shell) so data resources resolved behind
-      // Suspense are captured in the hydration snapshot below. Progressive
-      // streaming-data hydration is a planned follow-up; M1 buffers the
-      // document so the client hydrates with complete data and never refetches.
-      await render.allReady;
+      await render.shellReady;
     } catch (error) {
       return new Response(shellErrorHtml(error), {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -167,21 +219,31 @@ export function createRequestHandler(
 
     const rscSegments = rscSegment === undefined ? [] : [rscSegment.metadata];
     const rscFrameStream =
-      rscSegment === undefined
+      documentRsc === undefined
         ? undefined
-        : streamRscSegmentFrames(rscSegment, nonce);
-
-    const bootstrap = renderBootstrap({
-      clientEntry: options.clientEntry,
-      dataEntries: render.getData(),
-      location: location.href,
-      loaderData: collectLoaderData(result),
-      nonce,
-      rscSegments,
-    });
+        : streamRscSegmentFrames(documentRsc.frames, nonce);
+    const dataStream = createDocumentDataStream(nonce);
+    const clientReferenceModules =
+      documentRsc === undefined
+        ? []
+        : initialClientReferenceModules(documentRsc.clientReferences());
 
     return new Response(
-      injectBeforeBodyClose(render.stream, bootstrap, rscFrameStream),
+      injectBeforeBodyClose(
+        render.stream,
+        () =>
+          renderBootstrap({
+            clientEntry: options.clientEntry,
+            clientReferenceModules,
+            dataEntries: dataStream.initial(render.getData()),
+            location: location.href,
+            loaderData: collectLoaderData(result),
+            nonce,
+            rscSegments,
+          }),
+        rscFrameStream,
+        () => dataStream.flush(render.getData()),
+      ),
       {
         headers: { "content-type": render.contentType },
         status,
@@ -280,8 +342,150 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
 
 interface ServerRscSegment {
   contentType: string;
+  initialResources: readonly FigResource[];
   metadata: SerializedRscSegment;
   stream: ReadableStream<Uint8Array>;
+}
+
+interface DocumentRscSegment {
+  assetResources(): readonly FigResource[];
+  clientReferences(): readonly RscClientReferenceRecord[];
+  frames: ServerRscSegment;
+  initialRootReady: Promise<void>;
+  store: ServerRouteContentStore;
+}
+
+interface ClientReferenceModule {
+  id: string;
+  module: string;
+}
+
+function createDocumentRscSegment(
+  segment: ServerRscSegment,
+): DocumentRscSegment {
+  const [decodeStream, frameStream] = segment.stream.tee();
+  const response = createRscResponse({
+    resolveClientReference: (metadata) =>
+      metadata.ssr === true
+        ? resolveServerClientReference(metadata)
+        : undefined,
+  });
+  const initialRootReady = decodeDocumentRscStream(response, decodeStream);
+
+  return {
+    assetResources: () => response.getAssetResources(),
+    clientReferences: () => response.getClientReferences(),
+    frames: { ...segment, stream: frameStream },
+    initialRootReady,
+    store: createDocumentServerRouteContentStore(
+      segment.metadata.routeId,
+      response.getRoot(),
+    ),
+  };
+}
+
+function decodeDocumentRscStream(
+  response: ReturnType<typeof createRscResponse>,
+  stream: ReadableStream<Uint8Array>,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let bufferedRows = "";
+  let resolveInitialRoot: () => void = () => undefined;
+  let initialRootSettled = false;
+  const initialRootReady = new Promise<void>((resolve) => {
+    resolveInitialRoot = resolve;
+  });
+
+  function settleInitialRoot(): void {
+    if (initialRootSettled) return;
+    initialRootSettled = true;
+    resolveInitialRoot();
+  }
+
+  function processRows(chunk: string, done: boolean): void {
+    bufferedRows += chunk;
+    const rows = bufferedRows.split("\n");
+    bufferedRows = rows.pop() ?? "";
+
+    for (const row of rows) {
+      if (isRootModelRow(row)) settleInitialRoot();
+    }
+    if (done) {
+      if (isRootModelRow(bufferedRows)) settleInitialRoot();
+      bufferedRows = "";
+      settleInitialRoot();
+    }
+  }
+
+  async function decode(): Promise<void> {
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        const chunk =
+          done && value === undefined
+            ? decoder.decode()
+            : decoder.decode(value, { stream: !done });
+        if (chunk.length > 0 || done) processRows(chunk, done);
+        if (chunk.length > 0) response.processStringChunk(chunk);
+        if (done) {
+          response.processStringChunk("\n");
+          return;
+        }
+      }
+    } catch {
+      settleInitialRoot();
+    }
+  }
+
+  void decode();
+
+  return Promise.race([
+    initialRootReady,
+    new Promise<void>((resolve) => setTimeout(resolve, 0)),
+  ]);
+}
+
+function isRootModelRow(line: string): boolean {
+  if (line.length === 0) return false;
+  try {
+    const row = JSON.parse(line) as { id?: unknown; tag?: unknown };
+    return row.id === 0 && row.tag === "model";
+  } catch {
+    return false;
+  }
+}
+
+function createDocumentServerRouteContentStore(
+  routeId: string,
+  node: FigNode,
+): ServerRouteContentStore {
+  return {
+    commit: () => undefined,
+    getSnapshot: () => 0,
+    render: (requestedRouteId) =>
+      requestedRouteId === routeId ? node : undefined,
+    subscribe: () => () => undefined,
+  };
+}
+
+function initialClientReferenceModules(
+  references: readonly RscClientReferenceRecord[],
+): ClientReferenceModule[] {
+  const seen = new Set<string>();
+  const modules: ClientReferenceModule[] = [];
+
+  for (const reference of references) {
+    if (reference.ssr !== true) continue;
+    const module = reference.resources?.find(
+      (resource) => resource.kind === "modulepreload",
+    );
+    if (module === undefined || seen.has(reference.id)) continue;
+    seen.add(reference.id);
+    modules.push({ id: reference.id, module: module.href });
+  }
+
+  return modules;
 }
 
 function renderServerRouteSegment(
@@ -294,46 +498,114 @@ function renderServerRouteSegment(
   serverRouteAssets:
     | ((metadata: { id: string }) => FigResourceList)
     | undefined,
+  refreshBoundary: string | undefined,
 ): ServerRscSegment | undefined {
   if (result.status !== "match") return undefined;
-  const leaf = result.matches[result.matches.length - 1];
-  if (leaf === undefined || !isServerRoute(leaf.node.route)) {
-    return undefined;
-  }
+  const segment = firstServerRouteSegment(result.matches);
+  if (segment === undefined) return undefined;
 
-  const Component = leaf.node.route.options.component;
-  if (Component === undefined) return undefined;
-
-  // Server route components receive { params, loaderData } as props and the
-  // same router context as the document render, so typed route hooks work in
-  // both isomorphic and server-route leaves.
-  const routeAssets = serverRouteAssets?.({ id: leaf.routeId });
+  const routeAssets = serverRouteAssetList(
+    result.matches.slice(segment.index),
+    serverRouteAssets,
+  );
   const routeNode = createElement(
     RouterContext,
     { value: router },
-    createElement(Component as ElementType, {
-      loaderData: leaf.loaderData,
-      params: leaf.params,
-    }),
+    createElement(
+      ServerRouteRenderProvider,
+      { depth: segment.index, mode: "content" },
+      createElement(Outlet),
+    ),
   );
+  const routeId = segment.match.routeId;
+  const routeContent =
+    routeAssets.length === 0 ? routeNode : resources(routeAssets, routeNode);
+  const refreshesSegment = refreshBoundary === routeId;
   const rsc = renderToRscStream(
     createElement(
       Fragment,
       null,
-      routeAssets === undefined ? routeNode : resources(routeAssets, routeNode),
+      refreshesSegment
+        ? routeContent
+        : createElement(RscBoundary, { id: routeId }, routeContent),
     ),
-    { clientReferenceAssets, dataContext },
+    {
+      clientReferenceAssets,
+      dataContext,
+      refreshBoundary: refreshesSegment ? refreshBoundary : undefined,
+    },
   );
   void rsc.allReady.catch(() => undefined);
   return {
     contentType: rsc.contentType,
-    metadata: { id: leaf.routeId, routeId: leaf.routeId },
+    initialResources: routeAssets,
+    metadata: { id: routeId, routeId },
     stream: rsc.stream,
   };
 }
 
+function uniqueResources(input: readonly FigResource[]): FigResource[] {
+  const seen = new Set<string>();
+  const result: FigResource[] = [];
+  for (const resource of input) {
+    const key = figResourceKey(resource);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(resource);
+  }
+  return result;
+}
+
+function firstServerRouteSegment(
+  matches: readonly RouteMatch[],
+): { index: number; match: RouteMatch } | undefined {
+  const index = matches.findIndex((match) => isServerRoute(match.node.route));
+  const match = index === -1 ? undefined : matches[index];
+  return match === undefined ? undefined : { index, match };
+}
+
+function clientReferencePlaceholder(
+  reference: FigClientReference,
+  props: Props,
+): FigNode {
+  if (reference.ssr !== undefined) return createElement(reference.ssr, props);
+
+  return createElement("template", {
+    "data-fig-client-reference": reference.id,
+  });
+}
+
+function serverRouteAssetList(
+  matches: readonly RouteMatch[],
+  serverRouteAssets:
+    | ((metadata: { id: string }) => FigResourceList)
+    | undefined,
+): FigResource[] {
+  if (serverRouteAssets === undefined) return [];
+  return matches
+    .filter((match) => isServerRoute(match.node.route))
+    .flatMap((match) =>
+      resourceArray(serverRouteAssets({ id: match.routeId })),
+    );
+}
+
+function resourceArray(resources: FigResourceList): FigResource[] {
+  return isResourceArray(resources) ? [...resources] : [resources];
+}
+
+function isResourceArray(
+  resources: FigResourceList,
+): resources is readonly FigResource[] {
+  return Array.isArray(resources);
+}
+
 function isRscRouteRequest(request: Request): boolean {
   return request.headers.get("accept")?.includes("text/x-component") === true;
+}
+
+function rscBoundaryHeader(request: Request): string | undefined {
+  const value = request.headers.get(RSC_BOUNDARY_HEADER);
+  return value === null || value === "" ? undefined : value;
 }
 
 // A throw inside a server component becomes an RSC "error" row (it doesn't reject
@@ -447,6 +719,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function renderBootstrap(input: {
   clientEntry: string;
+  clientReferenceModules: readonly ClientReferenceModule[];
   dataEntries: readonly FigDataHydrationEntry[];
   location: string;
   loaderData: Record<string, unknown>;
@@ -461,6 +734,7 @@ function renderBootstrap(input: {
     input.nonce === undefined ? "" : ` nonce="${escapeAttribute(input.nonce)}"`;
 
   return [
+    dataStreamBootstrapScript(input.nonce),
     ...(input.rscSegments.length === 0
       ? []
       : [rscStreamBootstrapScript(input.nonce)]),
@@ -473,8 +747,85 @@ function renderBootstrap(input: {
     `<script id="${RSC_SEGMENTS_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       input.rscSegments,
     )}</script>`,
-    `<script${nonceAttr}>import(${escapeJson(input.clientEntry)});</script>`,
+    input.clientReferenceModules.length === 0
+      ? clientEntryScript(input.clientEntry, nonceAttr)
+      : ssrClientReferenceBootstrapScript(
+          input.clientEntry,
+          input.clientReferenceModules,
+          nonceAttr,
+        ),
   ].join("");
+}
+
+function clientEntryScript(clientEntry: string, nonceAttr: string): string {
+  return `<script type="module"${nonceAttr}>import ${escapeJson(
+    clientEntry,
+  )};</script>`;
+}
+
+function ssrClientReferenceBootstrapScript(
+  clientEntry: string,
+  modules: readonly ClientReferenceModule[],
+  nonceAttr: string,
+): string {
+  return `<script type="module"${nonceAttr}>globalThis[${escapeJson(CLIENT_REFERENCE_PRELOAD_GLOBAL)}] = true;
+${clientReferenceModuleImports(modules)}
+const registry = globalThis[${escapeJson(CLIENT_REFERENCE_MODULES_GLOBAL)}] ??= {};
+${clientReferenceModuleAssignments(modules)}
+delete globalThis[${escapeJson(CLIENT_REFERENCE_PRELOAD_GLOBAL)}];
+await import(${escapeJson(clientEntry)});
+globalThis[${escapeJson(CLIENT_HYDRATE_GLOBAL)}]?.();</script>`;
+}
+
+function clientReferenceModuleImports(
+  modules: readonly ClientReferenceModule[],
+): string {
+  return modules
+    .map(
+      (entry, index) =>
+        `const m${index} = await import(${escapeJson(entry.module)});`,
+    )
+    .join("\n");
+}
+
+function clientReferenceModuleAssignments(
+  modules: readonly ClientReferenceModule[],
+): string {
+  return modules
+    .map((entry, index) => `registry[${escapeJson(entry.id)}] = m${index};`)
+    .join("\n");
+}
+
+interface DocumentDataStream {
+  flush(entries: readonly FigDataHydrationEntry[]): string;
+  initial(entries: readonly FigDataHydrationEntry[]): FigDataHydrationEntry[];
+}
+
+function createDocumentDataStream(
+  nonce: string | undefined,
+): DocumentDataStream {
+  const sentKeys = new Set<string>();
+
+  function unsent(
+    entries: readonly FigDataHydrationEntry[],
+  ): FigDataHydrationEntry[] {
+    const next: FigDataHydrationEntry[] = [];
+    for (const entry of entries) {
+      const key = normalizeDataResourceKey(entry.key);
+      if (sentKeys.has(key)) continue;
+      sentKeys.add(key);
+      next.push(entry);
+    }
+    return next;
+  }
+
+  return {
+    flush(entries) {
+      const next = unsent(entries);
+      return next.length === 0 ? "" : dataFrameScript(next, nonce);
+    },
+    initial: unsent,
+  };
 }
 
 const BODY_CLOSE_MARKER = "</body>";
@@ -485,8 +836,9 @@ const BODY_CLOSE_HOLDBACK = BODY_CLOSE_MARKER.length - 1;
 // only holds back enough decoded text to match a split closing-body marker.
 function injectBeforeBodyClose(
   stream: ReadableStream<Uint8Array>,
-  html: string,
+  html: () => string,
   beforeBodyClose?: ReadableStream<Uint8Array>,
+  beforeChunk?: () => string,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -496,13 +848,21 @@ function injectBeforeBodyClose(
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const reader = stream.getReader();
+      const enqueueGenerated = (callback: (() => string) | undefined): void => {
+        const generated = callback?.();
+        if (generated !== undefined && generated.length > 0) {
+          controller.enqueue(encoder.encode(generated));
+        }
+      };
+
       for (;;) {
         const { done, value } = await reader.read();
         if (done) {
           buffer += decoder.decode();
+          if (injected) enqueueGenerated(beforeChunk);
           if (buffer.length > 0) controller.enqueue(encoder.encode(buffer));
           if (!injected) {
-            controller.enqueue(encoder.encode(html));
+            controller.enqueue(encoder.encode(html()));
             if (beforeBodyClose !== undefined) {
               await pipeStream(beforeBodyClose, controller);
             }
@@ -512,6 +872,7 @@ function injectBeforeBodyClose(
         }
 
         if (injected) {
+          enqueueGenerated(beforeChunk);
           controller.enqueue(value);
           continue;
         }
@@ -531,7 +892,7 @@ function injectBeforeBodyClose(
           continue;
         }
 
-        controller.enqueue(encoder.encode(buffer.slice(0, index) + html));
+        controller.enqueue(encoder.encode(buffer.slice(0, index) + html()));
         if (beforeBodyClose !== undefined) {
           await pipeStream(beforeBodyClose, controller);
         }
@@ -553,6 +914,26 @@ async function pipeStream(
     if (done) return;
     controller.enqueue(value);
   }
+}
+
+function dataStreamBootstrapScript(nonce: string | undefined): string {
+  const nonceAttr =
+    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
+  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${DATA_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${DATA_STREAM_GLOBAL}={q:q,p:function(e){for(var i=0;i<e.length;i++)q.push(e[i]);for(var j=0;j<l.length;j++)l[j](e)},s:function(fn){l.push(fn);if(q.length>0)fn(q);return function(){var n=[];for(var k=0;k<l.length;k++)if(l[k]!==fn)n.push(l[k]);l=n}}};})();</script>`;
+}
+
+function dataFrameScript(
+  entries: readonly FigDataHydrationEntry[],
+  nonce: string | undefined,
+): string {
+  const nonceAttr =
+    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
+  return (
+    `<script type="application/json" ${DATA_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
+      entries,
+    )}</script>` +
+    `<script${nonceAttr}>globalThis.${DATA_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
+  );
 }
 
 function rscStreamBootstrapScript(nonce: string | undefined): string {

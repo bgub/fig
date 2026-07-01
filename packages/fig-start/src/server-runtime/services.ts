@@ -71,7 +71,7 @@ export function startHandlerLayer(
 ): Layer.Layer<StartHandlerService, never, StartConfig> {
   return Layer.effect(
     StartHandlerService,
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const config = yield* StartConfig;
       return createRequestHandler({
         ...options,
@@ -87,7 +87,7 @@ export const clientAssetStoreLayer: Layer.Layer<
   StartConfig
 > = Layer.effect(
   ClientAssetStore,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const config = yield* StartConfig;
     return createClientAssetResolver({
       appUrl: config.appUrl.href,
@@ -103,7 +103,7 @@ export const startRequestListenerLayer: Layer.Layer<
   ClientAssetStore | StartConfig | StartHandlerService
 > = Layer.effect(
   StartRequestListener,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const clientAssets = yield* ClientAssetStore;
     const config = yield* StartConfig;
     const handler = yield* StartHandlerService;
@@ -121,11 +121,11 @@ export const nodeHttpServerLayer: Layer.Layer<
   StartConfig | StartRequestListener
 > = Layer.effect(
   NodeHttpServer,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const config = yield* StartConfig;
     const listener = yield* StartRequestListener;
     return {
-      start: Effect.fn("NodeHttpServer.start")(function*() {
+      start: Effect.fn("NodeHttpServer.start")(function* () {
         return yield* startNodeHttpServer({
           listener,
           port: config.port,

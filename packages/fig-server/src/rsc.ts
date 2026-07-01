@@ -106,7 +106,11 @@ type RscRow =
   | {
       id: number;
       tag: "client";
-      value: { id: string; resources?: SerializedAssetResource[] };
+      value: {
+        id: string;
+        resources?: SerializedAssetResource[];
+        ssr?: true;
+      };
     }
   | { tag: "data"; value: FigDataHydrationEntry[] }
   | { id: number; tag: "error"; value: { message: string } }
@@ -139,15 +143,29 @@ type RscSpecialModel =
   | { $fig: "suspense" }
   | { $fig: "undefined" };
 
+export interface RscClientReferenceMetadata {
+  id: string;
+  ssr?: boolean;
+}
+
+export interface RscClientReferenceRecord extends RscClientReferenceMetadata {
+  resources?: readonly FigResource[];
+}
+
 export interface RscResponseOptions {
-  loadClientReference?: (metadata: { id: string }) => Promise<unknown>;
-  resolveClientReference?: (metadata: { id: string }) => ElementType<any>;
+  loadClientReference?: (
+    metadata: RscClientReferenceMetadata,
+  ) => Promise<unknown>;
+  resolveClientReference?: (
+    metadata: RscClientReferenceMetadata,
+  ) => ElementType<any> | undefined;
 }
 
 export interface RscResponse {
   beginRefreshPayload(): void;
   bindRoot(root: RscRootLike): () => void;
   getAssetResources(): readonly FigResource[];
+  getClientReferences(): readonly RscClientReferenceRecord[];
   getRoot(): FigNode;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
   processStringChunk(chunk: string): void;
@@ -377,6 +395,10 @@ function createRscRequest(
 class RscResponseImpl implements RscResponse {
   private readonly assetResources = new Map<string, FigResource>();
   private readonly boundaries = new Map<string, RscModel>();
+  private readonly clientReferences = new Map<
+    string,
+    RscClientReferenceRecord
+  >();
   private readonly chunks = new Map<number, DecodedChunk>();
   private listeners = new Set<() => void>();
   private maxRowId = 0;
@@ -400,6 +422,10 @@ class RscResponseImpl implements RscResponse {
     return [...this.assetResources.values()];
   }
 
+  getClientReferences(): readonly RscClientReferenceRecord[] {
+    return [...this.clientReferences.values()];
+  }
+
   recordAssetResources(
     resources: readonly SerializedAssetResource[] | undefined,
   ): void {
@@ -417,6 +443,17 @@ class RscResponseImpl implements RscResponse {
       const key = figResourceKey(resource);
       if (!this.assetResources.has(key)) this.assetResources.set(key, resource);
     }
+  }
+
+  recordClientReference(
+    value: Extract<RscRow, { tag: "client" }>["value"],
+  ): void {
+    if (this.clientReferences.has(value.id)) return;
+    const reference: RscClientReferenceRecord = { id: value.id };
+    const resources = value.resources?.filter(isFigResource);
+    if (resources !== undefined) reference.resources = resources;
+    if (value.ssr === true) reference.ssr = true;
+    this.clientReferences.set(value.id, reference);
   }
 
   bindRoot(root: RscRootLike): () => void {
@@ -495,7 +532,7 @@ class RscResponseImpl implements RscResponse {
     return decodeModel(this, chunk.model) as FigNode;
   }
 
-  decodeClientReference(metadata: { id: string }): ElementType {
+  decodeClientReference(metadata: RscClientReferenceMetadata): ElementType {
     const resolved = this.options.resolveClientReference?.(metadata);
     if (resolved !== undefined) return resolved;
 
@@ -910,15 +947,17 @@ function emitClientReference(
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
   const resources = serializeClientReferenceAssets(request, reference);
+  const value: Extract<RscRow, { tag: "client" }>["value"] = {
+    id: reference.id,
+  };
+  if (resources.length > 0) value.resources = resources;
+  if (reference.ssr !== undefined) value.ssr = true;
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
   emitRow(request, {
     id,
     tag: "client",
-    value:
-      resources.length > 0
-        ? { id: reference.id, resources }
-        : { id: reference.id },
+    value,
   });
   return id;
 }
@@ -1143,15 +1182,19 @@ function resolveDecodedRow(
     chunk.status = "rejected";
     chunk.value = error;
     chunk.reject(error);
+    void chunk.promise.catch(() => undefined);
     return;
   }
 
   let value: unknown;
   if (row.tag === "client") {
+    response.recordClientReference(row.value);
     response.recordAssetResources(row.value.resources);
-    // Hand resolver hooks only the documented { id } shape; resources are an
-    // internal decode concern, not resolver input.
-    value = response.decodeClientReference({ id: row.value.id });
+    value = response.decodeClientReference(
+      row.value.ssr === true
+        ? { id: row.value.id, ssr: true }
+        : { id: row.value.id },
+    );
   } else {
     value = decodeModel(response, row.value);
   }

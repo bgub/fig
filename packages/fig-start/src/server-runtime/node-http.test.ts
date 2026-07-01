@@ -9,7 +9,7 @@ describe("listenNodeHttpServer", () => {
 
     await Effect.runPromise(
       Effect.scoped(
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const server = yield* listenNodeHttpServer({
             listener(_request, response) {
               response.end("ok");

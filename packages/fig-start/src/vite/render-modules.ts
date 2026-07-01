@@ -1,4 +1,8 @@
 import { readFile } from "node:fs/promises";
+import {
+  CLIENT_HYDRATE_GLOBAL,
+  CLIENT_REFERENCE_PRELOAD_GLOBAL,
+} from "../bootstrap.ts";
 import { assetImportSpecifiers, isCssSpecifier } from "./asset-imports.ts";
 import {
   CLIENT_ASSET_MANIFEST_FILE,
@@ -6,10 +10,7 @@ import {
   SERVER_ROUTE_ASSETS_ID,
   SERVER_ROUTE_ASSET_MODULE_PREFIX,
 } from "./ids.ts";
-import {
-  rootAbsolutePath,
-  rootRelativeImport,
-} from "./path-utils.ts";
+import { rootAbsolutePath, rootRelativeImport } from "./path-utils.ts";
 import { collectClientRefs, collectServerRoutes } from "./refs.ts";
 
 export async function renderManifest(root: string): Promise<string> {
@@ -138,12 +139,20 @@ import { hydrateStart } from "@bgub/fig-start/client";
 import { loadClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
-hydrateStart({
-  context: { appName: start.appName },
-  loadClientReference,
-  onRecoverableError: start.onRecoverableError,
-  routes: start.routes,
-});
+function __figStartHydrate() {
+  hydrateStart({
+    context: { appName: start.appName },
+    loadClientReference,
+    onRecoverableError: start.onRecoverableError,
+    routes: start.routes,
+  });
+}
+
+if (globalThis[${JSON.stringify(CLIENT_REFERENCE_PRELOAD_GLOBAL)}] === true) {
+  globalThis[${JSON.stringify(CLIENT_HYDRATE_GLOBAL)}] = __figStartHydrate;
+} else {
+  __figStartHydrate();
+}
 `;
 }
 

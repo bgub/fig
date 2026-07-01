@@ -3,7 +3,10 @@ import {
   createElement,
   type FigNode,
   readContext,
+  Suspense,
+  useBeforeLayout,
   useCallback,
+  useExternalStore,
 } from "@bgub/fig";
 import { RSC_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
@@ -15,12 +18,52 @@ import { RouterContext, useRouter, useRouterState } from "./router-context.ts";
 // Tracks how deep into the matched chain we are. Each rendered route component
 // is wrapped one level deeper, so an <Outlet/> inside it renders the next match.
 const MatchDepthContext = createContext(0);
+type ServerRouteRenderMode = "content" | "document" | "placeholder";
+const ServerRouteRenderModeContext =
+  createContext<ServerRouteRenderMode>("placeholder");
+export interface ServerRouteContentStore {
+  commit(routeId: string): void;
+  getSnapshot(routeId: string): number;
+  render(routeId: string): FigNode;
+  subscribe(routeId: string, listener: () => void): () => void;
+}
+
+const ServerRouteContentContext = createContext<ServerRouteContentStore | null>(
+  null,
+);
 
 export function RouterProvider(props: { router: Router }): FigNode {
   return createElement(
     RouterContext,
     { value: props.router },
     createElement(Outlet),
+  );
+}
+
+export function ServerRouteRenderProvider(props: {
+  children?: FigNode;
+  depth?: number;
+  mode: Exclude<ServerRouteRenderMode, "placeholder">;
+}): FigNode {
+  return createElement(
+    ServerRouteRenderModeContext,
+    { value: props.mode },
+    createElement(
+      MatchDepthContext,
+      { value: props.depth ?? 0 },
+      props.children,
+    ),
+  );
+}
+
+export function ServerRouteContentProvider(props: {
+  children?: FigNode;
+  store: ServerRouteContentStore;
+}): FigNode {
+  return createElement(
+    ServerRouteContentContext,
+    { value: props.store },
+    props.children,
   );
 }
 
@@ -38,12 +81,10 @@ export function Outlet(): FigNode {
     return null;
   }
 
-  if (isServerRoute(match.node.route)) {
-    // A server (RSC) route renders nothing in the isomorphic tree: it leaves an
-    // empty slot that the client mounts the streamed RSC payload into. (Its
-    // component contains client references that cannot run under SSR.)
-    return createElement("div", { [RSC_SLOT_ATTR]: match.routeId });
-  }
+  const serverRouteMode = readContext(ServerRouteRenderModeContext);
+  const serverRoute = isServerRoute(match.node.route);
+  if (serverRoute && serverRouteMode === "placeholder")
+    return createElement(ServerRouteSlot, { routeId: match.routeId });
 
   const Component = match.node.route.options.component;
   const child =
@@ -51,7 +92,55 @@ export function Outlet(): FigNode {
       ? createElement(Outlet)
       : createElement(Component, {});
 
-  return createElement(MatchDepthContext, { value: depth + 1 }, child);
+  const rendered = createElement(
+    MatchDepthContext,
+    { value: depth + 1 },
+    child,
+  );
+  return serverRoute && serverRouteMode === "document"
+    ? createElement(
+        "div",
+        { [RSC_SLOT_ATTR]: match.routeId },
+        createElement(
+          Suspense,
+          { fallback: null },
+          createElement(ServerRouteContent, {
+            fallback: rendered,
+            routeId: match.routeId,
+          }),
+        ),
+      )
+    : rendered;
+}
+
+function ServerRouteSlot(props: { routeId: string }): FigNode {
+  return createElement(
+    "div",
+    { [RSC_SLOT_ATTR]: props.routeId },
+    createElement(ServerRouteContent, { routeId: props.routeId }),
+  );
+}
+
+function ServerRouteContent(props: {
+  fallback?: FigNode;
+  routeId: string;
+}): FigNode {
+  const store = readContext(ServerRouteContentContext);
+  const getSnapshot = () => store?.getSnapshot(props.routeId) ?? 0;
+  const snapshot = useExternalStore(
+    (listener) =>
+      store === null
+        ? () => undefined
+        : store.subscribe(props.routeId, listener),
+    getSnapshot,
+    getSnapshot,
+  );
+  useBeforeLayout(() => {
+    store?.commit(props.routeId);
+    return undefined;
+  }, [props.routeId, snapshot, store]);
+
+  return store?.render(props.routeId) ?? props.fallback ?? null;
 }
 
 export interface LinkProps {

@@ -13,8 +13,10 @@ import {
   startRequestListenerLayer,
 } from "./server-runtime/services.ts";
 
-export interface StartDevServerOptions
-  extends Omit<StartHandlerOptions, "clientEntry"> {
+export interface StartDevServerOptions extends Omit<
+  StartHandlerOptions,
+  "clientEntry"
+> {
   appUrl: string;
   clientEntry?: string;
   env?: Record<string, string | undefined>;
@@ -55,7 +57,7 @@ export function startDevServer(
   return Effect.runPromise(startDevServerEffect().pipe(Effect.provide(layer)));
 }
 
-const startDevServerEffect = Effect.fn("startDevServer")(function*() {
+const startDevServerEffect = Effect.fn("startDevServer")(function* () {
   const config = yield* StartConfig;
   const logger = yield* StartLogger;
   const nodeServer = yield* NodeHttpServer;

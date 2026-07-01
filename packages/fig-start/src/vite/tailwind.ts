@@ -11,13 +11,14 @@ export async function transformTailwindCss(
     import("@tailwindcss/postcss"),
   ]);
   const base = typeof options === "object" ? options.base : undefined;
-  const result = await postcss([
-    tailwindcss({ base: base ?? root }),
-  ]).process(code, {
-    from: id,
-    map: { annotation: false, inline: false },
-    to: id,
-  });
+  const result = await postcss([tailwindcss({ base: base ?? root })]).process(
+    code,
+    {
+      from: id,
+      map: { annotation: false, inline: false },
+      to: id,
+    },
+  );
   return { code: result.css, map: result.map?.toJSON() ?? null };
 }
 
