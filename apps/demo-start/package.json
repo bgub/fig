@@ -5,7 +5,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "portless",
-    "dev:app": "node ../dev-server.mjs node",
+    "dev:app": "node ../dev-server.mjs start",
     "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",

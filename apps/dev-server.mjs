@@ -6,8 +6,8 @@ import { createTaskGroup } from "./dev/tasks.mjs";
 
 const mode = process.argv[2];
 
-if (mode !== "node" && mode !== "static") {
-  console.error("Usage: node ../dev-server.mjs node|static");
+if (mode !== "node" && mode !== "start" && mode !== "static") {
+  console.error("Usage: node ../dev-server.mjs node|start|static");
   process.exit(1);
 }
 
@@ -32,11 +32,13 @@ await tasks.run("setup", "vp", [
 
 const running = [
   tasks.startProcess("build", "vp", ["pack", "--watch"], logger),
-  mode === "node"
+  mode === "node" || mode === "start"
     ? tasks.startProcess(
         "server",
         process.execPath,
-        ["--watch", "--watch-preserve-output", "dist/server.js"],
+        mode === "start"
+          ? ["dist/dev-server.js"]
+          : ["--watch", "--watch-preserve-output", "dist/server.js"],
         logger,
       )
     : tasks.track(

@@ -231,7 +231,10 @@ function packConfigFor(path: string): PackConfig | undefined {
     case "apps/demo-start":
       return [
         {
-          entry: { server: "virtual:fig-start/server-entry" },
+          entry: {
+            "dev-server": "./src/dev-server.ts",
+            server: "virtual:fig-start/server-entry",
+          },
           deps: {
             neverBundle: [figPackages],
           },
