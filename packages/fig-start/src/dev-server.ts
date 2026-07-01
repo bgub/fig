@@ -1,11 +1,17 @@
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import type { Server } from "node:http";
 import type { StartHandlerOptions } from "./server.ts";
-import { createRequestHandler } from "./server.ts";
-import { createClientAssetResolver } from "./server-assets.ts";
-import { normalizeStartRuntimeConfig } from "./server-runtime/config.ts";
-import { startNodeHttpServer } from "./server-runtime/node-http.ts";
-import { createStartNodeRequestListener } from "./server-runtime/request-listener.ts";
+import {
+  NodeHttpServer,
+  StartConfig,
+  StartLogger,
+  clientAssetStoreLayer,
+  nodeHttpServerLayer,
+  startConfigLayer,
+  startHandlerLayer,
+  startLoggerLayer,
+  startRequestListenerLayer,
+} from "./server-runtime/services.ts";
 
 export interface StartDevServerOptions
   extends Omit<StartHandlerOptions, "clientEntry"> {
@@ -21,12 +27,6 @@ export interface StartDevServerOptions
 export function startDevServer(
   options: StartDevServerOptions,
 ): Promise<Server> {
-  return Effect.runPromise(startDevServerEffect(options));
-}
-
-const startDevServerEffect = Effect.fn("startDevServer")(function*(
-  options: StartDevServerOptions,
-) {
   const {
     appUrl,
     clientEntry,
@@ -37,35 +37,54 @@ const startDevServerEffect = Effect.fn("startDevServer")(function*(
     root,
     ...handlerOptions
   } = options;
-  const config = yield* normalizeStartRuntimeConfig({
-    appUrl,
-    cacheClientAssets: false,
-    clientEntry,
-    env,
-    mode: "development",
-    port,
-    publicUrl,
-    root,
-  });
-  const clientAssets = createClientAssetResolver({
-    appUrl: config.appUrl.href,
-    cache: config.cacheClientAssets,
-    clientEntry: config.clientEntry,
-  });
-  const handler = createRequestHandler({
-    ...handlerOptions,
-    clientEntry: config.clientEntry,
-  });
-  const listener = createStartNodeRequestListener({
-    cacheClientAssets: config.cacheClientAssets,
-    clientAssets,
-    handler,
-  });
-  const server = yield* startNodeHttpServer({
-    listener,
-    port: config.port,
+  const layer = devServerLayer({
+    config: {
+      appUrl,
+      cacheClientAssets: false,
+      clientEntry,
+      env,
+      mode: "development",
+      port,
+      publicUrl,
+      root,
+    },
+    handlerOptions,
+    log,
   });
 
-  log(`Fig Start dev server: ${config.publicUrl.href}`);
+  return Effect.runPromise(startDevServerEffect().pipe(Effect.provide(layer)));
+}
+
+const startDevServerEffect = Effect.fn("startDevServer")(function*() {
+  const config = yield* StartConfig;
+  const logger = yield* StartLogger;
+  const nodeServer = yield* NodeHttpServer;
+  const server = yield* nodeServer.start();
+
+  yield* logger.info(`Fig Start dev server: ${config.publicUrl.href}`);
   return server;
 });
+
+interface DevServerLayerInput {
+  config: Parameters<typeof startConfigLayer>[0];
+  handlerOptions: Omit<StartHandlerOptions, "clientEntry">;
+  log: (message: string) => void;
+}
+
+function devServerLayer(input: DevServerLayerInput) {
+  const baseLayer = Layer.mergeAll(
+    startConfigLayer(input.config),
+    startLoggerLayer(input.log),
+  );
+  const handlerLayer = startHandlerLayer(input.handlerOptions).pipe(
+    Layer.provideMerge(baseLayer),
+  );
+  const assetLayer = clientAssetStoreLayer.pipe(
+    Layer.provideMerge(handlerLayer),
+  );
+  const listenerLayer = startRequestListenerLayer.pipe(
+    Layer.provideMerge(assetLayer),
+  );
+
+  return nodeHttpServerLayer.pipe(Layer.provideMerge(listenerLayer));
+}

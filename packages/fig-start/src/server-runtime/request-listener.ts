@@ -5,11 +5,13 @@ import { requestPathname } from "../server-assets.ts";
 import type { StartHandler } from "../server.ts";
 import { contentTypeFor } from "./content-type.ts";
 
+export type StartNodeRequestListener = RequestListener;
+
 export function createStartNodeRequestListener(input: {
   cacheClientAssets: boolean;
   clientAssets: ClientAssetResolver;
   handler: StartHandler;
-}): RequestListener {
+}): StartNodeRequestListener {
   const listener = createNodeRequestListener(input.handler);
 
   return (request, response) => {
