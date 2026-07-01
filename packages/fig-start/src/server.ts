@@ -227,9 +227,13 @@ export function createRequestHandler(
         : initialClientReferenceModules(documentRsc.clientReferences());
 
     return new Response(
-      injectBeforeBodyClose(
-        render.stream,
-        () =>
+      injectDocumentStreams(render.stream, {
+        afterBodyOpen: () =>
+          renderStreamPrelude({
+            hasRscSegments: rscSegments.length > 0,
+            nonce,
+          }),
+        beforeBodyClose: () =>
           renderBootstrap({
             clientEntry: options.clientEntry,
             clientReferenceModules,
@@ -239,9 +243,9 @@ export function createRequestHandler(
             nonce,
             rscSegments,
           }),
-        rscFrameStream,
-        () => dataStream.flush(render.getData()),
-      ),
+        beforeHtmlChunk: () => dataStream.flush(render.getData()),
+        companionStreams: rscFrameStream === undefined ? [] : [rscFrameStream],
+      }),
       {
         headers: { "content-type": render.contentType },
         status,
@@ -715,6 +719,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function renderStreamPrelude(input: {
+  hasRscSegments: boolean;
+  nonce: string | undefined;
+}): string {
+  return [
+    dataStreamBootstrapScript(input.nonce),
+    ...(input.hasRscSegments ? [rscStreamBootstrapScript(input.nonce)] : []),
+  ].join("");
+}
+
 function renderBootstrap(input: {
   clientEntry: string;
   clientReferenceModules: readonly ClientReferenceModule[];
@@ -732,10 +746,6 @@ function renderBootstrap(input: {
     input.nonce === undefined ? "" : ` nonce="${escapeAttribute(input.nonce)}"`;
 
   return [
-    dataStreamBootstrapScript(input.nonce),
-    ...(input.rscSegments.length === 0
-      ? []
-      : [rscStreamBootstrapScript(input.nonce)]),
     `<script id="${ROUTER_STATE_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       state,
     )}</script>`,
@@ -817,90 +827,222 @@ function createDocumentDataStream(
 
 const BODY_CLOSE_MARKER = "</body>";
 const BODY_CLOSE_HOLDBACK = BODY_CLOSE_MARKER.length - 1;
+const BODY_OPEN_MARKER = "<body";
+const BODY_OPEN_HOLDBACK = BODY_OPEN_MARKER.length - 1;
 
-// Inject the bootstrap right before the document's </body> so the client entry
-// and hydration data load with the shell. This is not a general HTML parser; it
-// only holds back enough decoded text to match a split closing-body marker.
-function injectBeforeBodyClose(
+interface DocumentStreamInjection {
+  afterBodyOpen: () => string;
+  beforeBodyClose: () => string;
+  beforeHtmlChunk?: () => string;
+  companionStreams: readonly ReadableStream<Uint8Array>[];
+}
+
+// Initialize streaming queues after <body>, drain ready companion frames beside
+// HTML chunks, and keep the client entry at </body> so hydration starts after
+// the document stream has produced its root DOM.
+function injectDocumentStreams(
   stream: ReadableStream<Uint8Array>,
-  html: () => string,
-  beforeBodyClose?: ReadableStream<Uint8Array>,
-  beforeChunk?: () => string,
+  injection: DocumentStreamInjection,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
-  let injected = false;
+  const companionStreams = injection.companionStreams.map(
+    createBufferedByteStream,
+  );
+  let bodyPreludeInjected = false;
+  let bootstrapInjected = false;
   let buffer = "";
+  let htmlReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  function enqueueString(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    value: string,
+  ): void {
+    if (value.length > 0) controller.enqueue(encoder.encode(value));
+  }
+
+  function enqueueGenerated(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    callback: (() => string) | undefined,
+  ): void {
+    enqueueString(controller, callback?.() ?? "");
+  }
+
+  function flushLive(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    enqueueGenerated(controller, injection.beforeHtmlChunk);
+    for (const item of companionStreams) item.flush(controller);
+  }
+
+  function injectBodyPrelude(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (bodyPreludeInjected) return;
+    bodyPreludeInjected = true;
+    enqueueGenerated(controller, injection.afterBodyOpen);
+    flushLive(controller);
+  }
+
+  function enqueueBufferedPrefix(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    length: number,
+  ): void {
+    enqueueString(controller, buffer.slice(0, length));
+    buffer = buffer.slice(length);
+  }
+
+  function enqueueSafeBufferedPrefix(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    holdback: number,
+    final: boolean,
+  ): void {
+    enqueueBufferedPrefix(
+      controller,
+      final ? buffer.length : Math.max(0, buffer.length - holdback),
+    );
+  }
+
+  function processBeforeBodyPrelude(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    final: boolean,
+  ): void {
+    if (bodyPreludeInjected) return;
+
+    const bodyStart = buffer.toLowerCase().indexOf(BODY_OPEN_MARKER);
+    if (bodyStart === -1) {
+      enqueueSafeBufferedPrefix(controller, BODY_OPEN_HOLDBACK, final);
+      if (final) injectBodyPrelude(controller);
+      return;
+    }
+
+    const bodyEnd = buffer.indexOf(">", bodyStart);
+    if (bodyEnd === -1) {
+      enqueueBufferedPrefix(controller, bodyStart);
+      return;
+    }
+
+    enqueueBufferedPrefix(controller, bodyEnd + 1);
+    injectBodyPrelude(controller);
+  }
+
+  async function closeLive(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): Promise<void> {
+    flushLive(controller);
+    for (const item of companionStreams) {
+      await item.close(controller);
+    }
+  }
+
+  async function processAfterBodyPrelude(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    final: boolean,
+  ): Promise<void> {
+    if (!bodyPreludeInjected || bootstrapInjected) return;
+
+    const bodyCloseIndex = buffer.indexOf(BODY_CLOSE_MARKER);
+    if (bodyCloseIndex !== -1) {
+      flushLive(controller);
+      enqueueBufferedPrefix(controller, bodyCloseIndex);
+      enqueueGenerated(controller, injection.beforeBodyClose);
+      bootstrapInjected = true;
+      await closeLive(controller);
+      enqueueBufferedPrefix(controller, buffer.length);
+      return;
+    }
+
+    flushLive(controller);
+    enqueueSafeBufferedPrefix(controller, BODY_CLOSE_HOLDBACK, final);
+
+    if (final) {
+      enqueueGenerated(controller, injection.beforeBodyClose);
+      bootstrapInjected = true;
+      await closeLive(controller);
+    }
+  }
+
+  function processAfterBootstrap(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (!bootstrapInjected) return;
+    flushLive(controller);
+    enqueueString(controller, buffer);
+    buffer = "";
+  }
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      const reader = stream.getReader();
-      const enqueueGenerated = (callback: (() => string) | undefined): void => {
-        const generated = callback?.();
-        if (generated !== undefined && generated.length > 0) {
-          controller.enqueue(encoder.encode(generated));
-        }
-      };
+      htmlReader = stream.getReader();
 
       for (;;) {
-        const { done, value } = await reader.read();
+        const { done, value } = await htmlReader.read();
         if (done) {
           buffer += decoder.decode();
-          if (injected) enqueueGenerated(beforeChunk);
-          if (buffer.length > 0) controller.enqueue(encoder.encode(buffer));
-          if (!injected) {
-            controller.enqueue(encoder.encode(html()));
-            if (beforeBodyClose !== undefined) {
-              await pipeStream(beforeBodyClose, controller);
-            }
-          }
+          processBeforeBodyPrelude(controller, true);
+          await processAfterBodyPrelude(controller, true);
+          processAfterBootstrap(controller);
           controller.close();
           return;
         }
 
-        if (injected) {
-          enqueueGenerated(beforeChunk);
-          controller.enqueue(value);
-          continue;
-        }
-
         buffer += decoder.decode(value, { stream: true });
-        const index = buffer.indexOf(BODY_CLOSE_MARKER);
-        if (index === -1) {
-          // Hold back the only suffix that can still become `</body>`.
-          const safe = buffer.slice(
-            0,
-            Math.max(0, buffer.length - BODY_CLOSE_HOLDBACK),
-          );
-          if (safe.length > 0) {
-            controller.enqueue(encoder.encode(safe));
-            buffer = buffer.slice(safe.length);
-          }
-          continue;
-        }
-
-        controller.enqueue(encoder.encode(buffer.slice(0, index) + html()));
-        if (beforeBodyClose !== undefined) {
-          await pipeStream(beforeBodyClose, controller);
-        }
-        controller.enqueue(encoder.encode(buffer.slice(index)));
-        injected = true;
-        buffer = "";
+        processBeforeBodyPrelude(controller, false);
+        await processAfterBodyPrelude(controller, false);
+        processAfterBootstrap(controller);
       }
+    },
+    cancel(reason) {
+      void htmlReader?.cancel(reason).catch(() => undefined);
+      for (const item of companionStreams) item.cancel(reason);
     },
   });
 }
 
-async function pipeStream(
+interface BufferedByteStream {
+  cancel(reason: unknown): void;
+  close(controller: ReadableStreamDefaultController<Uint8Array>): Promise<void>;
+  flush(controller: ReadableStreamDefaultController<Uint8Array>): void;
+}
+
+function createBufferedByteStream(
   stream: ReadableStream<Uint8Array>,
-  controller: ReadableStreamDefaultController<Uint8Array>,
-): Promise<void> {
-  const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    controller.enqueue(value);
+): BufferedByteStream {
+  const chunks: Uint8Array[] = [];
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let failure: unknown;
+  const done = (async () => {
+    reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      chunks.push(value);
+    }
+  })().catch((error: unknown) => {
+    failure = error;
+  });
+
+  function flush(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    for (;;) {
+      const chunk = chunks.shift();
+      if (chunk === undefined) return;
+      controller.enqueue(chunk);
+    }
   }
+
+  return {
+    cancel(reason) {
+      void reader?.cancel(reason).catch(() => undefined);
+    },
+    async close(controller) {
+      await done;
+      flush(controller);
+      if (failure !== undefined) throw failure;
+    },
+    flush,
+  };
 }
 
 function dataStreamBootstrapScript(nonce: string | undefined): string {

@@ -202,6 +202,9 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).toContain(RSC_FRAME_ATTR);
     expect(html).toContain(islandId);
     expect(html).toContain('"routeId":"/dashboard"');
+    expect(html.indexOf(RSC_FRAME_ATTR)).toBeLessThan(
+      html.indexOf(RSC_SEGMENTS_SCRIPT_ID),
+    );
   });
 
   it("server-renders SSR-capable client references and preloads their modules", async () => {
