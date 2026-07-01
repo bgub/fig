@@ -3,6 +3,8 @@ import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
 import { elementName, isElementNode, isHtmlElement } from "./tree.ts";
 
+declare const process: { env: { NODE_ENV?: string } };
+
 interface SelectState {
   appliedDefault: boolean;
   controlled: boolean;
@@ -14,6 +16,8 @@ interface UpdateOptions {
 }
 
 type StyleTarget = Record<string, unknown> & {
+  readonly length?: number;
+  item?: (index: number) => string;
   removeProperty?: (name: string) => void;
   setProperty?: (name: string, value: string) => void;
 };
@@ -78,14 +82,26 @@ export function updateElement(
 }
 
 export function hydrateElement(element: Element, nextProps: Props): void {
-  removeExtraHydratedAttributes(element, nextProps);
-  clearHydratedStyle(element);
+  // Snapshot before client styles apply: updateElement writes the client
+  // style prop into the same declaration, so a post-update enumeration could
+  // not tell server-set names from client-set ones.
+  const serverStyles =
+    process.env.NODE_ENV !== "production" ? hydratedStyleNames(element) : [];
+
   updateElement(element, {}, nextProps, { hydrating: true });
+
+  if (process.env.NODE_ENV !== "production") {
+    warnExtraHydratedAttributes(element, nextProps, serverStyles);
+  }
 }
 
-function removeExtraHydratedAttributes(
+// Server-only attributes and styles are preserved (extensions and internal
+// markers make removal unsafe), so surface the divergence from a pure client
+// render as a dev warning instead.
+function warnExtraHydratedAttributes(
   element: Element,
   nextProps: Props,
+  serverStyles: readonly string[],
 ): void {
   const expectedAttributes = new Set<string>();
   const type = elementName(element);
@@ -98,17 +114,47 @@ function removeExtraHydratedAttributes(
     if (attribute !== null) expectedAttributes.add(attribute);
   }
 
+  const extra: string[] = [];
   for (const name of attributeNames(element)) {
     const attribute = hostAttributeName(name, html);
-    if (!expectedAttributes.has(attribute)) element.removeAttribute(name);
+    if (attribute.startsWith("data-fig-")) continue;
+    if (!expectedAttributes.has(attribute)) extra.push(name);
   }
+
+  extra.push(...extraHydratedStyleNames(serverStyles, nextProps.style));
+
+  if (extra.length === 0) return;
+
+  console.error(
+    `Hydration preserved extra server attributes or styles on <${type}>: ` +
+      `${extra.sort().join(", ")}. They were preserved, so this element now ` +
+      "differs from a pure client render.",
+  );
 }
 
-function clearHydratedStyle(element: Element): void {
-  element.removeAttribute("style");
+// Writing the client style prop to a scratch declaration routes both name
+// sets through the same CSSOM canonicalization (shorthand expansion, name
+// casing), so server-set and client-produced names compare directly.
+function extraHydratedStyleNames(
+  serverStyles: readonly string[],
+  next: unknown,
+): string[] {
+  if (serverStyles.length === 0) return [];
 
-  const style = (element as HTMLElement).style;
-  if (style === undefined) return;
+  const scratch = document.createElement("div");
+  setStyle(scratch, {}, next);
+  const expected = new Set(hydratedStyleNames(scratch));
+
+  return serverStyles
+    .filter((name) => !expected.has(name))
+    .map((name) => `style.${name}`);
+}
+
+function hydratedStyleNames(element: Element): string[] {
+  const style = (element as HTMLElement).style as unknown as
+    | StyleTarget
+    | undefined;
+  if (style === undefined) return [];
 
   if (typeof style.length === "number" && typeof style.item === "function") {
     const names: string[] = [];
@@ -116,13 +162,24 @@ function clearHydratedStyle(element: Element): void {
       const name = style.item(index);
       if (name !== "") names.push(name);
     }
-
-    for (const name of names) style.removeProperty(name);
-    return;
+    return names;
   }
 
-  const styleRecord = style as unknown as Record<string, unknown>;
-  for (const name of Object.keys(styleRecord)) styleRecord[name] = "";
+  return Object.keys(style).filter((name) => style[name] !== "");
+}
+
+function hydratedAttributeName(
+  type: string,
+  name: string,
+  html: boolean,
+): string | null {
+  if ((type === "textarea" || type === "select") && valueProp(name)) {
+    return null;
+  }
+
+  if (name === "defaultValue") return "value";
+  if (name === "defaultChecked") return "checked";
+  return hostAttributeName(name, html);
 }
 
 function attributeNames(element: Element): string[] {
@@ -419,20 +476,6 @@ function removeAttribute(element: Element, attribute: string): void {
   }
 
   element.removeAttribute(attribute);
-}
-
-function hydratedAttributeName(
-  type: string,
-  name: string,
-  html: boolean,
-): string | null {
-  if ((type === "textarea" || type === "select") && valueProp(name)) {
-    return null;
-  }
-
-  if (name === "defaultValue") return "value";
-  if (name === "defaultChecked") return "checked";
-  return hostAttributeName(name, html);
 }
 
 function formProp(name: string): boolean {

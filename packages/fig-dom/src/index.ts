@@ -16,6 +16,10 @@ import {
   resourceFromHostProps,
 } from "@bgub/fig/internal";
 import {
+  validateInstanceNesting,
+  validateTextNesting,
+} from "@bgub/fig/dom-nesting";
+import {
   createRenderer,
   type DehydratedSuspenseBoundary,
   type DehydratedSuspenseError,
@@ -59,6 +63,8 @@ type SuspenseBoundaryStatus = DehydratedSuspenseBoundary<
   TextLike
 >["status"];
 
+declare const process: { env: { NODE_ENV?: string } };
+
 interface SuspenseMarker {
   id: string | null;
   status: SuspenseBoundaryStatus;
@@ -87,6 +93,23 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>
     createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
+  ...(process.env.NODE_ENV !== "production"
+    ? {
+        validateInstanceNesting: (
+          type: string,
+          props: Props,
+          ancestors: readonly string[],
+        ) => {
+          // Asset resources hoist to <head>, so their fiber position is not
+          // their DOM position; the server exempts them the same way.
+          if (resourceFromHostProps(type, props) !== null) return;
+          validateInstanceNesting(type, ancestors);
+        },
+        validateTextNesting,
+        containerType: (container: Container | Element) =>
+          isElementNode(container) ? elementName(container) : null,
+      }
+    : {}),
   appendInitialChild: (parent, child) => {
     if (appendDocumentResource(child)) return;
     parent.appendChild(child);

@@ -11,6 +11,7 @@ const isPackCommand = process.argv.some((arg) => arg.includes("pack-bin"));
 const figSourceAliasEntries = [
   ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
+  ["@bgub/fig/dom-nesting", "packages/fig/src/dom-nesting.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig-data", "packages/fig-data/src/index.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
@@ -42,6 +43,7 @@ const demoClientBundleDependencies = [
 const libraryEntries: Record<string, string[]> = {
   "packages/fig": [
     "./src/index.ts",
+    "./src/dom-nesting.ts",
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
   ],
@@ -111,13 +113,17 @@ function figSourceAliasMap(): Record<string, string> {
 }
 
 function figSourceResolveAliases(): Array<{
-  find: string;
+  find: RegExp;
   replacement: string;
 }> {
   return figSourceAliasEntries.map(([find, path]) => ({
-    find,
+    find: exactImport(find),
     replacement: workspacePath(path),
   }));
+}
+
+function exactImport(id: string): RegExp {
+  return new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 }
 
 function testConfigFor(path: string): TestConfig {

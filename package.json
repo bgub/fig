@@ -19,7 +19,7 @@
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "1 kB"
+      "limit": "1.1 kB"
     },
     {
       "path": "packages/fig-data/dist/index.js",

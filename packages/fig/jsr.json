@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./internal": "./src/internal.ts",
+    "./dom-nesting": "./src/dom-nesting.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts"
   },
   "publish": {

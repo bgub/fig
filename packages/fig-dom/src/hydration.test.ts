@@ -28,6 +28,9 @@ describe("@bgub/fig-dom hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");
     button.setAttribute("id", "server");
+    button.setAttribute("data-server", "preserve");
+    button.style.color = "red";
+    button.style.fontWeight = "bold";
     button.appendChild(new FakeText("Server"));
     container.appendChild(button);
     const calls: string[] = [];
@@ -48,10 +51,81 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([button]);
     expect(button.textContent).toBe("Client");
-    expect(button.attributes).toEqual({ id: "client" });
+    expect(button.attributes).toEqual({
+      "data-server": "preserve",
+      id: "client",
+    });
+    expect(button.style.color).toBe("red");
+    expect(button.style.fontWeight).toBe("bold");
 
     button.dispatch("click");
     expect(calls).toEqual(["click"]);
+  });
+
+  it("warns about server-only attributes preserved during hydration", () => {
+    const container = new FakeElement("root");
+    const button = new FakeElement("button");
+    button.setAttribute("data-server", "extra");
+    button.setAttribute("data-fig-resource-key", "internal");
+    container.appendChild(button);
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement("button", { id: "client" }),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([
+      "Hydration preserved extra server attributes or styles on <button>: " +
+        "data-server. They were preserved, so this element now differs " +
+        "from a pure client render.",
+    ]);
+  });
+
+  it("patches hydrated styles without deleting server-only styles", () => {
+    const container = new FakeElement("root");
+    const button = new FakeElement("button");
+    button.style.color = "red";
+    button.style.fontWeight = "bold";
+    container.appendChild(button);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement("button", {
+            style: { color: "blue" },
+          }),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(container.childNodes).toEqual([button]);
+    expect(button.style.color).toBe("blue");
+    expect(button.style.fontWeight).toBe("bold");
+    expect(errors).toEqual([
+      "Hydration preserved extra server attributes or styles on <button>: " +
+        "style.fontWeight. They were preserved, so this element now differs " +
+        "from a pure client render.",
+    ]);
   });
 
   it("keeps hydrated host text content after a same-value update", () => {
@@ -820,7 +894,7 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes).toEqual([]);
   });
 
-  it("removes server-only attributes and styles during hydration", () => {
+  it("preserves server-only attributes and styles during hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");
 
@@ -843,9 +917,14 @@ describe("@bgub/fig-dom hydration", () => {
     );
 
     expect(container.childNodes).toEqual([button]);
-    expect(button.attributes).toEqual({ class: "client" });
+    expect(button.attributes).toEqual({
+      class: "client",
+      "data-server": "extra",
+      id: "stale",
+      style: "color: red; font-weight: bold;",
+    });
     expect(button.style.color).toBe("blue");
-    expect(button.style.fontWeight).toBe("");
+    expect(button.style.fontWeight).toBe("bold");
   });
 
   it("hydrates unsafe HTML without reconciling its children", () => {
@@ -928,6 +1007,7 @@ describe("@bgub/fig-dom hydration", () => {
     expect(use.attributes).toEqual({
       "aria-label": "Icon",
       "data-id": "icon",
+      style: "--accent: red; color: blue;",
       tabindex: "0",
       "xlink:href": "#icon",
     });
@@ -956,6 +1036,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([input]);
     expect(input.attributes).toEqual({
+      "data-server": "extra",
       maxlength: "20",
       readonly: "true",
     });

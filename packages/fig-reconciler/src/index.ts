@@ -142,6 +142,13 @@ export interface HostConfig<Container, Instance, TextInstance> {
     parent: Parent<Container, Instance>,
   ): Instance;
   createTextInstance(text: string): TextInstance;
+  validateInstanceNesting?(
+    type: string,
+    props: Props,
+    ancestors: readonly string[],
+  ): void;
+  validateTextNesting?(text: string, ancestors: readonly string[]): void;
+  containerType?(container: Parent<Container, Instance>): string | null;
   appendInitialChild?(
     parent: Instance,
     child: HostNode<Instance, TextInstance>,
@@ -1121,13 +1128,39 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === TextTag) {
+      if (
+        process.env.NODE_ENV !== "production" &&
+        (node.alternate === null ||
+          node.alternate.props.nodeValue !== node.props.nodeValue)
+      ) {
+        host.validateTextNesting?.(
+          String(node.props.nodeValue),
+          hostAncestorTypes(node),
+        );
+      }
       if (tryHydrateText(node)) return;
       node.stateNode ??= host.createTextInstance(String(node.props.nodeValue));
       return;
     }
 
     if (node.tag === HostTag) {
+      const type = String(node.type);
       const children = hostChildren(node.props);
+
+      if (process.env.NODE_ENV !== "production") {
+        const ancestors = hostAncestorTypes(node);
+        if (node.alternate === null) {
+          host.validateInstanceNesting?.(type, node.props, ancestors);
+        }
+        // Text that becomes Text fibers is validated by the TextTag branch.
+        if (shouldUseHostTextContent(node)) {
+          const textContent = hostTextContent(children);
+          if (textContent !== null) {
+            ancestors.unshift(type);
+            host.validateTextNesting?.(textContent, ancestors);
+          }
+        }
+      }
 
       if (tryHydrateInstance(node)) {
         reconcileCurrentChildren(node, children);
@@ -1135,7 +1168,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       node.stateNode ??= host.createInstance(
-        String(node.type),
+        type,
         node.props,
         hostParent(node),
       );
@@ -3241,6 +3274,27 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     throw new Error("Could not find a host parent for fiber.");
+  }
+
+  function hostAncestorTypes(node: F): string[] {
+    const ancestors: string[] = [];
+
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if (parent.tag === HostTag) {
+        ancestors.push(String(parent.type));
+        continue;
+      }
+
+      // Fiber ancestry ends at portals and roots; seed the container's own
+      // tag so nesting against the render target is still validated.
+      if (parent.tag === PortalTag || parent.tag === RootTag) {
+        const container = host.containerType?.(hostParentFor(parent));
+        if (container != null) ancestors.push(container);
+        break;
+      }
+    }
+
+    return ancestors;
   }
 
   function hostSibling(node: F): HostNode<Instance, TextInstance> | null {

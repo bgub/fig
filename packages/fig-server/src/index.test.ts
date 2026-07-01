@@ -301,6 +301,39 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("rejects invalid DOM nesting during server render", async () => {
+    await expect(
+      renderToString(
+        createElement("div", null, createElement("td", null, "Cell")),
+      ),
+    ).rejects.toThrow("Invalid DOM nesting: <td> cannot be a child of <div>.");
+  });
+
+  it("rejects invalid text nesting during server render", async () => {
+    await expect(
+      renderToString(createElement("table", null, "Text")),
+    ).rejects.toThrow(
+      "Invalid DOM nesting: text cannot be a child of <table>.",
+    );
+  });
+
+  it("renders tables with whitespace-only text children", async () => {
+    const html = await renderToString(
+      createElement(
+        "table",
+        null,
+        " ",
+        createElement(
+          "tbody",
+          null,
+          createElement("tr", null, createElement("td", null, "Cell")),
+        ),
+      ),
+    );
+
+    expect(html).toBe("<table> <tbody><tr><td>Cell</td></tr></tbody></table>");
+  });
+
   it("reads server context values from the nearest provider", async () => {
     const Theme = createContext("light");
 

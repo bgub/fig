@@ -26,6 +26,10 @@ import {
   setCurrentDataStore,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
+import {
+  validateInstanceNesting,
+  validateTextNesting,
+} from "@bgub/fig/dom-nesting";
 import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
   escapeAttribute,
@@ -65,6 +69,8 @@ import type {
   ServerRenderOptions,
   ServerRenderRequest,
 } from "./types.ts";
+
+declare const process: { env: { NODE_ENV?: string } };
 
 interface Request {
   abortableTasks: Set<Task>;
@@ -117,6 +123,10 @@ interface Task {
   // one. Threaded so suspended content streamed for that boundary can be revealed
   // into the activity template's inert content.
   hiddenActivityId: string | null;
+  // Logical host-ancestor tags (nearest first) for DOM-nesting validation.
+  // Suspended segments stream into staging nodes but are moved into place on
+  // the client, so their spawn-point ancestors stay authoritative.
+  hostAncestors: readonly string[];
   idPath: string;
   node: FigNode;
   selectProps: Props | null;
@@ -163,6 +173,7 @@ interface RenderFrame {
   dispatcher: RenderDispatcher;
   hiddenActivity: boolean;
   hiddenActivityId: string | null;
+  hostAncestors: readonly string[];
   request: Request;
   segment: Segment;
   idPath: string;
@@ -278,6 +289,7 @@ export function createServerRenderRequest(
     null,
     false,
     null,
+    [],
   );
   request.pingedTasks.push(rootTask);
 
@@ -326,6 +338,7 @@ function createTask(
   stack: StackFrame | null,
   hiddenActivity: boolean,
   hiddenActivityId: string | null,
+  hostAncestors: readonly string[],
 ): Task {
   request.pendingTasks += 1;
   if (blockedBoundary === null) {
@@ -340,6 +353,7 @@ function createTask(
     contextValues,
     hiddenActivity,
     hiddenActivityId,
+    hostAncestors,
     idPath,
     node,
     selectProps,
@@ -412,6 +426,7 @@ function retryTask(request: Request, task: Task): void {
     task.stack,
     task.hiddenActivity,
     task.hiddenActivityId,
+    task.hostAncestors,
   );
 
   try {
@@ -437,6 +452,7 @@ function createRenderFrame(
   stack: StackFrame | null,
   hiddenActivity: boolean,
   hiddenActivityId: string | null,
+  hostAncestors: readonly string[],
 ): RenderFrame {
   const frame = {
     abortSet,
@@ -445,6 +461,7 @@ function createRenderFrame(
     dispatcher: null as unknown as RenderDispatcher,
     hiddenActivity,
     hiddenActivityId,
+    hostAncestors,
     idPath,
     localIdCounter: 0,
     request,
@@ -495,6 +512,9 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
   if (typeof node === "string" || typeof node === "number") {
     if (frame.request.document !== null && !frame.request.document.hasHead) {
       if (String(node).trim() !== "") throw invalidDocumentShellError();
+    }
+    if (process.env.NODE_ENV !== "production") {
+      validateTextNesting(String(node), frame.hostAncestors);
     }
     writeText(String(node), frame.segment);
     return;
@@ -752,6 +772,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.stack,
     frame.hiddenActivity,
     frame.hiddenActivityId,
+    frame.hostAncestors,
   );
 
   try {
@@ -788,6 +809,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     frame.stack,
     frame.hiddenActivity,
     frame.hiddenActivityId,
+    frame.hostAncestors,
   );
 
   try {
@@ -809,6 +831,10 @@ function renderHostElement(
   frame: RenderFrame,
 ): void {
   if (renderHostResource(type, props, frame)) return;
+
+  if (process.env.NODE_ENV !== "production") {
+    validateInstanceNesting(type, frame.hostAncestors);
+  }
 
   const document = frame.request.document;
 
@@ -855,6 +881,10 @@ function renderHostElement(
 
   const previousSelectProps = frame.selectProps;
   if (type === "select") frame.selectProps = props;
+  const previousHostAncestors = frame.hostAncestors;
+  if (process.env.NODE_ENV !== "production") {
+    frame.hostAncestors = [type, ...previousHostAncestors];
+  }
 
   try {
     renderChildren(props.children, frame);
@@ -866,6 +896,7 @@ function renderHostElement(
     }
   } finally {
     frame.selectProps = previousSelectProps;
+    frame.hostAncestors = previousHostAncestors;
   }
   if (document !== null && type === "head") {
     frame.segment.write(documentHeadMarker);
@@ -906,6 +937,7 @@ function spawnSuspendedTask(
     frame.stack,
     frame.hiddenActivity,
     frame.hiddenActivityId,
+    frame.hostAncestors,
   );
   thenable.then(
     () => pingTask(request, task),

@@ -24,6 +24,7 @@ import {
   fetchRsc,
   isRscRequestCancelled,
   RscBoundary,
+  type RscClientReferenceMetadata,
   type RscFetch,
   renderToRscStream,
 } from "./rsc.ts";
@@ -334,7 +335,7 @@ describe("RSC rendering", () => {
     });
 
     const rows = await renderToRscRows(createElement(Counter, {}));
-    const seen: Array<Record<string, unknown>> = [];
+    const seen: RscClientReferenceMetadata[] = [];
     const response = createRscResponse({
       resolveClientReference(metadata) {
         seen.push(metadata);
