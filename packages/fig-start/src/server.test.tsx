@@ -389,14 +389,23 @@ describe("@bgub/fig-start server handler", () => {
     await mkdir(join(dir, "assets"));
     await writeFile(join(dir, "server.js"), "server secret");
     await writeFile(join(dir, "server-helper.js"), "server helper secret");
-    await writeFile(
-      join(dir, "assets", "client.js"),
-      'import("./Island-test.js");',
-    );
+    await writeFile(join(dir, "assets", "client.js"), "client entry");
     await writeFile(join(dir, "assets", "style.css"), ".island{}");
     await writeFile(
       join(dir, "assets", "Island-test.js"),
       "export const value = 1;",
+    );
+    await writeFile(
+      join(dir, "fig-start-client-assets.json"),
+      JSON.stringify({
+        clientReferences: {
+          Island: {
+            css: ["/assets/style.css"],
+            module: "/assets/Island-test.js",
+          },
+        },
+        serverRoutes: {},
+      }),
     );
 
     const resolver = createClientAssetResolver({
@@ -424,12 +433,44 @@ describe("@bgub/fig-start server handler", () => {
     }
   });
 
+  it("serves only the client entry when the asset manifest is missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fig-start-"));
+    await writeFile(join(dir, "server.js"), "server secret");
+    await writeFile(join(dir, "client.js"), "client entry");
+    await writeFile(join(dir, "Island-test.js"), "unmanifested chunk");
+
+    const resolver = createClientAssetResolver({
+      appUrl: pathToFileURL(join(dir, "server.js")).href,
+      cache: false,
+      clientEntry: "/client.js",
+    });
+
+    try {
+      expect((await resolver.resolve("/client.js"))?.href).toBe(
+        pathToFileURL(join(dir, "client.js")).href,
+      );
+      expect(await resolver.resolve("/Island-test.js")).toBe(null);
+      expect(await resolver.resolve("/server.js")).toBe(null);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+
   it("re-discovers client chunks when asset caching is disabled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "fig-start-"));
     await mkdir(join(dir, "assets"));
     await writeFile(join(dir, "server.js"), "server");
-    await writeFile(join(dir, "assets", "client.js"), 'import("./old.js");');
+    await writeFile(join(dir, "assets", "client.js"), "client entry");
     await writeFile(join(dir, "assets", "old.js"), "export const old = true;");
+    await writeFile(
+      join(dir, "fig-start-client-assets.json"),
+      JSON.stringify({
+        clientReferences: {
+          Island: { module: "/assets/old.js" },
+        },
+        serverRoutes: {},
+      }),
+    );
 
     const resolver = createClientAssetResolver({
       appUrl: pathToFileURL(join(dir, "server.js")).href,
@@ -443,8 +484,13 @@ describe("@bgub/fig-start server handler", () => {
       );
 
       await writeFile(
-        join(dir, "assets", "client.js"),
-        'import("./new.js");',
+        join(dir, "fig-start-client-assets.json"),
+        JSON.stringify({
+          clientReferences: {
+            Island: { module: "/assets/new.js" },
+          },
+          serverRoutes: {},
+        }),
       );
       await writeFile(
         join(dir, "assets", "new.js"),

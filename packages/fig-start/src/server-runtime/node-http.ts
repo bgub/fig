@@ -9,8 +9,11 @@ export interface NodeHttpServerOptions {
   port: number;
 }
 
+// Node-only listen/close adapter. Keep portable Fig Start rendering in the
+// web-standard StartHandler (`Request -> Response`) path so other runtimes can
+// supply their own adapter without touching router or RSC code.
 export const listenNodeHttpServer = Effect.fn("listenNodeHttpServer")(
-  function*(options: NodeHttpServerOptions) {
+  function* (options: NodeHttpServerOptions) {
     return yield* Effect.acquireRelease(
       startNodeHttpServer(options),
       (server) =>

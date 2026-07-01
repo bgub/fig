@@ -9,6 +9,7 @@ import {
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import { renderToRscStream } from "@bgub/fig-server/rsc";
+import { Effect } from "effect";
 import { createServer, type Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
@@ -32,6 +33,7 @@ import { RouterContext } from "./router-context.ts";
 import type { AnyRoute } from "./route.ts";
 import { createClientAssetResolver } from "./server-assets.ts";
 import { contentTypeFor } from "./server-runtime/content-type.ts";
+import { normalizeStartRuntimeConfig } from "./server-runtime/config.ts";
 import { createStartNodeRequestListener } from "./server-runtime/request-listener.ts";
 
 export interface StartHandlerOptions {
@@ -195,8 +197,11 @@ export interface StartServerOptions extends Omit<
   // Base URL the built client assets sit next to — pass `import.meta.url`. The
   // framework serves `./client.js` (next to your server bundle) automatically.
   appUrl: string;
+  cacheClientAssets?: boolean;
   clientEntry?: string;
+  mode?: "development" | "production";
   port?: number;
+  publicUrl?: string;
 }
 
 export interface StartStaticAsset {
@@ -210,24 +215,34 @@ export type StartStaticAssetInput = string | Uint8Array | StartStaticAsset;
 // assets, handles status codes and headers, and listens. An app's server entry
 // is just `startServer({ routes, appUrl: import.meta.url, ... })`.
 export function startServer(options: StartServerOptions): Server {
-  const clientEntry = options.clientEntry ?? "/client.js";
-  const cacheClientAssets = process.env.NODE_ENV === "production";
+  const config = Effect.runSync(
+    normalizeStartRuntimeConfig({
+      appUrl: options.appUrl,
+      cacheClientAssets: options.cacheClientAssets,
+      clientEntry: options.clientEntry,
+      mode: options.mode,
+      port: options.port,
+      publicUrl: options.publicUrl,
+    }),
+  );
   const clientAssets = createClientAssetResolver({
-    appUrl: options.appUrl,
-    cache: cacheClientAssets,
-    clientEntry,
+    appUrl: config.appUrl.href,
+    cache: config.cacheClientAssets,
+    clientEntry: config.clientEntry,
   });
-  const handler = createRequestHandler({ ...options, clientEntry });
+  const handler = createRequestHandler({
+    ...options,
+    clientEntry: config.clientEntry,
+  });
   const listener = createStartNodeRequestListener({
-    cacheClientAssets,
+    cacheClientAssets: config.cacheClientAssets,
     clientAssets,
     handler,
   });
   const server = createServer(listener);
 
-  const port = options.port ?? Number(process.env.PORT ?? 3000);
-  server.listen(port, () => {
-    console.log(`Fig Start: http://localhost:${port}/`);
+  server.listen(config.port, () => {
+    console.log(`Fig Start: ${config.publicUrl.href}`);
   });
   return server;
 }
@@ -325,18 +340,26 @@ function isRscRouteRequest(request: Request): boolean {
 // allReady), so the request would otherwise return 200 with no server log. Surface
 // it; the client error boundary renders it on its side.
 function reportServerRouteError(routeId: string, line: string): void {
-  let row: { tag?: string; value?: { message?: string } };
-  try {
-    row = JSON.parse(line) as typeof row;
-  } catch {
-    return;
-  }
-  if (row.tag !== "error") return;
+  const message = rscErrorMessage(line);
+  if (message === null) return;
   console.error(
-    `[fig-start] server route "${routeId}" failed to render: ${
-      row.value?.message ?? "unknown error"
-    }`,
+    `[fig-start] server route "${routeId}" failed to render: ${message}`,
   );
+}
+
+function rscErrorMessage(line: string): string | null {
+  let row: unknown;
+  try {
+    row = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(row) || row.tag !== "error") return null;
+  const value = row.value;
+  return isRecord(value) && typeof value.message === "string"
+    ? value.message
+    : "unknown error";
 }
 
 function streamRscSegmentFrames(
@@ -414,10 +437,12 @@ function createRscErrorReporter(
   };
 
   function reportServerRouteErrorLine(routeId: string, line: string): void {
-    if (line.length > 0 && line.includes('"tag":"error"')) {
-      reportServerRouteError(routeId, line);
-    }
+    if (line.length > 0) reportServerRouteError(routeId, line);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function renderBootstrap(input: {
@@ -452,8 +477,12 @@ function renderBootstrap(input: {
   ].join("");
 }
 
+const BODY_CLOSE_MARKER = "</body>";
+const BODY_CLOSE_HOLDBACK = BODY_CLOSE_MARKER.length - 1;
+
 // Inject the bootstrap right before the document's </body> so the client entry
-// and hydration data load with the shell.
+// and hydration data load with the shell. This is not a general HTML parser; it
+// only holds back enough decoded text to match a split closing-body marker.
 function injectBeforeBodyClose(
   stream: ReadableStream<Uint8Array>,
   html: string,
@@ -461,7 +490,6 @@ function injectBeforeBodyClose(
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
-  const marker = "</body>";
   let injected = false;
   let buffer = "";
 
@@ -471,6 +499,7 @@ function injectBeforeBodyClose(
       for (;;) {
         const { done, value } = await reader.read();
         if (done) {
+          buffer += decoder.decode();
           if (buffer.length > 0) controller.enqueue(encoder.encode(buffer));
           if (!injected) {
             controller.enqueue(encoder.encode(html));
@@ -488,12 +517,12 @@ function injectBeforeBodyClose(
         }
 
         buffer += decoder.decode(value, { stream: true });
-        const index = buffer.indexOf(marker);
+        const index = buffer.indexOf(BODY_CLOSE_MARKER);
         if (index === -1) {
-          // Hold back a marker-length tail in case </body> spans two chunks.
+          // Hold back the only suffix that can still become `</body>`.
           const safe = buffer.slice(
             0,
-            Math.max(0, buffer.length - marker.length),
+            Math.max(0, buffer.length - BODY_CLOSE_HOLDBACK),
           );
           if (safe.length > 0) {
             controller.enqueue(encoder.encode(safe));

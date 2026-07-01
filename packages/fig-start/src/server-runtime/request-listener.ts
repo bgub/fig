@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import type { RequestListener } from "node:http";
-import type { ClientAssetResolver } from "../server-assets.ts";
-import { requestPathname } from "../server-assets.ts";
+import {
+  type ClientAssetResolver,
+  isServableAssetPath,
+  requestPathname,
+} from "../server-assets.ts";
 import type { StartHandler } from "../server.ts";
 import { contentTypeFor } from "./content-type.ts";
 
@@ -40,6 +43,11 @@ interface ServeClientAssetOrRouteInput {
 async function serveClientAssetOrRoute(
   input: ServeClientAssetOrRouteInput,
 ): Promise<void> {
+  if (!isAssetRequest(input.request.method, input.url)) {
+    input.listener(input.request, input.response);
+    return;
+  }
+
   let assetUrl: URL | null;
   try {
     assetUrl = await input.clientAssets.resolve(input.url);
@@ -51,19 +59,21 @@ async function serveClientAssetOrRoute(
   if (assetUrl !== null) {
     await serveClientAsset(
       assetUrl,
+      input.request.method === "HEAD",
       input.response,
       input.cacheClientAssets,
     );
     return;
   }
 
-  if (requestPathname(input.url) === "/favicon.ico") {
-    input.response.writeHead(204);
-    input.response.end();
-    return;
-  }
-
   input.listener(input.request, input.response);
+}
+
+function isAssetRequest(method: string | undefined, url: string): boolean {
+  if (method !== "GET" && method !== "HEAD") return false;
+  const pathname = requestPathname(url);
+  const name = pathname.slice(pathname.lastIndexOf("/") + 1);
+  return isServableAssetPath(name);
 }
 
 function createNodeRequestListener(handler: StartHandler): RequestListener {
@@ -99,19 +109,24 @@ function createNodeRequestListener(handler: StartHandler): RequestListener {
 
 async function serveClientAsset(
   url: URL,
+  headOnly: boolean,
   response: Parameters<RequestListener>[1],
   cache: boolean,
 ): Promise<void> {
   try {
     const code = await readFile(url);
     response.writeHead(200, {
-      "cache-control": cache ? "public, max-age=31536000, immutable" : "no-store",
+      "cache-control": cache
+        ? "public, max-age=31536000, immutable"
+        : "no-store",
       "content-type": contentTypeFor(url.pathname),
     });
-    response.end(code);
+    if (headOnly) response.end();
+    else response.end(code);
   } catch {
     response.writeHead(404);
-    response.end("client bundle not built");
+    if (headOnly) response.end();
+    else response.end("client bundle not built");
   }
 }
 
