@@ -187,15 +187,18 @@ function outputAssetHrefsForChunk(root: string, chunk: OutputChunk): string[] {
 }
 
 function outputAssetAllowlistHrefsForBundle(bundle: OutputBundle): string[] {
-  return unique(
-    Object.values(bundle)
-      .filter((file) => file.type === "asset")
-      .map((file) => file.fileName)
-      .filter(
-        (fileName) => fileName.endsWith(".css") || isPreloadableAsset(fileName),
-      )
-      .map(outputHref),
-  );
+  const hrefs: string[] = [];
+  for (const file of Object.values(bundle)) {
+    if (file.type === "chunk") {
+      hrefs.push(outputHref(file.fileName));
+      continue;
+    }
+
+    if (file.fileName.endsWith(".css") || isPreloadableAsset(file.fileName)) {
+      hrefs.push(outputHref(file.fileName));
+    }
+  }
+  return unique(hrefs);
 }
 
 async function sourceAssetHrefsForModule(

@@ -30,9 +30,7 @@ import {
   ROOT_ELEMENT_ID,
   RSC_SEGMENTS_SCRIPT_ID,
   RSC_STREAM_GLOBAL,
-  CLIENT_HYDRATE_GLOBAL,
   CLIENT_REFERENCE_MODULES_GLOBAL,
-  CLIENT_REFERENCE_PRELOAD_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedRscFrame,
   type SerializedRscSegment,
@@ -768,32 +766,21 @@ function ssrClientReferenceBootstrapScript(
   modules: readonly ClientReferenceModule[],
   nonceAttr: string,
 ): string {
-  return `<script type="module"${nonceAttr}>globalThis[${escapeJson(CLIENT_REFERENCE_PRELOAD_GLOBAL)}] = true;
-${clientReferenceModuleImports(modules)}
-const registry = globalThis[${escapeJson(CLIENT_REFERENCE_MODULES_GLOBAL)}] ??= {};
-${clientReferenceModuleAssignments(modules)}
-delete globalThis[${escapeJson(CLIENT_REFERENCE_PRELOAD_GLOBAL)}];
-await import(${escapeJson(clientEntry)});
-globalThis[${escapeJson(CLIENT_HYDRATE_GLOBAL)}]?.();</script>`;
-}
+  const moduleImports = modules.map(
+    (entry, index) =>
+      `const m${index} = await import(${escapeJson(entry.module)});`,
+  );
+  const moduleAssignments = modules.map(
+    (entry, index) => `registry[${escapeJson(entry.id)}] = m${index};`,
+  );
+  const lines = [
+    ...moduleImports,
+    `const registry = globalThis[${escapeJson(CLIENT_REFERENCE_MODULES_GLOBAL)}] ??= {};`,
+    ...moduleAssignments,
+    `await import(${escapeJson(clientEntry)});`,
+  ];
 
-function clientReferenceModuleImports(
-  modules: readonly ClientReferenceModule[],
-): string {
-  return modules
-    .map(
-      (entry, index) =>
-        `const m${index} = await import(${escapeJson(entry.module)});`,
-    )
-    .join("\n");
-}
-
-function clientReferenceModuleAssignments(
-  modules: readonly ClientReferenceModule[],
-): string {
-  return modules
-    .map((entry, index) => `registry[${escapeJson(entry.id)}] = m${index};`)
-    .join("\n");
+  return `<script type="module"${nonceAttr}>${lines.join("\n")}</script>`;
 }
 
 interface DocumentDataStream {

@@ -3,35 +3,41 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { figStart } from "./index.ts";
-import { CLIENT_ENTRY_ID, resolvedVirtualId } from "./ids.ts";
+import {
+  CLIENT_ENTRY_ID,
+  CLIENT_RUNTIME_ID,
+  resolvedVirtualId,
+} from "./ids.ts";
 
 describe("@bgub/fig-start/vite plugin", () => {
   it("serves generated client and server entries", async () => {
     const plugin = figStart();
     const clientId = plugin.resolveId("virtual:fig-start/client-entry");
+    const runtimeId = plugin.resolveId("virtual:fig-start/client-runtime");
     const serverId = plugin.resolveId("virtual:fig-start/server-entry");
 
     expect(clientId).toBe("\0virtual:fig-start/client-entry");
+    expect(runtimeId).toBe("\0virtual:fig-start/client-runtime");
     expect(serverId).toBe("\0virtual:fig-start/server-entry");
     await expect(plugin.load(clientId ?? "")).resolves.toBe(
+      `import { startFigStartClient } from "virtual:fig-start/client-runtime";
+
+startFigStartClient();
+`,
+    );
+    await expect(plugin.load(runtimeId ?? "")).resolves.toBe(
       `import "virtual:fig-start/server-route-assets";
 import { hydrateStart } from "@bgub/fig-start/client";
 import { loadClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
-function __figStartHydrate() {
+export function startFigStartClient() {
   hydrateStart({
     context: { appName: start.appName },
     loadClientReference,
     onRecoverableError: start.onRecoverableError,
     routes: start.routes,
   });
-}
-
-if (globalThis["__figStartPreloadingClientReferences"] === true) {
-  globalThis["__figStartHydrate"] = __figStartHydrate;
-} else {
-  __figStartHydrate();
 }
 `,
     );
@@ -75,10 +81,7 @@ startServer({
     expect(clientId).toBe("\0virtual:fig-start/client-entry");
     expect(devEnvId).toBe("\0virtual:fig-start/dev-env");
     await expect(plugin.load(clientId ?? "")).resolves.toContain(
-      'import "virtual:fig-start/dev-env";\nimport "virtual:fig-start/server-route-assets";\nimport { hydrateStart }',
-    );
-    await expect(plugin.load(clientId ?? "")).resolves.toContain(
-      'globalThis["__figStartPreloadingClientReferences"] === true',
+      'import "virtual:fig-start/dev-env";\nimport { startFigStartClient } from "virtual:fig-start/client-runtime";',
     );
     await expect(plugin.load(devEnvId ?? "")).resolves.toBe(
       `globalThis.process ??= { env: {} };
@@ -97,11 +100,76 @@ export {};
       plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/client-entry"),
     ).toBe("/project/src/start.tsx");
     expect(
+      plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/client-runtime"),
+    ).toBe("/project/src/start.tsx");
+    expect(
       plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/server-entry"),
     ).toBe("/project/src/start.tsx");
     expect(
       plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/server-manifest"),
     ).toBe("/project/src/start.tsx");
+  });
+
+  it("adds the client runtime entry to Fig Start client pack builds", () => {
+    const plugin = figStart({ target: "client" });
+    const config = {
+      entry: { client: CLIENT_ENTRY_ID },
+    };
+
+    plugin.tsdownConfig?.(config);
+
+    expect(config.entry).toEqual({
+      client: CLIENT_ENTRY_ID,
+      "fig-start-client-runtime": CLIENT_RUNTIME_ID,
+    });
+  });
+
+  it("does not add the client runtime entry to server pack builds", () => {
+    const plugin = figStart({ target: "server" });
+    const config = {
+      entry: { server: "virtual:fig-start/server-entry" },
+    };
+
+    plugin.tsdownConfig?.(config);
+
+    expect(config.entry).toEqual({
+      server: "virtual:fig-start/server-entry",
+    });
+  });
+
+  it("preserves an explicit client runtime pack entry", () => {
+    const plugin = figStart({ target: "client" });
+    const config = {
+      entry: {
+        client: CLIENT_ENTRY_ID,
+        runtime: CLIENT_RUNTIME_ID,
+      },
+    };
+
+    plugin.tsdownConfig?.(config);
+
+    expect(config.entry).toEqual({
+      client: CLIENT_ENTRY_ID,
+      runtime: CLIENT_RUNTIME_ID,
+    });
+  });
+
+  it("adds the client runtime entry to Vite client build inputs", () => {
+    const plugin = figStart({ target: "client" });
+    const config = {
+      build: {
+        rollupOptions: {
+          input: { client: CLIENT_ENTRY_ID },
+        },
+      },
+    };
+
+    plugin.config?.(config);
+
+    expect(config.build.rollupOptions.input).toEqual({
+      client: CLIENT_ENTRY_ID,
+      "fig-start-client-runtime": CLIENT_RUNTIME_ID,
+    });
   });
 
   it("transforms Tailwind CSS before the CSS bundler sees imports", async () => {
@@ -309,6 +377,11 @@ export function Other() {
       );
       expect(JSON.parse(manifest)).toEqual({
         assets: [
+          "/client.js",
+          "/start-abc.js",
+          "/Island-abc.js",
+          "/Other-abc.js",
+          "/dashboard-assets.js",
           "/assets/global.css",
           "/assets/island-def.css",
           "/assets/island-mark.svg",

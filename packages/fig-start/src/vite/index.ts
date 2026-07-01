@@ -8,6 +8,7 @@ import {
   CSS_MODULE_PREFIX,
   CLIENT_ASSET_MANIFEST_FILE,
   CLIENT_ENTRY_ID,
+  CLIENT_RUNTIME_ID,
   DEV_ENV_ID,
   MANIFEST_ID,
   ROOT_RELATIVE_VIRTUAL_IDS,
@@ -26,6 +27,7 @@ import {
 } from "./css-modules.ts";
 import {
   renderClientEntry,
+  renderClientRuntime,
   renderDevEnv,
   renderManifest,
   renderServerEntry,
@@ -45,11 +47,13 @@ import {
 } from "./transform.ts";
 
 export interface FigStartPlugin {
+  config?(config: FigStartViteConfig): void;
   configResolved(config: { root?: string }): void;
   enforce: "pre";
   load(this: unknown, id: string): Promise<string | null>;
   name: string;
   resolveId(id: string, importer?: string): string | null;
+  tsdownConfig?(config: FigStartTsdownConfig): void;
   transform(
     code: string,
     id: string,
@@ -63,6 +67,27 @@ export interface FigStartPluginOptions {
   target?: "auto" | "client" | "server";
   tailwind?: boolean | { base?: string };
 }
+
+type BuildEntry = BuildEntryItem | readonly BuildEntryItem[];
+type BuildEntryItem = string | NamedBuildEntry;
+type NamedBuildEntry = Record<string, string | readonly string[]>;
+
+interface FigStartTsdownConfig {
+  entry?: BuildEntry;
+}
+
+interface FigStartViteConfig {
+  build?: {
+    rollupOptions?: {
+      input?: BuildEntry;
+    };
+  };
+}
+
+const CLIENT_RUNTIME_ENTRY_NAME = "fig-start-client-runtime";
+const CLIENT_RUNTIME_NAMED_ENTRY = {
+  [CLIENT_RUNTIME_ENTRY_NAME]: CLIENT_RUNTIME_ID,
+};
 
 // Vite plugin: rewrites `.tsx` imports inside `.server.tsx` modules into Fig
 // client references, and serves generated virtual modules for Start's runtime.
@@ -78,6 +103,7 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
     [MANIFEST_ID]: () => renderManifest(root),
     [SERVER_MANIFEST_ID]: () => renderServerManifest(root),
     [CLIENT_ENTRY_ID]: () => renderClientEntry(clientNodeEnv),
+    [CLIENT_RUNTIME_ID]: () => renderClientRuntime(),
     [SERVER_ENTRY_ID]: () => renderServerEntry(),
     [DEV_ENV_ID]: () => renderDevEnv(clientNodeEnv),
     [SERVER_ROUTE_ASSETS_ID]: () => renderServerRouteAssets(root),
@@ -86,6 +112,22 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
   return {
     name: "fig-start",
     enforce: "pre",
+    config(config) {
+      if (target !== "client") return;
+      const rollupOptions = config.build?.rollupOptions;
+      if (rollupOptions === undefined) return;
+      rollupOptions.input = entryWithClientRuntime(
+        rollupOptions.input,
+        CLIENT_RUNTIME_ID,
+      );
+    },
+    tsdownConfig(config) {
+      if (target !== "client") return;
+      config.entry = entryWithClientRuntime(
+        config.entry,
+        CLIENT_RUNTIME_NAMED_ENTRY,
+      );
+    },
     configResolved(config) {
       if (typeof config.root === "string") root = config.root;
     },
@@ -180,6 +222,50 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       return { code: result.code, map: result.map };
     },
   };
+}
+
+function entryWithClientRuntime(
+  entry: BuildEntry | undefined,
+  runtimeEntry: BuildEntryItem,
+): BuildEntry | undefined {
+  if (
+    entry === undefined ||
+    !entryIncludes(entry, CLIENT_ENTRY_ID) ||
+    entryIncludes(entry, CLIENT_RUNTIME_ID)
+  ) {
+    return entry;
+  }
+
+  if (typeof entry === "string") return [entry, runtimeEntry];
+  if (isBuildEntryArray(entry)) return [...entry, runtimeEntry];
+  return { ...entry, [CLIENT_RUNTIME_ENTRY_NAME]: CLIENT_RUNTIME_ID };
+}
+
+function entryIncludes(entry: BuildEntry, specifier: string): boolean {
+  if (typeof entry === "string") return entry === specifier;
+  if (isBuildEntryArray(entry)) {
+    return entry.some((item) =>
+      typeof item === "string"
+        ? item === specifier
+        : namedBuildEntryIncludes(item, specifier),
+    );
+  }
+  return namedBuildEntryIncludes(entry, specifier);
+}
+
+function isBuildEntryArray(
+  entry: BuildEntry,
+): entry is readonly BuildEntryItem[] {
+  return Array.isArray(entry);
+}
+
+function namedBuildEntryIncludes(
+  input: NamedBuildEntry,
+  specifier: string,
+): boolean {
+  return Object.values(input).some((value) =>
+    typeof value === "string" ? value === specifier : value.includes(specifier),
+  );
 }
 
 function resolveCssModuleId(

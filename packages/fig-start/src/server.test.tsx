@@ -15,9 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import {
-  CLIENT_HYDRATE_GLOBAL,
   CLIENT_REFERENCE_MODULES_GLOBAL,
-  CLIENT_REFERENCE_PRELOAD_GLOBAL,
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
   hasClientReferences,
@@ -216,14 +214,10 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).not.toContain(`data-fig-client-reference="${ssrIslandId}"`);
     expect(html).toContain(ssrIslandId);
     expect(html).toContain('\\"ssr\\":true');
-    expect(html).toContain(
-      `globalThis["${CLIENT_REFERENCE_PRELOAD_GLOBAL}"] = true;`,
-    );
     expect(html).toContain('const m0 = await import("/assets/ssr-island.js");');
     expect(html).toContain(`globalThis["${CLIENT_REFERENCE_MODULES_GLOBAL}"]`);
     expect(html).toContain(`registry["${ssrIslandId}"] = m0;`);
     expect(html).toContain('await import("/client.js");');
-    expect(html).toContain(`globalThis["${CLIENT_HYDRATE_GLOBAL}"]?.();`);
     expect(html.indexOf(`registry["${ssrIslandId}"] = m0;`)).toBeLessThan(
       html.indexOf('await import("/client.js");'),
     );

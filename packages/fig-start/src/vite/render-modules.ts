@@ -1,11 +1,8 @@
 import { readFile } from "node:fs/promises";
-import {
-  CLIENT_HYDRATE_GLOBAL,
-  CLIENT_REFERENCE_PRELOAD_GLOBAL,
-} from "../bootstrap.ts";
 import { assetImportSpecifiers, isCssSpecifier } from "./asset-imports.ts";
 import {
   CLIENT_ASSET_MANIFEST_FILE,
+  CLIENT_RUNTIME_ID,
   DEV_ENV_ID,
   SERVER_ROUTE_ASSETS_ID,
   SERVER_ROUTE_ASSET_MODULE_PREFIX,
@@ -134,24 +131,25 @@ export function renderClientEntry(clientNodeEnv?: string): string {
   const devEnvImport =
     clientNodeEnv === undefined ? "" : `import "${DEV_ENV_ID}";\n`;
 
-  return `${devEnvImport}import "${SERVER_ROUTE_ASSETS_ID}";
+  return `${devEnvImport}import { startFigStartClient } from "${CLIENT_RUNTIME_ID}";
+
+startFigStartClient();
+`;
+}
+
+export function renderClientRuntime(): string {
+  return `import "${SERVER_ROUTE_ASSETS_ID}";
 import { hydrateStart } from "@bgub/fig-start/client";
 import { loadClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
-function __figStartHydrate() {
+export function startFigStartClient() {
   hydrateStart({
     context: { appName: start.appName },
     loadClientReference,
     onRecoverableError: start.onRecoverableError,
     routes: start.routes,
   });
-}
-
-if (globalThis[${JSON.stringify(CLIENT_REFERENCE_PRELOAD_GLOBAL)}] === true) {
-  globalThis[${JSON.stringify(CLIENT_HYDRATE_GLOBAL)}] = __figStartHydrate;
-} else {
-  __figStartHydrate();
 }
 `;
 }

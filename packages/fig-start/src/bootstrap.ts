@@ -10,9 +10,6 @@ export const RSC_SEGMENTS_SCRIPT_ID = "__fig_start_rsc_segments__";
 export const RSC_FRAME_ATTR = "data-fig-rsc-frame";
 export const RSC_STREAM_GLOBAL = "__figStartRSC";
 export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
-export const CLIENT_REFERENCE_PRELOAD_GLOBAL =
-  "__figStartPreloadingClientReferences";
-export const CLIENT_HYDRATE_GLOBAL = "__figStartHydrate";
 export const RSC_BOUNDARY_HEADER = "x-fig-rsc-boundary";
 export const RSC_ROUTE_ID_HEADER = "x-fig-rsc-route-id";
 export const RSC_SEGMENT_ID_HEADER = "x-fig-rsc-segment-id";
