@@ -204,6 +204,23 @@ describe("@bgub/fig-dom diagnostics", () => {
     }).toThrow("Invalid DOM nesting: <div> cannot be a child of <select>.");
   });
 
+  it("allows text inside select and optgroup", () => {
+    expectValidRender(
+      createElement(
+        "select",
+        null,
+        "Choose:",
+        createElement(
+          "optgroup",
+          { label: "Fruit" },
+          "Ripe",
+          createElement("option", null, "Apple"),
+        ),
+      ),
+      "Choose:",
+    );
+  });
+
   it("allows hoisted asset resources in restricted parents", () => {
     expectValidRender(
       createElement(

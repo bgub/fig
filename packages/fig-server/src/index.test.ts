@@ -317,6 +317,19 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("renders text children inside select elements", async () => {
+    const html = await renderToString(
+      createElement(
+        "select",
+        null,
+        "Choose:",
+        createElement("option", null, "Apple"),
+      ),
+    );
+
+    expect(html).toBe("<select>Choose:<option>Apple</option></select>");
+  });
+
   it("renders tables with whitespace-only text children", async () => {
     const html = await renderToString(
       createElement(

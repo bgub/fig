@@ -14,11 +14,9 @@ import {
   isFigResource,
   resourceFromHostAttributes,
   resourceFromHostProps,
-} from "@bgub/fig/internal";
-import {
   validateInstanceNesting,
   validateTextNesting,
-} from "@bgub/fig/dom-nesting";
+} from "@bgub/fig/internal";
 import {
   createRenderer,
   type DehydratedSuspenseBoundary,
@@ -93,23 +91,23 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>
     createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
-  ...(process.env.NODE_ENV !== "production"
-    ? {
-        validateInstanceNesting: (
-          type: string,
-          props: Props,
-          ancestors: readonly string[],
-        ) => {
-          // Asset resources hoist to <head>, so their fiber position is not
-          // their DOM position; the server exempts them the same way.
-          if (resourceFromHostProps(type, props) !== null) return;
-          validateInstanceNesting(type, ancestors);
-        },
-        validateTextNesting,
-        containerType: (container: Container | Element) =>
-          isElementNode(container) ? elementName(container) : null,
-      }
-    : {}),
+  // The NODE_ENV gates below run at call time (never at module scope, which
+  // would throw on import wherever bundler defines don't apply); with a
+  // define, the dead branches let bundlers drop the dom-nesting module from
+  // production bundles.
+  validateInstanceNesting: (type, props, ancestors) => {
+    if (process.env.NODE_ENV === "production") return;
+    // Asset resources hoist to <head>, so their fiber position is not
+    // their DOM position; the server exempts them the same way.
+    if (resourceFromHostProps(type, props) !== null) return;
+    validateInstanceNesting(type, ancestors);
+  },
+  validateTextNesting: (text, ancestors) => {
+    if (process.env.NODE_ENV === "production") return;
+    validateTextNesting(text, ancestors);
+  },
+  containerType: (container) =>
+    isElementNode(container) ? elementName(container) : null,
   appendInitialChild: (parent, child) => {
     if (appendDocumentResource(child)) return;
     parent.appendChild(child);

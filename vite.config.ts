@@ -11,7 +11,6 @@ const isPackCommand = process.argv.some((arg) => arg.includes("pack-bin"));
 const figSourceAliasEntries = [
   ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
-  ["@bgub/fig/dom-nesting", "packages/fig/src/dom-nesting.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig-data", "packages/fig-data/src/index.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
@@ -43,7 +42,6 @@ const demoClientBundleDependencies = [
 const libraryEntries: Record<string, string[]> = {
   "packages/fig": [
     "./src/index.ts",
-    "./src/dom-nesting.ts",
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
   ],
@@ -106,12 +104,20 @@ function workspacePath(path: string): string {
   return fileURLToPath(new URL(path, import.meta.url));
 }
 
+// vp pack only accepts Record<string, string> aliases, whose string keys
+// prefix-match; sort longest-first so a bare package alias can never shadow
+// a subpath entry, making the source order of figSourceAliasEntries
+// irrelevant for both consumers.
 function figSourceAliasMap(): Record<string, string> {
   return Object.fromEntries(
-    figSourceAliasEntries.map(([find, path]) => [find, workspacePath(path)]),
+    [...figSourceAliasEntries]
+      .sort(([a], [b]) => b.length - a.length)
+      .map(([find, path]) => [find, workspacePath(path)]),
   );
 }
 
+// resolve.alias supports regexes, so exact-match anchoring gives the same
+// order-independence directly.
 function figSourceResolveAliases(): Array<{
   find: RegExp;
   replacement: string;

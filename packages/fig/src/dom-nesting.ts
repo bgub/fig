@@ -119,8 +119,14 @@ function validWithParent(child: string, parent: string): boolean {
 }
 
 function validTextWithParent(parent: string): boolean {
-  // <option> rejects element children but legally contains text.
-  return parent === "option" || validWithParent("#text", parent);
+  // <option>, <select>, and <optgroup> reject element children, but the
+  // parser inserts character tokens into them in place, so text is legal.
+  return (
+    parent === "option" ||
+    parent === "select" ||
+    parent === "optgroup" ||
+    validWithParent("#text", parent)
+  );
 }
 
 function invalidAncestorFor(

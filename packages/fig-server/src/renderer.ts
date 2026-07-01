@@ -25,11 +25,9 @@ import {
   setCurrentDispatcher,
   setCurrentDataStore,
   type RenderDispatcher,
-} from "@bgub/fig/internal";
-import {
   validateInstanceNesting,
   validateTextNesting,
-} from "@bgub/fig/dom-nesting";
+} from "@bgub/fig/internal";
 import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
   escapeAttribute,

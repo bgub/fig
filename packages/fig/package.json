@@ -14,10 +14,6 @@
       "import": "./dist/internal.js",
       "types": "./dist/internal.d.ts"
     },
-    "./dom-nesting": {
-      "import": "./dist/dom-nesting.js",
-      "types": "./dist/dom-nesting.d.ts"
-    },
     "./jsx-runtime": {
       "import": "./dist/jsx-runtime.js",
       "types": "./dist/jsx-runtime.d.ts"

@@ -1,4 +1,5 @@
 export { isContext, type FigContext, FigContextSymbol } from "./context.ts";
+export { validateInstanceNesting, validateTextNesting } from "./dom-nesting.ts";
 export {
   FigClientReferenceSymbol,
   FigElementSymbol,

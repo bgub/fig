@@ -1148,16 +1148,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       const children = hostChildren(node.props);
 
       if (process.env.NODE_ENV !== "production") {
-        const ancestors = hostAncestorTypes(node);
-        if (node.alternate === null) {
-          host.validateInstanceNesting?.(type, node.props, ancestors);
+        let ancestors: string[] | null = null;
+
+        if (node.alternate === null && host.validateInstanceNesting) {
+          ancestors = hostAncestorTypes(node);
+          host.validateInstanceNesting(type, node.props, ancestors);
         }
+
         // Text that becomes Text fibers is validated by the TextTag branch.
-        if (shouldUseHostTextContent(node)) {
+        if (host.validateTextNesting && shouldUseHostTextContent(node)) {
           const textContent = hostTextContent(children);
           if (textContent !== null) {
+            ancestors ??= hostAncestorTypes(node);
             ancestors.unshift(type);
-            host.validateTextNesting?.(textContent, ancestors);
+            host.validateTextNesting(textContent, ancestors);
           }
         }
       }
