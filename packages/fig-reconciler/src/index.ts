@@ -171,6 +171,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     node: HostNode<Instance, TextInstance>,
     text: string,
   ): boolean;
+  // Hosts that create an instance out-of-band (hoisted asset resources) emit
+  // nothing at the fiber's server position; such fibers must not consume a
+  // node from the hydration cursor and render their subtrees fresh.
+  isHydrationExempt?(type: string, props: Props): boolean;
   shouldCommitUpdate?(
     type: string,
     previousProps: Props,
@@ -1297,6 +1301,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hydratable = root.nextHydratableInstance;
     const type = String(node.type);
 
+    // Falling through creates the instance out-of-band, leaving the cursor
+    // for the fiber's siblings.
+    if (host.isHydrationExempt?.(type, node.props) === true) return false;
+
     if (hydratable === null) {
       throwHydrationMismatch(root, node, {
         actual: "nothing",
@@ -1358,8 +1366,29 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function shouldHydrateFiber(root: R, node: F): boolean {
     return (
-      root.isHydrating && node.alternate === null && node.stateNode === null
+      root.isHydrating &&
+      node.alternate === null &&
+      node.stateNode === null &&
+      !insideHydrationExemptHost(node)
     );
+  }
+
+  // A fresh host that rendered during hydration without claiming a DOM node
+  // (its instance was created out-of-band) renders its subtree fresh, so
+  // descendants must not consume the outer hydration cursor. The walk stops
+  // at the nearest host ancestor, or at any cloned fiber: hydration only
+  // occurs in fully fresh subtrees.
+  function insideHydrationExemptHost(node: F): boolean {
+    for (
+      let parent = node.return;
+      parent !== null && parent.alternate === null;
+      parent = parent.return
+    ) {
+      if (parent.tag !== HostTag) continue;
+      return parent.stateNode !== null && (parent.flags & HydrationFlag) === 0;
+    }
+
+    return false;
   }
 
   function completeHydration(node: F): void {

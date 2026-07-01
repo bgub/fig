@@ -125,6 +125,11 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   canHydrateInstance: (node, type, props) =>
     isHydratableElement(node, type, props),
   canHydrateTextInstance: (node) => isHydratableText(node),
+  // Hoisted asset resources never appear at their fiber's server position
+  // (the server registers them and emits nothing inline), so hydration must
+  // not match them against the DOM cursor.
+  isHydrationExempt: (type, props) =>
+    resourceFromHostProps(type, props) !== null,
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {

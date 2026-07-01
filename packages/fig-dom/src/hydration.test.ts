@@ -62,6 +62,59 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls).toEqual(["click"]);
   });
 
+  it("hydrates trees that render hoisted asset resources", () => {
+    const container = new FakeElement("root");
+    const div = new FakeElement("div");
+    div.appendChild(new FakeText("Hello"));
+    container.appendChild(div);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "div",
+          null,
+          createElement("link", {
+            href: "/x.css",
+            precedence: "app",
+            rel: "stylesheet",
+          }),
+          "Hello",
+        ),
+      ),
+    );
+
+    // The resource fiber must not consume the hydration cursor: the server
+    // emitted nothing at its position, so a match attempt would mismatch the
+    // root into a client render and replace the server nodes.
+    expect(container.childNodes[0]).toBe(div);
+    expect(div.textContent).toBe("Hello");
+  });
+
+  it("hydrates around hoisted resources with fresh children", () => {
+    const container = new FakeElement("root");
+    const div = new FakeElement("div");
+    div.appendChild(new FakeText("Hello"));
+    container.appendChild(div);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "div",
+          null,
+          createElement("title", null, "Page"),
+          "Hello",
+        ),
+      ),
+    );
+
+    // The title's text child renders fresh into the adopted element instead
+    // of claiming the server's "Hello" text node.
+    expect(container.childNodes[0]).toBe(div);
+    expect(div.textContent).toBe("Hello");
+  });
+
   it("warns about server-only attributes preserved during hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");
