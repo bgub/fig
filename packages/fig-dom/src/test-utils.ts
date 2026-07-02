@@ -50,12 +50,47 @@ type FakeStyle = Record<string, string> & {
   setProperty(name: string, value: string): void;
 };
 
+// Models the platform: native events that do not bubble. Deliberately
+// independent of events.ts's delegation tables — the fake must mirror real
+// browsers, not the implementation, so fidelity gaps surface in tests.
 const nonBubblingEvents = new Set([
+  "abort",
   "blur",
+  "cancel",
+  "canplay",
+  "canplaythrough",
+  "close",
+  "durationchange",
+  "emptied",
+  "encrypted",
+  "ended",
+  "error",
   "focus",
+  "invalid",
+  "load",
+  "loadeddata",
+  "loadedmetadata",
+  "loadstart",
   "mouseenter",
   "mouseleave",
+  "pause",
+  "play",
+  "playing",
+  "pointerenter",
+  "pointerleave",
+  "progress",
+  "ratechange",
+  "resize",
   "scroll",
+  "scrollend",
+  "seeked",
+  "seeking",
+  "stalled",
+  "suspend",
+  "timeupdate",
+  "toggle",
+  "volumechange",
+  "waiting",
 ]);
 const xlinkNamespace = "http://www.w3.org/1999/xlink";
 

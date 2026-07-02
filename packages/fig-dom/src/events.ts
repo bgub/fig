@@ -101,6 +101,46 @@ const hydrationEvents = new Set([
   "mouseenter",
   "mouseleave",
 ]);
+// Non-bubbling events (other than focus/blur, which use capture delegation
+// with Fig bubble semantics) attach directly to their element: a delegated
+// bubble-phase root listener would never fire for them in a real browser.
+const nonDelegatedEvents = new Set([
+  "abort",
+  "cancel",
+  "canplay",
+  "canplaythrough",
+  "close",
+  "durationchange",
+  "emptied",
+  "encrypted",
+  "ended",
+  "error",
+  "invalid",
+  "load",
+  "loadeddata",
+  "loadedmetadata",
+  "loadstart",
+  "mouseenter",
+  "mouseleave",
+  "pause",
+  "play",
+  "playing",
+  "pointerenter",
+  "pointerleave",
+  "progress",
+  "ratechange",
+  "resize",
+  "scroll",
+  "scrollend",
+  "seeked",
+  "seeking",
+  "stalled",
+  "suspend",
+  "timeupdate",
+  "toggle",
+  "volumechange",
+  "waiting",
+]);
 let batch: Batch = (callback) => callback();
 
 type HydrationCallback = (
@@ -815,7 +855,7 @@ function passiveHydrationEvent(type: string): boolean {
 }
 
 function direct(type: string): boolean {
-  return type === "mouseenter" || type === "mouseleave" || type === "scroll";
+  return nonDelegatedEvents.has(type);
 }
 
 function captureDelegated(type: string): boolean {

@@ -82,6 +82,46 @@ describe("@bgub/fig-dom events", () => {
     expect(calls).toEqual(["button:button", "main:main"]);
   });
 
+  it("attaches non-bubbling events directly to their element", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement(
+          "main",
+          { events: [on("load", () => calls.push("main"))] },
+          createElement("img", {
+            events: [
+              on("load", () => calls.push("img:load")),
+              on("pointerenter", () => calls.push("img:pointerenter")),
+            ],
+          }),
+          createElement("video", {
+            events: [on("play", () => calls.push("video:play"))],
+          }),
+        ),
+        container as unknown as Element,
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const img = main.childNodes[0] as FakeElement;
+    const video = main.childNodes[1] as FakeElement;
+
+    // Direct listeners live on the element, not the delegation root.
+    expect(img.listenerSets.load).toHaveLength(1);
+    expect(container.listenerSets.load).toBeUndefined();
+
+    img.dispatch("load");
+    img.dispatch("pointerenter");
+    video.dispatch("play");
+
+    // Non-bubbling events fire on their target only: the ancestor's load
+    // handler must not observe the img's load.
+    expect(calls).toEqual(["img:load", "img:pointerenter", "video:play"]);
+  });
+
   it("updates event descriptors without duplicating handlers", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
