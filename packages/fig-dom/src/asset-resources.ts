@@ -6,8 +6,7 @@ import {
   resourceFromHostProps,
   resourceHostAttributes,
 } from "@bgub/fig/internal";
-import { attachBindSubtree, removeBindSubtree } from "./bind.ts";
-import { attachEventSubtree, removeEventSubtree } from "./events.ts";
+import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { updateElement } from "./props.ts";
 import { elementName, isElementNode } from "./tree.ts";
 
@@ -99,8 +98,7 @@ export function acquireDocumentResource(element: Element): Element {
 
 function attachDocumentResource(head: Element, element: Element): Element {
   if (element.parentNode !== head) head.appendChild(element);
-  attachBindSubtree(element);
-  attachEventSubtree(element);
+  attachSubtree(element);
   return element;
 }
 
@@ -146,8 +144,7 @@ export function releaseDocumentResource(element: Element): void {
 }
 
 function removeReleasedResource(element: Element): void {
-  removeBindSubtree(element);
-  removeEventSubtree(element);
+  detachSubtree(element);
   element.parentNode?.removeChild(element);
 }
 

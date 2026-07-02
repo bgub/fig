@@ -1,4 +1,4 @@
-import { visitElementSubtree } from "./tree.ts";
+import { isEmptyPropValue } from "./tree.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -42,11 +42,9 @@ export function updateBind(element: Element, value: unknown): void {
   }
 }
 
-export function attachBindSubtree(node: Element | Text): void {
-  visitElementSubtree(node, (element) => {
-    const slot = bindSlots.get(element);
-    if (slot !== undefined) attachBindSlot(element, slot);
-  });
+export function attachElementBind(element: Element): void {
+  const slot = bindSlots.get(element);
+  if (slot !== undefined) attachBindSlot(element, slot);
 }
 
 export function suspendBind(element: Element): void {
@@ -61,14 +59,12 @@ export function resumeBind(element: Element): void {
   if (slot !== undefined) attachBindSlot(element, slot);
 }
 
-export function removeBindSubtree(node: Element | Text): void {
-  visitElementSubtree(node, (element) => {
-    const slot = bindSlots.get(element);
-    if (slot !== undefined) {
-      removeBindSlot(slot);
-      bindSlots.delete(element);
-    }
-  });
+export function detachElementBind(element: Element): void {
+  const slot = bindSlots.get(element);
+  if (slot !== undefined) {
+    removeBindSlot(slot);
+    bindSlots.delete(element);
+  }
 }
 
 function attachBindSlot(element: Element, slot: BindSlot): void {
@@ -104,7 +100,7 @@ function removeBindSlot(slot: BindSlot): void {
 }
 
 function bindCallback(value: unknown): Bind | null {
-  if (value === null || value === undefined || value === false) return null;
+  if (isEmptyPropValue(value)) return null;
   if (typeof value === "function") return value as Bind;
   throw new Error("The bind prop must be a function.");
 }

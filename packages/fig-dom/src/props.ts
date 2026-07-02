@@ -1,7 +1,12 @@
 import type { Props } from "@bgub/fig";
 import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
-import { elementName, isElementNode, isHtmlElement } from "./tree.ts";
+import {
+  elementName,
+  isElementNode,
+  isEmptyPropValue,
+  isHtmlElement,
+} from "./tree.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -107,7 +112,10 @@ export function updateElement(
   }
 
   updateSelectOptions(element, type, previousProps, nextProps, options);
-  updateParentSelect(element);
+  // Only option updates (value/text) can change which option a parent
+  // select's stored value matches; skip the ancestor walk for everything
+  // else.
+  if (type === "option" || type === "optgroup") updateParentSelect(element);
 }
 
 // Dev-only, deduped by key: silently dropping a prop the author clearly
@@ -313,7 +321,7 @@ function setFormValue(
 }
 
 function formValue(value: unknown): string | null {
-  return emptyValue(value) ? null : String(value);
+  return isEmptyPropValue(value) ? null : String(value);
 }
 
 function setChecked(
@@ -340,7 +348,7 @@ function setUnsafeHTML(element: Element, value: unknown): void {
 }
 
 function unsafeHTMLValue(value: unknown): string | null {
-  if (emptyValue(value)) return null;
+  if (isEmptyPropValue(value)) return null;
   if (typeof value === "string") return value;
   throw new Error("The unsafeHTML prop must be a string.");
 }
@@ -507,7 +515,7 @@ function setAttribute(
   attribute: string,
   value: unknown,
 ): void {
-  if (emptyValue(value)) {
+  if (isEmptyPropValue(value)) {
     removeAttribute(element, attribute);
     return;
   }
@@ -535,10 +543,6 @@ function formProp(name: string): boolean {
 
 function valueProp(name: string): boolean {
   return name === "value" || name === "defaultValue";
-}
-
-function emptyValue(value: unknown): boolean {
-  return value === null || value === undefined || value === false;
 }
 
 function reserved(name: string): boolean {

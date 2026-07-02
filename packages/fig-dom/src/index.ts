@@ -35,18 +35,12 @@ import {
   type RefreshUpdate,
   setRefreshHandler,
 } from "@bgub/fig-reconciler";
+import { attachSubtree, detachSubtree } from "./attachment.ts";
+import { resumeBind, suspendBind } from "./bind.ts";
 import {
-  attachBindSubtree,
-  removeBindSubtree,
-  resumeBind,
-  suspendBind,
-} from "./bind.ts";
-import {
-  attachEventSubtree,
   type Container,
   registerPortalContainer,
   registerRoot,
-  removeEventSubtree,
   removePortalContainer,
   replayQueuedEvents,
   setEventBatching,
@@ -57,6 +51,7 @@ import {
   elementName,
   htmlNamespace,
   isElementNode,
+  isEmptyPropValue,
   mathNamespace,
   svgNamespace,
 } from "./tree.ts";
@@ -111,8 +106,11 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   appendInitialChild: (parent, child) => {
     parent.appendChild(child);
     // Render-phase assembly: the select is not live yet, so applying its
-    // default to options that assemble after it is always safe.
-    if (isElementNode(child)) updateParentSelect(child, true);
+    // default to options that assemble after it is always safe. Only
+    // option-bearing children can change a selection.
+    if (isElementNode(child) && optionLike(child)) {
+      updateParentSelect(child, true);
+    }
   },
   finalizeInitialInstance: (instance, props) =>
     updateElement(instance, {}, props, { initial: true }),
@@ -143,8 +141,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 
     while (child !== null) {
       const next = child.nextSibling as Element | TextLike | null;
-      removeBindSubtree(child as Element | Text);
-      removeEventSubtree(child as Element | Text);
+      detachSubtree(child as Element | Text);
       container.removeChild(child);
       child = next;
     }
@@ -158,13 +155,11 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     // Live insertion: re-assert a controlled select's value, but never
     // re-apply an uncontrolled default — the user owns the live selection
     // (defaults are mount-time only, matching React).
-    if (isElementNode(child)) updateParentSelect(child);
-    attachBindSubtree(child as Element | Text);
-    attachEventSubtree(child as Element | Text);
+    if (isElementNode(child) && optionLike(child)) updateParentSelect(child);
+    attachSubtree(child as Element | Text);
   },
   removeChild: (parent, child) => {
-    removeBindSubtree(child as Element | Text);
-    removeEventSubtree(child as Element | Text);
+    detachSubtree(child as Element | Text);
     parent.removeChild(child);
   },
   commitTextUpdate: (text, value) => {
@@ -332,17 +327,8 @@ function isHydratableElement(
   type: string,
   props: Props,
 ): boolean {
-  if ("nodeType" in node && node.nodeType !== 1) return false;
-  if (!("setAttribute" in node)) return false;
-
-  const name =
-    "localName" in node && typeof node.localName === "string"
-      ? node.localName
-      : "tagName" in node && typeof node.tagName === "string"
-        ? node.tagName
-        : "";
-
-  if (name.toLowerCase() !== type.toLowerCase()) return false;
+  if (!isElementNode(node) || !("setAttribute" in node)) return false;
+  if (elementName(node) !== type.toLowerCase()) return false;
   return hasMatchingUnsafeHTML(node, props);
 }
 
@@ -392,10 +378,7 @@ function hasManagedTextareaContent(props: Props): boolean {
 }
 
 function unsafeHTMLValue(props: Props): unknown {
-  const value = props.unsafeHTML;
-  return value === null || value === undefined || value === false
-    ? null
-    : value;
+  return isEmptyPropValue(props.unsafeHTML) ? null : props.unsafeHTML;
 }
 
 function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
@@ -408,6 +391,11 @@ function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
 function isHydratableText(node: Element | TextLike): boolean {
   if ("nodeType" in node && node.nodeType !== 3) return false;
   return !("setAttribute" in node) && "nodeValue" in node;
+}
+
+function optionLike(element: Element): boolean {
+  const name = elementName(element);
+  return name === "option" || name === "optgroup";
 }
 
 function shouldRestoreControlledFormState(type: string, props: Props): boolean {

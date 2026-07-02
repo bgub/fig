@@ -6,7 +6,7 @@ import {
   runWithPriority,
   SyncLane,
 } from "./priority.ts";
-import { isElementNode, parentOf, visitElementSubtree } from "./tree.ts";
+import { isElementNode, isEmptyPropValue, parentOf } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
 export type EventOptions = Pick<
@@ -343,38 +343,31 @@ export function updateEvents(element: Element, value: unknown): void {
   slots.length = descriptors.length;
 }
 
-export function attachEventSubtree(node: Element | Text): void {
-  visitElementSubtree(node, (element) => {
-    const root = rootFor(element);
-    const listenerTarget = listenerTargetFor(element);
+export function attachElementEvents(element: Element): void {
+  const root = rootFor(element);
+  const listenerTarget = listenerTargetFor(element);
 
-    for (const slot of eventSlots.get(element) ?? []) {
-      attachEventSlot(element, root, listenerTarget, slot);
-    }
-  });
+  for (const slot of eventSlots.get(element) ?? []) {
+    attachEventSlot(element, root, listenerTarget, slot);
+  }
 }
 
-export function removeEventSubtree(node: Element | Text): void {
-  visitElementSubtree(node, (element) => {
-    for (const slot of eventSlots.get(element) ?? []) removeEventSlot(slot);
-    eventSlots.delete(element);
-  });
+export function detachElementEvents(element: Element): void {
+  for (const slot of eventSlots.get(element) ?? []) removeEventSlot(slot);
+  eventSlots.delete(element);
 }
 
+// Derived from listenerTargetFor so the two walks cannot disagree about
+// which container a node belongs to: the dispatch origin is the nearest
+// registered container, and its root is itself or its portal owner's root.
 export function rootFor(
   node: Element | Text | Comment | Container,
 ): Container | null {
-  for (let current: unknown = node; current !== null; ) {
-    if (isContainer(current)) {
-      const record = containerRecords.get(current);
-      if (record?.portalOwner != null) return record.portalOwner.root;
-      if (record?.root === true) return current;
-    }
+  const target = listenerTargetFor(node);
+  if (target === null) return null;
 
-    current = parentOf(current);
-  }
-
-  return null;
+  const record = containerRecords.get(target);
+  return record?.portalOwner?.root ?? (record?.root === true ? target : null);
 }
 
 export function registerPortalContainer(
@@ -744,7 +737,7 @@ function abortEventSlot(slot: EventSlot): void {
 }
 
 function eventDescriptors(value: unknown): EventDescriptor[] {
-  if (value === null || value === undefined || value === false) return [];
+  if (isEmptyPropValue(value)) return [];
   if (Array.isArray(value) && value.every(isEventDescriptor)) return value;
   throw new Error("The events prop must be an array of event descriptors.");
 }
