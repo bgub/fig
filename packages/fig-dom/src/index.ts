@@ -109,7 +109,6 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   containerType: (container) =>
     isElementNode(container) ? elementName(container) : null,
   appendInitialChild: (parent, child) => {
-    if (appendDocumentResource(child)) return;
     parent.appendChild(child);
     if (isElementNode(child)) updateParentSelect(child, true);
   },
@@ -126,10 +125,15 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     isHydratableElement(node, type, props),
   canHydrateTextInstance: (node) => isHydratableText(node),
   // Hoisted asset resources never appear at their fiber's server position
-  // (the server registers them and emits nothing inline), so hydration must
-  // not match them against the DOM cursor.
-  isHydrationExempt: (type, props) =>
+  // (the server registers them and emits nothing inline): hydration must not
+  // match them against the DOM cursor, and commit acquires/releases them in
+  // the head registry instead of inserting/removing at the fiber position.
+  isHoistedInstance: (type, props) =>
     resourceFromHostProps(type, props) !== null,
+  commitHoistedInstance: (instance) => acquireDocumentResource(instance),
+  removeHoistedInstance: (instance) => releaseDocumentResource(instance),
+  updateHoistedInstance: (instance, previousProps, nextProps) =>
+    updateHoistedResource(instance, previousProps, nextProps),
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
@@ -144,17 +148,12 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     }
   },
   insertBefore: (parent, child, before) => {
-    if (appendDocumentResource(child)) return;
     parent.insertBefore(child, before);
     if (isElementNode(child)) updateParentSelect(child, true);
     attachBindSubtree(child as Element | Text);
     attachEventSubtree(child as Element | Text);
   },
   removeChild: (parent, child) => {
-    if (isDocumentResource(child)) {
-      releaseDocumentResource(child);
-      return;
-    }
     removeBindSubtree(child as Element | Text);
     removeEventSubtree(child as Element | Text);
     parent.removeChild(child);
@@ -162,12 +161,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   commitTextUpdate: (text, value) => {
     if (text.nodeValue !== value) text.nodeValue = value;
   },
-  commitUpdate: (instance, previousProps, nextProps) => {
-    if (isDocumentResource(instance)) {
-      rekeyDocumentResource(instance, nextProps);
-    }
-    updateElement(instance, previousProps, nextProps);
-  },
+  commitUpdate: (instance, previousProps, nextProps) =>
+    updateElement(instance, previousProps, nextProps),
   commitHydratedInstance: (instance, nextProps) =>
     hydrateElement(instance, nextProps),
   getActivityBoundary: (node) =>
@@ -359,6 +354,9 @@ function createDomElement(
     : document.createElementNS(namespace, type);
 }
 
+// Render-phase find-or-create only: renders can be discarded and retried, so
+// acquisition (refcounting, head insertion) waits for commitHoistedInstance.
+// The zero-count registry entry dedupes sibling adopts within a render pass.
 function adoptDocumentResource(type: string, props: Props): Element | null {
   const head = documentHead();
   const resource = resourceFromHostProps(type, props);
@@ -372,15 +370,56 @@ function adoptDocumentResource(type: string, props: Props): Element | null {
     findDocumentResource(head, key) ??
     document.createElement(type);
 
-  if (resource.kind === "title") element.textContent = "";
-
   if (adopted === undefined) {
-    registry.set(key, { count: 1, element });
+    registry.set(key, { count: 0, element });
     documentResourceMeta.set(element, { key, kind: resource.kind });
-  } else {
-    adopted.count += 1;
   }
 
+  return element;
+}
+
+function acquireDocumentResource(element: Element): Element {
+  const head = documentHead();
+  if (head === null) return element;
+
+  const registry = documentResourceRegistry(head);
+  let meta = documentResourceMeta.get(element);
+
+  // Deletions commit before placements, so a sibling's release in the same
+  // commit may have dropped the element from the registry; re-derive its
+  // identity from its attributes and revive it.
+  if (meta === undefined) {
+    const resource = resourceFromHostAttributes(elementName(element), (name) =>
+      element.getAttribute(name),
+    );
+    if (resource === null) return element;
+    meta = { key: figResourceKey(resource), kind: resource.kind };
+    documentResourceMeta.set(element, meta);
+  }
+
+  const entry = registry.get(meta.key);
+
+  // The key already resolves to a different live element (e.g. inserted by
+  // insertAssetResources while this owner's render was suspended): adopt the
+  // authoritative element instead of appending a stale duplicate.
+  if (entry !== undefined && entry.element !== element) {
+    entry.count += 1;
+    return attachDocumentResource(head, entry.element);
+  }
+
+  if (entry === undefined) {
+    registry.set(meta.key, { count: 1, element });
+  } else {
+    entry.count += 1;
+  }
+
+  return attachDocumentResource(head, element);
+}
+
+function attachDocumentResource(head: Element, element: Element): Element {
+  if (element.parentNode !== head) head.appendChild(element);
+  attachBindSubtree(element);
+  attachEventSubtree(element);
   return element;
 }
 
@@ -402,56 +441,87 @@ function releaseDocumentResource(element: Element): void {
 
   const registry = documentResourceRegistries.get(head);
   const entry = registry?.get(meta.key);
-  if (entry === undefined || entry.element !== element) return;
 
-  entry.count -= 1;
+  // An element displaced from the registry (rekey collision) is untracked:
+  // remove it with its owner unless another entry still shares it.
+  if (entry === undefined || entry.element !== element) {
+    if (registryReferencesElement(registry, element)) return;
+    documentResourceMeta.delete(element);
+    if (removableResourceKind(meta.kind)) removeReleasedResource(element);
+    return;
+  }
+
+  if (entry.count > 0) entry.count -= 1;
   if (entry.count > 0) return;
 
   // Stylesheets, scripts, and fetch hints persist once inserted: removal
   // cannot undo a load and would unstyle content that still races on it.
   // Document metadata is removed with its last owner.
-  if (meta.kind !== "title" && meta.kind !== "meta") return;
+  if (!removableResourceKind(meta.kind)) return;
 
   registry?.delete(meta.key);
   documentResourceMeta.delete(element);
+  removeReleasedResource(element);
+}
+
+function removeReleasedResource(element: Element): void {
+  removeBindSubtree(element);
+  removeEventSubtree(element);
   element.parentNode?.removeChild(element);
 }
 
-function rekeyDocumentResource(element: Element, nextProps: Props): void {
-  const head = documentHead();
+function removableResourceKind(kind: FigResource["kind"]): boolean {
+  return kind === "title" || kind === "meta";
+}
+
+function registryReferencesElement(
+  registry: Map<string, DocumentResourceEntry> | undefined,
+  element: Element,
+): boolean {
+  if (registry === undefined) return false;
+  for (const entry of registry.values()) {
+    if (entry.element === element) return true;
+  }
+  return false;
+}
+
+// Hoisted instances are shared by key, so an identity change must not mutate
+// the shared element in place: release this owner's share of the old
+// identity and adopt (or create) the element for the new one. Other owners
+// keep the old element and its attributes untouched.
+function updateHoistedResource(
+  element: Element,
+  previousProps: Props,
+  nextProps: Props,
+): Element {
+  const type = elementName(element);
+  const resource = resourceFromHostProps(type, nextProps);
   const meta = documentResourceMeta.get(element);
-  const resource = resourceFromHostProps(elementName(element), nextProps);
-  if (head === null || meta === undefined || resource === null) return;
+  const key = resource === null ? null : figResourceKey(resource);
 
-  const key = figResourceKey(resource);
-  if (key === meta.key) return;
-
-  const registry = documentResourceRegistries.get(head);
-  const entry = registry?.get(meta.key);
-  if (
-    registry !== undefined &&
-    entry !== undefined &&
-    entry.element === element
-  ) {
-    registry.delete(meta.key);
-    if (!registry.has(key)) registry.set(key, entry);
+  if (key === null || meta === undefined || key === meta.key) {
+    updateElement(element, previousProps, nextProps);
+    return element;
   }
 
-  meta.key = key;
-  meta.kind = resource.kind;
-}
-
-function appendDocumentResource(node: Element | TextLike): boolean {
-  if (!isDocumentResource(node)) return false;
+  releaseDocumentResource(element);
 
   const head = documentHead();
-  if (head === null) return true;
-  if (node.parentNode !== head) head.appendChild(node);
-  return true;
-}
+  const entry =
+    head === null ? undefined : documentResourceRegistry(head).get(key);
+  const claimed =
+    entry !== undefined && entry.count > 0 ? entry.element : undefined;
+  const next = adoptDocumentResource(type, nextProps) ?? element;
+  if (next === element) {
+    // No head to adopt into; fall back to the in-place update.
+    updateElement(element, previousProps, nextProps);
+    return element;
+  }
 
-function isDocumentResource(node: Element | TextLike): node is Element {
-  return isElementNode(node) && documentResourceMeta.has(node);
+  // Style only a fresh or unclaimed element; an element other owners already
+  // committed keeps its attributes (identity is key-authoritative).
+  if (claimed !== next) updateElement(next, {}, nextProps);
+  return acquireDocumentResource(next);
 }
 
 function documentHead(): Element | null {
@@ -504,13 +574,21 @@ export function insertAssetResources(
     // a head <link> parses to, and a duplicate is appended).
     const asset = asInsertableResource(resource);
     const key = figResourceKey(asset);
-    const existing =
-      registry.get(key)?.element ?? findDocumentResource(head, key);
+    // A registry entry only counts as present while its element is attached:
+    // a discarded render can leave a detached zero-count element built from
+    // host props that need not match this descriptor (media, explicit-key
+    // href), so a stale entry is discarded and replaced by a fresh element
+    // created from the descriptor below.
+    const tracked = registry.get(key)?.element;
+    const existing: Element | null =
+      (tracked !== undefined && tracked.parentNode === head ? tracked : null) ??
+      findDocumentResource(head, key);
 
     if (existing !== null) {
-      // Already present (SSR, a host-rendered element, or a prior call): adopt
-      // it into the registry for O(1) future lookups, but do not re-gate.
-      if (!registry.has(key)) {
+      // Already present (SSR, a host-rendered element, or a prior call):
+      // adopt it into the registry for O(1) future lookups, but do not
+      // re-gate.
+      if (registry.get(key)?.element !== existing) {
         registry.set(key, { count: 1, element: existing });
         documentResourceMeta.set(existing, { key, kind: asset.kind });
       }

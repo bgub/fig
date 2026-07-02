@@ -1,7 +1,18 @@
-import { createElement } from "@bgub/fig";
+import { createElement, readPromise, stylesheet, Suspense } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { batchedUpdates, createRoot, flushSync, render } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  batchedUpdates,
+  createRoot,
+  flushSync,
+  insertAssetResources,
+  render,
+} from "./index.ts";
+import {
+  deferred,
+  delay,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -188,6 +199,111 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Body");
   });
 
+  it("releases document metadata nested under a removed ancestor", () => {
+    const { head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(
+            "div",
+            null,
+            createElement("title", null, "Page"),
+            createElement("meta", { content: "Fig", name: "description" }),
+          ),
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(2);
+
+    flushSync(() => root.render(createElement("main", null, "Empty")));
+
+    expect(head.childNodes).toHaveLength(0);
+  });
+
+  it("balances resource counts across discarded suspended renders", async () => {
+    const { head, root } = documentResourceRoot();
+    const pending = deferred<string>();
+
+    function Reader() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(
+            Suspense,
+            { fallback: "Loading" },
+            createElement(
+              "div",
+              null,
+              createElement("meta", { content: "Fig", name: "description" }),
+              createElement(Reader, null),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    pending.resolve("Ready");
+    await delay();
+
+    expect(head.childNodes).toHaveLength(1);
+
+    flushSync(() => root.render(createElement("main", null, "Empty")));
+
+    expect(head.childNodes).toHaveLength(0);
+  });
+
+  it("dedupes a resource rekeyed into an existing identity", () => {
+    const { head, root } = documentResourceRoot();
+    const app = (firstName: string) =>
+      createElement(
+        "main",
+        null,
+        createElement("meta", { content: "one", name: firstName }),
+        createElement("meta", { content: "two", name: "b" }),
+      );
+
+    flushSync(() => root.render(app("a")));
+    expect(head.childNodes).toHaveLength(2);
+
+    // Rekeying the first meta into the second's key adopts the existing
+    // element instead of leaving a duplicate.
+    flushSync(() => root.render(app("b")));
+    expect(head.childNodes).toHaveLength(1);
+
+    flushSync(() => root.render(createElement("main", null, "Empty")));
+    expect(head.childNodes).toHaveLength(0);
+  });
+
+  it("keeps the shared title updatable after another owner unmounts", () => {
+    const { head, root } = documentResourceRoot();
+    const app = (first: string, modal: boolean) =>
+      createElement(
+        "main",
+        null,
+        createElement("title", null, first),
+        modal ? createElement("title", null, "Modal") : null,
+      );
+
+    flushSync(() => root.render(app("Home", true)));
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).textContent).toBe("Modal");
+
+    flushSync(() => root.render(app("Home", false)));
+    flushSync(() => root.render(app("Dashboard", false)));
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).textContent).toBe("Dashboard");
+  });
+
   it("keeps stylesheets in the head after their owner unmounts", () => {
     const { head, root } = documentResourceRoot();
 
@@ -231,8 +347,14 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(app("/one.css")));
     flushSync(() => root.render(app("/two.css")));
 
-    expect(head.childNodes).toHaveLength(1);
+    // The old stylesheet persists (its load cannot be undone); the owner now
+    // holds a fresh element for the new identity.
+    expect(head.childNodes).toHaveLength(2);
     expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/one.css",
+      rel: "stylesheet",
+    });
+    expect((head.childNodes[1] as FakeElement).attributes).toEqual({
       href: "/two.css",
       rel: "stylesheet",
     });
@@ -248,7 +370,87 @@ describe("@bgub/fig-dom", () => {
       ),
     );
 
+    expect(head.childNodes).toHaveLength(2);
+  });
+
+  it("preserves shared resources when one owner changes identity", () => {
+    const { head, root } = documentResourceRoot();
+    const app = (firstName: string) =>
+      createElement(
+        "main",
+        null,
+        createElement("meta", { content: "shared", name: firstName }),
+        createElement("meta", { content: "shared", name: "a" }),
+      );
+
+    flushSync(() => root.render(app("a")));
     expect(head.childNodes).toHaveLength(1);
+
+    flushSync(() => root.render(app("b")));
+
+    // The remaining owner keeps the untouched shared element; the rekeyed
+    // owner gets its own element for the new identity.
+    const names = head.childNodes
+      .map((child) => (child as FakeElement).attributes.name)
+      .sort();
+    expect(names).toEqual(["a", "b"]);
+
+    flushSync(() => root.render(createElement("main", null, "Empty")));
+    expect(head.childNodes).toHaveLength(0);
+  });
+
+  it("inserts asset resources shadowed by a discarded render's element", async () => {
+    const { container, head, root } = documentResourceRoot();
+    const pending = deferred<string>();
+
+    function Reader() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(
+            Suspense,
+            { fallback: "Loading" },
+            createElement("link", {
+              href: "/late.css",
+              media: "print",
+              rel: "stylesheet",
+            }),
+            createElement(Reader, null),
+          ),
+        ),
+      ),
+    );
+
+    // The suspended render adopted the link but never committed it, leaving
+    // a detached zero-count element whose attributes come from host props.
+    expect(head.childNodes).toHaveLength(0);
+
+    void insertAssetResources([stylesheet("/late.css")]);
+
+    // The stale element is discarded: the inserted element reflects the
+    // descriptor, not the aborted render's media="print" props.
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/late.css",
+      rel: "stylesheet",
+    });
+
+    // The revealed primary tree adopts the authoritative element instead of
+    // committing its stale one alongside it.
+    pending.resolve("Ready");
+    await delay();
+
+    expect(container.textContent).toBe("Ready");
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/late.css",
+      rel: "stylesheet",
+    });
   });
 });
 
