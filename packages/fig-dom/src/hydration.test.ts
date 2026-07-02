@@ -115,6 +115,37 @@ describe("@bgub/fig-dom hydration", () => {
     expect(div.textContent).toBe("Hello");
   });
 
+  it("preserves pre-hydration select changes for uncontrolled selects", () => {
+    const container = new FakeElement("root");
+    const select = new FakeElement("select");
+    const optionA = new FakeElement("option");
+    optionA.setAttribute("value", "a");
+    const optionB = new FakeElement("option");
+    optionB.setAttribute("value", "b");
+    select.appendChild(optionA);
+    select.appendChild(optionB);
+    container.appendChild(select);
+
+    // The server rendered defaultValue "a", but the user changed the
+    // selection to "b" before hydration (selects work without JS).
+    optionB.selected = true;
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "select",
+          { defaultValue: "a" },
+          createElement("option", { value: "a" }),
+          createElement("option", { value: "b" }),
+        ),
+      ),
+    );
+
+    expect(optionA.selected).toBe(false);
+    expect(optionB.selected).toBe(true);
+  });
+
   it("warns about server-only attributes preserved during hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");

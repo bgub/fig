@@ -16,6 +16,10 @@ interface BindSlot {
 }
 
 const bindSlots = new WeakMap<Element, BindSlot>();
+// Elements inside hidden Activity trees: binds must not run while hidden.
+// Keyed by element (not a slot flag) so a bind that first appears while its
+// element is already hidden is covered too.
+const suspendedBindElements = new WeakSet<Element>();
 
 export function updateBind(element: Element, value: unknown): void {
   const callback = bindCallback(value);
@@ -46,11 +50,13 @@ export function attachBindSubtree(node: Element | Text): void {
 }
 
 export function suspendBind(element: Element): void {
+  suspendedBindElements.add(element);
   const slot = bindSlots.get(element);
   if (slot !== undefined) removeBindSlot(slot);
 }
 
 export function resumeBind(element: Element): void {
+  suspendedBindElements.delete(element);
   const slot = bindSlots.get(element);
   if (slot !== undefined) attachBindSlot(element, slot);
 }
@@ -66,7 +72,13 @@ export function removeBindSubtree(node: Element | Text): void {
 }
 
 function attachBindSlot(element: Element, slot: BindSlot): void {
-  if (slot.controller !== null || element.parentNode === null) return;
+  if (
+    slot.controller !== null ||
+    element.parentNode === null ||
+    suspendedBindElements.has(element)
+  ) {
+    return;
+  }
 
   let runStrict = false;
   if (process.env.NODE_ENV !== "production") {

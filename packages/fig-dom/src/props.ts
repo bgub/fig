@@ -13,6 +13,9 @@ interface SelectState {
 
 interface UpdateOptions {
   hydrating?: boolean;
+  // The instance's first render: the only time defaultValue/defaultChecked
+  // may live-write the element's value/checked state.
+  initial?: boolean;
 }
 
 type StyleTarget = Record<string, unknown> & {
@@ -60,15 +63,7 @@ export function updateElement(
     if (reserved(name)) continue;
 
     if (formProp(name)) {
-      setFormProperty(
-        element,
-        type,
-        name,
-        previous,
-        next,
-        previousProps,
-        options,
-      );
+      setFormProperty(element, type, name, next, nextProps, options);
       continue;
     }
 
@@ -77,7 +72,7 @@ export function updateElement(
     else setAttribute(element, hostAttributeName(name, html), next);
   }
 
-  updateSelectOptions(element, type, previousProps, nextProps);
+  updateSelectOptions(element, type, previousProps, nextProps, options);
   updateParentSelect(element);
 }
 
@@ -218,32 +213,31 @@ function setFormProperty(
   element: Element,
   type: string,
   name: string,
-  previous: unknown,
   next: unknown,
-  previousProps: Props,
+  nextProps: Props,
   options: UpdateOptions,
 ): void {
   if (type === "select" && valueProp(name)) return;
+
+  // Defaults live-write only on the instance's very first render (and never
+  // during hydration, or when a controlling sibling prop wins): a
+  // defaultValue/defaultChecked that APPEARS on a later update must not
+  // clobber what the user typed or toggled since mount.
+  const initial = options.initial === true && options.hydrating !== true;
 
   if (name === "value") {
     setFormValue(element, next, type, { live: true });
   } else if (name === "defaultValue") {
     setFormValue(element, next, type, {
       defaultValue: true,
-      live:
-        previous === undefined &&
-        previousProps.value === undefined &&
-        options.hydrating !== true,
+      live: initial && nextProps.value === undefined,
     });
   } else if (name === "checked") {
     setChecked(element, next, { live: true });
   } else if (name === "defaultChecked") {
     setChecked(element, next, {
       defaultChecked: true,
-      live:
-        previous === undefined &&
-        previousProps.checked === undefined &&
-        options.hydrating !== true,
+      live: initial && nextProps.checked === undefined,
     });
   }
 }
@@ -311,6 +305,7 @@ function updateSelectOptions(
   type: string,
   previousProps: Props,
   nextProps: Props,
+  options: UpdateOptions = {},
 ): void {
   if (type !== "select") return;
 
@@ -321,12 +316,19 @@ function updateSelectOptions(
     return;
   }
 
+  // A hydrating uncontrolled select trusts the server DOM's selection (the
+  // user may have changed it before JS loaded); record the default as
+  // applied so later updates don't re-apply it either. Controlled selects
+  // still re-assert their value.
+  const hydratingDefault = !controlled && options.hydrating === true;
+
   const state = selectState.get(element);
   const shouldApply =
-    controlled ||
-    (previousProps.value === undefined &&
-      previousProps.defaultValue === undefined &&
-      state?.appliedDefault !== true);
+    !hydratingDefault &&
+    (controlled ||
+      (previousProps.value === undefined &&
+        previousProps.defaultValue === undefined &&
+        state?.appliedDefault !== true));
   selectState.set(element, {
     appliedDefault: state?.appliedDefault === true || !controlled,
     controlled,
@@ -392,7 +394,11 @@ function descendantOptions(element: Element): Element[] {
 
 function currentOptionValue(option: Element): string {
   const value = attributeValue(option, "value");
-  return value === null ? (option.textContent ?? "") : value;
+  if (value !== null) return value;
+
+  // Spec-ish option.text: pretty-printed markup collapses to the visible
+  // label, so implicit values match their authored form.
+  return (option.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 function attributeValue(element: Element, name: string): string | null {

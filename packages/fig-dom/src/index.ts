@@ -110,10 +110,12 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     isElementNode(container) ? elementName(container) : null,
   appendInitialChild: (parent, child) => {
     parent.appendChild(child);
+    // Render-phase assembly: the select is not live yet, so applying its
+    // default to options that assemble after it is always safe.
     if (isElementNode(child)) updateParentSelect(child, true);
   },
   finalizeInitialInstance: (instance, props) =>
-    updateElement(instance, {}, props),
+    updateElement(instance, {}, props, { initial: true }),
   setTextContent: (instance, text) => {
     if (instance.textContent !== text) instance.textContent = text;
   },
@@ -153,7 +155,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
-    if (isElementNode(child)) updateParentSelect(child, true);
+    // Live insertion: re-assert a controlled select's value, but never
+    // re-apply an uncontrolled default — the user owns the live selection
+    // (defaults are mount-time only, matching React).
+    if (isElementNode(child)) updateParentSelect(child);
     attachBindSubtree(child as Element | Text);
     attachEventSubtree(child as Element | Text);
   },

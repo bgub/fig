@@ -3030,12 +3030,22 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const current: F = placed;
       const next: F | null = current.sibling;
+      const placedHidden = hidden || isHiddenBoundary(current);
+      // Hide (suspending binds) BEFORE inserting so attach paths in the
+      // host's insertBefore never run binds on hidden content; hide again
+      // after, since a placement update may rewrite the inline style.
+      // Preassembled subtrees also pre-hide nested hidden boundaries'
+      // content, which never gets a placement of its own.
+      if (placedHidden) hidePlacedNode(current);
+      if (hasHiddenBoundaries && isPreassembledHostSubtree(current)) {
+        hideNestedBoundaryContent(current.child);
+      }
       commitHostMutation(current, () => commitPlacement(current, before));
-      if (hidden) setNodeVisibility(current, true);
+      if (placedHidden) hidePlacedNode(current);
       if (!isPreassembledHostSubtree(current)) {
-        commitMutationEffects(current.child, hidden);
+        commitMutationEffects(current.child, placedHidden);
       } else {
-        commitPortalsInPreassembledSubtree(current.child, hidden);
+        commitPortalsInPreassembledSubtree(current.child, placedHidden);
       }
       placed = next;
     }
@@ -3043,17 +3053,34 @@ export function createRenderer<Container, Instance, TextInstance>(
     return afterPlaced;
   }
 
+  // setNodeVisibility keeps a hidden boundary's own subtree untouched, but a
+  // FRESH hidden boundary's content was never hidden; hide its children.
+  function hidePlacedNode(node: F): void {
+    if (isHiddenBoundary(node)) setSubtreeVisibility(node.child, true);
+    else setNodeVisibility(node, true);
+  }
+
+  function hideNestedBoundaryContent(node: F | null): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if (isHiddenBoundary(cursor)) setSubtreeVisibility(cursor.child, true);
+      hideNestedBoundaryContent(cursor.child);
+    }
+  }
+
   function commitPortalsInPreassembledSubtree(
     node: F | null,
     hidden: boolean,
   ): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      const cursorHidden = hidden || isHiddenBoundary(cursor);
       if (cursor.tag === PortalTag) {
+        if (cursorHidden) setSubtreeVisibility(cursor.child, true);
+        if (hasHiddenBoundaries) hideNestedBoundaryContent(cursor.child);
         commitHostMutation(cursor, () => commitPlacement(cursor));
-        if (hidden) setNodeVisibility(cursor, true);
-        commitMutationEffects(cursor.child, hidden);
+        if (cursorHidden) setNodeVisibility(cursor, true);
+        commitMutationEffects(cursor.child, cursorHidden);
       } else {
-        commitPortalsInPreassembledSubtree(cursor.child, hidden);
+        commitPortalsInPreassembledSubtree(cursor.child, cursorHidden);
       }
     }
   }

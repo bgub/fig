@@ -226,6 +226,78 @@ describe("@bgub/fig-dom props", () => {
     expect(input.attributes.value).toBe("Next");
   });
 
+  it("ignores default values that appear after mount", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("input", null)));
+
+    const input = container.childNodes[0] as FakeElement;
+    input.value = "Typed";
+
+    // Form data arriving mid-session must not clobber the user's input.
+    flushSync(() =>
+      root.render(createElement("input", { defaultValue: "Loaded" })),
+    );
+
+    expect(input.value).toBe("Typed");
+    expect(input.defaultValue).toBe("Loaded");
+
+    input.checked = true;
+    flushSync(() =>
+      root.render(
+        createElement("input", { defaultChecked: false, defaultValue: "L" }),
+      ),
+    );
+    expect(input.checked).toBe(true);
+  });
+
+  it("preserves user selection when options are inserted", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const option = (value: string) =>
+      createElement("option", { key: value, value }, value);
+    const app = (values: string[]) =>
+      createElement("select", { defaultValue: "b" }, values.map(option));
+
+    flushSync(() => root.render(app(["a", "b"])));
+
+    const select = container.childNodes[0] as FakeElement;
+    const optionB = select.childNodes[1] as FakeElement;
+    expect(optionB.selected).toBe(true);
+
+    // The user picks "a"; a later render adds and reorders options.
+    const optionA = select.childNodes[0] as FakeElement;
+    optionA.selected = true;
+    optionB.selected = false;
+
+    flushSync(() => root.render(app(["c", "a", "b"])));
+
+    expect(optionA.selected).toBe(true);
+    expect(optionB.selected).toBe(false);
+    expect((select.childNodes[0] as FakeElement).selected).toBe(false);
+  });
+
+  it("matches implicit option values with pretty-printed text", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "select",
+          { value: "Apple" },
+          createElement("option", null, "\n  Apple\n"),
+          createElement("option", null, "Banana"),
+        ),
+      ),
+    );
+
+    const select = container.childNodes[0] as FakeElement;
+    expect((select.childNodes[0] as FakeElement).selected).toBe(true);
+    expect((select.childNodes[1] as FakeElement).selected).toBe(false);
+  });
+
   it("controls checked state separately from default checked state", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

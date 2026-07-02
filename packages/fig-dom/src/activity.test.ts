@@ -151,6 +151,40 @@ describe("@bgub/fig-dom activity", () => {
     expect(signals[2]?.aborted).toBe(false);
   });
 
+  it("never runs binds for trees that mount hidden until reveal", () => {
+    const signals: AbortSignal[] = [];
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    const record = (_node: Element, signal: AbortSignal) => {
+      signals.push(signal);
+    };
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        Activity,
+        { mode },
+        createElement("input", { bind: record }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    // Mounted hidden: the bind must not run (not even the dev strict
+    // cycle), mirroring deferred effects.
+    expect(signals).toHaveLength(0);
+
+    flushSync(() => setMode?.("visible"));
+
+    // The reveal runs the deferred first attach, including the strict cycle.
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
   it("commits updates inside hidden trees without revealing them", async () => {
     let setCount: ((updater: (count: number) => number) => void) | null = null;
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;
