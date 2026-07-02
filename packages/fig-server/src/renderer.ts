@@ -25,6 +25,10 @@ import {
   setCurrentDispatcher,
   setCurrentDataStore,
   type RenderDispatcher,
+  ACTIVITY_TEMPLATE_ATTRIBUTE,
+  SUSPENSE_COMPLETED_MARKER,
+  SUSPENSE_END_MARKER,
+  SUSPENSE_PENDING_PREFIX,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
@@ -608,7 +612,7 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
       // inert content (see `ac`/`ax` in protocol.ts).
       const id = activityId(frame.request, frame.request.nextActivityId++);
       frame.segment.write(
-        `<template data-fig-activity="" id="${escapeAttribute(id)}">`,
+        `<template ${ACTIVITY_TEMPLATE_ATTRIBUTE}="" id="${escapeAttribute(id)}">`,
       );
       const wasHidden = frame.hiddenActivity;
       const wasHiddenId = frame.hiddenActivityId;
@@ -1195,19 +1199,19 @@ function flushSuspenseBoundary(
   boundary.parentFlushed = true;
 
   if (boundary.status === "completed") {
-    write(request, "<!--fig:suspense:completed-->");
+    write(request, `<!--${SUSPENSE_COMPLETED_MARKER}-->`);
     flushBoundaryContent(request, boundary);
-    write(request, "<!--/fig:suspense-->");
+    write(request, `<!--${SUSPENSE_END_MARKER}-->`);
     return;
   }
 
   boundary.id ??= request.nextBoundaryId++;
   if (boundary.contentSegment !== null)
     flushSegmentResources(request, boundary.contentSegment);
-  write(request, `<!--fig:suspense:pending:${boundary.id}-->`);
+  write(request, `<!--${SUSPENSE_PENDING_PREFIX}${boundary.id}-->`);
   write(request, boundaryPlaceholderMarkup(request, boundary.id));
   flushSubtree(request, segment);
-  write(request, "<!--/fig:suspense-->");
+  write(request, `<!--${SUSPENSE_END_MARKER}-->`);
 
   if (boundary.status === "client-rendered") {
     enqueueUnique(request.clientRenderedBoundaries, boundary);

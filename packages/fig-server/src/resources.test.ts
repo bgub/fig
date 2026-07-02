@@ -27,7 +27,7 @@ describe("ResourceRegistry", () => {
     const resource = stylesheet("/app.css", { media: "screen" });
 
     expect(write(registry, resource)).toBe(
-      '<link rel="stylesheet" href="/app.css" id="r-0" media="screen">',
+      '<link rel="stylesheet" href="/app.css" media="screen" id="r-0">',
     );
     expect(write(registry, stylesheet("/app.css", { media: "screen" }))).toBe(
       "",

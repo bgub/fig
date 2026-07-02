@@ -1,5 +1,9 @@
 import { type FigResource, type Props } from "@bgub/fig";
-import { figResourceKey, resourceDestination } from "@bgub/fig/internal";
+import {
+  figResourceKey,
+  resourceDestination,
+  resourceHostAttributes,
+} from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 
 export class ResourceRegistry {
@@ -105,76 +109,7 @@ function writeResourceTag(
   resource: FigResource,
   id: string | null,
 ): void {
-  const resourceKey = resource.key;
   switch (resource.kind) {
-    case "stylesheet":
-      writeLink(sink, {
-        rel: "stylesheet",
-        href: resource.href,
-        id: id ?? undefined,
-        "data-fig-resource-key": resourceKey,
-        "data-precedence": resource.precedence,
-        media: resource.media,
-        crossorigin: resource.crossOrigin,
-      });
-      return;
-    case "preload":
-      writeLink(sink, {
-        rel: "preload",
-        href: resource.href,
-        as: resource.as,
-        "data-fig-resource-key": resourceKey,
-        type: resource.type,
-        crossorigin: resource.crossOrigin,
-        fetchpriority: resource.fetchPriority,
-      });
-      return;
-    case "modulepreload":
-      writeLink(sink, {
-        rel: "modulepreload",
-        href: resource.href,
-        "data-fig-resource-key": resourceKey,
-        crossorigin: resource.crossOrigin,
-        fetchpriority: resource.fetchPriority,
-      });
-      return;
-    case "font":
-      writeLink(sink, {
-        rel: "preload",
-        href: resource.href,
-        as: "font",
-        "data-fig-resource-key": resourceKey,
-        type: resource.type,
-        crossorigin: resource.crossOrigin ?? "anonymous",
-        fetchpriority: resource.fetchPriority,
-      });
-      return;
-    case "preconnect":
-      writeLink(sink, {
-        rel: "preconnect",
-        href: resource.href,
-        "data-fig-resource-key": resourceKey,
-        crossorigin: resource.crossOrigin,
-      });
-      return;
-    case "script":
-      writeElementStart(
-        "script",
-        withNonce(sink, {
-          src: resource.src,
-          type: resource.module === true ? "module" : undefined,
-          "data-fig-resource-key": resourceKey,
-          // Hoisted scripts default to async, but an explicit defer opts into
-          // ordered execution and must not be overridden (async wins over
-          // defer in browsers).
-          async: (resource.async ?? resource.defer !== true) ? true : undefined,
-          defer: resource.defer === true ? true : undefined,
-          crossorigin: resource.crossOrigin,
-        }),
-        sink,
-      );
-      writeElementEnd("script", sink);
-      return;
     case "title":
       writeElementStart("title", {}, sink);
       writeText(resource.value, sink);
@@ -189,15 +124,22 @@ function writeResourceTag(
           property: resource.property,
           "http-equiv": resource.httpEquiv,
           content: resource.content,
-          "data-fig-resource-key": resourceKey,
+          "data-fig-resource-key": resource.key,
         },
         sink,
       );
-  }
-}
+      return;
+    default: {
+      // The attribute set is shared with the client's head insertion; only
+      // the server-side reveal-blocker id and nonce are appended here.
+      const props: Props = Object.fromEntries(resourceHostAttributes(resource));
+      if (resource.kind === "stylesheet" && id !== null) props.id = id;
 
-function writeLink(sink: ResourceSink, props: Props): void {
-  writeElementStart("link", withNonce(sink, props), sink);
+      const tag = resource.kind === "script" ? "script" : "link";
+      writeElementStart(tag, withNonce(sink, props), sink);
+      if (tag === "script") writeElementEnd("script", sink);
+    }
+  }
 }
 
 function withNonce(sink: ResourceSink, props: Props): Props {

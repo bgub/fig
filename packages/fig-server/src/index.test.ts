@@ -396,7 +396,7 @@ describe("@bgub/fig-server", () => {
     const html = await readStream(result.stream);
 
     expect(html).toBe(
-      '<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous" nonce="abc"><link rel="preload" href="/hero.png" as="image" fetchpriority="high" nonce="abc"><link rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin="anonymous" nonce="abc"><link rel="stylesheet" href="/app.css" id="r-0" data-precedence="app" nonce="abc"><script src="/app.js" type="module" async nonce="abc"></script><main><h1>Ready</h1></main>',
+      '<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous" nonce="abc"><link rel="preload" href="/hero.png" as="image" fetchpriority="high" nonce="abc"><link rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin="anonymous" nonce="abc"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0" nonce="abc"><script src="/app.js" type="module" async nonce="abc"></script><main><h1>Ready</h1></main>',
     );
   });
 
@@ -439,7 +439,7 @@ describe("@bgub/fig-server", () => {
     await expect(
       renderDocumentToString(createElement(Page, null)),
     ).resolves.toBe(
-      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" id="r-0" data-precedence="app"></head><body><main>Ready</main></body></html>',
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>',
     );
   });
 
@@ -475,7 +475,7 @@ describe("@bgub/fig-server", () => {
     await expect(
       renderDocumentToString(createElement(Page, null)),
     ).resolves.toBe(
-      '<!doctype html><html><head><meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" id="r-0" data-precedence="app"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>',
+      '<!doctype html><html><head><meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>',
     );
   });
 

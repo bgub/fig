@@ -1,6 +1,14 @@
 export { isContext, type FigContext, FigContextSymbol } from "./context.ts";
 export { validateInstanceNesting, validateTextNesting } from "./dom-nesting.ts";
 export {
+  ACTIVITY_TEMPLATE_ATTRIBUTE,
+  SUSPENSE_CLIENT_MARKER,
+  SUSPENSE_COMPLETED_MARKER,
+  SUSPENSE_END_MARKER,
+  SUSPENSE_MARKER_PREFIX,
+  SUSPENSE_PENDING_PREFIX,
+} from "./suspense-protocol.ts";
+export {
   FigClientReferenceSymbol,
   FigElementSymbol,
   FigErrorBoundarySymbol,
@@ -43,8 +51,10 @@ export {
   resourceDestination,
   resourceFromHostAttributes,
   resourceFromHostProps,
+  resourceHostAttributes,
   type ClientReferenceResources,
   type ResourceDestination,
+  type ResourceHostAttribute,
 } from "./resource.ts";
 export {
   invalidateDataResource,

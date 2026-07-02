@@ -249,6 +249,97 @@ export function resourceFromHostAttributes(
   return resourceFromHost(type, getAttribute);
 }
 
+export type ResourceHostAttribute = readonly [
+  name: string,
+  value: string | true,
+];
+
+// Canonical attribute serialization for hoisted asset-resource elements,
+// shared by the server's registry writer and the client's head insertion so
+// the two renders cannot drift. `true` marks a boolean attribute (bare on
+// the server, empty-string in the DOM). Server-only attributes (id, nonce)
+// stay with the server writer; title/meta are written by their own paths.
+export function resourceHostAttributes(
+  resource: FigResource,
+): ResourceHostAttribute[] {
+  const pairs: Array<readonly [string, string | true | undefined]> = [];
+
+  switch (resource.kind) {
+    case "stylesheet":
+      pairs.push(
+        ["rel", "stylesheet"],
+        ["href", resource.href],
+        ["data-fig-resource-key", resource.key],
+        ["data-precedence", resource.precedence],
+        ["media", resource.media],
+        ["crossorigin", resource.crossOrigin],
+      );
+      break;
+    case "preload":
+      pairs.push(
+        ["rel", "preload"],
+        ["href", resource.href],
+        ["as", resource.as],
+        ["data-fig-resource-key", resource.key],
+        ["type", resource.type],
+        ["crossorigin", resource.crossOrigin],
+        ["fetchpriority", resource.fetchPriority],
+      );
+      break;
+    case "modulepreload":
+      pairs.push(
+        ["rel", "modulepreload"],
+        ["href", resource.href],
+        ["data-fig-resource-key", resource.key],
+        ["crossorigin", resource.crossOrigin],
+        ["fetchpriority", resource.fetchPriority],
+      );
+      break;
+    case "font":
+      pairs.push(
+        ["rel", "preload"],
+        ["href", resource.href],
+        ["as", "font"],
+        ["data-fig-resource-key", resource.key],
+        ["type", resource.type],
+        ["crossorigin", resource.crossOrigin ?? "anonymous"],
+        ["fetchpriority", resource.fetchPriority],
+      );
+      break;
+    case "preconnect":
+      pairs.push(
+        ["rel", "preconnect"],
+        ["href", resource.href],
+        ["data-fig-resource-key", resource.key],
+        ["crossorigin", resource.crossOrigin],
+      );
+      break;
+    case "script":
+      pairs.push(
+        ["src", resource.src],
+        ["type", resource.module === true ? "module" : undefined],
+        ["data-fig-resource-key", resource.key],
+        // Hoisted scripts default to async, but an explicit defer opts into
+        // ordered execution and must not be overridden (async wins over
+        // defer in browsers).
+        [
+          "async",
+          (resource.async ?? resource.defer !== true) ? true : undefined,
+        ],
+        ["defer", resource.defer === true ? true : undefined],
+        ["crossorigin", resource.crossOrigin],
+      );
+      break;
+    case "title":
+    case "meta":
+      break;
+  }
+
+  return pairs.filter(
+    (pair): pair is readonly [string, string | true] => pair[1] !== undefined,
+  );
+}
+
 function resourceFromHost(
   type: string,
   prop: (name: string) => unknown,
@@ -323,7 +414,9 @@ function linkResourceFromHost(
       href,
       kind: "stylesheet",
       media: readProp(prop, "media"),
-      precedence: readProp(prop, "precedence"),
+      // Hoisted elements serialize the canonical data-precedence attribute;
+      // host-rendered <link precedence> keeps the author-facing prop name.
+      precedence: readProp(prop, "precedence", "data-precedence"),
     };
   }
 
