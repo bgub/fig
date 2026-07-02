@@ -1094,11 +1094,7 @@ function withPropagationState<T>(
       state.immediateStopped = true;
     },
   );
-  const restoreCancelBubble = patchCancelBubble(
-    event,
-    existingCancelBubble,
-    state,
-  );
+  const restoreCancelBubble = patchCancelBubble(event, state);
 
   try {
     return callback(state);
@@ -1112,15 +1108,14 @@ function withPropagationState<T>(
   }
 }
 
-function patchCancelBubble(
-  event: Event,
-  existing: boolean,
-  state: PropagationState,
-): () => void {
+function patchCancelBubble(event: Event, state: PropagationState): () => void {
   const previous = Object.getOwnPropertyDescriptor(event, "cancelBubble");
   const changed = Reflect.defineProperty(event, "cancelBubble", {
     configurable: true,
-    get: () => existing || state.stopped,
+    // `stopped` is seeded from the effective pre-existing value (ignored
+    // for replays), so reads reflect THIS dispatch: a replay handler must
+    // not observe the spent event's stale stop state.
+    get: () => state.stopped,
     set(value: unknown) {
       // Per spec, assigning false does nothing.
       if (value === true) state.stopped = true;

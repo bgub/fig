@@ -795,7 +795,13 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("replayed"))] },
+            {
+              events: [
+                on("click", (event) =>
+                  calls.push(`replayed:${event.cancelBubble}`),
+                ),
+              ],
+            },
             "Client",
           ),
         ),
@@ -808,9 +814,10 @@ describe("@bgub/fig-dom hydration", () => {
     completePendingBoundary(container, boundary);
     await delay();
 
-    // The replay tracks its own propagation state; the stale cancelBubble
-    // must not drop the replayed handlers.
-    expect(calls).toEqual(["replayed"]);
+    // The replay tracks its own propagation state: the stale cancelBubble
+    // must not drop the replayed handlers, and handler-visible reads of
+    // event.cancelBubble must reflect the replay, not the spent dispatch.
+    expect(calls).toEqual(["replayed:false"]);
   });
 
   it("honors legacy cancelBubble assignment during replay", async () => {
