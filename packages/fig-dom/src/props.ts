@@ -60,20 +60,65 @@ export function updateElement(
       continue;
     }
 
-    if (reserved(name)) continue;
+    if (reserved(name)) {
+      if (process.env.NODE_ENV !== "production" && event(name)) {
+        warnDroppedProp(
+          name,
+          `Fig has no "${name}" event props; use ` +
+            `events={[on("${name.slice(2).toLowerCase()}", handler)]} instead.`,
+        );
+      }
+      continue;
+    }
 
     if (formProp(name)) {
+      if (
+        process.env.NODE_ENV !== "production" &&
+        (name === "checked" || name === "defaultChecked") &&
+        next !== undefined &&
+        typeof next !== "boolean" &&
+        next !== null
+      ) {
+        warnDroppedProp(
+          `${name}:${typeof next}`,
+          `The "${name}" prop received a ${typeof next} (${String(next)}); ` +
+            "Fig treats only `true` as checked, so this renders unchecked.",
+        );
+      }
       setFormProperty(element, type, name, next, nextProps, options);
       continue;
     }
 
     if (previous === next) continue;
-    if (name === "style") setStyle(element, previous, next);
-    else setAttribute(element, hostAttributeName(name, html), next);
+    if (name === "style") {
+      if (
+        process.env.NODE_ENV !== "production" &&
+        typeof next === "string" &&
+        next !== ""
+      ) {
+        warnDroppedProp(
+          "style:string",
+          "The style prop must be an object of properties; string styles " +
+            "are ignored.",
+        );
+      }
+      setStyle(element, previous, next);
+    } else setAttribute(element, hostAttributeName(name, html), next);
   }
 
   updateSelectOptions(element, type, previousProps, nextProps, options);
   updateParentSelect(element);
+}
+
+// Dev-only, deduped by key: silently dropping a prop the author clearly
+// intended (onClick, checked={1}, string styles) is the worst failure mode —
+// nothing renders wrong, the behavior just never happens.
+const warnedDroppedProps = new Set<string>();
+
+function warnDroppedProp(key: string, message: string): void {
+  if (warnedDroppedProps.has(key)) return;
+  warnedDroppedProps.add(key);
+  console.error(message);
 }
 
 export function hydrateElement(element: Element, nextProps: Props): void {

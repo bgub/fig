@@ -226,6 +226,36 @@ describe("@bgub/fig-dom props", () => {
     expect(input.attributes.value).toBe("Next");
   });
 
+  it("warns once for silently dropped props in development", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      const app = () =>
+        createElement("button", {
+          onClick: () => undefined,
+          checked: 1,
+          style: "color: red",
+        } as unknown as Record<string, unknown>);
+      flushSync(() => root.render(app()));
+      // Re-renders must not repeat the warnings.
+      flushSync(() => root.render(app()));
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([
+      expect.stringContaining('events={[on("click", handler)]}'),
+      expect.stringContaining('"checked" prop received a number'),
+      expect.stringContaining("style prop must be an object"),
+    ]);
+  });
+
   it("ignores default values that appear after mount", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
