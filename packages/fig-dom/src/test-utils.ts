@@ -41,6 +41,7 @@ export class FakeComment {
 interface FakeListener {
   capture: boolean;
   listener: EventListener;
+  once?: boolean;
 }
 
 type FakeStyle = Record<string, string> & {
@@ -147,15 +148,17 @@ export class FakeElement {
       return this.appendChild(node);
     }
 
-    node.parentNode?.removeChild(node);
+    // Validate the anchor BEFORE detaching the node, like real DOM: a
+    // failed insert must not mutate the tree. Real browsers throw here; a
+    // lenient fake hides exactly the stale-anchor reconciler bug class.
     const index = this.childNodes.indexOf(child);
-
     if (index === -1) {
-      this.childNodes.push(node);
-    } else {
-      this.childNodes.splice(index, 0, node);
+      throw notFoundError("insertBefore anchor is not a child of this element");
     }
 
+    node.parentNode?.removeChild(node);
+    // Re-resolve: removing the node may have shifted the anchor's index.
+    this.childNodes.splice(this.childNodes.indexOf(child), 0, node);
     node.parentNode = this;
     return node;
   }
@@ -166,10 +169,11 @@ export class FakeElement {
     this.innerHTMLValue = null;
     const index = this.childNodes.indexOf(node);
 
-    if (index !== -1) {
-      this.childNodes.splice(index, 1);
+    if (index === -1) {
+      throw notFoundError("removeChild node is not a child of this element");
     }
 
+    this.childNodes.splice(index, 1);
     node.parentNode = null;
     return node;
   }
@@ -199,11 +203,31 @@ export class FakeElement {
     listener: EventListener,
     options?: AddEventListenerOptions | boolean,
   ): void {
+    const capture = captureOption(options);
+    const once = typeof options === "object" && options?.once === true;
+    const signal = typeof options === "object" ? options?.signal : undefined;
+
+    // Real DOM ignores duplicate (listener, capture) registrations.
+    if (
+      this.listenerSets[name]?.some(
+        (current) =>
+          current.listener === listener && current.capture === capture,
+      )
+    ) {
+      return;
+    }
+
+    if (signal?.aborted === true) return;
+
     this.listenerSets[name] ??= [];
     this.listenerSets[name].push({
-      capture: captureOption(options),
+      capture,
       listener,
+      once,
     });
+    signal?.addEventListener("abort", () =>
+      this.removeEventListener(name, listener, { capture }),
+    );
     this.listeners[name] = (event) => {
       for (const current of this.listenerSets[name] ?? []) {
         current.listener(event);
@@ -243,11 +267,19 @@ export class FakeElement {
 
     const event = {
       cancelBubble: false,
+      immediateStopped: false,
       composedPath: () => path,
       target: this,
       type: name,
       stopPropagation(this: { cancelBubble: boolean }) {
         this.cancelBubble = true;
+      },
+      stopImmediatePropagation(this: {
+        cancelBubble: boolean;
+        immediateStopped: boolean;
+      }) {
+        this.cancelBubble = true;
+        this.immediateStopped = true;
       },
     } as unknown as Event;
 
@@ -263,8 +295,25 @@ export class FakeElement {
   }
 
   invoke(name: string, event: Event, capture: boolean): void {
-    for (const current of this.listenerSets[name] ?? []) {
-      if (current.capture === capture) current.listener(event);
+    // Snapshot: once/signal removals (and handler-driven changes) mutate the
+    // live set mid-dispatch, exactly like real DOM listener semantics.
+    const snapshot = [...(this.listenerSets[name] ?? [])];
+    for (const current of snapshot) {
+      if (current.capture !== capture) continue;
+      if (!this.listenerSets[name]?.includes(current)) continue;
+      if (
+        (event as unknown as { immediateStopped?: boolean })
+          .immediateStopped === true
+      ) {
+        return;
+      }
+
+      if (current.once) {
+        this.removeEventListener(name, current.listener, {
+          capture: current.capture,
+        });
+      }
+      current.listener(event);
     }
   }
 
@@ -350,12 +399,21 @@ export function installFakeDocument(): void {
         new FakeElement(tagName, namespace),
       createTextNode: (value: string) => new FakeText(value),
       createComment: (value: string) => new FakeComment(value),
+      // Real documents have a head, so the document-resource registry is
+      // active by default instead of silently no-oping in every test.
+      head: new FakeElement("head"),
     } as unknown as Document;
   });
 
   afterEach(() => {
     globalThis.document = documentValue;
   });
+}
+
+function notFoundError(message: string): Error {
+  const error = new Error(`NotFoundError: ${message}`);
+  error.name = "NotFoundError";
+  return error;
 }
 
 function captureOption(options?: AddEventListenerOptions | boolean): boolean {

@@ -1077,7 +1077,10 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     // lane; it cannot make progress until the boundary reveals).
     flushSync(() => counterSet?.(5));
     await delay();
-    // Still suspended — fallback stays, primary stays hidden, no busy loop.
+    // Still suspended — fallback stays IN THE DOM (a speculative reveal must
+    // not commit its abandoned fallback deletion), primary stays hidden.
+    expect(fallback.parentNode).toBe(container);
+    expect(container.childNodes).toEqual([primary, fallback]);
     expect(fallback.textContent).toBe("load");
     expect(display(primary)).toBe("none");
 

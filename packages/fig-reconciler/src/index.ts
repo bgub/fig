@@ -3662,6 +3662,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const currentPrimary = suspensePrimaryFiber(boundary.alternate);
     if (currentPrimary !== null) {
       boundary.suspenseState = { kind: "fallback", primaryChild: null };
+      boundary.deletions = null;
       restoreConsumedPendingQueuesForRetry(
         root,
         boundary.suspenseQueueStart ?? root.consumedPendingQueues.length,
