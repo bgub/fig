@@ -67,11 +67,7 @@ export function updateElement(
 
     if (reserved(name)) {
       if (process.env.NODE_ENV !== "production" && event(name)) {
-        warnDroppedProp(
-          name,
-          `Fig has no "${name}" event props; use ` +
-            `events={[on("${name.slice(2).toLowerCase()}", handler)]} instead.`,
-        );
+        warnDroppedProp(name, eventPropWarning(name, type, nextProps));
       }
       continue;
     }
@@ -127,6 +123,45 @@ function warnDroppedProp(key: string, message: string): void {
   if (warnedDroppedProps.has(key)) return;
   warnedDroppedProps.add(key);
   console.error(message);
+}
+
+function eventPropWarning(name: string, type: string, props: Props): string {
+  // A trailing "Capture" is React's capture-phase suffix, except when it is
+  // part of the event name itself (onGotPointerCapture/onLostPointerCapture
+  // are bubble-phase props for gotpointercapture/lostpointercapture) or is
+  // the entire name (an "onCapture" prop would leave an empty event name).
+  const capture =
+    name.endsWith("Capture") &&
+    name.length > "onCapture".length &&
+    name !== "onGotPointerCapture" &&
+    name !== "onLostPointerCapture";
+  const rawName = name.slice(2, capture ? -"Capture".length : undefined);
+  const options = capture ? ", { capture: true }" : "";
+  const suggest = (eventName: string) =>
+    `Fig has no "${name}" event props; use ` +
+    `events={[on("${eventName}", handler${options})]} instead.`;
+
+  if (rawName === "DoubleClick") return suggest("dblclick");
+  if (rawName === "Change" && reactChangeUsesInputEvent(type, props)) {
+    return (
+      suggest("input") +
+      ` (React's onChange on text-editing controls fires per change like the` +
+      ` native "input" event; on("change") fires only on commit.)`
+    );
+  }
+  return suggest(rawName.toLowerCase());
+}
+
+// React backs onChange on text-editing controls with the native "input"
+// event; only checkbox/radio/file inputs (and selects) match the native
+// "change" timing, so everything else steers to on("input").
+function reactChangeUsesInputEvent(type: string, props: Props): boolean {
+  if (type === "textarea") return true;
+  if (type !== "input") return false;
+  const inputType = typeof props.type === "string" ? props.type : "text";
+  return (
+    inputType !== "checkbox" && inputType !== "radio" && inputType !== "file"
+  );
 }
 
 export function hydrateElement(element: Element, nextProps: Props): void {

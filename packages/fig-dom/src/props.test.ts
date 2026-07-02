@@ -235,25 +235,78 @@ describe("@bgub/fig-dom props", () => {
       errors.push(args.map(String).join(" "));
     };
 
+    let firstRenderCount = 0;
     try {
       const app = () =>
         createElement("button", {
           onClick: () => undefined,
+          onClickCapture: () => undefined,
+          onDoubleClick: () => undefined,
           checked: 1,
           style: "color: red",
         } as unknown as Record<string, unknown>);
       flushSync(() => root.render(app()));
+      firstRenderCount = errors.length;
       // Re-renders must not repeat the warnings.
       flushSync(() => root.render(app()));
     } finally {
       console.error = originalError;
     }
 
-    expect(errors).toEqual([
-      expect.stringContaining('events={[on("click", handler)]}'),
-      expect.stringContaining('"checked" prop received a number'),
-      expect.stringContaining("style prop must be an object"),
-    ]);
+    // arrayContaining, not an exact array: the dedupe registry is
+    // module-level, so other tests' warnings must not couple to this
+    // assertion's order or count.
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('events={[on("click", handler)]}'),
+        expect.stringContaining(
+          'events={[on("click", handler, { capture: true })]}',
+        ),
+        expect.stringContaining('events={[on("dblclick", handler)]}'),
+        expect.stringContaining('"checked" prop received a number'),
+        expect.stringContaining("style prop must be an object"),
+      ]),
+    );
+    expect(errors).toHaveLength(firstRenderCount);
+  });
+
+  it("suggests accurate event names for special React event props", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        root.render(
+          createElement("input", {
+            onChange: () => undefined,
+            onGotPointerCapture: () => undefined,
+            onLostPointerCapture: () => undefined,
+            onCapture: () => undefined,
+          } as unknown as Record<string, unknown>),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        // React's onChange on a text input fires per keystroke, so the
+        // behavior-preserving suggestion is on("input"), not on("change").
+        expect.stringContaining('events={[on("input", handler)]}'),
+        // The trailing "Capture" is part of these event names, not React's
+        // capture-phase suffix.
+        expect.stringContaining('events={[on("gotpointercapture", handler)]}'),
+        expect.stringContaining('events={[on("lostpointercapture", handler)]}'),
+        // A bare "onCapture" prop must not strip down to an empty name.
+        expect.stringContaining('events={[on("capture", handler)]}'),
+      ]),
+    );
   });
 
   it("ignores default values that appear after mount", () => {
