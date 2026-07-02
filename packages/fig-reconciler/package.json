@@ -34,8 +34,9 @@
   "license": "MIT",
   "dependencies": {
     "@bgub/fig": "workspace:*",
-    "@bgub/fig-data": "workspace:*",
     "@bgub/fig-scheduler": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@bgub/fig-data": "workspace:*"
+  }
 }

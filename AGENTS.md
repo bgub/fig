@@ -34,6 +34,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - `ErrorBoundary` catches render and Fig effect errors with a sticky fallback; reset by remounting/changing the boundary key.
 - Error boundaries do not catch promises, event handler errors, async callback errors, server render errors, or host commit failures.
 - Fig intentionally splits React's broad `use(resource)` idea into explicit reads.
+- Renderers do not bundle `@bgub/fig-data`: importing that package registers its store factory in a slot on `@bgub/fig/internal` (a module side effect, reflected in its `sideEffects` flag), and `fig-reconciler` roots created before it loads hold a stub store that upgrades itself in place on registration (covering code-split apps) and buffers `hydrate()`/`initialData` entries for replay. Data reads on the stub cannot happen — every data API is importable only from `@bgub/fig-data` — but throw a clear error if forced.
 - Context uses `createContext` plus `readContext(context)` because context reads are render-time inputs, not hook slots.
 - Context reads are tracked so provider updates mark matching consumers, and propagation stops at nested providers of the same context.
 - Promises use `readPromise(promise)` as the future Suspense-facing primitive; promise identity matters, not call position.

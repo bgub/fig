@@ -67,7 +67,10 @@ export {
 export {
   dataResourceKeysForError,
   markDataResourceError,
+  onDataStoreFactoryRegistered,
+  registerDataStoreFactory,
   resolveCurrentDataStore,
+  resolveDataStoreFactory,
   setCurrentDataStore,
   type DataRefreshResult,
   type DataResourceKey,
@@ -78,6 +81,8 @@ export {
   type FigDataResource,
   type FigDataStore,
   type FigDataStoreEntrySnapshot,
+  type FigDataStoreFactory,
   type FigDataStoreHandle,
+  type FigDataStoreHost,
 } from "./data.ts";
 export { setTransitionHandler } from "./transition.ts";

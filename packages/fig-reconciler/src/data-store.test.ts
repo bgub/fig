@@ -1,0 +1,120 @@
+// These tests intentionally avoid a static @bgub/fig-data import: the module
+// registers the real store factory as a side effect, and this file exercises
+// the stub store that roots hold before that happens. Test order matters —
+// the dynamic import in the upgrade test registers the factory for the rest
+// of the file.
+import { createElement } from "@bgub/fig";
+import type { FigDataResource, FigDataStore } from "@bgub/fig/internal";
+import { describe, expect, it } from "vite-plus/test";
+import { createRenderer, type HostConfig } from "./index.ts";
+
+class TestText {
+  parentNode: TestElement | null = null;
+
+  constructor(public nodeValue: string) {}
+
+  get textContent(): string {
+    return this.nodeValue;
+  }
+}
+
+class TestElement {
+  childNodes: Array<TestElement | TestText> = [];
+  parentNode: TestElement | null = null;
+
+  constructor(public type: string) {}
+
+  insertBefore(
+    node: TestElement | TestText,
+    child: TestElement | TestText | null,
+  ): void {
+    node.parentNode?.removeChild(node);
+    const index = child === null ? -1 : this.childNodes.indexOf(child);
+    if (index === -1) this.childNodes.push(node);
+    else this.childNodes.splice(index, 0, node);
+    node.parentNode = this;
+  }
+
+  removeChild(node: TestElement | TestText): void {
+    const index = this.childNodes.indexOf(node);
+    if (index !== -1) this.childNodes.splice(index, 1);
+    node.parentNode = null;
+  }
+
+  get textContent(): string {
+    return this.childNodes.map((child) => child.textContent).join("");
+  }
+}
+
+const host: HostConfig<TestElement, TestElement, TestText> = {
+  createInstance: (type) => new TestElement(type),
+  createTextInstance: (text) => new TestText(text),
+  appendInitialChild: (parent, child) => parent.insertBefore(child, null),
+  finalizeInitialInstance: () => undefined,
+  insertBefore: (parent, child, before) => parent.insertBefore(child, before),
+  removeChild: (parent, child) => parent.removeChild(child),
+  commitUpdate: () => undefined,
+  commitTextUpdate: (text, value) => {
+    text.nodeValue = value;
+  },
+};
+
+describe("root data store without @bgub/fig-data", () => {
+  it("renders on the stub store and run() executes the callback", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() => root.render(createElement("span", null, "Hello")));
+
+    expect(container.textContent).toBe("Hello");
+    expect(root.data.run(() => 42)).toBe(42);
+  });
+
+  it("throws a helpful error for data reads before the package loads", () => {
+    const { createRoot } = createRenderer(host);
+    const root = createRoot(new TestElement("root"));
+    const fakeResource = {} as FigDataResource<[], string>;
+
+    expect(() =>
+      (root.data as FigDataStore).readData(fakeResource, [], {}),
+    ).toThrow("Data resource APIs require @bgub/fig-data.");
+  });
+
+  it("buffers initialData and upgrades live roots in place on registration", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+
+    // A root disposed before registration must unsubscribe cleanly.
+    const abandoned = createRoot(new TestElement("root"));
+    abandoned.unmount();
+
+    const container = new TestElement("root");
+    const root = createRoot(container, {
+      initialData: [{ key: ["greeting"], value: "Hi from the server" }],
+    });
+    flushSync(() => root.render(createElement("span", null, "static")));
+
+    // Loading the package registers the factory; the live root's stub must
+    // upgrade in place and replay the buffered hydration entries.
+    const { dataResource, readData } = await import("@bgub/fig-data");
+    const greeting = dataResource.identity<[], string>({
+      key: () => ["greeting"],
+    });
+
+    function Greeting() {
+      return createElement("span", null, readData(greeting));
+    }
+
+    flushSync(() => root.render(createElement(Greeting, null)));
+    expect(container.textContent).toBe("Hi from the server");
+
+    // Post-upgrade, handle methods delegate to the real store.
+    root.data.hydrate([{ key: ["late"], value: "late" }]);
+    const late = dataResource.identity<[], string>({ key: () => ["late"] });
+    function Late() {
+      return createElement("span", null, readData(late));
+    }
+    flushSync(() => root.render(createElement(Late, null)));
+    expect(container.textContent).toBe("late");
+  });
+});

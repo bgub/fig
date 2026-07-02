@@ -4,6 +4,7 @@ import {
   preloadDataResource,
   readDataResource,
   refreshDataResource,
+  registerDataStoreFactory,
   resolveCurrentDataStore,
   setCurrentDataStore,
   type DataRefreshResult,
@@ -1076,3 +1077,11 @@ export function runWithDataStore<T>(store: FigDataStore, callback: () => T): T {
 export function currentDataStore(): FigDataStore {
   return resolveCurrentDataStore();
 }
+
+// Module side effect (reflected in package.json "sideEffects"): loading this
+// package hands renderers the real store factory. Renderer bundles carry only
+// a stub until then, and roots created earlier upgrade in place — see
+// registerDataStoreFactory in @bgub/fig/internal.
+registerDataStoreFactory((host) =>
+  createDataStore(host as DataStoreHost<object, unknown>),
+);

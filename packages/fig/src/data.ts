@@ -94,6 +94,49 @@ export interface FigDataStore extends FigDataStoreHandle {
   ): Promise<DataRefreshResult<TValue>>;
 }
 
+// The host callbacks a renderer hands to the data-store factory. Structurally
+// compatible with @bgub/fig-data's DataStoreHost so its createDataStore can
+// register directly.
+export interface FigDataStoreHost {
+  context: unknown;
+  getLane(): unknown;
+  partition?: DataResourceKeyInput;
+  schedule(owner: object, lane: unknown): void;
+}
+
+export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
+
+// The registration slot that decouples renderers from @bgub/fig-data:
+// importing that package registers its store factory here as a module side
+// effect, so renderer bundles never carry the store implementation. Roots
+// created before the package loads hold a stub store that upgrades itself
+// through the listener list; this is safe because every data-reading API
+// (dataResource, readData, ...) is importable only from @bgub/fig-data, so no
+// read can happen before it registers. First registration wins.
+let dataStoreFactory: FigDataStoreFactory | null = null;
+const dataStoreFactoryListeners = new Set<() => void>();
+
+export function registerDataStoreFactory(factory: FigDataStoreFactory): void {
+  if (dataStoreFactory !== null) return;
+  dataStoreFactory = factory;
+  for (const listener of dataStoreFactoryListeners) listener();
+  dataStoreFactoryListeners.clear();
+}
+
+export function resolveDataStoreFactory(): FigDataStoreFactory | null {
+  return dataStoreFactory;
+}
+
+export function onDataStoreFactoryRegistered(listener: () => void): () => void {
+  if (dataStoreFactory !== null) {
+    listener();
+    return () => {};
+  }
+
+  dataStoreFactoryListeners.add(listener);
+  return () => dataStoreFactoryListeners.delete(listener);
+}
+
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;

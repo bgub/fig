@@ -27,15 +27,18 @@ import {
   isResources,
   isSuspense,
   isValidElement,
+  onDataStoreFactoryRegistered,
+  resolveDataStoreFactory,
   setCurrentDispatcher,
   setCurrentDataStore,
   setTransitionHandler,
   type FigDataHydrationEntry,
+  type FigDataStore,
   type FigDataStoreHandle,
+  type FigDataStoreHost,
   type DataResourceKeyInput,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
-import { createDataStore, type DataStore } from "@bgub/fig-data";
 import {
   NormalPriority,
   now,
@@ -555,7 +558,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
-  dataStore: DataStore<Fiber<Container, Instance, TextInstance>, Lane>;
+  dataStore: FigDataStore;
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
@@ -719,12 +722,12 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function createFiberRoot(container: Container, options: FigRootOptions): R {
     const current = fiber(RootTag, null, null, { children: null }, null);
-    const dataStore = createDataStore<F, Lane>({
+    const dataStore = createRootDataStore({
       context: options.dataContext ?? {},
       getLane: requestUpdateLane,
       partition: options.dataPartition,
       schedule(owner, lane) {
-        scheduleFiber(owner, hiddenSubtreeLane(owner, lane));
+        scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
     });
     const root: R = {
@@ -4651,6 +4654,91 @@ function tagFor(element: FigElement): Tag {
   if (isActivity(element.type)) return ActivityTag;
   if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
   return FunctionTag;
+}
+
+// Every data-reading API (dataResource, readData, ...) is importable only
+// from @bgub/fig-data, and importing it registers the real store factory —
+// so a root created before the package loads can safely hold this stub: no
+// read can precede registration. The stub upgrades itself in place when the
+// factory arrives (covering code-split apps whose only fig-data import is a
+// lazy chunk) and buffers hydrate() entries so createRoot({initialData})
+// behaves identically either way.
+function createRootDataStore(host: FigDataStoreHost): FigDataStore {
+  const factory = resolveDataStoreFactory();
+  if (factory !== null) return factory(host);
+
+  let inner: FigDataStore | null = null;
+  let buffered: FigDataHydrationEntry[] | null = null;
+  let disposed = false;
+
+  const unsubscribe = onDataStoreFactoryRegistered(() => {
+    if (disposed) return;
+    inner = (
+      resolveDataStoreFactory() as NonNullable<
+        ReturnType<typeof resolveDataStoreFactory>
+      >
+    )(host);
+    if (buffered !== null) inner.hydrate(buffered);
+    buffered = null;
+  });
+
+  function requireStore(): FigDataStore {
+    if (inner === null) {
+      throw new Error("Data resource APIs require @bgub/fig-data.");
+    }
+
+    return inner;
+  }
+
+  return {
+    hydrate(entries) {
+      if (inner !== null) {
+        inner.hydrate(entries);
+        return;
+      }
+      (buffered ??= []).push(...entries);
+    },
+    run(callback) {
+      return inner !== null ? inner.run(callback) : callback();
+    },
+    readData(resource, args, owner) {
+      return requireStore().readData(resource, args, owner);
+    },
+    preloadData(resource, args) {
+      requireStore().preloadData(resource, args);
+    },
+    invalidateData(resource, args) {
+      requireStore().invalidateData(resource, args);
+    },
+    refreshData(resource, args) {
+      return requireStore().refreshData(resource, args);
+    },
+    commitDataDependencies(owner, previousOwner) {
+      inner?.commitDataDependencies(owner, previousOwner);
+    },
+    deleteDataOwner(owner) {
+      inner?.deleteDataOwner(owner);
+    },
+    releaseDataOwner(owner) {
+      inner?.releaseDataOwner(owner);
+    },
+    resetDataDependencies(owner) {
+      inner?.resetDataDependencies(owner);
+    },
+    dispose() {
+      disposed = true;
+      unsubscribe();
+      inner?.dispose();
+      inner = null;
+      buffered = null;
+    },
+    inspectDataEntries() {
+      return inner?.inspectDataEntries() ?? [];
+    },
+    snapshot() {
+      return inner?.snapshot() ?? buffered?.slice() ?? [];
+    },
+  };
 }
 
 // --- Fast Refresh (HMR) ----------------------------------------------------
