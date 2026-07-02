@@ -87,19 +87,24 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
   // The NODE_ENV gates below run at call time (never at module scope, which
-  // would throw on import wherever bundler defines don't apply); with a
-  // define, the dead branches let bundlers drop the dom-nesting module from
-  // production bundles.
+  // would throw on import wherever bundler defines don't apply). They must
+  // stay in block form — `if (dev) { validate() }` — not early-return form:
+  // esbuild only eliminates the constant branch (and with it the dom-nesting
+  // module import) at parse time, before symbol retention is decided; code
+  // after an `if (prod) return` keeps the import referenced and ships the
+  // whole module in production bundles.
   validateInstanceNesting: (type, props, ancestors) => {
-    if (process.env.NODE_ENV === "production") return;
-    // Asset resources hoist to <head>, so their fiber position is not
-    // their DOM position; the server exempts them the same way.
-    if (resourceFromHostProps(type, props) !== null) return;
-    validateInstanceNesting(type, ancestors);
+    if (process.env.NODE_ENV !== "production") {
+      // Asset resources hoist to <head>, so their fiber position is not
+      // their DOM position; the server exempts them the same way.
+      if (resourceFromHostProps(type, props) !== null) return;
+      validateInstanceNesting(type, ancestors);
+    }
   },
   validateTextNesting: (text, ancestors) => {
-    if (process.env.NODE_ENV === "production") return;
-    validateTextNesting(text, ancestors);
+    if (process.env.NODE_ENV !== "production") {
+      validateTextNesting(text, ancestors);
+    }
   },
   containerType: (container) =>
     isElementNode(container) ? elementName(container) : null,

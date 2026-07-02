@@ -143,7 +143,7 @@ const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
-export const dataResource: DataResourceFactory = Object.assign(
+export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
   function sharedDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext> {
@@ -544,12 +544,24 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     create: boolean,
   ): { entry: Entry<Owner, Lane> | null; key: string } {
     const normalized = normalizeKey(resource.key(...args));
-    const fingerprint = fingerprintFor(resource, args);
+    // The fingerprint feeds only the dev drift diagnostics below, so
+    // production never pays for encoding the args on every read.
+    const fingerprint =
+      process.env.NODE_ENV !== "production"
+        ? fingerprintFor(resource, args)
+        : null;
     const key = this.storeKey(normalized.canonical);
     const current = this.entries.get(key);
 
     if (current !== undefined) {
-      diagnoseEntryDrift(current, resource, normalized.canonical, fingerprint);
+      if (process.env.NODE_ENV !== "production") {
+        diagnoseEntryDrift(
+          current,
+          resource,
+          normalized.canonical,
+          fingerprint,
+        );
+      }
       return { entry: current, key };
     }
 

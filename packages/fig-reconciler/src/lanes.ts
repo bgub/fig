@@ -313,21 +313,35 @@ export function getLanePriority(lane: Lane): LanePriority {
   return "idle";
 }
 
+// Mask checks directly instead of via getLanePriority's string names, so the
+// name table stays out of production bundles (getLanePriority survives for
+// tests and diagnostics only). `lane` is a single bit (highest-priority
+// lane), so merging the groups is exact.
 export function getLaneSchedulerPriority(lane: Lane): PriorityLevel {
-  switch (getLanePriority(lane)) {
-    case "sync":
-      return ImmediatePriority;
-    case "input":
-    case "gesture":
-      return UserBlockingPriority;
-    case "default":
-    case "transition":
-      return NormalPriority;
-    case "retry":
-      return LowPriority;
-    default:
-      return IdlePriority;
+  if (includesSomeLane(SyncHydrationLane | SyncLane, lane)) {
+    return ImmediatePriority;
   }
+  if (
+    includesSomeLane(
+      InputContinuousHydrationLane | InputContinuousLane | GestureLane,
+      lane,
+    )
+  ) {
+    return UserBlockingPriority;
+  }
+  if (
+    includesSomeLane(
+      DefaultHydrationLane |
+        DefaultLane |
+        AllTransitionLanes |
+        TransitionHydrationLane,
+      lane,
+    )
+  ) {
+    return NormalPriority;
+  }
+  if (includesSomeLane(RetryLanes, lane)) return LowPriority;
+  return IdlePriority;
 }
 
 export function requestUpdateLane(): Lane {

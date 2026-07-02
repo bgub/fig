@@ -92,7 +92,23 @@ import {
 } from "./lanes.ts";
 import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
-export * from "./devtools.ts";
+// Type-only: the two devtools runtime helpers (devtoolsTypeName,
+// getFigDevtoolsGlobalHook) stay module-internal — no package imports them,
+// and value-exporting them from the entry would retain dev-only code in
+// production bundles (entry exports are tree-shaking roots).
+export type {
+  FigDevtoolsCommitInspection,
+  FigDevtoolsEffectPhase,
+  FigDevtoolsElementInspection,
+  FigDevtoolsFiberKind,
+  FigDevtoolsFiberSnapshot,
+  FigDevtoolsGlobalHook,
+  FigDevtoolsHookKind,
+  FigDevtoolsHookSnapshot,
+  FigDevtoolsHostSnapshot,
+  FigDevtoolsRendererInfo,
+  FigDevtoolsRootSnapshot,
+} from "./devtools.ts";
 export {
   DefaultLane,
   DeferredLane,
@@ -336,6 +352,34 @@ type EffectPhase =
   | typeof BeforePaintEffect
   | typeof BeforeLayoutEffect;
 
+// Hook kinds are numeric internally; effect hooks reuse their EffectPhase
+// constant as the kind, so isEffectHook is a range check and updateEffectHook
+// needs no separate kind argument. Devtools snapshots and dev-only errors map
+// back to the public FigDevtoolsHookKind strings through hookKindNames.
+const StateHook = 3;
+const ActionStateHook = 4;
+const IdHook = 5;
+const LaggedValueHook = 6;
+const ExternalStoreHook = 7;
+const MemoHook = 8;
+const TransitionHook = 9;
+const ReactiveEventHook = 10;
+type HookKind = number;
+
+const hookKindNames: readonly FigDevtoolsHookKind[] = [
+  "reactive",
+  "before-paint",
+  "before-layout",
+  "state",
+  "action-state",
+  "id",
+  "lagged-value",
+  "external-store",
+  "memo",
+  "transition",
+  "reactive-event",
+];
+
 interface HookUpdate<S> {
   action: SetStateAction<S>;
   lane: Lane;
@@ -348,7 +392,7 @@ interface HookQueue<S> {
 }
 
 interface Hook<S = any> {
-  kind: FigDevtoolsHookKind;
+  kind: HookKind;
   memoizedState: S;
   baseState: S;
   baseQueue: HookUpdate<S> | null;
@@ -410,7 +454,10 @@ interface ActionState<S, Args extends unknown[]> {
   value: S;
 }
 
-type QueuedHookKind = "state" | "transition" | "action-state";
+type QueuedHookKind =
+  | typeof StateHook
+  | typeof TransitionHook
+  | typeof ActionStateHook;
 
 interface ExternalStoreInstance<T, Owner> {
   committedSubscribe: ExternalStoreSubscribe | null;
@@ -540,13 +587,6 @@ interface RecoverableErrorRecord {
   info: RecoverableErrorInfo;
 }
 
-interface HydrationMismatch {
-  actual?: string;
-  boundaryId?: string;
-  expected?: string;
-  message: string;
-}
-
 type RecoverableDetails = Omit<RecoverableErrorInfo, "componentStack">;
 
 const PreservedSuspense = Symbol("fig.preserved-suspense");
@@ -599,49 +639,28 @@ export function createRenderer<Container, Instance, TextInstance>(
   let workInProgressHook: Hook | null = null;
   let localIdCounter = 0;
 
+  // Argument-identical delegations are direct references (the function
+  // declarations below are hoisted); only the effect hooks, which bind their
+  // phase constant, need wrappers.
   const dispatcher: RenderDispatcher = {
-    useState(initialState) {
-      const hook = updateStateHook(initialState);
-      const dispatch = hook.queue.dispatch;
-      if (dispatch === null) {
-        throw new Error("Expected state dispatch to be initialized.");
-      }
-
-      return [hook.memoizedState, dispatch];
-    },
-    useActionState(action, initialState) {
-      return updateActionStateHook(action, initialState);
-    },
-    useId() {
-      return updateIdHook();
-    },
-    useLaggedValue(value, initialValue, hasInitialValue) {
-      return updateLaggedValueHook(value, initialValue, hasInitialValue);
-    },
-    useMemo(calculate, deps) {
-      return updateMemoHook(calculate, deps);
-    },
-    useTransition() {
-      return updateTransitionHook();
-    },
+    useState: updateStateHook,
+    useActionState: updateActionStateHook,
+    useId: updateIdHook,
+    useLaggedValue: updateLaggedValueHook,
+    useMemo: updateMemoHook,
+    useTransition: updateTransitionHook,
     useReactive(effect, deps) {
-      updateEffectHook("reactive", ReactiveEffect, effect, deps);
+      updateEffectHook(ReactiveEffect, effect, deps);
     },
     useBeforePaint(effect, deps) {
-      updateEffectHook("before-paint", BeforePaintEffect, effect, deps);
+      updateEffectHook(BeforePaintEffect, effect, deps);
     },
     useBeforeLayout(effect, deps) {
-      updateEffectHook("before-layout", BeforeLayoutEffect, effect, deps);
+      updateEffectHook(BeforeLayoutEffect, effect, deps);
     },
-    useExternalStore(subscribe, getSnapshot, getServerSnapshot) {
-      return updateExternalStoreHook(subscribe, getSnapshot, getServerSnapshot);
-    },
-    useReactiveEvent(handler) {
-      return updateReactiveEventHook(handler);
-    },
-    readContext(context) {
-      return readContextValue(context);
-    },
+    useExternalStore: updateExternalStoreHook,
+    useReactiveEvent: updateReactiveEventHook,
+    readContext: readContextValue,
     readData(resource, args) {
       const fiber = requireRenderingFiber();
       return rootOf(fiber).dataStore.readData(resource, args, fiber);
@@ -1326,20 +1345,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       return false;
     }
 
-    if (hydratable === null) {
-      throwHydrationMismatch(root, node, {
-        actual: "nothing",
-        expected: `<${type}>`,
-        message: `expected <${type}>, but found no DOM node`,
-      });
-    }
-
-    if (!hydrationHost.canHydrateInstance(hydratable, type, node.props)) {
-      throwHydrationMismatch(root, node, {
-        actual: "different DOM node",
-        expected: `<${type}>`,
-        message: `expected <${type}>`,
-      });
+    if (
+      hydratable === null ||
+      !hydrationHost.canHydrateInstance(hydratable, type, node.props)
+    ) {
+      throwHydrationMismatch(root, node, `<${type}>`);
     }
 
     node.stateNode = hydratable as Instance;
@@ -1361,20 +1371,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hydratable = root.nextHydratableInstance;
     const text = String(node.props.nodeValue);
 
-    if (hydratable === null) {
-      throwHydrationMismatch(root, node, {
-        actual: "nothing",
-        expected: "text",
-        message: "expected text, but found no DOM node",
-      });
-    }
-
-    if (!hydrationHost.canHydrateTextInstance(hydratable, text)) {
-      throwHydrationMismatch(root, node, {
-        actual: "different DOM node",
-        expected: "text",
-        message: "expected text",
-      });
+    if (
+      hydratable === null ||
+      !hydrationHost.canHydrateTextInstance(hydratable, text)
+    ) {
+      throwHydrationMismatch(root, node, "text");
     }
 
     node.stateNode = hydratable as TextInstance;
@@ -1430,10 +1431,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       root.hydratingActivityBoundary === node
     ) {
       if (root.nextHydratableInstance !== null) {
-        throwHydrationMismatch(root, node, {
-          actual: "extra DOM node",
-          message: "found an extra DOM node in Activity",
-        });
+        throwHydrationMismatch(root, node, undefined, " in Activity");
       }
       leaveActivityHydration(root, node);
       return;
@@ -1442,10 +1440,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (!root.isHydrating || root.hydrationParent !== node) return;
 
     if (root.nextHydratableInstance !== null) {
-      throwHydrationMismatch(root, node, {
-        actual: "extra DOM node",
-        message: "found an extra DOM node",
-      });
+      throwHydrationMismatch(root, node);
     }
 
     const hydrationHost = requireHydrationHostConfig();
@@ -1466,11 +1461,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       !boundary.forceClientRender &&
       root.nextHydratableInstance !== boundary.end
     ) {
-      throwHydrationMismatch(root, node, {
-        actual: "extra DOM node",
-        boundaryId: boundary.id ?? undefined,
-        message: "found an extra DOM node in Suspense",
-      });
+      throwHydrationMismatch(
+        root,
+        node,
+        undefined,
+        " in Suspense",
+        boundary.id ?? undefined,
+      );
     }
 
     leaveSuspenseHydration(root, node, boundary);
@@ -1528,16 +1525,34 @@ export function createRenderer<Container, Instance, TextInstance>(
     return host as HydrationHostConfig<Container, Instance, TextInstance>;
   }
 
+  // The message and the recoverable-error fields derive from two facts: what
+  // was expected (`<div>`/"text"; undefined means an unexpected extra node)
+  // and whether the hydration cursor was empty — the expected-node throw
+  // sites all test root.nextHydratableInstance directly.
   function throwHydrationMismatch(
     root: R,
     node: F,
-    mismatch: HydrationMismatch,
+    expected?: string,
+    where = "",
+    boundaryId?: string,
   ): never {
-    const error = new Error(`Hydration mismatch: ${mismatch.message}.`);
+    const nothing = root.nextHydratableInstance === null;
+    const message =
+      expected === undefined
+        ? `found an extra DOM node${where}`
+        : nothing
+          ? `expected ${expected}, but found no DOM node`
+          : `expected ${expected}`;
+    const error = new Error(`Hydration mismatch: ${message}.`);
     queueRecoverableError(root, node, error, {
-      actual: mismatch.actual,
-      boundaryId: mismatch.boundaryId,
-      expected: mismatch.expected,
+      actual:
+        expected === undefined
+          ? "extra DOM node"
+          : nothing
+            ? "nothing"
+            : "different DOM node",
+      boundaryId,
+      expected,
       recovery: "root",
       source: "hydration",
     });
@@ -1952,24 +1967,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     reconcileCurrentChildren(node, node.props.children as FigNode);
   }
 
-  function updateStateHook<S>(initialState: S | (() => S)): Hook<S> {
-    const hook = updateQueuedHook("state", initialState);
+  function updateStateHook<S>(
+    initialState: S | (() => S),
+  ): [S, Dispatch<SetStateAction<S>>] {
+    const hook = updateQueuedHook(StateHook, initialState);
     const queue = hook.queue;
     const fiber = requireRenderingFiber();
 
-    if (queue.dispatch === null) {
-      queue.dispatch = (action: SetStateAction<S>) => {
-        if (renderingFiber !== null) {
-          throw new Error(
-            "State updates are not allowed while rendering a component.",
-          );
-        }
+    // The queue object persists across renders, so the dispatch created on
+    // mount is always present afterwards.
+    queue.dispatch ??= (action: SetStateAction<S>) => {
+      if (renderingFiber !== null) {
+        throw new Error(
+          "State updates are not allowed while rendering a component.",
+        );
+      }
 
-        scheduleHookUpdate(fiber, queue, action, requestUpdateLane());
-      };
-    }
+      scheduleHookUpdate(fiber, queue, action, requestUpdateLane());
+    };
 
-    return hook;
+    return [hook.memoizedState, queue.dispatch];
   }
 
   function updateActionStateHook<S, Args extends unknown[]>(
@@ -1977,7 +1994,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     initialState: S,
   ): [S, ActionStateDispatch<Args>, boolean] {
     const hook: Hook<ActionState<S, Args>> = updateQueuedHook(
-      "action-state",
+      ActionStateHook,
       () => createActionState(action, initialState),
     );
     const queue = hook.queue;
@@ -2068,27 +2085,27 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateIdHook(): string {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook("id") as Hook<string> | null;
+    const oldHook = updateHook(IdHook) as Hook<string> | null;
     const id =
       oldHook === null
         ? createFiberId(rootOf(fiber), fiber, localIdCounter)
         : oldHook.memoizedState;
     localIdCounter += 1;
 
-    appendHook(createHook("id", id));
+    appendHook(createHook(IdHook, id));
     return id;
   }
 
   function updateMemoHook<T>(calculate: () => T, deps: DependencyList): T {
     requireRenderingFiber();
-    const previous = (updateHook("memo") as Hook<MemoState<T>> | null)
+    const previous = (updateHook(MemoHook) as Hook<MemoState<T>> | null)
       ?.memoizedState;
     const state =
       previous !== undefined && areHookInputsEqual(deps, previous.deps)
         ? previous
         : { deps, value: calculate() };
 
-    appendHook(createHook("memo", state));
+    appendHook(createHook(MemoHook, state));
     return state.value;
   }
 
@@ -2098,7 +2115,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     hasInitialValue: boolean,
   ): T {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook("lagged-value") as Hook<T> | null;
+    const oldHook = updateHook(LaggedValueHook) as Hook<T> | null;
     let next =
       oldHook === null
         ? initialLaggedValue(value, initialValue, hasInitialValue)
@@ -2112,7 +2129,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    appendHook(createHook("lagged-value", next));
+    appendHook(createHook(LaggedValueHook, next));
     return next;
   }
 
@@ -2137,7 +2154,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       start: null,
     };
     const hook: Hook<TransitionState> = updateQueuedHook(
-      "transition",
+      TransitionHook,
       initialState,
     );
     const queue = hook.queue;
@@ -2191,12 +2208,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
     }
 
-    const start = hook.memoizedState.start;
-    if (start === null) {
-      throw new Error("Expected transition starter to be initialized.");
-    }
-
-    return [hook.memoizedState.pendingCount > 0, start];
+    // Assigned above when null; queued updates spread the previous state, so
+    // the starter is always carried forward.
+    return [
+      hook.memoizedState.pendingCount > 0,
+      hook.memoizedState.start as StartTransition,
+    ];
   }
 
   function requireRenderingFiber(): F {
@@ -2239,7 +2256,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     getServerSnapshot?: () => T,
   ): T {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook("external-store") as Hook<
+    const oldHook = updateHook(ExternalStoreHook) as Hook<
       ExternalStoreState<T, F>
     > | null;
     const root = rootOf(fiber);
@@ -2262,7 +2279,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       value,
     };
 
-    appendHook(createHook("external-store", state));
+    appendHook(createHook(ExternalStoreHook, state));
     return value;
   }
 
@@ -2271,13 +2288,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): (...args: ReactiveEventArgs<Args>) => Result {
     requireRenderingFiber();
     const oldHook = updateHook(
-      "reactive-event",
+      ReactiveEventHook,
     ) as Hook<ReactiveEventState> | null;
     const instance =
       oldHook?.memoizedState.instance ?? createReactiveEventInstance();
 
     appendHook(
-      createHook("reactive-event", {
+      createHook(ReactiveEventHook, {
         instance,
         next: handler as ReactiveEventHandler,
       }),
@@ -2445,13 +2462,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function updateEffectHook(
-    kind: FigDevtoolsHookKind,
     phase: EffectPhase,
     create: EffectCallback,
     deps?: DependencyList,
   ): void {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook(kind) as Hook<Effect> | null;
+    const oldHook = updateHook(phase) as Hook<Effect> | null;
     const nextDeps = deps ?? null;
     const previousEffect = oldHook?.memoizedState ?? null;
     const hasChanged =
@@ -2469,7 +2485,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         process.env.NODE_ENV !== "production" &&
         previousEffect?.strictRan === true,
     };
-    const hook = createHook(kind, effect);
+    const hook = createHook(phase, effect);
 
     appendHook(hook);
 
@@ -2512,7 +2528,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function updateHook(kind: FigDevtoolsHookKind): Hook | null {
+  function updateHook(kind: HookKind): Hook | null {
     const hook = currentHook;
 
     if (hook === null) {
@@ -2522,7 +2538,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (hook.kind !== kind) {
       throw new Error(
-        `Hook order changed: expected ${hook.kind}, received ${kind}.`,
+        `Hook order changed: expected ${hookKindName(hook.kind)}, ` +
+          `received ${hookKindName(kind)}.`,
       );
     }
 
@@ -4043,50 +4060,60 @@ export function createRenderer<Container, Instance, TextInstance>(
   // families re-render in place (hook state preserved); stale families (hook
   // signature changed) remount via their parent. The refresh runtime swaps each
   // family's `current` before calling this.
+  // Each refresh function wraps its whole body in a block-form NODE_ENV gate
+  // (not an early return: esbuild only drops the bodies — and with them the
+  // machinery — via parse-time branch elimination) so production builds ship
+  // empty stubs.
   function scheduleRefresh(update: RefreshUpdate): void {
-    if (resolveFamily === null || mountedRoots.size === 0) return;
+    if (process.env.NODE_ENV !== "production") {
+      if (resolveFamily === null || mountedRoots.size === 0) return;
 
-    staleFamilies = update.staleFamilies;
-    try {
-      flushSync(() => {
-        for (const root of mountedRoots) {
-          scheduleFamilyRefresh(root.current.child, update);
-        }
-      });
-    } finally {
-      staleFamilies = null;
+      staleFamilies = update.staleFamilies;
+      try {
+        flushSync(() => {
+          for (const root of mountedRoots) {
+            scheduleFamilyRefresh(root.current.child, update);
+          }
+        });
+      } finally {
+        staleFamilies = null;
+      }
     }
   }
 
   function scheduleFamilyRefresh(node: F | null, update: RefreshUpdate): void {
-    if (node === null) return;
+    if (process.env.NODE_ENV !== "production") {
+      if (node === null) return;
 
-    if (node.tag === FunctionTag && resolveFamily !== null) {
-      const family = resolveFamily(node.type);
-      if (family !== undefined) {
-        if (update.staleFamilies.has(family)) {
-          remountForRefresh(node);
-        } else if (update.updatedFamilies.has(family)) {
-          // Mark the instance dirty so render bailouts don't skip it.
-          scheduleFiber(node, SyncLane);
+      if (node.tag === FunctionTag && resolveFamily !== null) {
+        const family = resolveFamily(node.type);
+        if (family !== undefined) {
+          if (update.staleFamilies.has(family)) {
+            remountForRefresh(node);
+          } else if (update.updatedFamilies.has(family)) {
+            // Mark the instance dirty so render bailouts don't skip it.
+            scheduleFiber(node, SyncLane);
+          }
         }
       }
-    }
 
-    scheduleFamilyRefresh(node.child, update);
-    scheduleFamilyRefresh(node.sibling, update);
+      scheduleFamilyRefresh(node.child, update);
+      scheduleFamilyRefresh(node.sibling, update);
+    }
   }
 
   // A stale component must drop its hook state. Re-render its parent so the
   // child reconciles as an incompatible type and remounts; for a top-level
   // component re-render the whole root.
   function remountForRefresh(node: F): void {
-    const parent = node.return;
-    if (parent === null || parent.tag === RootTag) {
-      const root = rootOf(node);
-      updateRoot(root, root.element);
-    } else {
-      scheduleFiber(parent, SyncLane);
+    if (process.env.NODE_ENV !== "production") {
+      const parent = node.return;
+      if (parent === null || parent.tag === RootTag) {
+        const root = rootOf(node);
+        updateRoot(root, root.element);
+      } else {
+        scheduleFiber(parent, SyncLane);
+      }
     }
   }
 
@@ -4265,7 +4292,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         instance.live = !isInsideHiddenBoundary(owner);
       }
 
-      if (hook.kind === "action-state") {
+      if (hook.kind === ActionStateHook) {
         const state = hook.memoizedState as ActionState<unknown, unknown[]>;
         state.instance.action = state.action;
         state.instance.value = state.value;
@@ -4282,7 +4309,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isReactiveEventHook(hook: Hook): hook is Hook<ReactiveEventState> {
-    return hook.kind === "reactive-event";
+    return hook.kind === ReactiveEventHook;
   }
 
   function commitExternalStores(node: F | null): void {
@@ -4429,7 +4456,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function isExternalStoreHook(
     hook: Hook,
   ): hook is Hook<ExternalStoreState<unknown, F>> {
-    return hook.kind === "external-store";
+    return hook.kind === ExternalStoreHook;
   }
 
   function runEffect(effect: Effect): void {
@@ -4535,13 +4562,17 @@ function activityHidden(props: Props): boolean {
   return props.mode === "hidden";
 }
 
-function isEffectHook(kind: FigDevtoolsHookKind): boolean {
-  return (
-    kind === "reactive" || kind === "before-paint" || kind === "before-layout"
-  );
+function isEffectHook(kind: HookKind): boolean {
+  return kind <= BeforeLayoutEffect;
 }
 
-function createHook<S>(kind: FigDevtoolsHookKind, state: S): Hook<S> {
+// Dev-only (inline-gated at call sites): maps a numeric kind back to its
+// public FigDevtoolsHookKind name for readable errors.
+function hookKindName(kind: HookKind): string | number {
+  return process.env.NODE_ENV !== "production" ? hookKindNames[kind] : kind;
+}
+
+function createHook<S>(kind: HookKind, state: S): Hook<S> {
   return {
     kind,
     memoizedState: state,
@@ -4643,7 +4674,9 @@ let staleFamilies: Set<RefreshFamily> | null = null;
 export function setRefreshHandler(
   handler: ((type: unknown) => RefreshFamily | undefined) | null,
 ): void {
-  resolveFamily = handler;
+  if (process.env.NODE_ENV !== "production") {
+    resolveFamily = handler;
+  }
 }
 
 function resolveLatestType(type: unknown): unknown {
@@ -5094,36 +5127,36 @@ function devtoolsHooks(firstHook: Hook | null): FigDevtoolsHookSnapshot[] {
   ) {
     id += 1;
 
+    const kind = hookKindNames[hook.kind];
     if (isEffectHook(hook.kind)) {
       const effect = hook.memoizedState as Effect;
       hooks.push({
         id,
-        kind: hook.kind,
+        kind,
         deps: effect.deps,
         phase: devtoolsEffectPhase(effect.phase),
         active: effect.controller !== null,
       });
-    } else if (hook.kind === "memo") {
+    } else if (hook.kind === MemoHook) {
       const memo = hook.memoizedState as MemoState<unknown>;
       hooks.push({
         id,
-        kind: hook.kind,
+        kind,
         state: memo.value,
         deps: memo.deps,
       });
-    } else if (hook.kind === "external-store") {
+    } else if (hook.kind === ExternalStoreHook) {
       const store = hook.memoizedState as ExternalStoreState<unknown, unknown>;
       hooks.push({
         id,
-        kind: hook.kind,
+        kind,
         state: store.value,
       });
     } else {
-      const stateHook = hook as Hook<unknown>;
       hooks.push({
         id,
-        kind: stateHook.kind,
-        state: stateHook.memoizedState,
+        kind,
+        state: (hook as Hook<unknown>).memoizedState,
       });
     }
   }
