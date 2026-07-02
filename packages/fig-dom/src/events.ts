@@ -39,9 +39,14 @@ interface EventSlot {
   root: Container | null;
 }
 
+// type/capture/passive are stored rather than re-parsed from the listener
+// key: event types may themselves contain the key separator (":").
 interface RootListener {
+  capture: boolean;
   count: number;
   listener: EventListener;
+  passive: boolean;
+  type: string;
 }
 
 interface QueuedReplayableEvent {
@@ -52,6 +57,10 @@ interface QueuedReplayableEvent {
 
 interface PortalOwner {
   logicalParent: Container | Element;
+  // The logical parent's listener target at registration time: the container
+  // whose delegated keys this portal mirrors (an enclosing portal target, or
+  // the root).
+  parentTarget: Container;
   root: Container;
 }
 
@@ -64,6 +73,11 @@ interface ContainerRecord {
   hydrationListeners: Array<readonly [string, EventListener]> | null;
   listeners: Map<string, RootListener>;
   portalOwner: PortalOwner | null;
+  // Portal targets whose logical parent resolves to this container: this
+  // container's delegated listener keys mirror onto them (cascading down
+  // nested portals) so portal-inner events always have a dispatch point for
+  // logical bubbling, even when no portal-inner handler shares the key.
+  portals: Set<Container> | null;
   root: boolean;
   scope: RootScope | null;
 }
@@ -184,12 +198,15 @@ export function unregisterRoot(container: Container): void {
 
   // Slot teardown normally empties this map before unmount finishes; sweep
   // whatever remains so no delegated listener outlives the root.
-  for (const [key, rootListener] of record.listeners) {
-    const [type, capture] = key.split(":");
-    container.removeEventListener(type, rootListener.listener, {
-      capture: capture === "true",
+  for (const rootListener of record.listeners.values()) {
+    container.removeEventListener(rootListener.type, rootListener.listener, {
+      capture: rootListener.capture,
     });
   }
+
+  // Portal teardown normally clears these during unmount; sweep stragglers
+  // (nested portals hang off their parent target's record, so recurse).
+  sweepPortals(container);
 
   containerRecords.delete(container);
 
@@ -197,6 +214,13 @@ export function unregisterRoot(container: Container): void {
     if (queuedReplayableEvents[index].root === container) {
       queuedReplayableEvents.splice(index, 1);
     }
+  }
+}
+
+function sweepPortals(target: Container): void {
+  for (const portal of containerRecords.get(target)?.portals ?? []) {
+    sweepPortals(portal);
+    removePortalContainer(portal);
   }
 }
 
@@ -208,6 +232,7 @@ function containerRecord(container: Container): ContainerRecord {
       hydrationListeners: null,
       listeners: new Map(),
       portalOwner: null,
+      portals: null,
       root: false,
       scope: null,
     };
@@ -316,15 +341,57 @@ export function registerPortalContainer(
   root: Container,
   logicalParent: Container | Element,
 ): void {
-  containerRecord(container).portalOwner = {
+  const record = containerRecord(container);
+  const parentTarget = listenerTargetFor(logicalParent) ?? root;
+
+  if (record.portalOwner !== null) {
+    // Re-registration on a later commit: refresh the logical position; the
+    // mirrors are already in place while the parent target is unchanged.
+    if (
+      record.portalOwner.root === root &&
+      record.portalOwner.parentTarget === parentTarget
+    ) {
+      record.portalOwner = { logicalParent, parentTarget, root };
+      return;
+    }
+    removePortalContainer(container);
+  }
+
+  record.portalOwner = {
     logicalParent,
+    parentTarget,
     root,
   };
+
+  const parentRecord = containerRecord(parentTarget);
+  (parentRecord.portals ??= new Set()).add(container);
+  // Mirror the logical parent target's active delegated keys (which already
+  // include its own ancestors' mirrors) so events inside the portal have a
+  // dispatch point for every handler along the logical ancestor chain.
+  for (const mirrored of parentRecord.listeners.values()) {
+    acquireRootListener(
+      root,
+      container,
+      mirrored.type,
+      mirrored.capture,
+      mirrored.passive,
+    );
+  }
 }
 
 export function removePortalContainer(container: Container): void {
   const record = containerRecords.get(container);
-  if (record !== undefined) record.portalOwner = null;
+  const owner = record?.portalOwner ?? null;
+  if (record === undefined || owner === null) return;
+
+  record.portalOwner = null;
+
+  const parentRecord = containerRecords.get(owner.parentTarget);
+  if (parentRecord === undefined) return;
+  parentRecord.portals?.delete(container);
+  for (const key of parentRecord.listeners.keys()) {
+    releaseRootListener(container, key);
+  }
 }
 
 export function replayQueuedEvents(root: Container): void {
@@ -625,15 +692,29 @@ function attachDelegatedEventSlot(
   slot.root = root;
   slot.listenerTarget = listenerTarget;
 
+  acquireRootListener(
+    root,
+    listenerTarget,
+    slot.type,
+    rootListenerCapture(slot),
+    slot.options.passive,
+  );
+}
+
+function acquireRootListener(
+  root: Container,
+  listenerTarget: Container,
+  type: string,
+  capture: boolean,
+  passive: boolean,
+): void {
   const listeners = rootListenerMap(listenerTarget);
-  const key = rootListenerKey(slot);
+  const key = `${type}:${capture}:${passive}`;
   let rootListener = listeners.get(key);
 
   if (rootListener === undefined) {
-    const capture = rootListenerCapture(slot);
-    const { passive } = slot.options;
-    const { type } = slot;
     rootListener = {
+      capture,
       count: 0,
       listener: (event) =>
         captureDelegated(type)
@@ -646,15 +727,43 @@ function attachDelegatedEventSlot(
               passive,
               event,
             ),
+      passive,
+      type,
     };
     listenerTarget.addEventListener(type, rootListener.listener, {
       capture,
       passive,
     });
     listeners.set(key, rootListener);
+
+    // A key newly active on a target mirrors onto its portal targets
+    // (cascading through nested portals) so portal-inner events dispatch
+    // through the logical tree for it.
+    for (const portal of containerRecords.get(listenerTarget)?.portals ?? []) {
+      acquireRootListener(root, portal, type, capture, passive);
+    }
   }
 
   rootListener.count += 1;
+}
+
+function releaseRootListener(listenerTarget: Container, key: string): void {
+  const listeners = containerRecords.get(listenerTarget)?.listeners;
+  const rootListener = listeners?.get(key);
+  if (listeners === undefined || rootListener === undefined) return;
+
+  rootListener.count -= 1;
+  if (rootListener.count > 0) return;
+
+  listenerTarget.removeEventListener(rootListener.type, rootListener.listener, {
+    capture: rootListener.capture,
+  });
+  listeners.delete(key);
+
+  // The key died on this target: drop its mirrors from the portal targets.
+  for (const portal of containerRecords.get(listenerTarget)?.portals ?? []) {
+    releaseRootListener(portal, key);
+  }
 }
 
 function detachEventSlot(slot: EventSlot): void {
@@ -678,22 +787,7 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
 
   slot.root = null;
   slot.listenerTarget = null;
-  const key = rootListenerKey(slot);
-  const listeners = containerRecords.get(listenerTarget)?.listeners;
-  if (listeners === undefined) return;
-
-  const rootListener = listeners.get(key);
-
-  if (rootListener === undefined) return;
-
-  rootListener.count -= 1;
-
-  if (rootListener.count === 0) {
-    listenerTarget.removeEventListener(slot.type, rootListener.listener, {
-      capture: rootListenerCapture(slot),
-    });
-    listeners.delete(key);
-  }
+  releaseRootListener(listenerTarget, rootListenerKey(slot));
 }
 
 function removeElementSlot(
@@ -789,12 +883,21 @@ function logicalPortalPath(
   if (owner === null || owner.root !== root) return [];
 
   const path: Element[] = [];
-  for (
-    let current: unknown = owner.logicalParent;
-    current !== null && current !== root;
-    current = parentOf(current)
-  ) {
-    if (isElementNode(current)) path.push(current);
+  let cursor: unknown = owner.logicalParent;
+
+  while (cursor !== null && cursor !== root) {
+    // A portal container in the chain (nested portals): continue from its
+    // logical parent; the target element itself is not a logical ancestor.
+    if (isContainer(cursor)) {
+      const hop = containerRecords.get(cursor)?.portalOwner ?? null;
+      if (hop !== null && hop.root === root) {
+        cursor = hop.logicalParent;
+        continue;
+      }
+    }
+
+    if (isElementNode(cursor)) path.push(cursor);
+    cursor = parentOf(cursor);
   }
 
   return path;

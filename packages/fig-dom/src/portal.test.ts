@@ -141,6 +141,136 @@ describe("@bgub/fig-dom portals", () => {
     expect(calls).toEqual(["button", "parent"]);
   });
 
+  it("bubbles portal events to ancestors without portal-inner handlers", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const target = new FakeElement("portal-root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          { events: [on("click", () => calls.push("parent"))] },
+          createPortal(
+            createElement("button", null, "Plain"),
+            portalTarget(target),
+          ),
+        ),
+      ),
+    );
+
+    // No portal-inner click handler exists, so only the root's mirrored
+    // listener can route the event through the logical tree.
+    const button = target.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["parent"]);
+  });
+
+  it("runs ancestor capture handlers for portal events with different keys", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const target = new FakeElement("portal-root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          {
+            events: [
+              on("click", () => calls.push("parent-capture"), {
+                capture: true,
+              }),
+            ],
+          },
+          createPortal(
+            createElement("button", {
+              events: [on("click", () => calls.push("button"))],
+            }),
+            portalTarget(target),
+          ),
+        ),
+      ),
+    );
+
+    const button = target.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["parent-capture", "button"]);
+  });
+
+  it("bubbles nested portal events through every logical ancestor", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const outerTarget = new FakeElement("outer-root");
+    const innerTarget = new FakeElement("inner-root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          { events: [on("click", () => calls.push("main"))] },
+          createPortal(
+            createElement(
+              "section",
+              { events: [on("click", () => calls.push("section"))] },
+              createPortal(
+                createElement("button", {
+                  events: [on("click", () => calls.push("button"))],
+                }),
+                portalTarget(innerTarget),
+              ),
+            ),
+            portalTarget(outerTarget),
+          ),
+        ),
+      ),
+    );
+
+    const button = innerTarget.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["button", "section", "main"]);
+  });
+
+  it("bubbles nested portal events when only an outer-portal ancestor listens", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const outerTarget = new FakeElement("outer-root");
+    const innerTarget = new FakeElement("inner-root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createPortal(
+            createElement(
+              "section",
+              { events: [on("click", () => calls.push("section"))] },
+              createPortal(
+                createElement("button", null, "Plain"),
+                portalTarget(innerTarget),
+              ),
+            ),
+            portalTarget(outerTarget),
+          ),
+        ),
+      ),
+    );
+
+    // The click key lives only on the outer portal target (section's
+    // listener target); the inner target needs its mirror to dispatch.
+    const button = innerTarget.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["section"]);
+  });
+
   it("does not dispatch portal events twice when the target is inside the root", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");

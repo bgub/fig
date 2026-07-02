@@ -122,6 +122,30 @@ describe("@bgub/fig-dom events", () => {
     expect(calls).toEqual(["img:load", "img:pointerenter", "video:play"]);
   });
 
+  it("handles delegated custom event types containing colons", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const app = (listen: boolean) =>
+      createElement("button", {
+        events: listen ? [on("htmx:afterSwap", () => calls.push("swap"))] : [],
+      });
+
+    flushSync(() => root.render(app(true)));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("htmx:afterSwap");
+    expect(calls).toEqual(["swap"]);
+    expect(container.listenerSets["htmx:afterSwap"]).toHaveLength(1);
+
+    // Removing the handler must detach the full colon-containing type, not a
+    // prefix parsed out of the listener key.
+    flushSync(() => root.render(app(false)));
+
+    expect(container.listenerSets["htmx:afterSwap"]).toBeUndefined();
+    expect(container.listenerSets.htmx).toBeUndefined();
+  });
+
   it("updates event descriptors without duplicating handlers", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
