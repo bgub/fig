@@ -59,7 +59,6 @@ interface DispatchEntry {
 // a queued replay must not inherit cancelBubble state a third-party
 // listener left on the spent native event.
 interface PropagationState {
-  baselineCancelBubble: boolean;
   immediateStopped: boolean;
   stopped: boolean;
 }
@@ -614,7 +613,7 @@ function dispatchTwoPhase(
       state,
     );
 
-    if (state.immediateStopped || propagationStopped(event, state)) return;
+    if (state.immediateStopped || state.stopped) return;
 
     invokeDispatches(
       extractDispatches(root, listenerTarget, type, false, passive, event),
@@ -691,7 +690,7 @@ function invokeDispatches(
     // stopPropagation lets remaining handlers on the same element run and
     // skips every later element.
     if (entry.element !== currentElement) {
-      if (currentElement !== null && propagationStopped(event, state)) return;
+      if (currentElement !== null && state.stopped) return;
       currentElement = entry.element;
     }
 
@@ -1064,22 +1063,24 @@ function withCurrentTarget<T>(
   }
 }
 
-// Runs one logical dispatch with its own propagation state: the stop methods
-// are patched (save/restore, so nested dispatches of other events are
-// isolated) to record into the state while still calling the natives.
-// Replays set `ignoreExistingCancelBubble`: a spent event's stale
-// cancelBubble must not drop the replay, while a LIVE dispatch honors
-// cancelBubble a sibling root listener's handler already set.
+// Runs one logical dispatch with its own propagation state: the stop
+// methods and the legacy cancelBubble property are patched (save/restore,
+// so nested dispatches of other events are isolated) to record into the
+// state while still driving the natives. Replays set
+// `ignoreExistingCancelBubble`: a spent event's stale cancelBubble must not
+// drop the replay, while a LIVE dispatch honors cancelBubble a sibling root
+// listener's handler already set. Stops made DURING the dispatch — method
+// calls or `event.cancelBubble = true` assignments — are observed either
+// way via the patches.
 function withPropagationState<T>(
   event: Event,
   ignoreExistingCancelBubble: boolean,
   callback: (state: PropagationState) => T,
 ): T {
+  const existingCancelBubble = event.cancelBubble === true;
   const state: PropagationState = {
-    baselineCancelBubble:
-      ignoreExistingCancelBubble && event.cancelBubble === true,
     immediateStopped: false,
-    stopped: false,
+    stopped: !ignoreExistingCancelBubble && existingCancelBubble,
   };
 
   const restoreStop = patchEventMethod(event, "stopPropagation", () => {
@@ -1093,23 +1094,47 @@ function withPropagationState<T>(
       state.immediateStopped = true;
     },
   );
+  const restoreCancelBubble = patchCancelBubble(
+    event,
+    existingCancelBubble,
+    state,
+  );
 
   try {
     return callback(state);
   } finally {
+    restoreCancelBubble();
     restoreImmediate();
     restoreStop();
+    // Reflect a stop from this dispatch onto the real event once the
+    // patches are gone (a legacy assignment only reached the shadow).
+    if (state.stopped) event.cancelBubble = true;
   }
 }
 
-// Whether this logical dispatch stopped propagation: the state flags plus a
-// direct `event.cancelBubble = true` assignment made during this dispatch —
-// pre-existing cancelBubble (a spent event being replayed) is ignored.
-function propagationStopped(event: Event, state: PropagationState): boolean {
-  return (
-    state.stopped ||
-    (event.cancelBubble === true && !state.baselineCancelBubble)
-  );
+function patchCancelBubble(
+  event: Event,
+  existing: boolean,
+  state: PropagationState,
+): () => void {
+  const previous = Object.getOwnPropertyDescriptor(event, "cancelBubble");
+  const changed = Reflect.defineProperty(event, "cancelBubble", {
+    configurable: true,
+    get: () => existing || state.stopped,
+    set(value: unknown) {
+      // Per spec, assigning false does nothing.
+      if (value === true) state.stopped = true;
+    },
+  });
+
+  return () => {
+    if (!changed) return;
+    if (previous === undefined) {
+      delete (event as unknown as Record<string, unknown>).cancelBubble;
+    } else {
+      Object.defineProperty(event, "cancelBubble", previous);
+    }
+  };
 }
 
 function patchEventMethod(

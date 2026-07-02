@@ -782,6 +782,62 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls).toEqual(["replayed"]);
   });
 
+  it("honors legacy cancelBubble assignment during replay", async () => {
+    const boundary = suspenseDom("pending", "button", "Loading");
+    const container = new FakeElement("root");
+    const parent = new FakeElement("section");
+    const calls: string[] = [];
+
+    container.appendChild(parent);
+    parent.appendChild(boundary.start);
+    if (boundary.placeholder !== null) {
+      parent.appendChild(boundary.placeholder);
+    }
+    parent.appendChild(boundary.content);
+    parent.appendChild(boundary.end);
+
+    // Stale propagation state from before the event was queued.
+    boundary.content.addEventListener("click", (event) =>
+      event.stopPropagation(),
+    );
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "section",
+          { events: [on("click", () => calls.push("parent"))] },
+          createElement(
+            Suspense,
+            { fallback: createElement("button", null, "Loading") },
+            createElement(
+              "button",
+              {
+                events: [
+                  on("click", (event) => {
+                    calls.push("child");
+                    // Legacy property assignment must stop the parent even
+                    // though the spent event's cancelBubble is already true.
+                    event.cancelBubble = true;
+                  }),
+                ],
+              },
+              "Client",
+            ),
+          ),
+        ),
+      ),
+    );
+
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(parent, boundary);
+    await delay();
+
+    expect(calls).toEqual(["child"]);
+  });
+
   it("does not replay hydrate-only events after pending Suspense hydrates", async () => {
     const boundary = suspenseDom("pending", "textarea", "Loading");
     const calls: string[] = [];
