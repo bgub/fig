@@ -34,9 +34,34 @@ interface EventSlot {
   options: Required<EventOptions>;
   controller: AbortController | null;
   element: Element | null;
+  // A consumed `once` slot stays in the element's slot array as a tombstone:
+  // slots are matched to descriptors by position, so splicing would tear
+  // down and re-create every later sibling slot on the next render.
+  fired: boolean;
   listener: EventListener | null;
   listenerTarget: Container | null;
   root: Container | null;
+}
+
+// Snapshot of one handler invocation, extracted before any handler runs: a
+// re-entrant commit inside a handler may detach slots or swap callbacks
+// mid-dispatch, and listeners subscribed when the event fired must still
+// run exactly once with the fields they had at extraction.
+interface DispatchEntry {
+  callback: EventCallback;
+  element: Element;
+  root: Container | null;
+  slot: EventSlot;
+  type: string;
+}
+
+// Propagation is tracked per logical dispatch rather than on the event:
+// a queued replay must not inherit cancelBubble state a third-party
+// listener left on the spent native event.
+interface PropagationState {
+  baselineCancelBubble: boolean;
+  immediateStopped: boolean;
+  stopped: boolean;
 }
 
 // type/capture/passive are stored rather than re-parsed from the listener
@@ -51,6 +76,9 @@ interface RootListener {
 
 interface QueuedReplayableEvent {
   event: Event;
+  // The logical dispatch origin (a portal target or the root), captured
+  // while the target is still attached so replays keep portal bubbling.
+  listenerTarget: Container | null;
   root: Container;
   type: string;
 }
@@ -85,7 +113,6 @@ interface ContainerRecord {
 const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const containerRecords = new WeakMap<Container, ContainerRecord>();
-const immediatePropagationStopped = new WeakSet<Event>();
 // Keyed per (event, root): each root resolves selective hydration against
 // its own tree, so an outer root's "none" must not shadow a nested root's
 // "blocked". The inner WeakMap avoids retaining other roots' containers
@@ -97,14 +124,22 @@ const eventHydrationResults = new WeakMap<
 const queuedReplayableEvents: QueuedReplayableEvent[] = [];
 const discreteEvents = new Set([
   "beforeinput",
+  "blur",
   "change",
   "click",
+  "contextmenu",
+  "dblclick",
+  "focus",
   "input",
   "keydown",
   "keyup",
+  "mousedown",
+  "mouseup",
   "pointerdown",
   "pointerup",
   "submit",
+  "touchend",
+  "touchstart",
 ]);
 const replayableEvents = new Set([
   "click",
@@ -401,27 +436,38 @@ export function removePortalContainer(container: Container): void {
   }
 }
 
-export function replayQueuedEvents(root: Container): void {
+export function replayQueuedEvents(): void {
+  // Replays preserve the user's input order per root: a still-blocked entry
+  // stalls later entries of ITS root only, so an independent root's
+  // never-completing boundary cannot head-of-line block everyone else.
+  const stalledRoots = new Set<Container>();
+
   for (let index = 0; index < queuedReplayableEvents.length; ) {
     const queued = queuedReplayableEvents[index];
 
-    if (queued.root !== root) {
-      index += 1;
-      continue;
-    }
-
-    if (!targetWithinRoot(root, queued.event.target)) {
+    // Liveness is checked against the logical dispatch origin: a portal
+    // target lives outside the root container's DOM.
+    const anchor = queued.listenerTarget ?? queued.root;
+    if (!targetWithinRoot(anchor, queued.event.target)) {
       queuedReplayableEvents.splice(index, 1);
       continue;
     }
 
+    // Attempt hydration even for stalled roots so later boundaries make
+    // progress; only dispatch is withheld to keep ordering.
     if (hydrateQueuedEvent(queued) === "blocked") {
+      stalledRoots.add(queued.root);
+      index += 1;
+      continue;
+    }
+
+    if (stalledRoots.has(queued.root)) {
       index += 1;
       continue;
     }
 
     queuedReplayableEvents.splice(index, 1);
-    dispatchReplayedEvent(root, queued.type, queued.event);
+    dispatchReplayedEvent(queued);
   }
 }
 
@@ -440,6 +486,7 @@ function addEventSlot(
     options,
     controller: null,
     element: null,
+    fired: false,
     listener: null,
     listenerTarget: null,
     root: null,
@@ -464,9 +511,19 @@ function dispatchRootEvent(
   if (listenerTargetFor(event.target) !== listenerTarget) return;
   if (hydrateForEvent(root, type, event) === "blocked") return;
 
-  withStopImmediatePropagation(event, () => {
-    dispatchRootEventPath(root, listenerTarget, type, capture, passive, event);
-  });
+  const entries = extractDispatches(
+    root,
+    listenerTarget,
+    type,
+    capture,
+    passive,
+    event,
+  );
+  if (entries.length === 0) return;
+
+  withPropagationState(event, false, (state) =>
+    invokeDispatches(entries, event, state),
+  );
 }
 
 function ensureHydrationListeners(
@@ -522,6 +579,7 @@ function queueReplayableEvent(
 ): void {
   queuedReplayableEvents.push({
     event,
+    listenerTarget: listenerTargetFor(event.target),
     root,
     type,
   });
@@ -537,93 +595,138 @@ function hydrateQueuedEvent(
   return runWithPriority(lane, () => hydrate(queued.event.target, lane));
 }
 
-function dispatchReplayedEvent(
+// Two-phase dispatch used where a single native listener stands in for both
+// phases (focus-like capture delegation and queued replays). The bubble
+// phase extracts after capture handlers ran, mirroring live DOM listener
+// semantics; one propagation state spans both phases.
+function dispatchTwoPhase(
   root: Container,
+  listenerTarget: Container,
   type: string,
+  passive: boolean | null,
   event: Event,
+  replay = false,
 ): void {
-  withStopImmediatePropagation(event, () => {
-    dispatchRootEventPath(root, root, type, true, null, event);
-    if (!event.cancelBubble) {
-      dispatchRootEventPath(root, root, type, false, null, event);
-    }
+  withPropagationState(event, replay, (state) => {
+    invokeDispatches(
+      extractDispatches(root, listenerTarget, type, true, passive, event),
+      event,
+      state,
+    );
+
+    if (state.immediateStopped || propagationStopped(event, state)) return;
+
+    invokeDispatches(
+      extractDispatches(root, listenerTarget, type, false, passive, event),
+      event,
+      state,
+    );
   });
 }
 
-function dispatchRootEventPath(
+function dispatchReplayedEvent(queued: QueuedReplayableEvent): void {
+  dispatchTwoPhase(
+    queued.root,
+    queued.listenerTarget ?? queued.root,
+    queued.type,
+    null,
+    queued.event,
+    true,
+  );
+}
+
+function extractDispatches(
   root: Container,
   listenerTarget: Container,
   type: string,
   capture: boolean,
   passive: boolean | null,
   event: Event,
-): void {
+): DispatchEntry[] {
   const path = eventPath(root, listenerTarget, event);
+  const entries: DispatchEntry[] = [];
   const step = capture ? -1 : 1;
-  let index = capture ? path.length - 1 : 0;
 
-  while (index >= 0 && index < path.length) {
-    if (
-      dispatchRootEventAtElement(
-        root,
-        type,
-        capture,
-        passive,
-        event,
-        path[index],
-      )
-    ) {
-      return;
+  for (
+    let index = capture ? path.length - 1 : 0;
+    index >= 0 && index < path.length;
+    index += step
+  ) {
+    const element = path[index];
+
+    for (const slot of eventSlots.get(element) ?? []) {
+      if (
+        slot.fired ||
+        slot.root !== root ||
+        slot.type !== type ||
+        slot.options.capture !== capture ||
+        (passive !== null && slot.options.passive !== passive)
+      ) {
+        continue;
+      }
+
+      entries.push({
+        callback: slot.callback,
+        element,
+        root: slot.root,
+        slot,
+        type: slot.type,
+      });
     }
-    index += step;
-  }
-}
-
-function dispatchRootEventAtElement(
-  root: Container,
-  type: string,
-  capture: boolean,
-  passive: boolean | null,
-  event: Event,
-  element: Element,
-): boolean {
-  const slots = eventSlots.get(element);
-  if (slots === undefined) return false;
-
-  for (let index = 0; index < slots.length; index += 1) {
-    const slot = slots[index];
-    if (
-      slot.root !== root ||
-      slot.type !== type ||
-      slot.options.capture !== capture ||
-      (passive !== null && slot.options.passive !== passive)
-    ) {
-      continue;
-    }
-
-    index = detachOnceEventSlot(element, slot, slots, index);
-    dispatchEventSlotWithCleanup(element, slot, event);
-
-    if (immediatePropagationStopped.has(event)) return true;
   }
 
-  return event.cancelBubble;
+  return entries;
 }
 
-function dispatchEventSlot(
-  element: Element,
-  slot: EventSlot,
+function invokeDispatches(
+  entries: DispatchEntry[],
   event: Event,
+  state: PropagationState,
 ): void {
+  let currentElement: Element | null = null;
+
+  for (const entry of entries) {
+    if (state.immediateStopped) return;
+
+    // stopPropagation lets remaining handlers on the same element run and
+    // skips every later element.
+    if (entry.element !== currentElement) {
+      if (currentElement !== null && propagationStopped(event, state)) return;
+      currentElement = entry.element;
+    }
+
+    const slot = entry.slot;
+    if (slot.options.once) {
+      // A re-entrant dispatch from an earlier handler may have consumed it.
+      if (slot.fired) continue;
+      slot.fired = true;
+      detachEventSlot(slot);
+    }
+
+    try {
+      dispatchEventSlot(entry, event);
+    } finally {
+      // A slot detached mid-dispatch (removal or a consumed once) still ran
+      // — it was subscribed when the event fired — but its signal must end
+      // aborted per the abort-on-removal contract, even if the handler threw.
+      if (slot.element === null && slot.listenerTarget === null) {
+        abortEventSlot(slot);
+      }
+    }
+  }
+}
+
+function dispatchEventSlot(entry: DispatchEntry, event: Event): void {
+  const slot = entry.slot;
   abortEventSlot(slot);
   slot.controller = new AbortController();
   const signal = slot.controller.signal;
 
   batch(() => {
-    runWithRootScope(slot.root, () =>
-      runWithPriority(eventLane(slot.type), () => {
-        withCurrentTarget(event, element, (currentEvent) => {
-          slot.callback(currentEvent, signal);
+    runWithRootScope(entry.root, () =>
+      runWithPriority(eventLane(entry.type), () => {
+        withCurrentTarget(event, entry.element, (currentEvent) => {
+          entry.callback(currentEvent, signal);
         });
       }),
     );
@@ -670,6 +773,8 @@ function attachEventSlot(
   listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
+  if (slot.fired) return;
+
   if (direct(slot.type)) {
     attachDirectEventSlot(element, slot);
   } else {
@@ -683,8 +788,28 @@ function attachDirectEventSlot(element: Element, slot: EventSlot): void {
   detachEventSlot(slot);
   slot.element = element;
   slot.listener = (event) => {
-    detachOnceEventSlot(element, slot);
-    dispatchEventSlotWithCleanup(element, slot, event);
+    if (slot.fired) return;
+    if (slot.options.once) {
+      slot.fired = true;
+      detachEventSlot(slot);
+    }
+
+    try {
+      dispatchEventSlot(
+        {
+          callback: slot.callback,
+          element,
+          root: slot.root,
+          slot,
+          type: slot.type,
+        },
+        event,
+      );
+    } finally {
+      if (slot.element === null && slot.listenerTarget === null) {
+        abortEventSlot(slot);
+      }
+    }
   };
   element.addEventListener(slot.type, slot.listener, slot.options);
 }
@@ -804,39 +929,6 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
   releaseRootListener(listenerTarget, rootListenerKey(slot));
 }
 
-function removeElementSlot(
-  element: Element,
-  slots: EventSlot[],
-  index: number,
-): void {
-  removeEventSlot(slots[index]);
-  slots.splice(index, 1);
-  if (slots.length === 0) eventSlots.delete(element);
-}
-
-function detachOnceEventSlot(
-  element: Element,
-  slot: EventSlot,
-  slots = eventSlots.get(element),
-  index = slots?.indexOf(slot) ?? -1,
-): number {
-  if (!slot.options.once || slots === undefined || index === -1) return index;
-  removeElementSlot(element, slots, index);
-  return index - 1;
-}
-
-function dispatchEventSlotWithCleanup(
-  element: Element,
-  slot: EventSlot,
-  event: Event,
-): void {
-  try {
-    dispatchEventSlot(element, slot, event);
-  } finally {
-    if (slot.options.once) abortEventSlot(slot);
-  }
-}
-
 function dispatchFocusLikeEvent(
   root: Container,
   listenerTarget: Container,
@@ -844,10 +936,10 @@ function dispatchFocusLikeEvent(
   passive: boolean,
   event: Event,
 ): void {
-  dispatchRootEvent(root, listenerTarget, type, true, passive, event);
-  if (!event.cancelBubble) {
-    dispatchRootEvent(root, listenerTarget, type, false, passive, event);
-  }
+  if (listenerTargetFor(event.target) !== listenerTarget) return;
+  if (hydrateForEvent(root, type, event) === "blocked") return;
+
+  dispatchTwoPhase(root, listenerTarget, type, passive, event);
 }
 
 function rootListenerMap(root: Container): Map<string, RootListener> {
@@ -972,37 +1064,79 @@ function withCurrentTarget<T>(
   }
 }
 
-function withStopImmediatePropagation<T>(event: Event, callback: () => T): T {
-  const stopImmediatePropagation = Reflect.get(
-    event,
-    "stopImmediatePropagation",
-  );
-  if (typeof stopImmediatePropagation !== "function") return callback();
+// Runs one logical dispatch with its own propagation state: the stop methods
+// are patched (save/restore, so nested dispatches of other events are
+// isolated) to record into the state while still calling the natives.
+// Replays set `ignoreExistingCancelBubble`: a spent event's stale
+// cancelBubble must not drop the replay, while a LIVE dispatch honors
+// cancelBubble a sibling root listener's handler already set.
+function withPropagationState<T>(
+  event: Event,
+  ignoreExistingCancelBubble: boolean,
+  callback: (state: PropagationState) => T,
+): T {
+  const state: PropagationState = {
+    baselineCancelBubble:
+      ignoreExistingCancelBubble && event.cancelBubble === true,
+    immediateStopped: false,
+    stopped: false,
+  };
 
-  const previous = Object.getOwnPropertyDescriptor(
+  const restoreStop = patchEventMethod(event, "stopPropagation", () => {
+    state.stopped = true;
+  });
+  const restoreImmediate = patchEventMethod(
     event,
     "stopImmediatePropagation",
+    () => {
+      state.stopped = true;
+      state.immediateStopped = true;
+    },
   );
-  const changed = Reflect.defineProperty(event, "stopImmediatePropagation", {
+
+  try {
+    return callback(state);
+  } finally {
+    restoreImmediate();
+    restoreStop();
+  }
+}
+
+// Whether this logical dispatch stopped propagation: the state flags plus a
+// direct `event.cancelBubble = true` assignment made during this dispatch —
+// pre-existing cancelBubble (a spent event being replayed) is ignored.
+function propagationStopped(event: Event, state: PropagationState): boolean {
+  return (
+    state.stopped ||
+    (event.cancelBubble === true && !state.baselineCancelBubble)
+  );
+}
+
+function patchEventMethod(
+  event: Event,
+  name: "stopImmediatePropagation" | "stopPropagation",
+  onCall: () => void,
+): () => void {
+  const native = Reflect.get(event, name);
+  if (typeof native !== "function") return () => undefined;
+
+  const previous = Object.getOwnPropertyDescriptor(event, name);
+  const changed = Reflect.defineProperty(event, name, {
     configurable: true,
     value() {
-      immediatePropagationStopped.add(event);
-      stopImmediatePropagation.call(event);
+      onCall();
+      native.call(event);
     },
   });
 
-  try {
-    return callback();
-  } finally {
-    if (changed) {
-      if (previous === undefined) {
-        delete (event as unknown as { stopImmediatePropagation?: () => void })
-          .stopImmediatePropagation;
-      } else {
-        Object.defineProperty(event, "stopImmediatePropagation", previous);
-      }
+  return () => {
+    if (!changed) return;
+    if (previous === undefined) {
+      delete (event as unknown as Record<string, unknown>)[name];
+    } else {
+      Object.defineProperty(event, name, previous);
     }
-  }
+  };
 }
 
 function normalizedOptions(options: EventOptions = {}): Required<EventOptions> {
@@ -1024,7 +1158,11 @@ function eventLane(type: string): Lane {
 }
 
 function passiveHydrationEvent(type: string): boolean {
-  return continuousEvents.has(type);
+  // Hydration listeners never call preventDefault, so scroll-blocking touch
+  // events can stay passive alongside the continuous set.
+  return (
+    continuousEvents.has(type) || type === "touchstart" || type === "touchend"
+  );
 }
 
 function direct(type: string): boolean {

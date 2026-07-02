@@ -42,7 +42,6 @@ import {
   removeEventSubtree,
   removePortalContainer,
   replayQueuedEvents,
-  rootFor,
   setEventBatching,
   unregisterRoot,
 } from "./events.ts";
@@ -150,7 +149,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 
     // A cleared container (hydration-mismatch recovery) detaches every
     // queued replayable event's target; drain them.
-    queueMicrotask(() => replayQueuedEvents(container));
+    queueMicrotask(replayQueuedEvents);
   },
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
@@ -215,8 +214,6 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     (boundary.start as RetriableSuspenseMarker).__figRetry = retry;
   },
   commitHydratedSuspenseBoundary: (boundary) => {
-    const root = rootFor(boundary.start);
-
     if (boundary.status === "completed" && !boundary.forceClientRender) {
       removeNode(boundary.start);
       removeNode(boundary.end);
@@ -224,14 +221,13 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
       removeSuspenseBoundaryRange(boundary);
     }
 
-    if (root !== null) queueMicrotask(() => replayQueuedEvents(root));
+    queueMicrotask(replayQueuedEvents);
   },
   removeDehydratedSuspenseBoundary: (boundary) => {
-    // Resolve the root before the markers detach; the replay pass then drops
-    // queued events whose targets left the tree with the boundary.
-    const root = rootFor(boundary.start);
+    // The replay pass drops queued events whose targets left the tree with
+    // the boundary.
     removeSuspenseBoundaryRange(boundary);
-    if (root !== null) queueMicrotask(() => replayQueuedEvents(root));
+    queueMicrotask(replayQueuedEvents);
   },
   preparePortalContainer: (container, root, logicalParent) => {
     registerPortalContainer(

@@ -684,6 +684,104 @@ describe("@bgub/fig-dom hydration", () => {
     expect(Object.keys(container.listenerSets)).toHaveLength(0);
   });
 
+  it("replays queued events in input order within a root", async () => {
+    const first = suspenseDom("pending", "button", "LoadingA");
+    const second = suspenseDom("pending", "button", "LoadingB");
+    second.start.data = "fig:suspense:pending:1";
+    const container = new FakeElement("root");
+    const calls: string[] = [];
+
+    for (const boundary of [first, second]) {
+      container.appendChild(boundary.start);
+      if (boundary.placeholder !== null) {
+        container.appendChild(boundary.placeholder);
+      }
+      container.appendChild(boundary.content);
+      container.appendChild(boundary.end);
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, [
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "LoadingA"), key: "a" },
+          createElement(
+            "button",
+            { events: [on("keydown", () => calls.push("keydown"))] },
+            "ClientA",
+          ),
+        ),
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "LoadingB"), key: "b" },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("click"))] },
+            "Client",
+          ),
+        ),
+      ]),
+    );
+
+    first.content.dispatch("keydown");
+    second.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    // The second boundary completes first: its click must wait for the
+    // still-blocked keydown so replayed input keeps its order.
+    completePendingBoundary(container, second);
+    await delay();
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(container, first);
+    await delay();
+    expect(calls).toEqual(["keydown", "click"]);
+  });
+
+  it("replays events despite third-party propagation state", async () => {
+    const boundary = suspenseDom("pending", "button", "Loading");
+    const container = new FakeElement("root");
+    const calls: string[] = [];
+
+    container.appendChild(boundary.start);
+    if (boundary.placeholder !== null) {
+      container.appendChild(boundary.placeholder);
+    }
+    container.appendChild(boundary.content);
+    container.appendChild(boundary.end);
+
+    // A non-Fig listener stops propagation during the original (blocked)
+    // dispatch, leaving cancelBubble set on the spent native event.
+    boundary.content.addEventListener("click", (event) =>
+      event.stopPropagation(),
+    );
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("replayed"))] },
+            "Client",
+          ),
+        ),
+      ),
+    );
+
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(container, boundary);
+    await delay();
+
+    // The replay tracks its own propagation state; the stale cancelBubble
+    // must not drop the replayed handlers.
+    expect(calls).toEqual(["replayed"]);
+  });
+
   it("does not replay hydrate-only events after pending Suspense hydrates", async () => {
     const boundary = suspenseDom("pending", "textarea", "Loading");
     const calls: string[] = [];

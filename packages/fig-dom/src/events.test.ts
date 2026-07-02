@@ -40,6 +40,122 @@ describe("@bgub/fig-dom events", () => {
     expect(lanes).toEqual([SyncLane, InputContinuousLane, DefaultLane]);
   });
 
+  it("runs press interactions at discrete priority", () => {
+    const lanes: number[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement("button", {
+          events: [
+            on("mousedown", () => lanes.push(requestUpdateLane())),
+            on("contextmenu", () => lanes.push(requestUpdateLane())),
+          ],
+        }),
+        container as unknown as Element,
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("mousedown");
+    button.dispatch("contextmenu");
+
+    expect(lanes).toEqual([SyncLane, SyncLane]);
+  });
+
+  it("keeps sibling slots stable when a once handler fires", () => {
+    const aborts: string[] = [];
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const app = (label: string) =>
+      createElement("button", {
+        events: [
+          on("click", () => calls.push(`once:${label}`), { once: true }),
+          on("click", (_event, signal) => {
+            calls.push(`sibling:${label}`);
+            signal.addEventListener("abort", () => aborts.push(label));
+          }),
+        ],
+      });
+
+    flushSync(() => root.render(app("one")));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+    expect(calls).toEqual(["once:one", "sibling:one"]);
+
+    // A consumed once slot must not shift its siblings: the same-key
+    // re-render updates the sibling's callback in place without tearing it
+    // down (which would abort its in-flight signal) or re-arming the once.
+    flushSync(() => root.render(app("two")));
+    expect(aborts).toEqual([]);
+
+    button.dispatch("click");
+    expect(calls).toEqual(["once:one", "sibling:one", "sibling:two"]);
+  });
+
+  it("aborts a once handler's signal even when it throws", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let aborted = false;
+
+    flushSync(() =>
+      root.render(
+        createElement("button", {
+          events: [
+            on(
+              "click",
+              (_event, signal) => {
+                signal.addEventListener("abort", () => {
+                  aborted = true;
+                });
+                throw new Error("boom");
+              },
+              { once: true },
+            ),
+          ],
+        }),
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+    expect(() => button.dispatch("click")).toThrow("boom");
+    expect(aborted).toBe(true);
+  });
+
+  it("dispatches handlers subscribed at event time despite re-entrant commits", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const second = () => calls.push("second");
+
+    function App({ both }: { both: boolean }) {
+      return createElement("button", {
+        events: both
+          ? [
+              on("click", () => {
+                calls.push("first");
+                flushSync(() =>
+                  root.render(createElement(App, { both: false })),
+                );
+              }),
+              on("click", second),
+            ]
+          : [on("click", second)],
+      });
+    }
+
+    flushSync(() => root.render(createElement(App, { both: true })));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    // "second" was subscribed when the event fired (and still is after the
+    // re-entrant commit); the mid-dispatch slot mutation must not skip it.
+    expect(calls).toEqual(["first", "second"]);
+  });
+
   it("delegates events from the root with element currentTarget", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
