@@ -591,6 +591,58 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls).toEqual(["child:button"]);
   });
 
+  it("resolves selective hydration per root for nested hydrated roots", async () => {
+    const outerContainer = new FakeElement("root");
+    const section = new FakeElement("section");
+    section.appendChild(new FakeText("Outer"));
+    outerContainer.appendChild(section);
+    const calls: string[] = [];
+
+    flushSync(() =>
+      hydrateRoot(
+        outerContainer as unknown as Element,
+        createElement("section", null, "Outer"),
+      ),
+    );
+
+    // A nested app hydrates later inside the outer root's DOM.
+    const innerContainer = new FakeElement("div");
+    const boundary = suspenseDom("pending", "button", "Loading");
+    outerContainer.appendChild(innerContainer);
+    innerContainer.appendChild(boundary.start);
+    if (boundary.placeholder !== null) {
+      innerContainer.appendChild(boundary.placeholder);
+    }
+    innerContainer.appendChild(boundary.content);
+    innerContainer.appendChild(boundary.end);
+
+    flushSync(() =>
+      hydrateRoot(
+        innerContainer as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("inner"))] },
+            "Client",
+          ),
+        ),
+      ),
+    );
+
+    // The outer root's capture listener sees the click first and resolves
+    // "none" against its own tree; that must not shadow the inner root's
+    // "blocked" decision for the same native event.
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(innerContainer, boundary);
+    await delay();
+
+    expect(calls).toEqual(["inner"]);
+  });
+
   it("tears down hydration listeners and queued events on unmount", () => {
     const boundary = suspenseDom("pending", "button", "Loading");
     const container = new FakeElement("root");

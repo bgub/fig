@@ -86,7 +86,14 @@ const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
 const containerRecords = new WeakMap<Container, ContainerRecord>();
 const immediatePropagationStopped = new WeakSet<Event>();
-const eventHydrationResults = new WeakMap<Event, HydrationTargetResult>();
+// Keyed per (event, root): each root resolves selective hydration against
+// its own tree, so an outer root's "none" must not shadow a nested root's
+// "blocked". The inner WeakMap avoids retaining other roots' containers
+// while a queued replayable event keeps the native event alive.
+const eventHydrationResults = new WeakMap<
+  Event,
+  WeakMap<Container, HydrationTargetResult>
+>();
 const queuedReplayableEvents: QueuedReplayableEvent[] = [];
 const discreteEvents = new Set([
   "beforeinput",
@@ -487,13 +494,20 @@ function hydrateForEvent(
   const hydrate = containerRecords.get(root)?.hydrate ?? null;
   if (hydrate === null) return "none";
 
-  const previousResult = eventHydrationResults.get(event);
+  let results = eventHydrationResults.get(event);
+  const previousResult = results?.get(root);
   if (previousResult !== undefined) return previousResult;
 
   const lane = eventLane(type);
   const result = runWithPriority(lane, () => hydrate(event.target, lane));
-  eventHydrationResults.set(event, result);
+  if (results === undefined) {
+    results = new WeakMap();
+    eventHydrationResults.set(event, results);
+  }
+  results.set(root, result);
 
+  // Queue only on the fresh computation: the capture hydration listener and
+  // the delegated dispatch guard both land here for the same (event, root).
   if (result === "blocked" && replayableEvents.has(type)) {
     queueReplayableEvent(root, type, event);
   }
