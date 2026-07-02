@@ -4,6 +4,10 @@ Fig is a TypeScript re-implementation of React: the core ideas remain, including
 
 The goal is to keep React's modern model while dropping legacy cruft such as class components and adopting Fig-specific APIs where they are clearer.
 
+## Conventions
+
+- Use conventional commit messages (`feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`, `chore:`, with an optional scope like `fix(fig-dom): ...`).
+
 ## Resource Terminology
 
 - Use **data resources** for keyed async values, cache entries, server reads, and the APIs that refresh, invalidate, revalidate, or recompute them.
