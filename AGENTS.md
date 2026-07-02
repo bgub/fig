@@ -6,6 +6,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 
 ## Conventions
 
+- The repository is hosted at https://github.com/bgub/fig (`origin`).
 - Use conventional commit messages (`feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`, `chore:`, with an optional scope like `fix(fig-dom): ...`).
 
 ## Resource Terminology
