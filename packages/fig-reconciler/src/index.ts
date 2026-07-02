@@ -24,7 +24,7 @@ import {
   isContext,
   isErrorBoundary,
   isPortal,
-  isResources,
+  isAssets,
   isSuspense,
   isValidElement,
   onDataStoreFactoryRegistered,
@@ -56,18 +56,25 @@ import {
   type FigDevtoolsHookKind,
   type FigDevtoolsHookSnapshot,
   type FigDevtoolsRootSnapshot,
+  type FigDevtoolsWorkLabel,
   getFigDevtoolsGlobalHook,
 } from "./devtools.ts";
 import {
   claimNextRetryLane,
   claimNextTransitionLane,
   createLaneMap,
+  AllTransitionLanes,
   DefaultHydrationLane,
   DefaultLane,
   DeferredLane,
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
+  GestureLane,
+  IdleHydrationLane,
+  IdleLane,
+  InputContinuousLane,
+  InputContinuousHydrationLane,
   includesOnlyTransitions,
   includesSomeLane,
   isSyncLane,
@@ -91,43 +98,50 @@ import {
   runWithTransition,
   runWithTransitionLane,
   SelectiveHydrationLane,
+  SyncHydrationLane,
   SyncLane,
+  TransitionHydrationLane,
 } from "./lanes.ts";
+import {
+  hasRefreshHandler,
+  matchesComponentFamily,
+  refreshFamilyFor,
+  resolveLatestType,
+  runWithStaleRefreshFamilies,
+  type RefreshUpdate,
+} from "./refresh.ts";
 import { isThenable, readThenable, type Thenable } from "./thenables.ts";
 
-// Type-only: the two devtools runtime helpers (devtoolsTypeName,
-// getFigDevtoolsGlobalHook) stay module-internal — no package imports them,
-// and value-exporting them from the entry would retain dev-only code in
-// production bundles (entry exports are tree-shaking roots).
-export type {
-  FigDevtoolsCommitInspection,
-  FigDevtoolsEffectPhase,
-  FigDevtoolsElementInspection,
-  FigDevtoolsFiberKind,
-  FigDevtoolsFiberSnapshot,
-  FigDevtoolsGlobalHook,
-  FigDevtoolsHookKind,
-  FigDevtoolsHookSnapshot,
-  FigDevtoolsHostSnapshot,
-  FigDevtoolsRendererInfo,
-  FigDevtoolsRootSnapshot,
-} from "./devtools.ts";
-export {
-  DefaultLane,
-  DeferredLane,
-  GestureLane,
-  IdleLane,
-  InputContinuousLane,
-  type Lane,
-  type LanePriority,
-  type Lanes,
-  OffscreenLane,
-  requestUpdateLane,
-  runWithPriority,
-  runWithTransition,
-  SyncLane,
-  TransitionLane,
-} from "./lanes.ts";
+export type EventPriority = "default" | "continuous" | "discrete";
+
+export function getCurrentUpdatePriority(): EventPriority {
+  const lane = requestUpdateLane();
+  if (lane === SyncLane) return "discrete";
+  if (lane === InputContinuousLane) return "continuous";
+  return "default";
+}
+
+export function runWithEventPriority<T>(
+  priority: EventPriority,
+  callback: () => T,
+): T {
+  return runWithPriority(eventPriorityLane(priority), callback);
+}
+
+function eventPriorityLane(priority: EventPriority): Lane {
+  switch (priority) {
+    case "discrete":
+      return SyncLane;
+    case "continuous":
+      return InputContinuousLane;
+    case "default":
+      return DefaultLane;
+  }
+}
+
+function hydrationLaneForPriority(priority: EventPriority): Lane {
+  return priority === "discrete" ? SyncLane : SelectiveHydrationLane;
+}
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -267,6 +281,72 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
+export type HostRenderConfig<Container, Instance, TextInstance> = Pick<
+  HostConfig<Container, Instance, TextInstance>,
+  | "createInstance"
+  | "createTextInstance"
+  | "appendInitialChild"
+  | "finalizeInitialInstance"
+  | "setTextContent"
+  | "insertBefore"
+  | "removeChild"
+  | "commitUpdate"
+  | "commitTextUpdate"
+  | "shouldCommitUpdate"
+  | "clearContainer"
+>;
+
+export type HostValidationConfig<Container, Instance, TextInstance> = Pick<
+  HostConfig<Container, Instance, TextInstance>,
+  "validateInstanceNesting" | "validateTextNesting" | "containerType"
+>;
+
+export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    | "getFirstHydratableChild"
+    | "getNextHydratableSibling"
+    | "canHydrateInstance"
+    | "canHydrateTextInstance"
+    | "clearContainer"
+  >
+> &
+  Pick<HostConfig<Container, Instance, TextInstance>, "commitHydratedInstance">;
+
+export type HostActivityConfig<Container, Instance, TextInstance> = Pick<
+  HostConfig<Container, Instance, TextInstance>,
+  | "getActivityBoundary"
+  | "getFirstActivityHydratable"
+  | "commitHydratedActivityBoundary"
+  | "hideInstance"
+  | "unhideInstance"
+  | "hideTextInstance"
+  | "unhideTextInstance"
+>;
+
+export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    | "getSuspenseBoundary"
+    | "isTargetWithinSuspenseBoundary"
+    | "registerSuspenseBoundaryRetry"
+    | "commitHydratedSuspenseBoundary"
+    | "removeDehydratedSuspenseBoundary"
+  >;
+
+export type HostPortalConfig<Container, Instance, TextInstance> = Pick<
+  HostConfig<Container, Instance, TextInstance>,
+  "preparePortalContainer" | "removePortalContainer"
+>;
+
+export type HostHoistedAssetConfig<Container, Instance, TextInstance> = Pick<
+  HostConfig<Container, Instance, TextInstance>,
+  | "isHoistedInstance"
+  | "commitHoistedInstance"
+  | "removeHoistedInstance"
+  | "updateHoistedInstance"
+>;
+
 export interface FigRoot {
   data: FigDataStoreHandle;
   render(children: FigNode): void;
@@ -294,16 +374,8 @@ export interface RecoverableErrorInfo extends ErrorInfo {
 
 export type HydrationTargetResult = "none" | "hydrated" | "blocked";
 
-type HydrationHostConfig<Container, Instance, TextInstance> = Required<
-  Pick<
-    HostConfig<Container, Instance, TextInstance>,
-    | "getFirstHydratableChild"
-    | "getNextHydratableSibling"
-    | "canHydrateInstance"
-    | "canHydrateTextInstance"
-    | "clearContainer"
-  >
->;
+type RequiredHydrationHostConfig<Container, Instance, TextInstance> =
+  HostHydrationConfig<Container, Instance, TextInstance>;
 
 const RootTag = 0;
 const HostTag = 1;
@@ -314,7 +386,7 @@ const ContextProviderTag = 5;
 const SuspenseTag = 6;
 const ErrorBoundaryTag = 7;
 const PortalTag = 8;
-const ResourcesTag = 9;
+const AssetsTag = 9;
 const ActivityTag = 10;
 type Tag =
   | typeof RootTag
@@ -326,7 +398,7 @@ type Tag =
   | typeof SuspenseTag
   | typeof ErrorBoundaryTag
   | typeof PortalTag
-  | typeof ResourcesTag
+  | typeof AssetsTag
   | typeof ActivityTag;
 
 const NoFlags = 0;
@@ -713,7 +785,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const root = createFiberRoot(container, request.options ?? {});
     roots.set(container as object, root);
-    if (resolveFamily !== null) mountedRoots.add(root);
+    if (hasRefreshHandler()) mountedRoots.add(root);
 
     if (request.kind === "hydration") root.isHydrating = true;
 
@@ -809,8 +881,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   function hydrateTarget(
     container: Container,
     target: unknown,
-    lane: Lane = SelectiveHydrationLane,
+    priority: EventPriority = "default",
   ): HydrationTargetResult {
+    const lane = hydrationLaneForPriority(priority);
     const root = roots.get(container as object);
     if (root === undefined || host.isTargetWithinSuspenseBoundary === undefined)
       return "none";
@@ -1510,7 +1583,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return requireHydrationHostConfig().getNextHydratableSibling(boundary.end);
   }
 
-  function requireHydrationHostConfig(): HydrationHostConfig<
+  function requireHydrationHostConfig(): RequiredHydrationHostConfig<
     Container,
     Instance,
     TextInstance
@@ -1525,7 +1598,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw new Error("Hydration is not supported by this renderer.");
     }
 
-    return host as HydrationHostConfig<Container, Instance, TextInstance>;
+    return host as RequiredHydrationHostConfig<
+      Container,
+      Instance,
+      TextInstance
+    >;
   }
 
   // The message and the recoverable-error fields derive from two facts: what
@@ -1600,7 +1677,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function renderFunction(node: F): void {
     // Hot reload: run the latest version of this component's family. In
     // production no handler is set, so this is a no-op.
-    if (resolveFamily !== null) {
+    if (hasRefreshHandler()) {
       node.type = resolveLatestType(node.type) as F["type"];
     }
     prepareHookRender(node);
@@ -4042,8 +4119,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "ErrorBoundary";
       case PortalTag:
         return "Portal";
-      case ResourcesTag:
-        return "Resources";
+      case AssetsTag:
+        return "Assets";
       default:
         return null;
     }
@@ -4069,18 +4146,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   // empty stubs.
   function scheduleRefresh(update: RefreshUpdate): void {
     if (process.env.NODE_ENV !== "production") {
-      if (resolveFamily === null || mountedRoots.size === 0) return;
+      if (!hasRefreshHandler() || mountedRoots.size === 0) return;
 
-      staleFamilies = update.staleFamilies;
-      try {
+      runWithStaleRefreshFamilies(update.staleFamilies, () => {
         flushSync(() => {
           for (const root of mountedRoots) {
             scheduleFamilyRefresh(root.current.child, update);
           }
         });
-      } finally {
-        staleFamilies = null;
-      }
+      });
     }
   }
 
@@ -4088,8 +4162,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (process.env.NODE_ENV !== "production") {
       if (node === null) return;
 
-      if (node.tag === FunctionTag && resolveFamily !== null) {
-        const family = resolveFamily(node.type);
+      if (node.tag === FunctionTag && hasRefreshHandler()) {
+        const family = refreshFamilyFor(node.type);
         if (family !== undefined) {
           if (update.staleFamilies.has(family)) {
             remountForRefresh(node);
@@ -4648,7 +4722,7 @@ function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
 function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
   if (element.type === Fragment) return FragmentTag;
-  if (isResources(element.type)) return ResourcesTag;
+  if (isAssets(element.type)) return AssetsTag;
   if (isContext(element.type)) return ContextProviderTag;
   if (isSuspense(element.type)) return SuspenseTag;
   if (isActivity(element.type)) return ActivityTag;
@@ -4739,54 +4813,6 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       return inner?.snapshot() ?? buffered?.slice() ?? [];
     },
   };
-}
-
-// --- Fast Refresh (HMR) ----------------------------------------------------
-// A family groups every version of a component across hot edits; `current` is
-// the latest implementation. The handler is module-global (one refresh runtime
-// per app) so module-level reconcile helpers can consult it. In production no
-// handler is ever set, so all of this collapses to the identity/equality paths.
-
-export interface RefreshFamily {
-  current: unknown;
-}
-
-export interface RefreshUpdate {
-  staleFamilies: Set<RefreshFamily>;
-  updatedFamilies: Set<RefreshFamily>;
-}
-
-let resolveFamily: ((type: unknown) => RefreshFamily | undefined) | null = null;
-let staleFamilies: Set<RefreshFamily> | null = null;
-
-export function setRefreshHandler(
-  handler: ((type: unknown) => RefreshFamily | undefined) | null,
-): void {
-  if (process.env.NODE_ENV !== "production") {
-    resolveFamily = handler;
-  }
-}
-
-function resolveLatestType(type: unknown): unknown {
-  if (resolveFamily === null) return type;
-  const family = resolveFamily(type);
-  return family === undefined ? type : family.current;
-}
-
-// Whether an existing fiber can be reused for the next element's type (reuse =
-// preserve hook state). Without a refresh handler this is plain reference
-// equality. For a tracked component, two types match when they share a family —
-// but a family marked stale this refresh pass (its hook signature changed) never
-// matches, forcing a remount even when the type reference is unchanged.
-function matchesComponentFamily(
-  fiberType: unknown,
-  childType: unknown,
-): boolean {
-  if (resolveFamily === null) return fiberType === childType;
-  const family = resolveFamily(fiberType);
-  if (family === undefined) return fiberType === childType;
-  if (family !== resolveFamily(childType)) return false;
-  return staleFamilies === null || !staleFamilies.has(family);
 }
 
 function sameType<Container, Instance, TextInstance>(
@@ -5074,10 +5100,10 @@ function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
     rendererId,
     committedAt: now(),
     dataResources: root.dataStore.inspectDataEntries(),
-    pendingLanes: root.pendingLanes,
-    suspendedLanes: root.suspendedLanes,
-    pingedLanes: root.pingedLanes,
-    expiredLanes: root.expiredLanes,
+    pendingWork: devtoolsWorkLabels(root.pendingLanes),
+    suspendedWork: devtoolsWorkLabels(root.suspendedLanes),
+    pingedWork: devtoolsWorkLabels(root.pingedLanes),
+    expiredWork: devtoolsWorkLabels(root.expiredLanes),
     tree: snapshotDevtoolsFiber(root.current, null, inspection),
   };
 }
@@ -5104,8 +5130,8 @@ function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
     key: node.key,
     index: node.index,
     props: devtoolsProps(node),
-    lanes: node.lanes,
-    childLanes: node.childLanes,
+    pendingWork: devtoolsWorkLabels(node.lanes),
+    childWork: devtoolsWorkLabels(node.childLanes),
     hooks: devtoolsHooks(node.memoizedState),
     contextDependencies: devtoolsContextDependencies(node),
     host: devtoolsHost(node),
@@ -5113,6 +5139,34 @@ function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
     componentStack: node.errorBoundaryState?.info.componentStack,
     children,
   };
+}
+
+function devtoolsWorkLabels(lanes: Lanes): FigDevtoolsWorkLabel[] {
+  const labels: FigDevtoolsWorkLabel[] = [];
+  if (includesSomeLane(lanes, SyncHydrationLane | SyncLane))
+    labels.push("sync");
+  if (
+    includesSomeLane(lanes, InputContinuousHydrationLane | InputContinuousLane)
+  ) {
+    labels.push("input");
+  }
+  if (includesSomeLane(lanes, DefaultHydrationLane | DefaultLane)) {
+    labels.push("default");
+  }
+  if (includesSomeLane(lanes, GestureLane)) labels.push("gesture");
+  if (includesSomeLane(lanes, AllTransitionLanes | TransitionHydrationLane)) {
+    labels.push("transition");
+  }
+  if (includesSomeLane(lanes, RetryLanes)) labels.push("retry");
+  if (includesSomeLane(lanes, IdleHydrationLane | IdleLane)) {
+    labels.push("idle");
+  }
+  if (includesSomeLane(lanes, OffscreenLane)) labels.push("offscreen");
+  if (includesSomeLane(lanes, DeferredLane)) labels.push("deferred");
+  if (includesSomeLane(lanes, SelectiveHydrationLane)) {
+    labels.push("selective-hydration");
+  }
+  return labels;
 }
 
 function appendDevtoolsChildSnapshots<Container, Instance, TextInstance>(
@@ -5341,8 +5395,8 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "activity", name: "Activity" };
     case PortalTag:
       return { kind: "portal", name: "Portal" };
-    case ResourcesTag:
-      return { kind: "resources", name: "Resources" };
+    case AssetsTag:
+      return { kind: "assets", name: "Assets" };
   }
 }
 

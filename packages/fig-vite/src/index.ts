@@ -43,7 +43,7 @@ export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
 // and exposes register/setSignature plus a microtask-batched refresh trigger.
 function virtualModuleCode(): string {
   return `import { injectScheduleRefresh, performRefresh, register, setSignature } from "@bgub/fig-refresh";
-import { scheduleRefresh } from "@bgub/fig-dom";
+import { scheduleRefresh } from "@bgub/fig-dom/refresh";
 
 injectScheduleRefresh(scheduleRefresh);
 

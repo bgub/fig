@@ -32,13 +32,13 @@ const styledIslandHref = "http://[::1";
 const StyledIsland = clientReference({
   id: styledIslandId,
   load: () => Promise.resolve({}),
-  resources: [stylesheet(styledIslandHref)],
+  assets: [stylesheet(styledIslandHref)],
 });
 const ssrIslandId = "test/SsrIsland.tsx#SsrIsland";
 const SsrIsland = serverClientReference({
   id: ssrIslandId,
   load: () => Promise.resolve({ SsrIsland: RealSsrIsland }),
-  resources: [modulepreload("/assets/ssr-island.js")],
+  assets: [modulepreload("/assets/ssr-island.js")],
   ssr: RealSsrIsland,
 });
 

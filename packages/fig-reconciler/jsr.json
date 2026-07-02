@@ -2,7 +2,11 @@
   "name": "@bgub/fig-reconciler",
   "version": "0.0.1",
   "license": "MIT",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./devtools": "./src/devtools.ts",
+    "./refresh": "./src/refresh.ts"
+  },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],
     "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]

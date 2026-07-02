@@ -9,7 +9,7 @@ import {
   useExternalStore,
 } from "@bgub/fig";
 import {
-  figResourceKey,
+  assetResourceKey,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
 } from "@bgub/fig/internal";
@@ -628,7 +628,7 @@ function insertNewServerRouteAssets(
   insertedAssetKeys: Set<string>,
 ): Promise<void> | null {
   const newAssets = response.getAssetResources().filter((resource) => {
-    const key = figResourceKey(resource);
+    const key = assetResourceKey(resource);
     if (insertedAssetKeys.has(key)) return false;
     insertedAssetKeys.add(key);
     return true;

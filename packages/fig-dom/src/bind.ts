@@ -21,6 +21,18 @@ const bindSlots = new WeakMap<Element, BindSlot>();
 // element is already hidden is covered too.
 const suspendedBindElements = new WeakSet<Element>();
 
+export function composeBind<T extends Element = Element>(
+  ...binds: Array<Bind<T> | false | null | undefined>
+): Bind<T> {
+  const callbacks = binds.filter(
+    (bind): bind is Bind<T> => typeof bind === "function",
+  );
+
+  return (node, signal) => {
+    for (const bind of callbacks) bind(node, signal);
+  };
+}
+
 export function updateBind(element: Element, value: unknown): void {
   const callback = bindCallback(value);
   const slot = bindSlots.get(element);

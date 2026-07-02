@@ -7,8 +7,8 @@ import {
   type FigContext,
   type FigElement,
   type FigNode,
-  type FigResource,
-  type FigResourceList,
+  type FigAssetResource,
+  type FigAssetResourceList,
   type FontResource,
   Fragment,
   type Key,
@@ -22,18 +22,18 @@ import {
   Suspense,
 } from "@bgub/fig";
 import {
-  clientReferenceResources,
-  figResourceKey,
-  isFigResource,
+  clientReferenceAssets,
+  assetResourceKey,
+  isFigAssetResource,
   isClientReference,
   isContext,
-  isResources,
+  isAssets,
   isActivity,
   isErrorBoundary,
   isPortal,
   isSuspense,
   isValidElement,
-  resourceDestination,
+  assetResourceDestination,
   setCurrentDispatcher,
   setCurrentDataStore,
   type FigDataHydrationEntry,
@@ -42,10 +42,10 @@ import {
 } from "@bgub/fig/internal";
 import {
   createDataStore,
-  type DataResourceKeyInput,
   normalizeDataResourceKey,
   type DataStore,
-} from "@bgub/fig-data";
+} from "@bgub/fig-data/internal";
+import type { DataResourceKeyInput } from "@bgub/fig-data";
 import {
   type ContextValues,
   cloneContextValues,
@@ -57,6 +57,8 @@ import {
   withContextValue,
 } from "./shared.ts";
 
+declare const process: { env: { NODE_ENV?: string } };
+
 export interface RscRenderResult {
   allReady: Promise<void>;
   contentType: string;
@@ -64,7 +66,7 @@ export interface RscRenderResult {
 }
 
 export interface RscRenderOptions {
-  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
+  clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
   refreshBoundary?: string;
@@ -76,7 +78,7 @@ export interface RscRootLike {
 }
 
 // Stream-safe asset resources only (no head-only title/meta). These are the
-// FigResource subtypes whose fields are already JSON scalars, so they travel as
+// FigAssetResource subtypes whose fields are already JSON scalars, so they travel as
 // plain data with no implementation detail exposed.
 type SerializedAssetResource =
   | Pick<
@@ -108,7 +110,7 @@ type RscRow =
       tag: "client";
       value: {
         id: string;
-        resources?: SerializedAssetResource[];
+        assets?: SerializedAssetResource[];
         ssr?: true;
       };
     }
@@ -149,7 +151,7 @@ export interface RscClientReferenceMetadata {
 }
 
 export interface RscClientReferenceRecord extends RscClientReferenceMetadata {
-  resources?: readonly FigResource[];
+  assets?: readonly FigAssetResource[];
 }
 
 export interface RscResponseOptions {
@@ -164,7 +166,7 @@ export interface RscResponseOptions {
 export interface RscResponse {
   beginRefreshPayload(): void;
   bindRoot(root: RscRootLike): () => void;
-  getAssetResources(): readonly FigResource[];
+  getAssetResources(): readonly FigAssetResource[];
   getClientReferences(): readonly RscClientReferenceRecord[];
   getRoot(): FigNode;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
@@ -191,8 +193,9 @@ class RscRequestCancelledError extends Error {
 
 type RscRequest = {
   allReady: Promise<void>;
+  boundaryIds: Set<string> | null;
   clientReferenceRows: Map<string, number>;
-  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
+  clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
@@ -337,7 +340,7 @@ function createRscRequest(
   node: FigNode,
   refreshBoundary: string | null,
   clientReferenceAssets:
-    | ((metadata: { id: string }) => FigResourceList)
+    | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
   dataContext: unknown,
   dataPartition: DataResourceKeyInput | undefined,
@@ -351,6 +354,7 @@ function createRscRequest(
 
   const request: RscRequest = {
     allReady,
+    boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
     clientReferenceRows: new Map(),
     clientReferenceAssets,
     closeAllReady: resolveAllReady,
@@ -393,7 +397,7 @@ function createRscRequest(
 }
 
 class RscResponseImpl implements RscResponse {
-  private readonly assetResources = new Map<string, FigResource>();
+  private readonly assetResources = new Map<string, FigAssetResource>();
   private readonly boundaries = new Map<string, RscModel>();
   private readonly clientReferences = new Map<
     string,
@@ -418,7 +422,7 @@ class RscResponseImpl implements RscResponse {
     this.rowIdBase = this.maxRowId;
   }
 
-  getAssetResources(): readonly FigResource[] {
+  getAssetResources(): readonly FigAssetResource[] {
     return [...this.assetResources.values()];
   }
 
@@ -427,20 +431,20 @@ class RscResponseImpl implements RscResponse {
   }
 
   recordAssetResources(
-    resources: readonly SerializedAssetResource[] | undefined,
+    assets: readonly SerializedAssetResource[] | undefined,
   ): void {
-    if (resources === undefined) return;
+    if (assets === undefined) return;
 
     // Dedupe per payload by resource key: a shared asset referenced by several
     // client references is recorded once.
-    for (const resource of resources) {
+    for (const resource of assets) {
       if (
-        !isFigResource(resource) ||
-        resourceDestination(resource) !== "stream"
+        !isFigAssetResource(resource) ||
+        assetResourceDestination(resource) !== "stream"
       ) {
         continue;
       }
-      const key = figResourceKey(resource);
+      const key = assetResourceKey(resource);
       if (!this.assetResources.has(key)) this.assetResources.set(key, resource);
     }
   }
@@ -450,8 +454,8 @@ class RscResponseImpl implements RscResponse {
   ): void {
     if (this.clientReferences.has(value.id)) return;
     const reference: RscClientReferenceRecord = { id: value.id };
-    const resources = value.resources?.filter(isFigResource);
-    if (resources !== undefined) reference.resources = resources;
+    const assets = value.assets?.filter(isFigAssetResource);
+    if (assets !== undefined) reference.assets = assets;
     if (value.ssr === true) reference.ssr = true;
     this.clientReferences.set(value.id, reference);
   }
@@ -747,6 +751,12 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
     if (typeof id !== "string" || id.length === 0) {
       throw new Error("RSC boundaries require a non-empty string id.");
     }
+    if (frame.request.boundaryIds !== null) {
+      if (frame.request.boundaryIds.has(id)) {
+        throw new Error(`Duplicate RSC boundary id "${id}".`);
+      }
+      frame.request.boundaryIds.add(id);
+    }
 
     return {
       $fig: "boundary",
@@ -759,8 +769,8 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
     return serializeContextProvider(type, element.props, frame);
   }
 
-  if (isResources(type)) {
-    return serializeResources(element.props, frame);
+  if (isAssets(type)) {
+    return serializeAssets(element.props, frame);
   }
 
   if (isSuspense(type)) {
@@ -823,8 +833,8 @@ function serializeContextProvider(
   );
 }
 
-function serializeResources(props: Props, frame: RenderFrame): RscModel {
-  const serialized = serializeAssetResources(frame.request, props.resources);
+function serializeAssets(props: Props, frame: RenderFrame): RscModel {
+  const serialized = serializeAssetResources(frame.request, props.assets);
   if (serialized.length > 0) {
     emitRow(frame.request, { tag: "assets", value: serialized });
   }
@@ -946,11 +956,11 @@ function emitClientReference(
   // id and the client suspends on a chunk that never arrives. Resolving first
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
-  const resources = serializeClientReferenceAssets(request, reference);
+  const assets = serializeClientReferenceAssets(request, reference);
   const value: Extract<RscRow, { tag: "client" }>["value"] = {
     id: reference.id,
   };
-  if (resources.length > 0) value.resources = resources;
+  if (assets.length > 0) value.assets = assets;
   if (reference.ssr !== undefined) value.ssr = true;
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
@@ -976,7 +986,7 @@ function serializeAssetResources(
   request: RscRequest,
   value: unknown,
 ): SerializedAssetResource[] {
-  const input = isFigResource(value)
+  const input = isFigAssetResource(value)
     ? [value]
     : Array.isArray(value)
       ? value
@@ -984,12 +994,12 @@ function serializeAssetResources(
   const resources: SerializedAssetResource[] = [];
 
   for (const resource of input) {
-    if (!isFigResource(resource)) continue;
+    if (!isFigAssetResource(resource)) continue;
     // Only stream-safe assets travel on the wire; head-only title/meta are
     // document state, not client-component assets (see the asset-resources plan).
-    if (resourceDestination(resource) !== "stream") continue;
+    if (assetResourceDestination(resource) !== "stream") continue;
 
-    const key = figResourceKey(resource);
+    const key = assetResourceKey(resource);
     if (request.emittedAssetKeys.has(key)) continue;
     request.emittedAssetKeys.add(key);
     resources.push(serializeAssetResource(resource));
@@ -1001,16 +1011,16 @@ function serializeAssetResources(
 function collectClientReferenceAssets(
   request: RscRequest,
   reference: FigClientReference,
-): readonly FigResource[] {
-  const resources = [...clientReferenceResources(reference)];
+): readonly FigAssetResource[] {
+  const resources = [...clientReferenceAssets(reference)];
   const resolved = request.clientReferenceAssets?.({ id: reference.id });
   if (resolved === undefined) return resources;
-  if (isFigResource(resolved)) return [...resources, resolved];
+  if (isFigAssetResource(resolved)) return [...resources, resolved];
   return Array.isArray(resolved) ? [...resources, ...resolved] : resources;
 }
 
 function serializeAssetResource(
-  resource: FigResource,
+  resource: FigAssetResource,
 ): SerializedAssetResource {
   // The RSC asset wire format is descriptor-only and intentionally does not
   // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
@@ -1189,7 +1199,7 @@ function resolveDecodedRow(
   let value: unknown;
   if (row.tag === "client") {
     response.recordClientReference(row.value);
-    response.recordAssetResources(row.value.resources);
+    response.recordAssetResources(row.value.assets);
     value = response.decodeClientReference(
       row.value.ssr === true
         ? { id: row.value.id, ssr: true }

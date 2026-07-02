@@ -2,8 +2,8 @@ import type {
   ElementType,
   FigClientReference,
   FigNode,
-  FigResource,
-  FigResourceList,
+  FigAssetResource,
+  FigAssetResourceList,
   Props,
 } from "@bgub/fig";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
@@ -20,16 +20,16 @@ export interface ServerRenderOptions {
     error: unknown,
     info: ServerErrorInfo,
   ) => ServerErrorPayload | undefined;
-  onResourceError?: (error: unknown, info: ServerResourceErrorInfo) => void;
+  onAssetError?: (error: unknown, info: ServerAssetErrorInfo) => void;
   onShellError?: (error: unknown) => void;
   clientReferenceFallback?: (
     reference: FigClientReference,
     props: Props,
   ) => FigNode;
-  resolveResourceKey?: (type: ElementType) => string | undefined;
+  resolveAssetKey?: (type: ElementType) => string | undefined;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
-  resources?: Record<string, FigResourceList>;
+  assets?: Record<string, FigAssetResourceList>;
   signal?: AbortSignal;
 }
 
@@ -42,14 +42,14 @@ export interface ServerErrorPayload {
   message?: string;
 }
 
-export interface ServerResourceErrorInfo {
+export interface ServerAssetErrorInfo {
   componentStack: string;
-  destination: ServerResourceDestination;
+  destination: ServerAssetDestination;
   key: string;
-  resource: FigResource;
+  resource: FigAssetResource;
 }
 
-export type ServerResourceDestination = "head" | "stream";
+export type ServerAssetDestination = "head" | "stream";
 
 interface ServerStreamRenderResult {
   abort(reason?: unknown): void;
@@ -64,7 +64,7 @@ export interface ServerDocumentRenderResult extends ServerStreamRenderResult {}
 
 export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
   getHead(): string;
-  headReady: Promise<void>;
+  headReady: Promise<string>;
 }
 
 export interface ServerRenderRequest {
@@ -72,7 +72,7 @@ export interface ServerRenderRequest {
   allReady: Promise<void>;
   getData(): FigDataHydrationEntry[];
   getHead(): string;
-  headReady: Promise<void>;
+  headReady: Promise<string>;
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;
 }

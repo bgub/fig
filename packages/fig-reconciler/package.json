@@ -10,6 +10,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./devtools": {
+      "types": "./dist/devtools.d.ts",
+      "import": "./dist/devtools.js",
+      "default": "./dist/devtools.js"
+    },
+    "./refresh": {
+      "types": "./dist/refresh.d.ts",
+      "import": "./dist/refresh.js",
+      "default": "./dist/refresh.js"
     }
   },
   "types": "./dist/index.d.ts",

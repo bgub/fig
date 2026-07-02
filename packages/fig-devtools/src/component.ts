@@ -11,7 +11,7 @@ import type {
   FigDevtoolsFiberSnapshot,
   FigDevtoolsHookSnapshot,
   FigDevtoolsRootSnapshot,
-} from "@bgub/fig-reconciler";
+} from "@bgub/fig-reconciler/devtools";
 import {
   ensureFigDevtoolsGlobalHook,
   type FigDevtoolsCommitSnapshot,
@@ -704,7 +704,7 @@ function detailTab(
     row("Kind", fiber.kind),
     row("Key", fiber.key === null ? "none" : String(fiber.key)),
     row("Fiber id", String(fiber.id)),
-    row("Lanes", `${fiber.lanes} / child ${fiber.childLanes}`),
+    row("Work", formatWork(fiber.pendingWork, fiber.childWork)),
     fiber.host === undefined ? null : hostSection(fiber),
     fiber.capturedError === undefined
       ? null
@@ -716,6 +716,15 @@ function detailTab(
           row("Stack", fiber.componentStack?.trim() ?? ""),
         ),
   );
+}
+
+function formatWork(
+  pending: readonly string[],
+  children: readonly string[],
+): string {
+  const own = pending.length === 0 ? "none" : pending.join(", ");
+  const child = children.length === 0 ? "none" : children.join(", ");
+  return `${own} / child ${child}`;
 }
 
 function hostSection(fiber: FigDevtoolsFiberSnapshot): FigNode {

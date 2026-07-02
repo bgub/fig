@@ -1,4 +1,4 @@
-import type { FigResource, FigResourceList } from "@bgub/fig";
+import type { FigAssetResource, FigAssetResourceList } from "@bgub/fig";
 import type { StartConfig } from "@bgub/fig-start";
 import { startDevServer } from "@bgub/fig-start/dev-server";
 import {
@@ -16,14 +16,14 @@ const {
   ...serverOptions
 } = startConfig;
 
-function clientReferenceAssets(metadata: { id: string }): FigResourceList {
+function clientReferenceAssets(metadata: { id: string }): FigAssetResourceList {
   return mergeAssetResources(
     resolveClientReferenceAssets(metadata),
     appClientReferenceAssets?.(metadata),
   );
 }
 
-function serverRouteAssets(metadata: { id: string }): FigResourceList {
+function serverRouteAssets(metadata: { id: string }): FigAssetResourceList {
   return mergeAssetResources(
     resolveServerRouteAssets(metadata),
     appServerRouteAssets?.(metadata),
@@ -41,21 +41,21 @@ void startDevServer({
 });
 
 function mergeAssetResources(
-  generated: FigResourceList,
-  app: FigResourceList | undefined,
-): FigResourceList {
+  generated: FigAssetResourceList,
+  app: FigAssetResourceList | undefined,
+): FigAssetResourceList {
   if (app === undefined) return generated;
   return [...toAssetResourceArray(generated), ...toAssetResourceArray(app)];
 }
 
 function toAssetResourceArray(
-  resources: FigResourceList,
-): readonly FigResource[] {
+  resources: FigAssetResourceList,
+): readonly FigAssetResource[] {
   return isAssetResourceArray(resources) ? resources : [resources];
 }
 
 function isAssetResourceArray(
-  resources: FigResourceList,
-): resources is readonly FigResource[] {
+  resources: FigAssetResourceList,
+): resources is readonly FigAssetResource[] {
   return Array.isArray(resources);
 }

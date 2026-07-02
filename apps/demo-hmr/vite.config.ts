@@ -22,7 +22,19 @@ export default defineConfig({
       },
       { find: "@bgub/fig/internal", replacement: pkg("fig/src/internal.ts") },
       { find: "@bgub/fig-dom", replacement: pkg("fig-dom/src/index.ts") },
+      {
+        find: "@bgub/fig-data/internal",
+        replacement: pkg("fig-data/src/internal.ts"),
+      },
       { find: "@bgub/fig-data", replacement: pkg("fig-data/src/index.ts") },
+      {
+        find: "@bgub/fig-dom/refresh",
+        replacement: pkg("fig-dom/src/refresh.ts"),
+      },
+      {
+        find: "@bgub/fig-reconciler/refresh",
+        replacement: pkg("fig-reconciler/src/refresh.ts"),
+      },
       {
         find: "@bgub/fig-reconciler",
         replacement: pkg("fig-reconciler/src/index.ts"),

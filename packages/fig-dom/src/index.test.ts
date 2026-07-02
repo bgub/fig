@@ -5,7 +5,6 @@ import {
   createRoot,
   flushSync,
   insertAssetResources,
-  render,
 } from "./index.ts";
 import {
   deferred,
@@ -19,11 +18,9 @@ installFakeDocument();
 describe("@bgub/fig-dom", () => {
   it("renders and updates host elements", async () => {
     const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
 
-    render(
-      createElement("div", { class: "box", id: "first" }, "Hello"),
-      container as unknown as Element,
-    );
+    root.render(createElement("div", { class: "box", id: "first" }, "Hello"));
     await delay();
 
     expect(container.textContent).toBe("Hello");
@@ -33,10 +30,7 @@ describe("@bgub/fig-dom", () => {
       id: "first",
     });
 
-    render(
-      createElement("div", { id: "second" }, "Goodbye"),
-      container as unknown as Element,
-    );
+    root.render(createElement("div", { id: "second" }, "Goodbye"));
     await delay();
 
     expect(container.textContent).toBe("Goodbye");

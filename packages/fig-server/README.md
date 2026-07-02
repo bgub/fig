@@ -113,14 +113,14 @@ framework/RSC refresh path should revalidate the key.
 
 ## Resources
 
-Use `resources([...], children)` from `@bgub/fig` to attach document resources to
+Use `assets([...], children)` from `@bgub/fig` to attach document resources to
 a subtree:
 
 ```tsx
 import { resources, stylesheet, title } from "@bgub/fig";
 
 function Page() {
-  return resources(
+  return assets(
     [title("Fig"), stylesheet("/app.css", { precedence: "app" })],
     <main>Ready</main>,
   );
@@ -195,7 +195,7 @@ renderToReadableStream(<Page />, {
 ```
 
 Manifest resources use the same registry, destination rules, dedupe checks, and
-Suspense reveal gating as explicit `resources(...)` wrappers.
+Suspense reveal gating as explicit `assets(...)` wrappers.
 
 ## RSC
 

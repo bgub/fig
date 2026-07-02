@@ -35,8 +35,8 @@ declare module "virtual:fig-start/client-manifest" {
 declare module "virtual:fig-start/server-manifest" {
   export function resolveClientReferenceAssets(metadata: {
     id: string;
-  }): import("@bgub/fig").FigResourceList;
+  }): import("@bgub/fig").FigAssetResourceList;
   export function resolveServerRouteAssets(metadata: {
     id: string;
-  }): import("@bgub/fig").FigResourceList;
+  }): import("@bgub/fig").FigAssetResourceList;
 }

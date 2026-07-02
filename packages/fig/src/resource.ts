@@ -4,15 +4,15 @@ import {
   type FigElement,
   type FigNode,
   type Props,
-  Resources,
+  Assets,
 } from "./element.ts";
 
-export type ResourceBlocking = "reveal" | "none";
+export type AssetResourceBlocking = "reveal" | "none";
 export type CrossOrigin = "anonymous" | "use-credentials" | "";
 export type FetchPriority = "high" | "low" | "auto";
-export type ResourceDestination = "head" | "stream";
+export type AssetResourceDestination = "head" | "stream";
 
-export type FigResource =
+export type FigAssetResource =
   | StylesheetResource
   | PreloadResource
   | ModulePreloadResource
@@ -27,7 +27,7 @@ interface ResourceBase {
 }
 
 export interface StylesheetResource extends ResourceBase {
-  blocking?: ResourceBlocking;
+  blocking?: AssetResourceBlocking;
   crossOrigin?: CrossOrigin;
   href: string;
   kind: "stylesheet";
@@ -88,25 +88,27 @@ export interface MetaResource extends ResourceBase {
   property?: string;
 }
 
-export type FigResourceList = FigResource | readonly FigResource[];
+export type FigAssetResourceList =
+  | FigAssetResource
+  | readonly FigAssetResource[];
 
 // Asset resources a client reference contributes when it renders. Eager for
 // hand-written lists; a thunk for bundler-manifest resolution that may not be
 // available until serialization time, or that maps paths differently per build.
-export type ClientReferenceResources =
-  | FigResourceList
-  | (() => FigResourceList);
+export type ClientReferenceAssets =
+  | FigAssetResourceList
+  | (() => FigAssetResourceList);
 
-export interface ResourcesOptions {
+export interface AssetsOptions {
+  assets: FigAssetResourceList;
   children?: FigNode;
-  resources: FigResourceList;
 }
 
-export function resources(
-  value: FigResourceList,
+export function assets(
+  value: FigAssetResourceList,
   children?: FigNode,
-): FigElement<ResourcesOptions> {
-  return createElement(Resources, { resources: value }, children);
+): FigElement<AssetsOptions> {
+  return createElement(Assets, { assets: value }, children);
 }
 
 export function stylesheet(
@@ -163,7 +165,7 @@ export function meta(options: Omit<MetaResource, "kind">): MetaResource {
   return { ...options, kind: "meta" };
 }
 
-export function isFigResource(value: unknown): value is FigResource {
+export function isFigAssetResource(value: unknown): value is FigAssetResource {
   if (typeof value !== "object" || value === null) return false;
 
   switch ((value as { kind?: unknown }).kind) {
@@ -181,23 +183,23 @@ export function isFigResource(value: unknown): value is FigResource {
   }
 }
 
-export function clientReferenceResources(
+export function clientReferenceAssets(
   reference: FigClientReference,
-): readonly FigResource[] {
-  const value = reference.resources;
+): readonly FigAssetResource[] {
+  const value = reference.assets;
   if (value === undefined) return [];
 
   // Resolved on each call rather than memoized: a lazy resolver may read a
   // manifest that is not loaded until serialization, and a consumer that wants
   // to cache can do so against the stable reference identity.
   const list = typeof value === "function" ? value() : value;
-  if (isFigResource(list)) return [list];
+  if (isFigAssetResource(list)) return [list];
   // A thunk that yields nothing (e.g. a missing manifest entry) normalizes to an
   // empty list rather than leaking a non-array through the readonly contract.
   return Array.isArray(list) ? list : [];
 }
 
-export function figResourceKey(resource: FigResource): string {
+export function assetResourceKey(resource: FigAssetResource): string {
   // A document carries a single <title>; collapse every title to one key even
   // when an author supplies an explicit key, so the singleton invariant cannot
   // be bypassed into emitting multiple <title> elements (invalid HTML).
@@ -227,29 +229,29 @@ export function figResourceKey(resource: FigResource): string {
   }
 }
 
-export function resourceDestination(
-  resource: FigResource,
-): ResourceDestination {
+export function assetResourceDestination(
+  resource: FigAssetResource,
+): AssetResourceDestination {
   return resource.kind === "title" || resource.kind === "meta"
     ? "head"
     : "stream";
 }
 
-export function resourceFromHostProps(
+export function assetResourceFromHostProps(
   type: string,
   props: Props,
-): FigResource | null {
+): FigAssetResource | null {
   return resourceFromHost(type, (name) => props[name], props.children);
 }
 
-export function resourceFromHostAttributes(
+export function assetResourceFromHostAttributes(
   type: string,
   getAttribute: (name: string) => unknown,
-): FigResource | null {
+): FigAssetResource | null {
   return resourceFromHost(type, getAttribute);
 }
 
-export type ResourceHostAttribute = readonly [
+export type AssetResourceHostAttribute = readonly [
   name: string,
   value: string | true,
 ];
@@ -259,9 +261,9 @@ export type ResourceHostAttribute = readonly [
 // the two renders cannot drift. `true` marks a boolean attribute (bare on
 // the server, empty-string in the DOM). Server-only attributes (id, nonce)
 // stay with the server writer; title/meta are written by their own paths.
-export function resourceHostAttributes(
-  resource: FigResource,
-): ResourceHostAttribute[] {
+export function assetResourceHostAttributes(
+  resource: FigAssetResource,
+): AssetResourceHostAttribute[] {
   const pairs: Array<readonly [string, string | true | undefined]> = [];
 
   switch (resource.kind) {
@@ -344,8 +346,8 @@ function resourceFromHost(
   type: string,
   prop: (name: string) => unknown,
   children?: FigNode,
-): FigResource | null {
-  const withKey = (resource: FigResource): FigResource => {
+): FigAssetResource | null {
+  const withKey = (resource: FigAssetResource): FigAssetResource => {
     const key = readProp(prop, "data-fig-resource-key");
     return key === undefined ? resource : { ...resource, key };
   };
@@ -388,15 +390,15 @@ function resourceFromHost(
 }
 
 function withNullableKey(
-  resource: FigResource | null,
-  withKey: (resource: FigResource) => FigResource,
-): FigResource | null {
+  resource: FigAssetResource | null,
+  withKey: (resource: FigAssetResource) => FigAssetResource,
+): FigAssetResource | null {
   return resource === null ? null : withKey(resource);
 }
 
 function linkResourceFromHost(
   prop: (name: string) => unknown,
-): FigResource | null {
+): FigAssetResource | null {
   const rel = readProp(prop, "rel")?.toLowerCase();
   const href = readProp(prop, "href");
   if (

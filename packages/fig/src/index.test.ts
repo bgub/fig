@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   clientReference,
-  clientReferenceResources,
+  clientReferenceAssets,
   createContext,
   createElement,
   createPortalNode,
@@ -14,7 +14,7 @@ import {
   preload,
   readContext,
   readPromise,
-  resources,
+  assets,
   stylesheet,
   title,
   Suspense,
@@ -29,17 +29,17 @@ import {
   useTransition,
 } from "./index.ts";
 import {
-  figResourceKey,
+  assetResourceKey,
   isContext,
   isErrorBoundary,
   isPortal,
-  isResources,
+  isAssets,
   isSuspense,
   isValidElement,
-  resourceDestination,
-  resourceFromHostAttributes,
-  resourceFromHostProps,
-  Resources,
+  assetResourceDestination,
+  assetResourceFromHostAttributes,
+  assetResourceFromHostProps,
+  Assets,
 } from "./internal.ts";
 
 describe("@bgub/fig", () => {
@@ -104,14 +104,14 @@ describe("@bgub/fig", () => {
 
   it("creates resource wrappers", () => {
     const style = stylesheet("/app.css", { precedence: "app" });
-    const element = resources(style, "child");
+    const element = assets(style, "child");
 
-    expect(isResources(Resources)).toBe(true);
+    expect(isAssets(Assets)).toBe(true);
     expect(isValidElement(element)).toBe(true);
-    expect(element.type).toBe(Resources);
+    expect(element.type).toBe(Assets);
     expect(element.props).toEqual({
       children: "child",
-      resources: style,
+      assets: style,
     });
   });
 
@@ -121,11 +121,11 @@ describe("@bgub/fig", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",
       load: () => Promise.resolve({}),
-      resources: [css, js],
+      assets: [css, js],
     });
 
     expect(Counter.id).toBe("./Counter.tsx");
-    expect(clientReferenceResources(Counter)).toEqual([css, js]);
+    expect(clientReferenceAssets(Counter)).toEqual([css, js]);
   });
 
   it("normalizes a single client-reference resource to a list", () => {
@@ -133,10 +133,10 @@ describe("@bgub/fig", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",
       load: () => Promise.resolve({}),
-      resources: css,
+      assets: css,
     });
 
-    expect(clientReferenceResources(Counter)).toEqual([css]);
+    expect(clientReferenceAssets(Counter)).toEqual([css]);
   });
 
   it("resolves lazy client-reference resources at read time", () => {
@@ -144,7 +144,7 @@ describe("@bgub/fig", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",
       load: () => Promise.resolve({}),
-      resources: () => {
+      assets: () => {
         calls += 1;
         return [stylesheet(`/assets/Counter.${calls}.css`)];
       },
@@ -153,10 +153,10 @@ describe("@bgub/fig", () => {
     // Not resolved until read, then resolved on each call (a manifest may load
     // after the reference is defined).
     expect(calls).toBe(0);
-    expect(clientReferenceResources(Counter)).toEqual([
+    expect(clientReferenceAssets(Counter)).toEqual([
       stylesheet("/assets/Counter.1.css"),
     ]);
-    expect(clientReferenceResources(Counter)).toEqual([
+    expect(clientReferenceAssets(Counter)).toEqual([
       stylesheet("/assets/Counter.2.css"),
     ]);
     expect(calls).toBe(2);
@@ -168,10 +168,10 @@ describe("@bgub/fig", () => {
       load: () => Promise.resolve({}),
       // A missing manifest entry can make a typed thunk return undefined at
       // runtime; the resolver must not leak a non-array.
-      resources: () => undefined as never,
+      assets: () => undefined as never,
     });
 
-    expect(clientReferenceResources(Counter)).toEqual([]);
+    expect(clientReferenceAssets(Counter)).toEqual([]);
   });
 
   it("defaults client-reference resources to an empty list", () => {
@@ -180,46 +180,46 @@ describe("@bgub/fig", () => {
       load: () => Promise.resolve({}),
     });
 
-    expect(Counter.resources).toBeUndefined();
-    expect(clientReferenceResources(Counter)).toEqual([]);
+    expect(Counter.assets).toBeUndefined();
+    expect(clientReferenceAssets(Counter)).toEqual([]);
   });
 
   it("keys a font in the shared preload-font space", () => {
     // A font is loaded as <link rel="preload" as="font">, so it must key
     // identically to an equivalent preload across every package.
-    expect(figResourceKey(font("/a.woff2", "font/woff2"))).toBe(
+    expect(assetResourceKey(font("/a.woff2", "font/woff2"))).toBe(
       "preload:font:/a.woff2",
     );
-    expect(figResourceKey(preload("/a.woff2", "font"))).toBe(
+    expect(assetResourceKey(preload("/a.woff2", "font"))).toBe(
       "preload:font:/a.woff2",
     );
   });
 
   it("keys modulepreloads separately from classic script preloads", () => {
-    expect(figResourceKey(modulepreload("/chunk.js"))).toBe(
+    expect(assetResourceKey(modulepreload("/chunk.js"))).toBe(
       "modulepreload:/chunk.js",
     );
-    expect(figResourceKey(preload("/chunk.js", "script"))).toBe(
+    expect(assetResourceKey(preload("/chunk.js", "script"))).toBe(
       "preload:script:/chunk.js",
     );
   });
 
   it("collapses every title to the singleton key, ignoring an explicit key", () => {
-    expect(figResourceKey(title("A"))).toBe("title");
-    expect(figResourceKey(title("B", "explicit"))).toBe("title");
+    expect(assetResourceKey(title("A"))).toBe("title");
+    expect(assetResourceKey(title("B", "explicit"))).toBe("title");
     // Other kinds still honor an explicit key.
-    expect(figResourceKey(meta({ name: "robots", key: "r" }))).toBe("meta:r");
+    expect(assetResourceKey(meta({ name: "robots", key: "r" }))).toBe("meta:r");
   });
 
   it("classifies resource destinations", () => {
-    expect(resourceDestination(title("Fig"))).toBe("head");
-    expect(resourceDestination(stylesheet("/app.css"))).toBe("stream");
-    expect(resourceDestination(modulepreload("/chunk.js"))).toBe("stream");
+    expect(assetResourceDestination(title("Fig"))).toBe("head");
+    expect(assetResourceDestination(stylesheet("/app.css"))).toBe("stream");
+    expect(assetResourceDestination(modulepreload("/chunk.js"))).toBe("stream");
   });
 
   it("lowers host resource props", () => {
     expect(
-      resourceFromHostProps("link", {
+      assetResourceFromHostProps("link", {
         href: "/app.css",
         precedence: "app",
         rel: "stylesheet",
@@ -230,10 +230,10 @@ describe("@bgub/fig", () => {
       precedence: "app",
     });
     expect(
-      resourceFromHostProps("title", { children: ["Fig", " ", 1] }),
+      assetResourceFromHostProps("title", { children: ["Fig", " ", 1] }),
     ).toEqual({ kind: "title", value: "Fig 1" });
     expect(
-      resourceFromHostProps("link", {
+      assetResourceFromHostProps("link", {
         fetchPriority: "high",
         href: "/chunk.js",
         rel: "modulepreload",
@@ -252,7 +252,7 @@ describe("@bgub/fig", () => {
     ]);
 
     expect(
-      resourceFromHostAttributes("link", (name) => attributes.get(name)),
+      assetResourceFromHostAttributes("link", (name) => attributes.get(name)),
     ).toEqual({ href: "/app.css", kind: "stylesheet" });
   });
 

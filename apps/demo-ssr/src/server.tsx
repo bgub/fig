@@ -5,7 +5,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { meta, resources, title } from "@bgub/fig";
+import { assets, meta, title } from "@bgub/fig";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import {
@@ -105,7 +105,7 @@ async function handleRequest(
         <link rel="stylesheet" href="/style.css" />
       </head>
       <body>
-        {resources(
+        {assets(
           [
             title("Fig Streaming SSR"),
             meta({

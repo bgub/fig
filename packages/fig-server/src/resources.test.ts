@@ -6,12 +6,12 @@ import {
   script,
   stylesheet,
   title,
-  type FigResource,
+  type FigAssetResource,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { ResourceRegistry } from "./resources.ts";
 
-function write(registry: ResourceRegistry, resource: FigResource): string {
+function write(registry: ResourceRegistry, resource: FigAssetResource): string {
   let html = "";
   registry.write(resource, {
     write(chunk) {

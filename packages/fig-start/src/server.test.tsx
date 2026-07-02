@@ -48,7 +48,7 @@ function SsrIslandImpl(): FigNode {
 const SsrIsland = serverClientReference({
   id: ssrIslandId,
   load: () => Promise.resolve({ SsrIsland: SsrIslandImpl }),
-  resources: [modulepreload("/assets/ssr-island.js")],
+  assets: [modulepreload("/assets/ssr-island.js")],
   ssr: SsrIslandImpl,
 });
 

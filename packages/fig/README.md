@@ -97,7 +97,7 @@ createRoot(container).render(<App />);
   return the next state or a promise for it, and expose `isPending` while Fig
   applies the result in a transition priority scope. Server actions can layer on
   top later without changing the hook shape.
-- Document resources: `resources([...], children)` attaches resources to a
+- Document resources: `assets([...], children)` attaches resources to a
   subtree while rendering only `children` on the client. Resource helpers include
   `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.
   Server rendering exposes `title` and `meta` as document head output; stream-safe

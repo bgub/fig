@@ -6,7 +6,6 @@ import {
   type Props,
 } from "@bgub/fig";
 import type { FigDataStoreEntrySnapshot } from "@bgub/fig/internal";
-import type { Lanes } from "./lanes.ts";
 
 export type FigDevtoolsFiberKind =
   | "root"
@@ -14,7 +13,7 @@ export type FigDevtoolsFiberKind =
   | "text"
   | "function"
   | "fragment"
-  | "resources"
+  | "assets"
   | "context-provider"
   | "suspense"
   | "error-boundary"
@@ -39,6 +38,18 @@ export type FigDevtoolsEffectPhase =
   | "before-paint"
   | "before-layout";
 
+export type FigDevtoolsWorkLabel =
+  | "sync"
+  | "input"
+  | "default"
+  | "gesture"
+  | "transition"
+  | "retry"
+  | "idle"
+  | "offscreen"
+  | "deferred"
+  | "selective-hydration";
+
 export interface FigDevtoolsHookSnapshot {
   id: number;
   kind: FigDevtoolsHookKind;
@@ -56,8 +67,8 @@ export interface FigDevtoolsFiberSnapshot {
   key: string | number | null;
   index: number;
   props: Props;
-  lanes: Lanes;
-  childLanes: Lanes;
+  pendingWork: FigDevtoolsWorkLabel[];
+  childWork: FigDevtoolsWorkLabel[];
   hooks: FigDevtoolsHookSnapshot[];
   contextDependencies: string[];
   host?: FigDevtoolsHostSnapshot;
@@ -78,10 +89,10 @@ export interface FigDevtoolsRootSnapshot {
   rendererId: number;
   committedAt: number;
   dataResources: FigDataStoreEntrySnapshot[];
-  pendingLanes: Lanes;
-  suspendedLanes: Lanes;
-  pingedLanes: Lanes;
-  expiredLanes: Lanes;
+  pendingWork: FigDevtoolsWorkLabel[];
+  suspendedWork: FigDevtoolsWorkLabel[];
+  pingedWork: FigDevtoolsWorkLabel[];
+  expiredWork: FigDevtoolsWorkLabel[];
   tree: FigDevtoolsFiberSnapshot;
 }
 

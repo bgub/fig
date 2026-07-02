@@ -2,7 +2,7 @@ import {
   type RefreshFamily,
   type RefreshUpdate,
   setRefreshHandler,
-} from "@bgub/fig-reconciler";
+} from "@bgub/fig-reconciler/refresh";
 
 // The Fig Fast Refresh runtime. A bundler transform (dev only) registers each
 // component version under a stable id and records its hook signature, then calls

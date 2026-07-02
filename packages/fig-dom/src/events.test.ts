@@ -1,31 +1,28 @@
-import { createElement } from "@bgub/fig";
-import { requestUpdateLane } from "@bgub/fig-reconciler";
+import { createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  createRoot,
-  DefaultLane,
-  flushSync,
-  InputContinuousLane,
-  on,
-  render,
-  SyncLane,
-} from "./index.ts";
+import { createRoot, flushSync, on } from "./index.ts";
+import { getCurrentUpdatePriority } from "./priority.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
+function render(node: FigNode, container: Element): void {
+  const root = createRoot(container);
+  root.render(node);
+}
+
 describe("@bgub/fig-dom events", () => {
   it("runs DOM event handlers with event priority", () => {
-    const lanes: number[] = [];
+    const priorities: string[] = [];
     const container = new FakeElement("root");
 
     flushSync(() =>
       render(
         createElement("button", {
           events: [
-            on("click", () => lanes.push(requestUpdateLane())),
-            on("mousemove", () => lanes.push(requestUpdateLane())),
-            on("load", () => lanes.push(requestUpdateLane())),
+            on("click", () => priorities.push(getCurrentUpdatePriority())),
+            on("mousemove", () => priorities.push(getCurrentUpdatePriority())),
+            on("load", () => priorities.push(getCurrentUpdatePriority())),
           ],
         }),
         container as unknown as Element,
@@ -37,19 +34,21 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("mousemove");
     button.dispatch("load");
 
-    expect(lanes).toEqual([SyncLane, InputContinuousLane, DefaultLane]);
+    expect(priorities).toEqual(["discrete", "continuous", "default"]);
   });
 
   it("runs press interactions at discrete priority", () => {
-    const lanes: number[] = [];
+    const priorities: string[] = [];
     const container = new FakeElement("root");
 
     flushSync(() =>
       render(
         createElement("button", {
           events: [
-            on("mousedown", () => lanes.push(requestUpdateLane())),
-            on("contextmenu", () => lanes.push(requestUpdateLane())),
+            on("mousedown", () => priorities.push(getCurrentUpdatePriority())),
+            on("contextmenu", () =>
+              priorities.push(getCurrentUpdatePriority()),
+            ),
           ],
         }),
         container as unknown as Element,
@@ -60,7 +59,7 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("mousedown");
     button.dispatch("contextmenu");
 
-    expect(lanes).toEqual([SyncLane, SyncLane]);
+    expect(priorities).toEqual(["discrete", "discrete"]);
   });
 
   it("keeps sibling slots stable when a once handler fires", () => {

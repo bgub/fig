@@ -5,7 +5,7 @@ import type {
   FigDevtoolsGlobalHook,
   FigDevtoolsRendererInfo,
   FigDevtoolsRootSnapshot,
-} from "@bgub/fig-reconciler";
+} from "@bgub/fig-reconciler/devtools";
 
 export const FIG_DEVTOOLS_HOOK_KEY = "__FIG_DEVTOOLS_GLOBAL_HOOK__";
 

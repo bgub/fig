@@ -83,8 +83,8 @@ export type {
   ServerErrorPayload,
   ServerDocumentRenderResult,
   ServerFragmentRenderResult,
-  ServerResourceDestination,
-  ServerResourceErrorInfo,
+  ServerAssetDestination,
+  ServerAssetErrorInfo,
   ServerRenderOptions,
   ServerRenderResult,
 } from "./types.ts";

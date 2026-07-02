@@ -10,7 +10,7 @@ import {
 } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
-  resourceFromHostProps,
+  assetResourceFromHostProps,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
@@ -31,12 +31,9 @@ import {
   type FigRoot,
   type FigRootOptions,
   type HostConfig,
-  type RefreshFamily,
-  type RefreshUpdate,
-  setRefreshHandler,
 } from "@bgub/fig-reconciler";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
-import { resumeBind, suspendBind } from "./bind.ts";
+import { composeBind, resumeBind, suspendBind } from "./bind.ts";
 import {
   type Container,
   registerPortalContainer,
@@ -46,6 +43,7 @@ import {
   setEventBatching,
   unregisterRoot,
 } from "./events.ts";
+import { configureDomRefreshScheduler } from "./refresh.ts";
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
 import {
   elementName,
@@ -62,6 +60,7 @@ type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
 declare const process: { env: { NODE_ENV?: string } };
 
 export { insertAssetResources } from "./asset-resources.ts";
+export { composeBind };
 export type { Bind } from "./bind.ts";
 export {
   type EventCallback,
@@ -69,18 +68,6 @@ export {
   type EventOptions,
   on,
 } from "./events.ts";
-export {
-  DefaultLane,
-  DeferredLane,
-  GestureLane,
-  IdleLane,
-  InputContinuousLane,
-  type Lane,
-  OffscreenLane,
-  runWithPriority,
-  SyncLane,
-  TransitionLane,
-} from "./priority.ts";
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>
@@ -97,7 +84,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     if (process.env.NODE_ENV !== "production") {
       // Asset resources hoist to <head>, so their fiber position is not
       // their DOM position; the server exempts them the same way.
-      if (resourceFromHostProps(type, props) !== null) return;
+      if (assetResourceFromHostProps(type, props) !== null) return;
       validateInstanceNesting(type, ancestors);
     }
   },
@@ -134,7 +121,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   // match them against the DOM cursor, and commit acquires/releases them in
   // the head registry instead of inserting/removing at the fiber position.
   isHoistedInstance: (type, props) =>
-    resourceFromHostProps(type, props) !== null,
+    assetResourceFromHostProps(type, props) !== null,
   commitHoistedInstance: (instance) => acquireDocumentResource(instance),
   removeHoistedInstance: (instance) => releaseDocumentResource(instance),
   updateHoistedInstance: (instance, previousProps, nextProps) =>
@@ -248,13 +235,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 
 const renderer = createRenderer(hostConfig);
 setEventBatching(renderer.batchedUpdates);
+configureDomRefreshScheduler(renderer.scheduleRefresh);
 
 export const batchedUpdates = renderer.batchedUpdates;
 export const flushSync = renderer.flushSync;
-
-// Fast Refresh (HMR) plumbing — used by the refresh runtime, not app code.
-export const scheduleRefresh = renderer.scheduleRefresh;
-export { type RefreshFamily, type RefreshUpdate, setRefreshHandler };
 
 export type { FigRootOptions };
 
@@ -280,13 +264,6 @@ export function hydrateRoot(
     (target, lane) => renderer.hydrateTarget(container, target, lane),
     (callback) => root.data.run(callback),
   );
-  return withRootTeardown(root, container);
-}
-
-export function render(children: FigNode, container: Container): FigRoot {
-  registerRoot(container);
-  const root = renderer.render(children, container);
-  registerRoot(container, undefined, (callback) => root.data.run(callback));
   return withRootTeardown(root, container);
 }
 

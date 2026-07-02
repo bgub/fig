@@ -12,7 +12,7 @@ import {
   meta,
   preload,
   preconnect,
-  resources,
+  assets,
   script,
   stylesheet,
   Suspense,
@@ -366,14 +366,14 @@ describe("@bgub/fig-server", () => {
     expect(html).toBe("<section><span>light</span><span>dark</span></section>");
   });
 
-  it("hoists explicit document resources during server render", async () => {
+  it("hoists explicit document assets during server render", async () => {
     const result = renderToReadableStream(
       createElement(
         "main",
         null,
-        resources(
+        assets(
           [
-            title("Fig & resources"),
+            title("Fig & assets"),
             meta({ name: "description", content: "Fast < UI" }),
             preconnect("https://cdn.example.com", { crossOrigin: "anonymous" }),
             preload("/hero.png", "image", { fetchPriority: "high" }),
@@ -390,7 +390,7 @@ describe("@bgub/fig-server", () => {
 
     await result.headReady;
     expect(result.getHead()).toBe(
-      '<title>Fig &amp; resources</title><meta name="description" content="Fast &lt; UI">',
+      '<title>Fig &amp; assets</title><meta name="description" content="Fast &lt; UI">',
     );
 
     const html = await readStream(result.stream);
@@ -400,9 +400,9 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("does not emit head-only resources into the body stream", async () => {
+  it("does not emit head-only assets into the body stream", async () => {
     const html = await renderToString(
-      resources(
+      assets(
         [title("Head only"), meta({ name: "robots", content: "noindex" })],
         createElement("main", null, "Ready"),
       ),
@@ -411,7 +411,7 @@ describe("@bgub/fig-server", () => {
     expect(html).toBe("<main>Ready</main>");
   });
 
-  it("renders full documents with collected head resources", async () => {
+  it("renders full documents with collected head assets", async () => {
     function Page() {
       return createElement(
         "html",
@@ -424,7 +424,7 @@ describe("@bgub/fig-server", () => {
         createElement(
           "body",
           null,
-          resources(
+          assets(
             [
               title("Document"),
               meta({ name: "description", content: "SSR" }),
@@ -479,11 +479,11 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("streams document bodies while injecting head resources once", async () => {
+  it("streams document bodies while injecting head assets once", async () => {
     const pending = deferred<string>();
 
     function Message() {
-      return resources(
+      return assets(
         stylesheet("/message.css"),
         createElement("span", null, readPromise(pending.promise)),
       );
@@ -497,7 +497,7 @@ describe("@bgub/fig-server", () => {
         createElement(
           "body",
           null,
-          resources(
+          assets(
             title("Stream"),
             createElement(
               Suspense,
@@ -543,7 +543,7 @@ describe("@bgub/fig-server", () => {
     const diagnostics: string[] = [];
 
     function Message() {
-      return resources(
+      return assets(
         title(`Late ${readPromise(pending.promise)}`),
         createElement("span", null, "Ready"),
       );
@@ -565,7 +565,7 @@ describe("@bgub/fig-server", () => {
         ),
       ),
       {
-        onResourceError(_error, info) {
+        onAssetError(_error, info) {
           diagnostics.push(info.key);
         },
       },
@@ -581,16 +581,13 @@ describe("@bgub/fig-server", () => {
     expect(diagnostics).toEqual(["title"]);
   });
 
-  it("reports late head resources while keeping them out of the stream", async () => {
+  it("reports late head assets while keeping them out of the stream", async () => {
     const pending = deferred<string>();
     const diagnostics: Array<{ componentStack: string; key: string }> = [];
 
     function Message() {
       const value = readPromise(pending.promise);
-      return resources(
-        title(`Late ${value}`),
-        createElement("span", null, value),
-      );
+      return assets(title(`Late ${value}`), createElement("span", null, value));
     }
 
     const result = renderToReadableStream(
@@ -600,7 +597,7 @@ describe("@bgub/fig-server", () => {
         createElement(Message, null),
       ),
       {
-        onResourceError(error, info) {
+        onAssetError(error, info) {
           expect(error).toBeInstanceOf(Error);
           diagnostics.push({
             componentStack: info.componentStack,
@@ -615,7 +612,7 @@ describe("@bgub/fig-server", () => {
 
     pending.resolve("Ready");
     await result.allReady;
-    expect(result.getHead()).toBe("<title>Late Ready</title>");
+    expect(result.getHead()).toBe("");
     expect(diagnostics).toEqual([
       {
         componentStack: "\n    at Message",
@@ -628,10 +625,10 @@ describe("@bgub/fig-server", () => {
     expect(html).not.toContain("<title>");
   });
 
-  it("rejects conflicting duplicate document resources", async () => {
+  it("rejects conflicting duplicate document assets", async () => {
     await expect(
       renderToString(
-        resources(
+        assets(
           [stylesheet("/app.css"), stylesheet("/app.css", { media: "print" })],
           createElement("main", null, "Ready"),
         ),
@@ -671,7 +668,7 @@ describe("@bgub/fig-server", () => {
     }
 
     function Message() {
-      return resources(stylesheet("/message.css"), createElement(Text, null));
+      return assets(stylesheet("/message.css"), createElement(Text, null));
     }
 
     const result = renderToReadableStream(
@@ -697,15 +694,14 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("discovers resources from resolved component module ids", async () => {
+  it("discovers assets from resolved component module ids", async () => {
     function Card() {
       return createElement("section", null, "Card");
     }
 
     const result = renderToReadableStream(createElement(Card, null), {
-      resolveResourceKey: (type) =>
-        type === Card ? "app/card.tsx" : undefined,
-      resources: {
+      resolveAssetKey: (type) => (type === Card ? "app/card.tsx" : undefined),
+      assets: {
         "app/card.tsx": [
           title("Card"),
           stylesheet("/card.css", { blocking: "none" }),
@@ -737,9 +733,9 @@ describe("@bgub/fig-server", () => {
       ),
       {
         identifierPrefix: "manifest",
-        resolveResourceKey: (type) =>
+        resolveAssetKey: (type) =>
           type === Message ? "app/message.tsx" : undefined,
-        resources: { "app/message.tsx": stylesheet("/message.css") },
+        assets: { "app/message.tsx": stylesheet("/message.css") },
       },
     );
 

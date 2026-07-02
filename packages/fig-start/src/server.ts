@@ -2,14 +2,17 @@ import {
   createElement,
   type FigClientReference,
   type FigNode,
-  type FigResource,
-  type FigResourceList,
+  type FigAssetResource,
+  type FigAssetResourceList,
   Fragment,
-  resources,
+  assets,
   type Props,
 } from "@bgub/fig";
-import { figResourceKey, type FigDataHydrationEntry } from "@bgub/fig/internal";
-import { normalizeDataResourceKey } from "@bgub/fig-data";
+import {
+  assetResourceKey,
+  type FigDataHydrationEntry,
+} from "@bgub/fig/internal";
+import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import {
   createRscResponse,
@@ -56,7 +59,7 @@ import { createStartNodeRequestListener } from "./server-runtime/request-listene
 
 export interface StartHandlerOptions {
   assets?: Record<string, StartStaticAssetInput>;
-  clientReferenceAssets?: (metadata: { id: string }) => FigResourceList;
+  clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   // URL of the built client entry module, as served (e.g. "/client.js").
   clientEntry: string;
   // Per-request context for beforeLoad/loader (e.g. a data/query client). May
@@ -70,7 +73,7 @@ export interface StartHandlerOptions {
   htmlLang?: string;
   nonce?: (request: Request) => string;
   routes: readonly AnyRoute[];
-  serverRouteAssets?: (metadata: { id: string }) => FigResourceList;
+  serverRouteAssets?: (metadata: { id: string }) => FigAssetResourceList;
 }
 
 export type StartHandler = (request: Request) => Promise<Response>;
@@ -80,11 +83,11 @@ export type StartHandler = (request: Request) => Promise<Response>;
 export function createRequestHandler(
   options: StartHandlerOptions,
 ): StartHandler {
-  const assets = normalizeStaticAssets(options.assets);
+  const staticAssets = normalizeStaticAssets(options.assets);
 
   return async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const asset = assets.get(url.pathname);
+    const asset = staticAssets.get(url.pathname);
     if (asset !== undefined) {
       return new Response(asset.content as BodyInit, {
         headers: {
@@ -189,7 +192,7 @@ export function createRequestHandler(
         }),
         hoistedServerRouteResources.length === 0
           ? null
-          : resources(hoistedServerRouteResources),
+          : assets(hoistedServerRouteResources),
         options.head ?? null,
       ),
       createElement(
@@ -344,13 +347,13 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
 
 interface ServerRscSegment {
   contentType: string;
-  initialResources: readonly FigResource[];
+  initialResources: readonly FigAssetResource[];
   metadata: SerializedRscSegment;
   stream: ReadableStream<Uint8Array>;
 }
 
 interface DocumentRscSegment {
-  assetResources(): readonly FigResource[];
+  assetResources(): readonly FigAssetResource[];
   clientReferences(): readonly RscClientReferenceRecord[];
   frames: ServerRscSegment;
   initialRootReady: Promise<void>;
@@ -479,7 +482,7 @@ function initialClientReferenceModules(
 
   for (const reference of references) {
     if (reference.ssr !== true) continue;
-    const module = reference.resources?.find(
+    const module = reference.assets?.find(
       (resource) => resource.kind === "modulepreload",
     );
     if (module === undefined || seen.has(reference.id)) continue;
@@ -495,10 +498,10 @@ function renderServerRouteSegment(
   router: Router,
   dataContext: unknown,
   clientReferenceAssets:
-    | ((metadata: { id: string }) => FigResourceList)
+    | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
   serverRouteAssets:
-    | ((metadata: { id: string }) => FigResourceList)
+    | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
   refreshBoundary: string | undefined,
 ): ServerRscSegment | undefined {
@@ -521,7 +524,7 @@ function renderServerRouteSegment(
   );
   const routeId = segment.match.routeId;
   const routeContent =
-    routeAssets.length === 0 ? routeNode : resources(routeAssets, routeNode);
+    routeAssets.length === 0 ? routeNode : assets(routeAssets, routeNode);
   const refreshesSegment = refreshBoundary === routeId;
   const rsc = renderToRscStream(
     createElement(
@@ -546,11 +549,13 @@ function renderServerRouteSegment(
   };
 }
 
-function uniqueResources(input: readonly FigResource[]): FigResource[] {
+function uniqueResources(
+  input: readonly FigAssetResource[],
+): FigAssetResource[] {
   const seen = new Set<string>();
-  const result: FigResource[] = [];
+  const result: FigAssetResource[] = [];
   for (const resource of input) {
-    const key = figResourceKey(resource);
+    const key = assetResourceKey(resource);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(resource);
@@ -580,9 +585,9 @@ function clientReferencePlaceholder(
 function serverRouteAssetList(
   matches: readonly RouteMatch[],
   serverRouteAssets:
-    | ((metadata: { id: string }) => FigResourceList)
+    | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
-): FigResource[] {
+): FigAssetResource[] {
   if (serverRouteAssets === undefined) return [];
   return matches
     .filter((match) => isServerRoute(match.node.route))
@@ -591,13 +596,13 @@ function serverRouteAssetList(
     );
 }
 
-function resourceArray(resources: FigResourceList): FigResource[] {
+function resourceArray(resources: FigAssetResourceList): FigAssetResource[] {
   return isResourceArray(resources) ? [...resources] : [resources];
 }
 
 function isResourceArray(
-  resources: FigResourceList,
-): resources is readonly FigResource[] {
+  resources: FigAssetResourceList,
+): resources is readonly FigAssetResource[] {
   return Array.isArray(resources);
 }
 

@@ -1,10 +1,7 @@
 import {
-  DefaultLane,
+  type EventPriority,
   type HydrationTargetResult,
-  InputContinuousLane,
-  type Lane,
-  runWithPriority,
-  SyncLane,
+  runWithEventPriority,
 } from "./priority.ts";
 import { isElementNode, isEmptyPropValue, parentOf } from "./tree.ts";
 
@@ -208,7 +205,7 @@ let batch: Batch = (callback) => callback();
 
 type HydrationCallback = (
   target: EventTarget | null,
-  lane: Lane,
+  priority: EventPriority,
 ) => HydrationTargetResult;
 
 export function setEventBatching(nextBatch: Batch): void {
@@ -547,8 +544,10 @@ function hydrateForEvent(
   const previousResult = results?.get(root);
   if (previousResult !== undefined) return previousResult;
 
-  const lane = eventLane(type);
-  const result = runWithPriority(lane, () => hydrate(event.target, lane));
+  const priority = eventPriority(type);
+  const result = runWithEventPriority(priority, () =>
+    hydrate(event.target, priority),
+  );
   if (results === undefined) {
     results = new WeakMap();
     eventHydrationResults.set(event, results);
@@ -583,8 +582,10 @@ function hydrateQueuedEvent(
   const hydrate = containerRecords.get(queued.root)?.hydrate ?? null;
   if (hydrate === null) return "none";
 
-  const lane = eventLane(queued.type);
-  return runWithPriority(lane, () => hydrate(queued.event.target, lane));
+  const priority = eventPriority(queued.type);
+  return runWithEventPriority(priority, () =>
+    hydrate(queued.event.target, priority),
+  );
 }
 
 // Two-phase dispatch used where a single native listener stands in for both
@@ -716,7 +717,7 @@ function dispatchEventSlot(entry: DispatchEntry, event: Event): void {
 
   batch(() => {
     runWithRootScope(entry.root, () =>
-      runWithPriority(eventLane(entry.type), () => {
+      runWithEventPriority(eventPriority(entry.type), () => {
         withCurrentTarget(event, entry.element, (currentEvent) => {
           entry.callback(currentEvent, signal);
         });
@@ -1164,10 +1165,10 @@ function eventKey(type: string, options: Required<EventOptions>): string {
   return `${type}:${options.capture}:${options.once}:${options.passive}`;
 }
 
-function eventLane(type: string): Lane {
-  if (discreteEvents.has(type)) return SyncLane;
-  if (continuousEvents.has(type)) return InputContinuousLane;
-  return DefaultLane;
+function eventPriority(type: string): EventPriority {
+  if (discreteEvents.has(type)) return "discrete";
+  if (continuousEvents.has(type)) return "continuous";
+  return "default";
 }
 
 function passiveHydrationEvent(type: string): boolean {

@@ -3,7 +3,7 @@ import {
   ErrorBoundary,
   meta,
   readPromise,
-  resources,
+  assets,
   stylesheet,
   Suspense,
   title,
@@ -11,16 +11,15 @@ import {
   useState,
 } from "@bgub/fig";
 import { dataResource, readData } from "@bgub/fig-data";
-import { Resources } from "@bgub/fig/internal";
+import { Assets } from "@bgub/fig/internal";
 import { requestPaint } from "@bgub/fig-scheduler";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import {
-  createRenderer,
-  type FigDevtoolsCommitInspection,
-  type FigDevtoolsGlobalHook,
-  type FigDevtoolsRootSnapshot,
-  type HostConfig,
-} from "./index.ts";
+import { createRenderer, type HostConfig } from "./index.ts";
+import type {
+  FigDevtoolsCommitInspection,
+  FigDevtoolsGlobalHook,
+  FigDevtoolsRootSnapshot,
+} from "./devtools.ts";
 
 class TestText {
   parentNode: TestElement | null = null;
@@ -361,14 +360,14 @@ describe("reconciler", () => {
 
     flushSync(() =>
       root.render(
-        resources(stylesheet("/app.css"), createElement("span", null, "Ready")),
+        assets(stylesheet("/app.css"), createElement("span", null, "Ready")),
       ),
     );
 
     const wrapper = commits.at(-1)?.tree.children[0];
     expect(wrapper).toMatchObject({
-      kind: "resources",
-      name: "Resources",
+      kind: "assets",
+      name: "Assets",
     });
     expect(wrapper?.children[0]?.name).toBe("span");
     expect(container.textContent).toBe("Ready");
@@ -391,8 +390,8 @@ describe("reconciler", () => {
     flushSync(() =>
       root.render(
         createElement(
-          Resources,
-          { key: "document", resources: title("One") },
+          Assets,
+          { key: "document", assets: title("One") },
           createElement(Counter, null),
         ),
       ),
@@ -402,10 +401,10 @@ describe("reconciler", () => {
     flushSync(() =>
       root.render(
         createElement(
-          Resources,
+          Assets,
           {
             key: "document",
-            resources: [
+            assets: [
               title("Two"),
               meta({ name: "description", content: "Two" }),
             ],

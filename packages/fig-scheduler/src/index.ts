@@ -5,6 +5,20 @@ export interface ScheduledTask {
   cancel(): void;
 }
 
+export interface Scheduler {
+  forceFrameRate(fps: number): void;
+  getCurrentPriorityLevel(): PriorityLevel;
+  now(): number;
+  requestPaint(): void;
+  runWithPriority<T>(priority: PriorityLevel, callback: () => T): T;
+  scheduleCallback(
+    priority: PriorityLevel,
+    callback: SchedulerCallback,
+    options?: { delay?: number },
+  ): ScheduledTask;
+  shouldYieldToHost(): boolean;
+}
+
 interface Task {
   id: number;
   callback: SchedulerCallback | null;
@@ -104,56 +118,226 @@ class MinHeap<T extends { sortIndex: number; id: number }> {
   }
 }
 
-let frameInterval = 5;
-let startTime = -1;
-let taskId = 1;
-let currentPriorityLevel: PriorityLevel = NormalPriority;
-let messageLoopRunning = false;
-let hostTimeout: ReturnType<typeof setTimeout> | null = null;
-let needsPaint = false;
+class DefaultScheduler implements Scheduler {
+  private readonly channel =
+    typeof MessageChannel === "function" ? new MessageChannel() : null;
+  private readonly taskQueue = new MinHeap<Task>();
+  private readonly timerQueue = new MinHeap<Task>();
+  private currentPriorityLevel: PriorityLevel = NormalPriority;
+  private frameInterval = 5;
+  private hostTimeout: ReturnType<typeof setTimeout> | null = null;
+  private messageLoopRunning = false;
+  private needsPaint = false;
+  private startTime = -1;
+  private taskId = 1;
 
-const taskQueue = new MinHeap<Task>();
-const timerQueue = new MinHeap<Task>();
-const channel =
-  typeof MessageChannel === "function" ? new MessageChannel() : null;
+  constructor() {
+    if (this.channel !== null) {
+      this.channel.port1.onmessage = () => this.performWorkUntilDeadline();
+    }
+  }
 
-if (channel !== null) {
-  channel.port1.onmessage = performWorkUntilDeadline;
+  now(): number {
+    return globalThis.performance?.now?.() ?? Date.now();
+  }
+
+  shouldYieldToHost(): boolean {
+    return this.needsPaint || this.now() - this.startTime >= this.frameInterval;
+  }
+
+  requestPaint(): void {
+    this.needsPaint = true;
+  }
+
+  forceFrameRate(fps: number): void {
+    if (fps < 0 || fps > 125) return;
+    this.frameInterval = fps > 0 ? Math.floor(1000 / fps) : 5;
+  }
+
+  getCurrentPriorityLevel(): PriorityLevel {
+    return this.currentPriorityLevel;
+  }
+
+  runWithPriority<T>(priority: PriorityLevel, callback: () => T): T {
+    const previousPriority = this.currentPriorityLevel;
+    this.currentPriorityLevel = priority;
+
+    try {
+      return callback();
+    } finally {
+      this.currentPriorityLevel = previousPriority;
+    }
+  }
+
+  scheduleCallback(
+    priority: PriorityLevel,
+    callback: SchedulerCallback,
+    options: { delay?: number } = {},
+  ): ScheduledTask {
+    const currentTime = this.now();
+    const start = currentTime + (options.delay ?? 0);
+    const task: Task = {
+      id: this.taskId++,
+      callback,
+      priority,
+      startTime: start,
+      expirationTime: start + priorityTimeouts[priority],
+      sortIndex: start,
+    };
+
+    if (start > currentTime) {
+      this.timerQueue.push(task);
+      this.scheduleHostTimeout();
+    } else {
+      task.sortIndex = task.expirationTime;
+      this.taskQueue.push(task);
+      this.requestHostCallback();
+    }
+
+    return {
+      cancel() {
+        task.callback = null;
+      },
+    };
+  }
+
+  private requestHostCallback(): void {
+    if (this.messageLoopRunning) return;
+    this.messageLoopRunning = true;
+    this.postMessageLoop();
+  }
+
+  private performWorkUntilDeadline(): void {
+    if (!this.messageLoopRunning) return;
+
+    this.needsPaint = false;
+    this.startTime = this.now();
+
+    let hasMoreWork = false;
+    try {
+      hasMoreWork = this.flushWork(this.startTime);
+    } finally {
+      if (hasMoreWork) {
+        this.postMessageLoop();
+      } else {
+        this.messageLoopRunning = false;
+      }
+    }
+  }
+
+  private postMessageLoop(): void {
+    if (this.channel !== null) {
+      this.channel.port2.postMessage(null);
+    } else {
+      setTimeout(() => this.performWorkUntilDeadline(), 0);
+    }
+  }
+
+  private flushWork(currentTime: number): boolean {
+    this.advanceTimers(currentTime);
+
+    let task = this.taskQueue.peek();
+    while (task !== null) {
+      if (task.expirationTime > currentTime && this.shouldYieldToHost()) break;
+
+      const callback = task.callback;
+      if (callback === null) {
+        this.taskQueue.pop();
+      } else {
+        task.callback = null;
+        const continuation = this.runWithPriority(task.priority, callback);
+
+        if (typeof continuation === "function") {
+          task.callback = continuation;
+          task.sortIndex = task.expirationTime;
+        } else if (task === this.taskQueue.peek()) {
+          // The callback may have scheduled work that sorts ahead of this task,
+          // so only pop when this task is still at the top of the heap; a stale
+          // entry is skipped via its null callback when it surfaces later.
+          this.taskQueue.pop();
+        }
+      }
+
+      this.advanceTimers(this.now());
+      task = this.taskQueue.peek();
+    }
+
+    if (task !== null) return true;
+
+    this.scheduleHostTimeout();
+    return false;
+  }
+
+  private advanceTimers(currentTime: number): void {
+    let timer = this.timerQueue.peek();
+
+    while (timer !== null) {
+      if (timer.callback === null) {
+        this.timerQueue.pop();
+      } else if (timer.startTime <= currentTime) {
+        this.timerQueue.pop();
+        timer.sortIndex = timer.expirationTime;
+        this.taskQueue.push(timer);
+      } else {
+        return;
+      }
+
+      timer = this.timerQueue.peek();
+    }
+  }
+
+  private scheduleHostTimeout(): void {
+    if (this.hostTimeout !== null) {
+      clearTimeout(this.hostTimeout);
+      this.hostTimeout = null;
+    }
+
+    const timer = this.timerQueue.peek();
+    if (timer === null) return;
+
+    this.hostTimeout = setTimeout(
+      () => {
+        this.hostTimeout = null;
+        this.advanceTimers(this.now());
+        if (this.taskQueue.peek() !== null) this.requestHostCallback();
+        else this.scheduleHostTimeout();
+      },
+      Math.max(0, timer.startTime - this.now()),
+    );
+  }
+}
+
+const defaultScheduler = createScheduler();
+
+export function createScheduler(): Scheduler {
+  return new DefaultScheduler();
 }
 
 export function now(): number {
-  return globalThis.performance?.now?.() ?? Date.now();
+  return defaultScheduler.now();
 }
 
 export function shouldYieldToHost(): boolean {
-  return needsPaint || now() - startTime >= frameInterval;
+  return defaultScheduler.shouldYieldToHost();
 }
 
 export function requestPaint(): void {
-  needsPaint = true;
+  defaultScheduler.requestPaint();
 }
 
 export function forceFrameRate(fps: number): void {
-  if (fps < 0 || fps > 125) return;
-  frameInterval = fps > 0 ? Math.floor(1000 / fps) : 5;
+  defaultScheduler.forceFrameRate(fps);
 }
 
 export function getCurrentPriorityLevel(): PriorityLevel {
-  return currentPriorityLevel;
+  return defaultScheduler.getCurrentPriorityLevel();
 }
 
 export function runWithPriority<T>(
   priority: PriorityLevel,
   callback: () => T,
 ): T {
-  const previousPriority = currentPriorityLevel;
-  currentPriorityLevel = priority;
-
-  try {
-    return callback();
-  } finally {
-    currentPriorityLevel = previousPriority;
-  }
+  return defaultScheduler.runWithPriority(priority, callback);
 }
 
 export function scheduleCallback(
@@ -161,134 +345,5 @@ export function scheduleCallback(
   callback: SchedulerCallback,
   options: { delay?: number } = {},
 ): ScheduledTask {
-  const currentTime = now();
-  const start = currentTime + (options.delay ?? 0);
-  const task: Task = {
-    id: taskId++,
-    callback,
-    priority,
-    startTime: start,
-    expirationTime: start + priorityTimeouts[priority],
-    sortIndex: start,
-  };
-
-  if (start > currentTime) {
-    timerQueue.push(task);
-    scheduleHostTimeout();
-  } else {
-    task.sortIndex = task.expirationTime;
-    taskQueue.push(task);
-    requestHostCallback();
-  }
-
-  return {
-    cancel() {
-      task.callback = null;
-    },
-  };
-}
-
-function requestHostCallback(): void {
-  if (messageLoopRunning) return;
-  messageLoopRunning = true;
-  postMessageLoop();
-}
-
-function performWorkUntilDeadline(): void {
-  if (!messageLoopRunning) return;
-
-  needsPaint = false;
-  startTime = now();
-
-  let hasMoreWork = false;
-  try {
-    hasMoreWork = flushWork(startTime);
-  } finally {
-    if (hasMoreWork) {
-      postMessageLoop();
-    } else {
-      messageLoopRunning = false;
-    }
-  }
-}
-
-function postMessageLoop(): void {
-  if (channel !== null) {
-    channel.port2.postMessage(null);
-  } else {
-    setTimeout(performWorkUntilDeadline, 0);
-  }
-}
-
-function flushWork(currentTime: number): boolean {
-  advanceTimers(currentTime);
-
-  let task = taskQueue.peek();
-  while (task !== null) {
-    if (task.expirationTime > currentTime && shouldYieldToHost()) break;
-
-    const callback = task.callback;
-    if (callback === null) {
-      taskQueue.pop();
-    } else {
-      task.callback = null;
-      const continuation = runWithPriority(task.priority, callback);
-
-      if (typeof continuation === "function") {
-        task.callback = continuation;
-        task.sortIndex = task.expirationTime;
-      } else if (task === taskQueue.peek()) {
-        // The callback may have scheduled work that sorts ahead of this task,
-        // so only pop when this task is still at the top of the heap; a stale
-        // entry is skipped via its null callback when it surfaces later.
-        taskQueue.pop();
-      }
-    }
-
-    advanceTimers(now());
-    task = taskQueue.peek();
-  }
-
-  if (task !== null) return true;
-
-  scheduleHostTimeout();
-  return false;
-}
-
-function advanceTimers(currentTime: number): void {
-  let timer = timerQueue.peek();
-
-  while (timer !== null) {
-    if (timer.callback === null) {
-      timerQueue.pop();
-    } else if (timer.startTime <= currentTime) {
-      timerQueue.pop();
-      timer.sortIndex = timer.expirationTime;
-      taskQueue.push(timer);
-    } else {
-      return;
-    }
-
-    timer = timerQueue.peek();
-  }
-}
-
-function scheduleHostTimeout(): void {
-  if (hostTimeout !== null) {
-    clearTimeout(hostTimeout);
-    hostTimeout = null;
-  }
-
-  const timer = timerQueue.peek();
-  if (timer === null) return;
-
-  hostTimeout = setTimeout(
-    () => {
-      hostTimeout = null;
-      advanceTimers(now());
-      if (taskQueue.peek() !== null) requestHostCallback();
-      else scheduleHostTimeout();
-    },
-    Math.max(0, timer.startTime - now()),
-  );
+  return defaultScheduler.scheduleCallback(priority, callback, options);
 }

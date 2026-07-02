@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  createDataStore,
   dataResource,
   invalidateData,
   preloadData,
   refreshData,
 } from "./index.ts";
+import { createDataStore } from "./internal.ts";
 
 const never = new Promise<never>(() => undefined);
 

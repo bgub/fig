@@ -1,13 +1,6 @@
 export {
-  DefaultLane,
-  DeferredLane,
-  GestureLane,
+  type EventPriority,
+  getCurrentUpdatePriority,
   type HydrationTargetResult,
-  IdleLane,
-  InputContinuousLane,
-  type Lane,
-  OffscreenLane,
-  runWithPriority,
-  SyncLane,
-  TransitionLane,
+  runWithEventPriority,
 } from "@bgub/fig-reconciler";

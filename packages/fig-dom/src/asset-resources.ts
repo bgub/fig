@@ -1,10 +1,10 @@
-import { type FigResource, type Props } from "@bgub/fig";
+import { type FigAssetResource, type Props } from "@bgub/fig";
 import {
-  figResourceKey,
-  isFigResource,
-  resourceFromHostAttributes,
-  resourceFromHostProps,
-  resourceHostAttributes,
+  assetResourceKey,
+  isFigAssetResource,
+  assetResourceFromHostAttributes,
+  assetResourceFromHostProps,
+  assetResourceHostAttributes,
 } from "@bgub/fig/internal";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { updateElement } from "./props.ts";
@@ -13,7 +13,7 @@ import { elementName, isElementNode } from "./tree.ts";
 // The document/asset-resource registry: hoisted head elements (stylesheets,
 // scripts, preloads, fonts, title/meta) are found-or-created during render,
 // acquired/released with commit-phase refcounting through the hoisted host
-// hooks, and deduped against SSR output by figResourceKey.
+// hooks, and deduped against SSR output by assetResourceKey.
 
 interface DocumentResourceEntry {
   count: number;
@@ -22,7 +22,7 @@ interface DocumentResourceEntry {
 
 interface DocumentResourceMeta {
   key: string;
-  kind: FigResource["kind"];
+  kind: FigAssetResource["kind"];
 }
 
 const documentResourceRegistries = new WeakMap<
@@ -39,10 +39,10 @@ export function adoptDocumentResource(
   props: Props,
 ): Element | null {
   const head = documentHead();
-  const resource = resourceFromHostProps(type, props);
+  const resource = assetResourceFromHostProps(type, props);
   if (head === null || resource === null) return null;
 
-  const key = figResourceKey(resource);
+  const key = assetResourceKey(resource);
   const registry = documentResourceRegistry(head);
   const adopted = registry.get(key);
   const element =
@@ -69,11 +69,12 @@ export function acquireDocumentResource(element: Element): Element {
   // commit may have dropped the element from the registry; re-derive its
   // identity from its attributes and revive it.
   if (meta === undefined) {
-    const resource = resourceFromHostAttributes(elementName(element), (name) =>
-      element.getAttribute(name),
+    const resource = assetResourceFromHostAttributes(
+      elementName(element),
+      (name) => element.getAttribute(name),
     );
     if (resource === null) return element;
-    meta = { key: figResourceKey(resource), kind: resource.kind };
+    meta = { key: assetResourceKey(resource), kind: resource.kind };
     documentResourceMeta.set(element, meta);
   }
 
@@ -148,7 +149,7 @@ function removeReleasedResource(element: Element): void {
   element.parentNode?.removeChild(element);
 }
 
-function removableResourceKind(kind: FigResource["kind"]): boolean {
+function removableResourceKind(kind: FigAssetResource["kind"]): boolean {
   return kind === "title" || kind === "meta";
 }
 
@@ -173,9 +174,9 @@ export function updateHoistedResource(
   nextProps: Props,
 ): Element {
   const type = elementName(element);
-  const resource = resourceFromHostProps(type, nextProps);
+  const resource = assetResourceFromHostProps(type, nextProps);
   const meta = documentResourceMeta.get(element);
-  const key = resource === null ? null : figResourceKey(resource);
+  const key = resource === null ? null : assetResourceKey(resource);
 
   if (key === null || meta === undefined || key === meta.key) {
     updateElement(element, previousProps, nextProps);
@@ -212,10 +213,10 @@ function findDocumentResource(head: Element, key: string): Element | null {
   for (const child of Array.from(head.childNodes)) {
     if (!isElementNode(child)) continue;
 
-    const resource = resourceFromHostAttributes(child.localName, (name) =>
+    const resource = assetResourceFromHostAttributes(child.localName, (name) =>
       child.getAttribute(name),
     );
-    if (resource !== null && figResourceKey(resource) === key) {
+    if (resource !== null && assetResourceKey(resource) === key) {
       return child;
     }
   }
@@ -233,7 +234,7 @@ function findDocumentResource(head: Element, key: string): Element | null {
  * preconnect, scripts, fonts, `blocking: "none"` stylesheets) never block.
  */
 export function insertAssetResources(
-  resources: readonly FigResource[],
+  resources: readonly FigAssetResource[],
 ): Promise<void> {
   const head = documentHead();
   if (head === null) return Promise.resolve();
@@ -242,7 +243,7 @@ export function insertAssetResources(
   const gates: Promise<void>[] = [];
 
   for (const resource of resources) {
-    if (!isFigResource(resource)) continue;
+    if (!isFigAssetResource(resource)) continue;
     if (resource.kind === "title" || resource.kind === "meta") continue;
 
     // A font is delivered as <link rel="preload" as="font">, which parses back
@@ -251,7 +252,7 @@ export function insertAssetResources(
     // (otherwise the font:<href> lookup key never matches the preload:font:<href>
     // a head <link> parses to, and a duplicate is appended).
     const asset = asInsertableResource(resource);
-    const key = figResourceKey(asset);
+    const key = assetResourceKey(asset);
     // A registry entry only counts as present while its element is attached:
     // a discarded render can leave a detached zero-count element built from
     // host props that need not match this descriptor (media, explicit-key
@@ -289,7 +290,7 @@ export function insertAssetResources(
     : Promise.all(gates).then(() => undefined);
 }
 
-function asInsertableResource(resource: FigResource): FigResource {
+function asInsertableResource(resource: FigAssetResource): FigAssetResource {
   // Fonts share the DOM representation (and therefore the key space) of a
   // font-targeted preload; everything else is already in its own key space.
   if (resource.kind !== "font") return resource;
@@ -305,7 +306,7 @@ function asInsertableResource(resource: FigResource): FigResource {
   };
 }
 
-function isCriticalStylesheet(resource: FigResource): boolean {
+function isCriticalStylesheet(resource: FigAssetResource): boolean {
   // Client-reference stylesheets gate reveal by default; opt out with
   // blocking: "none". Every other kind is a hint that must never block.
   if (resource.kind !== "stylesheet" || resource.blocking === "none") {
@@ -332,12 +333,12 @@ function whenResourceSettled(element: Element): Promise<void> {
 
 // The attribute set is shared with the server's registry writer, so a
 // client-inserted asset element cannot drift from its SSR counterpart.
-function createAssetResourceElement(resource: FigResource): Element {
+function createAssetResourceElement(resource: FigAssetResource): Element {
   const element = document.createElement(
     resource.kind === "script" ? "script" : "link",
   );
 
-  for (const [name, value] of resourceHostAttributes(resource)) {
+  for (const [name, value] of assetResourceHostAttributes(resource)) {
     element.setAttribute(name, value === true ? "" : value);
   }
 

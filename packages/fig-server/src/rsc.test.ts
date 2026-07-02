@@ -12,7 +12,7 @@ import {
   preload,
   readContext,
   readPromise,
-  resources,
+  assets,
   stylesheet,
   Suspense,
   title,
@@ -41,7 +41,7 @@ type TestRscRow =
   | {
       id: number;
       tag: "client";
-      value: { id: string; resources?: TestRscModel[] };
+      value: { id: string; assets?: TestRscModel[] };
     }
   | { id: number; tag: "error"; value: { message: string } }
   | { id: number; tag: "model"; value: TestRscModel }
@@ -248,11 +248,11 @@ describe("RSC rendering", () => {
     ]);
   });
 
-  it("serializes stream-safe asset resources on rendered client rows", async () => {
+  it("serializes stream-safe asset assets on rendered client rows", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
       load: () => Promise.resolve({}),
-      resources: [
+      assets: [
         stylesheet("/assets/Counter.css", {
           blocking: "none",
           precedence: "app",
@@ -271,7 +271,7 @@ describe("RSC rendering", () => {
       tag: "client",
       value: {
         id: "app/Counter.client.tsx#Counter",
-        resources: [
+        assets: [
           {
             href: "/assets/Counter.css",
             kind: "stylesheet",
@@ -304,7 +304,7 @@ describe("RSC rendering", () => {
       tag: "client",
       value: {
         id: "app/Counter.client.tsx#Counter",
-        resources: [
+        assets: [
           { href: "/assets/Counter.css", kind: "stylesheet" },
           { href: "/assets/Counter.js", kind: "modulepreload" },
         ],
@@ -312,7 +312,7 @@ describe("RSC rendering", () => {
     });
   });
 
-  it("omits the resources field for client references with no assets", async () => {
+  it("omits the assets field for client references with no assets", async () => {
     const Plain = clientReference({
       id: "app/Plain.client.tsx#Plain",
       load: () => Promise.resolve({}),
@@ -331,7 +331,7 @@ describe("RSC rendering", () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
       load: () => Promise.resolve({}),
-      resources: [stylesheet("/assets/Counter.css")],
+      assets: [stylesheet("/assets/Counter.css")],
     });
 
     const rows = await renderToRscRows(createElement(Counter, {}));
@@ -344,7 +344,7 @@ describe("RSC rendering", () => {
     });
     processTestRscRows(response, rows);
 
-    // The wire row carries resources, but resolver hooks see the documented
+    // The wire row carries assets, but resolver hooks see the documented
     // { id } shape only.
     expect(seen).toEqual([{ id: "app/Counter.client.tsx#Counter" }]);
   });
@@ -358,7 +358,7 @@ describe("RSC rendering", () => {
         tag: "client",
         value: {
           id: "app/Counter.client.tsx#Counter",
-          resources: [
+          assets: [
             { href: "/assets/Counter.css", kind: "stylesheet" },
             { href: "/assets/Unknown.asset", kind: "unknown" },
           ],
@@ -371,9 +371,9 @@ describe("RSC rendering", () => {
     ]);
   });
 
-  it("sends explicit resources from RSC subtrees", async () => {
+  it("sends explicit assets from RSC subtrees", async () => {
     const rows = await renderToRscText(
-      resources(
+      assets(
         [stylesheet("/assets/ServerRoute.css"), preload("/mark.svg", "image")],
         createElement("article", null, "Server route"),
       ),
@@ -392,18 +392,18 @@ describe("RSC rendering", () => {
     const Header = clientReference({
       id: "app/Header.client.tsx#Header",
       load: () => Promise.resolve({}),
-      resources: [shared, stylesheet("/assets/Header.css")],
+      assets: [shared, stylesheet("/assets/Header.css")],
     });
     const Footer = clientReference({
       id: "app/Footer.client.tsx#Footer",
       load: () => Promise.resolve({}),
-      resources: [shared, stylesheet("/assets/Footer.css")],
+      assets: [shared, stylesheet("/assets/Footer.css")],
     });
     // Defined but never rendered: must contribute nothing.
     clientReference({
       id: "app/Unused.client.tsx#Unused",
       load: () => Promise.resolve({}),
-      resources: [stylesheet("/assets/Unused.css")],
+      assets: [stylesheet("/assets/Unused.css")],
     });
 
     const text = await renderToRscText(
@@ -432,7 +432,7 @@ describe("RSC rendering", () => {
     const Text = clientReference({
       id: "app/Text.client.tsx#Text",
       load: () => Promise.resolve({}),
-      resources: [
+      assets: [
         font("/assets/Inter.woff2", "font/woff2"),
         // Same asset, expressed as a preload: both share the preload-font key
         // space, so only the first survives serialization.
@@ -450,7 +450,7 @@ describe("RSC rendering", () => {
       tag: "client",
       value: {
         id: "app/Text.client.tsx#Text",
-        resources: [
+        assets: [
           { href: "/assets/Inter.woff2", kind: "font", type: "font/woff2" },
         ],
       },
@@ -464,7 +464,7 @@ describe("RSC rendering", () => {
       // A bundler-manifest thunk may throw (missing entry). Resolving assets
       // before reserving the row id surfaces this as an ordinary error row
       // instead of a reserved-but-unemitted client row that suspends forever.
-      resources: () => {
+      assets: () => {
         throw new Error("manifest missing");
       },
     });
@@ -757,6 +757,23 @@ describe("RSC rendering", () => {
         },
       },
     ]);
+  });
+
+  it("rejects duplicate RSC boundary ids", async () => {
+    const rows = await renderToRscRows(
+      createElement(
+        "section",
+        null,
+        createElement(RscBoundary, { id: "post" }, "First"),
+        createElement(RscBoundary, { id: "post" }, "Second"),
+      ),
+    );
+
+    expect(rows).toContainEqual({
+      id: 1,
+      tag: "error",
+      value: { message: 'Duplicate RSC boundary id "post".' },
+    });
   });
 
   it("renders boundary refresh rows", async () => {

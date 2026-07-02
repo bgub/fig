@@ -1,5 +1,6 @@
 import { createElement } from "@bgub/fig";
-import { createDataStore, dataResource, readData } from "@bgub/fig-data";
+import { dataResource, readData } from "@bgub/fig-data";
+import { createDataStore } from "@bgub/fig-data/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { renderToReadableStream } from "./index.ts";
 import { createRscResponse, renderToRscStream } from "./rsc.ts";

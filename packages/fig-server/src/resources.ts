@@ -1,28 +1,28 @@
-import { type FigResource, type Props } from "@bgub/fig";
+import { type FigAssetResource, type Props } from "@bgub/fig";
 import {
-  figResourceKey,
-  resourceDestination,
-  resourceHostAttributes,
+  assetResourceKey,
+  assetResourceDestination,
+  assetResourceHostAttributes,
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 
 export class ResourceRegistry {
   private readonly emittedResources = new Set<string>();
-  private readonly resources = new Map<string, FigResource>();
+  private readonly resources = new Map<string, FigAssetResource>();
   private readonly stylesheetIds = new Map<string, string>();
   private nextStylesheetId = 0;
 
   constructor(private readonly identifierPrefix: string) {}
 
-  register(resource: FigResource): boolean {
+  register(resource: FigAssetResource): boolean {
     return this.canonical(resource).added;
   }
 
-  write(resource: FigResource, sink: ResourceSink): string | null {
+  write(resource: FigAssetResource, sink: ResourceSink): string | null {
     const { key, resource: current } = this.canonical(resource);
     const id = this.revealBlockerId(key, current);
 
-    if (resourceDestination(current) === "head") return id;
+    if (assetResourceDestination(current) === "head") return id;
     if (this.emittedResources.has(key)) return id;
 
     this.emittedResources.add(key);
@@ -40,7 +40,7 @@ export class ResourceRegistry {
     };
 
     for (const resource of this.resources.values()) {
-      if (resourceDestination(resource) === "head") {
+      if (assetResourceDestination(resource) === "head") {
         writeResourceTag(sink, resource, null);
       }
     }
@@ -48,12 +48,12 @@ export class ResourceRegistry {
     return html;
   }
 
-  private canonical(resource: FigResource): {
+  private canonical(resource: FigAssetResource): {
     added: boolean;
     key: string;
-    resource: FigResource;
+    resource: FigAssetResource;
   } {
-    const key = figResourceKey(resource);
+    const key = assetResourceKey(resource);
     const current = this.resources.get(key);
 
     if (current !== undefined) {
@@ -68,7 +68,10 @@ export class ResourceRegistry {
     return { added: true, key, resource };
   }
 
-  private revealBlockerId(key: string, resource: FigResource): string | null {
+  private revealBlockerId(
+    key: string,
+    resource: FigAssetResource,
+  ): string | null {
     if (resource.kind !== "stylesheet") return null;
     if (resource.blocking === "none") return null;
 
@@ -90,7 +93,11 @@ export class ResourceRegistry {
 }
 
 export class ResourceConflictError extends Error {
-  constructor(key: string, current: FigResource, incoming: FigResource) {
+  constructor(
+    key: string,
+    current: FigAssetResource,
+    incoming: FigAssetResource,
+  ) {
     super(
       `Conflicting Fig resource for key "${key}". Existing: ${JSON.stringify(
         current,
@@ -106,7 +113,7 @@ interface ResourceSink {
 
 function writeResourceTag(
   sink: ResourceSink,
-  resource: FigResource,
+  resource: FigAssetResource,
   id: string | null,
 ): void {
   switch (resource.kind) {
@@ -132,7 +139,9 @@ function writeResourceTag(
     default: {
       // The attribute set is shared with the client's head insertion; only
       // the server-side reveal-blocker id and nonce are appended here.
-      const props: Props = Object.fromEntries(resourceHostAttributes(resource));
+      const props: Props = Object.fromEntries(
+        assetResourceHostAttributes(resource),
+      );
       if (resource.kind === "stylesheet" && id !== null) props.id = id;
 
       const tag = resource.kind === "script" ? "script" : "link";
@@ -146,7 +155,7 @@ function withNonce(sink: ResourceSink, props: Props): Props {
   return sink.nonce === undefined ? props : { ...props, nonce: sink.nonce };
 }
 
-function resourceSignature(resource: FigResource): string {
+function resourceSignature(resource: FigAssetResource): string {
   switch (resource.kind) {
     case "stylesheet":
       return signature(
@@ -175,7 +184,7 @@ function resourceSignature(resource: FigResource): string {
       );
     case "font":
       // Mirror the preload-as-font signature: a font shares the preload-font key
-      // space (see figResourceKey), so an equivalent preload(href, "font") must
+      // space (see assetResourceKey), so an equivalent preload(href, "font") must
       // produce the same signature and dedupe rather than raising a conflict.
       return signature(
         "preload",

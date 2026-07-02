@@ -1,6 +1,6 @@
 import { createElement, useBeforePaint } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { type Bind, createRoot, flushSync, render } from "./index.ts";
+import { type Bind, composeBind, createRoot, flushSync } from "./index.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
@@ -17,16 +17,16 @@ describe("@bgub/fig-dom bind", () => {
     function TextField({ bind }: { bind?: Bind<HTMLInputElement> }) {
       return createElement("input", { bind });
     }
+    const root = createRoot(container as unknown as Element);
 
     flushSync(() =>
-      render(
+      root.render(
         createElement(TextField, {
           bind: (node, signal) => {
             calls.push((node as unknown as FakeElement).tagName);
             signals.push(signal);
           },
         }),
-        container as unknown as Element,
       ),
     );
 
@@ -70,6 +70,43 @@ describe("@bgub/fig-dom bind", () => {
     expect(signals[2].aborted).toBe(true);
   });
 
+  it("composes bind callbacks through composeBind", () => {
+    const calls: string[] = [];
+    const signals: AbortSignal[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const first: Bind = (_node, signal) => {
+      calls.push("first");
+      signals.push(signal);
+    };
+    const second: Bind = (_node, signal) => {
+      calls.push("second");
+      signals.push(signal);
+    };
+    const third: Bind = (_node, signal) => {
+      calls.push("third");
+      signals.push(signal);
+    };
+    const composed = composeBind(first, second, null, third);
+
+    flushSync(() => root.render(createElement("button", { bind: composed })));
+
+    expect(calls).toEqual([
+      "first",
+      "second",
+      "third",
+      "first",
+      "second",
+      "third",
+    ]);
+    expect(signals.slice(0, 3).every((signal) => signal.aborted)).toBe(true);
+    expect(signals.slice(3).every((signal) => !signal.aborted)).toBe(true);
+
+    flushSync(() => root.render(createElement("button", null)));
+
+    expect(signals.slice(3).every((signal) => signal.aborted)).toBe(true);
+  });
+
   it("aborts bind signals when bound nodes are removed", () => {
     const signals: AbortSignal[] = [];
     const container = new FakeElement("root");
@@ -110,10 +147,9 @@ describe("@bgub/fig-dom bind", () => {
         bind: () => calls.push("bind"),
       });
     }
+    const root = createRoot(container as unknown as Element);
 
-    flushSync(() =>
-      render(createElement(App, null), container as unknown as Element),
-    );
+    flushSync(() => root.render(createElement(App, null)));
 
     // Both the bind and the before-paint effect strict-run twice on mount.
     expect(calls).toEqual(["bind", "bind", "before-paint", "before-paint"]);

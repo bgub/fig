@@ -1,13 +1,13 @@
 import { readPromise } from "./hooks.ts";
 import type { DataResourceKey } from "./data.ts";
-import type { ClientReferenceResources } from "./resource.ts";
+import type { ClientReferenceAssets } from "./resource.ts";
 
 export type Key = string | number;
 export type Props = Record<string, any>;
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
-  | FigResources
+  | FigAssets
   | FigClientReference<P>
   | FigErrorBoundary
   | FigSuspense
@@ -39,18 +39,18 @@ export interface FigPortal<Target = unknown> {
 }
 
 export interface ClientReferenceOptions {
+  assets?: ClientReferenceAssets;
   id: string;
   load: () => Promise<unknown>;
-  resources?: ClientReferenceResources;
   ssr?: ElementType;
 }
 
 export interface FigClientReference<P = Props> {
   (props: P & { children?: FigNode }): FigNode;
   readonly $$typeof: symbol;
+  readonly assets?: ClientReferenceAssets;
   readonly id: string;
   readonly load: () => Promise<unknown>;
-  readonly resources?: ClientReferenceResources;
   readonly ssr?: ElementType;
 }
 
@@ -94,7 +94,7 @@ export interface FigErrorBoundary {
   readonly $$typeof: symbol;
 }
 
-export interface FigResources {
+export interface FigAssets {
   (props: Props & { children?: FigNode }): FigNode;
   readonly $$typeof: symbol;
 }
@@ -105,12 +105,12 @@ export const FigClientReferenceSymbol = Symbol.for("fig.client-reference");
 export const FigActivitySymbol = Symbol.for("fig.activity");
 export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigPortalSymbol = Symbol.for("fig.portal");
-export const FigResourcesSymbol = Symbol.for("fig.resources");
+export const FigAssetsSymbol = Symbol.for("fig.assets");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
 
-export const Resources: FigResources = Object.assign(
+export const Assets: FigAssets = Object.assign(
   (props: Props & { children?: FigNode }) => props.children,
-  { $$typeof: FigResourcesSymbol },
+  { $$typeof: FigAssetsSymbol },
 );
 
 export const ErrorBoundary: FigErrorBoundary = Object.assign(
@@ -181,9 +181,9 @@ export function clientReference<P extends Props>(
 
   return Object.assign(reference, {
     $$typeof: FigClientReferenceSymbol,
+    assets: options.assets,
     id: options.id,
     load: options.load,
-    resources: options.resources,
     ssr: options.ssr,
   });
 }
@@ -226,9 +226,9 @@ export function isErrorBoundary(value: unknown): value is FigErrorBoundary {
   );
 }
 
-export function isResources(value: unknown): value is FigResources {
+export function isAssets(value: unknown): value is FigAssets {
   return (
     typeof value === "function" &&
-    (value as FigResources).$$typeof === FigResourcesSymbol
+    (value as FigAssets).$$typeof === FigAssetsSymbol
   );
 }

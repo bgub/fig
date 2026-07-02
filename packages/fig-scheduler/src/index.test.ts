@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  createScheduler,
   ImmediatePriority,
   LowPriority,
   NormalPriority,
@@ -69,5 +70,23 @@ describe("@bgub/fig-scheduler", () => {
 
     await delay();
     expect(calls).toEqual(["first:false", "yield:true", "second"]);
+  });
+
+  it("creates isolated scheduler instances", async () => {
+    const first = createScheduler();
+    const second = createScheduler();
+    const calls: string[] = [];
+
+    first.scheduleCallback(NormalPriority, () => {
+      calls.push(`first:${first.getCurrentPriorityLevel()}`);
+    });
+    second.scheduleCallback(ImmediatePriority, () => {
+      calls.push(`second:${second.getCurrentPriorityLevel()}`);
+    });
+
+    await delay();
+    expect([...calls].sort()).toEqual(
+      [`first:${NormalPriority}`, `second:${ImmediatePriority}`].sort(),
+    );
   });
 });

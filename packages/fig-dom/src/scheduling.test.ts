@@ -1,13 +1,7 @@
 import { createElement, useState } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  batchedUpdates,
-  createRoot,
-  DefaultLane,
-  flushSync,
-  on,
-  runWithPriority,
-} from "./index.ts";
+import { batchedUpdates, createRoot, flushSync, on } from "./index.ts";
+import { runWithEventPriority } from "./priority.ts";
 import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
@@ -93,7 +87,7 @@ describe("@bgub/fig-dom scheduling", () => {
     flushSync(() => root.render(createElement(Counter, null)));
     expect(container.textContent).toBe("0");
 
-    runWithPriority(DefaultLane, () => {
+    runWithEventPriority("default", () => {
       setCount?.((count) => count + 10);
     });
     flushSync(() => {
