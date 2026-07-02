@@ -7,12 +7,14 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     },
     "./rsc": {
+      "types": "./dist/rsc.d.ts",
       "import": "./dist/rsc.js",
-      "types": "./dist/rsc.d.ts"
+      "default": "./dist/rsc.js"
     }
   },
   "types": "./dist/index.d.ts",

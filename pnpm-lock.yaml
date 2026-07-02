@@ -189,12 +189,13 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../fig-data
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
+    devDependencies:
+      '@bgub/fig-data':
+        specifier: workspace:*
+        version: link:../fig-data
 
   packages/fig-reconciler:
     dependencies:

@@ -40,6 +40,11 @@ export function isHtmlElement(element: Element): boolean {
   );
 }
 
+// Known limitation: the walk follows parentNode only and never hops shadow
+// boundaries (a ShadowRoot's parentNode is null, and there is no `.host`
+// fallback). Fig content rendered inside shadow trees is out of scope for
+// root resolution, delegated dispatch, and replay targeting; register the
+// in-shadow container as a portal target to route events explicitly.
 export function parentOf(node: unknown): unknown {
   return typeof node === "object" && node !== null && "parentNode" in node
     ? node.parentNode

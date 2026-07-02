@@ -7,20 +7,24 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     },
     "./internal": {
+      "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js",
-      "types": "./dist/internal.d.ts"
+      "default": "./dist/internal.js"
     },
     "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js",
-      "types": "./dist/jsx-runtime.d.ts"
+      "default": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js",
-      "types": "./dist/jsx-runtime.d.ts"
+      "default": "./dist/jsx-runtime.js"
     }
   },
   "types": "./dist/index.d.ts",

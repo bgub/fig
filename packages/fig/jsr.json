@@ -8,6 +8,7 @@
     "./jsx-runtime": "./src/jsx-runtime.ts"
   },
   "publish": {
-    "include": ["LICENSE", "README.md", "src/**/*.ts"]
+    "include": ["LICENSE", "README.md", "src/**/*.ts"],
+    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]
   }
 }

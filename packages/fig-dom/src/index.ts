@@ -81,6 +81,7 @@ export {
   GestureLane,
   IdleLane,
   InputContinuousLane,
+  type Lane,
   OffscreenLane,
   runWithPriority,
   SyncLane,
