@@ -55,14 +55,22 @@ interface PortalOwner {
   root: Container;
 }
 
+// One record per container that participates in event routing — a root, a
+// portal target, or both roles' delegated listener host. Keeping every
+// per-container datum here keeps registration, dispatch, and teardown
+// reading one structure.
+interface ContainerRecord {
+  hydrate: HydrationCallback | null;
+  hydrationListeners: Array<readonly [string, EventListener]> | null;
+  listeners: Map<string, RootListener>;
+  portalOwner: PortalOwner | null;
+  root: boolean;
+  scope: RootScope | null;
+}
+
 const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlot[]>();
-const portalOwners = new WeakMap<Container, PortalOwner>();
-const rootContainers = new WeakSet<Container>();
-const rootScopes = new WeakMap<Container, RootScope>();
-const rootListeners = new WeakMap<Container, Map<string, RootListener>>();
-const rootHydrationCallbacks = new WeakMap<Container, HydrationCallback>();
-const rootsWithHydrationListeners = new WeakSet<Container>();
+const containerRecords = new WeakMap<Container, ContainerRecord>();
 const immediatePropagationStopped = new WeakSet<Event>();
 const eventHydrationResults = new WeakMap<Event, HydrationTargetResult>();
 const queuedReplayableEvents: QueuedReplayableEvent[] = [];
@@ -157,12 +165,55 @@ export function registerRoot(
   hydrate?: HydrationCallback,
   scope?: RootScope,
 ): void {
-  rootContainers.add(container);
-  if (scope !== undefined) rootScopes.set(container, scope);
+  const record = containerRecord(container);
+  record.root = true;
+  if (scope !== undefined) record.scope = scope;
   if (hydrate === undefined) return;
 
-  rootHydrationCallbacks.set(container, hydrate);
-  ensureHydrationListeners(container);
+  record.hydrate = hydrate;
+  ensureHydrationListeners(container, record);
+}
+
+export function unregisterRoot(container: Container): void {
+  const record = containerRecords.get(container);
+  if (record === undefined) return;
+
+  for (const [type, listener] of record.hydrationListeners ?? []) {
+    container.removeEventListener(type, listener, { capture: true });
+  }
+
+  // Slot teardown normally empties this map before unmount finishes; sweep
+  // whatever remains so no delegated listener outlives the root.
+  for (const [key, rootListener] of record.listeners) {
+    const [type, capture] = key.split(":");
+    container.removeEventListener(type, rootListener.listener, {
+      capture: capture === "true",
+    });
+  }
+
+  containerRecords.delete(container);
+
+  for (let index = queuedReplayableEvents.length - 1; index >= 0; index -= 1) {
+    if (queuedReplayableEvents[index].root === container) {
+      queuedReplayableEvents.splice(index, 1);
+    }
+  }
+}
+
+function containerRecord(container: Container): ContainerRecord {
+  let record = containerRecords.get(container);
+  if (record === undefined) {
+    record = {
+      hydrate: null,
+      hydrationListeners: null,
+      listeners: new Map(),
+      portalOwner: null,
+      root: false,
+      scope: null,
+    };
+    containerRecords.set(container, record);
+  }
+  return record;
 }
 
 export function on<K extends keyof HTMLElementEventMap>(
@@ -249,9 +300,9 @@ export function rootFor(
 ): Container | null {
   for (let current: unknown = node; current !== null; ) {
     if (isContainer(current)) {
-      const owner = portalOwners.get(current);
-      if (owner !== undefined) return owner.root;
-      if (rootContainers.has(current)) return current;
+      const record = containerRecords.get(current);
+      if (record?.portalOwner != null) return record.portalOwner.root;
+      if (record?.root === true) return current;
     }
 
     current = parentOf(current);
@@ -265,14 +316,15 @@ export function registerPortalContainer(
   root: Container,
   logicalParent: Container | Element,
 ): void {
-  portalOwners.set(container, {
+  containerRecord(container).portalOwner = {
     logicalParent,
     root,
-  });
+  };
 }
 
 export function removePortalContainer(container: Container): void {
-  portalOwners.delete(container);
+  const record = containerRecords.get(container);
+  if (record !== undefined) record.portalOwner = null;
 }
 
 export function replayQueuedEvents(root: Container): void {
@@ -343,12 +395,16 @@ function dispatchRootEvent(
   });
 }
 
-function ensureHydrationListeners(root: Container): void {
-  if (rootsWithHydrationListeners.has(root)) return;
-  rootsWithHydrationListeners.add(root);
+function ensureHydrationListeners(
+  root: Container,
+  record: ContainerRecord,
+): void {
+  if (record.hydrationListeners !== null) return;
+  record.hydrationListeners = [];
 
   for (const type of hydrationEvents) {
     const listener = (event: Event) => hydrateForEvent(root, type, event);
+    record.hydrationListeners.push([type, listener]);
     root.addEventListener(type, listener, {
       capture: true,
       passive: passiveHydrationEvent(type),
@@ -361,8 +417,8 @@ function hydrateForEvent(
   type: string,
   event: Event,
 ): HydrationTargetResult {
-  const hydrate = rootHydrationCallbacks.get(root);
-  if (hydrate === undefined) return "none";
+  const hydrate = containerRecords.get(root)?.hydrate ?? null;
+  if (hydrate === null) return "none";
 
   const previousResult = eventHydrationResults.get(event);
   if (previousResult !== undefined) return previousResult;
@@ -393,8 +449,8 @@ function queueReplayableEvent(
 function hydrateQueuedEvent(
   queued: QueuedReplayableEvent,
 ): HydrationTargetResult {
-  const hydrate = rootHydrationCallbacks.get(queued.root);
-  if (hydrate === undefined) return "none";
+  const hydrate = containerRecords.get(queued.root)?.hydrate ?? null;
+  if (hydrate === null) return "none";
 
   const lane = eventLane(queued.type);
   return runWithPriority(lane, () => hydrate(queued.event.target, lane));
@@ -494,8 +550,9 @@ function dispatchEventSlot(
 }
 
 function runWithRootScope<T>(root: Container | null, callback: () => T): T {
-  const scope = root === null ? undefined : rootScopes.get(root);
-  return scope === undefined ? callback() : scope(callback);
+  const scope =
+    root === null ? null : (containerRecords.get(root)?.scope ?? null);
+  return scope === null ? callback() : scope(callback);
 }
 
 function abortEventSlot(slot: EventSlot): void {
@@ -622,7 +679,7 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
   slot.root = null;
   slot.listenerTarget = null;
   const key = rootListenerKey(slot);
-  const listeners = rootListeners.get(listenerTarget);
+  const listeners = containerRecords.get(listenerTarget)?.listeners;
   if (listeners === undefined) return;
 
   const rootListener = listeners.get(key);
@@ -686,12 +743,7 @@ function dispatchFocusLikeEvent(
 }
 
 function rootListenerMap(root: Container): Map<string, RootListener> {
-  let listeners = rootListeners.get(root);
-  if (listeners === undefined) {
-    listeners = new Map();
-    rootListeners.set(root, listeners);
-  }
-  return listeners;
+  return containerRecord(root).listeners;
 }
 
 function rootListenerKey(slot: EventSlot): string {
@@ -733,8 +785,8 @@ function logicalPortalPath(
   root: Container,
   listenerTarget: Container,
 ): Element[] {
-  const owner = portalOwners.get(listenerTarget);
-  if (owner === undefined || owner.root !== root) return [];
+  const owner = containerRecords.get(listenerTarget)?.portalOwner ?? null;
+  if (owner === null || owner.root !== root) return [];
 
   const path: Element[] = [];
   for (
@@ -763,7 +815,11 @@ function targetWithinRoot(
 function listenerTargetFor(node: EventTarget | null): Container | null {
   for (let current: unknown = node; current !== null; ) {
     if (isContainer(current)) {
-      if (portalOwners.has(current) || rootContainers.has(current)) {
+      const record = containerRecords.get(current);
+      if (
+        record !== undefined &&
+        (record.portalOwner !== null || record.root)
+      ) {
         return current;
       }
     }

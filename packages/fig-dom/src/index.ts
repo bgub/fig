@@ -44,6 +44,7 @@ import {
   replayQueuedEvents,
   rootFor,
   setEventBatching,
+  unregisterRoot,
 } from "./events.ts";
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
 import {
@@ -146,6 +147,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
       container.removeChild(child);
       child = next;
     }
+
+    // A cleared container (hydration-mismatch recovery) detaches every
+    // queued replayable event's target; drain them.
+    queueMicrotask(() => replayQueuedEvents(container));
   },
   insertBefore: (parent, child, before) => {
     parent.insertBefore(child, before);
@@ -222,7 +227,11 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     if (root !== null) queueMicrotask(() => replayQueuedEvents(root));
   },
   removeDehydratedSuspenseBoundary: (boundary) => {
+    // Resolve the root before the markers detach; the replay pass then drops
+    // queued events whose targets left the tree with the boundary.
+    const root = rootFor(boundary.start);
     removeSuspenseBoundaryRange(boundary);
+    if (root !== null) queueMicrotask(() => replayQueuedEvents(root));
   },
   preparePortalContainer: (container, root, logicalParent) => {
     registerPortalContainer(
@@ -270,7 +279,7 @@ export function createRoot(
 ): FigRoot {
   const root = renderer.createRoot(container, options);
   registerRoot(container, undefined, (callback) => root.data.run(callback));
-  return root;
+  return withRootTeardown(root, container);
 }
 
 export function hydrateRoot(
@@ -278,23 +287,35 @@ export function hydrateRoot(
   children: FigNode,
   options?: FigRootOptions,
 ): FigRoot {
-  registerRoot(container, (target, lane) =>
-    renderer.hydrateTarget(container, target, lane),
-  );
+  // Registration can follow the initial hydration render: it runs
+  // synchronously in this task, so no DOM event can dispatch in between.
   const root = renderer.hydrateRoot(container, children, options);
   registerRoot(
     container,
     (target, lane) => renderer.hydrateTarget(container, target, lane),
     (callback) => root.data.run(callback),
   );
-  return root;
+  return withRootTeardown(root, container);
 }
 
 export function render(children: FigNode, container: Container): FigRoot {
   registerRoot(container);
   const root = renderer.render(children, container);
   registerRoot(container, undefined, (callback) => root.data.run(callback));
-  return root;
+  return withRootTeardown(root, container);
+}
+
+// Root event state (hydration listeners, delegated listener maps, queued
+// replayable events) lives outside the reconciler; tear it down with the
+// root so nothing dispatches against or retains an unmounted tree.
+function withRootTeardown(root: FigRoot, container: Container): FigRoot {
+  return {
+    ...root,
+    unmount: () => {
+      root.unmount();
+      unregisterRoot(container);
+    },
+  };
 }
 
 export function createPortal(

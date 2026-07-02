@@ -591,6 +591,47 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls).toEqual(["child:button"]);
   });
 
+  it("tears down hydration listeners and queued events on unmount", () => {
+    const boundary = suspenseDom("pending", "button", "Loading");
+    const container = new FakeElement("root");
+    const calls: string[] = [];
+
+    container.appendChild(boundary.start);
+    if (boundary.placeholder !== null) {
+      container.appendChild(boundary.placeholder);
+    }
+    container.appendChild(boundary.content);
+    container.appendChild(boundary.end);
+
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    flushSync(() => {
+      root = hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement(
+            "button",
+            { events: [on("click", () => calls.push("click"))] },
+            "Client",
+          ),
+        ),
+      );
+    });
+
+    expect(Object.keys(container.listenerSets)).not.toHaveLength(0);
+
+    // Blocked by the pending boundary: the click queues for replay.
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    root?.unmount();
+
+    // Every root listener (hydration capture listeners and delegated slot
+    // listeners) is removed with the root.
+    expect(Object.keys(container.listenerSets)).toHaveLength(0);
+  });
+
   it("does not replay hydrate-only events after pending Suspense hydrates", async () => {
     const boundary = suspenseDom("pending", "textarea", "Loading");
     const calls: string[] = [];
