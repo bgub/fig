@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
-  createScheduler,
   ImmediatePriority,
   LowPriority,
   NormalPriority,
@@ -26,15 +25,11 @@ describe("@bgub/fig-scheduler", () => {
     expect(calls).toEqual(["immediate", "normal"]);
   });
 
-  it("does not run cancelled delayed tasks", async () => {
+  it("does not run cancelled tasks", async () => {
     const calls: string[] = [];
-    const task = scheduleCallback(
-      NormalPriority,
-      () => {
-        calls.push("delayed");
-      },
-      { delay: 5 },
-    );
+    const task = scheduleCallback(NormalPriority, () => {
+      calls.push("cancelled");
+    });
 
     task.cancel();
 
@@ -72,28 +67,6 @@ describe("@bgub/fig-scheduler", () => {
     expect(calls).toEqual(["first:false", "yield:true", "second"]);
   });
 
-  it("stops running work after dispose", async () => {
-    const scheduler = createScheduler();
-    const calls: string[] = [];
-
-    scheduler.scheduleCallback(NormalPriority, () => {
-      calls.push("immediate");
-    });
-    scheduler.scheduleCallback(
-      NormalPriority,
-      () => {
-        calls.push("delayed");
-      },
-      { delay: 5 },
-    );
-
-    scheduler.dispose();
-    scheduler.dispose();
-
-    await delay();
-    expect(calls).toEqual([]);
-  });
-
   it("does not construct a MessageChannel at import time", async () => {
     // A MessagePort with a message handler refs the Node event loop forever,
     // so an import-time channel keeps any process that transitively imports
@@ -118,23 +91,5 @@ describe("@bgub/fig-scheduler", () => {
     } finally {
       vi.unstubAllGlobals();
     }
-  });
-
-  it("creates isolated scheduler instances", async () => {
-    const first = createScheduler();
-    const second = createScheduler();
-    const calls: string[] = [];
-
-    first.scheduleCallback(NormalPriority, () => {
-      calls.push(`first:${first.getCurrentPriorityLevel()}`);
-    });
-    second.scheduleCallback(ImmediatePriority, () => {
-      calls.push(`second:${second.getCurrentPriorityLevel()}`);
-    });
-
-    await delay();
-    expect([...calls].sort()).toEqual(
-      [`first:${NormalPriority}`, `second:${ImmediatePriority}`].sort(),
-    );
   });
 });

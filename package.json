@@ -27,15 +27,15 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "24.5 kB"
+      "limit": "24 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "16 kB"
+      "limit": "15.75 kB"
     },
     {
       "path": "packages/fig-scheduler/dist/index.js",
-      "limit": "1.35 kB"
+      "limit": "0.8 kB"
     }
   ],
   "devDependencies": {

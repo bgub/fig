@@ -42,6 +42,7 @@ import {
 import {
   NormalPriority,
   now,
+  requestPaint,
   type ScheduledTask,
   scheduleCallback,
   shouldYieldToHost,
@@ -2955,6 +2956,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       emitDevtoolsCommit(host, root);
     }
     flushRecoverableErrors(root);
+    // Host mutations just landed: make the work loop yield at its next check
+    // so the host paints before further scheduled work (React does the same
+    // from commitRoot).
+    requestPaint();
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
