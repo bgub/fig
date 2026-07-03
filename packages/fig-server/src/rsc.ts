@@ -59,6 +59,7 @@ import {
   deferred,
   withContextValue,
 } from "./shared.ts";
+import type { ServerErrorPayload } from "./types.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -72,6 +73,13 @@ export interface RscRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
+  /**
+   * Decides what crosses the wire when a server render throws, mirroring the
+   * HTML renderer's contract: the returned payload is authoritative. Without
+   * a handler, development includes the error message and production sends
+   * an empty payload.
+   */
+  onError?: (error: unknown) => ServerErrorPayload | undefined;
   refreshBoundary?: string;
 }
 
@@ -117,7 +125,7 @@ type RscRow =
       };
     }
   | { tag: "data"; value: FigDataHydrationEntry[] }
-  | { id: number; tag: "error"; value: { message: string } }
+  | { id: number; tag: "error"; value: ServerErrorPayload }
   | { id: number; tag: "model"; value: RscModel }
   | { boundary: string; tag: "refresh"; value: RscModel };
 
@@ -209,6 +217,7 @@ type RscRequest = {
   emittedDataKeys: Set<string>;
   nextRowId: number;
   nextUseId: number;
+  onError: RscRenderOptions["onError"];
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: string[];
@@ -263,13 +272,7 @@ export function renderToRscStream(
   node: FigNode,
   options: RscRenderOptions = {},
 ): RscRenderResult {
-  const request = createRscRequest(
-    node,
-    options.refreshBoundary ?? null,
-    options.clientReferenceAssets,
-    options.dataContext,
-    options.dataPartition,
-  );
+  const request = createRscRequest(node, options);
   return {
     allReady: request.allReady.promise,
     contentType,
@@ -345,33 +348,29 @@ export async function fetchRsc(
 
 function createRscRequest(
   node: FigNode,
-  refreshBoundary: string | null,
-  clientReferenceAssets:
-    | ((metadata: { id: string }) => FigAssetResourceList)
-    | undefined,
-  dataContext: unknown,
-  dataPartition: DataResourceKeyInput | undefined,
+  options: RscRenderOptions,
 ): RscRequest {
   const request: RscRequest = {
     allReady: deferred<void>(),
     boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
     clientReferenceRows: new Map(),
-    clientReferenceAssets,
+    clientReferenceAssets: options.clientReferenceAssets,
     controller: null,
     dataStore: createDataStore<object, null>({
-      context: dataContext ?? {},
+      context: options.dataContext ?? {},
       getLane: () => null,
-      partition: dataPartition,
+      partition: options.dataPartition,
       schedule: () => undefined,
     }),
     emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
     nextRowId: 1,
     nextUseId: 0,
+    onError: options.onError,
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
-    refreshBoundary,
+    refreshBoundary: options.refreshBoundary ?? null,
     status: "opening",
     stream: null as never,
     workScheduled: false,
@@ -735,7 +734,7 @@ function retryTask(request: RscRequest, task: Task): void {
     emitRow(request, {
       id: task.id,
       tag: "error",
-      value: { message: errorMessage(error) },
+      value: errorRowPayload(request, error),
     });
     finishTask(request);
   }
@@ -1039,9 +1038,31 @@ function outlineError(
   emitRow(request, {
     id,
     tag: "error",
-    value: { message: errorMessage(error) },
+    value: errorRowPayload(request, error),
   });
   return { $fig: referenceKind, id };
+}
+
+// The onError return value is authoritative, like the HTML renderer's
+// reportBoundaryError: message crosses the wire only when the handler says
+// so. Without a handler, development keeps the real message for debugging
+// (RSC errors never re-execute on the client, so the wire is the only
+// surface) and production sends an empty payload.
+function errorRowPayload(
+  request: RscRequest,
+  error: unknown,
+): ServerErrorPayload {
+  if (request.onError === undefined) {
+    return process.env.NODE_ENV !== "production"
+      ? { message: errorMessage(error) }
+      : {};
+  }
+
+  try {
+    return request.onError(error) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function emitClientReference(
@@ -1248,7 +1269,10 @@ function resolveDecodedRow(
   const chunk = response.getChunk(row.id);
 
   if (row.tag === "error") {
-    const error = new Error(row.value.message);
+    const error = new Error(
+      row.value.message ?? "The server render failed.",
+    ) as Error & { digest?: string };
+    if (row.value.digest !== undefined) error.digest = row.value.digest;
     chunk.model = null;
     chunk.status = "rejected";
     chunk.value = error;

@@ -558,7 +558,10 @@ describe("@bgub/fig-start server handler", () => {
       const response = await handler(new Request("http://localhost/broken"));
       const html = await response.text();
       expect(html).toContain(RSC_FRAME_ATTR);
-      expect(html).toContain("rsc exploded");
+      // Only the digest crosses the wire; the raw server message stays out of
+      // the payload and lands in the server log instead.
+      expect(html).toContain("fig-start-error");
+      expect(html).not.toContain("rsc exploded");
     } finally {
       console.error = previousError;
     }

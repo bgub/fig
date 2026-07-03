@@ -57,6 +57,11 @@ Deliberate divergences:
 - Server rendering uses Web `ReadableStream`s as the primary streaming model
   instead of Node-specific streams. This keeps the same API shape across modern
   Node, edge runtimes, Deno, Bun, and browser-like environments.
+- Server render errors cross the wire only through the explicit
+  `onError → { digest?, message? }` contract, shared by the HTML and RSC
+  renderers: the handler's payload is authoritative, production defaults to an
+  empty payload, and development defaults to including the message because
+  server errors never re-execute on the client.
 - Document resources use explicit `resources([...], children)` wrappers and
   small helpers such as `stylesheet`, `preload`, `font`, `preconnect`, `title`,
   `meta`, and `script`; document-mode server rendering also lowers host

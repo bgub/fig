@@ -471,6 +471,17 @@ function renderServerRouteSegment(
     {
       clientReferenceAssets,
       dataContext,
+      // A throw inside a server component becomes an RSC "error" row (it
+      // doesn't reject allReady), so the request would otherwise return 200
+      // with no server log. Log it here; only the digest crosses the wire and
+      // the client error boundary renders on its side.
+      onError(error) {
+        console.error(
+          `[fig-start] server route "${routeId}" failed to render:`,
+          error,
+        );
+        return { digest: "fig-start-error" };
+      },
       refreshBoundary: refreshesSegment ? refreshBoundary : undefined,
     },
   );
@@ -549,32 +560,6 @@ function rscBoundaryHeader(request: Request): string | undefined {
   return value === null || value === "" ? undefined : value;
 }
 
-// A throw inside a server component becomes an RSC "error" row (it doesn't reject
-// allReady), so the request would otherwise return 200 with no server log. Surface
-// it; the client error boundary renders it on its side.
-function reportServerRouteError(routeId: string, line: string): void {
-  const message = rscErrorMessage(line);
-  if (message === null) return;
-  console.error(
-    `[fig-start] server route "${routeId}" failed to render: ${message}`,
-  );
-}
-
-function rscErrorMessage(line: string): string | null {
-  let row: unknown;
-  try {
-    row = JSON.parse(line);
-  } catch {
-    return null;
-  }
-
-  if (!isRecord(row) || row.tag !== "error") return null;
-  const value = row.value;
-  return isRecord(value) && typeof value.message === "string"
-    ? value.message
-    : "unknown error";
-}
-
 function streamRscSegmentFrames(
   segment: ServerRscSegment,
   nonce: string | undefined,
@@ -601,7 +586,6 @@ function streamRscSegment(
   ) => Uint8Array | undefined,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
-  const reportErrors = createRscErrorReporter(segment.metadata.routeId);
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -612,10 +596,6 @@ function streamRscSegment(
           done && value === undefined
             ? decoder.decode()
             : decoder.decode(value, { stream: !done });
-
-        if (chunk.length > 0 || done) {
-          reportErrors(chunk, done);
-        }
 
         const output = emit(chunk, value);
         if (output !== undefined) controller.enqueue(output);
@@ -630,32 +610,6 @@ function streamRscSegment(
       void reader?.cancel(reason).catch(() => undefined);
     },
   });
-}
-
-function createRscErrorReporter(
-  routeId: string,
-): (chunk: string, done: boolean) => void {
-  let bufferedLine = "";
-
-  return (chunk, done) => {
-    bufferedLine += chunk;
-    const lines = bufferedLine.split("\n");
-    bufferedLine = lines.pop() ?? "";
-
-    for (const line of lines) reportServerRouteErrorLine(routeId, line);
-    if (done) {
-      reportServerRouteErrorLine(routeId, bufferedLine);
-      bufferedLine = "";
-    }
-  };
-
-  function reportServerRouteErrorLine(routeId: string, line: string): void {
-    if (line.length > 0) reportServerRouteError(routeId, line);
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function renderStreamPrelude(input: {

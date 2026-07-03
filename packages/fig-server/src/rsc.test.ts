@@ -53,7 +53,7 @@ type TestRscRow =
       tag: "client";
       value: { id: string; assets?: TestRscModel[] };
     }
-  | { id: number; tag: "error"; value: { message: string } }
+  | { id: number; tag: "error"; value: { digest?: string; message?: string } }
   | { id: number; tag: "model"; value: TestRscModel }
   | { boundary: string; tag: "refresh"; value: TestRscModel };
 
@@ -714,6 +714,62 @@ describe("RSC rendering", () => {
         value: { message: "Functions cannot be passed to Client Components." },
       },
     ]);
+  });
+
+  it("routes thrown server errors through onError, whose payload is authoritative", async () => {
+    const Failing = () => {
+      throw new Error("db credentials leaked in message");
+    };
+    const seen: string[] = [];
+
+    const rows = await renderToRscRows(createElement(Failing, null), {
+      onError(error) {
+        seen.push(error instanceof Error ? error.message : String(error));
+        return { digest: "digest-7" };
+      },
+    });
+
+    expect(rows).toEqual([
+      { id: 0, tag: "error", value: { digest: "digest-7" } },
+    ]);
+    expect(seen).toEqual(["db credentials leaked in message"]);
+  });
+
+  it("sends an empty error payload when onError returns nothing or throws", async () => {
+    const Failing = () => {
+      throw new Error("secret");
+    };
+
+    await expect(
+      renderToRscRows(createElement(Failing, null), {
+        onError: () => undefined,
+      }),
+    ).resolves.toEqual([{ id: 0, tag: "error", value: {} }]);
+
+    await expect(
+      renderToRscRows(createElement(Failing, null), {
+        onError: () => {
+          throw new Error("handler exploded");
+        },
+      }),
+    ).resolves.toEqual([{ id: 0, tag: "error", value: {} }]);
+  });
+
+  it("decodes error rows into digest-carrying errors with a generic message", () => {
+    const root = decodeTestRscRows([
+      { id: 0, tag: "error", value: { digest: "digest-9" } },
+    ]);
+
+    let thrown: unknown;
+    try {
+      evaluateRscNode(root);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error & { digest?: string }).digest).toBe("digest-9");
+    expect((thrown as Error).message).toBe("The server render failed.");
   });
 
   it("marks refreshable RSC boundaries in the model", async () => {
