@@ -426,6 +426,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
     entry.refreshError = undefined;
+    if (entry.status === "rejected") {
+      // The same intent applies to a cached rejection: without this, every
+      // read rethrows the old error forever — remounting an ErrorBoundary
+      // could never recover. Back to pending, so the next read loads afresh.
+      entry.error = undefined;
+      entry.status = "pending";
+    }
     this.notifyEntryChange(entry);
     if (entry.subscribers.size === 0) return;
 

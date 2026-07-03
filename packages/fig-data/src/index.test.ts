@@ -400,6 +400,85 @@ describe("@bgub/fig-data", () => {
       status: "aborted",
     });
   });
+
+  it("rethrows a cached rejection until invalidation resets it to pending", async () => {
+    let attempts = 0;
+    const owner = {};
+    const scheduled: object[] = [];
+    const flakyResource = dataResource({
+      key: (id: string) => ["flaky", id],
+      load: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new Error("load failed"))
+          : Promise.resolve("recovered");
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    // First read suspends on the initial load, which rejects.
+    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
+    store.commitDataDependencies(owner, null);
+    await delay();
+
+    // The rejection is cached: every read rethrows without a new load.
+    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow(
+      "load failed",
+    );
+    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow(
+      "load failed",
+    );
+    expect(attempts).toBe(1);
+
+    // Invalidation means "fetch again" for failures too: the entry returns to
+    // pending, subscribers are scheduled, and the next read loads afresh.
+    scheduled.length = 0;
+    store.invalidateData(flakyResource, "one");
+    expect(scheduled).toEqual([owner]);
+    expect(
+      store
+        .inspectDataEntries()
+        .find((entry) => entry.canonicalKey === '["flaky","one"]')?.status,
+    ).toBe("pending");
+
+    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
+    await delay();
+
+    expect(store.readData(flakyResource, ["one"], owner)).toBe("recovered");
+    expect(attempts).toBe(2);
+  });
+
+  it("recovers a rejected entry through refreshData", async () => {
+    let attempts = 0;
+    const flakyResource = dataResource({
+      key: (id: string) => ["flaky-refresh", id],
+      load: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new Error("load failed"))
+          : Promise.resolve("recovered");
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await expect(store.refreshData(flakyResource, "one")).resolves.toEqual({
+      error: new Error("load failed"),
+      status: "rejected",
+    });
+
+    await expect(store.refreshData(flakyResource, "one")).resolves.toEqual({
+      status: "fulfilled",
+      value: "recovered",
+    });
+  });
 });
 
 function delay(): Promise<void> {
