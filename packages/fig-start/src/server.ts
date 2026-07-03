@@ -52,10 +52,7 @@ import { createRouter } from "./router.ts";
 import { RouterContext } from "./router-context.ts";
 import type { AnyRoute } from "./route.ts";
 import { contentTypeFor } from "./server-runtime/content-type.ts";
-import {
-  runStartRuntime,
-  startRuntimeLayer,
-} from "./server-runtime/runtime.ts";
+import { runStartRuntime } from "./server-runtime/runtime.ts";
 
 export { StartConfigError, StartListenError } from "./server-runtime/errors.ts";
 
@@ -297,13 +294,11 @@ export function startServer(options: StartServerOptions): Promise<Server> {
     ...handlerOptions
   } = options;
 
-  return runStartRuntime(
-    startRuntimeLayer({
-      config: { appUrl, cacheClientAssets, clientEntry, mode, port, publicUrl },
-      handlerOptions,
-      log: console.log,
-    }),
-  );
+  return runStartRuntime({
+    config: { appUrl, cacheClientAssets, clientEntry, mode, port, publicUrl },
+    handlerOptions,
+    log: console.log,
+  });
 }
 
 function normalizeStaticAssets(

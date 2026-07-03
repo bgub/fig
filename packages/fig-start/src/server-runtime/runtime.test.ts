@@ -1,25 +1,23 @@
 import { describe, expect, it } from "vite-plus/test";
 import { StartConfigError, StartListenError } from "./errors.ts";
-import { runStartRuntime, startRuntimeLayer } from "./runtime.ts";
+import { runStartRuntime } from "./runtime.ts";
 import { closeServer, makeTestApp, serverPort } from "./test-app.ts";
 
 describe("start runtime", () => {
-  it("boots production mode through the shared layers", async () => {
+  it("boots production mode through the shared runtime", async () => {
     const app = await makeTestApp("Runtime");
     const logs: string[] = [];
-    const server = await runStartRuntime(
-      startRuntimeLayer({
-        config: {
-          appUrl: app.appUrl,
-          env: {},
-          mode: "production",
-          port: 0,
-          publicUrl: "https://fig.example/",
-        },
-        handlerOptions: { routes: app.routes },
-        log: (message) => logs.push(message),
-      }),
-    );
+    const server = await runStartRuntime({
+      config: {
+        appUrl: app.appUrl,
+        env: {},
+        mode: "production",
+        port: 0,
+        publicUrl: "https://fig.example/",
+      },
+      handlerOptions: { routes: app.routes },
+      log: (message) => logs.push(message),
+    });
 
     try {
       const port = serverPort(server);
@@ -27,8 +25,6 @@ describe("start runtime", () => {
       const page = await fetch(`http://127.0.0.1:${port}/`);
 
       expect(asset.status).toBe(200);
-      // Production defaults (immutable asset caching) flow through the same
-      // layer path the dev server uses.
       expect(asset.headers.get("cache-control")).toBe(
         "public, max-age=31536000, immutable",
       );
@@ -42,13 +38,11 @@ describe("start runtime", () => {
   });
 
   it("rejects with StartConfigError for invalid config", async () => {
-    const rejection = runStartRuntime(
-      startRuntimeLayer({
-        config: { appUrl: "not-an-absolute-url", env: {} },
-        handlerOptions: { routes: [] },
-        log: () => undefined,
-      }),
-    );
+    const rejection = runStartRuntime({
+      config: { appUrl: "not-an-absolute-url", env: {} },
+      handlerOptions: { routes: [] },
+      log: () => undefined,
+    });
 
     await expect(rejection).rejects.toBeInstanceOf(StartConfigError);
     await expect(rejection).rejects.toMatchObject({ field: "appUrl" });
@@ -56,16 +50,15 @@ describe("start runtime", () => {
 
   it("rejects with StartListenError when the port is taken", async () => {
     const app = await makeTestApp("Runtime");
-    const layerFor = (port: number) =>
-      startRuntimeLayer({
-        config: { appUrl: app.appUrl, env: {}, port },
-        handlerOptions: { routes: app.routes },
-        log: () => undefined,
-      });
+    const inputFor = (port: number) => ({
+      config: { appUrl: app.appUrl, env: {}, port },
+      handlerOptions: { routes: app.routes },
+      log: () => undefined,
+    });
 
-    const first = await runStartRuntime(layerFor(0));
+    const first = await runStartRuntime(inputFor(0));
     try {
-      const rejection = runStartRuntime(layerFor(serverPort(first)));
+      const rejection = runStartRuntime(inputFor(serverPort(first)));
       await expect(rejection).rejects.toBeInstanceOf(StartListenError);
       await expect(rejection).rejects.toMatchObject({
         port: serverPort(first),
@@ -80,20 +73,18 @@ describe("start runtime", () => {
     const app = await makeTestApp("Runtime");
     const before = process.listenerCount("SIGINT");
 
-    const server = await runStartRuntime(
-      startRuntimeLayer({
-        config: { appUrl: app.appUrl, env: {}, port: 0 },
-        handlerOptions: { routes: app.routes },
-        log: () => undefined,
-      }),
-    );
+    const server = await runStartRuntime({
+      config: { appUrl: app.appUrl, env: {}, port: 0 },
+      handlerOptions: { routes: app.routes },
+      log: () => undefined,
+    });
 
     try {
       expect(process.listenerCount("SIGINT")).toBe(before + 1);
 
       await closeServer(server);
       // The close event completes the scoped program, which interrupts the
-      // signal wait and detaches its process listeners.
+      // NodeRuntime main fiber and detaches its process listeners.
       for (let i = 0; i < 20; i += 1) {
         if (process.listenerCount("SIGINT") === before) break;
         await new Promise((resolve) => setTimeout(resolve, 5));

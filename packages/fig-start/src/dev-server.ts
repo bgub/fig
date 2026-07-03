@@ -1,9 +1,6 @@
 import type { Server } from "node:http";
 import type { StartHandlerOptions } from "./server.ts";
-import {
-  runStartRuntime,
-  startRuntimeLayer,
-} from "./server-runtime/runtime.ts";
+import { runStartRuntime } from "./server-runtime/runtime.ts";
 
 export interface StartDevServerOptions extends Omit<
   StartHandlerOptions,
@@ -35,20 +32,18 @@ export function startDevServer(
     ...handlerOptions
   } = options;
 
-  return runStartRuntime(
-    startRuntimeLayer({
-      config: {
-        appUrl,
-        cacheClientAssets: false,
-        clientEntry,
-        env,
-        mode: "development",
-        port,
-        publicUrl,
-        root,
-      },
-      handlerOptions,
-      log,
-    }),
-  );
+  return runStartRuntime({
+    config: {
+      appUrl,
+      cacheClientAssets: false,
+      clientEntry,
+      env,
+      mode: "development",
+      port,
+      publicUrl,
+      root,
+    },
+    handlerOptions,
+    log,
+  });
 }
