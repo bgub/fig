@@ -600,21 +600,19 @@ function hydrateQueuedEvent(
   );
 }
 
-// Two-phase dispatch used where a single native listener stands in for both
-// phases (queued replayable events after selective hydration). The bubble
-// phase extracts after capture handlers ran, mirroring live DOM listener
-// semantics; one propagation state spans both phases.
-function dispatchTwoPhase(
-  root: Container,
-  listenerTarget: Container,
-  type: string,
-  passive: boolean | null,
-  event: Event,
-  replay = false,
-): void {
-  withPropagationState(event, replay, (state) => {
+// Replays a queued event after selective hydration: the spent native event
+// no longer propagates, so one synthetic dispatch stands in for both phases
+// (`passive: null` matches every slot — no live root listener partitions
+// them by key here). The bubble phase extracts after capture handlers ran,
+// mirroring live DOM listener semantics; one propagation state spans both
+// phases, ignoring the spent event's stale cancelBubble.
+function dispatchReplayedEvent(queued: QueuedReplayableEvent): void {
+  const { event, root, type } = queued;
+  const listenerTarget = queued.listenerTarget ?? queued.root;
+
+  withPropagationState(event, true, (state) => {
     invokeDispatches(
-      extractDispatches(root, listenerTarget, type, true, passive, event),
+      extractDispatches(root, listenerTarget, type, true, null, event),
       event,
       state,
     );
@@ -622,22 +620,11 @@ function dispatchTwoPhase(
     if (state.immediateStopped || state.stopped) return;
 
     invokeDispatches(
-      extractDispatches(root, listenerTarget, type, false, passive, event),
+      extractDispatches(root, listenerTarget, type, false, null, event),
       event,
       state,
     );
   });
-}
-
-function dispatchReplayedEvent(queued: QueuedReplayableEvent): void {
-  dispatchTwoPhase(
-    queued.root,
-    queued.listenerTarget ?? queued.root,
-    queued.type,
-    null,
-    queued.event,
-    true,
-  );
 }
 
 function extractDispatches(
