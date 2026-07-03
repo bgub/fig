@@ -59,7 +59,21 @@ export const demoRootId = "fig-stream-demo-root";
 export const streamBoundaryDigest = "stream-demo-suspense";
 export const streamIdentifierPrefix = "stream-demo";
 
-const LazyStreamPanel = lazy(() => delay(LazyPanelContent, 1300));
+// Scales the demo's artificial streaming delays so e2e runs don't wait out
+// the human-readable timings; the copy still describes the unscaled values.
+// The client bundle has no env (typeof guard), so it keeps the 1x delays.
+const demoDelayScale =
+  typeof process === "undefined"
+    ? 1
+    : Number(process.env.FIG_STREAM_DEMO_DELAY_SCALE ?? "1") || 1;
+
+export function scaledDemoDelay(ms: number): number {
+  return Math.max(1, Math.round(ms * demoDelayScale));
+}
+
+const LazyStreamPanel = lazy(() =>
+  delay(LazyPanelContent, scaledDemoDelay(1300)),
+);
 
 export function App({ request }: { request: DemoRequest }) {
   const isAbort = request.abortDelay !== null;
@@ -157,10 +171,19 @@ export function createServerRequest(
   return {
     abortDelay,
     resources: {
-      broken: rejectAfter(new Error("server error demo"), 900),
-      suspense: delay("Content resolved on the server after 5 seconds.", 5000),
-      hidden: delay("Hidden Activity content rendered on the server.", 800),
-      hiddenBroken: rejectAfter(new Error("hidden activity server error"), 700),
+      broken: rejectAfter(new Error("server error demo"), scaledDemoDelay(900)),
+      suspense: delay(
+        "Content resolved on the server after 5 seconds.",
+        scaledDemoDelay(5000),
+      ),
+      hidden: delay(
+        "Hidden Activity content rendered on the server.",
+        scaledDemoDelay(800),
+      ),
+      hiddenBroken: rejectAfter(
+        new Error("hidden activity server error"),
+        scaledDemoDelay(700),
+      ),
     },
     startedAt,
   };

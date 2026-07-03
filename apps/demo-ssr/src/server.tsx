@@ -16,6 +16,7 @@ import {
   demoDataResourceScriptId,
   demoDataScriptId,
   demoRootId,
+  scaledDemoDelay,
   type ServerInfo,
   streamBoundaryDigest,
   streamIdentifierPrefix,
@@ -184,7 +185,7 @@ async function handleRequest(
 }
 
 function abortDelayFor(url: URL): number | null {
-  if (url.pathname === "/abort") return 900;
+  if (url.pathname === "/abort") return scaledDemoDelay(900);
 
   const value = url.searchParams.get("abort");
   if (value === null) return null;

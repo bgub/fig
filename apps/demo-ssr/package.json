@@ -11,7 +11,7 @@
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",
     "test": "vp test run",
-    "test:e2e": "playwright test"
+    "test:e2e": "sh ../../scripts/free-port.sh 4181 && playwright test"
   },
   "portless": {
     "name": "fig-demo-ssr",

@@ -13,6 +13,10 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
 
   await page.goto("/", { waitUntil: "commit" });
 
+  // The fallback ships in the shell HTML; check it before anything that
+  // waits, since the server reveal replaces it shortly after.
+  await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
+
   await expect(page.locator("body")).toHaveAttribute(
     "data-fig-hydrated",
     "true",
@@ -25,7 +29,6 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
     page.getByRole("button", { name: "Shell clicks: 1" }),
   ).toBeVisible();
 
-  await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
   await expect(
     page.getByText("Content resolved on the server after 5 seconds."),
   ).toBeVisible();
@@ -52,6 +55,10 @@ test("client-renders aborted Suspense boundaries after the shell", async ({
 }) => {
   await page.goto("/abort", { waitUntil: "commit" });
 
+  // Check the shell fallback first: the client resolves the aborted boundary
+  // soon after the abort marker streams, replacing the fallback.
+  await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
+
   await expect(page.locator("body")).toHaveAttribute(
     "data-fig-hydrated",
     "true",
@@ -59,7 +66,6 @@ test("client-renders aborted Suspense boundaries after the shell", async ({
   await expect(
     page.getByRole("heading", { name: "Abort after shell" }),
   ).toBeVisible();
-  await expect(page.getByText("Pending fallback for 5 seconds.")).toBeVisible();
 
   const suspenseButton = page.getByRole("button", {
     name: "Suspense clicks: 0",

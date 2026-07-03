@@ -9,7 +9,7 @@
     "dev:app": "node ../dev-server.mjs static",
     "dev:build": "vp pack --watch",
     "serve": "sh -c 'python3 -m http.server \"${PORT:-4173}\" --bind 127.0.0.1'",
-    "test:e2e": "playwright test"
+    "test:e2e": "sh ../../scripts/free-port.sh 4182 && playwright test"
   },
   "portless": {
     "name": "fig-demo-client",
