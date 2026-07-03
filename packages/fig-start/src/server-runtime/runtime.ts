@@ -1,5 +1,6 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Deferred, Effect, Layer } from "effect";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import { Cause, Deferred, Effect, Exit, Layer, Runtime } from "effect";
 import {
   HttpServer,
   HttpServerRequest,
@@ -48,32 +49,34 @@ export function startRuntimeLayer(
 
 // Bridges each platform request to the web-standard app handler. Handler
 // rejections become defects, which the platform converts to 500 responses.
+// Bodies are not forwarded (parity with the previous Node adapter); the
+// framework's routes only serve GET/HEAD today.
 const app = Effect.gen(function* () {
   const handler = yield* StartAppHandler;
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const response = yield* Effect.promise(() =>
-    handler(webRequestFrom(request)),
-  );
+  const host = request.headers.host ?? "localhost";
+  const response = yield* Effect.promise(() => {
+    return handler(
+      new Request(`http://${host}${request.url}`, {
+        headers: request.headers,
+        method: request.method,
+      }),
+    );
+  });
   return HttpServerResponse.fromWeb(response);
 });
 
-// Bodies are not forwarded (parity with the previous Node adapter); the
-// framework's routes only serve GET/HEAD today.
-function webRequestFrom(request: HttpServerRequest.HttpServerRequest): Request {
-  const host = request.headers.host ?? "localhost";
-  return new Request(`http://${host}${request.url}`, {
-    headers: request.headers,
-    method: request.method,
-  });
-}
-
-// The platform server owns listen and close: the socket is acquired into the
-// layer's scope and released with a graceful, connection-draining shutdown.
-// Listen failures are mapped to the public StartListenError.
-function nodeServerLayer(
-  server: Server,
-): Layer.Layer<HttpServer.HttpServer, StartListenError, StartConfig> {
-  return Layer.effect(
+// Runtime boundary: starts the server program as the Node main fiber and hands
+// the caller a Promise for the listening server. NodeRuntime owns SIGINT/SIGTERM
+// interruption; the platform HTTP layer owns scoped listen/close.
+export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
+  const started = Deferred.makeUnsafe<Server, StartRuntimeError>();
+  const server = createServer();
+  const httpServerLayer: Layer.Layer<
+    HttpServer.HttpServer,
+    StartListenError,
+    StartConfig
+  > = Layer.effect(
     HttpServer.HttpServer,
     Effect.gen(function* () {
       const config = yield* StartConfig;
@@ -87,89 +90,50 @@ function nodeServerLayer(
       );
     }),
   );
-}
 
-// Runs after the provided layers are built, so the server is already
-// listening and serving; this program just announces it and holds the layer
-// scope open until a shutdown signal or an external close.
-const serveUntilShutdown = Effect.fn("serveUntilShutdown")(function* (
-  started: Deferred.Deferred<Server, StartRuntimeError>,
-  server: Server,
-) {
-  const config = yield* StartConfig;
-  const logger = yield* StartLogger;
+  NodeRuntime.runMain(
+    Effect.gen(function* () {
+      const config = yield* StartConfig;
+      const logger = yield* StartLogger;
+      const name =
+        config.mode === "development" ? "Fig Start dev server" : "Fig Start";
 
-  const name =
-    config.mode === "development" ? "Fig Start dev server" : "Fig Start";
-  yield* logger.info(`${name}: ${config.publicUrl.href}`);
-  yield* Deferred.succeed(started, server);
-
-  const shutdown = yield* Effect.race(
-    awaitShutdownSignal,
-    Effect.as(awaitServerClose(server), "closed" as const),
-  );
-  if (shutdown !== "closed") {
-    yield* logger.info(`Received ${shutdown}; shutting down.`);
-  }
-  return shutdown;
-});
-
-// Runtime boundary: forks the server program as a daemon fiber and hands the
-// caller a Promise for the listening server. Failures reject with the typed
-// error instance (StartConfigError / StartListenError): runPromise squashes
-// the Cause down to its first failure.
-export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
-  const started = Deferred.makeUnsafe<Server, StartRuntimeError>();
-  const server = createServer();
-
-  Effect.runFork(
-    serveUntilShutdown(started, server).pipe(
+      yield* logger.info(`${name}: ${config.publicUrl.href}`);
+      yield* Deferred.succeed(started, server);
+      yield* Effect.callback<void>((resume) => {
+        const onClose = (): void => resume(Effect.void);
+        server.once("close", onClose);
+        return Effect.sync(() => {
+          server.off("close", onClose);
+        });
+      });
+    }).pipe(
       Effect.provide(
         HttpServer.serve(app).pipe(
-          Layer.provideMerge(nodeServerLayer(server)),
+          Layer.provideMerge(httpServerLayer),
           Layer.provideMerge(layer),
         ),
       ),
-      // The layers have been torn down (socket released); re-raise the signal
-      // so the default handler terminates the process as if we never
-      // intercepted it. Deferred a tick so piped stdout can flush first.
-      Effect.tap((shutdown) =>
-        shutdown === "closed"
-          ? Effect.void
-          : Effect.sync(() => {
-              setImmediate(() => process.kill(process.pid, shutdown));
-            }),
-      ),
       Effect.onError((cause) => Deferred.failCause(started, cause)),
     ),
+    {
+      disableErrorReporting: true,
+      // runMain is an app-entrypoint API adapted here for library use: its
+      // onExit only terminates the process when a signal was received or the
+      // code is non-zero. Signal interrupts take defaultTeardown (exit 130);
+      // every other exit — external close, or failures like StartListenError
+      // that surface through the returned promise instead — must pass 0 so
+      // the caller's process (and test workers) stay alive. Do not "fix"
+      // this to defaultTeardown.
+      teardown: (exit, onExit) => {
+        if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
+          Runtime.defaultTeardown(exit, onExit);
+        } else {
+          onExit(0);
+        }
+      },
+    },
   );
 
   return Effect.runPromise(Deferred.await(started));
-}
-
-const shutdownSignals: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
-
-const awaitShutdownSignal: Effect.Effect<NodeJS.Signals> = Effect.callback(
-  (resume) => {
-    const listeners = shutdownSignals.map((signal) => {
-      const listener = (): void => resume(Effect.succeed(signal));
-      process.once(signal, listener);
-      return [signal, listener] as const;
-    });
-    return Effect.sync(() => {
-      for (const [signal, listener] of listeners) {
-        process.off(signal, listener);
-      }
-    });
-  },
-);
-
-function awaitServerClose(server: Server): Effect.Effect<void> {
-  return Effect.callback((resume) => {
-    const onClose = (): void => resume(Effect.void);
-    server.once("close", onClose);
-    return Effect.sync(() => {
-      server.off("close", onClose);
-    });
-  });
 }
