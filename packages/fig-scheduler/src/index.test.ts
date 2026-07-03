@@ -72,6 +72,28 @@ describe("@bgub/fig-scheduler", () => {
     expect(calls).toEqual(["first:false", "yield:true", "second"]);
   });
 
+  it("stops running work after dispose", async () => {
+    const scheduler = createScheduler();
+    const calls: string[] = [];
+
+    scheduler.scheduleCallback(NormalPriority, () => {
+      calls.push("immediate");
+    });
+    scheduler.scheduleCallback(
+      NormalPriority,
+      () => {
+        calls.push("delayed");
+      },
+      { delay: 5 },
+    );
+
+    scheduler.dispose();
+    scheduler.dispose();
+
+    await delay();
+    expect(calls).toEqual([]);
+  });
+
   it("creates isolated scheduler instances", async () => {
     const first = createScheduler();
     const second = createScheduler();

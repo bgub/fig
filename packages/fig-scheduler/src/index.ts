@@ -6,6 +6,7 @@ export interface ScheduledTask {
 }
 
 export interface Scheduler {
+  dispose(): void;
   forceFrameRate(fps: number): void;
   getCurrentPriorityLevel(): PriorityLevel;
   now(): number;
@@ -156,6 +157,24 @@ class DefaultScheduler implements Scheduler {
 
   getCurrentPriorityLevel(): PriorityLevel {
     return this.currentPriorityLevel;
+  }
+
+  // A MessagePort with a message handler refs the Node event loop, so a
+  // transient scheduler would keep the process alive forever without this.
+  // Pending tasks and timers are dropped.
+  dispose(): void {
+    this.messageLoopRunning = false;
+
+    if (this.hostTimeout !== null) {
+      clearTimeout(this.hostTimeout);
+      this.hostTimeout = null;
+    }
+
+    if (this.channel !== null) {
+      this.channel.port1.onmessage = null;
+      this.channel.port1.close();
+      this.channel.port2.close();
+    }
   }
 
   runWithPriority<T>(priority: PriorityLevel, callback: () => T): T {

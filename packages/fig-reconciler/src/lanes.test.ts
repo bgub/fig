@@ -1,3 +1,4 @@
+import { NormalPriority } from "@bgub/fig-scheduler";
 import { describe, expect, it } from "vite-plus/test";
 import {
   AllTransitionLanes,
@@ -7,6 +8,7 @@ import {
   getEntangledLanes,
   getHighestPriorityLane,
   getLanePriority,
+  getLaneSchedulerPriority,
   getNextLanes,
   IdleHydrationLane,
   IdleLane,
@@ -24,6 +26,7 @@ import {
   RetryLanes,
   runWithPriority,
   runWithTransition,
+  SelectiveHydrationLane,
   SyncLane,
   TotalLanes,
   TransitionLane1,
@@ -54,6 +57,14 @@ describe("lanes", () => {
     expect(NonIdleLanes & DefaultLane).toBe(DefaultLane);
     expect(NonIdleLanes & (IdleHydrationLane | IdleLane | OffscreenLane)).toBe(
       NoLanes,
+    );
+  });
+
+  it("schedules selective hydration as non-idle default-priority work", () => {
+    expect(NonIdleLanes & SelectiveHydrationLane).toBe(SelectiveHydrationLane);
+    expect(getLanePriority(SelectiveHydrationLane)).toBe("default");
+    expect(getLaneSchedulerPriority(SelectiveHydrationLane)).toBe(
+      NormalPriority,
     );
   });
 

@@ -35,7 +35,7 @@
     },
     {
       "path": "packages/fig-scheduler/dist/index.js",
-      "limit": "1 kB"
+      "limit": "1.35 kB"
     }
   ],
   "devDependencies": {

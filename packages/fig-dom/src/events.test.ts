@@ -1,5 +1,16 @@
 import { createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
+// White-box import of the reconciler's lane module (aliased to source, so it
+// shares state with the reconciler under test): the public
+// getCurrentUpdatePriority collapses every lane below continuous to
+// "default", which would hide a regression that ran handlers at
+// transition/idle lanes.
+import {
+  DefaultLane,
+  InputContinuousLane,
+  requestUpdateLane,
+  SyncLane,
+} from "../../fig-reconciler/src/lanes.ts";
 import { createRoot, flushSync, on } from "./index.ts";
 import { getCurrentUpdatePriority } from "./priority.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
@@ -13,16 +24,21 @@ function render(node: FigNode, container: Element): void {
 
 describe("@bgub/fig-dom events", () => {
   it("runs DOM event handlers with event priority", () => {
+    const lanes: number[] = [];
     const priorities: string[] = [];
     const container = new FakeElement("root");
+    const record = () => {
+      lanes.push(requestUpdateLane());
+      priorities.push(getCurrentUpdatePriority());
+    };
 
     flushSync(() =>
       render(
         createElement("button", {
           events: [
-            on("click", () => priorities.push(getCurrentUpdatePriority())),
-            on("mousemove", () => priorities.push(getCurrentUpdatePriority())),
-            on("load", () => priorities.push(getCurrentUpdatePriority())),
+            on("click", record),
+            on("mousemove", record),
+            on("load", record),
           ],
         }),
         container as unknown as Element,
@@ -34,22 +50,19 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("mousemove");
     button.dispatch("load");
 
+    expect(lanes).toEqual([SyncLane, InputContinuousLane, DefaultLane]);
     expect(priorities).toEqual(["discrete", "continuous", "default"]);
   });
 
   it("runs press interactions at discrete priority", () => {
-    const priorities: string[] = [];
+    const lanes: number[] = [];
     const container = new FakeElement("root");
+    const record = () => lanes.push(requestUpdateLane());
 
     flushSync(() =>
       render(
         createElement("button", {
-          events: [
-            on("mousedown", () => priorities.push(getCurrentUpdatePriority())),
-            on("contextmenu", () =>
-              priorities.push(getCurrentUpdatePriority()),
-            ),
-          ],
+          events: [on("mousedown", record), on("contextmenu", record)],
         }),
         container as unknown as Element,
       ),
@@ -59,7 +72,7 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("mousedown");
     button.dispatch("contextmenu");
 
-    expect(priorities).toEqual(["discrete", "discrete"]);
+    expect(lanes).toEqual([SyncLane, SyncLane]);
   });
 
   it("keeps sibling slots stable when a once handler fires", () => {

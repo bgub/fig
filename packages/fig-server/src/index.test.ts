@@ -848,6 +848,55 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('__figSSR.c("test-b-0","test-s-0")');
   });
 
+  it("emits inline scripts without top-level lexical declarations", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+
+    function First() {
+      return createElement("span", null, readPromise(first.promise));
+    }
+
+    function Second() {
+      return createElement("span", null, readPromise(second.promise));
+    }
+
+    const result = renderToReadableStream(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "One") },
+          createElement(First, null),
+        ),
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Two") },
+          createElement(Second, null),
+        ),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await result.shellReady;
+    first.resolve("First");
+    second.resolve("Second");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    const scripts = [...html.matchAll(/<script[^>]*>(.*?)<\/script>/gs)].map(
+      (match) => match[1],
+    );
+
+    // Classic scripts share the page's global lexical environment: a
+    // top-level let/const/class in one reveal script redeclares in the next
+    // and throws, so every script after the first would be dead in browsers.
+    expect(scripts.length).toBeGreaterThanOrEqual(3);
+    for (const code of scripts) {
+      expect(code).not.toMatch(/^\s*(?:let|const|class)\s/);
+    }
+  });
+
   it("keeps host markup balanced when a single child suspends", async () => {
     const pending = deferred<string>();
 

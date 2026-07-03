@@ -301,8 +301,14 @@ export function getLanePriority(lane: Lane): LanePriority {
   ) {
     return "input";
   }
-  if (includesSomeLane(DefaultHydrationLane | DefaultLane, lane))
+  if (
+    includesSomeLane(
+      DefaultHydrationLane | DefaultLane | SelectiveHydrationLane,
+      lane,
+    )
+  ) {
     return "default";
+  }
   if (includesSomeLane(GestureLane, lane)) return "gesture";
   if (includesSomeLane(AllTransitionLanes | TransitionHydrationLane, lane)) {
     return "transition";
@@ -329,12 +335,16 @@ export function getLaneSchedulerPriority(lane: Lane): PriorityLevel {
   ) {
     return UserBlockingPriority;
   }
+  // SelectiveHydrationLane is non-idle work (event-triggered hydration of a
+  // dehydrated boundary): schedule it at Normal like React, or it starves
+  // behind every transition and never gets a scheduler timeout.
   if (
     includesSomeLane(
       DefaultHydrationLane |
         DefaultLane |
         AllTransitionLanes |
-        TransitionHydrationLane,
+        TransitionHydrationLane |
+        SelectiveHydrationLane,
       lane,
     )
   ) {

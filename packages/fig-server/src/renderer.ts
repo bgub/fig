@@ -1467,10 +1467,14 @@ function writeRuntime(request: Request): void {
   writeProtocolRuntime(request, (chunk) => write(request, chunk));
 }
 
+// Classic <script> elements share the page's global lexical environment, so a
+// top-level `let` would redeclare across op scripts and throw; the IIFE keeps
+// a per-script binding that async op callbacks (the stylesheet gate) close
+// over even if a later stream rebinds the runtime name.
 function writeScript(request: Request, code: string): void {
   writeProtocolScript(
     request,
-    `let __figSSR=globalThis[${jsString(request.runtimeName)}];${code}`,
+    `(__figSSR=>{${code}})(globalThis[${jsString(request.runtimeName)}])`,
     (chunk) => write(request, chunk),
   );
 }

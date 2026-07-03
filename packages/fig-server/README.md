@@ -117,7 +117,7 @@ Use `assets([...], children)` from `@bgub/fig` to attach document resources to
 a subtree:
 
 ```tsx
-import { resources, stylesheet, title } from "@bgub/fig";
+import { assets, stylesheet, title } from "@bgub/fig";
 
 function Page() {
   return assets(
@@ -131,10 +131,10 @@ The document renderer keeps head-only metadata separate from body segment HTML
 and injects `title()` and `meta()` before `</head>`. With the lower-level
 `renderToReadableStream`, those tags are available through `result.getHead()`
 after `headReady`; they are never emitted into segment HTML. `headReady`
-resolves with the shell and seals the initial document head. If a new head
-resource is found later, such as behind pending Suspense, Fig reports it through
-`onResourceError`. You can still call `getHead()` again after `allReady` if your
-server intentionally waits for complete metadata, but required shell metadata
+resolves with the shell and seals the initial document head; `getHead()` keeps
+returning that sealed snapshot afterward. If a new head resource is found
+later, such as behind pending Suspense, Fig reports it through `onAssetError`
+instead of adding it to the already-flushed head, so required shell metadata
 should render before `headReady`.
 
 ```ts
@@ -162,7 +162,7 @@ function Page() {
 
 Metadata discovered before `headReady` is injected into the initial document
 head. Metadata discovered after `headReady`, for example inside pending
-Suspense content, is reported through `onResourceError` and is not added to the
+Suspense content, is reported through `onAssetError` and is not added to the
 already-flushed shell. Stylesheets discovered for later Suspense segments remain
 stream-safe: Fig emits them near the segment and gates reveal until they load
 unless `{ blocking: "none" }` opts out.
@@ -181,20 +181,21 @@ such as `type`, `crossOrigin`, and `fetchPriority` must match for duplicates.
 Conflict errors include the resource key plus the existing and incoming
 resources.
 
-`resources` can attach resources to component modules without wrapping the
-component tree. It is a string-keyed record intended for bundler/module ids.
-Use `resolveResourceKey` to map a component type to one of those ids:
+The `assets` option can attach asset resources to component modules without
+wrapping the component tree. It is a string-keyed record intended for
+bundler/module ids. Use `resolveAssetKey` to map a component type to one of
+those ids:
 
 ```tsx
 renderToReadableStream(<Page />, {
-  resolveResourceKey: (type) => (type === Page ? "app/page.tsx" : undefined),
-  resources: {
+  resolveAssetKey: (type) => (type === Page ? "app/page.tsx" : undefined),
+  assets: {
     "app/page.tsx": [title("Page"), stylesheet("/page.css")],
   },
 });
 ```
 
-Manifest resources use the same registry, destination rules, dedupe checks, and
+Manifest assets use the same registry, destination rules, dedupe checks, and
 Suspense reveal gating as explicit `assets(...)` wrappers.
 
 ## RSC
