@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit, Layer } from "effect";
+import { Deferred, Effect, Layer } from "effect";
 import type { Server } from "node:http";
 import type { StartHandlerOptions } from "../server.ts";
 import type { StartRuntimeConfigInput } from "./config.ts";
@@ -66,17 +66,20 @@ const serveUntilShutdown = Effect.fn("serveUntilShutdown")(function* (
   yield* logger.info(`${name}: ${config.publicUrl.href}`);
   yield* Deferred.succeed(started, server);
 
-  const signal = yield* Effect.race(
+  const shutdown = yield* Effect.race(
     awaitShutdownSignal,
-    Effect.as(awaitServerClose(server), null),
+    Effect.as(awaitServerClose(server), "closed" as const),
   );
-  if (signal !== null) yield* logger.info(`Received ${signal}; shutting down.`);
-  return signal;
+  if (shutdown !== "closed") {
+    yield* logger.info(`Received ${shutdown}; shutting down.`);
+  }
+  return shutdown;
 });
 
 // Runtime boundary: forks the server program as a daemon fiber and hands the
 // caller a Promise for the listening server. Failures reject with the typed
-// error instance (StartConfigError / StartListenError), not a FiberFailure.
+// error instance (StartConfigError / StartListenError): runPromise squashes
+// the Cause down to its first failure.
 export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
   const started = Deferred.makeUnsafe<Server, StartRuntimeError>();
 
@@ -85,11 +88,11 @@ export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
       // The scope has closed (socket released); re-raise the signal so the
       // default handler terminates the process as if we never intercepted it.
       // Deferred a tick so piped stdout (the shutdown log) can flush first.
-      Effect.tap((signal) =>
-        signal === null
+      Effect.tap((shutdown) =>
+        shutdown === "closed"
           ? Effect.void
           : Effect.sync(() => {
-              setImmediate(() => process.kill(process.pid, signal));
+              setImmediate(() => process.kill(process.pid, shutdown));
             }),
       ),
       Effect.provide(layer),
@@ -97,17 +100,7 @@ export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
     ),
   );
 
-  return Effect.runPromiseExit(Deferred.await(started)).then((exit) => {
-    if (Exit.isSuccess(exit)) return exit.value;
-    throw startErrorFromCause(exit.cause);
-  });
-}
-
-function startErrorFromCause(cause: Cause.Cause<StartRuntimeError>): unknown {
-  for (const reason of cause.reasons) {
-    if (reason._tag === "Fail") return reason.error;
-  }
-  return Cause.squash(cause);
+  return Effect.runPromise(Deferred.await(started));
 }
 
 const shutdownSignals: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];

@@ -44,12 +44,7 @@ import {
 } from "./components.tsx";
 import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
-import {
-  createRouter,
-  type FigRouter,
-  type LoadResult,
-  type RouterHistory,
-} from "./router.ts";
+import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
 import type { RouterLocation } from "./types.ts";
 
@@ -77,20 +72,15 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     throw new Error(`Missing #${ROOT_ELEMENT_ID} container to hydrate into.`);
   }
 
-  // Assigned right after createRouter; the beforeCommit closure only runs on
-  // later navigations. Prefetching the RSC payload before the commit keeps
-  // the previous page visible until the next server route can render.
-  let boundServerRouteContent: ServerRouteContent | null = null;
-  const prepareServerRoutes = (
-    location: RouterLocation,
-    result: LoadResult,
-  ): Promise<void> | undefined =>
-    result.status === "match"
-      ? boundServerRouteContent?.prepare(location, result.matches)
-      : undefined;
-
+  // Prefetching the RSC payload before the commit keeps the previous page
+  // visible until the next server route can render. The closure reads
+  // `serverRouteContent`, declared below (it needs the router); beforeCommit
+  // only runs on navigations, long after both exist.
   const router = createRouter({
-    beforeCommit: prepareServerRoutes,
+    beforeCommit: (location, result) =>
+      result.status === "match"
+        ? serverRouteContent.prepare(location, result.matches)
+        : undefined,
     context: options.context,
     history: browserHistory(),
     routes: options.routes,
@@ -105,7 +95,6 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
   const serverRouteContent = createServerRouteContent(options, router);
-  boundServerRouteContent = serverRouteContent;
 
   // If the matched route was a `.server.tsx`, the document carries its RSC
   // payload. Newer payloads arrive as streamed segment frames; keep the old
@@ -314,7 +303,7 @@ interface ServerRouteContent extends ServerRouteContentStore {
   prepare(
     location: RouterLocation,
     matches: readonly RouteMatch[],
-  ): Promise<void> | undefined;
+  ): Promise<void>;
   receiveBuffered(payload: SerializedRscPayload, url: string): void;
   receiveSegment(
     segment: SerializedRscSegment,
@@ -589,17 +578,20 @@ function createServerRouteContent(
       });
       entry.dispose = combineDisposers(entry.dispose, unsubscribe);
     },
-    prepare(location, matches) {
+    // Pre-commit gate for navigations that mount a NEW server route: without
+    // a renderable entry, committing would swap the old page for an empty
+    // slot. Same-route URL changes are intentionally not gated — the entry
+    // stays mounted and renderActiveRoute refreshes it in place after the
+    // commit (stale content visible while revalidating).
+    async prepare(location, matches) {
       const match = firstServerRouteMatch(matches);
-      if (match === undefined) return undefined;
-      if (entries.has(match.routeId)) return undefined;
+      if (match === undefined) return;
 
-      const entry = startEntryFetch(match.routeId, rscRouteUrl(location));
-      const renderable = waitForEntryRenderable(entry);
-      if (renderable === undefined) {
-        return preloadEntryClientReferences(entry);
-      }
-      return renderable.then(() => preloadEntryClientReferences(entry));
+      const entry =
+        entries.get(match.routeId) ??
+        startEntryFetch(match.routeId, rscRouteUrl(location));
+      await waitForEntryRenderable(entry);
+      await preloadEntryClientReferences(entry);
     },
     render(routeId) {
       const entry = entries.get(routeId);

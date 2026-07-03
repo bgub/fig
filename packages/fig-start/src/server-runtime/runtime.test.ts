@@ -1,56 +1,13 @@
-import { createElement } from "@bgub/fig";
 import { Effect } from "effect";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
-import { createFileRoute, createRootRoute } from "../route.ts";
-import type { AnyRoute } from "../route.ts";
 import { StartConfigError, StartListenError } from "./errors.ts";
 import { closeNodeHttpServer } from "./node-http.ts";
 import { runStartRuntime, startRuntimeLayer } from "./runtime.ts";
-
-interface TestApp {
-  appUrl: string;
-  cleanup(): Promise<void>;
-  root: string;
-  routes: AnyRoute[];
-}
-
-async function makeTestApp(): Promise<TestApp> {
-  const root = await mkdtemp(join(tmpdir(), "fig-start-runtime-"));
-  const dist = join(root, "dist");
-  await mkdir(dist, { recursive: true });
-  await writeFile(join(dist, "client.js"), "export const ok = true;\n");
-  await writeFile(join(dist, "server.js"), "export {};\n");
-
-  return {
-    appUrl: pathToFileURL(join(dist, "server.js")).href,
-    cleanup: () => rm(root, { force: true, recursive: true }),
-    root,
-    routes: [
-      createRootRoute({
-        component: () => createElement("main", null, "Runtime route"),
-      }),
-      createFileRoute("/")({
-        component: () => createElement("h1", null, "Runtime home"),
-      }),
-    ],
-  };
-}
-
-function serverPort(server: { address(): unknown }): number {
-  const address = server.address();
-  if (typeof address !== "object" || address === null) {
-    throw new Error("Expected TCP server address.");
-  }
-  return (address as { port: number }).port;
-}
+import { makeTestApp, serverPort } from "./test-app.ts";
 
 describe("start runtime", () => {
   it("boots production mode through the shared layers", async () => {
-    const app = await makeTestApp();
+    const app = await makeTestApp("Runtime");
     const logs: string[] = [];
     const server = await runStartRuntime(
       startRuntimeLayer({
@@ -100,7 +57,7 @@ describe("start runtime", () => {
   });
 
   it("rejects with StartListenError when the port is taken", async () => {
-    const app = await makeTestApp();
+    const app = await makeTestApp("Runtime");
     const layerFor = (port: number) =>
       startRuntimeLayer({
         config: { appUrl: app.appUrl, env: {}, port },
@@ -122,7 +79,7 @@ describe("start runtime", () => {
   });
 
   it("releases shutdown-signal listeners when the server closes externally", async () => {
-    const app = await makeTestApp();
+    const app = await makeTestApp("Runtime");
     const before = process.listenerCount("SIGINT");
 
     const server = await runStartRuntime(

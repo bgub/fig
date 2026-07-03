@@ -22,7 +22,7 @@ export const listenNodeHttpServer = Effect.fn("listenNodeHttpServer")(
   },
 );
 
-export function startNodeHttpServer(
+function startNodeHttpServer(
   options: NodeHttpServerOptions,
 ): Effect.Effect<Server, StartListenError> {
   return Effect.callback<Server, StartListenError>((resume) => {

@@ -131,6 +131,12 @@ async function installServerRenderedDocument(
     );
 }
 
+function toRequest(input: RequestInfo | URL, init?: RequestInit): Request {
+  return input instanceof Request
+    ? input
+    : new Request(new URL(String(input), "http://localhost").href, init);
+}
+
 function installHandlerFetch(
   routeSet: readonly AnyRoute[] = routes,
 ): () => void {
@@ -139,13 +145,7 @@ function installHandlerFetch(
     routes: routeSet,
   });
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    const request =
-      input instanceof Request
-        ? input
-        : new Request(new URL(String(input), "http://localhost").href, init);
-    return handler(request);
-  };
+  globalThis.fetch = async (input, init) => handler(toRequest(input, init));
   return () => {
     globalThis.fetch = previousFetch;
   };
@@ -230,11 +230,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     const requests: Request[] = [];
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      const request =
-        input instanceof Request
-          ? input
-          : new Request(new URL(String(input), "http://localhost").href, init);
-      requests.push(request);
+      requests.push(toRequest(input, init));
       return previousFetch(input, init);
     };
 
@@ -260,16 +256,10 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     await installServerRenderedDocument("/");
     const restoreFetch = installHandlerFetch();
     const previousFetch = globalThis.fetch;
-    let releaseDash: () => void = () => undefined;
-    const dashGate = new Promise<void>((resolve) => {
-      releaseDash = resolve;
-    });
+    const dashGate = deferred<void>();
     globalThis.fetch = async (input, init) => {
-      const request =
-        input instanceof Request
-          ? input
-          : new Request(new URL(String(input), "http://localhost").href, init);
-      if (new URL(request.url).pathname === "/dash") await dashGate;
+      const request = toRequest(input, init);
+      if (new URL(request.url).pathname === "/dash") await dashGate.promise;
       return previousFetch(input, init);
     };
 
@@ -286,7 +276,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       expect(document.body.textContent).toContain("Home");
       expect(document.querySelector('[data-fig-rsc-slot="/dash"]')).toBeNull();
 
-      releaseDash();
+      dashGate.resolve(undefined);
       await navigation;
       await flush();
 

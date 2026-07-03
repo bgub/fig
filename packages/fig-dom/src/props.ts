@@ -195,6 +195,8 @@ function warnExtraHydratedAttributes(
   serverStyles: readonly string[],
   serverAttributes: readonly string[],
 ): void {
+  if (serverAttributes.length === 0 && serverStyles.length === 0) return;
+
   const expectedAttributes = new Set<string>();
   const type = elementName(element);
   const html = isHtmlElement(element);

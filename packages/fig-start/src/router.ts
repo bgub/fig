@@ -199,8 +199,7 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
 
   async function transitionTo(
     location: RouterLocation,
-    applyHistory: ((href: string) => void) | null,
-    redirectReplace: boolean | undefined,
+    options: { replace?: boolean; updateHistory: boolean },
   ): Promise<void> {
     const version = ++navigationVersion;
     setState({ ...state, status: "pending" });
@@ -208,36 +207,32 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
     if (version !== navigationVersion) return;
 
     if (result.status === "redirect") {
-      await navigate({ replace: redirectReplace, to: result.redirect.to });
+      await navigate({ replace: options.replace, to: result.redirect.to });
       return;
     }
 
     await beforeCommit?.(location, result);
     if (version !== navigationVersion) return;
 
-    applyHistory?.(location.href);
+    if (options.updateHistory && history !== null) {
+      if (options.replace === true) history.replace(location.href);
+      else history.push(location.href);
+    }
     commit(location, result);
   }
 
-  async function navigate(to: NavigateOptions | string): Promise<void> {
+  function navigate(to: NavigateOptions | string): Promise<void> {
     const options = typeof to === "string" ? { to } : to;
-    const location = buildLocation(options);
-
-    await transitionTo(
-      location,
-      (href) => {
-        if (history === null) return;
-        if (options.replace === true) history.replace(href);
-        else history.push(href);
-      },
-      options.replace,
-    );
+    return transitionTo(buildLocation(options), {
+      replace: options.replace,
+      updateHistory: true,
+    });
   }
 
   // For popstate: the browser already updated the URL, so load and commit
   // (with the same superseding and beforeCommit rules) without pushing.
   function sync(location: RouterLocation): Promise<void> {
-    return transitionTo(location, null, true);
+    return transitionTo(location, { replace: true, updateHistory: false });
   }
 
   return {

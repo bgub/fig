@@ -368,13 +368,9 @@ describe("RSC rendering", () => {
       loadClientReference: () => Promise.resolve(widgetModule),
     });
     processTestRscRows(cold, rows);
-    let thrown: unknown;
-    try {
-      evaluateRscNode(cold.getRoot());
-    } catch (error) {
-      thrown = error;
-    }
-    expect(String(thrown)).toContain("readPromise can only be called");
+    expect(() => evaluateRscNode(cold.getRoot())).toThrow(
+      "readPromise can only be called",
+    );
 
     // Preloading dedupes the module load and makes the render synchronous.
     let loads = 0;
