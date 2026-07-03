@@ -14,8 +14,6 @@ The short version: **the original Fig ideas are consistently better than their R
 
 ## Tier 2 — React carried over wholesale
 
-**focus/blur bubbling emulation is the one synthetic-event behavior Fig kept.** Fig correctly refused `mouseenter` emulation and `onChange` remapping, but natively non-bubbling `focus`/`blur` bubble through the Fig tree via capture delegation — while `focusin`/`focusout` (the native bubbling variants) also work. A native-DOM-literate user gets non-native behavior with no API-surface hint. Defensible for portal-crossing semantics, but it should be a documented decision or dropped; right now it's inherited.
-
 **Naming and surface habit-isms**, roughly in order of conviction:
 
 - `useReactiveEvent` — the name inverts the semantics; the project's own docs call it the "non-reactive event hook." `useEvent` or `useStableEvent`.
@@ -41,4 +39,4 @@ Worth saying explicitly, because the answer to the headline question is mostly "
 
 ## Sequencing
 
-Done so far: the RSC `onError` leak, the fig-data store-handle mutations (`root.data` + `readDataStore()`, effects run in the ambient store), the error-recovery loop (function `fallback` receives the error; `invalidateData` resets rejected entries), and the scheduler in full (Node-liveness fix, dead-surface prune, commit → `requestPaint` wiring, folded into fig-reconciler as an internal module — the published `@bgub/fig-scheduler` package is gone). Next: the signal-for-actions contract and the RSC naming are the ones to settle **before** anything freezes, because they're wire formats or call-signature contracts; JSX types are the biggest single ergonomics investment; the naming cleanups can trail.
+Done so far: the RSC `onError` leak, the fig-data store-handle mutations (`root.data` + `readDataStore()`, effects run in the ambient store), the error-recovery loop (function `fallback` receives the error; `invalidateData` resets rejected entries), the scheduler in full (Node-liveness fix, dead-surface prune, commit → `requestPaint` wiring, folded into fig-reconciler as an internal module — the published `@bgub/fig-scheduler` package is gone), and the focus/blur decision: the React-style bubbling emulation is deleted — all non-bubbling events attach directly with native semantics, and ancestor focus tracking uses `focusin`/`focusout`. Next: the signal-for-actions contract and the RSC naming are the ones to settle **before** anything freezes, because they're wire formats or call-signature contracts; JSX types are the biggest single ergonomics investment; the naming cleanups can trail.

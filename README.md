@@ -34,6 +34,11 @@ Deliberate divergences:
   fresh signal. Production builds strip these checks.
 - DOM events use `events={[on("click", handler)]}` with native events and an
   `AbortSignal`, not `onClick` props.
+- Event propagation is native, with no exceptions: non-bubbling events —
+  `focus` and `blur` included — fire only on their target. Fig does not
+  emulate React's bubbling `focus`/`blur`; observe focus changes from an
+  ancestor with the platform's bubbling variants, `focusin`/`focusout` (or a
+  `capture: true` listener, as in the real DOM).
 - `useReactiveEvent(handler)` declares stable, non-reactive event handlers for
   effect-held callbacks: the handler always sees the latest committed render,
   receives a trailing `AbortSignal`, and aborts the previous invocation on

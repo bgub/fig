@@ -126,6 +126,8 @@ const discreteEvents = new Set([
   "contextmenu",
   "dblclick",
   "focus",
+  "focusin",
+  "focusout",
   "input",
   "keydown",
   "keyup",
@@ -156,16 +158,17 @@ const continuousEvents = new Set([
 const hydrationEvents = new Set([
   ...discreteEvents,
   ...continuousEvents,
-  "blur",
-  "focus",
   "mouseenter",
   "mouseleave",
 ]);
-// Non-bubbling events (other than focus/blur, which use capture delegation
-// with Fig bubble semantics) attach directly to their element: a delegated
-// bubble-phase root listener would never fire for them in a real browser.
+// Non-bubbling events attach directly to their element with native
+// semantics: a delegated bubble-phase root listener would never fire for
+// them in a real browser. focus/blur included — the platform's bubbling
+// variants are focusin/focusout, which delegate like any bubbling event, so
+// Fig does not emulate bubbling focus the way React does.
 const nonDelegatedEvents = new Set([
   "abort",
+  "blur",
   "cancel",
   "canplay",
   "canplaythrough",
@@ -175,6 +178,7 @@ const nonDelegatedEvents = new Set([
   "encrypted",
   "ended",
   "error",
+  "focus",
   "invalid",
   "load",
   "loadeddata",
@@ -279,6 +283,14 @@ function containerRecord(container: Container): ContainerRecord {
   return record;
 }
 
+/**
+ * Declares a listener for the `events` prop. Events keep their native
+ * semantics: bubbling events are delegated through the Fig tree (including
+ * portals), while non-bubbling events — `focus` and `blur` included — attach
+ * directly to the element and fire only there. Fig does not emulate React's
+ * bubbling `focus`/`blur`; to observe focus changes from an ancestor, use
+ * the platform's bubbling variants, `focusin` and `focusout`.
+ */
 export function on<K extends keyof HTMLElementEventMap>(
   type: K,
   callback: EventCallback<HTMLElementEventMap[K]>,
@@ -589,7 +601,7 @@ function hydrateQueuedEvent(
 }
 
 // Two-phase dispatch used where a single native listener stands in for both
-// phases (focus-like capture delegation and queued replays). The bubble
+// phases (queued replayable events after selective hydration). The bubble
 // phase extracts after capture handlers ran, mirroring live DOM listener
 // semantics; one propagation state spans both phases.
 function dispatchTwoPhase(
@@ -828,7 +840,7 @@ function attachDelegatedEventSlot(
     root,
     listenerTarget,
     slot.type,
-    rootListenerCapture(slot),
+    slot.options.capture,
     slot.options.passive,
   );
 }
@@ -849,16 +861,7 @@ function acquireRootListener(
       capture,
       count: 0,
       listener: (event) =>
-        captureDelegated(type)
-          ? dispatchFocusLikeEvent(root, listenerTarget, type, passive, event)
-          : dispatchRootEvent(
-              root,
-              listenerTarget,
-              type,
-              capture,
-              passive,
-              event,
-            ),
+        dispatchRootEvent(root, listenerTarget, type, capture, passive, event),
       passive,
       type,
     };
@@ -922,29 +925,12 @@ function detachDelegatedEventSlot(slot: EventSlot): void {
   releaseRootListener(listenerTarget, rootListenerKey(slot));
 }
 
-function dispatchFocusLikeEvent(
-  root: Container,
-  listenerTarget: Container,
-  type: string,
-  passive: boolean,
-  event: Event,
-): void {
-  if (listenerTargetFor(event.target) !== listenerTarget) return;
-  if (hydrateForEvent(root, type, event) === "blocked") return;
-
-  dispatchTwoPhase(root, listenerTarget, type, passive, event);
-}
-
 function rootListenerMap(root: Container): Map<string, RootListener> {
   return containerRecord(root).listeners;
 }
 
 function rootListenerKey(slot: EventSlot): string {
-  return `${slot.type}:${rootListenerCapture(slot)}:${slot.options.passive}`;
-}
-
-function rootListenerCapture(slot: EventSlot): boolean {
-  return captureDelegated(slot.type) || slot.options.capture;
+  return `${slot.type}:${slot.options.capture}:${slot.options.passive}`;
 }
 
 function eventPath(
@@ -1181,10 +1167,6 @@ function passiveHydrationEvent(type: string): boolean {
 
 function direct(type: string): boolean {
   return nonDelegatedEvents.has(type);
-}
-
-function captureDelegated(type: string): boolean {
-  return type === "blur" || type === "focus";
 }
 
 function isContainer(node: unknown): node is Container {

@@ -415,8 +415,8 @@ describe("@bgub/fig-dom events", () => {
     expect(calls).toEqual(["child:first", "child:second"]);
   });
 
-  it("delegates focus-like events through capture with Fig bubble semantics", () => {
-    for (const type of ["focus", "blur"]) {
+  it("delegates the native bubbling focusin/focusout with Fig bubble semantics", () => {
+    for (const type of ["focusin", "focusout"]) {
       const calls: string[] = [];
       const container = new FakeElement("root");
 
@@ -443,7 +443,7 @@ describe("@bgub/fig-dom events", () => {
       const main = container.childNodes[0] as FakeElement;
       const button = main.childNodes[0] as FakeElement;
 
-      expect(container.listenerSets[type]).toHaveLength(1);
+      expect(container.listenerSets[type]).toHaveLength(2);
       expect(button.listenerSets[type]).toBeUndefined();
 
       button.dispatch(type);
@@ -456,8 +456,17 @@ describe("@bgub/fig-dom events", () => {
     }
   });
 
-  it("uses direct listeners for non-bubbling scroll and enter/leave events", () => {
-    for (const type of ["scroll", "mouseenter", "mouseleave"]) {
+  it("uses direct listeners for non-bubbling events, focus/blur included", () => {
+    // No React-style bubbling emulation: focus and blur keep their native
+    // non-bubbling semantics, so only the target's own listener fires.
+    // Ancestor-level focus tracking uses focusin/focusout (test above).
+    for (const type of [
+      "scroll",
+      "mouseenter",
+      "mouseleave",
+      "focus",
+      "blur",
+    ]) {
       const calls: string[] = [];
       const container = new FakeElement("root");
 
