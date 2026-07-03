@@ -35,35 +35,8 @@ import {
   renderToString,
 } from "./index.ts";
 import { jsString } from "./protocol.ts";
-
-async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let output = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return output + decoder.decode();
-    output += decoder.decode(value, { stream: true });
-  }
-}
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  reject(reason?: unknown): void;
-  resolve(value: T): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let reject: Deferred<T>["reject"] = () => undefined;
-  let resolve: Deferred<T>["resolve"] = () => undefined;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, reject, resolve };
-}
+import { deferred } from "./shared.ts";
+import { readStream } from "./test-utils.ts";
 
 async function waitForMicrotasks(): Promise<void> {
   await Promise.resolve();

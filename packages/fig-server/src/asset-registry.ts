@@ -6,7 +6,7 @@ import {
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 
-export class ResourceRegistry {
+export class AssetResourceRegistry {
   private readonly emittedResources = new Set<string>();
   private readonly resources = new Map<string, FigAssetResource>();
   private readonly stylesheetIds = new Map<string, string>();
@@ -18,7 +18,7 @@ export class ResourceRegistry {
     return this.canonical(resource).added;
   }
 
-  write(resource: FigAssetResource, sink: ResourceSink): string | null {
+  write(resource: FigAssetResource, sink: AssetSink): string | null {
     const { key, resource: current } = this.canonical(resource);
     const id = this.revealBlockerId(key, current);
 
@@ -26,7 +26,7 @@ export class ResourceRegistry {
     if (this.emittedResources.has(key)) return id;
 
     this.emittedResources.add(key);
-    writeResourceTag(sink, current, id);
+    writeAssetTag(sink, current, id);
     return id;
   }
 
@@ -41,7 +41,7 @@ export class ResourceRegistry {
 
     for (const resource of this.resources.values()) {
       if (assetResourceDestination(resource) === "head") {
-        writeResourceTag(sink, resource, null);
+        writeAssetTag(sink, resource, null);
       }
     }
 
@@ -57,8 +57,8 @@ export class ResourceRegistry {
     const current = this.resources.get(key);
 
     if (current !== undefined) {
-      if (resourceSignature(current) !== resourceSignature(resource)) {
-        throw new ResourceConflictError(key, current, resource);
+      if (assetSignature(current) !== assetSignature(resource)) {
+        throw new AssetResourceConflictError(key, current, resource);
       }
 
       return { added: false, key, resource: current };
@@ -92,7 +92,7 @@ export class ResourceRegistry {
   }
 }
 
-export class ResourceConflictError extends Error {
+export class AssetResourceConflictError extends Error {
   constructor(
     key: string,
     current: FigAssetResource,
@@ -106,13 +106,13 @@ export class ResourceConflictError extends Error {
   }
 }
 
-interface ResourceSink {
+interface AssetSink {
   nonce?: string;
   write(chunk: string): void;
 }
 
-function writeResourceTag(
-  sink: ResourceSink,
+function writeAssetTag(
+  sink: AssetSink,
   resource: FigAssetResource,
   id: string | null,
 ): void {
@@ -151,11 +151,11 @@ function writeResourceTag(
   }
 }
 
-function withNonce(sink: ResourceSink, props: Props): Props {
+function withNonce(sink: AssetSink, props: Props): Props {
   return sink.nonce === undefined ? props : { ...props, nonce: sink.nonce };
 }
 
-function resourceSignature(resource: FigAssetResource): string {
+function assetSignature(resource: FigAssetResource): string {
   switch (resource.kind) {
     case "stylesheet":
       return signature(

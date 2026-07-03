@@ -6,18 +6,13 @@ import type {
   ServerRenderOptions,
 } from "./types.ts";
 
-const contentType = "text/html; charset=utf-8";
+export { escapeAttribute, escapeText } from "./html.ts";
 
 export function renderToReadableStream(
   node: FigNode,
   options: ServerRenderOptions = {},
 ): ServerFragmentRenderResult {
-  const request = createServerRenderRequest(node, options);
-
-  return {
-    ...request,
-    contentType,
-  };
+  return createServerRenderRequest(node, options);
 }
 
 export function renderToDocumentStream(
@@ -27,12 +22,13 @@ export function renderToDocumentStream(
   const request = createServerRenderRequest(node, options, {
     document: true,
   });
-  request.headReady.catch(() => undefined);
 
+  // Document mode owns the head: expose the stream result without the
+  // fragment-only head accessors.
   return {
     abort: (reason) => request.abort(reason),
     allReady: request.allReady,
-    contentType,
+    contentType: request.contentType,
     getData: () => request.getData(),
     shellReady: request.shellReady,
     stream: request.stream,
@@ -44,8 +40,6 @@ export async function renderToString(
   options: ServerRenderOptions = {},
 ): Promise<string> {
   const result = renderToReadableStream(node, options);
-  result.headReady.catch(() => undefined);
-  result.shellReady.catch(() => undefined);
   await result.allReady;
   return readStreamToString(result.stream);
 }
@@ -55,27 +49,22 @@ export async function renderDocumentToString(
   options: ServerRenderOptions = {},
 ): Promise<string> {
   const result = renderToDocumentStream(node, options);
-  result.shellReady.catch(() => undefined);
   await result.allReady;
   return readStreamToString(result.stream);
 }
 
-function readStreamToString(
+async function readStreamToString(
   stream: ReadableStream<Uint8Array>,
 ): Promise<string> {
   const reader = stream.getReader();
   const textDecoder = new TextDecoder();
   let output = "";
 
-  return reader.read().then(function readNext(result): Promise<string> {
-    if (result.done) {
-      output += textDecoder.decode();
-      return Promise.resolve(output);
-    }
-
-    output += textDecoder.decode(result.value, { stream: true });
-    return reader.read().then(readNext);
-  });
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return output + textDecoder.decode();
+    output += textDecoder.decode(value, { stream: true });
+  }
 }
 
 export type {
@@ -86,5 +75,4 @@ export type {
   ServerAssetDestination,
   ServerAssetErrorInfo,
   ServerRenderOptions,
-  ServerRenderResult,
 } from "./types.ts";

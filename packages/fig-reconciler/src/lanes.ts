@@ -1,3 +1,4 @@
+import { isThenable } from "@bgub/fig/internal";
 import {
   IdlePriority,
   ImmediatePriority,
@@ -408,14 +409,6 @@ function releaseAsyncTransitionLane(lane: Lane, index: number): void {
   if (asyncTransitionLaneCounts[index] === 0) {
     asyncTransitionLanes &= ~lane;
   }
-}
-
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return (
-    (typeof value === "object" || typeof value === "function") &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === "function"
-  );
 }
 
 function computeExpirationTime(lane: Lane, currentTime: number): number {

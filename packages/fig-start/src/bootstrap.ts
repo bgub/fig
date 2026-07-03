@@ -5,7 +5,6 @@ export const ROUTER_STATE_SCRIPT_ID = "__fig_start_state__";
 export const DATA_SCRIPT_ID = "__fig_start_data__";
 export const DATA_FRAME_ATTR = "data-fig-data-frame";
 export const DATA_STREAM_GLOBAL = "__figStartData";
-export const RSC_PAYLOAD_SCRIPT_ID = "__fig_start_rsc__";
 export const RSC_SEGMENTS_SCRIPT_ID = "__fig_start_rsc_segments__";
 export const RSC_FRAME_ATTR = "data-fig-rsc-frame";
 export const RSC_STREAM_GLOBAL = "__figStartRSC";
@@ -26,13 +25,6 @@ export interface SerializedRouterState {
   loaderData: Record<string, unknown>;
 }
 
-export interface SerializedRscPayload {
-  // Legacy buffered payload shape. New server output streams segment frames, but
-  // the client keeps this path so older documents still hydrate.
-  routeId: string;
-  rows: string;
-}
-
 export interface SerializedRscSegment {
   // Segment id is separate from route id so the transport can grow from today's
   // single server-route leaf into nested route/layout segments later.
@@ -47,6 +39,3 @@ export interface SerializedRscFrame {
 
 // Whether an RSC payload contains any client references (needs a client-reference
 // resolver to render on the client).
-export function hasClientReferences(rows: string): boolean {
-  return rows.includes('"tag":"client"');
-}

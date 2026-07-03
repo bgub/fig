@@ -60,23 +60,11 @@ interface ServerStreamRenderResult {
   stream: ReadableStream<Uint8Array>;
 }
 
-export interface ServerDocumentRenderResult extends ServerStreamRenderResult {}
+// Document mode is the fragment result minus the head accessors: the
+// document renderer injects the sealed head into the stream itself.
+export type ServerDocumentRenderResult = ServerStreamRenderResult;
 
 export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
   getHead(): string;
   headReady: Promise<string>;
 }
-
-export interface ServerRenderRequest {
-  abort(reason?: unknown): void;
-  allReady: Promise<void>;
-  getData(): FigDataHydrationEntry[];
-  getHead(): string;
-  headReady: Promise<string>;
-  shellReady: Promise<void>;
-  stream: ReadableStream<Uint8Array>;
-}
-
-export type ServerRenderResult = ServerFragmentRenderResult;
-
-export type ServerRenderable = FigNode;

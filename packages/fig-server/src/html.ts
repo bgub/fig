@@ -267,7 +267,7 @@ function validateAttributeName(name: string): void {
   }
 }
 
-function escapeText(value: string): string {
+export function escapeText(value: string): string {
   return value.replace(/[&<>]/g, (character) => {
     if (character === "&") return "&amp;";
     if (character === "<") return "&lt;";

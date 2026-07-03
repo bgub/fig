@@ -39,6 +39,11 @@ import {
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
   type RenderDispatcher,
+  isThenable,
+  readThenable,
+  trackThenable,
+  type Thenable,
+  describeInvalidChild,
 } from "@bgub/fig/internal";
 import {
   createDataStore,
@@ -48,12 +53,10 @@ import {
 import type { DataResourceKeyInput } from "@bgub/fig-data";
 import {
   type ContextValues,
+  type Deferred,
   cloneContextValues,
   createStaticDispatcher,
-  describeInvalidChild,
-  isThenable,
-  readThenable,
-  type Thenable,
+  deferred,
   withContextValue,
 } from "./shared.ts";
 
@@ -79,29 +82,28 @@ export interface RscRootLike {
 
 // Stream-safe asset resources only (no head-only title/meta). These are the
 // FigAssetResource subtypes whose fields are already JSON scalars, so they travel as
-// plain data with no implementation detail exposed.
+// plain data with no implementation detail exposed. The per-kind field lists
+// are the single source of truth: the wire type derives from them, and
+// serializeAssetResource picks exactly these fields.
+const streamedAssetFields = {
+  font: ["crossOrigin", "fetchPriority", "href", "kind", "type"],
+  modulepreload: ["crossOrigin", "fetchPriority", "href", "kind"],
+  preconnect: ["crossOrigin", "href", "kind"],
+  preload: ["as", "crossOrigin", "fetchPriority", "href", "kind", "type"],
+  script: ["async", "crossOrigin", "defer", "kind", "module", "src"],
+  stylesheet: ["crossOrigin", "href", "kind", "media", "precedence"],
+} as const;
+
 type SerializedAssetResource =
-  | Pick<
-      StylesheetResource,
-      "crossOrigin" | "href" | "kind" | "media" | "precedence"
-    >
-  | Pick<
-      PreloadResource,
-      "as" | "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
-    >
+  | Pick<StylesheetResource, (typeof streamedAssetFields.stylesheet)[number]>
+  | Pick<PreloadResource, (typeof streamedAssetFields.preload)[number]>
   | Pick<
       ModulePreloadResource,
-      "crossOrigin" | "fetchPriority" | "href" | "kind"
+      (typeof streamedAssetFields.modulepreload)[number]
     >
-  | Pick<
-      ScriptResource,
-      "async" | "crossOrigin" | "defer" | "kind" | "module" | "src"
-    >
-  | Pick<
-      FontResource,
-      "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
-    >
-  | Pick<PreconnectResource, "crossOrigin" | "href" | "kind">;
+  | Pick<ScriptResource, (typeof streamedAssetFields.script)[number]>
+  | Pick<FontResource, (typeof streamedAssetFields.font)[number]>
+  | Pick<PreconnectResource, (typeof streamedAssetFields.preconnect)[number]>;
 
 type RscRow =
   | { tag: "assets"; value: SerializedAssetResource[] }
@@ -172,6 +174,10 @@ export interface RscResponse {
   preloadClientReferences(): Promise<void>;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
   processStringChunk(chunk: string): void;
+  // Resolves when the root row (id 0) of the initial payload has been
+  // decoded. Never rejects; race with a timeout or the processing promise
+  // for streams that may end without a root.
+  readonly rootReady: Promise<void>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -193,25 +199,23 @@ class RscRequestCancelledError extends Error {
 }
 
 type RscRequest = {
-  allReady: Promise<void>;
+  allReady: Deferred<void>;
   boundaryIds: Set<string> | null;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
-  closeAllReady(): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedAssetKeys: Set<string>;
   emittedDataKeys: Set<string>;
-  nextId: number;
   nextRowId: number;
+  nextUseId: number;
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: string[];
-  recoverAllReady(error: unknown): void;
   refreshBoundary: string | null;
   status: "opening" | "open" | "closed";
   stream: ReadableStream<Uint8Array>;
-  textEncoder: TextEncoder;
+  workScheduled: boolean;
 };
 
 type Task = {
@@ -225,10 +229,15 @@ type Component = (props: Props & { children?: FigNode }) => unknown;
 
 type RenderFrame = {
   contextValues: ContextValues;
+  // Built lazily on the first function component; reused for the whole task
+  // (the dispatcher reads context through the frame, so it stays current).
+  dispatcher: RenderDispatcher | null;
   request: RscRequest;
 };
 
 type DecodedChunk = {
+  decoded: unknown;
+  hasDecoded: boolean;
   model: RscModel | null;
   promise: Promise<unknown>;
   reject(reason: unknown): void;
@@ -238,24 +247,17 @@ type DecodedChunk = {
 };
 
 const contentType = "text/x-component; charset=utf-8";
+const textEncoder = new TextEncoder();
 const RscBoundarySymbol = Symbol.for("fig.rsc-boundary");
 
 type RscBoundaryProps = { children?: FigNode; id: string };
 
-interface RscBoundaryComponent {
+export const RscBoundary: {
   (props: RscBoundaryProps): FigNode;
   readonly $$typeof: symbol;
-}
-
-const RscBoundaryImpl: RscBoundaryComponent = Object.assign(
-  (props: RscBoundaryProps) => props.children,
-  { $$typeof: RscBoundarySymbol },
-);
-
-export const RscBoundary: (props: {
-  children?: FigNode;
-  id: string;
-}) => FigNode = RscBoundaryImpl;
+} = Object.assign((props: RscBoundaryProps) => props.children, {
+  $$typeof: RscBoundarySymbol,
+});
 
 export function renderToRscStream(
   node: FigNode,
@@ -268,7 +270,11 @@ export function renderToRscStream(
     options.dataContext,
     options.dataPartition,
   );
-  return { allReady: request.allReady, contentType, stream: request.stream };
+  return {
+    allReady: request.allReady.promise,
+    contentType,
+    stream: request.stream,
+  };
 }
 
 export function createRscResponse(
@@ -346,19 +352,11 @@ function createRscRequest(
   dataContext: unknown,
   dataPartition: DataResourceKeyInput | undefined,
 ): RscRequest {
-  let resolveAllReady: () => void = () => undefined;
-  let rejectAllReady: (error: unknown) => void = () => undefined;
-  const allReady = new Promise<void>((resolve, reject) => {
-    resolveAllReady = resolve;
-    rejectAllReady = reject;
-  });
-
   const request: RscRequest = {
-    allReady,
+    allReady: deferred<void>(),
     boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
     clientReferenceRows: new Map(),
     clientReferenceAssets,
-    closeAllReady: resolveAllReady,
     controller: null,
     dataStore: createDataStore<object, null>({
       context: dataContext ?? {},
@@ -368,16 +366,15 @@ function createRscRequest(
     }),
     emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
-    nextId: 0,
     nextRowId: 1,
+    nextUseId: 0,
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
-    recoverAllReady: rejectAllReady,
     refreshBoundary,
     status: "opening",
     stream: null as never,
-    textEncoder: new TextEncoder(),
+    workScheduled: false,
   };
 
   const stream = new ReadableStream<Uint8Array>({
@@ -392,7 +389,11 @@ function createRscRequest(
   request.stream = stream;
   request.pingedTasks.push(createTask(request, 0, "node", node, new Map()));
 
-  queueMicrotask(() => performWork(request));
+  request.workScheduled = true;
+  queueMicrotask(() => {
+    request.workScheduled = false;
+    performWork(request);
+  });
 
   return request;
 }
@@ -400,33 +401,30 @@ function createRscRequest(
 interface RscClientReferenceEntry {
   component?: ElementType;
   load: Promise<unknown>;
-  module?: unknown;
-  // `module` alone can't signal readiness: a module may legitimately be
-  // undefined-ish, and `resolved` also distinguishes fulfilled from rejected
-  // (rejected loads keep resolved=false so the component reads the rejection).
-  resolved: boolean;
 }
 
 class RscResponseImpl implements RscResponse {
   private readonly assetResources = new Map<string, FigAssetResource>();
   private readonly boundaries = new Map<string, RscModel>();
+  private readonly decodedBoundaries = new Map<string, FigNode>();
   private readonly clientReferences = new Map<
     string,
     RscClientReferenceRecord
   >();
   private readonly chunks = new Map<number, DecodedChunk>();
   // One entry per loader-backed reference id: stable component identity keeps
-  // island state across re-decodes, and the resolved-module fast path lets an
-  // already-loaded reference render synchronously instead of suspending on
-  // its first read. (The deeper fix would be instrumenting resolved thenables
-  // in the reconciler's readThenable so every readPromise caller — lazy(),
-  // hydration gates — gets the same fast path; that touches Suspense
-  // semantics, so it lives here for now.)
+  // island state across re-decodes, and each load is registered with
+  // trackThenable at creation, so a reference whose module settled before its
+  // first render read resolves synchronously instead of suspending.
   private readonly clientReferenceEntries = new Map<
     string,
     RscClientReferenceEntry
   >();
   private listeners = new Set<() => void>();
+  private resolveRootReady: () => void = () => undefined;
+  readonly rootReady: Promise<void> = new Promise((resolve) => {
+    this.resolveRootReady = resolve;
+  });
   private maxRowId = 0;
   private pendingData: FigDataHydrationEntry[] = [];
   private rootData: FigDataStoreHandle | null = null;
@@ -525,12 +523,20 @@ class RscResponseImpl implements RscResponse {
 
     if (row.tag === "refresh") {
       this.boundaries.set(row.boundary, row.value);
+      // Refreshed content must reach its slot through fresh element
+      // identities (slots read the boundaries map without subscribing), so
+      // drop every decode cache; the caches only need to survive the common
+      // per-notify and per-re-render paths, and refreshes are rare.
+      this.invalidateDecodeCaches();
       this.notify();
       return;
     }
 
     resolveDecodedRow(this, row);
-    if (row.id === 0) this.notify();
+    if (row.id === 0) {
+      this.resolveRootReady();
+      this.notify();
+    }
   }
 
   processStream(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -538,16 +544,17 @@ class RscResponseImpl implements RscResponse {
   }
 
   processStringChunk(chunk: string): void {
-    this.stringBuffer += chunk;
+    const buffer = this.stringBuffer + chunk;
+    let start = 0;
 
-    while (true) {
-      const newlineIndex = this.stringBuffer.indexOf("\n");
-      if (newlineIndex === -1) return;
-
-      const line = this.stringBuffer.slice(0, newlineIndex);
-      this.stringBuffer = this.stringBuffer.slice(newlineIndex + 1);
-      this.processLine(line);
+    for (;;) {
+      const newlineIndex = buffer.indexOf("\n", start);
+      if (newlineIndex === -1) break;
+      this.processLine(buffer.slice(start, newlineIndex));
+      start = newlineIndex + 1;
     }
+
+    this.stringBuffer = start === 0 ? buffer : buffer.slice(start);
   }
 
   subscribe(listener: () => void): () => void {
@@ -557,8 +564,24 @@ class RscResponseImpl implements RscResponse {
     };
   }
 
+  private invalidateDecodeCaches(): void {
+    this.decodedBoundaries.clear();
+    for (const chunk of this.chunks.values()) {
+      chunk.decoded = undefined;
+      chunk.hasDecoded = false;
+    }
+  }
+
   readBoundary(id: string, initial: RscModel): FigNode {
-    return decodeModel(this, this.boundaries.get(id) ?? initial) as FigNode;
+    let decoded = this.decodedBoundaries.get(id);
+    if (decoded === undefined) {
+      decoded = decodeModel(
+        this,
+        this.boundaries.get(id) ?? initial,
+      ) as FigNode;
+      this.decodedBoundaries.set(id, decoded);
+    }
+    return decoded;
   }
 
   readChunk(id: number): FigNode {
@@ -566,7 +589,15 @@ class RscResponseImpl implements RscResponse {
     if (chunk.status === "rejected") throw chunk.value;
     if (chunk.status === "pending") readPromise(chunk.promise);
     if (chunk.model === null) return chunk.value as FigNode;
-    return decodeModel(this, chunk.model) as FigNode;
+    // Decoded trees are cached per chunk: models are immutable once resolved,
+    // and stable element identities let the client reconciler bail out of
+    // unchanged subtrees instead of re-rendering the whole payload on every
+    // notify.
+    if (!chunk.hasDecoded) {
+      chunk.decoded = decodeModel(this, chunk.model);
+      chunk.hasDecoded = true;
+    }
+    return chunk.decoded as FigNode;
   }
 
   decodeClientReference(metadata: RscClientReferenceMetadata): ElementType {
@@ -583,10 +614,10 @@ class RscResponseImpl implements RscResponse {
 
       entry.component = function RscClientComponent(props: Props) {
         if (type === null) {
-          const moduleValue = entry.resolved
-            ? entry.module
-            : readPromise(entry.load);
-          type = resolveClientReferenceExport(moduleValue, metadata.id);
+          type = resolveClientReferenceExport(
+            readPromise(entry.load),
+            metadata.id,
+          );
         }
         return createElement(type, props);
       };
@@ -616,19 +647,11 @@ class RscResponseImpl implements RscResponse {
   ): RscClientReferenceEntry {
     let entry = this.clientReferenceEntries.get(metadata.id);
     if (entry === undefined) {
-      const created: RscClientReferenceEntry = {
-        load: load(metadata),
-        resolved: false,
-      };
-      entry = created;
-      this.clientReferenceEntries.set(metadata.id, created);
-      void created.load.then(
-        (value) => {
-          created.module = value;
-          created.resolved = true;
-        },
-        () => undefined,
-      );
+      entry = { load: load(metadata) };
+      this.clientReferenceEntries.set(metadata.id, entry);
+      // Track immediately: once the module settles, the first render read
+      // resolves synchronously instead of suspending for a retry beat.
+      trackThenable(entry.load);
     }
     return entry;
   }
@@ -720,7 +743,7 @@ function retryTask(request: RscRequest, task: Task): void {
 
 function finishTask(request: RscRequest): void {
   request.pendingTasks -= 1;
-  if (request.pendingTasks === 0) request.closeAllReady();
+  if (request.pendingTasks === 0) request.allReady.resolve(undefined);
 }
 
 function emitDataRows(request: RscRequest): void {
@@ -747,7 +770,7 @@ function createRenderFrame(
   request: RscRequest,
   contextValues: ContextValues,
 ): RenderFrame {
-  return { contextValues, request };
+  return { contextValues, dispatcher: null, request };
 }
 
 function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
@@ -763,8 +786,8 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
       frame.request.dataStore.preloadData(resource, args);
     },
     useId() {
-      const id = `fig-rsc-${frame.request.nextId.toString(32)}`;
-      frame.request.nextId += 1;
+      const id = `fig-rsc-${frame.request.nextUseId.toString(32)}`;
+      frame.request.nextUseId += 1;
       return id;
     },
     updateError: "State updates are not allowed during RSC render.",
@@ -773,7 +796,7 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
 
 function serializeNode(node: FigNode, frame: RenderFrame): RscModel {
   if (Array.isArray(node)) {
-    return collectChildren(node).map((child) =>
+    return flattenChildArrays(node).map((child) =>
       serializeNodeOrLazy(child, frame),
     );
   }
@@ -887,7 +910,8 @@ function serializeFunctionComponent(
   props: Props,
   frame: RenderFrame,
 ): RscModel {
-  const previousDispatcher = setCurrentDispatcher(createRscDispatcher(frame));
+  frame.dispatcher ??= createRscDispatcher(frame);
+  const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
 
   try {
@@ -1102,66 +1126,16 @@ function serializeAssetResource(
   // The RSC asset wire format is descriptor-only and intentionally does not
   // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
   // SSR/head resources still round-trip keys through data-fig-resource-key.
-  switch (resource.kind) {
-    case "stylesheet":
-      return optionalFields({
-        crossOrigin: resource.crossOrigin,
-        href: resource.href,
-        kind: resource.kind,
-        media: resource.media,
-        precedence: resource.precedence,
-      });
-    case "preload":
-      return optionalFields({
-        as: resource.as,
-        crossOrigin: resource.crossOrigin,
-        fetchPriority: resource.fetchPriority,
-        href: resource.href,
-        kind: resource.kind,
-        type: resource.type,
-      });
-    case "modulepreload":
-      return optionalFields({
-        crossOrigin: resource.crossOrigin,
-        fetchPriority: resource.fetchPriority,
-        href: resource.href,
-        kind: resource.kind,
-      });
-    case "script":
-      return optionalFields({
-        async: resource.async,
-        crossOrigin: resource.crossOrigin,
-        defer: resource.defer,
-        kind: resource.kind,
-        module: resource.module,
-        src: resource.src,
-      });
-    case "font":
-      return optionalFields({
-        crossOrigin: resource.crossOrigin,
-        fetchPriority: resource.fetchPriority,
-        href: resource.href,
-        kind: resource.kind,
-        type: resource.type,
-      });
-    case "preconnect":
-      return optionalFields({
-        crossOrigin: resource.crossOrigin,
-        href: resource.href,
-        kind: resource.kind,
-      });
-    case "title":
-    case "meta":
-      throw new Error("Head-only resources cannot be serialized to RSC.");
+  if (resource.kind === "title" || resource.kind === "meta") {
+    throw new Error("Head-only resources cannot be serialized to RSC.");
   }
-}
 
-function optionalFields<T extends object>(input: T): T {
   const output: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) output[key] = value;
+  for (const field of streamedAssetFields[resource.kind]) {
+    const value = (resource as unknown as Record<string, unknown>)[field];
+    if (value !== undefined) output[field] = value;
   }
-  return output as T;
+  return output as SerializedAssetResource;
 }
 
 function emitRow(request: RscRequest, row: RscRow): void {
@@ -1172,17 +1146,24 @@ function emitRow(request: RscRequest, row: RscRow): void {
 function pingTask(request: RscRequest, task: Task): void {
   if (request.status === "closed") return;
   request.pingedTasks.push(task);
-  queueMicrotask(() => performWork(request));
+  // Many thenables settling in one tick ping many tasks; one performWork
+  // pass drains them all, so schedule at most one.
+  if (request.workScheduled) return;
+  request.workScheduled = true;
+  queueMicrotask(() => {
+    request.workScheduled = false;
+    performWork(request);
+  });
 }
 
 function flushRows(request: RscRequest): void {
   if (request.controller === null || request.status === "closed") return;
   if (request.status === "opening") return;
 
-  for (const row of request.queuedRows) {
-    request.controller.enqueue(request.textEncoder.encode(row));
+  if (request.queuedRows.length > 0) {
+    request.controller.enqueue(textEncoder.encode(request.queuedRows.join("")));
+    request.queuedRows = [];
   }
-  request.queuedRows = [];
 
   if (request.pendingTasks === 0) {
     request.status = "closed";
@@ -1195,15 +1176,18 @@ function closeWithError(request: RscRequest, error: unknown): void {
   if (request.status === "closed") return;
   request.status = "closed";
   request.dataStore.dispose();
-  request.recoverAllReady(error);
+  request.allReady.reject(error);
   request.controller?.error(error);
 }
 
-function collectChildren(children: FigChild[]): FigChild[] {
+// Wire-format flattening only: unlike the shared collectChildren, this keeps
+// empty children and does NOT merge adjacent text — the client decodes rows
+// and re-collects children itself, so merging here would double-apply.
+function flattenChildArrays(children: FigChild[]): FigChild[] {
   const collected: FigChild[] = [];
 
   for (const child of children) {
-    if (Array.isArray(child)) collected.push(...collectChildren(child));
+    if (Array.isArray(child)) collected.push(...flattenChildArrays(child));
     else collected.push(child);
   }
 
@@ -1455,17 +1439,14 @@ function getOrCreateChunk(
   const existing = chunks.get(id);
   if (existing !== undefined) return existing;
 
-  let resolve: (value: unknown) => void = () => undefined;
-  let reject: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<unknown>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
+  const settled = deferred<unknown>();
   const chunk: DecodedChunk = {
+    decoded: undefined,
+    hasDecoded: false,
     model: null,
-    promise,
-    reject,
-    resolve,
+    promise: settled.promise,
+    reject: settled.reject,
+    resolve: settled.resolve,
     status: "pending",
     value: undefined,
   };
@@ -1473,9 +1454,9 @@ function getOrCreateChunk(
   return chunk;
 }
 
-function isRscBoundary(value: unknown): value is RscBoundaryComponent {
+function isRscBoundary(value: unknown): value is typeof RscBoundary {
   return (
     typeof value === "function" &&
-    (value as RscBoundaryComponent).$$typeof === RscBoundarySymbol
+    (value as typeof RscBoundary).$$typeof === RscBoundarySymbol
   );
 }

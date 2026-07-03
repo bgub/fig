@@ -2,6 +2,7 @@ import { createElement } from "@bgub/fig";
 import { dataResource, readData } from "@bgub/fig-data";
 import { createDataStore } from "@bgub/fig-data/internal";
 import { describe, expect, it } from "vite-plus/test";
+import { readStream } from "./test-utils.ts";
 import { renderToReadableStream } from "./index.ts";
 import { createRscResponse, renderToRscStream } from "./rsc.ts";
 
@@ -22,7 +23,7 @@ describe("@bgub/fig-server data resources", () => {
 
     await result.allReady;
 
-    expect(await readStreamToString(result.stream)).toBe("<span>Ada</span>");
+    expect(await readStream(result.stream)).toBe("<span>Ada</span>");
     expect(result.getData()).toEqual([
       { key: ["ssr-user", "one"], value: "Ada" },
     ]);
@@ -45,7 +46,7 @@ describe("@bgub/fig-server data resources", () => {
 
     await result.allReady;
 
-    const streamText = await readStreamToString(result.stream);
+    const streamText = await readStream(result.stream);
     const dataIndex = streamText.indexOf('"tag":"data"');
     const modelIndex = streamText.indexOf('"tag":"model"');
 
@@ -70,21 +71,3 @@ describe("@bgub/fig-server data resources", () => {
     ]);
   });
 });
-
-function readStreamToString(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
-  const textDecoder = new TextDecoder();
-  let output = "";
-
-  return reader.read().then(function readNext(result): Promise<string> {
-    if (result.done) {
-      output += textDecoder.decode();
-      return Promise.resolve(output);
-    }
-
-    output += textDecoder.decode(result.value, { stream: true });
-    return reader.read().then(readNext);
-  });
-}

@@ -17,7 +17,17 @@ import {
   Suspense,
   title,
 } from "@bgub/fig";
-import { isValidElement } from "@bgub/fig/internal";
+import {
+  isValidElement,
+  readThenable,
+  setCurrentDispatcher,
+} from "@bgub/fig/internal";
+import { createStaticDispatcher, deferred } from "./shared.ts";
+import {
+  controlledTextStream,
+  readStream,
+  streamFromString,
+} from "./test-utils.ts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   createRscResponse,
@@ -52,65 +62,6 @@ interface TestRscElementModel {
   key: string | number | null;
   props: Record<string, TestRscModel>;
   type: TestRscModel;
-}
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve(value: T): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve: Deferred<T>["resolve"] = () => undefined;
-  const promise = new Promise<T>((innerResolve) => {
-    resolve = innerResolve;
-  });
-
-  return { promise, resolve };
-}
-
-async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let output = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return output + decoder.decode();
-    output += decoder.decode(value, { stream: true });
-  }
-}
-
-function streamFromString(input: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(input));
-      controller.close();
-    },
-  });
-}
-
-function controlledTextStream(): {
-  close(): void;
-  stream: ReadableStream<Uint8Array>;
-  write(chunk: string): void;
-} {
-  const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-
-  return {
-    close() {
-      controller?.close();
-    },
-    stream: new ReadableStream<Uint8Array>({
-      start(innerController) {
-        controller = innerController;
-      },
-    }),
-    write(chunk) {
-      controller?.enqueue(encoder.encode(chunk));
-    },
-  };
 }
 
 function requireHeaders(headers: Headers | null): Headers {
@@ -150,6 +101,13 @@ function decodeTestRscRows(
   return response.getRoot();
 }
 
+function processStreamInto(
+  response: ReturnType<typeof createRscResponse>,
+  stream: ReadableStream<Uint8Array>,
+): Promise<void> {
+  return response.processStream(stream);
+}
+
 function processTestRscRows(
   response: ReturnType<typeof createRscResponse>,
   rows: TestRscRow[],
@@ -157,32 +115,6 @@ function processTestRscRows(
   response.processStringChunk(
     `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
   );
-}
-
-async function processTestRscStream(
-  response: ReturnType<typeof createRscResponse>,
-  stream: ReadableStream<Uint8Array>,
-): Promise<void> {
-  await readTextStream(stream, (chunk) => response.processStringChunk(chunk));
-  response.processStringChunk("\n");
-}
-
-async function readTextStream(
-  stream: ReadableStream<Uint8Array>,
-  onChunk: (chunk: string) => void,
-): Promise<void> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      onChunk(decoder.decode());
-      return;
-    }
-
-    onChunk(decoder.decode(value, { stream: true }));
-  }
 }
 
 function evaluateRscNode(node: FigNode): FigNode {
@@ -361,35 +293,55 @@ describe("RSC rendering", () => {
         createElement("span", null, `widget:${props.label}`),
     };
 
-    // Without preloading, the first render reads the module promise (this
-    // evaluation runs outside a Fig render, so readPromise throws its
-    // dispatcher error instead of suspending).
-    const cold = createRscResponse({
-      loadClientReference: () => Promise.resolve(widgetModule),
-    });
-    processTestRscRows(cold, rows);
-    expect(() => evaluateRscNode(cold.getRoot())).toThrow(
-      "readPromise can only be called",
-    );
-
-    // Preloading dedupes the module load and makes the render synchronous.
-    let loads = 0;
-    const response = createRscResponse({
-      loadClientReference: () => {
-        loads += 1;
-        return Promise.resolve(widgetModule);
+    // Render under a minimal dispatcher, as a real renderer would.
+    const dispatcher = createStaticDispatcher({
+      contextValues: new Map(),
+      externalStoreError: "no external store",
+      preloadData: () => undefined,
+      readData: () => {
+        throw new Error("no data store");
       },
+      readPromise: readThenable,
+      updateError: "no updates",
+      useId: () => "test",
     });
-    processTestRscRows(response, rows);
 
-    await response.preloadClientReferences();
-    await response.preloadClientReferences();
-    expect(loads).toBe(1);
+    setCurrentDispatcher(dispatcher);
+    try {
+      // Before the module settles, the first render read suspends.
+      const cold = createRscResponse({
+        loadClientReference: () => Promise.resolve(widgetModule),
+      });
+      processTestRscRows(cold, rows);
+      let thrown: unknown;
+      try {
+        evaluateRscNode(cold.getRoot());
+      } catch (error) {
+        thrown = error;
+      }
+      expect(typeof (thrown as PromiseLike<unknown>).then).toBe("function");
 
-    const rendered = evaluateRscNode(response.getRoot()) as FigElement;
-    expect(isValidElement(rendered)).toBe(true);
-    expect(rendered.type).toBe("span");
-    expect(rendered.props.children).toBe("widget:hi");
+      // Preloading dedupes the module load and makes the render synchronous.
+      let loads = 0;
+      const response = createRscResponse({
+        loadClientReference: () => {
+          loads += 1;
+          return Promise.resolve(widgetModule);
+        },
+      });
+      processTestRscRows(response, rows);
+
+      await response.preloadClientReferences();
+      await response.preloadClientReferences();
+      expect(loads).toBe(1);
+
+      const rendered = evaluateRscNode(response.getRoot()) as FigElement;
+      expect(isValidElement(rendered)).toBe(true);
+      expect(rendered.type).toBe("span");
+      expect(rendered.props.children).toBe("widget:hi");
+    } finally {
+      setCurrentDispatcher(null);
+    }
   });
 
   it("ignores invalid asset descriptors while decoding client rows", () => {
@@ -958,7 +910,7 @@ describe("RSC rendering", () => {
 
   it("pipes readable streams into an RSC response", async () => {
     const response = createRscResponse();
-    await processTestRscStream(
+    await processStreamInto(
       response,
       streamFromString(await renderToRscText(createElement("p", null, "Hi"))),
     );
@@ -971,7 +923,7 @@ describe("RSC rendering", () => {
 
   it("flushes a final RSC row without a trailing newline", async () => {
     const response = createRscResponse();
-    await processTestRscStream(
+    await processStreamInto(
       response,
       streamFromString('{"id":0,"tag":"model","value":"Done"}'),
     );

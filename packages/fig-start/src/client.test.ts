@@ -26,7 +26,8 @@ describe("@bgub/fig-start client server-route helpers", () => {
   it("throws when a payload has client refs but no resolver", () => {
     expect(() =>
       requireClientReferenceResolver(
-        { routeId: "/dash", rows: '{"tag":"client"}\n' },
+        "/dash",
+        { getClientReferences: () => [{ id: "app/Island.tsx#Island" }] },
         {},
       ),
     ).toThrow(/client-reference resolver/);
@@ -35,7 +36,8 @@ describe("@bgub/fig-start client server-route helpers", () => {
   it("accepts a payload when a resolver is provided", () => {
     expect(() =>
       requireClientReferenceResolver(
-        { routeId: "/dash", rows: '{"tag":"client"}\n' },
+        "/dash",
+        { getClientReferences: () => [{ id: "app/Island.tsx#Island" }] },
         { loadClientReference: () => Promise.resolve({}) },
       ),
     ).not.toThrow();
@@ -44,7 +46,8 @@ describe("@bgub/fig-start client server-route helpers", () => {
   it("accepts a payload with no client references", () => {
     expect(() =>
       requireClientReferenceResolver(
-        { routeId: "/dash", rows: '{"tag":"model"}\n' },
+        "/dash",
+        { getClientReferences: () => [] },
         {},
       ),
     ).not.toThrow();

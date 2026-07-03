@@ -110,7 +110,13 @@ import {
   runWithStaleRefreshFamilies,
   type RefreshUpdate,
 } from "./refresh.ts";
-import { isThenable, readThenable, type Thenable } from "./thenables.ts";
+import {
+  collectChildren,
+  invalidChildError,
+  isThenable,
+  readThenable,
+  type Thenable,
+} from "@bgub/fig/internal";
 
 export type EventPriority = "default" | "continuous" | "discrete";
 
@@ -4878,43 +4884,6 @@ function implicitKey(index: number): string {
   return `.${index}`;
 }
 
-function collectChildren(node: FigNode): FigChild[] {
-  const children: FigChild[] = [];
-  collectChild(node, children);
-  return children;
-}
-
-function collectChild(node: FigNode, children: FigChild[]): void {
-  if (Array.isArray(node)) {
-    for (const child of node) collectChild(child as FigNode, children);
-    return;
-  }
-
-  if (node === null || node === undefined || typeof node === "boolean") return;
-
-  if (typeof node === "string" || typeof node === "number") {
-    appendTextChild(children, String(node));
-    return;
-  }
-
-  if (isValidElement(node) || isPortal(node)) {
-    children.push(node);
-    return;
-  }
-
-  throw invalidChildError(node);
-}
-
-function appendTextChild(children: FigChild[], text: string): void {
-  const previous = children.at(-1);
-
-  if (typeof previous === "string" || typeof previous === "number") {
-    children[children.length - 1] = `${previous}${text}`;
-  } else {
-    children.push(text);
-  }
-}
-
 const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
 const NonTextHostContent = Symbol("fig.non-text-host-content");
 
@@ -4989,19 +4958,6 @@ function hostTextContentPart(node: FigNode): HostTextContent {
 
 function duplicateKeyError(key: string | number): Error {
   return new Error(`Duplicate key "${String(key)}" found among siblings.`);
-}
-
-function invalidChildError(value: unknown): Error {
-  return new Error(
-    `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, array, boolean, null, or undefined.`,
-  );
-}
-
-function describeInvalidChild(value: unknown): string {
-  if (typeof value !== "object" || value === null) return typeof value;
-
-  const keys = Object.keys(value);
-  return keys.length === 0 ? "object" : `object with keys ${keys.join(", ")}`;
 }
 
 function isHost<Container, Instance, TextInstance>(

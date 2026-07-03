@@ -19,22 +19,20 @@ import {
   fetchRsc,
   isRscRequestCancelled,
   type RscClientReferenceMetadata,
+  type RscResponse,
 } from "@bgub/fig-server/rsc";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
   DATA_STREAM_GLOBAL,
-  hasClientReferences,
   ROOT_ELEMENT_ID,
   RSC_FRAME_ATTR,
-  RSC_PAYLOAD_SCRIPT_ID,
   RSC_SEGMENTS_SCRIPT_ID,
   RSC_STREAM_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedRscFrame,
   type SerializedRouterState,
-  type SerializedRscPayload,
   type SerializedRscSegment,
 } from "./bootstrap.ts";
 import {
@@ -97,8 +95,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   const serverRouteContent = createServerRouteContent(options, router);
 
   // If the matched route was a `.server.tsx`, the document carries its RSC
-  // payload. Newer payloads arrive as streamed segment frames; keep the old
-  // buffered script as a fallback so older server output still hydrates.
+  // payload as streamed segment frames.
   const rscSegments = readJson<SerializedRscSegment[]>(
     RSC_SEGMENTS_SCRIPT_ID,
     [],
@@ -112,17 +109,6 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
         rscRouteUrl(router.getState().location),
       );
     }
-  }
-
-  const legacyRscPayload = readJson<SerializedRscPayload | null>(
-    RSC_PAYLOAD_SCRIPT_ID,
-    null,
-  );
-  if (legacyRscPayload !== null) {
-    serverRouteContent.receiveBuffered(
-      legacyRscPayload,
-      rscRouteUrl(router.getState().location),
-    );
   }
 
   const root = hydrateRoot(
@@ -304,7 +290,6 @@ interface ServerRouteContent extends ServerRouteContentStore {
     location: RouterLocation,
     matches: readonly RouteMatch[],
   ): Promise<void>;
-  receiveBuffered(payload: SerializedRscPayload, url: string): void;
   receiveSegment(
     segment: SerializedRscSegment,
     stream: RscStream,
@@ -483,15 +468,9 @@ function createServerRouteContent(
     return entry;
   }
 
-  function receiveRows(
-    entry: ServerRouteEntry,
-    rows: string,
-    requireResolver: boolean,
-  ): void {
-    if (requireResolver) {
-      requireClientReferenceResolverForRows(entry.routeId, rows, options);
-    }
+  function receiveRows(entry: ServerRouteEntry, rows: string): void {
     entry.response.processStringChunk(rows);
+    requireClientReferenceResolver(entry.routeId, entry.response, options);
     ensureEntryAssets(entry);
     notify(entry);
   }
@@ -548,19 +527,6 @@ function createServerRouteContent(
     getSnapshot(routeId) {
       return entries.get(routeId)?.version ?? 0;
     },
-    receiveBuffered(payload, url) {
-      const clientReferenceHydrationGate = createClientReferenceHydrationGate();
-      const entry = createEntry(
-        payload.routeId,
-        createServerRouteResponse(options, clientReferenceHydrationGate),
-        {
-          clientReferenceHydrationGate,
-          hydrateWithPendingAssets: true,
-          url,
-        },
-      );
-      receiveRows(entry, payload.rows, true);
-    },
     receiveSegment(segment, stream, url) {
       const clientReferenceHydrationGate = createClientReferenceHydrationGate();
       const entry = createEntry(
@@ -574,7 +540,7 @@ function createServerRouteContent(
       );
       const unsubscribe = stream.s((frame) => {
         if (frame.id !== segment.id) return;
-        receiveRows(entry, frame.chunk, true);
+        receiveRows(entry, frame.chunk);
       });
       entry.dispose = combineDisposers(entry.dispose, unsubscribe);
     },
@@ -759,7 +725,7 @@ function loadServerRouteRsc(
   );
 }
 
-function fetchServerRouteRsc(
+async function fetchServerRouteRsc(
   response: ServerRouteResponse,
   routeId: string,
   url: string,
@@ -767,75 +733,12 @@ function fetchServerRouteRsc(
   signal: AbortSignal,
   refreshBoundary?: string,
 ): Promise<Response> {
-  return fetchRsc(response, url, {
-    fetch: async (input, init) => {
-      const result = await fetch(input, init);
-      if (result.body === null || hasClientReferenceResolver(options)) {
-        return result;
-      }
-      return new Response(guardRscRows(routeId, result.body, options), {
-        headers: result.headers,
-        status: result.status,
-        statusText: result.statusText,
-      });
-    },
-    refreshBoundary,
-    signal,
-  });
-}
-
-function guardRscRows(
-  routeId: string,
-  stream: ReadableStream<Uint8Array>,
-  options: StartClientOptions,
-): ReadableStream<Uint8Array> {
-  const decoder = new TextDecoder();
-  let bufferedRows = "";
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      reader = stream.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        const chunk =
-          done && value === undefined
-            ? decoder.decode()
-            : decoder.decode(value, { stream: !done });
-
-        if (chunk.length > 0 || done) {
-          requireClientReferenceResolverForCompleteRows(routeId, chunk, done);
-        }
-        if (value !== undefined) controller.enqueue(value);
-
-        if (done) {
-          controller.close();
-          return;
-        }
-      }
-    },
-    cancel(reason) {
-      void reader?.cancel(reason).catch(() => undefined);
-    },
-  });
-
-  function requireClientReferenceResolverForCompleteRows(
-    routeId: string,
-    chunk: string,
-    done: boolean,
-  ): void {
-    bufferedRows += chunk;
-    const rows = bufferedRows.split("\n");
-    bufferedRows = rows.pop() ?? "";
-
-    for (const row of rows) {
-      requireClientReferenceResolverForRows(routeId, row, options);
-    }
-    if (done) {
-      requireClientReferenceResolverForRows(routeId, bufferedRows, options);
-      bufferedRows = "";
-    }
-  }
+  const result = await fetchRsc(response, url, { refreshBoundary, signal });
+  // The response has decoded the full payload; a payload with client
+  // references but no configured resolver would render placeholders forever,
+  // so fail loudly instead.
+  requireClientReferenceResolver(routeId, response, options);
+  return result;
 }
 
 function hasClientReferenceResolver(
@@ -872,24 +775,17 @@ function reportRscFetchError(
 // Exported for testing: the missing-resolver guard and the navigation-teardown
 // watcher are pure logic, so they're verified without a DOM.
 export function requireClientReferenceResolver(
-  payload: SerializedRscPayload,
-  options: Pick<
-    StartClientOptions,
-    "loadClientReference" | "resolveClientReference"
-  >,
-): void {
-  requireClientReferenceResolverForRows(payload.routeId, payload.rows, options);
-}
-
-function requireClientReferenceResolverForRows(
   routeId: string,
-  rows: string,
+  response: Pick<RscResponse, "getClientReferences">,
   options: Pick<
     StartClientOptions,
     "loadClientReference" | "resolveClientReference"
   >,
 ): void {
-  if (!hasClientReferenceResolver(options) && hasClientReferences(rows)) {
+  if (
+    !hasClientReferenceResolver(options) &&
+    response.getClientReferences().length > 0
+  ) {
     throw new Error(
       `Server route "${routeId}" renders client components, but ` +
         `hydrateStart() received no client-reference resolver. Pass ` +

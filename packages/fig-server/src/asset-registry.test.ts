@@ -9,9 +9,12 @@ import {
   type FigAssetResource,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { ResourceRegistry } from "./resources.ts";
+import { AssetResourceRegistry } from "./asset-registry.ts";
 
-function write(registry: ResourceRegistry, resource: FigAssetResource): string {
+function write(
+  registry: AssetResourceRegistry,
+  resource: FigAssetResource,
+): string {
   let html = "";
   registry.write(resource, {
     write(chunk) {
@@ -21,9 +24,9 @@ function write(registry: ResourceRegistry, resource: FigAssetResource): string {
   return html;
 }
 
-describe("ResourceRegistry", () => {
+describe("AssetResourceRegistry", () => {
   it("dedupes identical stylesheet resources", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
     const resource = stylesheet("/app.css", { media: "screen" });
 
     expect(write(registry, resource)).toBe(
@@ -35,7 +38,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("defaults scripts to async unless they opt into defer ordering", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     expect(write(registry, script("/plain.js"))).toBe(
       '<script src="/plain.js" async></script>',
@@ -52,7 +55,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("rejects stylesheet resources with the same href and different media", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     write(registry, stylesheet("/app.css", { media: "screen" }));
 
@@ -64,7 +67,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("rejects conflicting title and meta resources", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     registry.register(title("Dashboard"));
     registry.register(meta({ name: "description", content: "One" }));
@@ -78,7 +81,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("dedupes a font against an equivalent preload-as-font under one key", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     // font() and preload(href, "font") emit byte-identical markup and now share
     // the preload-font key space, so the second must dedupe rather than conflict.
@@ -97,7 +100,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("keeps the title singleton even when a title carries an explicit key", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     registry.register(title("Dashboard", "primary"));
 
@@ -108,7 +111,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("dedupes identical preloads and keeps different preload targets distinct", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     expect(write(registry, preload("/asset", "image"))).toBe(
       '<link rel="preload" href="/asset" as="image">',
@@ -120,7 +123,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("writes and dedupes modulepreloads", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     expect(
       write(
@@ -148,7 +151,7 @@ describe("ResourceRegistry", () => {
   });
 
   it("rejects preloads with the same target and different behavior", () => {
-    const registry = new ResourceRegistry("");
+    const registry = new AssetResourceRegistry("");
 
     write(registry, preload("/asset", "image", { fetchPriority: "high" }));
 

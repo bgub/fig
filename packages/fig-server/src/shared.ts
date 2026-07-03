@@ -2,22 +2,15 @@ import type { Dispatch, FigContext, SetStateAction } from "@bgub/fig";
 import type { FigDataResource, RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
-export type Thenable<T = unknown> = PromiseLike<T> & object;
-
-type ThenableRecord<T> = {
-  reason?: unknown;
-  status: "pending" | "fulfilled" | "rejected";
-  value?: T;
-};
 
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
-  preloadData?<TArgs extends unknown[], TValue, TStoreContext>(
+  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: FigDataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
   ): void;
-  readData?<TArgs extends unknown[], TValue, TStoreContext>(
+  readData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: FigDataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
   ): TValue;
@@ -25,8 +18,6 @@ interface StaticDispatcherOptions {
   updateError: string;
   useId(): string;
 }
-
-const thenableRecords = new WeakMap<object, ThenableRecord<unknown>>();
 
 function contextStack(
   values: ContextValues,
@@ -58,10 +49,7 @@ export function withContextValue<T>(
   }
 }
 
-export function readContextValue<T>(
-  values: ContextValues,
-  context: FigContext<T>,
-): T {
+function readContextValue<T>(values: ContextValues, context: FigContext<T>): T {
   const stack = values.get(context as FigContext<unknown>);
   if (stack !== undefined && stack.length > 0) {
     return stack[stack.length - 1] as T;
@@ -70,55 +58,35 @@ export function readContextValue<T>(
   return context.defaultValue;
 }
 
+export interface Deferred<T> {
+  promise: Promise<T>;
+  reject: (reason: unknown) => void;
+  resolve: (value: T) => void;
+}
+
+export function deferred<T>(): Deferred<T> {
+  let resolve: Deferred<T>["resolve"] = () => undefined;
+  let reject: Deferred<T>["reject"] = () => undefined;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, reject, resolve };
+}
+
 export function cloneContextValues(values: ContextValues): ContextValues {
   const clone: ContextValues = new Map();
   for (const [context, stack] of values) clone.set(context, [...stack]);
   return clone;
 }
 
-export function readThenable<T>(thenable: PromiseLike<T>): T {
-  const key = thenable as Thenable<T>;
-  let record = thenableRecords.get(key) as ThenableRecord<T> | undefined;
-
-  if (record === undefined) {
-    const pendingRecord: ThenableRecord<T> = { status: "pending" };
-    record = pendingRecord;
-    thenableRecords.set(key, pendingRecord);
-    thenable.then(
-      (value) => {
-        pendingRecord.status = "fulfilled";
-        pendingRecord.value = value;
-      },
-      (reason: unknown) => {
-        pendingRecord.status = "rejected";
-        pendingRecord.reason = reason;
-      },
-    );
-  }
-
-  if (record.status === "fulfilled") return record.value as T;
-  if (record.status === "rejected") throw record.reason;
-  throw key;
-}
-
-export function isThenable(value: unknown): value is Thenable {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null
-  ) {
-    return false;
-  }
-
-  return typeof (value as PromiseLike<unknown>).then === "function";
-}
-
-export function resolveInitialState<S>(initialState: S | (() => S)): S {
+function resolveInitialState<S>(initialState: S | (() => S)): S {
   return typeof initialState === "function"
     ? (initialState as () => S)()
     : initialState;
 }
 
-export function noopEffect(): void {}
+function noopEffect(): void {}
 
 export function createStaticDispatcher(
   options: StaticDispatcherOptions,
@@ -173,28 +141,13 @@ export function createStaticDispatcher(
       return readContextValue(options.contextValues, context);
     },
     readData(resource, args) {
-      if (options.readData === undefined) {
-        throw new Error("readData is not supported during server render.");
-      }
-
       return options.readData(resource, args);
     },
     preloadData(resource, args) {
-      if (options.preloadData === undefined) {
-        throw new Error("preloadData is not supported during server render.");
-      }
-
       options.preloadData(resource, args);
     },
     readPromise(promise) {
       return options.readPromise(promise);
     },
   };
-}
-
-export function describeInvalidChild(value: unknown): string {
-  if (typeof value !== "object" || value === null) return typeof value;
-
-  const keys = Object.keys(value);
-  return keys.length === 0 ? "object" : `object with keys ${keys.join(", ")}`;
 }

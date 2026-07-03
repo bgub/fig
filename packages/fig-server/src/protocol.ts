@@ -22,8 +22,6 @@ type IdentifierRequest = Pick<ProtocolRequest, "identifierPrefix">;
 // DocumentFragment is unreachable by getElementById, so Activity-aware ops first
 // search that fragment and then fall back to the light DOM if the activity has
 // already revealed and unpacked.
-export const serverRuntimeCode = serverRuntimeCodeFor("__figSSR");
-
 export function serverRuntimeCodeFor(runtimeName: string): string {
   return `globalThis[${jsString(runtimeName)}]??={r(a,f){let n=0,d=()=>{--n||f()};for(let i of a){let e=document.getElementById(i);if(e&&e.tagName==='LINK'&&e.rel==='stylesheet'&&!e.sheet){n++;e.addEventListener('load',d,{once:true});e.addEventListener('error',d,{once:true})}}n||f()},s(p,s){p=document.getElementById(p);s=document.getElementById(s);if(!p||!s)return;while(s.firstChild)p.parentNode.insertBefore(s.firstChild,p);p.remove();s.remove()},f(r,i){if(!r)return null;if(r.id===i)return r;for(let e of r.querySelectorAll?r.querySelectorAll('[id]'):[])if(e.id===i)return e;return null},b(t,b){let e=document.getElementById(t),r=e&&(e.content||e);return this.f(r,b)||document.getElementById(b)},c(b,s){this.o(document.getElementById(b),document.getElementById(s))},o(b,s){if(!b||!s)return;let a=b.previousSibling||b,p=a.parentNode,c=s.content||s;if(!p)return;while(c.firstChild)p.insertBefore(c.firstChild,b);for(let e=b,d=0;e;){if(e.nodeType===8){if(e.data.indexOf('${SUSPENSE_MARKER_PREFIX}')===0)d++;else if(e.data==='${SUSPENSE_END_MARKER}'){if(d===0)break;d--}}let x=e.nextSibling;e.remove();e=x}s.remove();if(a.nodeType===8){a.data='${SUSPENSE_COMPLETED_MARKER}';a.__figRetry&&a.__figRetry()}},x(b,d,m){this.y(document.getElementById(b),d,m)},y(b,d,m){if(!b)return;let s=b.previousSibling;if(s&&s.nodeType===8){s.data='${SUSPENSE_CLIENT_MARKER}';if(d)b.dataset.dgst=d;if(m)b.dataset.msg=m;s.__figRetry&&s.__figRetry()}},ac(t,b,s){this.o(this.b(t,b),document.getElementById(s))},ax(t,b,d,m){this.y(this.b(t,b),d,m)}}`;
 }
@@ -51,16 +49,18 @@ export function placeholderMarkup(
   request: IdentifierRequest,
   id: number,
 ): string {
-  const escapedId = escapeAttribute(placeholderId(request, id));
-  return `<template id="${escapedId}"></template>`;
+  return templateMarkup(placeholderId(request, id));
 }
 
 export function boundaryPlaceholderMarkup(
   request: IdentifierRequest,
   id: number,
 ): string {
-  const escapedId = escapeAttribute(boundaryId(request, id));
-  return `<template id="${escapedId}"></template>`;
+  return templateMarkup(boundaryId(request, id));
+}
+
+function templateMarkup(id: string): string {
+  return `<template id="${escapeAttribute(id)}"></template>`;
 }
 
 export function segmentContainerStartMarkup(

@@ -1,6 +1,17 @@
 export { isContext, type FigContext, FigContextSymbol } from "./context.ts";
 export { validateInstanceNesting, validateTextNesting } from "./dom-nesting.ts";
 export {
+  isThenable,
+  readThenable,
+  type Thenable,
+  trackThenable,
+} from "./thenables.ts";
+export {
+  collectChildren,
+  describeInvalidChild,
+  invalidChildError,
+} from "./children.ts";
+export {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,

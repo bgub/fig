@@ -13,7 +13,11 @@ import {
   type FigDataHydrationEntry,
 } from "@bgub/fig/internal";
 import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
-import { renderToDocumentStream } from "@bgub/fig-server";
+import {
+  escapeAttribute,
+  escapeText,
+  renderToDocumentStream,
+} from "@bgub/fig-server";
 import {
   createRscResponse,
   RscBoundary,
@@ -376,76 +380,19 @@ function createDocumentRscSegment(
   };
 }
 
+// Waits for the initial root row (or one tick, whichever is first) so the
+// document render can include server-renderable RSC markup when the payload
+// is already buffered, without blocking the shell on slow segments.
 function decodeDocumentRscStream(
   response: ReturnType<typeof createRscResponse>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
-  const decoder = new TextDecoder();
-  let bufferedRows = "";
-  let resolveInitialRoot: () => void = () => undefined;
-  let initialRootSettled = false;
-  const initialRootReady = new Promise<void>((resolve) => {
-    resolveInitialRoot = resolve;
-  });
-
-  function settleInitialRoot(): void {
-    if (initialRootSettled) return;
-    initialRootSettled = true;
-    resolveInitialRoot();
-  }
-
-  function processRows(chunk: string, done: boolean): void {
-    bufferedRows += chunk;
-    const rows = bufferedRows.split("\n");
-    bufferedRows = rows.pop() ?? "";
-
-    for (const row of rows) {
-      if (isRootModelRow(row)) settleInitialRoot();
-    }
-    if (done) {
-      if (isRootModelRow(bufferedRows)) settleInitialRoot();
-      bufferedRows = "";
-      settleInitialRoot();
-    }
-  }
-
-  async function decode(): Promise<void> {
-    const reader = stream.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        const chunk =
-          done && value === undefined
-            ? decoder.decode()
-            : decoder.decode(value, { stream: !done });
-        if (chunk.length > 0 || done) processRows(chunk, done);
-        if (chunk.length > 0) response.processStringChunk(chunk);
-        if (done) {
-          response.processStringChunk("\n");
-          return;
-        }
-      }
-    } catch {
-      settleInitialRoot();
-    }
-  }
-
-  void decode();
+  void response.processStream(stream).catch(() => undefined);
 
   return Promise.race([
-    initialRootReady,
+    response.rootReady,
     new Promise<void>((resolve) => setTimeout(resolve, 0)),
   ]);
-}
-
-function isRootModelRow(line: string): boolean {
-  if (line.length === 0) return false;
-  try {
-    const row = JSON.parse(line) as { id?: unknown; tag?: unknown };
-    return row.id === 0 && row.tag === "model";
-  } catch {
-    return false;
-  }
 }
 
 function createDocumentServerRouteContentStore(
@@ -935,8 +882,12 @@ function injectDocumentStreams(
 
     const bodyCloseIndex = buffer.indexOf(BODY_CLOSE_MARKER);
     if (bodyCloseIndex !== -1) {
-      flushLive(controller);
       enqueueBufferedPrefix(controller, bodyCloseIndex);
+      // Companion frames enqueued before </body> must beat the bootstrap
+      // script regardless of HTML chunk granularity; their buffered readers
+      // pull asynchronously, so give those reads one tick to settle.
+      await settleCompanionReads();
+      flushLive(controller);
       enqueueGenerated(controller, injection.beforeBodyClose);
       bootstrapInjected = true;
       await closeLive(controller);
@@ -948,10 +899,17 @@ function injectDocumentStreams(
     enqueueSafeBufferedPrefix(controller, BODY_CLOSE_HOLDBACK, final);
 
     if (final) {
+      await settleCompanionReads();
+      flushLive(controller);
       enqueueGenerated(controller, injection.beforeBodyClose);
       bootstrapInjected = true;
       await closeLive(controller);
     }
+  }
+
+  function settleCompanionReads(): Promise<void> {
+    if (companionStreams.length === 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   function processAfterBootstrap(
@@ -1084,24 +1042,6 @@ function shellErrorHtml(error: unknown): string {
   return `<!doctype html><html lang="en"><body><pre>${escapeText(
     message,
   )}</pre></body></html>`;
-}
-
-function escapeText(value: string): string {
-  return value.replace(/[&<>]/g, (character) =>
-    character === "&" ? "&amp;" : character === "<" ? "&lt;" : "&gt;",
-  );
-}
-
-function escapeAttribute(value: string): string {
-  return value.replace(/[&"<>]/g, (character) =>
-    character === "&"
-      ? "&amp;"
-      : character === '"'
-        ? "&quot;"
-        : character === "<"
-          ? "&lt;"
-          : "&gt;",
-  );
 }
 
 function escapeJson(value: unknown): string {

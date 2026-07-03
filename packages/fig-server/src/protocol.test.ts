@@ -1,85 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
-import { serverRuntimeCode } from "./protocol.ts";
-
-const elementNode = 1;
-const commentNode = 8;
-
-class TestNode {
-  childNodes: TestNode[] = [];
-  parentNode: TestNode | null = null;
-  dataset: Record<string, string> = {};
-
-  constructor(
-    readonly nodeType: number,
-    readonly id: string | null = null,
-    readonly data: string = "",
-  ) {}
-
-  get firstChild(): TestNode | null {
-    return this.childNodes[0] ?? null;
-  }
-
-  get nextSibling(): TestNode | null {
-    if (this.parentNode === null) return null;
-    const index = this.parentNode.childNodes.indexOf(this);
-    return this.parentNode.childNodes[index + 1] ?? null;
-  }
-
-  get previousSibling(): TestNode | null {
-    if (this.parentNode === null) return null;
-    const index = this.parentNode.childNodes.indexOf(this);
-    return index <= 0 ? null : this.parentNode.childNodes[index - 1];
-  }
-
-  appendChild(node: TestNode): void {
-    node.remove();
-    node.parentNode = this;
-    this.childNodes.push(node);
-  }
-
-  insertBefore(node: TestNode, reference: TestNode): void {
-    node.remove();
-    const index = this.childNodes.indexOf(reference);
-    if (index === -1) throw new Error("Reference node is not a child.");
-    node.parentNode = this;
-    this.childNodes.splice(index, 0, node);
-  }
-
-  remove(): void {
-    if (this.parentNode === null) return;
-    const siblings = this.parentNode.childNodes;
-    const index = siblings.indexOf(this);
-    if (index !== -1) siblings.splice(index, 1);
-    this.parentNode = null;
-  }
-
-  querySelectorAll(selector: string): TestNode[] {
-    if (selector !== "[id]")
-      throw new Error(`Unsupported selector ${selector}.`);
-
-    const matches: TestNode[] = [];
-    const visit = (node: TestNode): void => {
-      if (node.id !== null) matches.push(node);
-      for (const child of node.childNodes) visit(child);
-    };
-
-    for (const child of this.childNodes) visit(child);
-    return matches;
-  }
-}
-
-class TestDocument {
-  private readonly nodesById = new Map<string, TestNode>();
-
-  getElementById(id: string): TestNode | null {
-    return this.nodesById.get(id) ?? null;
-  }
-
-  register(node: TestNode): TestNode {
-    if (node.id !== null) this.nodesById.set(node.id, node);
-    return node;
-  }
-}
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { serverRuntimeCodeFor } from "./protocol.ts";
 
 interface TestRuntime {
   ac(activityId: string, boundaryId: string, segmentId: string): void;
@@ -93,13 +14,16 @@ interface TestRuntime {
   x(boundaryId: string, digest: string, message: string): void;
 }
 
-type RetriableTestNode = TestNode & { __figRetry?: () => void };
+type RetriableComment = Comment & { __figRetry?: () => void };
 
-function installRuntime(document: TestDocument): TestRuntime {
+// Evaluate the inline runtime against the real (happy-dom) document, exactly
+// as a browser would; template content is a real inert DocumentFragment, so
+// the `e.content || e` branches in the ops are exercised for real.
+function installRuntime(): TestRuntime {
   const globalScope: { __figSSR?: TestRuntime } = {};
 
   // oxlint-disable-next-line typescript-eslint/no-implied-eval
-  new Function("document", "globalThis", serverRuntimeCode)(
+  new Function("document", "globalThis", serverRuntimeCodeFor("__figSSR"))(
     document,
     globalScope,
   );
@@ -111,62 +35,62 @@ function installRuntime(document: TestDocument): TestRuntime {
   return globalScope.__figSSR;
 }
 
-function createPendingBoundary(document: TestDocument): {
-  boundaryPlaceholder: TestNode;
+function createPendingBoundary(parent: ParentNode): {
+  boundaryPlaceholder: HTMLTemplateElement;
   calls: string[];
-  end: TestNode;
-  fallback: TestNode;
-  root: TestNode;
-  start: RetriableTestNode;
+  end: Comment;
+  fallback: HTMLElement;
+  start: RetriableComment;
 } {
   const calls: string[] = [];
-  const root = new TestNode(elementNode, "root");
-  const start = new TestNode(
-    commentNode,
-    null,
+  const start = document.createComment(
     "fig:suspense:pending:0",
-  ) as RetriableTestNode;
-  const boundaryPlaceholder = document.register(new TestNode(elementNode, "b"));
-  const fallback = new TestNode(elementNode, "fallback");
-  const end = new TestNode(commentNode, null, "/fig:suspense");
+  ) as RetriableComment;
+  const boundaryPlaceholder = document.createElement("template");
+  boundaryPlaceholder.id = "b";
+  const fallback = document.createElement("div");
+  fallback.textContent = "fallback";
+  const end = document.createComment("/fig:suspense");
 
   start.__figRetry = () => calls.push("retry");
-  root.appendChild(start);
-  root.appendChild(boundaryPlaceholder);
-  root.appendChild(fallback);
-  root.appendChild(end);
+  parent.append(start, boundaryPlaceholder, fallback, end);
 
-  return { boundaryPlaceholder, calls, end, fallback, root, start };
+  return { boundaryPlaceholder, calls, end, fallback, start };
 }
 
-function appendCompletedSegment(
-  document: TestDocument,
-  root: TestNode,
-): { after: TestNode; completed: TestNode; segment: TestNode } {
-  const after = new TestNode(elementNode, "after");
-  const segment = document.register(new TestNode(elementNode, "s"));
-  const completed = new TestNode(elementNode, "completed");
+function appendCompletedSegment(root: HTMLElement): {
+  after: HTMLElement;
+  completed: HTMLElement;
+  segment: HTMLElement;
+} {
+  const after = document.createElement("div");
+  after.id = "after";
+  const segment = document.createElement("div");
+  segment.id = "s";
+  const completed = document.createElement("div");
+  completed.id = "completed";
 
-  root.appendChild(after);
-  root.appendChild(segment);
-  segment.appendChild(completed);
+  root.append(after, segment);
+  segment.append(completed);
 
   return { after, completed, segment };
 }
 
 describe("server streaming protocol", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {
-    const document = new TestDocument();
-    const { boundaryPlaceholder, calls, end, fallback, root, start } =
-      createPendingBoundary(document);
-    const { after, completed, segment } = appendCompletedSegment(
-      document,
-      root,
-    );
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, end, fallback, start } =
+      createPendingBoundary(root);
+    const { after, completed, segment } = appendCompletedSegment(root);
 
-    installRuntime(document).c("b", "s");
+    installRuntime().c("b", "s");
 
-    expect(root.childNodes).toEqual([start, completed, end, after]);
+    expect(Array.from(root.childNodes)).toEqual([start, completed, end, after]);
     expect(segment.parentNode).toBeNull();
     expect(start.data).toBe("fig:suspense:completed");
     expect(start.parentNode).toBe(root);
@@ -177,28 +101,23 @@ describe("server streaming protocol", () => {
   });
 
   it("removes nested fallback Suspense ranges when completing a boundary", () => {
-    const document = new TestDocument();
-    const { boundaryPlaceholder, calls, end, fallback, root, start } =
-      createPendingBoundary(document);
-    const innerStart = new TestNode(
-      commentNode,
-      null,
-      "fig:suspense:pending:1",
-    );
-    const innerEnd = new TestNode(commentNode, null, "/fig:suspense");
-    const innerPlaceholder = document.register(new TestNode(elementNode, "ib"));
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, end, fallback, start } =
+      createPendingBoundary(root);
+    const innerStart = document.createComment("fig:suspense:pending:1");
+    const innerEnd = document.createComment("/fig:suspense");
+    const innerPlaceholder = document.createElement("template");
+    innerPlaceholder.id = "ib";
 
     root.insertBefore(innerStart, fallback);
     root.insertBefore(innerPlaceholder, fallback);
     root.insertBefore(innerEnd, end);
-    const { after, completed, segment } = appendCompletedSegment(
-      document,
-      root,
-    );
+    const { after, completed, segment } = appendCompletedSegment(root);
 
-    installRuntime(document).c("b", "s");
+    installRuntime().c("b", "s");
 
-    expect(root.childNodes).toEqual([start, completed, end, after]);
+    expect(Array.from(root.childNodes)).toEqual([start, completed, end, after]);
     expect(segment.parentNode).toBeNull();
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(start.data).toBe("fig:suspense:completed");
@@ -206,48 +125,42 @@ describe("server streaming protocol", () => {
   });
 
   it("marks client-rendered boundaries and retries hydrated parents", () => {
-    const document = new TestDocument();
-    const { boundaryPlaceholder, calls, start } =
-      createPendingBoundary(document);
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, start } = createPendingBoundary(root);
 
-    installRuntime(document).x("b", "digest-1", "Server failed");
+    installRuntime().x("b", "digest-1", "Server failed");
 
     expect(start.data).toBe("fig:suspense:client");
-    expect(boundaryPlaceholder.dataset).toEqual({
-      dgst: "digest-1",
-      msg: "Server failed",
-    });
+    expect(boundaryPlaceholder.dataset.dgst).toBe("digest-1");
+    expect(boundaryPlaceholder.dataset.msg).toBe("Server failed");
     expect(calls).toEqual(["retry"]);
   });
 
-  it("completes Activity-hidden boundaries inside template content by id comparison", () => {
-    const document = new TestDocument();
-    const calls: string[] = [];
-    const root = new TestNode(elementNode, "root");
-    const activity = document.register(new TestNode(elementNode, "a"));
-    const start = new TestNode(
-      commentNode,
-      null,
-      "fig:suspense:pending:0",
-    ) as RetriableTestNode;
-    const boundaryPlaceholder = new TestNode(elementNode, 'bad"id]');
-    const fallback = new TestNode(elementNode, "fallback");
-    const end = new TestNode(commentNode, null, "/fig:suspense");
-    const segment = document.register(new TestNode(elementNode, "s"));
-    const completed = new TestNode(elementNode, "completed");
+  it("completes Activity-hidden boundaries inside real template content", () => {
+    // The boundary markers live inside a real <template>'s content fragment,
+    // which getElementById cannot reach — the `ac` op must resolve them
+    // through the template's inert content.
+    const activity = document.createElement("template");
+    activity.id = "a";
+    document.body.append(activity);
+    const { boundaryPlaceholder, calls, end, fallback, start } =
+      createPendingBoundary(activity.content);
 
-    start.__figRetry = () => calls.push("retry");
-    root.appendChild(activity);
-    root.appendChild(segment);
-    activity.appendChild(start);
-    activity.appendChild(boundaryPlaceholder);
-    activity.appendChild(fallback);
-    activity.appendChild(end);
-    segment.appendChild(completed);
+    const segment = document.createElement("div");
+    segment.id = "s";
+    const completed = document.createElement("div");
+    completed.id = "completed";
+    segment.append(completed);
+    document.body.append(segment);
 
-    installRuntime(document).ac("a", 'bad"id]', "s");
+    installRuntime().ac("a", "b", "s");
 
-    expect(activity.childNodes).toEqual([start, completed, end]);
+    expect(Array.from(activity.content.childNodes)).toEqual([
+      start,
+      completed,
+      end,
+    ]);
     expect(segment.parentNode).toBeNull();
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(fallback.parentNode).toBeNull();
@@ -256,17 +169,15 @@ describe("server streaming protocol", () => {
   });
 
   it("completes Activity-hidden boundaries from light DOM after Activity reveal", () => {
-    const document = new TestDocument();
-    const { boundaryPlaceholder, calls, end, fallback, root, start } =
-      createPendingBoundary(document);
-    const { after, completed, segment } = appendCompletedSegment(
-      document,
-      root,
-    );
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, end, fallback, start } =
+      createPendingBoundary(root);
+    const { after, completed, segment } = appendCompletedSegment(root);
 
-    installRuntime(document).ac("already-revealed", "b", "s");
+    installRuntime().ac("already-revealed", "b", "s");
 
-    expect(root.childNodes).toEqual([start, completed, end, after]);
+    expect(Array.from(root.childNodes)).toEqual([start, completed, end, after]);
     expect(segment.parentNode).toBeNull();
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(fallback.parentNode).toBeNull();
@@ -274,34 +185,19 @@ describe("server streaming protocol", () => {
     expect(calls).toEqual(["retry"]);
   });
 
-  it("marks Activity-hidden client-rendered boundaries inside template content", () => {
-    const document = new TestDocument();
-    const calls: string[] = [];
-    const root = new TestNode(elementNode, "root");
-    const activity = document.register(new TestNode(elementNode, "a"));
-    const start = new TestNode(
-      commentNode,
-      null,
-      "fig:suspense:pending:0",
-    ) as RetriableTestNode;
-    const boundaryPlaceholder = new TestNode(elementNode, 'bad"id]');
-    const fallback = new TestNode(elementNode, "fallback");
-    const end = new TestNode(commentNode, null, "/fig:suspense");
+  it("marks Activity-hidden client-rendered boundaries inside real template content", () => {
+    const activity = document.createElement("template");
+    activity.id = "a";
+    document.body.append(activity);
+    const { boundaryPlaceholder, calls, start } = createPendingBoundary(
+      activity.content,
+    );
 
-    start.__figRetry = () => calls.push("retry");
-    root.appendChild(activity);
-    activity.appendChild(start);
-    activity.appendChild(boundaryPlaceholder);
-    activity.appendChild(fallback);
-    activity.appendChild(end);
-
-    installRuntime(document).ax("a", 'bad"id]', "digest-1", "Server failed");
+    installRuntime().ax("a", "b", "digest-1", "Server failed");
 
     expect(start.data).toBe("fig:suspense:client");
-    expect(boundaryPlaceholder.dataset).toEqual({
-      dgst: "digest-1",
-      msg: "Server failed",
-    });
+    expect(boundaryPlaceholder.dataset.dgst).toBe("digest-1");
+    expect(boundaryPlaceholder.dataset.msg).toBe("Server failed");
     expect(calls).toEqual(["retry"]);
   });
 });

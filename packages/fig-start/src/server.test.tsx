@@ -18,7 +18,6 @@ import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
-  hasClientReferences,
   RSC_BOUNDARY_HEADER,
   RSC_FRAME_ATTR,
   RSC_ROUTE_ID_HEADER,
@@ -611,13 +610,6 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).toContain("Single pass");
     expect(html).toContain(RSC_FRAME_ATTR);
     expect(renders).toBe(1);
-  });
-
-  it("detects client references in an RSC payload", () => {
-    expect(hasClientReferences('{"tag":"client","value":{"id":"x"}}')).toBe(
-      true,
-    );
-    expect(hasClientReferences('{"tag":"model","value":null}')).toBe(false);
   });
 
   it("resolves only built client chunks next to the client entry", async () => {
