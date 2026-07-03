@@ -1185,6 +1185,7 @@ function ReplayButton({
     <button
       type="button"
       class="button primary replay-action"
+      data-replay-button="true"
       events={onAction === undefined ? undefined : [on("click", onAction)]}
     >
       {label}

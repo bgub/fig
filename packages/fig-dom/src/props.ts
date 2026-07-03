@@ -165,16 +165,24 @@ function reactChangeUsesInputEvent(type: string, props: Props): boolean {
 }
 
 export function hydrateElement(element: Element, nextProps: Props): void {
-  // Snapshot before client styles apply: updateElement writes the client
-  // style prop into the same declaration, so a post-update enumeration could
-  // not tell server-set names from client-set ones.
+  // Snapshot before the update applies: updateElement writes the client
+  // style prop into the same declaration and runs the bind callback (which
+  // may set attributes), so a post-update enumeration could not tell
+  // server-set names from client-set ones.
   const serverStyles =
     process.env.NODE_ENV !== "production" ? hydratedStyleNames(element) : [];
+  const serverAttributes =
+    process.env.NODE_ENV !== "production" ? attributeNames(element) : [];
 
   updateElement(element, {}, nextProps, { hydrating: true });
 
   if (process.env.NODE_ENV !== "production") {
-    warnExtraHydratedAttributes(element, nextProps, serverStyles);
+    warnExtraHydratedAttributes(
+      element,
+      nextProps,
+      serverStyles,
+      serverAttributes,
+    );
   }
 }
 
@@ -185,6 +193,7 @@ function warnExtraHydratedAttributes(
   element: Element,
   nextProps: Props,
   serverStyles: readonly string[],
+  serverAttributes: readonly string[],
 ): void {
   const expectedAttributes = new Set<string>();
   const type = elementName(element);
@@ -198,7 +207,7 @@ function warnExtraHydratedAttributes(
   }
 
   const extra: string[] = [];
-  for (const name of attributeNames(element)) {
+  for (const name of serverAttributes) {
     const attribute = hostAttributeName(name, html);
     if (attribute.startsWith("data-fig-")) continue;
     if (!expectedAttributes.has(attribute)) extra.push(name);

@@ -177,6 +177,41 @@ describe("@bgub/fig-dom hydration", () => {
     ]);
   });
 
+  it("does not warn about attributes set by a bind during hydration", () => {
+    const container = new FakeElement("root");
+    const button = new FakeElement("button");
+    container.appendChild(button);
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    const bind: Bind = (node, signal) => {
+      node.setAttribute("data-bound", "true");
+      signal.addEventListener(
+        "abort",
+        () => node.removeAttribute("data-bound"),
+        { once: true },
+      );
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement("button", { bind }),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(button.attributes["data-bound"]).toBe("true");
+    expect(errors).toEqual([]);
+  });
+
   it("patches hydrated styles without deleting server-only styles", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");
