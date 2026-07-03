@@ -15,10 +15,3 @@ export class StartListenError extends Schema.TaggedErrorClass<StartListenError>(
     port: Schema.Number,
   },
 ) {}
-
-export class StartCloseError extends Schema.TaggedErrorClass<StartCloseError>()(
-  "StartCloseError",
-  {
-    cause: Schema.Defect(),
-  },
-) {}

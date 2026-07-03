@@ -1,7 +1,9 @@
-import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
-import { closeNodeHttpServer } from "./server-runtime/node-http.ts";
-import { makeTestApp, serverPort } from "./server-runtime/test-app.ts";
+import {
+  closeServer,
+  makeTestApp,
+  serverPort,
+} from "./server-runtime/test-app.ts";
 import { startDevServer } from "./dev-server.ts";
 
 describe("startDevServer", () => {
@@ -32,7 +34,7 @@ describe("startDevServer", () => {
         "Fig Start dev server: https://fig-demo-start.localhost/",
       ]);
     } finally {
-      await Effect.runPromise(closeNodeHttpServer(server));
+      await closeServer(server);
       await app.cleanup();
     }
   });

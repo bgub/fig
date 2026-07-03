@@ -1,9 +1,7 @@
-import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import { StartConfigError, StartListenError } from "./errors.ts";
-import { closeNodeHttpServer } from "./node-http.ts";
 import { runStartRuntime, startRuntimeLayer } from "./runtime.ts";
-import { makeTestApp, serverPort } from "./test-app.ts";
+import { closeServer, makeTestApp, serverPort } from "./test-app.ts";
 
 describe("start runtime", () => {
   it("boots production mode through the shared layers", async () => {
@@ -38,7 +36,7 @@ describe("start runtime", () => {
       await expect(page.text()).resolves.toContain("Runtime route");
       expect(logs).toEqual(["Fig Start: https://fig.example/"]);
     } finally {
-      await Effect.runPromise(closeNodeHttpServer(server));
+      await closeServer(server);
       await app.cleanup();
     }
   });
@@ -73,7 +71,7 @@ describe("start runtime", () => {
         port: serverPort(first),
       });
     } finally {
-      await Effect.runPromise(closeNodeHttpServer(first));
+      await closeServer(first);
       await app.cleanup();
     }
   });
@@ -93,7 +91,7 @@ describe("start runtime", () => {
     try {
       expect(process.listenerCount("SIGINT")).toBe(before + 1);
 
-      await Effect.runPromise(closeNodeHttpServer(server));
+      await closeServer(server);
       // The close event completes the scoped program, which interrupts the
       // signal wait and detaches its process listeners.
       for (let i = 0; i < 20; i += 1) {

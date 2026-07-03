@@ -1,5 +1,4 @@
-import { Context, Effect, Layer, type Scope } from "effect";
-import type { Server } from "node:http";
+import { Context, Effect, Layer } from "effect";
 import type { ClientAssetResolver } from "../server-assets.ts";
 import type { StartHandler, StartHandlerOptions } from "../server.ts";
 import { createRequestHandler } from "../server.ts";
@@ -9,12 +8,8 @@ import {
   type StartRuntimeConfigInput,
   normalizeStartRuntimeConfig,
 } from "./config.ts";
-import type { StartConfigError, StartListenError } from "./errors.ts";
-import { listenNodeHttpServer } from "./node-http.ts";
-import {
-  type StartNodeRequestListener,
-  createStartNodeRequestListener,
-} from "./request-listener.ts";
+import type { StartConfigError } from "./errors.ts";
+import { createStartWebHandler } from "./web-handler.ts";
 
 export class StartConfig extends Context.Service<
   StartConfig,
@@ -38,19 +33,12 @@ export class ClientAssetStore extends Context.Service<
   ClientAssetResolver
 >()("ClientAssetStore") {}
 
-export class StartRequestListener extends Context.Service<
-  StartRequestListener,
-  StartNodeRequestListener
->()("StartRequestListener") {}
-
-export class NodeHttpServer extends Context.Service<
-  NodeHttpServer,
-  {
-    // Scoped: the listening socket is released (graceful close) when the
-    // enclosing scope closes.
-    readonly listen: () => Effect.Effect<Server, StartListenError, Scope.Scope>;
-  }
->()("NodeHttpServer") {}
+// The route handler wrapped with built-client-asset serving: the complete
+// web-standard app that a server adapter hosts.
+export class StartAppHandler extends Context.Service<
+  StartAppHandler,
+  StartHandler
+>()("StartAppHandler") {}
 
 export function startConfigLayer(
   input: StartRuntimeConfigInput,
@@ -99,40 +87,20 @@ export const clientAssetStoreLayer: Layer.Layer<
   }),
 );
 
-export const startRequestListenerLayer: Layer.Layer<
-  StartRequestListener,
+export const startAppHandlerLayer: Layer.Layer<
+  StartAppHandler,
   never,
   ClientAssetStore | StartConfig | StartHandlerService
 > = Layer.effect(
-  StartRequestListener,
+  StartAppHandler,
   Effect.gen(function* () {
     const clientAssets = yield* ClientAssetStore;
     const config = yield* StartConfig;
     const handler = yield* StartHandlerService;
-    return createStartNodeRequestListener({
+    return createStartWebHandler({
       cacheClientAssets: config.cacheClientAssets,
       clientAssets,
       handler,
     });
-  }),
-);
-
-export const nodeHttpServerLayer: Layer.Layer<
-  NodeHttpServer,
-  never,
-  StartConfig | StartRequestListener
-> = Layer.effect(
-  NodeHttpServer,
-  Effect.gen(function* () {
-    const config = yield* StartConfig;
-    const listener = yield* StartRequestListener;
-    return {
-      listen: Effect.fn("NodeHttpServer.listen")(function* () {
-        return yield* listenNodeHttpServer({
-          listener,
-          port: config.port,
-        });
-      }),
-    };
   }),
 );

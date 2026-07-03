@@ -43,3 +43,12 @@ export function serverPort(server: Server): number {
   if (typeof address === "object" && address !== null) return address.port;
   throw new Error("Expected TCP server address.");
 }
+
+export function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) resolve();
+      else reject(error);
+    });
+  });
+}

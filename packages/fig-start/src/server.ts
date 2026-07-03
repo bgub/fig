@@ -57,11 +57,7 @@ import {
   startRuntimeLayer,
 } from "./server-runtime/runtime.ts";
 
-export {
-  StartCloseError,
-  StartConfigError,
-  StartListenError,
-} from "./server-runtime/errors.ts";
+export { StartConfigError, StartListenError } from "./server-runtime/errors.ts";
 
 export interface StartHandlerOptions {
   assets?: Record<string, StartStaticAssetInput>;

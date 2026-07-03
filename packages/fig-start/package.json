@@ -64,6 +64,7 @@
     "@bgub/fig-data": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
+    "@effect/platform-node": "4.0.0-beta.92",
     "effect": "4.0.0-beta.92"
   },
   "peerDependencies": {

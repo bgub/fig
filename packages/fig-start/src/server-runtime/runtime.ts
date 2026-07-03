@@ -1,18 +1,23 @@
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { Deferred, Effect, Layer } from "effect";
-import type { Server } from "node:http";
+import {
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
+import { createServer, type Server } from "node:http";
 import type { StartHandlerOptions } from "../server.ts";
 import type { StartRuntimeConfigInput } from "./config.ts";
-import type { StartConfigError, StartListenError } from "./errors.ts";
+import { type StartConfigError, StartListenError } from "./errors.ts";
 import {
-  NodeHttpServer,
+  StartAppHandler,
   StartConfig,
   StartLogger,
   clientAssetStoreLayer,
-  nodeHttpServerLayer,
+  startAppHandlerLayer,
   startConfigLayer,
   startHandlerLayer,
   startLoggerLayer,
-  startRequestListenerLayer,
 } from "./services.ts";
 
 export type StartRuntimeError = StartConfigError | StartListenError;
@@ -24,42 +29,75 @@ export interface StartRuntimeLayerInput {
 }
 
 export type StartRuntimeLayer = Layer.Layer<
-  NodeHttpServer | StartConfig | StartLogger,
+  StartAppHandler | StartConfig | StartLogger,
   StartConfigError
 >;
 
-// The one wiring path for both dev and prod servers: config and logger feed
-// the handler, which feeds the asset store, listener, and http server.
+// The one wiring path for both dev and prod servers. Each provideMerge feeds
+// everything above it, so config and logger reach every layer in the stack.
 export function startRuntimeLayer(
   input: StartRuntimeLayerInput,
 ): StartRuntimeLayer {
-  const baseLayer = Layer.mergeAll(
-    startConfigLayer(input.config),
-    startLoggerLayer(input.log),
+  return startAppHandlerLayer.pipe(
+    Layer.provideMerge(clientAssetStoreLayer),
+    Layer.provideMerge(startHandlerLayer(input.handlerOptions)),
+    Layer.provideMerge(startConfigLayer(input.config)),
+    Layer.provideMerge(startLoggerLayer(input.log)),
   );
-  const handlerLayer = startHandlerLayer(input.handlerOptions).pipe(
-    Layer.provideMerge(baseLayer),
-  );
-  const assetLayer = clientAssetStoreLayer.pipe(
-    Layer.provideMerge(handlerLayer),
-  );
-  const listenerLayer = startRequestListenerLayer.pipe(
-    Layer.provideMerge(assetLayer),
-  );
-
-  return nodeHttpServerLayer.pipe(Layer.provideMerge(listenerLayer));
 }
 
-// The server's whole lifetime is one scoped program: the listening socket is
-// acquired into the scope, and leaving it — a shutdown signal or the server
-// being closed out from under us — releases it with a graceful close.
+// Bridges each platform request to the web-standard app handler. Handler
+// rejections become defects, which the platform converts to 500 responses.
+const app = Effect.gen(function* () {
+  const handler = yield* StartAppHandler;
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const response = yield* Effect.promise(() =>
+    handler(webRequestFrom(request)),
+  );
+  return HttpServerResponse.fromWeb(response);
+});
+
+// Bodies are not forwarded (parity with the previous Node adapter); the
+// framework's routes only serve GET/HEAD today.
+function webRequestFrom(request: HttpServerRequest.HttpServerRequest): Request {
+  const host = request.headers.host ?? "localhost";
+  return new Request(`http://${host}${request.url}`, {
+    headers: request.headers,
+    method: request.method,
+  });
+}
+
+// The platform server owns listen and close: the socket is acquired into the
+// layer's scope and released with a graceful, connection-draining shutdown.
+// Listen failures are mapped to the public StartListenError.
+function nodeServerLayer(
+  server: Server,
+): Layer.Layer<HttpServer.HttpServer, StartListenError, StartConfig> {
+  return Layer.effect(
+    HttpServer.HttpServer,
+    Effect.gen(function* () {
+      const config = yield* StartConfig;
+      return yield* NodeHttpServer.make(() => server, {
+        port: config.port,
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new StartListenError({ cause: error.cause, port: config.port }),
+        ),
+      );
+    }),
+  );
+}
+
+// Runs after the provided layers are built, so the server is already
+// listening and serving; this program just announces it and holds the layer
+// scope open until a shutdown signal or an external close.
 const serveUntilShutdown = Effect.fn("serveUntilShutdown")(function* (
   started: Deferred.Deferred<Server, StartRuntimeError>,
+  server: Server,
 ) {
   const config = yield* StartConfig;
   const logger = yield* StartLogger;
-  const nodeServer = yield* NodeHttpServer;
-  const server = yield* nodeServer.listen();
 
   const name =
     config.mode === "development" ? "Fig Start dev server" : "Fig Start";
@@ -82,12 +120,19 @@ const serveUntilShutdown = Effect.fn("serveUntilShutdown")(function* (
 // the Cause down to its first failure.
 export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
   const started = Deferred.makeUnsafe<Server, StartRuntimeError>();
+  const server = createServer();
 
   Effect.runFork(
-    Effect.scoped(serveUntilShutdown(started)).pipe(
-      // The scope has closed (socket released); re-raise the signal so the
-      // default handler terminates the process as if we never intercepted it.
-      // Deferred a tick so piped stdout (the shutdown log) can flush first.
+    serveUntilShutdown(started, server).pipe(
+      Effect.provide(
+        HttpServer.serve(app).pipe(
+          Layer.provideMerge(nodeServerLayer(server)),
+          Layer.provideMerge(layer),
+        ),
+      ),
+      // The layers have been torn down (socket released); re-raise the signal
+      // so the default handler terminates the process as if we never
+      // intercepted it. Deferred a tick so piped stdout can flush first.
       Effect.tap((shutdown) =>
         shutdown === "closed"
           ? Effect.void
@@ -95,7 +140,6 @@ export function runStartRuntime(layer: StartRuntimeLayer): Promise<Server> {
               setImmediate(() => process.kill(process.pid, shutdown));
             }),
       ),
-      Effect.provide(layer),
       Effect.onError((cause) => Deferred.failCause(started, cause)),
     ),
   );
