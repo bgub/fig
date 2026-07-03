@@ -119,9 +119,16 @@ class MinHeap<T extends { sortIndex: number; id: number }> {
   }
 }
 
+// Node macrotask scheduling without MessageChannel: a pending setImmediate
+// keeps the process alive only until it fires, unlike a MessagePort with a
+// message handler, which refs the event loop permanently — even idle.
+declare const setImmediate: ((callback: () => void) => unknown) | undefined;
+
 class DefaultScheduler implements Scheduler {
-  private readonly channel =
-    typeof MessageChannel === "function" ? new MessageChannel() : null;
+  // Created lazily on the first posted work loop (browser path only): an
+  // import-time channel would keep every Node process that transitively
+  // imports the scheduler alive forever.
+  private channel: MessageChannel | null = null;
   private readonly taskQueue = new MinHeap<Task>();
   private readonly timerQueue = new MinHeap<Task>();
   private currentPriorityLevel: PriorityLevel = NormalPriority;
@@ -131,12 +138,6 @@ class DefaultScheduler implements Scheduler {
   private needsPaint = false;
   private startTime = -1;
   private taskId = 1;
-
-  constructor() {
-    if (this.channel !== null) {
-      this.channel.port1.onmessage = () => this.performWorkUntilDeadline();
-    }
-  }
 
   now(): number {
     return globalThis.performance?.now?.() ?? Date.now();
@@ -245,11 +246,23 @@ class DefaultScheduler implements Scheduler {
   }
 
   private postMessageLoop(): void {
-    if (this.channel !== null) {
-      this.channel.port2.postMessage(null);
-    } else {
-      setTimeout(() => this.performWorkUntilDeadline(), 0);
+    if (typeof setImmediate === "function") {
+      setImmediate(() => this.performWorkUntilDeadline());
+      return;
     }
+
+    if (typeof MessageChannel === "function") {
+      if (this.channel === null) {
+        this.channel = new MessageChannel();
+        this.channel.port1.onmessage = () => this.performWorkUntilDeadline();
+      }
+      this.channel.port2.postMessage(null);
+      return;
+    }
+
+    // setTimeout(0) is clamped (nested calls reach 4ms+), so it is the last
+    // resort, not the default.
+    setTimeout(() => this.performWorkUntilDeadline(), 0);
   }
 
   private flushWork(currentTime: number): boolean {

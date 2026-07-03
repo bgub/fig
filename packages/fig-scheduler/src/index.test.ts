@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createScheduler,
   ImmediatePriority,
@@ -92,6 +92,32 @@ describe("@bgub/fig-scheduler", () => {
 
     await delay();
     expect(calls).toEqual([]);
+  });
+
+  it("does not construct a MessageChannel at import time", async () => {
+    // A MessagePort with a message handler refs the Node event loop forever,
+    // so an import-time channel keeps any process that transitively imports
+    // the scheduler alive. The channel must be lazy (and unused under Node,
+    // where setImmediate is preferred).
+    const RealMessageChannel = globalThis.MessageChannel;
+    let constructed = 0;
+    vi.stubGlobal(
+      "MessageChannel",
+      class extends RealMessageChannel {
+        constructor() {
+          super();
+          constructed += 1;
+        }
+      },
+    );
+    vi.resetModules();
+
+    try {
+      await import("./index.ts");
+      expect(constructed).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("creates isolated scheduler instances", async () => {
