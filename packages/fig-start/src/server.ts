@@ -20,8 +20,7 @@ import {
   type RscClientReferenceRecord,
   renderToRscStream,
 } from "@bgub/fig-server/rsc";
-import { Effect } from "effect";
-import { createServer, type Server } from "node:http";
+import type { Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
@@ -52,10 +51,17 @@ import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
 import { RouterContext } from "./router-context.ts";
 import type { AnyRoute } from "./route.ts";
-import { createClientAssetResolver } from "./server-assets.ts";
 import { contentTypeFor } from "./server-runtime/content-type.ts";
-import { normalizeStartRuntimeConfig } from "./server-runtime/config.ts";
-import { createStartNodeRequestListener } from "./server-runtime/request-listener.ts";
+import {
+  runStartRuntime,
+  startRuntimeLayer,
+} from "./server-runtime/runtime.ts";
+
+export {
+  StartCloseError,
+  StartConfigError,
+  StartListenError,
+} from "./server-runtime/errors.ts";
 
 export interface StartHandlerOptions {
   assets?: Record<string, StartStaticAssetInput>;
@@ -279,39 +285,29 @@ export interface StartStaticAsset {
 export type StartStaticAssetInput = string | Uint8Array | StartStaticAsset;
 
 // The batteries-included entry: builds the request handler, serves built client
-// assets, handles status codes and headers, and listens. An app's server entry
-// is just `startServer({ routes, appUrl: import.meta.url, ... })`.
-export function startServer(options: StartServerOptions): Server {
-  const config = Effect.runSync(
-    normalizeStartRuntimeConfig({
-      appUrl: options.appUrl,
-      cacheClientAssets: options.cacheClientAssets,
-      clientEntry: options.clientEntry,
-      mode: options.mode,
-      port: options.port,
-      publicUrl: options.publicUrl,
+// assets, handles status codes and headers, and listens — through the same
+// Effect runtime as the dev server. An app's server entry is just
+// `startServer({ routes, appUrl: import.meta.url, ... })`. Rejects with
+// StartConfigError / StartListenError; SIGINT/SIGTERM close the listening
+// socket gracefully before the process terminates.
+export function startServer(options: StartServerOptions): Promise<Server> {
+  const {
+    appUrl,
+    cacheClientAssets,
+    clientEntry,
+    mode,
+    port,
+    publicUrl,
+    ...handlerOptions
+  } = options;
+
+  return runStartRuntime(
+    startRuntimeLayer({
+      config: { appUrl, cacheClientAssets, clientEntry, mode, port, publicUrl },
+      handlerOptions,
+      log: console.log,
     }),
   );
-  const clientAssets = createClientAssetResolver({
-    appUrl: config.appUrl.href,
-    cache: config.cacheClientAssets,
-    clientEntry: config.clientEntry,
-  });
-  const handler = createRequestHandler({
-    ...options,
-    clientEntry: config.clientEntry,
-  });
-  const listener = createStartNodeRequestListener({
-    cacheClientAssets: config.cacheClientAssets,
-    clientAssets,
-    handler,
-  });
-  const server = createServer(listener);
-
-  server.listen(config.port, () => {
-    console.log(`Fig Start: ${config.publicUrl.href}`);
-  });
-  return server;
 }
 
 function normalizeStaticAssets(

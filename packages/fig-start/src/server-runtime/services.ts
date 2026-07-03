@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, type Scope } from "effect";
 import type { Server } from "node:http";
 import type { ClientAssetResolver } from "../server-assets.ts";
 import type { StartHandler, StartHandlerOptions } from "../server.ts";
@@ -10,7 +10,7 @@ import {
   normalizeStartRuntimeConfig,
 } from "./config.ts";
 import type { StartConfigError, StartListenError } from "./errors.ts";
-import { startNodeHttpServer } from "./node-http.ts";
+import { listenNodeHttpServer } from "./node-http.ts";
 import {
   type StartNodeRequestListener,
   createStartNodeRequestListener,
@@ -46,7 +46,9 @@ export class StartRequestListener extends Context.Service<
 export class NodeHttpServer extends Context.Service<
   NodeHttpServer,
   {
-    readonly start: () => Effect.Effect<Server, StartListenError>;
+    // Scoped: the listening socket is released (graceful close) when the
+    // enclosing scope closes.
+    readonly listen: () => Effect.Effect<Server, StartListenError, Scope.Scope>;
   }
 >()("NodeHttpServer") {}
 
@@ -125,8 +127,8 @@ export const nodeHttpServerLayer: Layer.Layer<
     const config = yield* StartConfig;
     const listener = yield* StartRequestListener;
     return {
-      start: Effect.fn("NodeHttpServer.start")(function* () {
-        return yield* startNodeHttpServer({
+      listen: Effect.fn("NodeHttpServer.listen")(function* () {
+        return yield* listenNodeHttpServer({
           listener,
           port: config.port,
         });

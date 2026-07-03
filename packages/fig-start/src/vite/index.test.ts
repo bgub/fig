@@ -68,6 +68,9 @@ startServer({
   clientReferenceAssets,
   context: () => ({ appName }),
   serverRouteAssets,
+}).catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
 `,
     );
