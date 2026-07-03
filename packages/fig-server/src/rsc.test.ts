@@ -349,6 +349,53 @@ describe("RSC rendering", () => {
     expect(seen).toEqual([{ id: "app/Counter.client.tsx#Counter" }]);
   });
 
+  it("renders preloaded client references synchronously", async () => {
+    const Widget = clientReference({
+      id: "app/Widget.client.tsx#Widget",
+      load: () => Promise.resolve({}),
+    });
+    const rows = await renderToRscRows(createElement(Widget, { label: "hi" }));
+
+    const widgetModule = {
+      Widget: (props: { label: string }) =>
+        createElement("span", null, `widget:${props.label}`),
+    };
+
+    // Without preloading, the first render reads the module promise (this
+    // evaluation runs outside a Fig render, so readPromise throws its
+    // dispatcher error instead of suspending).
+    const cold = createRscResponse({
+      loadClientReference: () => Promise.resolve(widgetModule),
+    });
+    processTestRscRows(cold, rows);
+    let thrown: unknown;
+    try {
+      evaluateRscNode(cold.getRoot());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String(thrown)).toContain("readPromise can only be called");
+
+    // Preloading dedupes the module load and makes the render synchronous.
+    let loads = 0;
+    const response = createRscResponse({
+      loadClientReference: () => {
+        loads += 1;
+        return Promise.resolve(widgetModule);
+      },
+    });
+    processTestRscRows(response, rows);
+
+    await response.preloadClientReferences();
+    await response.preloadClientReferences();
+    expect(loads).toBe(1);
+
+    const rendered = evaluateRscNode(response.getRoot()) as FigElement;
+    expect(isValidElement(rendered)).toBe(true);
+    expect(rendered.type).toBe("span");
+    expect(rendered.props.children).toBe("widget:hi");
+  });
+
   it("ignores invalid asset descriptors while decoding client rows", () => {
     const response = createRscResponse();
 

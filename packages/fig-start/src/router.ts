@@ -17,6 +17,13 @@ export interface RouterHistory {
 }
 
 export interface CreateRouterOptions {
+  // Awaited between a successful load and the state commit. Client
+  // navigation uses it to prefetch server-route RSC payloads so the previous
+  // page stays visible until the next one can render.
+  beforeCommit?: (
+    location: RouterLocation,
+    result: LoadResult,
+  ) => Promise<void> | void;
   context?: unknown;
   history?: RouterHistory;
   routes: readonly AnyRoute[];
@@ -33,11 +40,13 @@ export interface FigRouter extends Router {
   commit(location: RouterLocation, result: LoadResult): void;
   hydrate(location: RouterLocation, loaderData: Record<string, unknown>): void;
   load(location: RouterLocation): Promise<LoadResult>;
+  sync(location: RouterLocation): Promise<void>;
 }
 
 export function createRouter(options: CreateRouterOptions): FigRouter {
   const tree = buildRouteTree(options.routes);
   const baseContext = options.context ?? {};
+  const beforeCommit = options.beforeCommit ?? null;
   const history = options.history ?? null;
   const listeners = new Set<() => void>();
 
@@ -183,23 +192,52 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
     });
   }
 
+  // Loads (and beforeCommit prefetches) can be slow and overlap: only the
+  // most recently started navigation may commit; superseded ones return
+  // without touching state or history.
+  let navigationVersion = 0;
+
+  async function transitionTo(
+    location: RouterLocation,
+    applyHistory: ((href: string) => void) | null,
+    redirectReplace: boolean | undefined,
+  ): Promise<void> {
+    const version = ++navigationVersion;
+    setState({ ...state, status: "pending" });
+    const result = await load(location);
+    if (version !== navigationVersion) return;
+
+    if (result.status === "redirect") {
+      await navigate({ replace: redirectReplace, to: result.redirect.to });
+      return;
+    }
+
+    await beforeCommit?.(location, result);
+    if (version !== navigationVersion) return;
+
+    applyHistory?.(location.href);
+    commit(location, result);
+  }
+
   async function navigate(to: NavigateOptions | string): Promise<void> {
     const options = typeof to === "string" ? { to } : to;
     const location = buildLocation(options);
 
-    setState({ ...state, status: "pending" });
-    const result = await load(location);
+    await transitionTo(
+      location,
+      (href) => {
+        if (history === null) return;
+        if (options.replace === true) history.replace(href);
+        else history.push(href);
+      },
+      options.replace,
+    );
+  }
 
-    if (result.status === "redirect") {
-      await navigate({ replace: options.replace, to: result.redirect.to });
-      return;
-    }
-
-    if (history !== null) {
-      if (options.replace === true) history.replace(location.href);
-      else history.push(location.href);
-    }
-    commit(location, result);
+  // For popstate: the browser already updated the URL, so load and commit
+  // (with the same superseding and beforeCommit rules) without pushing.
+  function sync(location: RouterLocation): Promise<void> {
+    return transitionTo(location, null, true);
   }
 
   return {
@@ -211,6 +249,7 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
     load,
     navigate,
     subscribe,
+    sync,
     tree,
   };
 }

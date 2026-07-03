@@ -256,6 +256,50 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     }
   });
 
+  it("keeps the previous route visible until a navigated server route can render", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+    const previousFetch = globalThis.fetch;
+    let releaseDash: () => void = () => undefined;
+    const dashGate = new Promise<void>((resolve) => {
+      releaseDash = resolve;
+    });
+    globalThis.fetch = async (input, init) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), "http://localhost").href, init);
+      if (new URL(request.url).pathname === "/dash") await dashGate;
+      return previousFetch(input, init);
+    };
+
+    try {
+      const router = hydrateStart({ routes, loadClientReference });
+      await flush();
+      expect(document.body.textContent).toContain("Home");
+
+      const navigation = router.navigate("/dash");
+      await flush();
+
+      // The RSC payload is still in flight: the previous route must stay
+      // mounted instead of committing to an empty server-route slot.
+      expect(document.body.textContent).toContain("Home");
+      expect(document.querySelector('[data-fig-rsc-slot="/dash"]')).toBeNull();
+
+      releaseDash();
+      await navigation;
+      await flush();
+
+      const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+      expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
+      expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+      expect(document.body.textContent).not.toContain("Home");
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreFetch();
+    }
+  });
+
   it("refreshes an existing server route segment when navigating between its child routes", async () => {
     const nestedRoutes = [
       createRootRoute({
@@ -440,18 +484,22 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
 
     try {
       const router = hydrateStart({ routes, loadClientReference });
-      await router.navigate("/styled");
+      const navigation = router.navigate("/styled");
       await flush();
 
       const link = document.head.querySelector('link[rel="stylesheet"]');
-      const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
       expect(link).not.toBeNull();
       expect(link?.getAttribute("href")).toBe(styledIslandHref);
-      expect(slot?.querySelector(".styled-island")).toBeNull();
+      // The stylesheet gate holds the whole navigation: nothing commits yet.
+      expect(
+        document.querySelector('[data-fig-rsc-slot="/styled"]'),
+      ).toBeNull();
 
       link?.dispatchEvent(new Event("load"));
+      await navigation;
       await flush();
 
+      const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
       expect(slot?.querySelector(".styled-island")?.textContent).toBe(
         "styled!",
       );
@@ -466,15 +514,17 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
 
     try {
       const router = hydrateStart({ routes, loadClientReference });
-      await router.navigate("/styled");
+      const navigation = router.navigate("/styled");
       await flush();
 
       const link = document.head.querySelector('link[rel="stylesheet"]');
       expect(link).not.toBeNull();
       expect(document.querySelector(".styled-island")).toBeNull();
 
+      // Superseding navigation abandons the gated one entirely.
       await router.navigate("/");
       link?.dispatchEvent(new Event("load"));
+      await navigation;
       await flush();
 
       expect(document.body.textContent).toContain("Home");
@@ -507,14 +557,15 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
 
     try {
       const router = hydrateStart({ routes: slowRoutes });
-      await router.navigate("/slow");
+      const navigation = router.navigate("/slow");
       await flush();
-      expect(
-        document.querySelector('[data-fig-rsc-slot="/slow"]'),
-      ).not.toBeNull();
+      // The payload is still streaming, so the navigation has not committed.
+      expect(document.querySelector('[data-fig-rsc-slot="/slow"]')).toBeNull();
+      expect(document.body.textContent).toContain("Home");
 
       await router.navigate("/");
       pending.resolve("too late");
+      await navigation;
       await flush();
 
       expect(document.body.textContent).toContain("Home");

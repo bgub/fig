@@ -44,7 +44,12 @@ import {
 } from "./components.tsx";
 import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
-import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
+import {
+  createRouter,
+  type FigRouter,
+  type LoadResult,
+  type RouterHistory,
+} from "./router.ts";
 import type { AnyRoute } from "./route.ts";
 import type { RouterLocation } from "./types.ts";
 
@@ -72,7 +77,20 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     throw new Error(`Missing #${ROOT_ELEMENT_ID} container to hydrate into.`);
   }
 
+  // Assigned right after createRouter; the beforeCommit closure only runs on
+  // later navigations. Prefetching the RSC payload before the commit keeps
+  // the previous page visible until the next server route can render.
+  let boundServerRouteContent: ServerRouteContent | null = null;
+  const prepareServerRoutes = (
+    location: RouterLocation,
+    result: LoadResult,
+  ): Promise<void> | undefined =>
+    result.status === "match"
+      ? boundServerRouteContent?.prepare(location, result.matches)
+      : undefined;
+
   const router = createRouter({
+    beforeCommit: prepareServerRoutes,
     context: options.context,
     history: browserHistory(),
     routes: options.routes,
@@ -87,6 +105,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
   const serverRouteContent = createServerRouteContent(options, router);
+  boundServerRouteContent = serverRouteContent;
 
   // If the matched route was a `.server.tsx`, the document carries its RSC
   // payload. Newer payloads arrive as streamed segment frames; keep the old
@@ -292,6 +311,10 @@ function resolveClientReferenceExport(
 
 interface ServerRouteContent extends ServerRouteContentStore {
   bindRootData(data: FigDataStoreHandle): void;
+  prepare(
+    location: RouterLocation,
+    matches: readonly RouteMatch[],
+  ): Promise<void> | undefined;
   receiveBuffered(payload: SerializedRscPayload, url: string): void;
   receiveSegment(
     segment: SerializedRscSegment,
@@ -449,6 +472,28 @@ function createServerRouteContent(
     return entries.get(routeId);
   }
 
+  function startEntryFetch(routeId: string, url: string): ServerRouteEntry {
+    const response = createServerRouteResponse(options);
+    const controller = new AbortController();
+    const entry = createEntry(routeId, response, {
+      dispose: () => controller.abort(),
+      // Client navigation reveals server routes atomically after the RSC fetch;
+      // initial document streams keep their default progressive reveal behavior.
+      payloadComplete: false,
+      url,
+    });
+
+    loadServerRouteRsc(
+      response,
+      routeId,
+      url,
+      options,
+      controller.signal,
+      control(entry),
+    );
+    return entry;
+  }
+
   function receiveRows(
     entry: ServerRouteEntry,
     rows: string,
@@ -460,6 +505,44 @@ function createServerRouteContent(
     entry.response.processStringChunk(rows);
     ensureEntryAssets(entry);
     notify(entry);
+  }
+
+  function entryRenderable(entry: ServerRouteEntry): boolean {
+    return (
+      entry.payloadComplete &&
+      (entry.assetGate === null ||
+        entry.revealed ||
+        entry.hydrateWithPendingAssets)
+    );
+  }
+
+  // Loading island modules before the commit lets the payload's client
+  // references render synchronously on reveal instead of suspending the
+  // freshly committed slot to its null fallback for a beat.
+  function preloadEntryClientReferences(
+    entry: ServerRouteEntry,
+  ): Promise<void> | undefined {
+    if (entries.get(entry.routeId) !== entry) return undefined;
+    return entry.response.preloadClientReferences();
+  }
+
+  // Resolves when the entry can render (payload complete and assets settled),
+  // or when the entry is torn down by a superseding navigation.
+  function waitForEntryRenderable(
+    entry: ServerRouteEntry,
+  ): Promise<void> | undefined {
+    if (entryRenderable(entry)) return undefined;
+
+    return new Promise((resolve) => {
+      const listener = (): void => {
+        if (entries.get(entry.routeId) === entry && !entryRenderable(entry)) {
+          return;
+        }
+        entry.listeners.delete(listener);
+        resolve();
+      };
+      entry.listeners.add(listener);
+    });
   }
 
   return {
@@ -506,16 +589,22 @@ function createServerRouteContent(
       });
       entry.dispose = combineDisposers(entry.dispose, unsubscribe);
     },
+    prepare(location, matches) {
+      const match = firstServerRouteMatch(matches);
+      if (match === undefined) return undefined;
+      if (entries.has(match.routeId)) return undefined;
+
+      const entry = startEntryFetch(match.routeId, rscRouteUrl(location));
+      const renderable = waitForEntryRenderable(entry);
+      if (renderable === undefined) {
+        return preloadEntryClientReferences(entry);
+      }
+      return renderable.then(() => preloadEntryClientReferences(entry));
+    },
     render(routeId) {
       const entry = entries.get(routeId);
       if (entry === undefined) return null;
-      if (
-        (entry.assetGate !== null &&
-          !entry.revealed &&
-          !entry.hydrateWithPendingAssets) ||
-        !entry.payloadComplete
-      )
-        return null;
+      if (!entryRenderable(entry)) return null;
       entry.revealed = true;
       return serverRouteNode(entry.node);
     },
@@ -531,24 +620,7 @@ function createServerRouteContent(
         return;
       }
 
-      const response = createServerRouteResponse(options);
-      const controller = new AbortController();
-      const entry = createEntry(match.routeId, response, {
-        dispose: () => controller.abort(),
-        // Client navigation reveals server routes atomically after the RSC fetch;
-        // initial document streams keep their default progressive reveal behavior.
-        payloadComplete: false,
-        url,
-      });
-
-      loadServerRouteRsc(
-        response,
-        match.routeId,
-        url,
-        options,
-        controller.signal,
-        control(entry),
-      );
+      startEntryFetch(match.routeId, url);
     },
     subscribe(routeId, listener) {
       const entry = entries.get(routeId);
@@ -1038,16 +1110,7 @@ function installLinkInterceptor(router: FigRouter): void {
 
 function installPopStateHandler(router: FigRouter): void {
   window.addEventListener("popstate", () => {
-    const location = router.buildLocation(currentHref());
-    void (async () => {
-      const result = await router.load(location);
-      if (result.status === "redirect") {
-        await router.navigate({ replace: true, to: result.redirect.to });
-        return;
-      }
-      // The browser already updated the URL, so commit without pushing.
-      router.commit(location, result);
-    })();
+    void router.sync(router.buildLocation(currentHref()));
   });
 }
 

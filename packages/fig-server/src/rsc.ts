@@ -169,6 +169,7 @@ export interface RscResponse {
   getAssetResources(): readonly FigAssetResource[];
   getClientReferences(): readonly RscClientReferenceRecord[];
   getRoot(): FigNode;
+  preloadClientReferences(): Promise<void>;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
   processStringChunk(chunk: string): void;
   subscribe(listener: () => void): () => void;
@@ -404,6 +405,13 @@ class RscResponseImpl implements RscResponse {
     RscClientReferenceRecord
   >();
   private readonly chunks = new Map<number, DecodedChunk>();
+  // One component, load promise, and resolved module per reference id:
+  // stable component identity keeps island state across re-decodes, and the
+  // resolved-module fast path lets an already-loaded reference render
+  // synchronously instead of suspending on its first read.
+  private readonly clientReferenceComponents = new Map<string, ElementType>();
+  private readonly clientReferenceLoads = new Map<string, Promise<unknown>>();
+  private readonly clientReferenceModules = new Map<string, unknown>();
   private listeners = new Set<() => void>();
   private maxRowId = 0;
   private pendingData: FigDataHydrationEntry[] = [];
@@ -541,19 +549,65 @@ class RscResponseImpl implements RscResponse {
     if (resolved !== undefined) return resolved;
 
     if (this.options.loadClientReference !== undefined) {
-      const loaded = this.options.loadClientReference(metadata);
+      const cached = this.clientReferenceComponents.get(metadata.id);
+      if (cached !== undefined) return cached;
 
-      return function RscClientComponent(props: Props) {
-        const moduleValue = readPromise(loaded);
+      const loaded = this.loadClientReferenceModule(metadata);
+      const modules = this.clientReferenceModules;
+
+      const component = function RscClientComponent(props: Props) {
+        const moduleValue = modules.has(metadata.id)
+          ? modules.get(metadata.id)
+          : readPromise(loaded);
         const type = resolveClientReferenceExport(moduleValue, metadata.id);
         return createElement(type, props);
       };
+      this.clientReferenceComponents.set(metadata.id, component);
+      return component;
     }
 
     return clientReference({
       id: metadata.id,
       load: () => Promise.resolve({}),
     });
+  }
+
+  // Starts (and caches) every recorded reference's module load. Awaiting this
+  // before revealing a navigated payload lets its islands render
+  // synchronously; load failures resolve anyway and surface when the
+  // component reads the rejected promise.
+  preloadClientReferences(): Promise<void> {
+    if (this.options.loadClientReference === undefined) {
+      return Promise.resolve();
+    }
+
+    const loads = [...this.clientReferences.values()]
+      .filter((reference) => {
+        return this.options.resolveClientReference?.(reference) === undefined;
+      })
+      .map((reference) => this.loadClientReferenceModule(reference));
+    return Promise.allSettled(loads).then(() => undefined);
+  }
+
+  private loadClientReferenceModule(
+    metadata: RscClientReferenceMetadata,
+  ): Promise<unknown> {
+    let loaded = this.clientReferenceLoads.get(metadata.id);
+    if (loaded === undefined) {
+      loaded = (
+        this.options.loadClientReference as NonNullable<
+          RscResponseOptions["loadClientReference"]
+        >
+      )(metadata);
+      this.clientReferenceLoads.set(metadata.id, loaded);
+      void loaded.then(
+        (value) => {
+          this.clientReferenceModules.set(metadata.id, value);
+        },
+        () => undefined,
+      );
+    }
+    return loaded;
   }
 
   getChunk(id: number): DecodedChunk {
