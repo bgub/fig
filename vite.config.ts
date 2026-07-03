@@ -22,7 +22,6 @@ const figSourceAliasEntries = [
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
   ["@bgub/fig-refresh", "packages/fig-refresh/src/index.ts"],
   ["@bgub/fig-vite", "packages/fig-vite/src/index.ts"],
-  ["@bgub/fig-scheduler", "packages/fig-scheduler/src/index.ts"],
   ["@bgub/fig-server/rsc", "packages/fig-server/src/rsc.ts"],
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
   ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
@@ -59,7 +58,6 @@ const libraryEntries: Record<string, string[]> = {
   ],
   "packages/fig-refresh": ["./src/index.ts"],
   "packages/fig-vite": ["./src/index.ts"],
-  "packages/fig-scheduler": ["./src/index.ts"],
   "packages/fig-server": ["./src/index.ts", "./src/rsc.ts"],
   "packages/fig-start": [
     "./src/index.ts",
@@ -74,7 +72,6 @@ const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const packWorkspacePaths = [
   "packages/fig",
   "packages/fig-data",
-  "packages/fig-scheduler",
   "packages/fig-server",
   "packages/fig-reconciler",
   "packages/fig-refresh",

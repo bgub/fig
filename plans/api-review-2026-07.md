@@ -14,8 +14,6 @@ The short version: **the original Fig ideas are consistently better than their R
 
 ## Tier 2 — React carried over wholesale
 
-**fig-scheduler: fold into fig-reconciler?** The prune is done — `runWithPriority`/`getCurrentPriorityLevel`, `forceFrameRate`, the delayed-task timer queue, and the `createScheduler` instance API are deleted (726 B, down from 1.3 kB); `requestPaint` was the one keeper, now actually wired from `commitRoot` like React so the work loop yields to paint after commits; and the work loop prefers `setImmediate` with a lazy `MessageChannel` so importing the scheduler cannot keep Node processes alive. What remains of the original finding: the package has exactly one consumer (fig-reconciler) and could be folded in as an internal module instead of being published.
-
 **focus/blur bubbling emulation is the one synthetic-event behavior Fig kept.** Fig correctly refused `mouseenter` emulation and `onChange` remapping, but natively non-bubbling `focus`/`blur` bubble through the Fig tree via capture delegation — while `focusin`/`focusout` (the native bubbling variants) also work. A native-DOM-literate user gets non-native behavior with no API-surface hint. Defensible for portal-crossing semantics, but it should be a documented decision or dropped; right now it's inherited.
 
 **Naming and surface habit-isms**, roughly in order of conviction:
@@ -43,4 +41,4 @@ Worth saying explicitly, because the answer to the headline question is mostly "
 
 ## Sequencing
 
-Done so far: the RSC `onError` leak, the scheduler Node-liveness bug, the fig-data store-handle mutations (`root.data` + `readDataStore()`, effects run in the ambient store), and the error-recovery loop (function `fallback` receives the error; `invalidateData` resets rejected entries). Next: the signal-for-actions contract and the RSC naming are the ones to settle **before** anything freezes, because they're wire formats or call-signature contracts; JSX types are the biggest single ergonomics investment; the scheduler prune and naming cleanups can trail.
+Done so far: the RSC `onError` leak, the fig-data store-handle mutations (`root.data` + `readDataStore()`, effects run in the ambient store), the error-recovery loop (function `fallback` receives the error; `invalidateData` resets rejected entries), and the scheduler in full (Node-liveness fix, dead-surface prune, commit → `requestPaint` wiring, folded into fig-reconciler as an internal module — the published `@bgub/fig-scheduler` package is gone). Next: the signal-for-actions contract and the RSC naming are the ones to settle **before** anything freezes, because they're wire formats or call-signature contracts; JSX types are the biggest single ergonomics investment; the naming cleanups can trail.

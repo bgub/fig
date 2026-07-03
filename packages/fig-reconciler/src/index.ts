@@ -46,7 +46,7 @@ import {
   type ScheduledTask,
   scheduleCallback,
   shouldYieldToHost,
-} from "@bgub/fig-scheduler";
+} from "./scheduler.ts";
 import {
   devtoolsTypeName,
   type FigDevtoolsCommitInspection,

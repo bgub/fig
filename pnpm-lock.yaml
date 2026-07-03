@@ -202,9 +202,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
-      '@bgub/fig-scheduler':
-        specifier: workspace:*
-        version: link:../fig-scheduler
     devDependencies:
       '@bgub/fig-data':
         specifier: workspace:*
@@ -215,8 +212,6 @@ importers:
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
-
-  packages/fig-scheduler: {}
 
   packages/fig-server:
     dependencies:

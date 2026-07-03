@@ -100,9 +100,8 @@ Future goal:
   rendering, Suspense streaming, resource hoisting, server errors, and RSC
   helpers.
 - [`@bgub/fig-reconciler`](./packages/fig-reconciler/README.md): renderer
-  internals for custom host configs.
-- [`@bgub/fig-scheduler`](./packages/fig-scheduler/README.md): cooperative
-  task scheduling primitives.
+  internals for custom host configs, including the cooperative task
+  scheduler.
 
 ## Example
 

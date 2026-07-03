@@ -12,7 +12,7 @@ import {
 } from "@bgub/fig";
 import { dataResource, readData } from "@bgub/fig-data";
 import { Assets } from "@bgub/fig/internal";
-import { requestPaint } from "@bgub/fig-scheduler";
+import { requestPaint } from "./scheduler.ts";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { createRenderer, type HostConfig } from "./index.ts";
 import type {

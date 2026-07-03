@@ -8,11 +8,6 @@
       "extra-files": ["jsr.json"],
       "prerelease-type": "alpha"
     },
-    "packages/fig-scheduler": {
-      "package-name": "@bgub/fig-scheduler",
-      "extra-files": ["jsr.json"],
-      "prerelease-type": "alpha"
-    },
     "packages/fig-server": {
       "package-name": "@bgub/fig-server",
       "extra-files": ["jsr.json"],

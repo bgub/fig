@@ -1,3 +1,8 @@
+// Fig's cooperative task scheduler: a macrotask-hopping work loop with five
+// priority tiers (mapped from lanes in lanes.ts) and starvation timeouts.
+// Internal to fig-reconciler — the reconciler is its only consumer, so it is
+// deliberately not a published package.
+
 export type PriorityLevel = 1 | 2 | 3 | 4 | 5;
 export type SchedulerCallback = () => SchedulerCallback | undefined;
 

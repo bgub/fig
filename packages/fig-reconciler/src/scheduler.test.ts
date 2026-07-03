@@ -6,11 +6,11 @@ import {
   requestPaint,
   scheduleCallback,
   shouldYieldToHost,
-} from "./index.ts";
+} from "./scheduler.ts";
 
 const delay = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe("@bgub/fig-scheduler", () => {
+describe("scheduler", () => {
   it("runs higher priority tasks first", async () => {
     const calls: string[] = [];
 
@@ -86,7 +86,7 @@ describe("@bgub/fig-scheduler", () => {
     vi.resetModules();
 
     try {
-      await import("./index.ts");
+      await import("./scheduler.ts");
       expect(constructed).toBe(0);
     } finally {
       vi.unstubAllGlobals();

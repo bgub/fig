@@ -6,7 +6,7 @@ import {
   NormalPriority,
   type PriorityLevel,
   UserBlockingPriority,
-} from "@bgub/fig-scheduler";
+} from "./scheduler.ts";
 
 export type Lane = number;
 export type Lanes = number;

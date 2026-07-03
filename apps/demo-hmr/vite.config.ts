@@ -40,10 +40,6 @@ export default defineConfig({
         replacement: pkg("fig-reconciler/src/index.ts"),
       },
       {
-        find: "@bgub/fig-scheduler",
-        replacement: pkg("fig-scheduler/src/index.ts"),
-      },
-      {
         find: "@bgub/fig-refresh",
         replacement: pkg("fig-refresh/src/index.ts"),
       },

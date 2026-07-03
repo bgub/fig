@@ -1,4 +1,4 @@
-import { NormalPriority } from "@bgub/fig-scheduler";
+import { NormalPriority } from "./scheduler.ts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   AllTransitionLanes,
