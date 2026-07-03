@@ -446,6 +446,41 @@ describe("reconciler", () => {
     expect(boundary.componentStack).toContain("at Broken");
   });
 
+  it("passes the caught error and info to function fallbacks", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const stacks: string[] = [];
+
+    function Broken(): never {
+      throw new Error("boom");
+    }
+
+    const tree = createElement(
+      ErrorBoundary,
+      {
+        fallback: (error, info) => {
+          stacks.push(info.componentStack);
+          return createElement(
+            "span",
+            null,
+            `Crashed: ${(error as Error).message}`,
+          );
+        },
+      },
+      createElement(Broken, null),
+    );
+
+    flushSync(() => root.render(tree));
+    expect(container.textContent).toBe("Crashed: boom");
+    expect(stacks.at(-1)).toContain("at Broken");
+
+    // Sticky fallback: re-renders of the captured boundary still see the
+    // error (the beginErrorBoundary path, not just initial capture).
+    flushSync(() => root.render(tree));
+    expect(container.textContent).toBe("Crashed: boom");
+  });
+
   it("throws a hydration support diagnostic when clearContainer is missing", () => {
     const { hydrateRoot } = createRenderer({
       ...host,

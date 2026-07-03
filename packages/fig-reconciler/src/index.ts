@@ -2045,8 +2045,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       node,
       previousErrorState === null
         ? node.props.children
-        : (node.props.fallback as FigNode),
+        : errorBoundaryFallback(node, previousErrorState),
     );
+  }
+
+  // A bare function is never a valid FigNode, so a function fallback is
+  // unambiguously the render-with-error shape.
+  function errorBoundaryFallback(node: F, state: ErrorBoundaryState): FigNode {
+    const fallback = node.props.fallback as
+      | FigNode
+      | ((error: unknown, info: ErrorInfo) => FigNode)
+      | undefined;
+    return typeof fallback === "function"
+      ? fallback(state.error, state.info)
+      : fallback;
   }
 
   function beginPortal(node: F): void {
@@ -3816,7 +3828,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     source: F,
   ): F | null {
     boundary.errorBoundaryState = createErrorBoundaryState(error, source);
-    reconcileCurrentChildren(boundary, boundary.props.fallback as FigNode);
+    reconcileCurrentChildren(
+      boundary,
+      errorBoundaryFallback(boundary, boundary.errorBoundaryState),
+    );
     return boundary.child ?? completeUnit(boundary);
   }
 

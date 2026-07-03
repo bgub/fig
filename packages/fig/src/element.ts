@@ -79,7 +79,11 @@ export interface FigActivity {
 }
 
 export interface ErrorBoundaryProps {
-  fallback?: FigNode;
+  // A function fallback receives the caught error so error UIs can render
+  // it (message, retry affordance) without smuggling state above the
+  // boundary through onError. A bare function is never a valid FigNode, so
+  // the two shapes cannot collide.
+  fallback?: FigNode | ((error: unknown, info: ErrorInfo) => FigNode);
   onError?: (error: unknown, info: ErrorInfo) => void;
   children?: FigNode;
 }

@@ -12,6 +12,7 @@ import {
   ErrorBoundary,
   Suspense,
   useReactive,
+  useState,
 } from "@bgub/fig";
 import type { DataResourceKey } from "@bgub/fig-data";
 import { describe, expect, it } from "vite-plus/test";
@@ -286,6 +287,70 @@ describe("@bgub/fig-dom data resources", () => {
     await delay();
 
     expect(loads).toBe(1);
+  });
+
+  it("recovers from a failed load: error fallback, invalidate, remount", async () => {
+    let attempts = 0;
+    const profileResource = dataResource({
+      key: (id: string) => ["recovery", id],
+      load: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new Error("network down"))
+          : Promise.resolve("Ada");
+      },
+    });
+
+    function Profile() {
+      return createElement("span", null, readData(profileResource, "one"));
+    }
+
+    // The whole loop: load fails -> function fallback renders the error with
+    // a retry button -> retry invalidates the poisoned entry and remounts the
+    // boundary by key -> fresh load succeeds.
+    function App() {
+      const [generation, setGeneration] = useState(0);
+      const data = readDataStore();
+      return createElement(
+        ErrorBoundary,
+        {
+          key: generation,
+          fallback: (error: unknown) =>
+            createElement(
+              "button",
+              {
+                events: [
+                  on("click", () => {
+                    data.invalidateData(profileResource, "one");
+                    setGeneration((value) => value + 1);
+                  }),
+                ],
+              },
+              `Failed: ${(error as Error).message}`,
+            ),
+        },
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Profile, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, null)));
+    await delay();
+    expect(container.textContent).toBe("Failed: network down");
+    expect(attempts).toBe(1);
+
+    (container.firstChild as FakeElement).dispatch("click");
+    await delay();
+    await delay();
+
+    expect(container.textContent).toBe("Ada");
+    expect(attempts).toBe(2);
   });
 
   it("hydrates initial data entries before the first client read", () => {
