@@ -62,8 +62,26 @@ export interface FigDataStoreEntrySnapshot {
   value?: unknown;
 }
 
+// The explicit, app-facing store surface (FigRoot.data, readDataStore()).
+// The free functions in @bgub/fig-data resolve the ambient store slot, which
+// is only set while Fig executes synchronously — render, event handlers, the
+// synchronous prefix of actions and transitions, and effects. After an
+// `await` the slot is gone, so async flows capture this handle first and call
+// its methods instead.
 export interface FigDataStoreHandle {
   hydrate(entries: readonly FigDataHydrationEntry[]): void;
+  invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    ...args: TArgs
+  ): void;
+  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    ...args: TArgs
+  ): void;
+  refreshData<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+    ...args: TArgs
+  ): Promise<DataRefreshResult<TValue>>;
   run<T>(callback: () => T): T;
 }
 
@@ -75,23 +93,13 @@ export interface FigDataStore extends FigDataStoreHandle {
   dispose(): void;
   inspectDataEntries(): FigDataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
-  invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
-  ): void;
-  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
-  ): void;
+  // Renderer plumbing, not handle surface: args stay an array because the
+  // subscribing owner trails them.
   readData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: FigDataResource<TArgs, TValue, TStoreContext>,
     args: TArgs,
     owner: object,
   ): TValue;
-  refreshData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
-  ): Promise<DataRefreshResult<TValue>>;
 }
 
 // The host callbacks a renderer hands to the data-store factory. Structurally

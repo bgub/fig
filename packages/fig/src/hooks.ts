@@ -199,7 +199,7 @@ export function preloadDataResource<
     return;
   }
 
-  resolveDataStore().preloadData(resource, args);
+  resolveDataStore().preloadData(resource, ...args);
 }
 
 export function invalidateDataResource<
@@ -207,7 +207,7 @@ export function invalidateDataResource<
   TValue,
   TStoreContext,
 >(resource: FigDataResource<TArgs, TValue, TStoreContext>, args: TArgs): void {
-  resolveDataStore().invalidateData(resource, args);
+  resolveDataStore().invalidateData(resource, ...args);
 }
 
 export function refreshDataResource<
@@ -218,7 +218,7 @@ export function refreshDataResource<
   resource: FigDataResource<TArgs, TValue, TStoreContext>,
   args: TArgs,
 ): Promise<DataRefreshResult<TValue>> {
-  return resolveDataStore().refreshData(resource, args);
+  return resolveDataStore().refreshData(resource, ...args);
 }
 
 export function setCurrentDispatcher(
@@ -241,6 +241,9 @@ function resolveDispatcher(
 
 function resolveDataStore(): FigDataStore {
   return resolveCurrentDataStore(
-    "Data resource APIs require a Fig data store.",
+    "No ambient Fig data store. Data APIs work synchronously during render, " +
+      "event handlers, actions, and effects — not after an await. Capture " +
+      "readDataStore() (or root.data) synchronously and call the handle " +
+      "instead.",
   );
 }

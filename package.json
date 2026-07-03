@@ -23,7 +23,7 @@
     },
     {
       "path": "packages/fig-data/dist/index.js",
-      "limit": "3.5 kB"
+      "limit": "3.75 kB"
     },
     {
       "path": "packages/fig-dom/dist/index.js",

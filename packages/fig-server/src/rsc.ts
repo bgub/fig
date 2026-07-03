@@ -782,7 +782,7 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
       return frame.request.dataStore.readData(resource, args, frame);
     },
     preloadData(resource, args) {
-      frame.request.dataStore.preloadData(resource, args);
+      frame.request.dataStore.preloadData(resource, ...args);
     },
     useId() {
       const id = `fig-rsc-${frame.request.nextUseId.toString(32)}`;

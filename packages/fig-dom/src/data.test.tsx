@@ -1,10 +1,18 @@
 import {
   dataResource,
   invalidateData,
+  preloadData,
   readData,
+  readDataStore,
   refreshData,
 } from "@bgub/fig-data";
-import { Activity, createElement, ErrorBoundary, Suspense } from "@bgub/fig";
+import {
+  Activity,
+  createElement,
+  ErrorBoundary,
+  Suspense,
+  useReactive,
+} from "@bgub/fig";
 import type { DataResourceKey } from "@bgub/fig-data";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, on } from "./index.ts";
@@ -161,6 +169,123 @@ describe("@bgub/fig-dom data resources", () => {
     await delay();
 
     expect(container.textContent).toBe("Updated");
+  });
+
+  it("mutates through the root data handle without run(), even after awaits", async () => {
+    const next = deferred<string>();
+    let loads = 0;
+    const labelResource = dataResource({
+      key: (id: string) => ["handle-label", id],
+      load: () => {
+        loads += 1;
+        return loads === 1 ? "Initial" : next.promise;
+      },
+    });
+
+    function Label() {
+      return createElement("span", null, readData(labelResource, "one"));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Label, null),
+        ),
+      ),
+    );
+    await delay();
+    expect(container.textContent).toBe("Initial");
+
+    // No ambient store here (plain async test code): the handle carries its
+    // store, so the canonical `await save(); invalidate(...)` flow works.
+    root.data.invalidateData(labelResource, "one");
+    await delay();
+    expect(loads).toBe(2);
+
+    next.resolve("Updated");
+    await delay();
+    expect(container.textContent).toBe("Updated");
+  });
+
+  it("captures readDataStore() in render for use after awaits in events", async () => {
+    const values = ["Ada", "Grace"];
+    const userResource = dataResource({
+      key: (id: string) => ["captured-user", id],
+      load: () => values.shift() ?? "Unknown",
+    });
+
+    function Profile() {
+      const data = readDataStore();
+      const user = readData(userResource, "one");
+      return createElement(
+        "button",
+        {
+          events: [
+            on("click", () => {
+              void (async () => {
+                // The ambient slot is gone after this await; the captured
+                // handle is the supported path.
+                await delay();
+                await data.refreshData(userResource, "one");
+              })();
+            }),
+          ],
+        },
+        user,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Profile, null),
+        ),
+      ),
+    );
+    await delay();
+    expect(container.textContent).toBe("Ada");
+
+    (container.firstChild as FakeElement).dispatch("click");
+    await delay();
+    await delay();
+
+    expect(container.textContent).toBe("Grace");
+  });
+
+  it("resolves the ambient store inside effects", async () => {
+    let loads = 0;
+    const itemResource = dataResource({
+      key: (id: string) => ["effect-preload", id],
+      load: () => {
+        loads += 1;
+        return "Item";
+      },
+    });
+
+    function Preloader() {
+      useReactive(() => {
+        // Throws "no ambient store" before effects ran inside dataStore.run.
+        preloadData(itemResource, "one");
+      }, []);
+      return null;
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(Preloader, null)));
+    await delay();
+
+    expect(loads).toBe(1);
   });
 
   it("hydrates initial data entries before the first client read", () => {

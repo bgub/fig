@@ -21,7 +21,7 @@ describe("@bgub/fig-data", () => {
       schedule: () => undefined,
     });
 
-    await expect(store.refreshData(messageResource, ["one"])).resolves.toEqual({
+    await expect(store.refreshData(messageResource, "one")).resolves.toEqual({
       status: "fulfilled",
       value: "hello-one",
     });
@@ -77,10 +77,10 @@ describe("@bgub/fig-data", () => {
     expect(byKey.get('["reset","b"]')?.subscriberCount).toBe(1);
 
     // The owner no longer reads "a", so invalidating it must not schedule it.
-    store.invalidateData(resource, ["a"]);
+    store.invalidateData(resource, "a");
     expect(scheduled).toEqual([]);
 
-    store.invalidateData(resource, ["b"]);
+    store.invalidateData(resource, "b");
     expect(scheduled).toEqual([owner]);
   });
 
@@ -124,7 +124,7 @@ describe("@bgub/fig-data", () => {
       schedule: () => undefined,
     });
 
-    const result = store.refreshData(pendingResource, ["one"]);
+    const result = store.refreshData(pendingResource, "one");
     store.dispose();
 
     await expect(result).resolves.toEqual({
@@ -173,7 +173,7 @@ describe("@bgub/fig-data", () => {
       schedule: () => undefined,
     });
 
-    await store.refreshData(valueResource, ["one"]);
+    await store.refreshData(valueResource, "one");
     store.run(() => invalidateData(valueResource, "one"));
     await delay();
 
@@ -227,8 +227,8 @@ describe("@bgub/fig-data", () => {
     expect(store.readData(valueResource, ["one"], owner)).toBe("initial");
     store.commitDataDependencies(owner, null);
 
-    const first = store.refreshData(valueResource, ["one"]);
-    const second = store.refreshData(valueResource, ["one"]);
+    const first = store.refreshData(valueResource, "one");
+    const second = store.refreshData(valueResource, "one");
 
     await expect(first).resolves.toEqual({
       reason: "superseded",
@@ -269,7 +269,7 @@ describe("@bgub/fig-data", () => {
     // A failing background refresh keeps the stale value but must not retry on
     // every subsequent read.
     failNext = true;
-    store.invalidateData(valueResource, ["one"]);
+    store.invalidateData(valueResource, "one");
     expect(store.readData(valueResource, ["one"], owner)).toBe("value");
     await delay();
     expect(loads).toBe(2);
@@ -280,7 +280,7 @@ describe("@bgub/fig-data", () => {
 
     // An explicit invalidation is a fresh intent and re-enables auto-refresh.
     failNext = false;
-    store.invalidateData(valueResource, ["one"]);
+    store.invalidateData(valueResource, "one");
     expect(store.readData(valueResource, ["one"], owner)).toBe("value");
     await delay();
     expect(loads).toBe(3);
@@ -331,7 +331,7 @@ describe("@bgub/fig-data", () => {
     store.commitDataDependencies(owner, null);
 
     // Start a background refresh, leaving the entry value-bearing and in flight.
-    store.invalidateData(valueResource, ["one"]);
+    store.invalidateData(valueResource, "one");
     expect(store.readData(valueResource, ["one"], owner)).toBe("first");
     expect(loads).toBe(2);
 

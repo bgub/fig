@@ -451,7 +451,7 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     preloadData(resource, args) {
       throwIfAborting(frame.request);
-      frame.request.dataStore.preloadData(resource, args);
+      frame.request.dataStore.preloadData(resource, ...args);
     },
     useId() {
       const id = `${frame.request.identifierPrefix}fig-${frame.idPath}-${frame.localIdCounter.toString(32)}`;

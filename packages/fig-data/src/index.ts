@@ -3,6 +3,7 @@ export {
   invalidateData,
   preloadData,
   readData,
+  readDataStore,
   refreshData,
 } from "./store.ts";
 export type {

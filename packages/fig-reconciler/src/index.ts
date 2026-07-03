@@ -748,7 +748,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
     preloadData(resource, args) {
       const fiber = requireRenderingFiber();
-      rootOf(fiber).dataStore.preloadData(resource, args);
+      rootOf(fiber).dataStore.preloadData(resource, ...args);
     },
     readPromise(promise) {
       return readThenable(promise);
@@ -4551,15 +4551,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       effect.strictRan = true;
     }
     abortEffect(effect);
-    effect.controller = new AbortController();
+    let controller = new AbortController();
+    effect.controller = controller;
+    // Effects run with the ambient data store set, like render and event
+    // dispatch, so preloadData/invalidateData work synchronously inside them.
+    const dataStore = rootOf(effect.owner as F).dataStore;
     try {
-      effect.create(effect.controller.signal);
+      dataStore.run(() => effect.create(controller.signal));
       if (process.env.NODE_ENV !== "production" && runStrict) {
         // Strict re-run: abort and re-invoke first-time effects so work that
         // ignores its AbortSignal surfaces in development.
         abortEffect(effect);
-        effect.controller = new AbortController();
-        effect.create(effect.controller.signal);
+        controller = new AbortController();
+        effect.controller = controller;
+        dataStore.run(() => effect.create(controller.signal));
       }
     } catch (error) {
       abortEffect(effect);
@@ -4784,14 +4789,14 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     readData(resource, args, owner) {
       return requireStore().readData(resource, args, owner);
     },
-    preloadData(resource, args) {
-      requireStore().preloadData(resource, args);
+    preloadData(resource, ...args) {
+      requireStore().preloadData(resource, ...args);
     },
-    invalidateData(resource, args) {
-      requireStore().invalidateData(resource, args);
+    invalidateData(resource, ...args) {
+      requireStore().invalidateData(resource, ...args);
     },
-    refreshData(resource, args) {
-      return requireStore().refreshData(resource, args);
+    refreshData(resource, ...args) {
+      return requireStore().refreshData(resource, ...args);
     },
     commitDataDependencies(owner, previousOwner) {
       inner?.commitDataDependencies(owner, previousOwner);

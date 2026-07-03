@@ -198,6 +198,18 @@ export function refreshData<TArgs extends unknown[], TValue, TStoreContext>(
   return refreshDataResource(resource, args);
 }
 
+// Captures the ambient store as an explicit handle. Call it synchronously
+// wherever Fig is executing — render, event handlers, actions, effects — and
+// keep the reference: unlike the free functions above, the handle's methods
+// still work after an `await`, where the ambient slot is gone.
+export function readDataStore(): FigDataStoreHandle {
+  return resolveCurrentDataStore(
+    "readDataStore() must be called synchronously while Fig is executing — " +
+      "during render, an event handler, an action, or an effect. Capture " +
+      "the handle there and use it after awaits.",
+  );
+}
+
 export function createDataStore<Owner extends object, Lane>(
   host: DataStoreHost<Owner, Lane>,
 ): DataStore<Owner, Lane> {
@@ -403,7 +415,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: DataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
+    ...args: TArgs
   ): void {
     if (this.disposed) return;
 
@@ -422,7 +434,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   preloadData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: DataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
+    ...args: TArgs
   ): void {
     if (this.disposed || resource.load === undefined) return;
 
@@ -477,7 +489,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   refreshData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: DataResource<TArgs, TValue, TStoreContext>,
-    args: TArgs,
+    ...args: TArgs
   ): Promise<DataRefreshResult<TValue>> {
     if (this.disposed) {
       return Promise.resolve({
