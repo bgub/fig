@@ -45,6 +45,15 @@ Deliberate divergences:
 - Context reads use `readContext(context)` because context is a render input.
 - Promise reads use `readPromise(promise)` rather than React's broad
   `use(resource)` API.
+- Data mutations are handle-explicit across async boundaries: the
+  `invalidateData`/`preloadData`/`refreshData` free functions resolve an
+  ambient store that only exists while Fig executes synchronously (render,
+  events, actions, effects). Async flows capture `readDataStore()` — or use
+  `root.data` — and call the same methods on the handle after awaits.
+- Error recovery composes without side channels: an `ErrorBoundary` `fallback`
+  may be a function receiving `(error, info)` so error UIs render the failure
+  and offer retry, and invalidating a rejected data entry clears the cached
+  error so a remounted boundary loads afresh instead of rethrowing.
 - Transitions are explicit priority scopes: `transition(callback)` and
   `useTransition()` mark updates scheduled inside the callback, including
   post-`await` updates while an async transition callback is still pending.
