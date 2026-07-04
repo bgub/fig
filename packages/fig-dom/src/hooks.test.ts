@@ -672,6 +672,58 @@ describe("@bgub/fig-dom hooks", () => {
     expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
   });
 
+  it("aborts in-flight actions when an enclosing Activity hides", async () => {
+    const signals: AbortSignal[] = [];
+    const first = deferred<string>();
+    let run: ((value: Promise<string>) => void) | null = null;
+
+    function Inner() {
+      const [value, runner, isPending] = useActionState(
+        (_previous: string, next: Promise<string>, signal: AbortSignal) => {
+          signals.push(signal);
+          return next;
+        },
+        "initial",
+      );
+      run = runner;
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        value,
+      );
+    }
+
+    function App({ mode }: { mode: "visible" | "hidden" }) {
+      return createElement(Activity, { mode }, createElement(Inner, null));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+
+    requireTestValue(run as ((value: Promise<string>) => void) | null)(
+      first.promise,
+    );
+    await delay();
+    expect(container.textContent).toBe("Pending initial");
+    expect(signals[0].aborted).toBe(false);
+
+    flushSync(() => root.render(createElement(App, { mode: "hidden" })));
+    expect(signals[0].aborted).toBe(true);
+
+    // The retired run released its pending slot, so the revealed tree is not
+    // stuck pending.
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    await delay();
+    expect(container.textContent).toBe("Idle initial");
+
+    // Hide retired the run: its late settlement can no longer apply state.
+    first.resolve("stale");
+    await delay();
+    expect(container.textContent).toBe("Idle initial");
+  });
+
   it("aborts transitions when an enclosing Activity hides, unpinning isPending", async () => {
     const signals: AbortSignal[] = [];
     const never = deferred<void>();
