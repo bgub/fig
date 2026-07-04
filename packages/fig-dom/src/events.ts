@@ -6,10 +6,7 @@ import {
 import { isElementNode, isEmptyPropValue, parentOf } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
-export type EventOptions = Pick<
-  AddEventListenerOptions,
-  "capture" | "once" | "passive"
->;
+export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
 export type EventCallback<E extends Event = Event> = (
   event: E,
   signal: AbortSignal,
@@ -31,10 +28,6 @@ interface EventSlot {
   options: Required<EventOptions>;
   controller: AbortController | null;
   element: Element | null;
-  // A consumed `once` slot stays in the element's slot array as a tombstone:
-  // slots are matched to descriptors by position, so splicing would tear
-  // down and re-create every later sibling slot on the next render.
-  fired: boolean;
   listener: EventListener | null;
   listenerTarget: Container | null;
   root: Container | null;
@@ -487,7 +480,6 @@ function addEventSlot(
     options,
     controller: null,
     element: null,
-    fired: false,
     listener: null,
     listenerTarget: null,
     root: null,
@@ -648,7 +640,6 @@ function extractDispatches(
 
     for (const slot of eventSlots.get(element) ?? []) {
       if (
-        slot.fired ||
         slot.root !== root ||
         slot.type !== type ||
         slot.options.capture !== capture ||
@@ -687,20 +678,13 @@ function invokeDispatches(
       currentElement = entry.element;
     }
 
-    const slot = entry.slot;
-    if (slot.options.once) {
-      // A re-entrant dispatch from an earlier handler may have consumed it.
-      if (slot.fired) continue;
-      slot.fired = true;
-      detachEventSlot(slot);
-    }
-
     try {
       dispatchEventSlot(entry, event);
     } finally {
-      // A slot detached mid-dispatch (removal or a consumed once) still ran
-      // — it was subscribed when the event fired — but its signal must end
-      // aborted per the abort-on-removal contract, even if the handler threw.
+      // A slot detached mid-dispatch still ran — it was subscribed when the
+      // event fired — but its signal must end aborted per the abort-on-removal
+      // contract, even if the handler threw.
+      const slot = entry.slot;
       if (slot.element === null && slot.listenerTarget === null) {
         abortEventSlot(slot);
       }
@@ -765,8 +749,6 @@ function attachEventSlot(
   listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
-  if (slot.fired) return;
-
   if (direct(slot.type)) {
     attachDirectEventSlot(element, slot);
   } else {
@@ -780,12 +762,6 @@ function attachDirectEventSlot(element: Element, slot: EventSlot): void {
   detachEventSlot(slot);
   slot.element = element;
   slot.listener = (event) => {
-    if (slot.fired) return;
-    if (slot.options.once) {
-      slot.fired = true;
-      detachEventSlot(slot);
-    }
-
     try {
       dispatchEventSlot(
         {
@@ -1129,13 +1105,12 @@ function patchEventMethod(
 function normalizedOptions(options: EventOptions = {}): Required<EventOptions> {
   return {
     capture: options.capture === true,
-    once: options.once === true,
     passive: options.passive === true,
   };
 }
 
 function eventKey(type: string, options: Required<EventOptions>): string {
-  return `${type}:${options.capture}:${options.once}:${options.passive}`;
+  return `${type}:${options.capture}:${options.passive}`;
 }
 
 function eventPriority(type: string): EventPriority {

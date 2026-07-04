@@ -317,6 +317,10 @@ function setFormProperty(
   options: UpdateOptions,
 ): void {
   if (type === "select" && valueProp(name)) return;
+  if (type === "option" && name === "value") {
+    setAttribute(element, "value", formValue(next));
+    return;
+  }
 
   // Defaults live-write only on the instance's very first render (and never
   // during hydration, or when a controlling sibling prop wins): a
@@ -350,12 +354,16 @@ function setFormValue(
   const textArea = type === "textarea";
   const next = formValue(value);
 
-  setAttribute(element, "value", textArea ? null : next);
-
   if (options.defaultValue === true && "defaultValue" in element) {
     (element as unknown as { defaultValue: string }).defaultValue = next ?? "";
   }
-  if (textArea) element.textContent = next ?? "";
+  if (options.defaultValue === true) {
+    if (textArea) {
+      element.textContent = next ?? "";
+    } else {
+      setAttribute(element, "value", next);
+    }
+  }
 
   if (
     options.live === true &&

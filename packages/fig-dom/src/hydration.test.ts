@@ -1419,6 +1419,7 @@ describe("@bgub/fig-dom hydration", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
     input.setAttribute("value", "Server");
+    input.defaultValue = "Server";
     input.value = "User typed";
     container.appendChild(input);
 
@@ -1431,7 +1432,8 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.childNodes).toEqual([input]);
     expect(input.value).toBe("Client");
-    expect(input.attributes.value).toBe("Client");
+    expect(input.defaultValue).toBe("Server");
+    expect(input.attributes.value).toBe("Server");
   });
 
   it("preserves uncontrolled form edits during hydration", () => {

@@ -94,6 +94,9 @@ running list of deliberate divergences. (Open questions live in
 - Host props use native DOM names: `class`, `for`, `tabindex`,
   `stroke-width`, `xlink:href`. Raw trusted HTML is `unsafeHTML` (a plain,
   scary-named string prop), not `dangerouslySetInnerHTML`.
+- Form `value` props are authoritative at commit time, not synchronously
+  locked after native input events. `value` controls the live DOM value;
+  `defaultValue` owns the default value and HTML representation.
 - JSX host-prop types come from the renderer: core's `JSX.IntrinsicElements`
   is deliberately empty and `@bgub/fig-dom` augments it with a per-tag
   `HostProps<E>` map, so `bind` infers the concrete element type per tag

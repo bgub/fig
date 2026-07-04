@@ -189,17 +189,34 @@ describe("@bgub/fig-dom props", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
-    flushSync(() => root.render(createElement("input", { value: "First" })));
+    flushSync(() =>
+      root.render(
+        createElement("input", { defaultValue: "Initial", value: "First" }),
+      ),
+    );
 
     const input = container.childNodes[0] as FakeElement;
+    expect(input.value).toBe("First");
+    expect(input.defaultValue).toBe("Initial");
+    expect(input.attributes.value).toBe("Initial");
+
     input.value = "Typed";
 
-    flushSync(() => root.render(createElement("input", { value: "First" })));
+    flushSync(() =>
+      root.render(
+        createElement("input", { defaultValue: "Initial", value: "First" }),
+      ),
+    );
     expect(input.value).toBe("First");
-    expect(input.attributes.value).toBe("First");
+    expect(input.defaultValue).toBe("Initial");
+    expect(input.attributes.value).toBe("Initial");
 
     input.value = "First";
-    flushSync(() => root.render(createElement("input", { value: "First" })));
+    flushSync(() =>
+      root.render(
+        createElement("input", { defaultValue: "Initial", value: "First" }),
+      ),
+    );
     expect(input.value).toBe("First");
   });
 
@@ -434,7 +451,8 @@ describe("@bgub/fig-dom props", () => {
       root.render(createElement("textarea", { value: "Controlled" })),
     );
     expect(textarea.value).toBe("Controlled");
-    expect(textarea.textContent).toBe("Controlled");
+    expect(textarea.defaultValue).toBe("");
+    expect(textarea.textContent).toBe("");
     expect(textarea.attributes.value).toBeUndefined();
   });
 

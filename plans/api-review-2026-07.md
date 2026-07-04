@@ -19,8 +19,8 @@ All Tier-1 findings are resolved.
 
 These aren't wrong, but they're currently accidents rather than choices, and each will surprise someone after the API freezes:
 
-- **Controlled inputs**: Fig's actual semantics are "value is authoritative at commit time," not React's synchronous post-event lock — arguably _more_ coherent with native events, but undocumented, and the `value` prop currently also syncs the `value` _attribute_ (i.e. `defaultValue`) on every commit, which React deliberately doesn't do. Pick the model, document it, fix the attribute wart.
-- **`events` array identity**: conditional entries (`isOpen && on(...)`) throw, while `composeBind` accepts them — accept falsy holes and document that array position is a listener's identity. Also `once` slots tombstone forever under a stable declaration; document or drop `once`.
+- Done: **controlled inputs** use the explicit Fig model: `value` is authoritative at commit time and controls only the live DOM value; `defaultValue` owns the default value/HTML representation. Fig does not emulate React's synchronous post-event lock.
+- **`events` array identity**: conditional entries (`isOpen && on(...)`) throw, while `composeBind` accepts them — accept falsy holes and document that array position is a listener's identity. Done: the ambiguous declarative `once` option was dropped from Fig event options.
 - **Numeric style values** silently produce nothing (no px auto-suffix — right call — but also no dev warning, while string styles _do_ warn).
 - **No hydration-mismatch opt-out**: intentional server/client divergence (timestamps, locales) currently has no per-element escape hatch — decide whether that's a stance or a gap.
 - **`TStoreContext`** rides as an uninferrable phantom on every fig-data signature backed by an unchecked cast from `dataContext: unknown` — a Register-style module augmentation (fig-start already uses the pattern) would delete it from every signature.

@@ -70,67 +70,6 @@ describe("@bgub/fig-dom events", () => {
     expect(lanes).toEqual([SyncLane, SyncLane]);
   });
 
-  it("keeps sibling slots stable when a once handler fires", () => {
-    const aborts: string[] = [];
-    const calls: string[] = [];
-    const container = new FakeElement("root");
-    const root = createRoot(container as unknown as Element);
-    const app = (label: string) =>
-      createElement("button", {
-        events: [
-          on("click", () => calls.push(`once:${label}`), { once: true }),
-          on("click", (_event, signal) => {
-            calls.push(`sibling:${label}`);
-            signal.addEventListener("abort", () => aborts.push(label));
-          }),
-        ],
-      });
-
-    flushSync(() => root.render(app("one")));
-
-    const button = container.childNodes[0] as FakeElement;
-    button.dispatch("click");
-    expect(calls).toEqual(["once:one", "sibling:one"]);
-
-    // A consumed once slot must not shift its siblings: the same-key
-    // re-render updates the sibling's callback in place without tearing it
-    // down (which would abort its in-flight signal) or re-arming the once.
-    flushSync(() => root.render(app("two")));
-    expect(aborts).toEqual([]);
-
-    button.dispatch("click");
-    expect(calls).toEqual(["once:one", "sibling:one", "sibling:two"]);
-  });
-
-  it("aborts a once handler's signal even when it throws", () => {
-    const container = new FakeElement("root");
-    const root = createRoot(container as unknown as Element);
-    let aborted = false;
-
-    flushSync(() =>
-      root.render(
-        createElement("button", {
-          events: [
-            on(
-              "click",
-              (_event, signal) => {
-                signal.addEventListener("abort", () => {
-                  aborted = true;
-                });
-                throw new Error("boom");
-              },
-              { once: true },
-            ),
-          ],
-        }),
-      ),
-    );
-
-    const button = container.childNodes[0] as FakeElement;
-    expect(() => button.dispatch("click")).toThrow("boom");
-    expect(aborted).toBe(true);
-  });
-
   it("dispatches handlers subscribed at event time despite re-entrant commits", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");
@@ -491,71 +430,6 @@ describe("@bgub/fig-dom events", () => {
 
       expect(calls).toEqual(["child"]);
     }
-  });
-
-  it("cleans up once event listeners after dispatch", () => {
-    const calls: string[] = [];
-    const signals: AbortSignal[] = [];
-    const container = new FakeElement("root");
-
-    flushSync(() =>
-      render(
-        createElement("button", {
-          events: [
-            on(
-              "click",
-              (_event, signal) => {
-                calls.push("click");
-                signals.push(signal);
-              },
-              { once: true },
-            ),
-          ],
-        }),
-        container as unknown as Element,
-      ),
-    );
-
-    const button = container.childNodes[0] as FakeElement;
-
-    button.dispatch("click");
-    button.dispatch("click");
-
-    expect(calls).toEqual(["click"]);
-    expect(signals[0].aborted).toBe(true);
-    expect(container.listeners.click).toBeUndefined();
-  });
-
-  it("cleans up delegated once listeners when callbacks throw", () => {
-    let calls = 0;
-    const container = new FakeElement("root");
-
-    flushSync(() =>
-      render(
-        createElement("button", {
-          events: [
-            on(
-              "click",
-              () => {
-                calls += 1;
-                throw new Error("boom");
-              },
-              { once: true },
-            ),
-          ],
-        }),
-        container as unknown as Element,
-      ),
-    );
-
-    const button = container.childNodes[0] as FakeElement;
-
-    expect(() => button.dispatch("click")).toThrow("boom");
-    expect(calls).toBe(1);
-    expect(container.listeners.click).toBeUndefined();
-
-    expect(() => button.dispatch("click")).not.toThrow();
-    expect(calls).toBe(1);
   });
 
   it("keeps delegated root listeners while sibling handlers remain", () => {
