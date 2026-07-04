@@ -56,6 +56,13 @@ type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
 declare const process: { env: { NODE_ENV?: string } };
 
 export { insertAssetResources } from "./asset-resources.ts";
+export type {
+  EmptyPropValue,
+  HostEvents,
+  HostIntrinsicElements,
+  HostProps,
+  HostStyle,
+} from "./jsx.ts";
 export { composeBind };
 export type { Bind } from "./bind.ts";
 export {

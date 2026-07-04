@@ -47,7 +47,9 @@ Deliberate divergences:
   event contract — a trailing `AbortSignal`, aborted on re-entry and unmount.
 - DOM node access uses `bind={(node, signal) => ...}` instead of refs.
 - Host props use native DOM names such as `class`, `for`, `tabindex`,
-  `stroke-width`, and `xlink:href`.
+  `stroke-width`, and `xlink:href`; the JSX types enforce this — `className`,
+  `ref`, and `on*` props are compile errors, and `bind` infers each tag's
+  concrete element type.
 - Raw trusted HTML uses `unsafeHTML`, not `dangerouslySetInnerHTML`.
 - Context reads use `readContext(context)` because context is a render input.
 - Promise reads use `readPromise(promise)` rather than React's broad
