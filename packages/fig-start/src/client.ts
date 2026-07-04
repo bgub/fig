@@ -6,13 +6,11 @@ import {
   type Props,
   readPromise,
   Suspense,
-  useExternalStore,
-} from "@bgub/fig";
-import {
-  assetResourceKey,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
-} from "@bgub/fig/internal";
+  useExternalStore,
+} from "@bgub/fig";
+import { assetResourceKey } from "@bgub/fig/internal";
 import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
   createPayloadResponse,

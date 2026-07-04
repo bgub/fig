@@ -77,3 +77,17 @@ export {
   type TitleResource,
 } from "./resource.ts";
 export { transition, type TransitionHandler } from "./transition.ts";
+// Data-protocol types referenced by public renderer APIs (root.data,
+// createRoot({ initialData }), the server results' getData()). Types only:
+// every runtime data API is importable exclusively from @bgub/fig-data —
+// that split is what lets renderer bundles ship without the store
+// implementation, and type exports do not weaken it.
+export type {
+  DataRefreshResult,
+  DataResourceKey,
+  DataResourceKeyInput,
+  DataResourceLoadContext,
+  FigDataHydrationEntry,
+  FigDataResource,
+  FigDataStoreHandle,
+} from "./data.ts";

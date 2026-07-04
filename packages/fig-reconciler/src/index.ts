@@ -6,7 +6,10 @@ import {
   type ElementType,
   type ErrorInfo,
   type ExternalStoreSubscribe,
+  type DataResourceKeyInput,
   type FigContext,
+  type FigDataHydrationEntry,
+  type FigDataStoreHandle,
   type FigElement,
   type FigNode,
   type FigPortal,
@@ -30,11 +33,8 @@ import {
   setCurrentDispatcher,
   setCurrentDataStore,
   setTransitionHandler,
-  type FigDataHydrationEntry,
   type FigDataStore,
-  type FigDataStoreHandle,
   type FigDataStoreHost,
-  type DataResourceKeyInput,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
 import {

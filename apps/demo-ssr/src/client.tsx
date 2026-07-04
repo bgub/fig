@@ -1,6 +1,6 @@
 import "./dev-env.ts";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
-import type { FigDataHydrationEntry } from "@bgub/fig/internal";
+import type { FigDataHydrationEntry } from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   App,

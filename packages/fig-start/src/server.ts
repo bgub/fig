@@ -1,6 +1,7 @@
 import {
   createElement,
   type FigClientReference,
+  type FigDataHydrationEntry,
   type FigNode,
   type FigAssetResource,
   type FigAssetResourceList,
@@ -8,10 +9,7 @@ import {
   assets,
   type Props,
 } from "@bgub/fig";
-import {
-  assetResourceKey,
-  type FigDataHydrationEntry,
-} from "@bgub/fig/internal";
+import { assetResourceKey } from "@bgub/fig/internal";
 import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
 import {
   escapeAttribute,

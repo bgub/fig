@@ -4,9 +4,9 @@ import type {
   FigNode,
   FigAssetResource,
   FigAssetResourceList,
+  FigDataHydrationEntry,
   Props,
 } from "@bgub/fig";
-import type { FigDataHydrationEntry } from "@bgub/fig/internal";
 import type { DataResourceKeyInput } from "@bgub/fig-data";
 
 export interface ServerRenderOptions {
