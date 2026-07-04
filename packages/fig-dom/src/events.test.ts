@@ -70,6 +70,46 @@ describe("@bgub/fig-dom events", () => {
     expect(lanes).toEqual([SyncLane, SyncLane]);
   });
 
+  it("ignores falsy event entries without shifting listener slots", () => {
+    const aborts: string[] = [];
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const app = (enabled: boolean, label: string) =>
+      createElement("button", {
+        events: [
+          false,
+          enabled && on("click", () => calls.push(`conditional:${label}`)),
+          null,
+          on("click", (_event, signal) => {
+            calls.push(`stable:${label}`);
+            signal.addEventListener("abort", () => aborts.push(label));
+          }),
+          undefined,
+        ],
+      });
+
+    flushSync(() => root.render(app(false, "one")));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+    expect(calls).toEqual(["stable:one"]);
+
+    flushSync(() => root.render(app(false, "two")));
+    expect(aborts).toEqual([]);
+    button.dispatch("click");
+    expect(calls).toEqual(["stable:one", "stable:two"]);
+
+    flushSync(() => root.render(app(true, "three")));
+    button.dispatch("click");
+    expect(calls).toEqual([
+      "stable:one",
+      "stable:two",
+      "conditional:three",
+      "stable:three",
+    ]);
+  });
+
   it("dispatches handlers subscribed at event time despite re-entrant commits", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");

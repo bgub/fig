@@ -722,7 +722,19 @@ function abortEventSlot(slot: EventSlot): void {
 
 function eventDescriptors(value: unknown): EventDescriptor[] {
   if (isEmptyPropValue(value)) return [];
-  if (Array.isArray(value) && value.every(isEventDescriptor)) return value;
+  if (Array.isArray(value)) {
+    const descriptors: EventDescriptor[] = [];
+    for (const item of value) {
+      if (isEmptyPropValue(item)) continue;
+      if (!isEventDescriptor(item)) {
+        throw new Error(
+          "The events prop must be an array of event descriptors.",
+        );
+      }
+      descriptors.push(item);
+    }
+    return descriptors;
+  }
   throw new Error("The events prop must be an array of event descriptors.");
 }
 
