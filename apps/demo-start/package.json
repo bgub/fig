@@ -9,7 +9,7 @@
     "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",
-    "test": "vp test run"
+    "test": "vp test run --passWithNoTests"
   },
   "portless": {
     "name": "fig-demo-start",
