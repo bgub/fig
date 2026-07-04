@@ -1,54 +1,53 @@
 # Fig
 
-Fig is a TypeScript re-implementation of React: the core ideas remain, including fibers, lanes, scheduling, diffing, rendering, and hooks.
+Fig is a TypeScript re-implementation of React: the core ideas remain —
+fibers, lanes, scheduling, diffing, rendering, hooks — while legacy cruft is
+dropped and Fig-specific APIs are adopted where they are clearer.
 
-The goal is to keep React's modern model while dropping legacy cruft such as class components and adopting Fig-specific APIs where they are clearer.
+## Documentation Map
+
+- `concepts/` — **the spec.** One file per subsystem; the single
+  authoritative source for contracts, invariants, wire formats, and
+  rationale. Start at `concepts/README.md`. When a change alters a contract,
+  update the owning concept file in the same commit.
+- `docs/` — user-facing guides (`intentional-differences-from-react.md` is
+  the React-migrant orientation; depth lives in concepts).
+- `plans/` — time-bound work plans and investigations; historical once
+  shipped (shipped contracts graduate to concepts).
 
 ## Conventions
 
 - The repository is hosted at https://github.com/bgub/fig (`origin`).
-- Use conventional commit messages (`feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`, `chore:`, with an optional scope like `fix(fig-dom): ...`).
+- Use conventional commit messages (`feat:`, `fix:`, `refactor:`, `perf:`,
+  `test:`, `docs:`, `chore:`, with an optional scope like
+  `fix(fig-dom): ...`).
 
-## Resource Terminology
+## Terminology
 
-- Use **data resources** for keyed async values, cache entries, server reads, and the APIs that refresh, invalidate, revalidate, or recompute them.
-- Use **asset resources** for CSS, scripts, module preloads, fonts, preconnects, and other render-discovered assets that are discovered, deduped, loaded, retained, and sometimes gated before reveal.
-- Avoid the unqualified term "resources" when discussing APIs, protocol work, or implementation plans where the distinction matters.
-- Use **payload** for the server-component wire layer (`@bgub/fig-server/payload`: row streaming, client references, boundary refreshes). Do not call it RSC or Flight — those are React brands; the format is Fig's own.
+- **data resources** — keyed async values, cache entries, server reads, and
+  the APIs that refresh or invalidate them (`concepts/data.md`).
+- **asset resources** — CSS, scripts, module preloads, fonts, preconnects,
+  and other render-discovered assets that are deduped, loaded, and sometimes
+  gated before reveal (`concepts/assets.md`).
+- Avoid the unqualified term "resources" where the distinction matters.
+- **payload** — the server-component wire layer
+  (`@bgub/fig-server/payload`). Never "RSC" or "Flight": those are React
+  brands; the format is Fig's own (`concepts/payload.md`).
 
-## Design Choices
+## Design Stances (pointers, not the spec)
 
-- No legacy React APIs: no class components, string refs, legacy context, or synthetic event pooling.
-- Hooks use Fig names: `useReactive` replaces `useEffect`, `useBeforePaint` replaces `useLayoutEffect`, and `useBeforeLayout` replaces `useInsertionEffect`.
-- Effects receive an `AbortSignal` instead of returning cleanup functions; Fig aborts on dependency changes and unmounts.
-- There is no mount-only effect hook: an empty deps array (`useReactive(fn, [])`) is the mount-once idiom.
-- DOM events use `events={[on("click", (event, signal) => ...)]}` instead of `onClick` props.
-- Event callbacks receive native DOM events plus an `AbortSignal`; Fig aborts the previous signal on re-entry and on listener removal.
-- DOM event listeners are delegated at the root and mapped to lanes/priorities.
-- Non-bubbling DOM events all stay direct with native semantics — focus/blur included, with no React-style bubbling emulation; ancestor-level focus tracking uses the native bubbling focusin/focusout (which delegate like any bubbling event) or a capture listener.
-- Portals render into explicit DOM targets while preserving Fig context, effects, and delegated event bubbling through the logical tree.
-- DOM node access uses `bind={(node, signal) => ...}` instead of React refs; components forward it as a normal prop.
-- Styling should stay separate from the `events` and `bind` APIs.
-- Render bails out in two tiers: a fiber with identical props and no own work in the render lanes is never re-rendered — when its `childLanes` are also clean it adopts the committed children without cloning (`AdoptedFlag`) and render plus the commit mutation/deletion/effect walks skip the subtree; when descendants have work its children are cloned and traversal descends, preserving child props identity so siblings bail too. Suspense boundaries always run `begin` so hidden-primary retries are handled. Commit clears fiber flags and deletions as it consumes them, so adopted subtrees never re-expose already-committed state.
-- Render diagnostics throw before commit for duplicate sibling keys, invalid children, render-phase state updates, and invalid DOM nesting; duplicate-key detection, nesting validation, and DevTools commit emission are dev-only via inline `process.env.NODE_ENV !== "production"` checks that app bundlers strip. DOM-nesting rules live in `@bgub/fig/internal` (`dom-nesting.ts`) and run on both the client (at fiber creation, with ancestors seeded from portal targets and root containers via the `containerType` host hook) and the server (an ancestor stack threaded through render frames, so suspended segments validate against their logical position); the ancestor checks model HTML parser scoping (button/table scope boundaries, li/dd/dt implied end tags); whitespace-only text and hoisted asset resources are exempt. Hydration preserves server-only attributes and styles, warning in dev when they diverge from the client render.
-- There is no `StrictMode` component and no opt-out: development builds always strict-render. Each render pass invokes the component twice — a shadow pass whose hooks, effects, and consumed update queues are discarded and restored, with no reconciliation — and commits only the second invocation; effects and fig-dom `bind` callbacks run, abort, and run again with a fresh signal once per lifetime (tracked via `Effect.strictRan` / `BindSlot.strictRan`, set before the first call so re-entrant runs cannot re-enter the cycle). All strict behaviors use the same inline `NODE_ENV` gates and apply on the client only, not during server rendering.
-- `useMemo` and `useCallback` are supported for stable values and callback identities.
-- `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` is the external store API; server render and hydration require `getServerSnapshot`.
-- `useStableEvent(handler)` is Fig's non-reactive event hook (React's `useEffectEvent` shape with the Fig event contract; "stable" names the identity guarantee): it returns a stable function whose handler always sees the latest committed render, receives a trailing `AbortSignal`, and aborts the previous invocation's signal on re-entry and on unmount; calls after unmount run the last committed handler with an already-aborted signal. Handlers swap at commit before the before-layout effect phase; calling one during render or server render throws, and the strict shadow pass never publishes.
-- `<Activity mode="visible" | "hidden">` hides a subtree while preserving fiber and hook state: hiding applies host `hideInstance`/`unhideInstance` hooks (through portals, stopping at nested hidden boundaries) and aborts effects, binds, and stable events; revealing re-arms deferred effects (kept on `fiber.effects` while hidden, skipped by the commit effect walks) so they run in normal phase order, and external-store subscriptions defer until reveal. Trees that mount hidden never run effects until revealed. There is no visibility API: the aborted signal is the indicator. Updates inside hidden trees are downgraded to the offscreen lane at schedule time (visibility is read from a commit-updated `ActivityState` shared by both fiber generations, so stale dispatch chains stay authoritative) and prerender at idle priority into the hidden DOM, with prerendered placements and host updates re-hidden as they commit; a reveal expands the render lanes so pending hidden work commits atomically with the reveal, and offscreen work skipped by earlier bailouts is re-marked pending after commit. The server streams hidden Activity content inside an inert `<template data-fig-activity>` so neither elements nor bare text render before hydration; the client keeps such boundaries dehydrated — no fibers, hooks, or hydration work — until reveal (or a visible client mode), when the content hydrates against the template's nodes and the commit unpacks them into the live DOM with node identity preserved. Any throw during Activity hydration abandons the attempt and the boundary stays dehydrated for a clean retry; hydration mismatches recover with a root client render. Suspense that suspends inside hidden server content still streams its completion: the boundary's markers live in the activity's inert `<template>` (whose content fragment is unreachable by the id-based reveal scripts), so its partial segments stage and fill in light-DOM hidden divs like any boundary and a final `ac` reveal op moves the assembled content into the template content (falling back to the light DOM if the activity already revealed), leaving a completed boundary that hydrates normally on reveal; a server render error inside such content emits an `ax` client-render marker into the same template content, also falling back to the light DOM after early reveal.
-- `useReducer` is intentionally not built in; reducer abstractions can live in libraries on top of `useState`. The setter type is `StateSetter<S>` — there is no `Dispatch`/`SetStateAction` reducer vocabulary.
-- `ErrorBoundary` catches render and Fig effect errors with a sticky fallback; reset by remounting/changing the boundary key. `fallback` may be a function receiving `(error, info)` so error UIs render the failure directly; a bare function is never a valid FigNode, so the shapes cannot collide.
-- Error boundaries do not catch promises, event handler errors, async callback errors, server render errors, or host commit failures.
-- Fig intentionally splits React's broad `use(resource)` idea into explicit reads.
-- Renderers do not bundle `@bgub/fig-data`: importing that package registers its store factory in a slot on `@bgub/fig/internal` (a module side effect, reflected in its `sideEffects` flag), and `fig-reconciler` roots created before it loads hold a stub store that upgrades itself in place on registration (covering code-split apps) and buffers `hydrate()`/`initialData` entries for replay. Data reads on the stub cannot happen — every data API is importable only from `@bgub/fig-data` — but throw a clear error if forced.
-- Data mutations (`invalidateData`/`preloadData`/`refreshData`) resolve an ambient store set only while Fig executes synchronously — render, event dispatch, the synchronous prefix of actions and transitions, and effects (which run inside `dataStore.run`). Async flows capture the explicit handle (`readDataStore()` during any of those windows, or `root.data`) and call the same variadic methods on it after awaits. Invalidating a rejected entry clears the cached error and returns it to pending so the next read loads afresh.
-- Context uses `createContext` plus `readContext(context)` because context reads are render-time inputs, not hook slots.
-- Context reads are tracked so provider updates mark matching consumers, and propagation stops at nested providers of the same context.
-- Promises use `readPromise(promise)` as the future Suspense-facing primitive; promise identity matters, not call position.
-- Server streaming uses nonce-compatible inline scripts; no external runtime format.
-- Server Suspense streams fallbacks first, then completed content and partial segments; server errors recover only through Suspense client-render markers.
-- Hydration is Suspense-boundary selective: server markers can stay dehydrated until background work or interaction hydrates that boundary.
-- Hydration queues replayable events blocked by pending Suspense hydration and replays them after the boundary hydrates.
-- Suspense retries after a committed fallback are scheduled on React-style retry lanes: low priority, excluded from expiration, reusing the boundary's retry lane when a retry suspends again.
-- A dehydrated Suspense boundary whose hydration attempt suspends stays dehydrated — the server DOM is preserved and the attached thenable ping retries hydration; no fallback is rendered over server content.
-- Uncaught render errors rethrow to `flushSync` callers; outside `flushSync` they go to the root's `onUncaughtError`, or rethrow from a detached task when no handler exists, so scheduler ticks never die.
+- Every export has one home; renderer packages never mirror core; types
+  follow signatures → `concepts/architecture.md`.
+- Callbacks receive `AbortSignal`s, never return cleanups; the aborted
+  signal is the indicator everywhere (effects, events, binds, stable events,
+  transitions, actions, data loaders) → `concepts/hooks.md`.
+- Native DOM names and native propagation semantics, no exceptions; events
+  declare via `events={[on(...)]}`; DOM access via `bind` →
+  `concepts/events.md`, `concepts/jsx.md`.
+- Explicit read verbs instead of `use(resource)`: `readContext`,
+  `readPromise`, `readData` → `concepts/hooks.md`, `concepts/data.md`.
+- Always-strict dev rendering; diagnostics throw before commit; dev behavior
+  strips via inline `NODE_ENV` gates → `concepts/rendering.md`.
+- Server errors cross the wire only as `onError → { digest?, message? }`;
+  streaming vs prerender semantics → `concepts/server-rendering.md`,
+  `concepts/errors.md`.

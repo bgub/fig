@@ -10,9 +10,7 @@ smaller Fig-specific APIs where they are clearer.
 
 ## Design
 
-Fig treats React as a reference point, not a compatibility contract. The
-full divergence list lives in
-[docs/intentional-differences-from-react.md](./docs/intentional-differences-from-react.md).
+Fig treats React as a reference point, not a compatibility contract.
 
 Principles:
 
@@ -22,73 +20,28 @@ Principles:
 - Add APIs because they strengthen Fig, not because React has them.
 - Fail early for invalid render inputs instead of warning after commit.
 
-Deliberate divergences:
+The full divergence list lives in
+[docs/intentional-differences-from-react.md](./docs/intentional-differences-from-react.md);
+subsystem contracts, invariants, and rationale live in
+[concepts/](./concepts/README.md). Highlights:
 
-- No legacy React APIs: no class components, string refs, legacy context, or
-  synthetic event pooling.
-- Effects use Fig names: `useReactive`, `useBeforePaint`, and
-  `useBeforeLayout`; an empty deps array is the mount-once idiom.
-- Effects receive an `AbortSignal`; cleanup attaches to abort instead of being
-  returned from the effect.
-- No `StrictMode` component: development builds always strict-render.
-  Components render twice per pass with the first result discarded, and
-  first-time effects and `bind` callbacks run, abort, and run again with a
-  fresh signal. Production builds strip these checks.
-- DOM events use `events={[on("click", handler)]}` with native events and an
-  `AbortSignal`, not `onClick` props.
-- Event propagation is native, with no exceptions: non-bubbling events —
-  `focus` and `blur` included — fire only on their target. Fig does not
-  emulate React's bubbling `focus`/`blur`; observe focus changes from an
-  ancestor with the platform's bubbling variants, `focusin`/`focusout` (or a
-  `capture: true` listener, as in the real DOM).
-- `useStableEvent(handler)` declares stable, non-reactive handlers (Fig's
-  `useEffectEvent`): the returned function's identity never changes, the
-  handler always sees the latest committed render, and it follows the Fig
-  event contract — a trailing `AbortSignal`, aborted on re-entry and unmount.
-- DOM node access uses `bind={(node, signal) => ...}` instead of refs.
-- Host props use native DOM names such as `class`, `for`, `tabindex`,
-  `stroke-width`, and `xlink:href`; the JSX types enforce this — `className`,
-  `ref`, and `on*` props are compile errors, and `bind` infers each tag's
-  concrete element type.
-- Raw trusted HTML uses `unsafeHTML`, not `dangerouslySetInnerHTML`.
-- Context reads use `readContext(context)` because context is a render input.
-- Promise reads use `readPromise(promise)` rather than React's broad
-  `use(resource)` API.
-- Data mutations are handle-explicit across async boundaries: the
-  `invalidateData`/`preloadData`/`refreshData` free functions resolve an
-  ambient store that only exists while Fig executes synchronously (render,
-  events, actions, effects). Async flows capture `readDataStore()` — or use
-  `root.data` — and call the same methods on the handle after awaits.
-- Error recovery composes without side channels: an `ErrorBoundary` `fallback`
-  may be a function receiving `(error, info)` so error UIs render the failure
-  and offer retry, and invalidating a rejected data entry clears the cached
-  error so a remounted boundary loads afresh instead of rethrowing.
-- Transitions are explicit priority scopes: `transition(callback)` and
-  `useTransition()` mark updates scheduled inside the callback, including
-  post-`await` updates while an async transition callback is still pending.
-  `useTransition()` callbacks receive an `AbortSignal` that aborts on
-  supersede (each hook is one cancellation domain), unmount, and Activity
-  hide; an aborted run is retired — its pending slot releases immediately and
-  its settlement (including an aborted fetch's rejection) is inert.
-- `useActionState(action, initialState)` follows React's argument order, with
-  Fig appending a trailing `AbortSignal` after the runner's arguments. Runs
-  are last-run-wins: a new run aborts and retires the previous one, whose
-  settlement can no longer touch state, error, or pending. Server action
-  transport is intentionally left to a future framework layer.
-- Server rendering uses Web `ReadableStream`s as the primary streaming model
-  instead of Node-specific streams. This keeps the same API shape across modern
-  Node, edge runtimes, Deno, Bun, and browser-like environments.
-- Server render errors cross the wire only through the explicit
-  `onError → { digest?, message? }` contract, shared by the HTML and payload
-  renderers: the handler's payload is authoritative, production defaults to an
-  empty payload, and development defaults to including the message because
-  server errors never re-execute on the client.
-- Document resources use explicit `resources([...], children)` wrappers and
-  small helpers such as `stylesheet`, `preload`, `font`, `preconnect`, `title`,
-  `meta`, and `script`; document-mode server rendering also lowers host
-  `<title>`, `<meta>`, `<link>`, and `<script>` tags into the same registry.
-  Metadata is injected into `<head>` while stream-safe assets can be hoisted
-  near dependent segments.
+- Effects, events, binds, transitions, actions, and data loaders all receive
+  an `AbortSignal`; nothing returns a cleanup function.
+- DOM events are native, declared as `events={[on("click", handler)]}`;
+  propagation is native with no exceptions, and DOM access is
+  `bind={(node, signal) => ...}`.
+- Host props use native names (`class`, `for`, `stroke-width`), enforced by
+  renderer-owned JSX types; raw trusted HTML is `unsafeHTML`.
+- React's `use(resource)` splits into `readContext`, `readPromise`, and
+  `readData`; data freshness has two verbs (`invalidateData`, `refreshData`)
+  and explicit store handles for async flows.
+- Development always strict-renders; render diagnostics throw before commit;
+  batching is automatic with `flushSync` as the only escape hatch.
+- Server rendering is Web-stream-first with a symmetric entry grid plus
+  `prerender` for settled, script-free HTML; server errors cross the wire
+  only through the `onError → { digest?, message? }` contract.
+- The server-component layer is Fig's own **payload** format — not RSC, not
+  Flight.
 
 Not goals:
 

@@ -1,5 +1,9 @@
 # Asset Resources Proposal
 
+> Historical proposal. Shipped contracts now live in `concepts/assets.md`
+> (terminology here predates the payload rename); unimplemented phases and
+> open questions below remain live.
+
 ## Summary
 
 Asset resources are render-discovered assets such as stylesheets, scripts,

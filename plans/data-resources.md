@@ -1,5 +1,9 @@
 # Data Resources Proposal
 
+> Historical proposal. Shipped contracts now live in `concepts/data.md`
+> (terminology here predates the payload rename); unimplemented phases and
+> open questions below remain live.
+
 ## Summary
 
 Data resources are Fig's key-addressable async render inputs: server reads,
