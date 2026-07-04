@@ -15,7 +15,7 @@ import {
   type FigPortal,
   Fragment,
   type Props,
-  type ReactiveEventArgs,
+  type StableEventArgs,
   type StateSetter,
   type StartTransition,
 } from "@bgub/fig";
@@ -437,7 +437,7 @@ const LaggedValueHook = 6;
 const ExternalStoreHook = 7;
 const MemoHook = 8;
 const TransitionHook = 9;
-const ReactiveEventHook = 10;
+const StableEventHook = 10;
 type HookKind = number;
 
 const hookKindNames: readonly FigDevtoolsHookKind[] = [
@@ -451,7 +451,7 @@ const hookKindNames: readonly FigDevtoolsHookKind[] = [
   "external-store",
   "memo",
   "transition",
-  "reactive-event",
+  "stable-event",
 ];
 
 // The queue payload: what a StateSetter accepts.
@@ -489,21 +489,21 @@ interface Effect {
   strictRan: boolean;
 }
 
-type ReactiveEventHandler = (...args: unknown[]) => unknown;
+type StableEventHandler = (...args: unknown[]) => unknown;
 
-interface ReactiveEventInstance {
+interface StableEventInstance {
   controller: AbortController | null;
-  handler: ReactiveEventHandler | null;
+  handler: StableEventHandler | null;
   live: boolean;
-  stable: ReactiveEventHandler;
+  stable: StableEventHandler;
 }
 
-interface ReactiveEventState {
-  instance: ReactiveEventInstance;
+interface StableEventState {
+  instance: StableEventInstance;
   // Lives on the per-render hook state, not the persistent instance: commits
   // republish bailed-out fibers' hooks, so an abandoned render's handler must
   // never be reachable from the instance.
-  next: ReactiveEventHandler;
+  next: StableEventHandler;
 }
 
 interface MemoState<T> {
@@ -736,7 +736,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       updateEffectHook(BeforeLayoutEffect, effect, deps);
     },
     useExternalStore: updateExternalStoreHook,
-    useReactiveEvent: updateReactiveEventHook,
+    useStableEvent: updateStableEventHook,
     readContext: readContextValue,
     readData(resource, args) {
       const fiber = requireRenderingFiber();
@@ -2366,41 +2366,41 @@ export function createRenderer<Container, Instance, TextInstance>(
     return value;
   }
 
-  function updateReactiveEventHook<Args extends unknown[], Result>(
+  function updateStableEventHook<Args extends unknown[], Result>(
     handler: (...args: Args) => Result,
-  ): (...args: ReactiveEventArgs<Args>) => Result {
+  ): (...args: StableEventArgs<Args>) => Result {
     requireRenderingFiber();
     const oldHook = updateHook(
-      ReactiveEventHook,
-    ) as Hook<ReactiveEventState> | null;
+      StableEventHook,
+    ) as Hook<StableEventState> | null;
     const instance =
-      oldHook?.memoizedState.instance ?? createReactiveEventInstance();
+      oldHook?.memoizedState.instance ?? createStableEventInstance();
 
     appendHook(
-      createHook(ReactiveEventHook, {
+      createHook(StableEventHook, {
         instance,
-        next: handler as ReactiveEventHandler,
+        next: handler as StableEventHandler,
       }),
     );
-    return instance.stable as (...args: ReactiveEventArgs<Args>) => Result;
+    return instance.stable as (...args: StableEventArgs<Args>) => Result;
   }
 
-  function createReactiveEventInstance(): ReactiveEventInstance {
-    const instance: ReactiveEventInstance = {
+  function createStableEventInstance(): StableEventInstance {
+    const instance: StableEventInstance = {
       controller: null,
       handler: null,
       live: false,
       stable: (...args) => {
         if (renderingFiber !== null) {
           throw new Error(
-            "Reactive events cannot be called while rendering a component.",
+            "Stable events cannot be called while rendering a component.",
           );
         }
 
         const handler = instance.handler;
         if (handler === null) {
           throw new Error(
-            "Reactive events cannot be called before their first commit.",
+            "Stable events cannot be called before their first commit.",
           );
         }
 
@@ -4372,7 +4372,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitLiveHookInstances(node: F | null): void {
     visitFiberHooks(node, (owner, hook) => {
-      if (isReactiveEventHook(hook)) {
+      if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
         instance.handler = hook.memoizedState.next;
         instance.live = !isInsideHiddenBoundary(owner);
@@ -4394,8 +4394,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     return false;
   }
 
-  function isReactiveEventHook(hook: Hook): hook is Hook<ReactiveEventState> {
-    return hook.kind === ReactiveEventHook;
+  function isStableEventHook(hook: Hook): hook is Hook<StableEventState> {
+    return hook.kind === StableEventHook;
   }
 
   function commitExternalStores(node: F | null): void {
@@ -4594,7 +4594,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
       if (isExternalStoreHook(hook))
         unsubscribeExternalStore(hook.memoizedState);
-      if (isReactiveEventHook(hook)) {
+      if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
         instance.controller?.abort();
         instance.controller = null;

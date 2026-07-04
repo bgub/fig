@@ -61,7 +61,7 @@ createRoot(container).render(<App />);
   early. Production builds strip these checks.
 - `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` reads external
   stores. Server rendering and hydration require `getServerSnapshot`.
-- `useReactiveEvent(handler)` returns a stable function for effect-held
+- `useStableEvent(handler)` returns a stable function for effect-held
   callbacks (subscriptions, sockets, timers). The handler always sees the
   latest committed render and follows the Fig event contract: it receives a
   trailing `AbortSignal`, and the previous invocation's signal aborts on

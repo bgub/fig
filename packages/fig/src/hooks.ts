@@ -51,9 +51,9 @@ export interface RenderDispatcher {
     getSnapshot: () => T,
     getServerSnapshot?: () => T,
   ): T;
-  useReactiveEvent<Args extends unknown[], Result>(
+  useStableEvent<Args extends unknown[], Result>(
     handler: (...args: Args) => Result,
-  ): (...args: ReactiveEventArgs<Args>) => Result;
+  ): (...args: StableEventArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
   readData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: FigDataResource<TArgs, TValue, TStoreContext>,
@@ -71,7 +71,7 @@ export type DependencyList = readonly unknown[];
 
 // Fig appends the AbortSignal when invoking the handler; callers never pass
 // it, so a declared trailing signal is stripped from the callable signature.
-export type ReactiveEventArgs<Args extends unknown[]> = Args extends [
+export type StableEventArgs<Args extends unknown[]> = Args extends [
   ...infer Rest,
   AbortSignal,
 ]
@@ -157,10 +157,10 @@ export function useExternalStore<T>(
   );
 }
 
-export function useReactiveEvent<Args extends unknown[], Result>(
+export function useStableEvent<Args extends unknown[], Result>(
   handler: (...args: Args) => Result,
-): (...args: ReactiveEventArgs<Args>) => Result {
-  return resolveDispatcher().useReactiveEvent(handler);
+): (...args: StableEventArgs<Args>) => Result {
+  return resolveDispatcher().useStableEvent(handler);
 }
 
 export function readContext<T>(context: FigContext<T>): T {

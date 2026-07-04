@@ -23,7 +23,7 @@ import {
   useMemo,
   useReactive,
   Activity,
-  useReactiveEvent,
+  useStableEvent,
   useState,
   useTransition,
 } from "@bgub/fig";
@@ -159,11 +159,11 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("returns reactive events that throw if called during server render", async () => {
+  it("returns stable events that throw if called during server render", async () => {
     let emit: (() => void) | null = null;
 
     function App() {
-      emit = useReactiveEvent((_signal: AbortSignal) => undefined);
+      emit = useStableEvent((_signal: AbortSignal) => undefined);
       return createElement("span", null, "Server");
     }
 
@@ -171,7 +171,7 @@ describe("@bgub/fig-server", () => {
       "<span>Server</span>",
     );
     expect(() => emit?.()).toThrow(
-      "Reactive events cannot be called during server render.",
+      "Stable events cannot be called during server render.",
     );
   });
 

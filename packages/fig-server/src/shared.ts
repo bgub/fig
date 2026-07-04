@@ -130,11 +130,9 @@ export function createStaticDispatcher(
 
       return getServerSnapshot();
     },
-    useReactiveEvent() {
+    useStableEvent() {
       return () => {
-        throw new Error(
-          "Reactive events cannot be called during server render.",
-        );
+        throw new Error("Stable events cannot be called during server render.");
       };
     },
     readContext(context) {

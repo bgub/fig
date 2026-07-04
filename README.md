@@ -41,10 +41,10 @@ Deliberate divergences:
   emulate React's bubbling `focus`/`blur`; observe focus changes from an
   ancestor with the platform's bubbling variants, `focusin`/`focusout` (or a
   `capture: true` listener, as in the real DOM).
-- `useReactiveEvent(handler)` declares stable, non-reactive event handlers for
-  effect-held callbacks: the handler always sees the latest committed render,
-  receives a trailing `AbortSignal`, and aborts the previous invocation on
-  re-entry and unmount.
+- `useStableEvent(handler)` declares stable, non-reactive handlers (Fig's
+  `useEffectEvent`): the returned function's identity never changes, the
+  handler always sees the latest committed render, and it follows the Fig
+  event contract — a trailing `AbortSignal`, aborted on re-entry and unmount.
 - DOM node access uses `bind={(node, signal) => ...}` instead of refs.
 - Host props use native DOM names such as `class`, `for`, `tabindex`,
   `stroke-width`, and `xlink:href`.

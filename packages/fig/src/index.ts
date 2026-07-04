@@ -37,7 +37,7 @@ export {
   useLaggedValue,
   useMemo,
   useReactive,
-  useReactiveEvent,
+  useStableEvent,
   useState,
   useTransition,
   type ActionStateAction,
@@ -45,7 +45,7 @@ export {
   type DependencyList,
   type EffectCallback,
   type ExternalStoreSubscribe,
-  type ReactiveEventArgs,
+  type StableEventArgs,
   type StateSetter,
   type StartTransition,
 } from "./hooks.ts";

@@ -3,7 +3,7 @@ import {
   createElement,
   useBeforeLayout,
   useReactive,
-  useReactiveEvent,
+  useStableEvent,
   useState,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
@@ -12,7 +12,7 @@ import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
-describe("@bgub/fig-dom reactive events", () => {
+describe("@bgub/fig-dom stable events", () => {
   it("returns a stable handler that reads the latest committed render", async () => {
     const calls: string[] = [];
     const handlers: Array<(suffix: string) => void> = [];
@@ -22,11 +22,9 @@ describe("@bgub/fig-dom reactive events", () => {
     function App() {
       const [count, set] = useState(0);
       setCount = set;
-      const onPing = useReactiveEvent(
-        (suffix: string, _signal: AbortSignal) => {
-          calls.push(`${count}:${suffix}`);
-        },
-      );
+      const onPing = useStableEvent((suffix: string, _signal: AbortSignal) => {
+        calls.push(`${count}:${suffix}`);
+      });
       handlers.push(onPing);
       useReactive(() => {
         emit = onPing;
@@ -57,7 +55,7 @@ describe("@bgub/fig-dom reactive events", () => {
     let emit: (() => void) | null = null;
 
     function App() {
-      const onPing = useReactiveEvent((signal: AbortSignal) => {
+      const onPing = useStableEvent((signal: AbortSignal) => {
         signals.push(signal);
       });
       useReactive(() => {
@@ -89,13 +87,13 @@ describe("@bgub/fig-dom reactive events", () => {
     expect(signals[2].aborted).toBe(true);
   });
 
-  it("keeps hidden reactive event calls aborted across unrelated commits", () => {
+  it("keeps hidden stable event calls aborted across unrelated commits", () => {
     const signals: AbortSignal[] = [];
     let fire: (() => void) | null = null;
     let bump: (() => void) | null = null;
 
     function HiddenChild() {
-      fire = useReactiveEvent((signal: AbortSignal) => {
+      fire = useStableEvent((signal: AbortSignal) => {
         signals.push(signal);
       });
       return createElement("span", null, "hidden");
@@ -140,7 +138,7 @@ describe("@bgub/fig-dom reactive events", () => {
     let emit: ((name: string) => void) | null = null;
 
     function App() {
-      const onPing = useReactiveEvent((name: string) => {
+      const onPing = useStableEvent((name: string) => {
         calls.push(name);
       });
       useReactive(() => {
@@ -161,26 +159,26 @@ describe("@bgub/fig-dom reactive events", () => {
     expect(calls).toEqual(["x", "y"]);
   });
 
-  it("throws when a reactive event is called during render", () => {
+  it("throws when a stable event is called during render", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
     function App() {
-      const onPing = useReactiveEvent((_signal: AbortSignal) => undefined);
+      const onPing = useStableEvent((_signal: AbortSignal) => undefined);
       onPing();
       return null;
     }
 
     expect(() =>
       flushSync(() => root.render(createElement(App, null))),
-    ).toThrow("Reactive events cannot be called while rendering a component.");
+    ).toThrow("Stable events cannot be called while rendering a component.");
   });
 
   it("publishes the new handler before before-layout effects run", () => {
     const seen: number[] = [];
 
     function App({ value }: { value: number }) {
-      const read = useReactiveEvent((_signal: AbortSignal) => value);
+      const read = useStableEvent((_signal: AbortSignal) => value);
       useBeforeLayout(() => {
         seen.push(read());
       }, [value]);

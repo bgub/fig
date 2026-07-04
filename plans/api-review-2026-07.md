@@ -14,7 +14,6 @@ The short version: **the original Fig ideas are consistently better than their R
 
 **Naming and surface habit-isms**, roughly in order of conviction:
 
-- `useReactiveEvent` — the name inverts the semantics; the project's own docs call it the "non-reactive event hook." `useEvent` or `useStableEvent`.
 - `renderToString` — the name promises react-dom/server semantics but the behavior is "buffer the stream," so suspended trees yield fallbacks, staging divs, and inline scripts in the "string." Either make it a true settle-then-emit `prerender` (clean HTML, no runtime scripts — genuinely useful for SSG/emails) or rename it honestly. Relatedly, `onShellError` duplicates the rejecting `shellReady` promise — React needed the callback only for its Node-callback API; Fig has the promise, drop the callback.
 
 ## Decisions to make explicitly rather than inherit
