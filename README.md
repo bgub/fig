@@ -10,7 +10,9 @@ smaller Fig-specific APIs where they are clearer.
 
 ## Design
 
-Fig treats React as a reference point, not a compatibility contract.
+Fig treats React as a reference point, not a compatibility contract. The
+full divergence list lives in
+[docs/intentional-differences-from-react.md](./docs/intentional-differences-from-react.md).
 
 Principles:
 
