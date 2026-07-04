@@ -57,3 +57,9 @@ and unmount; DOM _moves_ do not re-fire it. `composeBind` merges binds and
 accepts falsy entries. Strict dev runs first-time binds through the
 run/abort/re-run cycle like effects. (Note: binds fire during insertion; use
 `useBeforePaint` for layout measurement.)
+
+## Styling Stays Separate
+
+Styling is deliberately not part of the `events` or `bind` APIs: `style` is
+its own prop (string-valued object — see jsx.md), and neither descriptors
+nor bind callbacks grow styling conveniences. One prop kind per concern.

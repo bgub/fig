@@ -5,6 +5,15 @@ that subsystem's contracts, invariants, wire formats, and rationale. Written
 for someone changing the code; user guides live in `docs/`. When a contract
 changes, the owning concept file updates in the same commit.
 
+The principles every file applies: prefer small runtime concepts over
+compatibility layers; keep renderer behavior explicit and host-driven; use
+native platform semantics when they are clearer than React aliases; add APIs
+because they strengthen Fig, not because React has them; fail early for
+invalid render inputs instead of warning after commit. Non-goals: matching
+React's legacy or compatibility behavior, Node-specific streams as the
+default SSR surface, and adding React APIs before a Fig use case proves they
+belong.
+
 Every file carries a `Status:` line — `stable` for settled contracts,
 `exploring` for open designs (Problem → Prior Art → Direction → Open
 Questions → Provisional Stance).

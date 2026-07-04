@@ -17,6 +17,11 @@ components. `lazy(load)` expects the loader to return the component itself —
 no `{ default }` unwrapping, no special element type; it is a plain component
 over `readPromise`.
 
+Portals (`createPortal(children, target, key?)`) render into explicit DOM
+targets while remaining logical children: context, effects ordering, error
+propagation, and delegated event bubbling all follow the Fig tree, not the
+DOM position (see events.md for the delegation mechanics).
+
 Child normalization (shared verbatim with the server renderer — see
 architecture.md) flattens arrays, drops `null`/`undefined`/booleans, and
 merges adjacent text (numbers stringify). The normalized member type is
