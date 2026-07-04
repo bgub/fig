@@ -31,6 +31,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   renderToDocumentHtml,
   renderToDocumentStream,
+  prerender,
   renderToStream,
   renderToHtml,
 } from "./index.ts";
@@ -209,6 +210,181 @@ describe("@bgub/fig-server", () => {
     await expect(renderToHtml(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
     );
+  });
+
+  it("prerenders settled Suspense content in logical position without scripts", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const resultPromise = prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement("div", null, "Before ", createElement(Message, null)),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await waitForMicrotasks();
+    pending.resolve("Ready");
+
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      data: [],
+      head: "",
+      html: "<!--fig:suspense:completed--><div>Before <span>Ready</span></div><!--/fig:suspense-->",
+    });
+    expect(result.html).not.toContain("Loading");
+    expect(result.html).not.toContain("fig:suspense:pending");
+    expect(result.html).not.toContain("__figSSR");
+    expect(result.html).not.toContain("hidden");
+  });
+
+  it("prerenders server-failed Suspense as static client-render fallback markup", async () => {
+    const errors: unknown[] = [];
+
+    function Broken(): never {
+      throw new Error("server failed");
+    }
+
+    const result = await prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Broken, null),
+      ),
+      {
+        identifierPrefix: "test",
+        onError(error) {
+          errors.push(error);
+          return { digest: "digest-1", message: "Server failed" };
+        },
+      },
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(result.html).toBe(
+      '<!--fig:suspense:client--><template id="test-b-0" data-dgst="digest-1" data-msg="Server failed"></template><em>Loading</em><!--/fig:suspense-->',
+    );
+    expect(result.html).not.toContain("fig:suspense:pending");
+    expect(result.html).not.toContain("__figSSR");
+  });
+
+  it("prerender resolves with static fallbacks when aborted after the shell", async () => {
+    const pending = new Promise<string>(() => undefined);
+    const controller = new AbortController();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending));
+    }
+
+    const resultPromise = prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Message, null),
+      ),
+      { identifierPrefix: "test", signal: controller.signal },
+    );
+
+    await waitForMicrotasks();
+    controller.abort("stop");
+
+    const result = await resultPromise;
+
+    expect(result.html).toBe(
+      '<!--fig:suspense:client--><template id="test-b-0"></template><em>Loading</em><!--/fig:suspense-->',
+    );
+    expect(result.html).not.toContain("fig:suspense:pending");
+    expect(result.html).not.toContain("__figSSR");
+  });
+
+  it("prerender rejects when aborted before the shell", async () => {
+    const controller = new AbortController();
+
+    const resultPromise = prerender(createElement("main", null, "Ready"), {
+      signal: controller.signal,
+    });
+    controller.abort("stop");
+
+    await expect(resultPromise).rejects.toThrow("stop");
+  });
+
+  it("prerender includes head assets discovered after suspension", async () => {
+    const pending = deferred<string>();
+    const lateAssets: string[] = [];
+
+    function Message() {
+      const value = readPromise(pending.promise);
+      return assets(title(`Late ${value}`), createElement("span", null, value));
+    }
+
+    const resultPromise = prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Message, null),
+      ),
+      {
+        onAssetError(_error, info) {
+          lateAssets.push(info.key);
+        },
+      },
+    );
+
+    await waitForMicrotasks();
+    pending.resolve("Ready");
+
+    const result = await resultPromise;
+
+    expect(lateAssets).toEqual([]);
+    expect(result.head).toBe("<title>Late Ready</title>");
+    expect(result.html).toBe(
+      "<!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense-->",
+    );
+  });
+
+  it("prerenders full documents with settled Suspense and inlined head assets", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      const value = readPromise(pending.promise);
+      return assets(title(`Late ${value}`), createElement("span", null, value));
+    }
+
+    const resultPromise = prerender(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          createElement(
+            Suspense,
+            { fallback: createElement("em", null, "Loading") },
+            createElement(Message, null),
+          ),
+        ),
+      ),
+      { document: true, identifierPrefix: "doc" },
+    );
+
+    await waitForMicrotasks();
+    pending.resolve("Ready");
+
+    const result = await resultPromise;
+
+    expect(result.head).toBe("");
+    expect(result.html).toBe(
+      "<!doctype html><html><head><title>Late Ready</title></head><body><!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense--></body></html>",
+    );
+    expect(result.html).not.toContain("Loading");
+    expect(result.html).not.toContain("__figSSR");
   });
 
   it("renders stable prefixed ids", async () => {

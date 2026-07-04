@@ -32,6 +32,14 @@ export interface ServerRenderOptions {
   signal?: AbortSignal;
 }
 
+export interface ServerPrerenderOptions extends ServerRenderOptions {
+  /**
+   * Render a full document. The root must render an <html> element with a
+   * <head>, and collected head assets are inlined into that document head.
+   */
+  document?: boolean;
+}
+
 export interface ServerErrorInfo {
   componentStack: string;
 }
@@ -66,4 +74,14 @@ export type ServerDocumentRenderResult = ServerStreamRenderResult;
 export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
   getHead(): string;
   headReady: Promise<string>;
+}
+
+export interface ServerPrerenderResult {
+  data: FigDataHydrationEntry[];
+  /**
+   * Fragment-mode collected head HTML. Empty in document mode because the head
+   * assets are already inlined into `html`.
+   */
+  head: string;
+  html: string;
 }

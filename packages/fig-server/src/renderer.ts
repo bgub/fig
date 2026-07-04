@@ -27,6 +27,7 @@ import {
   type RenderDispatcher,
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   SUSPENSE_COMPLETED_MARKER,
+  SUSPENSE_CLIENT_MARKER,
   SUSPENSE_END_MARKER,
   SUSPENSE_PENDING_PREFIX,
   validateInstanceNesting,
@@ -110,6 +111,7 @@ interface Request {
   clientRenderedBoundaries: Set<SuspenseBoundary>;
   clientReferenceFallback?: ServerRenderOptions["clientReferenceFallback"];
   partialBoundaries: Set<SuspenseBoundary>;
+  prerender: boolean;
   componentAssets?: ServerRenderOptions["assets"];
   document: DocumentState | null;
   assetRegistry: AssetResourceRegistry;
@@ -205,7 +207,7 @@ let nextRuntimeId = 0;
 export function createServerRenderRequest(
   node: FigNode,
   options: ServerRenderOptions = {},
-  mode: { document?: boolean } = {},
+  mode: { document?: boolean; prerender?: boolean } = {},
 ): ServerFragmentRenderResult {
   throwIfAborted(options.signal);
 
@@ -255,6 +257,7 @@ export function createServerRenderRequest(
     clientRenderedBoundaries: new Set(),
     clientReferenceFallback: options.clientReferenceFallback,
     partialBoundaries: new Set(),
+    prerender: mode.prerender === true,
     componentAssets: options.assets,
     document: mode.document === true ? { hasHead: false } : null,
     assetRegistry: new AssetResourceRegistry(options.identifierPrefix ?? ""),
@@ -1047,11 +1050,7 @@ function finishRootShell(request: Request): void {
     return;
   }
 
-  if (request.headSnapshot === null) {
-    const head = request.assetRegistry.headHtml(request.nonce);
-    request.headSnapshot = head;
-    request.headReady.resolve(head);
-  }
+  if (!request.prerender) sealHead(request);
   request.shellReady.resolve(undefined);
 }
 
@@ -1059,6 +1058,9 @@ function flushCompletedQueues(request: Request): void {
   if (request.controller === null || request.status === "closed") return;
   if (request.status === "opening") return;
   if (request.pendingRootTasks > 0) return;
+  if (request.prerender && request.pendingTasks > 0) return;
+
+  sealHead(request);
 
   if (request.completedRootSegment !== null) {
     flushSegment(request, request.completedRootSegment);
@@ -1147,6 +1149,17 @@ function flushSuspenseBoundary(
     return;
   }
 
+  if (request.prerender && boundary.status === "client-rendered") {
+    // Static prerender does not hoist assets discovered only in failed content:
+    // the retry path loads them on demand, and pure-static consumers see only
+    // the fallback.
+    write(request, `<!--${SUSPENSE_CLIENT_MARKER}-->`);
+    write(request, clientRenderedBoundaryPlaceholderMarkup(request, boundary));
+    flushSubtree(request, segment);
+    write(request, `<!--${SUSPENSE_END_MARKER}-->`);
+    return;
+  }
+
   const boundaryIdValue = ensureBoundaryId(request, boundary);
   flushSegmentAssets(request, boundary.contentSegment);
   write(request, `<!--${SUSPENSE_PENDING_PREFIX}${boundaryIdValue}-->`);
@@ -1169,6 +1182,35 @@ function flushBoundaryContent(
     flushSegment(request, segment);
   }
   boundary.completedSegments = [];
+}
+
+function clientRenderedBoundaryPlaceholderMarkup(
+  request: Request,
+  boundary: SuspenseBoundary,
+): string {
+  const id = escapeAttribute(
+    boundaryId(request, ensureBoundaryId(request, boundary)),
+  );
+  const digest = boundary.error?.digest;
+  const message = boundary.error?.message;
+  const digestAttr =
+    digest === undefined || digest === ""
+      ? ""
+      : ` data-dgst="${escapeAttribute(digest)}"`;
+  const messageAttr =
+    message === undefined || message === ""
+      ? ""
+      : ` data-msg="${escapeAttribute(message)}"`;
+
+  return `<template id="${id}"${digestAttr}${messageAttr}></template>`;
+}
+
+function sealHead(request: Request): void {
+  if (request.headSnapshot !== null) return;
+
+  const head = request.assetRegistry.headHtml(request.nonce);
+  request.headSnapshot = head;
+  request.headReady.resolve(head);
 }
 
 function flushCompletedBoundary(

@@ -130,6 +130,9 @@ running list of deliberate divergences. (Open questions live in
   reuse React names: `renderToHtml` is honestly "the streamed output,
   buffered" (runtime scripts included), not React's settled, script-free
   `renderToString`.
+- `prerender` is the separate static semantic: it waits for all async server
+  work before emitting HTML, so completed Suspense content appears in logical
+  position without streaming reveal scripts.
 - The server-component layer is **payload**, never "RSC" or "Flight" — those
   are React brands (see Payload).
 

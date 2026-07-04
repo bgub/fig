@@ -12,6 +12,7 @@ pnpm add @bgub/fig-server
 
 ```ts
 import {
+  prerender,
   renderToDocumentHtml,
   renderToDocumentStream,
   renderToStream,
@@ -66,6 +67,38 @@ const documentHtml = await renderToDocumentHtml(
       <App />
     </body>
   </html>,
+);
+```
+
+`prerender` is the settled static renderer for SSG, email, RSS, Open Graph
+markup, and tests that should not record streaming protocol details. It waits
+for all async work before emitting HTML, so fulfilled Suspense boundaries render
+their completed content in logical position with no fallback, staging container,
+or `__figSSR` reveal script. Suspense boundaries that fail on the server render
+their fallback with a static client-render marker so hydratable pages can retry
+that boundary on the client.
+
+```ts
+const result = await prerender(<App />, { signal });
+
+result.html;
+result.head; // fragment-mode head assets
+result.data; // data-resource hydration entries
+```
+
+For document output, pass `document: true`; the root must render an `<html>`
+document with a `<head>`, and collected head assets are inlined into that
+document head:
+
+```ts
+const result = await prerender(
+  <html>
+    <head />
+    <body>
+      <App />
+    </body>
+  </html>,
+  { document: true },
 );
 ```
 

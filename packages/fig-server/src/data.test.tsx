@@ -3,7 +3,7 @@ import { dataResource, readData } from "@bgub/fig-data";
 import { createDataStore } from "@bgub/fig-data/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { readStream } from "./test-utils.ts";
-import { renderToStream } from "./index.ts";
+import { prerender, renderToStream } from "./index.ts";
 import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
 
 describe("@bgub/fig-server data resources", () => {
@@ -26,6 +26,26 @@ describe("@bgub/fig-server data resources", () => {
     expect(await readStream(result.stream)).toBe("<span>Ada</span>");
     expect(result.getData()).toEqual([
       { key: ["ssr-user", "one"], value: "Ada" },
+    ]);
+  });
+
+  it("returns data hydration entries from prerender", async () => {
+    const userIdentity = dataResource.identity<[string], string>({
+      key: (id: string) => ["prerender-user", id],
+    });
+    const userResource = dataResource.server(userIdentity, {
+      load: () => "Ada",
+    });
+
+    function Profile() {
+      return createElement("span", null, readData(userResource, "one"));
+    }
+
+    const result = await prerender(createElement(Profile, null));
+
+    expect(result.html).toBe("<span>Ada</span>");
+    expect(result.data).toEqual([
+      { key: ["prerender-user", "one"], value: "Ada" },
     ]);
   });
 

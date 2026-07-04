@@ -3,6 +3,8 @@ import { createServerRenderRequest } from "./renderer.ts";
 import type {
   ServerDocumentRenderResult,
   ServerFragmentRenderResult,
+  ServerPrerenderOptions,
+  ServerPrerenderResult,
   ServerRenderOptions,
 } from "./types.ts";
 
@@ -44,8 +46,8 @@ export function renderToDocumentStream(
  * the bytes a streaming client would have received — including the inline
  * streaming runtime and boundary-reveal scripts when the tree suspends past
  * the shell. Right for caching responses and snapshotting wire output; it is
- * NOT React's `renderToString` (settled, script-free static markup is a
- * future prerender mode).
+ * NOT React's `renderToString` (use `prerender` for settled, script-free
+ * static markup).
  */
 export async function renderToHtml(
   node: FigNode,
@@ -64,6 +66,30 @@ export async function renderToDocumentHtml(
   const result = renderToDocumentStream(node, options);
   await result.allReady;
   return readStreamToString(result.stream);
+}
+
+/**
+ * Settled static HTML: waits for all async work before flushing, so completed
+ * Suspense content is emitted in logical position without streaming scripts.
+ */
+export async function prerender(
+  node: FigNode,
+  options: ServerPrerenderOptions = {},
+): Promise<ServerPrerenderResult> {
+  const { document = false, ...renderOptions } = options;
+  const result = createServerRenderRequest(node, renderOptions, {
+    document,
+    prerender: true,
+  });
+
+  await result.allReady;
+  const html = await readStreamToString(result.stream);
+
+  return {
+    data: result.getData(),
+    head: document ? "" : result.getHead(),
+    html,
+  };
 }
 
 async function readStreamToString(
@@ -85,6 +111,8 @@ export type {
   ServerErrorPayload,
   ServerDocumentRenderResult,
   ServerFragmentRenderResult,
+  ServerPrerenderOptions,
+  ServerPrerenderResult,
   ServerAssetDestination,
   ServerAssetErrorInfo,
   ServerRenderOptions,
