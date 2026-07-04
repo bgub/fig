@@ -545,6 +545,18 @@ function setStyleProperty(
   name: string,
   value: unknown,
 ): void {
+  if (typeof value === "number" || typeof value === "bigint") {
+    if (process.env.NODE_ENV !== "production") {
+      warnDroppedProp(
+        `style:${name}:${typeof value}`,
+        `The style property "${name}" received a ${typeof value} ` +
+          `(${String(value)}); Fig style values must be strings, so this ` +
+          "style is ignored.",
+      );
+    }
+    return;
+  }
+
   if (name.startsWith("--") && typeof style.setProperty === "function") {
     style.setProperty(name, String(value));
   } else {

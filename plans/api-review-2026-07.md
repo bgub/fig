@@ -21,7 +21,7 @@ These aren't wrong, but they're currently accidents rather than choices, and eac
 
 - Done: **controlled inputs** use the explicit Fig model: `value` is authoritative at commit time and controls only the live DOM value; `defaultValue` owns the default value/HTML representation. Fig does not emulate React's synchronous post-event lock.
 - **`events` array identity**: conditional entries (`isOpen && on(...)`) throw, while `composeBind` accepts them — accept falsy holes and document that array position is a listener's identity. Done: the ambiguous declarative `once` option was dropped from Fig event options.
-- **Numeric style values** silently produce nothing (no px auto-suffix — right call — but also no dev warning, while string styles _do_ warn).
+- Done: **numeric style values** still do not get a React-style px auto-suffix, but development builds now warn when they are ignored.
 - **No hydration-mismatch opt-out**: intentional server/client divergence (timestamps, locales) currently has no per-element escape hatch — decide whether that's a stance or a gap.
 - **`TStoreContext`** rides as an uninferrable phantom on every fig-data signature backed by an unchecked cast from `dataContext: unknown` — a Register-style module augmentation (fig-start already uses the pattern) would delete it from every signature.
 

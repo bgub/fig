@@ -255,13 +255,20 @@ describe("@bgub/fig-dom props", () => {
     let firstRenderCount = 0;
     try {
       const app = () =>
-        createElement("button", {
-          onClick: () => undefined,
-          onClickCapture: () => undefined,
-          onDoubleClick: () => undefined,
-          checked: 1,
-          style: "color: red",
-        } as unknown as Record<string, unknown>);
+        createElement(
+          "div",
+          null,
+          createElement("button", {
+            onClick: () => undefined,
+            onClickCapture: () => undefined,
+            onDoubleClick: () => undefined,
+            checked: 1,
+            style: { marginTop: 12 },
+          } as unknown as Record<string, unknown>),
+          createElement("span", {
+            style: "color: red",
+          } as unknown as Record<string, unknown>),
+        );
       flushSync(() => root.render(app()));
       firstRenderCount = errors.length;
       // Re-renders must not repeat the warnings.
@@ -282,9 +289,14 @@ describe("@bgub/fig-dom props", () => {
         expect.stringContaining('events={[on("dblclick", handler)]}'),
         expect.stringContaining('"checked" prop received a number'),
         expect.stringContaining("style prop must be an object"),
+        expect.stringContaining('style property "marginTop" received a number'),
       ]),
     );
     expect(errors).toHaveLength(firstRenderCount);
+    const wrapper = container.childNodes[0] as FakeElement;
+    expect((wrapper.childNodes[0] as FakeElement).style.marginTop).toBe(
+      undefined,
+    );
   });
 
   it("suggests accurate event names for special React event props", () => {
