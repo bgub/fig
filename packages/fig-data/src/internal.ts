@@ -8,4 +8,5 @@ export type {
   DataStore,
   DataStoreEntrySnapshot,
   DataStoreHost,
+  RegisteredContext,
 } from "./store.ts";

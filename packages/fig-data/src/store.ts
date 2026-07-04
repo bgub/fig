@@ -10,7 +10,7 @@ import {
   type DataRefreshResult,
   type DataResourceKey,
   type DataResourceKeyInput,
-  type DataResourceLoadContext,
+  type DataResourceLoadContext as FigDataResourceLoadContext,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataResource,
@@ -25,15 +25,32 @@ export {
   type DataRefreshResult,
   type DataResourceKey,
   type DataResourceKeyInput,
-  type DataResourceLoadContext,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
 };
 
+declare global {
+  namespace FigData {
+    // Apps can augment this once to set app-wide data resource types.
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Register {}
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface Register extends FigData.Register {}
+
+export type RegisteredContext = Register extends { context: infer C }
+  ? C
+  : unknown;
+
+export type DataResourceLoadContext<TStoreContext = RegisteredContext> =
+  FigDataResourceLoadContext<TStoreContext>;
+
 export interface DataResourceOptions<
   TArgs extends unknown[],
   TValue,
-  TStoreContext = unknown,
+  TStoreContext = RegisteredContext,
 > {
   key: (...args: TArgs) => DataResourceKey;
   load: (
@@ -46,7 +63,7 @@ export interface DataResourceOptions<
 export type DataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
-  TStoreContext = unknown,
+  TStoreContext = RegisteredContext,
 > = FigDataResource<TArgs, TValue, TStoreContext>;
 
 export interface DataStoreHost<Owner extends object, Lane> {
@@ -70,10 +87,10 @@ export interface DataStore<
 export type DataStoreEntrySnapshot = FigDataStoreEntrySnapshot;
 
 export interface DataResourceFactory {
-  <TArgs extends unknown[], TValue, TStoreContext = unknown>(
+  <TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext>;
-  identity<TArgs extends unknown[], TValue, TStoreContext = unknown>(
+  identity<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
     options: DataResourceIdentityOptions<TArgs>,
   ): DataResource<TArgs, TValue, TStoreContext>;
   server<TArgs extends unknown[], TValue, TStoreContext>(
@@ -91,7 +108,7 @@ export interface DataResourceIdentityOptions<TArgs extends unknown[]> {
 export interface DataResourceServerOptions<
   TArgs extends unknown[],
   TValue,
-  TStoreContext = unknown,
+  TStoreContext = RegisteredContext,
 > {
   load: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
@@ -145,13 +162,21 @@ const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
-  function sharedDataResource<TArgs extends unknown[], TValue, TStoreContext>(
+  function sharedDataResource<
+    TArgs extends unknown[],
+    TValue,
+    TStoreContext = RegisteredContext,
+  >(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext> {
     return createDataResource(options);
   },
   {
-    identity<TArgs extends unknown[], TValue, TStoreContext = unknown>(
+    identity<
+      TArgs extends unknown[],
+      TValue,
+      TStoreContext = RegisteredContext,
+    >(
       options: DataResourceIdentityOptions<TArgs>,
     ): DataResource<TArgs, TValue, TStoreContext> {
       return createDataResource(options);

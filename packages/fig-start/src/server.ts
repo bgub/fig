@@ -10,7 +10,10 @@ import {
   type Props,
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
-import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
+import {
+  normalizeDataResourceKey,
+  type RegisteredContext as RegisteredDataContext,
+} from "@bgub/fig-data/internal";
 import {
   escapeAttribute,
   escapeText,
@@ -67,7 +70,7 @@ export interface StartHandlerOptions {
   // return a promise; it is awaited before routing.
   context?: (request: Request) => unknown;
   // Per-request context passed to Fig data resources during server render.
-  dataContext?: (request: Request) => unknown;
+  dataContext?: (request: Request) => RegisteredDataContext;
   // Extra <head> content (e.g. <title>, <meta>). fig-server lowers host
   // title/meta/link into hoisted document resources.
   head?: FigNode;

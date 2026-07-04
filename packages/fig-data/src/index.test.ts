@@ -7,13 +7,24 @@ import {
 } from "./index.ts";
 import { createDataStore } from "./internal.ts";
 
+declare global {
+  namespace FigData {
+    interface Register {
+      context: { prefix: string };
+    }
+  }
+}
+
 const never = new Promise<never>(() => undefined);
 
 describe("@bgub/fig-data", () => {
   it("passes store context to loaders", async () => {
-    const messageResource = dataResource<[string], string, { prefix: string }>({
-      key: (id) => ["message", id],
-      load: (id, { context }) => `${context.prefix}${id}`,
+    const messageResource = dataResource({
+      key: (id: string) => ["message", id],
+      load: (id: string, { context }) => {
+        const prefix: string = context.prefix;
+        return `${prefix}${id}`;
+      },
     });
     const store = createDataStore<object, null>({
       context: { prefix: "hello-" },

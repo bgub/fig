@@ -110,6 +110,27 @@ Client roots accept `dataContext`, `dataPartition`, and `initialData` options.
 The context is passed to every loader in that store; the partition separates a
 store's internal keyspace without changing public resource keys.
 
+Apps can register the data context type once so loaders do not need a third
+generic parameter:
+
+```ts
+declare namespace FigData {
+  interface Register {
+    context: { db: DbClient };
+  }
+}
+```
+
+After registration, `context` in resource loaders is typed as that app context
+by default:
+
+```ts
+const userResource = dataResource({
+  key: (id: string) => ["user", id],
+  load: (id, { context }) => context.db.user.find(id),
+});
+```
+
 ## Server Values And Hydration
 
 Server renderers expose fulfilled data entries with `getData()`. Pass those

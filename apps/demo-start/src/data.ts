@@ -24,13 +24,23 @@ const POSTS: Record<string, Post> = {
   },
 };
 
+export interface PostService {
+  find(id: string): Promise<Post | undefined>;
+}
+
+export const postService: PostService = {
+  async find(id) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return POSTS[id];
+  },
+};
+
 // A keyed async render input. Reading it suspends; on the server the value
 // streams in over Suspense and is serialized for client hydration.
 export const postResource = dataResource({
   key: (id: string) => ["post", id],
-  load: async (id: string) => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const post = POSTS[id];
+  load: async (id: string, { context }) => {
+    const post = await context.posts.find(id);
     if (post === undefined) throw new Error(`No post with id "${id}".`);
     return post;
   },

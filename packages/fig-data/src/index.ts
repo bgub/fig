@@ -18,4 +18,6 @@ export type {
   DataResourceServerOptions,
   FigDataHydrationEntry,
   FigDataStoreHandle,
+  Register,
+  RegisteredContext,
 } from "./store.ts";

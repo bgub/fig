@@ -23,7 +23,7 @@ These aren't wrong, but they're currently accidents rather than choices, and eac
 - **`events` array identity**: conditional entries (`isOpen && on(...)`) throw, while `composeBind` accepts them — accept falsy holes and document that array position is a listener's identity. Done: the ambiguous declarative `once` option was dropped from Fig event options.
 - Done: **numeric style values** still do not get a React-style px auto-suffix, but development builds now warn when they are ignored.
 - **No hydration-mismatch opt-out**: intentional server/client divergence (timestamps, locales) currently has no per-element escape hatch — decide whether that's a stance or a gap.
-- **`TStoreContext`** rides as an uninferrable phantom on every fig-data signature backed by an unchecked cast from `dataContext: unknown` — a Register-style module augmentation (fig-start already uses the pattern) would delete it from every signature.
+- Done: **`TStoreContext`** now defaults to the app-wide `FigData.Register["context"]` type, so fig-start apps can type data loaders once without threading the third generic through every resource.
 
 ## What's genuinely better than React (leave alone)
 
