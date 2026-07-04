@@ -1,12 +1,8 @@
 import {
   createPortalNode,
-  ErrorBoundary,
   type FigNode,
-  Fragment,
   type Key,
   type Props,
-  Suspense,
-  transition,
 } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
@@ -386,4 +382,4 @@ function shouldRestoreControlledFormState(type: string, props: Props): boolean {
   );
 }
 
-export { ErrorBoundary, Fragment, Suspense, transition };
+export type { Container };
