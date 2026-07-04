@@ -13,7 +13,6 @@ export {
   type ElementType,
   type ErrorBoundaryProps,
   type ErrorInfo,
-  type FigChild,
   type FigClientReference,
   type FigElement,
   type FigNode,
@@ -44,11 +43,10 @@ export {
   type ActionStateAction,
   type ActionStateDispatch,
   type DependencyList,
-  type Dispatch,
   type EffectCallback,
   type ExternalStoreSubscribe,
   type ReactiveEventArgs,
-  type SetStateAction,
+  type StateSetter,
   type StartTransition,
 } from "./hooks.ts";
 export {

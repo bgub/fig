@@ -2,12 +2,10 @@ import {
   type ActionStateAction,
   type ActionStateDispatch,
   type DependencyList,
-  type Dispatch,
   type EffectCallback,
   type ElementType,
   type ErrorInfo,
   type ExternalStoreSubscribe,
-  type FigChild,
   type FigContext,
   type FigElement,
   type FigNode,
@@ -15,7 +13,7 @@ import {
   Fragment,
   type Props,
   type ReactiveEventArgs,
-  type SetStateAction,
+  type StateSetter,
   type StartTransition,
 } from "@bgub/fig";
 import {
@@ -113,6 +111,7 @@ import {
 } from "./refresh.ts";
 import {
   collectChildren,
+  type NormalizedChild,
   invalidChildError,
   isThenable,
   readThenable,
@@ -462,15 +461,18 @@ const hookKindNames: readonly FigDevtoolsHookKind[] = [
   "reactive-event",
 ];
 
+// The queue payload: what a StateSetter accepts.
+type StateUpdate<S> = S | ((previous: S) => S);
+
 interface HookUpdate<S> {
-  action: SetStateAction<S>;
+  action: StateUpdate<S>;
   lane: Lane;
   next: HookUpdate<S>;
 }
 
 interface HookQueue<S> {
   pending: HookUpdate<S> | null;
-  dispatch: Dispatch<SetStateAction<S>> | null;
+  dispatch: StateSetter<S> | null;
 }
 
 interface Hook<S = any> {
@@ -2068,14 +2070,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateStateHook<S>(
     initialState: S | (() => S),
-  ): [S, Dispatch<SetStateAction<S>>] {
+  ): [S, StateSetter<S>] {
     const hook = updateQueuedHook(StateHook, initialState);
     const queue = hook.queue;
     const fiber = requireRenderingFiber();
 
     // The queue object persists across renders, so the dispatch created on
     // mount is always present afterwards.
-    queue.dispatch ??= (action: SetStateAction<S>) => {
+    queue.dispatch ??= (action: StateUpdate<S>) => {
       if (renderingFiber !== null) {
         throw new Error(
           "State updates are not allowed while rendering a component.",
@@ -2168,7 +2170,7 @@ export function createRenderer<Container, Instance, TextInstance>(
             finish(lane, error);
           },
         );
-      }) as unknown as Dispatch<SetStateAction<ActionState<S, Args>>>;
+      }) as unknown as StateSetter<ActionState<S, Args>>;
     }
 
     if (hook.memoizedState.error !== NoActionStateError) {
@@ -2486,7 +2488,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function scheduleHookUpdate<S>(
     fiber: F,
     queue: HookQueue<S>,
-    action: SetStateAction<S>,
+    action: StateUpdate<S>,
     lane: Lane,
   ): void {
     lane = hiddenSubtreeLane(fiber, lane);
@@ -4040,9 +4042,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     return child;
   }
 
-  function fiberFrom(child: FigChild): F | null {
-    if (typeof child === "string" || typeof child === "number") {
-      return fiber(TextTag, null, null, { nodeValue: String(child) }, null);
+  function fiberFrom(child: NormalizedChild): F | null {
+    if (typeof child === "string") {
+      return fiber(TextTag, null, null, { nodeValue: child }, null);
     }
 
     if (isPortal(child)) {
@@ -4848,9 +4850,9 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
 
 function sameType<Container, Instance, TextInstance>(
   fiber: Fiber<Container, Instance, TextInstance>,
-  child: FigChild,
+  child: NormalizedChild,
 ): boolean {
-  if (typeof child === "string" || typeof child === "number") {
+  if (typeof child === "string") {
     return fiber.tag === TextTag;
   }
 
@@ -4863,9 +4865,9 @@ function sameType<Container, Instance, TextInstance>(
   );
 }
 
-function propsFor(child: FigChild): Props {
-  if (typeof child === "string" || typeof child === "number") {
-    return { nodeValue: String(child) };
+function propsFor(child: NormalizedChild): Props {
+  if (typeof child === "string") {
+    return { nodeValue: child };
   }
 
   if (isPortal(child)) return portalProps(child);
@@ -4879,7 +4881,7 @@ function portalProps(child: FigPortal): Props {
 }
 
 function childKey(
-  child: FigChild,
+  child: NormalizedChild,
   index: number,
   seenKeys: Set<string>,
 ): string {

@@ -1,23 +1,28 @@
 import {
-  type FigChild,
+  type FigElement,
   type FigNode,
+  type FigPortal,
   isPortal,
   isValidElement,
 } from "./element.ts";
+
+// What normalization leaves behind: arrays are flattened, null/undefined/
+// booleans are dropped, and numbers are stringified into (merged) text.
+export type NormalizedChild = FigElement<any> | FigPortal<any> | string;
 
 // Child normalization shared by the reconciler and the server renderer.
 // Adjacent text merging here MUST match on both sides: the server emits
 // merged text nodes into HTML, and hydration matches them against the
 // client's fiber children — divergence is a hydration mismatch.
-export function collectChildren(node: FigNode): FigChild[] {
-  const children: FigChild[] = [];
+export function collectChildren(node: FigNode): NormalizedChild[] {
+  const children: NormalizedChild[] = [];
   collectChild(node, children);
   return children;
 }
 
-function collectChild(node: FigNode, children: FigChild[]): void {
+function collectChild(node: FigNode, children: NormalizedChild[]): void {
   if (Array.isArray(node)) {
-    for (const child of node) collectChild(child as FigNode, children);
+    for (const child of node) collectChild(child, children);
     return;
   }
 
@@ -36,10 +41,10 @@ function collectChild(node: FigNode, children: FigChild[]): void {
   throw invalidChildError(node);
 }
 
-function appendTextChild(children: FigChild[], text: string): void {
+function appendTextChild(children: NormalizedChild[], text: string): void {
   const previous = children.at(-1);
 
-  if (typeof previous === "string" || typeof previous === "number") {
+  if (typeof previous === "string") {
     children[children.length - 1] = `${previous}${text}`;
   } else {
     children.push(text);

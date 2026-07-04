@@ -2,7 +2,6 @@ import {
   clientReference,
   createElement,
   type ElementType,
-  type FigChild,
   type FigClientReference,
   type FigContext,
   type FigElement,
@@ -1238,8 +1237,8 @@ function closeWithError(request: PayloadRequest, error: unknown): void {
 // Wire-format flattening only: unlike the shared collectChildren, this keeps
 // empty children and does NOT merge adjacent text — the client decodes rows
 // and re-collects children itself, so merging here would double-apply.
-function flattenChildArrays(children: FigChild[]): FigChild[] {
-  const collected: FigChild[] = [];
+function flattenChildArrays(children: FigNode[]): FigNode[] {
+  const collected: FigNode[] = [];
 
   for (const child of children) {
     if (Array.isArray(child)) collected.push(...flattenChildArrays(child));

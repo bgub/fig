@@ -6,8 +6,9 @@ import type {
 } from "./data.ts";
 import { resolveCurrentDataStore } from "./data.ts";
 
-export type SetStateAction<S> = S | ((previousState: S) => S);
-export type Dispatch<A> = (action: A) => void;
+// The useState updater: accepts the next state, or an updater function of
+// the previous state for stale-closure safety.
+export type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
 export type ActionStateAction<S, Args extends unknown[]> = (
   previousState: S,
@@ -29,7 +30,7 @@ export type StartTransition = (
 type Callback = (...args: never[]) => unknown;
 
 export interface RenderDispatcher {
-  useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+  useState<S>(initialState: S | (() => S)): [S, StateSetter<S>];
   useActionState<S, Args extends unknown[]>(
     action: ActionStateAction<S, Args>,
     initialState: S,
@@ -79,9 +80,7 @@ export type ReactiveEventArgs<Args extends unknown[]> = Args extends [
 
 let currentDispatcher: RenderDispatcher | null = null;
 
-export function useState<S>(
-  initialState: S | (() => S),
-): [S, Dispatch<SetStateAction<S>>] {
+export function useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
   return resolveDispatcher().useState(initialState);
 }
 

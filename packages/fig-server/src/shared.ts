@@ -1,4 +1,4 @@
-import type { Dispatch, FigContext, SetStateAction } from "@bgub/fig";
+import type { FigContext, StateSetter } from "@bgub/fig";
 import type { FigDataResource, RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
@@ -94,10 +94,10 @@ export function createStaticDispatcher(
   return {
     useState(initialState) {
       const value = resolveInitialState(initialState);
-      const dispatch: Dispatch<SetStateAction<typeof value>> = () => {
+      const setState: StateSetter<typeof value> = () => {
         throw new Error(options.updateError);
       };
-      return [value, dispatch];
+      return [value, setState];
     },
     useActionState(_action, initialState) {
       return [

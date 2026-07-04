@@ -1,7 +1,6 @@
 import {
   createElement,
   type ElementType,
-  type FigChild,
   type FigClientReference,
   type FigContext,
   type FigElement,
@@ -36,6 +35,7 @@ import {
   readThenable,
   type Thenable,
   collectChildren,
+  type NormalizedChild,
   invalidChildError,
 } from "@bgub/fig/internal";
 import { createDataStore, type DataStore } from "@bgub/fig-data/internal";
@@ -494,7 +494,10 @@ function renderChildren(node: FigNode, frame: RenderFrame): void {
   renderChildSequence(collectChildren(node), frame);
 }
 
-function renderChildSequence(children: FigChild[], frame: RenderFrame): void {
+function renderChildSequence(
+  children: NormalizedChild[],
+  frame: RenderFrame,
+): void {
   for (let index = 0; index < children.length; index += 1) {
     try {
       withIdSegment(frame, index, () => renderNode(children[index], frame));

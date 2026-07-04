@@ -10,6 +10,7 @@ export {
   collectChildren,
   describeInvalidChild,
   invalidChildError,
+  type NormalizedChild,
 } from "./children.ts";
 export {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
@@ -39,7 +40,6 @@ export {
   type ElementType,
   type ErrorBoundaryProps,
   type ErrorInfo,
-  type FigChild,
   type FigClientReference,
   type FigElement,
   type FigErrorBoundary,

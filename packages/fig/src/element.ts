@@ -14,15 +14,14 @@ export type ElementType<P = Props> =
   | FigActivity
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
-export type FigChild =
+export type FigNode =
   | FigElement<any>
   | FigPortal<any>
   | FigText
   | boolean
   | null
   | undefined
-  | FigChild[];
-export type FigNode = FigChild;
+  | FigNode[];
 
 export interface FigElement<P = Props> {
   readonly $$typeof: symbol;
