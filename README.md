@@ -64,12 +64,15 @@ Deliberate divergences:
 - Transitions are explicit priority scopes: `transition(callback)` and
   `useTransition()` mark updates scheduled inside the callback, including
   post-`await` updates while an async transition callback is still pending.
-  Async callbacks keep `useTransition()` pending until they settle.
-- `useActionState(action, initialState)` follows React's argument order for the
-  client-side core: actions receive previous state first, may return a promise,
-  and expose pending state while Fig runs the action result through a transition
-  priority scope. Server action transport is intentionally left to a future
-  framework layer.
+  `useTransition()` callbacks receive an `AbortSignal` that aborts on
+  supersede (each hook is one cancellation domain), unmount, and Activity
+  hide; an aborted run is retired — its pending slot releases immediately and
+  its settlement (including an aborted fetch's rejection) is inert.
+- `useActionState(action, initialState)` follows React's argument order, with
+  Fig appending a trailing `AbortSignal` after the runner's arguments. Runs
+  are last-run-wins: a new run aborts and retires the previous one, whose
+  settlement can no longer touch state, error, or pending. Server action
+  transport is intentionally left to a future framework layer.
 - Server rendering uses Web `ReadableStream`s as the primary streaming model
   instead of Node-specific streams. This keeps the same API shape across modern
   Node, edge runtimes, Deno, Bun, and browser-like environments.

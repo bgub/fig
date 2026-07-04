@@ -1,4 +1,5 @@
 import {
+  Activity,
   createElement,
   ErrorBoundary,
   type FigNode,
@@ -344,7 +345,7 @@ describe("@bgub/fig-dom hooks", () => {
 
     function App() {
       const [count, dispatch, isPending] = useActionState(
-        (previous: number, amount: number) => {
+        (previous: number, amount: number, _signal: AbortSignal) => {
           calls.push(previous);
           return previous + amount;
         },
@@ -391,7 +392,11 @@ describe("@bgub/fig-dom hooks", () => {
 
     function App() {
       const [value, dispatch, isPending] = useActionState(
-        async (_previous: MessageResource, next: Promise<string>) => {
+        async (
+          _previous: MessageResource,
+          next: Promise<string>,
+          _signal: AbortSignal,
+        ) => {
           await gate.promise;
           return { promise: next };
         },
@@ -431,6 +436,277 @@ describe("@bgub/fig-dom hooks", () => {
     content.resolve("Loaded");
     await delay();
     expect(container.textContent).toBe("Idle Loaded");
+  });
+
+  it("aborts and retires a superseded transition", async () => {
+    const signals: AbortSignal[] = [];
+    const never = deferred<void>();
+    let start: StartTransition | null = null;
+
+    function App() {
+      const [isPending, startTransition] = useTransition();
+      start = startTransition;
+      return createElement("main", null, isPending ? "Pending" : "Idle");
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle");
+
+    const startTransition = requireTestValue(start as StartTransition | null);
+    startTransition((signal) => {
+      signals.push(signal);
+      // Ignores its signal and never settles: retirement must not depend on
+      // the superseded callback cooperating.
+      return never.promise;
+    });
+    await delay();
+    expect(container.textContent).toBe("Pending");
+    expect(signals[0].aborted).toBe(false);
+
+    startTransition((signal) => {
+      signals.push(signal);
+      return Promise.resolve();
+    });
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    await delay();
+
+    // The second run settled; the first never will, but its pending slot was
+    // released at supersede time, so isPending cannot be pinned.
+    expect(container.textContent).toBe("Idle");
+  });
+
+  it("swallows a retired transition's rejection", async () => {
+    let start: StartTransition | null = null;
+
+    function App() {
+      const [isPending, startTransition] = useTransition();
+      start = startTransition;
+      return createElement("main", null, isPending ? "Pending" : "Idle");
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    const startTransition = requireTestValue(start as StartTransition | null);
+    // An aborted fetch rejects: that rejection must be inert once the run is
+    // retired (an escaped rejection would fail this test as an unhandled
+    // error).
+    startTransition(
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(new Error("aborted fetch")),
+          );
+        }),
+    );
+    await delay();
+
+    startTransition(() => Promise.resolve());
+    await delay();
+
+    expect(container.textContent).toBe("Idle");
+  });
+
+  it("keeps state updates from a retired transition callback", async () => {
+    const gate = deferred<void>();
+    let start: StartTransition | null = null;
+    let setLabel: ((value: string) => void) | null = null;
+
+    function App() {
+      const [label, set] = useState("initial");
+      const [, startTransition] = useTransition();
+      start = startTransition;
+      setLabel = set;
+      return createElement("main", null, label);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    const startTransition = requireTestValue(start as StartTransition | null);
+    const set = requireTestValue(setLabel as ((value: string) => void) | null);
+    startTransition(async () => {
+      await gate.promise;
+      // Aborting is a signal, not an unwind: a retired callback that keeps
+      // going may still update state.
+      set("late");
+    });
+    await delay();
+
+    startTransition(() => undefined);
+    gate.resolve(undefined);
+    await delay();
+
+    expect(container.textContent).toBe("late");
+  });
+
+  it("runs actions last-run-wins with an abort signal", async () => {
+    const signals: AbortSignal[] = [];
+    const first = deferred<string>();
+    const second = deferred<string>();
+    let run: ((value: Promise<string>) => void) | null = null;
+
+    function App() {
+      const [value, runner, isPending] = useActionState(
+        (_previous: string, next: Promise<string>, signal: AbortSignal) => {
+          signals.push(signal);
+          return next;
+        },
+        "initial",
+      );
+      run = runner;
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        value,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle initial");
+
+    const runAction = requireTestValue(
+      run as ((value: Promise<string>) => void) | null,
+    );
+    runAction(first.promise);
+    await delay();
+    expect(container.textContent).toBe("Pending initial");
+
+    runAction(second.promise);
+    expect(signals[0].aborted).toBe(true);
+
+    second.resolve("second");
+    await delay();
+    expect(container.textContent).toBe("Idle second");
+
+    // The retired run's fulfillment is inert: it cannot clobber newer state.
+    first.resolve("first");
+    await delay();
+    expect(container.textContent).toBe("Idle second");
+  });
+
+  it("ignores a retired action run's rejection", async () => {
+    const first = deferred<string>();
+    let run: ((value: Promise<string>) => void) | null = null;
+
+    function App() {
+      const [value, runner] = useActionState(
+        (_previous: string, next: Promise<string>, _signal: AbortSignal) =>
+          next,
+        "initial",
+      );
+      run = runner;
+      return createElement("main", null, value);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("main", null, "Crashed") },
+          createElement(App, null),
+        ),
+      ),
+    );
+
+    const runAction = requireTestValue(
+      run as ((value: Promise<string>) => void) | null,
+    );
+    runAction(first.promise);
+    await delay();
+
+    runAction(Promise.resolve("second"));
+    await delay();
+    expect(container.textContent).toBe("second");
+
+    // A retired run's rejection must not reach the boundary.
+    first.reject(new Error("stale failure"));
+    await delay();
+    expect(container.textContent).toBe("second");
+  });
+
+  it("aborts in-flight transitions and actions on unmount", async () => {
+    const signals: AbortSignal[] = [];
+    const never = deferred<void>();
+    let start: StartTransition | null = null;
+    let run: (() => void) | null = null;
+
+    function App() {
+      const [, startTransition] = useTransition();
+      const [, runner] = useActionState(
+        (_previous: null, signal: AbortSignal) => {
+          signals.push(signal);
+          return never.promise.then(() => null);
+        },
+        null,
+      );
+      start = startTransition;
+      run = runner;
+      return createElement("main", null, "Mounted");
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, null)));
+
+    requireTestValue(start as StartTransition | null)((signal) => {
+      signals.push(signal);
+      return never.promise;
+    });
+    requireTestValue(run as (() => void) | null)();
+    await delay();
+    expect(signals.map((signal) => signal.aborted)).toEqual([false, false]);
+
+    flushSync(() => root.render(null));
+
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+  });
+
+  it("aborts transitions when an enclosing Activity hides, unpinning isPending", async () => {
+    const signals: AbortSignal[] = [];
+    const never = deferred<void>();
+    let start: StartTransition | null = null;
+
+    function Inner() {
+      const [isPending, startTransition] = useTransition();
+      start = startTransition;
+      return createElement("main", null, isPending ? "Pending" : "Idle");
+    }
+
+    function App({ mode }: { mode: "visible" | "hidden" }) {
+      return createElement(Activity, { mode }, createElement(Inner, null));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+
+    requireTestValue(start as StartTransition | null)((signal) => {
+      signals.push(signal);
+      return never.promise;
+    });
+    await delay();
+    expect(container.textContent).toBe("Pending");
+    expect(signals[0].aborted).toBe(false);
+
+    flushSync(() => root.render(createElement(App, { mode: "hidden" })));
+    expect(signals[0].aborted).toBe(true);
+
+    // The retired run released its pending slot, so the revealed tree is not
+    // stuck pending forever.
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    await delay();
+    expect(container.textContent).toBe("Idle");
   });
 
   it("throws rejected action state errors through error boundaries", async () => {

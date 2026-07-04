@@ -280,9 +280,9 @@ describe("@bgub/fig", () => {
     expect(() => useState(0)).toThrow(
       "Hooks can only be called while rendering a component.",
     );
-    expect(() => useActionState((state: number) => state, 0)).toThrow(
-      "Hooks can only be called while rendering a component.",
-    );
+    expect(() =>
+      useActionState((state: number, _signal: AbortSignal) => state, 0),
+    ).toThrow("Hooks can only be called while rendering a component.");
     expect(() => useMemo(() => 1, [])).toThrow(
       "Hooks can only be called while rendering a component.",
     );

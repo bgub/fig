@@ -1,6 +1,6 @@
 import {
   type ActionStateAction,
-  type ActionStateDispatch,
+  type ActionStateRunner,
   type DependencyList,
   type EffectCallback,
   type ElementType,
@@ -511,14 +511,23 @@ interface MemoState<T> {
   deps: DependencyList;
 }
 
+// One cancellable run per hook: supersede/unmount/hide abort the controller
+// and bump the generation, which retires the run — retired settlements are
+// fully inert (no pending decrement, rejections swallowed).
+interface RunInstance {
+  controller: AbortController | null;
+  generation: number;
+}
+
 interface TransitionState {
+  instance: RunInstance;
   pendingCount: number;
   start: StartTransition | null;
 }
 
 const NoActionStateError = Symbol();
 
-interface ActionStateInstance<S, Args extends unknown[]> {
+interface ActionStateInstance<S, Args extends unknown[]> extends RunInstance {
   action: ActionStateAction<S, Args>;
   value: S;
 }
@@ -2075,7 +2084,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function updateActionStateHook<S, Args extends unknown[]>(
     action: ActionStateAction<S, Args>,
     initialState: S,
-  ): [S, ActionStateDispatch<Args>, boolean] {
+  ): [S, ActionStateRunner<Args>, boolean] {
     const hook: Hook<ActionState<S, Args>> = updateQueuedHook(
       ActionStateHook,
       () => createActionState(action, initialState),
@@ -2124,32 +2133,47 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
 
+        // Last-run-wins: a new run aborts and retires the previous one,
+        // releasing its pending slot now (on DefaultLane — the retired run's
+        // held transition lane may never render). A retired run's settlement
+        // — value or rejection — never touches state, error, or pending.
+        if (retireRun(instance)) updatePending(-1, DefaultLane);
+
         const lane = claimNextTransitionLane();
+        const controller = new AbortController();
+        const generation = (instance.generation += 1);
+        instance.controller = controller;
         updatePending(1, SyncLane);
+
+        const settleIfLive = (): boolean => {
+          if (generation !== instance.generation) return false;
+          instance.controller = null;
+          return true;
+        };
 
         let result: S | PromiseLike<S>;
         try {
           result = rootOf(fiber).dataStore.run(() =>
-            runWithTransitionLane(lane, () => {
-              return instance.action(instance.value, ...args);
-            }),
+            runWithTransitionLane(lane, () =>
+              instance.action(instance.value, ...args, controller.signal),
+            ),
           );
         } catch (error) {
-          finish(lane, error);
+          if (settleIfLive()) finish(lane, error);
           return;
         }
 
         if (!isThenable(result)) {
-          finish(lane, NoActionStateError, result);
+          if (settleIfLive()) finish(lane, NoActionStateError, result);
           return;
         }
 
         result.then(
           (value) => {
-            finish(lane, NoActionStateError, value);
+            if (settleIfLive()) finish(lane, NoActionStateError, value);
           },
           (error: unknown) => {
-            finish(lane, error);
+            if (settleIfLive()) finish(lane, error);
           },
         );
       }) as unknown as StateSetter<ActionState<S, Args>>;
@@ -2161,7 +2185,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     return [
       hook.memoizedState.value,
-      queue.dispatch as unknown as ActionStateDispatch<Args>,
+      queue.dispatch as unknown as ActionStateRunner<Args>,
       hook.memoizedState.pending > 0,
     ];
   }
@@ -2233,6 +2257,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateTransitionHook(): [boolean, StartTransition] {
     const initialState: TransitionState = {
+      instance: { controller: null, generation: 0 },
       pendingCount: 0,
       start: null,
     };
@@ -2256,6 +2281,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         );
       };
 
+      const instance = hook.memoizedState.instance;
       hook.memoizedState.start = (callback) => {
         if (renderingFiber !== null) {
           throw new Error(
@@ -2263,31 +2289,56 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
 
+        // One cancellation domain per hook: a new start aborts and retires
+        // the previous pending run, releasing its pending slot now so an
+        // ignored signal or hung promise can never pin isPending. The
+        // decrement goes to DefaultLane — the retired run's own transition
+        // lane is held until its callback settles (possibly never), and a
+        // cancelled run has nothing to commit atomically with.
+        if (retireRun(instance)) updatePending(-1, DefaultLane);
+
         const lane = claimNextTransitionLane();
-        const finish = () => updatePending(-1, lane);
+        const controller = new AbortController();
+        const generation = (instance.generation += 1);
+        instance.controller = controller;
         updatePending(1, SyncLane);
+
+        // Retired settlements are fully inert: the pending slot was released
+        // at abort time, state updates the callback already made stay
+        // committed (aborting is a signal, not an unwind), and rejections
+        // are swallowed — an aborted fetch rejecting is the happy path.
+        const settleIfLive = (): boolean => {
+          if (generation !== instance.generation) return false;
+          instance.controller = null;
+          updatePending(-1, lane);
+          return true;
+        };
 
         let result: unknown;
         try {
           result = rootOf(fiber).dataStore.run(() =>
-            runWithTransitionLane(lane, callback),
+            runWithTransitionLane(lane, () => callback(controller.signal)),
           );
         } catch (error) {
-          finish();
-          throw error;
-        }
-
-        if (!isThenable(result)) {
-          finish();
+          if (settleIfLive()) throw error;
           return;
         }
 
-        result.then(finish, (error: unknown) => {
-          finish();
-          queueMicrotask(() => {
-            throw error;
-          });
-        });
+        if (!isThenable(result)) {
+          settleIfLive();
+          return;
+        }
+
+        result.then(
+          () => void settleIfLive(),
+          (error: unknown) => {
+            if (settleIfLive()) {
+              queueMicrotask(() => {
+                throw error;
+              });
+            }
+          },
+        );
       };
     }
 
@@ -2445,8 +2496,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         !includesSomeLane(renderLanes, update.lane)
       ) {
         const cloneUpdate = cloneUpdateNode(update);
+        // Pin the rebase point at the FIRST skipped update (mergeQueues
+        // returns the appended tail, so comparing against cloneUpdate would
+        // re-snapshot on every skip and lose earlier skipped reductions).
+        if (newBaseQueue === null) newBaseState = state;
         newBaseQueue = mergeQueues(newBaseQueue, cloneUpdate);
-        if (newBaseQueue === cloneUpdate) newBaseState = state;
       } else {
         state =
           typeof update.action === "function"
@@ -4282,7 +4336,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         setSubtreeVisibility(cursor.child, effectiveHidden);
         if (effectiveHidden && cursor.child !== null)
-          abortFiberEffects(cursor.child);
+          abortFiberEffects(cursor.child, true);
         if (
           !effectiveHidden &&
           includesSomeLane(cursor.childLanes, OffscreenLane)
@@ -4589,8 +4643,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     throw error;
   }
 
-  function abortFiberEffects(node: F): void {
-    visitFiberHooks(node, (_owner, hook) => {
+  // retirePending: hide keeps the tree alive, so retired transition/action
+  // runs must also release their pending slots (the decrement schedules at
+  // the run's lane and downgrades to the offscreen lane like any hidden
+  // update); deletions and root unmount skip the scheduling — the fiber is
+  // going away, so only the abort matters.
+  function abortFiberEffects(node: F, retirePending = false): void {
+    visitFiberHooks(node, (owner, hook) => {
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
       if (isExternalStoreHook(hook))
         unsubscribeExternalStore(hook.memoizedState);
@@ -4601,6 +4660,34 @@ export function createRenderer<Container, Instance, TextInstance>(
         // Calls after unmount (or while hidden) still run the last committed
         // handler, but with a signal that is already aborted.
         instance.live = false;
+      }
+      if (hook.kind === TransitionHook) {
+        const state = hook.memoizedState as TransitionState;
+        if (retireRun(state.instance) && retirePending) {
+          scheduleHookUpdate(
+            owner,
+            hook.queue as HookQueue<TransitionState>,
+            (previous) => ({
+              ...previous,
+              pendingCount: Math.max(0, previous.pendingCount - 1),
+            }),
+            DefaultLane,
+          );
+        }
+      }
+      if (hook.kind === ActionStateHook) {
+        const state = hook.memoizedState as ActionState<unknown, unknown[]>;
+        if (retireRun(state.instance) && retirePending) {
+          scheduleHookUpdate(
+            owner,
+            hook.queue as HookQueue<ActionState<unknown, unknown[]>>,
+            (previous) => ({
+              ...previous,
+              pending: Math.max(0, previous.pending - 1),
+            }),
+            DefaultLane,
+          );
+        }
       }
     });
   }
@@ -4674,6 +4761,18 @@ function createHook<S>(kind: HookKind, state: S): Hook<S> {
   };
 }
 
+// Aborts and retires the instance's live run (if any): its generation is
+// invalidated so any later settlement is inert. Returns whether a run was
+// retired, so callers release its pending slot exactly once.
+function retireRun(instance: RunInstance): boolean {
+  const controller = instance.controller;
+  if (controller === null) return false;
+  instance.controller = null;
+  instance.generation += 1;
+  controller.abort();
+  return true;
+}
+
 function createActionState<S, Args extends unknown[]>(
   action: ActionStateAction<S, Args>,
   value: S,
@@ -4681,7 +4780,7 @@ function createActionState<S, Args extends unknown[]>(
   return {
     action,
     error: NoActionStateError,
-    instance: { action, value },
+    instance: { action, controller: null, generation: 0, value },
     pending: 0,
     value,
   };

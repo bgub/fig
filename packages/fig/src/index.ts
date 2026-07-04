@@ -41,7 +41,7 @@ export {
   useState,
   useTransition,
   type ActionStateAction,
-  type ActionStateDispatch,
+  type ActionStateRunner,
   type DependencyList,
   type EffectCallback,
   type ExternalStoreSubscribe,

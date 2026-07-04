@@ -93,10 +93,25 @@ createRoot(container).render(<App />);
   Server rendering runs transition callbacks immediately and never exposes
   pending state.
 - `useActionState(action, initialState)` matches React's argument order while
-  staying client-side in Fig today. Actions receive previous state first,
-  return the next state or a promise for it, and expose `isPending` while Fig
-  applies the result in a transition priority scope. Server actions can layer on
-  top later without changing the hook shape.
+  staying client-side in Fig today. Actions receive the previous state first,
+  then the runner's arguments, then an `AbortSignal` Fig appends — declare the
+  trailing signal parameter (it drives `Args` inference):
+
+  ```ts
+  const [count, add, isPending] = useActionState(
+    (previous: number, amount: number, signal: AbortSignal) => {
+      return fetchNext(previous + amount, { signal });
+    },
+    0,
+  );
+  add(2); // Fig appends the signal; callers pass only the args.
+  ```
+
+  Runs are last-run-wins: a new run aborts the previous one's signal and
+  retires it, so a stale settlement (value or rejection) never touches state,
+  error, or pending. The signal also aborts on unmount and Activity hide.
+  Server actions can layer on top later without changing the hook shape.
+
 - Document resources: `assets([...], children)` attaches resources to a
   subtree while rendering only `children` on the client. Resource helpers include
   `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.

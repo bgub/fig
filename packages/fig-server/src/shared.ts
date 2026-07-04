@@ -118,7 +118,9 @@ export function createStaticDispatcher(
       return calculate();
     },
     useTransition() {
-      return [false, (callback) => void callback()];
+      // Server transitions run synchronously to completion; the signal never
+      // aborts (there is no supersede/unmount lifecycle during a request).
+      return [false, (callback) => void callback(new AbortController().signal)];
     },
     useReactive: noopEffect,
     useBeforePaint: noopEffect,
