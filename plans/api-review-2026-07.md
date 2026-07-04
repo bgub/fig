@@ -14,7 +14,7 @@ The short version: **the original Fig ideas are consistently better than their R
 
 **Naming and surface habit-isms**, roughly in order of conviction:
 
-- `renderToString` — the name promises react-dom/server semantics but the behavior is "buffer the stream," so suspended trees yield fallbacks, staging divs, and inline scripts in the "string." Either make it a true settle-then-emit `prerender` (clean HTML, no runtime scripts — genuinely useful for SSG/emails) or rename it honestly. Relatedly, `onShellError` duplicates the rejecting `shellReady` promise — React needed the callback only for its Node-callback API; Fig has the promise, drop the callback.
+- A true `prerender(node)` mode — hold flushing until `allReady` so boundaries complete in place and the output is settled, script-free HTML (SSG/emails). The rename half of the old finding is done (`renderToHtml` documents the buffered-stream semantics honestly; `onShellError` is dropped); this is the remaining feature half.
 
 ## Decisions to make explicitly rather than inherit
 

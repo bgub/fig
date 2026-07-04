@@ -93,7 +93,6 @@ interface Request {
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
   onAssetError?: ServerRenderOptions["onAssetError"];
-  onShellError?: (error: unknown) => void;
   pendingRootTasks: number;
   pendingTasks: number;
   pingedTasks: Task[];
@@ -213,9 +212,9 @@ export function createServerRenderRequest(
   const shellReady = deferred<void>();
   const headReady = deferred<string>();
   const allReady = deferred<void>();
-  // The readiness promises also reject through onShellError and the stream;
-  // pre-attached no-op handlers keep the ones a caller does not await from
-  // becoming unhandled rejections (await-ers still observe the rejection).
+  // The readiness promises also reject through the stream; pre-attached
+  // no-op handlers keep the ones a caller does not await from becoming
+  // unhandled rejections (await-ers still observe the rejection).
   void shellReady.promise.catch(() => undefined);
   void headReady.promise.catch(() => undefined);
   void allReady.promise.catch(() => undefined);
@@ -241,7 +240,6 @@ export function createServerRenderRequest(
     nonce: options.nonce,
     onError: options.onError,
     onAssetError: options.onAssetError,
-    onShellError: options.onShellError,
     pendingRootTasks: 0,
     pendingTasks: 0,
     pingedTasks: [],
@@ -1037,7 +1035,6 @@ function fatalError(request: Request, error: unknown): void {
   request.status = "closed";
   request.dataStore.dispose();
   request.fatalError = error;
-  request.onShellError?.(error);
   request.headReady.reject(error);
   request.shellReady.reject(error);
   request.allReady.reject(error);

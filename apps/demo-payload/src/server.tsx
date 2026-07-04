@@ -4,7 +4,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { renderToString } from "@bgub/fig-server";
+import { renderToHtml } from "@bgub/fig-server";
 import {
   type PayloadRenderResult,
   renderToPayloadStream,
@@ -98,7 +98,7 @@ async function sendPayload(
 }
 
 async function documentHtml(): Promise<string> {
-  const shell = await renderToString(<LoadingShell />);
+  const shell = await renderToHtml(<LoadingShell />);
 
   return [
     "<!doctype html>",

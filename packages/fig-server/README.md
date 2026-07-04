@@ -12,10 +12,10 @@ pnpm add @bgub/fig-server
 
 ```ts
 import {
-  renderDocumentToString,
+  renderToDocumentHtml,
   renderToDocumentStream,
-  renderToReadableStream,
-  renderToString,
+  renderToStream,
+  renderToHtml,
 } from "@bgub/fig-server";
 ```
 
@@ -47,19 +47,19 @@ document. The root must render an `<html>` element with a `<head>`. Fig prepends
 `<!doctype html>`, injects collected head resources before `</head>`, and then
 streams the body with Suspense updates.
 
-`renderToReadableStream` is the lower-level fragment/body API. It returns a
+`renderToStream` is the lower-level fragment/body API. It returns a
 `ServerFragmentRenderResult` with a Web `ReadableStream`, `headReady`,
 `shellReady`, and `allReady` promises, a `getHead()` method, a content type, and
 an abort handle. Pending Suspense boundaries stream their fallback in the shell,
 then receive completed content through nonce-compatible inline scripts. Aborting
 after the shell flushes the affected boundaries as client-rendered fallbacks.
 
-`renderToString` is a convenience wrapper that waits for `allReady` and
+`renderToHtml` buffers the streamed output: it waits for `allReady` and
 collects the readable stream:
 
 ```ts
-const html = await renderToString(<App />);
-const documentHtml = await renderDocumentToString(
+const html = await renderToHtml(<App />);
+const documentHtml = await renderToDocumentHtml(
   <html>
     <head />
     <body>
@@ -81,7 +81,7 @@ available through `result.getData()`:
 
 ```tsx
 import { dataResource, readData } from "@bgub/fig-data";
-import { renderToReadableStream } from "@bgub/fig-server";
+import { renderToStream } from "@bgub/fig-server";
 
 const userResource = dataResource.server(
   dataResource.identity<[string], { name: string }>({
@@ -98,7 +98,7 @@ function Profile({ id }: { id: string }) {
   return <h1>{user.name}</h1>;
 }
 
-const result = renderToReadableStream(<Profile id="one" />, {
+const result = renderToStream(<Profile id="one" />, {
   dataContext: { users },
 });
 await result.allReady;
@@ -129,7 +129,7 @@ function Page() {
 
 The document renderer keeps head-only metadata separate from body segment HTML
 and injects `title()` and `meta()` before `</head>`. With the lower-level
-`renderToReadableStream`, those tags are available through `result.getHead()`
+`renderToStream`, those tags are available through `result.getHead()`
 after `headReady`; they are never emitted into segment HTML. `headReady`
 resolves with the shell and seals the initial document head; `getHead()` keeps
 returning that sealed snapshot afterward. If a new head resource is found
@@ -138,7 +138,7 @@ instead of adding it to the already-flushed head, so required shell metadata
 should render before `headReady`.
 
 ```ts
-const result = renderToReadableStream(<Page />);
+const result = renderToStream(<Page />);
 await result.headReady;
 
 response.write(`<!doctype html><html><head>${result.getHead()}</head><body>`);
@@ -187,7 +187,7 @@ bundler/module ids. Use `resolveAssetKey` to map a component type to one of
 those ids:
 
 ```tsx
-renderToReadableStream(<Page />, {
+renderToStream(<Page />, {
   resolveAssetKey: (type) => (type === Page ? "app/page.tsx" : undefined),
   assets: {
     "app/page.tsx": [title("Page"), stylesheet("/page.css")],

@@ -117,7 +117,7 @@ Use `@bgub/fig-dom` for browser rendering:
 - Raw trusted HTML uses `unsafeHTML="<p>trusted html</p>"`.
 
 Use `@bgub/fig-server` for streaming server rendering with
-`renderToReadableStream` or `renderToString`.
+`renderToStream` or `renderToHtml`.
 
 ## License
 

@@ -1,4 +1,4 @@
-import { renderToReadableStream } from "@bgub/fig-server";
+import { renderToStream } from "@bgub/fig-server";
 import { describe, expect, it } from "vite-plus/test";
 import {
   App,
@@ -34,7 +34,7 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 function renderDemo(request: DemoRequest) {
-  return renderToReadableStream(
+  return renderToStream(
     <div id={demoRootId}>
       <App request={request} />
     </div>,

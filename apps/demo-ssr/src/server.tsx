@@ -133,9 +133,6 @@ async function handleRequest(
         }
         return { digest: streamBoundaryDigest };
       },
-      onShellError(error) {
-        console.error("Shell failed", error);
-      },
     },
   );
 
@@ -148,6 +145,7 @@ async function handleRequest(
   try {
     await render.shellReady;
   } catch (error) {
+    console.error("Shell failed", error);
     send(response, 500, shellErrorHtml(error), {
       "content-type": "text/html; charset=utf-8",
     });

@@ -3,7 +3,7 @@ import { dataResource, readData } from "@bgub/fig-data";
 import { createDataStore } from "@bgub/fig-data/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { readStream } from "./test-utils.ts";
-import { renderToReadableStream } from "./index.ts";
+import { renderToStream } from "./index.ts";
 import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
 
 describe("@bgub/fig-server data resources", () => {
@@ -19,7 +19,7 @@ describe("@bgub/fig-server data resources", () => {
       return createElement("span", null, readData(userResource, "one"));
     }
 
-    const result = renderToReadableStream(createElement(Profile, null));
+    const result = renderToStream(createElement(Profile, null));
 
     await result.allReady;
 

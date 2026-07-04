@@ -28,7 +28,7 @@ import {
   refreshData,
 } from "@bgub/fig-data";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
-import { renderToString } from "@bgub/fig-server";
+import { renderToHtml } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
 import {
@@ -843,7 +843,7 @@ function HydrationPage() {
     resetActivityHydrationDemoRoot();
     sandbox.replaceChildren();
 
-    const html = await renderToString(
+    const html = await renderToHtml(
       <ActivityHydrationIsland
         initialMode="hidden"
         onChildAction={() => undefined}
@@ -1032,7 +1032,7 @@ async function renderHydrationHtml(mismatch: boolean): Promise<{
   servedAt: string;
 }> {
   const servedAt = new Date().toLocaleString();
-  const html = await renderToString(
+  const html = await renderToHtml(
     <HydrationIsland
       mode="server"
       servedAt={servedAt}

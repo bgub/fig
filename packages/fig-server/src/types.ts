@@ -21,7 +21,6 @@ export interface ServerRenderOptions {
     info: ServerErrorInfo,
   ) => ServerErrorPayload | undefined;
   onAssetError?: (error: unknown, info: ServerAssetErrorInfo) => void;
-  onShellError?: (error: unknown) => void;
   clientReferenceFallback?: (
     reference: FigClientReference,
     props: Props,

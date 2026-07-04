@@ -29,10 +29,10 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import {
-  renderDocumentToString,
+  renderToDocumentHtml,
   renderToDocumentStream,
-  renderToReadableStream,
-  renderToString,
+  renderToStream,
+  renderToHtml,
 } from "./index.ts";
 import { jsString } from "./protocol.ts";
 import { deferred } from "./shared.ts";
@@ -53,7 +53,7 @@ async function readResolvedSuspenseHtml(
     return createElement("span", null, readPromise(pending.promise));
   }
 
-  const result = renderToReadableStream(
+  const result = renderToStream(
     createElement(
       Suspense,
       { fallback: createElement("em", null, "Loading") },
@@ -70,7 +70,7 @@ async function readResolvedSuspenseHtml(
 
 describe("@bgub/fig-server", () => {
   it("renders host elements and escapes text and attributes", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "button",
         {
@@ -99,7 +99,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("renders unsafe HTML without escaping it", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement("article", {
         class: "content",
         unsafeHTML: "<strong>Fig</strong>&",
@@ -112,7 +112,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("serializes namespaced SVG attribute aliases", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "svg",
         null,
@@ -134,7 +134,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, label, count);
     }
 
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(Fragment, null, createElement("h1", null, "Fig"), [
         createElement(Counter, { key: "counter" }),
         " done",
@@ -154,7 +154,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, snapshot);
     }
 
-    await expect(renderToString(createElement(App, null))).resolves.toBe(
+    await expect(renderToHtml(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
     );
   });
@@ -167,7 +167,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, "Server");
     }
 
-    await expect(renderToString(createElement(App, null))).resolves.toBe(
+    await expect(renderToHtml(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
     );
     expect(() => emit?.()).toThrow(
@@ -176,7 +176,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("streams hidden Activity content inside an inert template", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "main",
         null,
@@ -206,7 +206,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, value);
     }
 
-    await expect(renderToString(createElement(App, null))).resolves.toBe(
+    await expect(renderToHtml(createElement(App, null))).resolves.toBe(
       "<span>Server</span>",
     );
   });
@@ -223,7 +223,7 @@ describe("@bgub/fig-server", () => {
       );
     }
 
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "main",
         null,
@@ -255,7 +255,7 @@ describe("@bgub/fig-server", () => {
       );
     }
 
-    await expect(renderToString(createElement(App, null))).resolves.toBe(
+    await expect(renderToHtml(createElement(App, null))).resolves.toBe(
       "<span>Idle:Updated</span>",
     );
   });
@@ -269,14 +269,14 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, snapshot);
     }
 
-    await expect(renderToString(createElement(App, null))).rejects.toThrow(
+    await expect(renderToHtml(createElement(App, null))).rejects.toThrow(
       "useExternalStore requires getServerSnapshot during server render.",
     );
   });
 
   it("rejects invalid DOM nesting during server render", async () => {
     await expect(
-      renderToString(
+      renderToHtml(
         createElement("div", null, createElement("td", null, "Cell")),
       ),
     ).rejects.toThrow("Invalid DOM nesting: <td> cannot be a child of <div>.");
@@ -284,14 +284,14 @@ describe("@bgub/fig-server", () => {
 
   it("rejects invalid text nesting during server render", async () => {
     await expect(
-      renderToString(createElement("table", null, "Text")),
+      renderToHtml(createElement("table", null, "Text")),
     ).rejects.toThrow(
       "Invalid DOM nesting: text cannot be a child of <table>.",
     );
   });
 
   it("renders text children inside select elements", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "select",
         null,
@@ -304,7 +304,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("renders tables with whitespace-only text children", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "table",
         null,
@@ -327,7 +327,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readContext(Theme));
     }
 
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "section",
         null,
@@ -340,7 +340,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("hoists explicit document assets during server render", async () => {
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         "main",
         null,
@@ -374,7 +374,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("does not emit head-only assets into the body stream", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       assets(
         [title("Head only"), meta({ name: "robots", content: "noindex" })],
         createElement("main", null, "Ready"),
@@ -409,9 +409,7 @@ describe("@bgub/fig-server", () => {
       );
     }
 
-    await expect(
-      renderDocumentToString(createElement(Page, null)),
-    ).resolves.toBe(
+    await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
       '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>',
     );
   });
@@ -445,9 +443,7 @@ describe("@bgub/fig-server", () => {
       );
     }
 
-    await expect(
-      renderDocumentToString(createElement(Page, null)),
-    ).resolves.toBe(
+    await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
       '<!doctype html><html><head><meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>',
     );
   });
@@ -505,7 +501,7 @@ describe("@bgub/fig-server", () => {
 
   it("rejects document streams without an html head shell", async () => {
     await expect(
-      renderDocumentToString(createElement("main", null, "Ready")),
+      renderToDocumentHtml(createElement("main", null, "Ready")),
     ).rejects.toThrow(
       "renderToDocumentStream requires the root to render an <html> document with a <head>.",
     );
@@ -563,7 +559,7 @@ describe("@bgub/fig-server", () => {
       return assets(title(`Late ${value}`), createElement("span", null, value));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -600,7 +596,7 @@ describe("@bgub/fig-server", () => {
 
   it("rejects conflicting duplicate document assets", async () => {
     await expect(
-      renderToString(
+      renderToHtml(
         assets(
           [stylesheet("/app.css"), stylesheet("/app.css", { media: "print" })],
           createElement("main", null, "Ready"),
@@ -617,7 +613,7 @@ describe("@bgub/fig-server", () => {
       load: () => Promise.resolve({}),
     });
 
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement("section", null, "Before", createElement(Island, {})),
       {
         clientReferenceFallback: (reference) =>
@@ -644,7 +640,7 @@ describe("@bgub/fig-server", () => {
       return assets(stylesheet("/message.css"), createElement(Text, null));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -672,7 +668,7 @@ describe("@bgub/fig-server", () => {
       return createElement("section", null, "Card");
     }
 
-    const result = renderToReadableStream(createElement(Card, null), {
+    const result = renderToStream(createElement(Card, null), {
       resolveAssetKey: (type) => (type === Card ? "app/card.tsx" : undefined),
       assets: {
         "app/card.tsx": [
@@ -698,7 +694,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -732,7 +728,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -761,7 +757,7 @@ describe("@bgub/fig-server", () => {
 
     const pending = deferred<typeof Message>();
     const LazyMessage = lazy(() => pending.promise);
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -794,7 +790,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -833,7 +829,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(second.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Fragment,
         null,
@@ -877,7 +873,7 @@ describe("@bgub/fig-server", () => {
       return readPromise(pending.promise);
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -906,7 +902,7 @@ describe("@bgub/fig-server", () => {
       throw new Error("server failed");
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -943,7 +939,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(second.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -990,7 +986,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(bad.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         "main",
         null,
@@ -1038,7 +1034,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Activity,
         { mode: "hidden" },
@@ -1076,7 +1072,7 @@ describe("@bgub/fig-server", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToReadableStream(
+    const result = renderToStream(
       createElement(
         Activity,
         { mode: "hidden" },
@@ -1109,7 +1105,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("renders error boundary children on the server", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         ErrorBoundary,
         { fallback: createElement("span", null, "Crashed") },
@@ -1126,7 +1122,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(
-      renderToString(
+      renderToHtml(
         createElement(
           ErrorBoundary,
           { fallback: createElement("span", null, "Crashed") },
@@ -1137,7 +1133,7 @@ describe("@bgub/fig-server", () => {
   });
 
   it("returns a Web stream result with readiness promises", async () => {
-    const result = renderToReadableStream(createElement("p", null, "Hi"));
+    const result = renderToStream(createElement("p", null, "Hi"));
 
     await expect(result.shellReady).resolves.toBeUndefined();
     await expect(result.allReady).resolves.toBeUndefined();
@@ -1152,24 +1148,24 @@ describe("@bgub/fig-server", () => {
       return null;
     }
 
-    await expect(renderToString(createElement(Bad, null))).rejects.toThrow(
+    await expect(renderToHtml(createElement(Bad, null))).rejects.toThrow(
       "State updates are not allowed during server render.",
     );
   });
 
   it("throws for invalid children and invalid host props", async () => {
     await expect(
-      renderToString(
+      renderToHtml(
         createElement("div", null, { nope: true } as unknown as FigNode),
       ),
     ).rejects.toThrow("Invalid Fig child: object with keys nope.");
 
     await expect(
-      renderToString(createElement("div", { data: { nope: true } })),
+      renderToHtml(createElement("div", { data: { nope: true } })),
     ).rejects.toThrow('Cannot serialize prop "data" to HTML.');
 
     await expect(
-      renderToString(
+      renderToHtml(
         createElement("div", { unsafeHTML: "<strong>Fig</strong>" }, "Fig"),
       ),
     ).rejects.toThrow(
@@ -1177,7 +1173,7 @@ describe("@bgub/fig-server", () => {
     );
 
     await expect(
-      renderToString(createElement("div", { unsafeHTML: { html: "" } })),
+      renderToHtml(createElement("div", { unsafeHTML: { html: "" } })),
     ).rejects.toThrow(
       "The unsafeHTML prop must be a string during server render.",
     );
@@ -1232,28 +1228,28 @@ describe("@bgub/fig-server", () => {
 
   it("renders void elements and rejects their children", async () => {
     await expect(
-      renderToString(createElement("input", { value: "Fig" })),
+      renderToHtml(createElement("input", { value: "Fig" })),
     ).resolves.toBe('<input value="Fig">');
 
     await expect(
-      renderToString(createElement("input", { value: true })),
+      renderToHtml(createElement("input", { value: true })),
     ).resolves.toBe('<input value="true">');
 
     await expect(
-      renderToString(createElement("input", { defaultValue: true })),
+      renderToHtml(createElement("input", { defaultValue: true })),
     ).resolves.toBe('<input value="true">');
 
     await expect(
-      renderToString(createElement("input", null, "child")),
+      renderToHtml(createElement("input", null, "child")),
     ).rejects.toThrow("Void element <input> cannot have children.");
 
     await expect(
-      renderToString(createElement("input", { unsafeHTML: "child" })),
+      renderToHtml(createElement("input", { unsafeHTML: "child" })),
     ).rejects.toThrow("Void element <input> cannot have unsafeHTML.");
   });
 
   it("serializes form default props as browser HTML", async () => {
-    const html = await renderToString(
+    const html = await renderToHtml(
       createElement(
         "form",
         null,
