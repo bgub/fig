@@ -9,6 +9,9 @@ Every file carries a `Status:` line — `stable` for settled contracts,
 `exploring` for open designs (Problem → Prior Art → Direction → Open
 Questions → Provisional Stance).
 
+- [open-questions.md](./open-questions.md) — every open design question and
+  planned piece of work, in one place; items graduate into their owning
+  concept file when resolved.
 - [architecture.md](./architecture.md) — package ownership doctrine, the
   internal protocol registry, the data-store registration slot, boundaries
   that never leak.

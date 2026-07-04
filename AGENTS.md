@@ -8,8 +8,9 @@ dropped and Fig-specific APIs are adopted where they are clearer.
 
 - `concepts/` — **the spec.** One file per subsystem; the single
   authoritative source for contracts, invariants, wire formats, and
-  rationale. Start at `concepts/README.md`. When a change alters a contract,
-  update the owning concept file in the same commit.
+  rationale. Start at `concepts/README.md`; open questions and future plans
+  are summarized in `concepts/open-questions.md`. When a change alters a
+  contract, update the owning concept file in the same commit.
 - `docs/` — user-facing guides (`intentional-differences-from-react.md` is
   the React-migrant orientation; depth lives in concepts).
 - `plans/` — time-bound work plans and investigations; historical once

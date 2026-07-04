@@ -1,5 +1,9 @@
 # Fig API Review — React-isms and Unwise Decisions (July 2026)
 
+> Archived. Every finding is resolved or graduated: contracts live in
+> `concepts/`, and the remaining open threads are summarized in
+> `concepts/open-questions.md`.
+
 Synthesis of a five-reviewer audit across `fig`, `fig-server`, `fig-dom`, `fig-reconciler`, `fig-scheduler`, and `fig-data`, evaluating every public API against Fig's philosophy: keep React's modern model, drop legacy cruft, adopt Fig-specific APIs where clearer.
 
 The short version: **the original Fig ideas are consistently better than their React counterparts — the real problems are places where Fig invented a better idiom and then didn't apply it to its own APIs, plus one cloned package (the scheduler) and one borrowed brand (RSC) that were carried over wholesale — both since resolved.** Findings ranked by how much they matter.
