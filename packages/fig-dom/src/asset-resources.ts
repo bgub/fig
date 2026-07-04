@@ -225,7 +225,7 @@ function findDocumentResource(head: Element, key: string): Element | null {
 }
 
 /**
- * Insert render-discovered asset resources (e.g. from an RSC response's
+ * Insert render-discovered asset resources (e.g. from a payload response's
  * `getAssetResources()`) into the document head, deduped against resources
  * already inserted by SSR, a host-rendered element, or an earlier call — using
  * the same key semantics as host resources. Returns a promise that resolves once

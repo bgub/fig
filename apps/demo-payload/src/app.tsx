@@ -1,5 +1,5 @@
 import { lazy, readPromise, Suspense } from "@bgub/fig";
-import { RscBoundary } from "@bgub/fig-server/rsc";
+import { PayloadBoundary } from "@bgub/fig-server/payload";
 import { feedBoundaryId, RefreshButtonRef } from "./shared.ts";
 import { AppFrame } from "./shell.tsx";
 
@@ -26,12 +26,12 @@ export function createDemoData(seed: number) {
 
 export type DemoData = ReturnType<typeof createDemoData>;
 
-export function RscApp({ data }: { data: DemoData }) {
+export function PayloadApp({ data }: { data: DemoData }) {
   return (
     <AppFrame
       actions={
         <div class="actions">
-          <a class="button" href="/rsc">
+          <a class="button" href="/payload">
             Raw stream
           </a>
           <a class="button" href="/">
@@ -39,13 +39,13 @@ export function RscApp({ data }: { data: DemoData }) {
           </a>
         </div>
       }
-      description="Initial render is fetched as an RSC stream; the dashboard can refresh one server-rendered boundary without replacing the app shell."
+      description="Initial render is fetched as a payload stream; the dashboard can refresh one server-rendered boundary without replacing the app shell."
       title="Server Components"
     >
       <section class="grid">
-        <RscBoundary id={feedBoundaryId}>
+        <PayloadBoundary id={feedBoundaryId}>
           <Dashboard data={data} />
-        </RscBoundary>
+        </PayloadBoundary>
         <Suspense fallback={<InsightPending />}>
           <InsightPanel insight={data.insight} />
         </Suspense>
@@ -141,7 +141,7 @@ function ServerSummaryPanel({ stats }: { stats: DemoStats }) {
         <div>
           <h3>Lazy server component</h3>
           <p class="muted">
-            Loaded with lazy(load), then serialized into the RSC stream for{" "}
+            Loaded with lazy(load), then serialized into the payload stream for{" "}
             {stats.region}.
           </p>
         </div>
@@ -181,7 +181,7 @@ function statsFor(seed: number): DemoStats {
 function insightFor(stats: DemoStats): string {
   const direction = stats.trend > 12 ? "above" : "near";
 
-  return `${stats.region} is ${direction} plan with ${stats.orders.toLocaleString()} orders and a ${stats.latencyMs}ms RSC response target.`;
+  return `${stats.region} is ${direction} plan with ${stats.orders.toLocaleString()} orders and a ${stats.latencyMs}ms payload response target.`;
 }
 
 function delay<T>(value: T, ms: number): Promise<T> {

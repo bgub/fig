@@ -15,25 +15,25 @@ import {
 } from "@bgub/fig/internal";
 import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
-  createRscResponse,
-  fetchRsc,
-  isRscRequestCancelled,
-  type RscClientReferenceMetadata,
-  type RscResponse,
-} from "@bgub/fig-server/rsc";
+  createPayloadResponse,
+  fetchPayload,
+  isPayloadRequestCancelled,
+  type PayloadClientReferenceMetadata,
+  type PayloadResponse,
+} from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
   DATA_STREAM_GLOBAL,
   ROOT_ELEMENT_ID,
-  RSC_FRAME_ATTR,
-  RSC_SEGMENTS_SCRIPT_ID,
-  RSC_STREAM_GLOBAL,
+  PAYLOAD_FRAME_ATTR,
+  PAYLOAD_SEGMENTS_SCRIPT_ID,
+  PAYLOAD_STREAM_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
-  type SerializedRscFrame,
+  type SerializedPayloadFrame,
   type SerializedRouterState,
-  type SerializedRscSegment,
+  type SerializedPayloadSegment,
 } from "./bootstrap.ts";
 import {
   RouterProvider,
@@ -46,7 +46,7 @@ import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
 import type { RouterLocation } from "./types.ts";
 
-type ServerRouteResponse = ReturnType<typeof createRscResponse>;
+type ServerRouteResponse = ReturnType<typeof createPayloadResponse>;
 
 export interface StartClientOptions {
   container?: Element | null;
@@ -54,11 +54,11 @@ export interface StartClientOptions {
   // Resolve a server route's client-reference ids back to components. With the
   // @bgub/fig-start/vite plugin, pass the generated manifest's loadClientReference.
   loadClientReference?: (
-    metadata: RscClientReferenceMetadata,
+    metadata: PayloadClientReferenceMetadata,
   ) => Promise<unknown>;
   onRecoverableError?: (error: unknown) => void;
   resolveClientReference?: (
-    metadata: RscClientReferenceMetadata,
+    metadata: PayloadClientReferenceMetadata,
   ) => ElementType | undefined;
   routes: readonly AnyRoute[];
 }
@@ -70,7 +70,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     throw new Error(`Missing #${ROOT_ELEMENT_ID} container to hydrate into.`);
   }
 
-  // Prefetching the RSC payload before the commit keeps the previous page
+  // Prefetching the payload before the commit keeps the previous page
   // visible until the next server route can render. The closure reads
   // `serverRouteContent`, declared below (it needs the router); beforeCommit
   // only runs on navigations, long after both exist.
@@ -94,19 +94,19 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
 
   const serverRouteContent = createServerRouteContent(options, router);
 
-  // If the matched route was a `.server.tsx`, the document carries its RSC
+  // If the matched route was a `.server.tsx`, the document carries its payload
   // payload as streamed segment frames.
-  const rscSegments = readJson<SerializedRscSegment[]>(
-    RSC_SEGMENTS_SCRIPT_ID,
+  const payloadSegments = readJson<SerializedPayloadSegment[]>(
+    PAYLOAD_SEGMENTS_SCRIPT_ID,
     [],
   );
-  if (rscSegments.length > 0) {
-    const stream = getRscStream();
-    for (const segment of rscSegments) {
+  if (payloadSegments.length > 0) {
+    const stream = getPayloadStream();
+    for (const segment of payloadSegments) {
       serverRouteContent.receiveSegment(
         segment,
         stream,
-        rscRouteUrl(router.getState().location),
+        payloadRouteUrl(router.getState().location),
       );
     }
   }
@@ -133,10 +133,10 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   return router;
 }
 
-interface RscStream {
-  p(frame: SerializedRscFrame): void;
-  q: SerializedRscFrame[];
-  s(listener: (frame: SerializedRscFrame) => void): () => void;
+interface PayloadStream {
+  p(frame: SerializedPayloadFrame): void;
+  q: SerializedPayloadFrame[];
+  s(listener: (frame: SerializedPayloadFrame) => void): () => void;
 }
 
 interface DataStream {
@@ -150,7 +150,7 @@ function createServerRouteResponse(
   clientReferenceHydrationGate?: ClientReferenceHydrationGate,
 ): ServerRouteResponse {
   if (clientReferenceHydrationGate !== undefined) {
-    return createRscResponse({
+    return createPayloadResponse({
       resolveClientReference: (metadata) =>
         createHydratableClientReference(
           options,
@@ -160,7 +160,7 @@ function createServerRouteResponse(
     });
   }
 
-  return createRscResponse({
+  return createPayloadResponse({
     loadClientReference: options.loadClientReference,
     resolveClientReference: options.resolveClientReference,
   });
@@ -168,7 +168,7 @@ function createServerRouteResponse(
 
 function createHydratableClientReference(
   options: StartClientOptions,
-  metadata: RscClientReferenceMetadata,
+  metadata: PayloadClientReferenceMetadata,
   hydrationGate: ClientReferenceHydrationGate,
 ): ElementType {
   if (metadata.ssr === true) {
@@ -210,7 +210,7 @@ function createHydratableClientReference(
 
 function createSsrHydratableClientReference(
   options: StartClientOptions,
-  metadata: RscClientReferenceMetadata,
+  metadata: PayloadClientReferenceMetadata,
 ): ElementType {
   const resolved =
     resolvePreloadedClientReference(metadata) ??
@@ -233,7 +233,7 @@ function clientReferencePlaceholder(metadata: { id: string }): FigNode {
 }
 
 function resolvePreloadedClientReference(
-  metadata: RscClientReferenceMetadata,
+  metadata: PayloadClientReferenceMetadata,
 ): ElementType | undefined {
   const registry = (globalThis as Record<string, unknown>)[
     CLIENT_REFERENCE_MODULES_GLOBAL
@@ -291,8 +291,8 @@ interface ServerRouteContent extends ServerRouteContentStore {
     matches: readonly RouteMatch[],
   ): Promise<void>;
   receiveSegment(
-    segment: SerializedRscSegment,
-    stream: RscStream,
+    segment: SerializedPayloadSegment,
+    stream: PayloadStream,
     url: string,
   ): void;
   renderActiveRoute(): void;
@@ -423,7 +423,7 @@ function createServerRouteContent(
         entry.activeRefresh?.abort();
         const controller = new AbortController();
         entry.activeRefresh = controller;
-        loadServerRouteRsc(
+        loadServerRoutePayload(
           entry.response,
           entry.routeId,
           url,
@@ -451,13 +451,13 @@ function createServerRouteContent(
     const controller = new AbortController();
     const entry = createEntry(routeId, response, {
       dispose: () => controller.abort(),
-      // Client navigation reveals server routes atomically after the RSC fetch;
+      // Client navigation reveals server routes atomically after the payload fetch;
       // initial document streams keep their default progressive reveal behavior.
       payloadComplete: false,
       url,
     });
 
-    loadServerRouteRsc(
+    loadServerRoutePayload(
       response,
       routeId,
       url,
@@ -555,7 +555,7 @@ function createServerRouteContent(
 
       const entry =
         entries.get(match.routeId) ??
-        startEntryFetch(match.routeId, rscRouteUrl(location));
+        startEntryFetch(match.routeId, payloadRouteUrl(location));
       await waitForEntryRenderable(entry);
       await preloadEntryClientReferences(entry);
     },
@@ -571,7 +571,7 @@ function createServerRouteContent(
       if (state.status !== "idle") return;
       const match = firstServerRouteMatch(state.matches);
       if (match === undefined) return;
-      const url = rscRouteUrl(state.location);
+      const url = payloadRouteUrl(state.location);
       const existing = entryForRoute(match.routeId);
       if (existing !== undefined) {
         control(existing).refresh(url);
@@ -606,7 +606,7 @@ function createServerRouteContent(
 function serverRouteNode(node: FigNode): FigNode {
   return createElement(
     ErrorBoundary,
-    { fallback: createElement("div", { "data-fig-rsc-error": "" }) },
+    { fallback: createElement("div", { "data-fig-payload-error": "" }) },
     createElement(Suspense, { fallback: null }, node),
   );
 }
@@ -699,7 +699,7 @@ function firstServerRouteMatch(
   return matches.find((match) => isServerRoute(match.node.route));
 }
 
-function loadServerRouteRsc(
+function loadServerRoutePayload(
   response: ServerRouteResponse,
   routeId: string,
   url: string,
@@ -708,7 +708,7 @@ function loadServerRouteRsc(
   control: ServerRouteControl,
   refreshBoundary?: string,
 ): void {
-  void fetchServerRouteRsc(
+  void fetchServerRoutePayload(
     response,
     routeId,
     url,
@@ -718,14 +718,14 @@ function loadServerRouteRsc(
   ).then(
     () => control.complete(),
     (error: unknown) => {
-      if (isRscRequestCancelled(error)) return;
-      reportRscFetchError(routeId, error, options);
+      if (isPayloadRequestCancelled(error)) return;
+      reportPayloadFetchError(routeId, error, options);
       control.complete();
     },
   );
 }
 
-async function fetchServerRouteRsc(
+async function fetchServerRoutePayload(
   response: ServerRouteResponse,
   routeId: string,
   url: string,
@@ -733,7 +733,7 @@ async function fetchServerRouteRsc(
   signal: AbortSignal,
   refreshBoundary?: string,
 ): Promise<Response> {
-  const result = await fetchRsc(response, url, { refreshBoundary, signal });
+  const result = await fetchPayload(response, url, { refreshBoundary, signal });
   // The response has decoded the full payload; a payload with client
   // references but no configured resolver would render placeholders forever,
   // so fail loudly instead.
@@ -753,11 +753,11 @@ function hasClientReferenceResolver(
   );
 }
 
-function rscRouteUrl(location: RouterLocation): string {
+function payloadRouteUrl(location: RouterLocation): string {
   return location.pathname + location.search;
 }
 
-function reportRscFetchError(
+function reportPayloadFetchError(
   routeId: string,
   error: unknown,
   options: StartClientOptions,
@@ -767,7 +767,7 @@ function reportRscFetchError(
     return;
   }
   console.error(
-    `[fig-start] server route "${routeId}" RSC fetch failed:`,
+    `[fig-start] server route "${routeId}" payload fetch failed:`,
     error,
   );
 }
@@ -776,7 +776,7 @@ function reportRscFetchError(
 // watcher are pure logic, so they're verified without a DOM.
 export function requireClientReferenceResolver(
   routeId: string,
-  response: Pick<RscResponse, "getClientReferences">,
+  response: Pick<PayloadResponse, "getClientReferences">,
   options: Pick<
     StartClientOptions,
     "loadClientReference" | "resolveClientReference"
@@ -867,20 +867,20 @@ function readDataFramesFromDocument(): FigDataHydrationEntry[] {
   ).flat();
 }
 
-function readRscStream(): RscStream | null {
-  const value = (globalThis as Record<string, unknown>)[RSC_STREAM_GLOBAL];
-  return isRscStream(value) ? value : null;
+function readPayloadStream(): PayloadStream | null {
+  const value = (globalThis as Record<string, unknown>)[PAYLOAD_STREAM_GLOBAL];
+  return isPayloadStream(value) ? value : null;
 }
 
-function getRscStream(): RscStream {
-  const current = readRscStream();
+function getPayloadStream(): PayloadStream {
+  const current = readPayloadStream();
   if (current !== null) {
-    appendMissingRscFrames(current, readRscFramesFromDocument());
+    appendMissingPayloadFrames(current, readPayloadFramesFromDocument());
     return current;
   }
 
-  const stream = createRscStream(readRscFramesFromDocument());
-  (globalThis as Record<string, unknown>)[RSC_STREAM_GLOBAL] = stream;
+  const stream = createPayloadStream(readPayloadFramesFromDocument());
+  (globalThis as Record<string, unknown>)[PAYLOAD_STREAM_GLOBAL] = stream;
   return stream;
 }
 
@@ -898,9 +898,9 @@ function appendMissingDataEntries(
   if (next.length > 0) stream.p(next);
 }
 
-function appendMissingRscFrames(
-  stream: RscStream,
-  frames: readonly SerializedRscFrame[],
+function appendMissingPayloadFrames(
+  stream: PayloadStream,
+  frames: readonly SerializedPayloadFrame[],
 ): void {
   const seen = new Set(stream.q.map((frame) => JSON.stringify(frame)));
   for (const frame of frames) {
@@ -911,11 +911,11 @@ function appendMissingRscFrames(
   }
 }
 
-function createRscStream(
-  initialFrames: readonly SerializedRscFrame[],
-): RscStream {
-  let listeners: Array<(frame: SerializedRscFrame) => void> = [];
-  const stream: RscStream = {
+function createPayloadStream(
+  initialFrames: readonly SerializedPayloadFrame[],
+): PayloadStream {
+  let listeners: Array<(frame: SerializedPayloadFrame) => void> = [];
+  const stream: PayloadStream = {
     q: [...initialFrames],
     p(frame) {
       stream.q.push(frame);
@@ -932,7 +932,7 @@ function createRscStream(
   return stream;
 }
 
-function isRscStream(value: unknown): value is RscStream {
+function isPayloadStream(value: unknown): value is PayloadStream {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -942,10 +942,11 @@ function isRscStream(value: unknown): value is RscStream {
   );
 }
 
-function readRscFramesFromDocument(): SerializedRscFrame[] {
+function readPayloadFramesFromDocument(): SerializedPayloadFrame[] {
   return Array.from(
-    document.querySelectorAll(`script[${RSC_FRAME_ATTR}]`),
-    (element) => JSON.parse(element.textContent ?? "") as SerializedRscFrame,
+    document.querySelectorAll(`script[${PAYLOAD_FRAME_ATTR}]`),
+    (element) =>
+      JSON.parse(element.textContent ?? "") as SerializedPayloadFrame,
   );
 }
 

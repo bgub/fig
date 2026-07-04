@@ -5,8 +5,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import { renderToString } from "@bgub/fig-server";
-import { type RscRenderResult, renderToRscStream } from "@bgub/fig-server/rsc";
-import { createDemoData, Dashboard, RscApp } from "./app.tsx";
+import {
+  type PayloadRenderResult,
+  renderToPayloadStream,
+} from "@bgub/fig-server/payload";
+import { createDemoData, Dashboard, PayloadApp } from "./app.tsx";
 import {
   devReloadScript,
   handleDevReloadRequest,
@@ -40,7 +43,7 @@ createServer((request, response) => {
     response.end(error instanceof Error ? error.message : String(error));
   });
 }).listen(port, "127.0.0.1", () => {
-  console.log(`Fig RSC demo: ${publicUrl(port)}`);
+  console.log(`Fig payload demo: ${publicUrl(port)}`);
 });
 
 async function handleRequest(
@@ -61,8 +64,8 @@ async function handleRequest(
       response.writeHead(204);
       response.end();
       return;
-    case "/rsc":
-      await sendRsc(request, response, url);
+    case "/payload":
+      await sendPayload(request, response, url);
       return;
     case "/style.css":
       send(response, 200, styles, textCss);
@@ -72,17 +75,17 @@ async function handleRequest(
   }
 }
 
-async function sendRsc(
+async function sendPayload(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
 ): Promise<void> {
   const seed = seedFor(url);
-  const boundary = headerValue(request.headers["x-fig-rsc-boundary"]);
+  const boundary = headerValue(request.headers["x-fig-payload-boundary"]);
   const data = createDemoData(seed);
   const refreshingFeed = boundary === feedBoundaryId;
-  const result = renderToRscStream(
-    refreshingFeed ? <Dashboard data={data} /> : <RscApp data={data} />,
+  const result = renderToPayloadStream(
+    refreshingFeed ? <Dashboard data={data} /> : <PayloadApp data={data} />,
     refreshingFeed ? { refreshBoundary: boundary } : undefined,
   );
 
@@ -91,7 +94,7 @@ async function sendRsc(
     "content-type": result.contentType,
     "x-accel-buffering": "no",
   });
-  await pipeRsc(result, response);
+  await pipePayload(result, response);
 }
 
 async function documentHtml(): Promise<string> {
@@ -103,7 +106,7 @@ async function documentHtml(): Promise<string> {
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "<title>Fig RSC Demo</title>",
+    "<title>Fig payload Demo</title>",
     '<link rel="stylesheet" href="/style.css">',
     "</head>",
     "<body>",
@@ -133,8 +136,8 @@ function seedFor(url: URL): number {
   return Math.floor(Date.now() / 1000) % 1000;
 }
 
-async function pipeRsc(
-  result: RscRenderResult,
+async function pipePayload(
+  result: PayloadRenderResult,
   response: ServerResponse,
 ): Promise<void> {
   const reader = result.stream.getReader();

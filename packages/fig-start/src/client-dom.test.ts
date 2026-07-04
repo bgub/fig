@@ -14,7 +14,7 @@ import { hydrateStart } from "./client.ts";
 import { Outlet } from "./components.tsx";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
-  RSC_BOUNDARY_HEADER,
+  PAYLOAD_BOUNDARY_HEADER,
 } from "./bootstrap.ts";
 import { markServerRoute, serverClientReference } from "./internal.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
@@ -151,12 +151,12 @@ function installHandlerFetch(
   };
 }
 
-describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
-  it("mounts a server route's RSC payload, resolves its island, and tears down on nav", async () => {
+describe("@bgub/fig-start client payload mount (happy-dom)", () => {
+  it("mounts a server route's payload, resolves its island, and tears down on nav", async () => {
     await installServerRenderedDocument("/dash");
 
-    // The SSR'd document includes server-renderable RSC markup immediately.
-    const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+    // The SSR'd document includes server-renderable payload markup immediately.
+    const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
     expect(slot).not.toBeNull();
     expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
     expect(slot?.querySelector("[data-fig-client-reference]")).not.toBeNull();
@@ -168,7 +168,9 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       routes,
     });
     await flush();
-    const mountedSlot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+    const mountedSlot = document.querySelector(
+      '[data-fig-payload-slot="/dash"]',
+    );
     expect(mountedSlot).toBe(slot);
     expect(errors).toEqual([]);
 
@@ -195,7 +197,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     };
 
     try {
-      const slot = document.querySelector('[data-fig-rsc-slot="/ssr"]');
+      const slot = document.querySelector('[data-fig-payload-slot="/ssr"]');
       const button = slot?.querySelector(".ssr-island");
       expect(button?.textContent).toBe("SSR island");
       expect(slot?.querySelector("[data-fig-client-reference]")).toBeNull();
@@ -208,7 +210,9 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       });
       await flush();
 
-      const hydratedSlot = document.querySelector('[data-fig-rsc-slot="/ssr"]');
+      const hydratedSlot = document.querySelector(
+        '[data-fig-payload-slot="/ssr"]',
+      );
       expect(hydratedSlot?.querySelector(".ssr-island")).toBe(button);
       expect(hydratedSlot?.querySelector(".ssr-island")?.textContent).toBe(
         "SSR island",
@@ -224,7 +228,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     }
   });
 
-  it("fetches a server route's RSC payload when navigating on the client", async () => {
+  it("fetches a server route's payload when navigating on the client", async () => {
     await installServerRenderedDocument("/");
     const restoreFetch = installHandlerFetch();
     const requests: Request[] = [];
@@ -242,10 +246,10 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       await router.navigate("/dash");
       await flush();
 
-      const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+      const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
       expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
       expect(slot?.querySelector(".island")?.textContent).toBe("island!");
-      expect(requests.at(-1)?.headers.get(RSC_BOUNDARY_HEADER)).toBeNull();
+      expect(requests.at(-1)?.headers.get(PAYLOAD_BOUNDARY_HEADER)).toBeNull();
     } finally {
       globalThis.fetch = previousFetch;
       restoreFetch();
@@ -271,16 +275,18 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       const navigation = router.navigate("/dash");
       await flush();
 
-      // The RSC payload is still in flight: the previous route must stay
+      // The payload is still in flight: the previous route must stay
       // mounted instead of committing to an empty server-route slot.
       expect(document.body.textContent).toContain("Home");
-      expect(document.querySelector('[data-fig-rsc-slot="/dash"]')).toBeNull();
+      expect(
+        document.querySelector('[data-fig-payload-slot="/dash"]'),
+      ).toBeNull();
 
       dashGate.resolve(undefined);
       await navigation;
       await flush();
 
-      const slot = document.querySelector('[data-fig-rsc-slot="/dash"]');
+      const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
       expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
       expect(slot?.querySelector(".island")?.textContent).toBe("island!");
       expect(document.body.textContent).not.toContain("Home");
@@ -300,7 +306,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
         component: () => createElement("h1", null, "Home"),
       }),
       markServerRoute(
-        createFileRoute("/rsc-layout")({
+        createFileRoute("/payload-layout")({
           component: () =>
             createElement(
               "section",
@@ -310,10 +316,10 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
             ),
         }),
       ),
-      createFileRoute("/rsc-layout/a")({
+      createFileRoute("/payload-layout/a")({
         component: () => createElement("p", { class: "child" }, "Child A"),
       }),
-      createFileRoute("/rsc-layout/b")({
+      createFileRoute("/payload-layout/b")({
         component: () => createElement("p", { class: "child" }, "Child B"),
       }),
     ];
@@ -322,11 +328,11 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
 
     try {
       const router = hydrateStart({ routes: nestedRoutes });
-      await router.navigate("/rsc-layout/a");
+      await router.navigate("/payload-layout/a");
       await flush();
       expect(document.querySelector(".child")?.textContent).toBe("Child A");
 
-      await router.navigate("/rsc-layout/b");
+      await router.navigate("/payload-layout/b");
       await flush();
 
       expect(document.querySelector(".child")?.textContent).toBe("Child B");
@@ -343,7 +349,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
           createElement("div", { id: "app" }, createElement(Outlet)),
       }),
       markServerRoute(
-        createFileRoute("/rsc-layout")({
+        createFileRoute("/payload-layout")({
           component: () =>
             createElement(
               "section",
@@ -353,12 +359,12 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
             ),
         }),
       ),
-      createFileRoute("/rsc-layout/a")({
+      createFileRoute("/payload-layout/a")({
         component: () => createElement("p", { class: "child" }, "Child A"),
       }),
     ];
 
-    await installServerRenderedDocument("/rsc-layout/a", nestedRoutes);
+    await installServerRenderedDocument("/payload-layout/a", nestedRoutes);
     hydrateStart({ routes: nestedRoutes });
     await flush();
 
@@ -376,7 +382,7 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
     });
     await flush();
 
-    const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
+    const slot = document.querySelector('[data-fig-payload-slot="/styled"]');
     const link = document.head.querySelector('link[rel="stylesheet"]');
     expect(errors).toEqual([]);
     expect(slot).not.toBeNull();
@@ -482,14 +488,14 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       expect(link?.getAttribute("href")).toBe(styledIslandHref);
       // The stylesheet gate holds the whole navigation: nothing commits yet.
       expect(
-        document.querySelector('[data-fig-rsc-slot="/styled"]'),
+        document.querySelector('[data-fig-payload-slot="/styled"]'),
       ).toBeNull();
 
       link?.dispatchEvent(new Event("load"));
       await navigation;
       await flush();
 
-      const slot = document.querySelector('[data-fig-rsc-slot="/styled"]');
+      const slot = document.querySelector('[data-fig-payload-slot="/styled"]');
       expect(slot?.querySelector(".styled-island")?.textContent).toBe(
         "styled!",
       );
@@ -550,7 +556,9 @@ describe("@bgub/fig-start client RSC mount (happy-dom)", () => {
       const navigation = router.navigate("/slow");
       await flush();
       // The payload is still streaming, so the navigation has not committed.
-      expect(document.querySelector('[data-fig-rsc-slot="/slow"]')).toBeNull();
+      expect(
+        document.querySelector('[data-fig-payload-slot="/slow"]'),
+      ).toBeNull();
       expect(document.body.textContent).toContain("Home");
 
       await router.navigate("/");

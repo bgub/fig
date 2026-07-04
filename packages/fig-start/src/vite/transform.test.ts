@@ -31,7 +31,7 @@ export function Dashboard() {
     expect(out.code).toContain("ssr:");
     expect(out.code).toContain('"/src/routes/Island.tsx#Island"');
     // The original module stays in the server graph under a private alias so
-    // the document render can SSR the island while RSC still sees a client ref.
+    // the document render can SSR the island while payload still sees a client ref.
     expect(out.code).toContain('from "./Island.tsx"');
   });
 

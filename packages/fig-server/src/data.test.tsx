@@ -4,7 +4,7 @@ import { createDataStore } from "@bgub/fig-data/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { readStream } from "./test-utils.ts";
 import { renderToReadableStream } from "./index.ts";
-import { createRscResponse, renderToRscStream } from "./rsc.ts";
+import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
 
 describe("@bgub/fig-server data resources", () => {
   it("renders data resources and exposes fulfilled entries", async () => {
@@ -29,9 +29,9 @@ describe("@bgub/fig-server data resources", () => {
     ]);
   });
 
-  it("streams RSC data rows before the model that may read them on the client", async () => {
+  it("streams payload data rows before the model that may read them on the client", async () => {
     const userIdentity = dataResource.identity<[string], { name: string }>({
-      key: (id: string) => ["rsc-user", id],
+      key: (id: string) => ["payload-user", id],
     });
     const userResource = dataResource.server(userIdentity, {
       load: () => ({ name: "Grace" }),
@@ -42,7 +42,7 @@ describe("@bgub/fig-server data resources", () => {
       return createElement("span", null, user.name);
     }
 
-    const result = renderToRscStream(createElement(ServerProfile, null));
+    const result = renderToPayloadStream(createElement(ServerProfile, null));
 
     await result.allReady;
 
@@ -53,7 +53,7 @@ describe("@bgub/fig-server data resources", () => {
     expect(dataIndex).toBeGreaterThanOrEqual(0);
     expect(modelIndex).toBeGreaterThan(dataIndex);
 
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     const store = createDataStore<object, null>({
       context: {},
       getLane: () => null,
@@ -67,7 +67,7 @@ describe("@bgub/fig-server data resources", () => {
     response.processStringChunk(streamText);
 
     expect(store.snapshot()).toEqual([
-      { key: ["rsc-user", "one"], value: { name: "Grace" } },
+      { key: ["payload-user", "one"], value: { name: "Grace" } },
     ]);
   });
 });

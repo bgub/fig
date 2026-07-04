@@ -98,7 +98,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/fig-vite
 
-  apps/demo-rsc:
+  apps/demo-payload:
     dependencies:
       '@bgub/fig':
         specifier: workspace:*

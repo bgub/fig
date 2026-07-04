@@ -3,7 +3,7 @@ import { on } from "@bgub/fig-dom";
 import islandMarkHref from "./fig-mark.svg";
 
 // Imported by a `.server.tsx` route, so the Start Vite plugin rewrites this
-// component into a client reference for the RSC payload.
+// component into a client reference for the payload stream.
 export function Island(): FigNode {
   const [count, setCount] = useState(0);
   return (

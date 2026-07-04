@@ -11,10 +11,10 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./rsc": {
-      "types": "./dist/rsc.d.ts",
-      "import": "./dist/rsc.js",
-      "default": "./dist/rsc.js"
+    "./payload": {
+      "types": "./dist/payload.d.ts",
+      "import": "./dist/payload.js",
+      "default": "./dist/payload.js"
     }
   },
   "types": "./dist/index.d.ts",

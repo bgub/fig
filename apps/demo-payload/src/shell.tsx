@@ -44,7 +44,7 @@ export function LoadingShell() {
 export function ErrorShell({ error }: { error: unknown }) {
   return (
     <AppFrame
-      description="RSC request failed"
+      description="payload request failed"
       title={error instanceof Error ? error.message : String(error)}
     />
   );
@@ -54,12 +54,12 @@ function Topbar() {
   return (
     <header class="topbar">
       <div class="topbar-inner">
-        <h1 class="brand">RSC Demo</h1>
-        <nav class="nav" aria-label="RSC demo">
+        <h1 class="brand">payload Demo</h1>
+        <nav class="nav" aria-label="payload demo">
           <a class="active" href="/">
             Server model
           </a>
-          <a href="/rsc">Raw stream</a>
+          <a href="/payload">Raw stream</a>
         </nav>
       </div>
     </header>

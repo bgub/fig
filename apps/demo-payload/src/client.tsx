@@ -2,17 +2,17 @@ import "./dev-env.ts";
 import { createRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
-  createRscResponse,
-  fetchRsc,
-  isRscRequestCancelled,
-} from "@bgub/fig-server/rsc";
+  createPayloadResponse,
+  fetchPayload,
+  isPayloadRequestCancelled,
+} from "@bgub/fig-server/payload";
 import { RefreshButton, setRefreshHandler } from "./client-components.tsx";
 import { appRootId, refreshButtonReferenceId } from "./shared.ts";
 import { ErrorShell } from "./shell.tsx";
 
 const rootElement = document.getElementById(appRootId);
 if (rootElement === null) {
-  throw new Error("Missing RSC demo root.");
+  throw new Error("Missing payload demo root.");
 }
 const appRootElement = rootElement;
 
@@ -22,7 +22,7 @@ createRoot(devtoolsContainer, { devtools: false }).render(
   <FigDevtools hook={devtoolsHook} placement="sidebar" />,
 );
 
-const response = createRscResponse({
+const response = createPayloadResponse({
   resolveClientReference(metadata) {
     if (metadata.id === refreshButtonReferenceId) return RefreshButton;
     throw new Error(`Unknown client reference "${metadata.id}".`);
@@ -49,21 +49,21 @@ function render(node = response.getRoot()): void {
 }
 
 setRefreshHandler((boundary, seed) =>
-  fetchRsc(response, `/rsc?seed=${seed}`, { refreshBoundary: boundary }).then(
-    () => undefined,
-  ),
+  fetchPayload(response, `/payload?seed=${seed}`, {
+    refreshBoundary: boundary,
+  }).then(() => undefined),
 );
 
 response.subscribe(() => render());
 
-void fetchRsc(response, "/rsc", { signal: initialRequest.signal }).catch(
-  (error: unknown) => {
-    if (isRscRequestCancelled(error)) return;
-    render(<ErrorShell error={error} />);
-  },
-);
+void fetchPayload(response, "/payload", {
+  signal: initialRequest.signal,
+}).catch((error: unknown) => {
+  if (isPayloadRequestCancelled(error)) return;
+  render(<ErrorShell error={error} />);
+});
 
-document.body.dataset.figRscDemo = "ready";
+document.body.dataset.figPayloadDemo = "ready";
 
 function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
   const layout = document.createElement("div");

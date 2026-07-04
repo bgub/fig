@@ -109,7 +109,7 @@ const initialData = result.getData();
 Pass `initialData` to `createRoot(...)` or `hydrateRoot(...)` on the client to
 hydrate those values by key. Client imports can use the identity-only resource;
 if no client loader exists, `refreshData(...)` reports `unsupported` and a
-framework/RSC refresh path should revalidate the key.
+framework/payload refresh path should revalidate the key.
 
 ## Resources
 
@@ -198,27 +198,27 @@ renderToReadableStream(<Page />, {
 Manifest assets use the same registry, destination rules, dedupe checks, and
 Suspense reveal gating as explicit `assets(...)` wrappers.
 
-## RSC
+## Payload (server components)
 
 ```ts
 import {
-  createRscResponse,
-  fetchRsc,
-  renderToRscStream,
-  RscBoundary,
-} from "@bgub/fig-server/rsc";
+  createPayloadResponse,
+  fetchPayload,
+  renderToPayloadStream,
+  PayloadBoundary,
+} from "@bgub/fig-server/payload";
 ```
 
-`renderToRscStream(node, options?)` renders a Server Component payload.
+`renderToPayloadStream(node, options?)` renders a server-component payload.
 Pass `refreshBoundary` to render a targeted boundary refresh:
 
 ```tsx
-renderToRscStream(<Dashboard />, { refreshBoundary: "feed" });
+renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" });
 ```
 
-`createRscResponse()` decodes streamed rows on the client, and
-`fetchRsc(response, input, options?)` fetches and processes a payload. Pass
-`refreshBoundary` to `fetchRsc` to request and apply a boundary refresh.
+`createPayloadResponse()` decodes streamed rows on the client, and
+`fetchPayload(response, input, options?)` fetches and processes a payload. Pass
+`refreshBoundary` to `fetchPayload` to request and apply a boundary refresh.
 
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useExternalStore` server snapshots, no-op server

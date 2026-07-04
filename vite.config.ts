@@ -22,7 +22,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
   ["@bgub/fig-refresh", "packages/fig-refresh/src/index.ts"],
   ["@bgub/fig-vite", "packages/fig-vite/src/index.ts"],
-  ["@bgub/fig-server/rsc", "packages/fig-server/src/rsc.ts"],
+  ["@bgub/fig-server/payload", "packages/fig-server/src/payload.ts"],
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
   ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
   ["@bgub/fig-start/client", "packages/fig-start/src/client.ts"],
@@ -58,7 +58,7 @@ const libraryEntries: Record<string, string[]> = {
   ],
   "packages/fig-refresh": ["./src/index.ts"],
   "packages/fig-vite": ["./src/index.ts"],
-  "packages/fig-server": ["./src/index.ts", "./src/rsc.ts"],
+  "packages/fig-server": ["./src/index.ts", "./src/payload.ts"],
   "packages/fig-start": [
     "./src/index.ts",
     "./src/server.ts",
@@ -182,7 +182,7 @@ function packConfigFor(path: string): PackConfig | undefined {
       });
     case "apps/demo-client":
       return demoClientPackConfig();
-    case "apps/demo-rsc":
+    case "apps/demo-payload":
       return [
         {
           entry: ["./src/server.tsx"],

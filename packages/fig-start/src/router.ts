@@ -18,7 +18,7 @@ export interface RouterHistory {
 
 export interface CreateRouterOptions {
   // Awaited between a successful load and the state commit. Client
-  // navigation uses it to prefetch server-route RSC payloads so the previous
+  // navigation uses it to prefetch server-route payloads so the previous
   // page stays visible until the next one can render.
   beforeCommit?: (
     location: RouterLocation,

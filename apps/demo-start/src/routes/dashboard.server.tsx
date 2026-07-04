@@ -12,7 +12,7 @@ function Dashboard(): FigNode {
       <h1 class="text-3xl font-semibold tracking-tight">Dashboard</h1>
       <p class="text-slate-700">
         This route is a `.server.tsx` leaf. Its markup is delivered through the
-        Fig RSC stream, and the button below is a client reference.
+        Fig payload stream, and the button below is a client reference.
       </p>
       <Island />
     </section>

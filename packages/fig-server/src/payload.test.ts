@@ -30,38 +30,38 @@ import {
 } from "./test-utils.ts";
 import { describe, expect, it } from "vite-plus/test";
 import {
-  createRscResponse,
-  fetchRsc,
-  isRscRequestCancelled,
-  RscBoundary,
-  type RscClientReferenceMetadata,
-  type RscFetch,
-  renderToRscStream,
-} from "./rsc.ts";
+  createPayloadResponse,
+  fetchPayload,
+  isPayloadRequestCancelled,
+  PayloadBoundary,
+  type PayloadClientReferenceMetadata,
+  type PayloadFetch,
+  renderToPayloadStream,
+} from "./payload.ts";
 
-type TestRscModel =
+type TestPayloadModel =
   | null
   | boolean
   | number
   | string
-  | TestRscModel[]
-  | { [key: string]: TestRscModel };
+  | TestPayloadModel[]
+  | { [key: string]: TestPayloadModel };
 
-type TestRscRow =
+type TestPayloadRow =
   | {
       id: number;
       tag: "client";
-      value: { id: string; assets?: TestRscModel[] };
+      value: { id: string; assets?: TestPayloadModel[] };
     }
   | { id: number; tag: "error"; value: { digest?: string; message?: string } }
-  | { id: number; tag: "model"; value: TestRscModel }
-  | { boundary: string; tag: "refresh"; value: TestRscModel };
+  | { id: number; tag: "model"; value: TestPayloadModel }
+  | { boundary: string; tag: "refresh"; value: TestPayloadModel };
 
-interface TestRscElementModel {
+interface TestPayloadElementModel {
   $fig: "element";
   key: string | number | null;
-  props: Record<string, TestRscModel>;
-  type: TestRscModel;
+  props: Record<string, TestPayloadModel>;
+  type: TestPayloadModel;
 }
 
 function requireHeaders(headers: Headers | null): Headers {
@@ -69,61 +69,62 @@ function requireHeaders(headers: Headers | null): Headers {
   return headers;
 }
 
-async function renderToRscText(
+async function renderToPayloadText(
   node: FigNode,
-  options?: Parameters<typeof renderToRscStream>[1],
+  options?: Parameters<typeof renderToPayloadStream>[1],
 ): Promise<string> {
-  const result = renderToRscStream(node, options);
+  const result = renderToPayloadStream(node, options);
   await result.allReady;
   return readStream(result.stream);
 }
 
-async function renderToRscRows(
+async function renderToPayloadRows(
   node: FigNode,
-  options?: Parameters<typeof renderToRscStream>[1],
-): Promise<TestRscRow[]> {
-  return parseTestRscRows(await renderToRscText(node, options));
+  options?: Parameters<typeof renderToPayloadStream>[1],
+): Promise<TestPayloadRow[]> {
+  return parseTestPayloadRows(await renderToPayloadText(node, options));
 }
 
-function parseTestRscRows(input: string): TestRscRow[] {
+function parseTestPayloadRows(input: string): TestPayloadRow[] {
   return input
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as TestRscRow);
+    .map((line) => JSON.parse(line) as TestPayloadRow);
 }
 
-function decodeTestRscRows(
-  rows: TestRscRow[],
-  options?: Parameters<typeof createRscResponse>[0],
+function decodeTestPayloadRows(
+  rows: TestPayloadRow[],
+  options?: Parameters<typeof createPayloadResponse>[0],
 ): FigNode {
-  const response = createRscResponse(options);
-  processTestRscRows(response, rows);
+  const response = createPayloadResponse(options);
+  processTestPayloadRows(response, rows);
   return response.getRoot();
 }
 
 function processStreamInto(
-  response: ReturnType<typeof createRscResponse>,
+  response: ReturnType<typeof createPayloadResponse>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
   return response.processStream(stream);
 }
 
-function processTestRscRows(
-  response: ReturnType<typeof createRscResponse>,
-  rows: TestRscRow[],
+function processTestPayloadRows(
+  response: ReturnType<typeof createPayloadResponse>,
+  rows: TestPayloadRow[],
 ): void {
   response.processStringChunk(
     `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
   );
 }
 
-function evaluateRscNode(node: FigNode): FigNode {
-  if (Array.isArray(node)) return node.map((child) => evaluateRscNode(child));
+function evaluatePayloadNode(node: FigNode): FigNode {
+  if (Array.isArray(node))
+    return node.map((child) => evaluatePayloadNode(child));
   if (!isValidElement(node)) return node;
-  if (node.type === Fragment) return evaluateRscNode(node.props.children);
+  if (node.type === Fragment) return evaluatePayloadNode(node.props.children);
 
   if (typeof node.type === "function") {
-    return evaluateRscNode(
+    return evaluatePayloadNode(
       (node.type as ElementType & ((props: FigElement["props"]) => FigNode))(
         node.props,
       ),
@@ -134,7 +135,7 @@ function evaluateRscNode(node: FigNode): FigNode {
     ...node,
     props: {
       ...node.props,
-      children: evaluateRscNode(node.props.children),
+      children: evaluatePayloadNode(node.props.children),
     },
   };
 }
@@ -147,7 +148,7 @@ function unwrapFunctionComponent(node: FigNode): FigNode {
   );
 }
 
-describe("RSC rendering", () => {
+describe("payload rendering", () => {
   it("serializes client references with normal JSX props", async () => {
     const LikeButton = clientReference<{
       initialCount: number;
@@ -157,7 +158,7 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const rows = await renderToRscRows(
+    const rows = await renderToPayloadRows(
       createElement(LikeButton, { initialCount: 12, tone: "primary" }),
     );
 
@@ -165,7 +166,10 @@ describe("RSC rendering", () => {
       {
         id: 1,
         tag: "client",
-        value: { id: "app/LikeButton.client.tsx#LikeButton" },
+        value: {
+          id: "app/LikeButton.client.tsx#LikeButton",
+          exportName: "LikeButton",
+        },
       },
       {
         id: 0,
@@ -195,7 +199,7 @@ describe("RSC rendering", () => {
       ],
     });
 
-    const rows = await renderToRscRows(createElement(Counter, {}));
+    const rows = await renderToPayloadRows(createElement(Counter, {}));
     const clientRow = rows.find((row) => row.tag === "client");
 
     expect(clientRow).toEqual({
@@ -203,6 +207,7 @@ describe("RSC rendering", () => {
       tag: "client",
       value: {
         id: "app/Counter.client.tsx#Counter",
+        exportName: "Counter",
         assets: [
           {
             href: "/assets/Counter.css",
@@ -221,7 +226,7 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const rows = await renderToRscRows(createElement(Counter, {}), {
+    const rows = await renderToPayloadRows(createElement(Counter, {}), {
       clientReferenceAssets: ({ id }) =>
         id === "app/Counter.client.tsx#Counter"
           ? [
@@ -236,6 +241,7 @@ describe("RSC rendering", () => {
       tag: "client",
       value: {
         id: "app/Counter.client.tsx#Counter",
+        exportName: "Counter",
         assets: [
           { href: "/assets/Counter.css", kind: "stylesheet" },
           { href: "/assets/Counter.js", kind: "modulepreload" },
@@ -250,35 +256,37 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const rows = await renderToRscRows(createElement(Plain, {}));
+    const rows = await renderToPayloadRows(createElement(Plain, {}));
 
     expect(rows.find((row) => row.tag === "client")).toEqual({
       id: 1,
       tag: "client",
-      value: { id: "app/Plain.client.tsx#Plain" },
+      value: { id: "app/Plain.client.tsx#Plain", exportName: "Plain" },
     });
   });
 
-  it("passes only the id to client reference resolvers", async () => {
+  it("passes reference metadata without assets to client reference resolvers", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
       load: () => Promise.resolve({}),
       assets: [stylesheet("/assets/Counter.css")],
     });
 
-    const rows = await renderToRscRows(createElement(Counter, {}));
-    const seen: RscClientReferenceMetadata[] = [];
-    const response = createRscResponse({
+    const rows = await renderToPayloadRows(createElement(Counter, {}));
+    const seen: PayloadClientReferenceMetadata[] = [];
+    const response = createPayloadResponse({
       resolveClientReference(metadata) {
         seen.push(metadata);
         return () => null;
       },
     });
-    processTestRscRows(response, rows);
+    processTestPayloadRows(response, rows);
 
     // The wire row carries assets, but resolver hooks see the documented
-    // { id } shape only.
-    expect(seen).toEqual([{ id: "app/Counter.client.tsx#Counter" }]);
+    // metadata shape only.
+    expect(seen).toEqual([
+      { id: "app/Counter.client.tsx#Counter", exportName: "Counter" },
+    ]);
   });
 
   it("renders preloaded client references synchronously", async () => {
@@ -286,7 +294,9 @@ describe("RSC rendering", () => {
       id: "app/Widget.client.tsx#Widget",
       load: () => Promise.resolve({}),
     });
-    const rows = await renderToRscRows(createElement(Widget, { label: "hi" }));
+    const rows = await renderToPayloadRows(
+      createElement(Widget, { label: "hi" }),
+    );
 
     const widgetModule = {
       Widget: (props: { label: string }) =>
@@ -309,13 +319,13 @@ describe("RSC rendering", () => {
     setCurrentDispatcher(dispatcher);
     try {
       // Before the module settles, the first render read suspends.
-      const cold = createRscResponse({
+      const cold = createPayloadResponse({
         loadClientReference: () => Promise.resolve(widgetModule),
       });
-      processTestRscRows(cold, rows);
+      processTestPayloadRows(cold, rows);
       let thrown: unknown;
       try {
-        evaluateRscNode(cold.getRoot());
+        evaluatePayloadNode(cold.getRoot());
       } catch (error) {
         thrown = error;
       }
@@ -323,19 +333,19 @@ describe("RSC rendering", () => {
 
       // Preloading dedupes the module load and makes the render synchronous.
       let loads = 0;
-      const response = createRscResponse({
+      const response = createPayloadResponse({
         loadClientReference: () => {
           loads += 1;
           return Promise.resolve(widgetModule);
         },
       });
-      processTestRscRows(response, rows);
+      processTestPayloadRows(response, rows);
 
       await response.preloadClientReferences();
       await response.preloadClientReferences();
       expect(loads).toBe(1);
 
-      const rendered = evaluateRscNode(response.getRoot()) as FigElement;
+      const rendered = evaluatePayloadNode(response.getRoot()) as FigElement;
       expect(isValidElement(rendered)).toBe(true);
       expect(rendered.type).toBe("span");
       expect(rendered.props.children).toBe("widget:hi");
@@ -345,7 +355,7 @@ describe("RSC rendering", () => {
   });
 
   it("ignores invalid asset descriptors while decoding client rows", () => {
-    const response = createRscResponse();
+    const response = createPayloadResponse();
 
     response.processStringChunk(
       `${JSON.stringify({
@@ -366,14 +376,14 @@ describe("RSC rendering", () => {
     ]);
   });
 
-  it("sends explicit assets from RSC subtrees", async () => {
-    const rows = await renderToRscText(
+  it("sends explicit assets from payload subtrees", async () => {
+    const rows = await renderToPayloadText(
       assets(
         [stylesheet("/assets/ServerRoute.css"), preload("/mark.svg", "image")],
         createElement("article", null, "Server route"),
       ),
     );
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     response.processStringChunk(rows);
 
     expect(response.getAssetResources()).toEqual([
@@ -401,7 +411,7 @@ describe("RSC rendering", () => {
       assets: [stylesheet("/assets/Unused.css")],
     });
 
-    const text = await renderToRscText(
+    const text = await renderToPayloadText(
       createElement(
         Fragment,
         null,
@@ -412,7 +422,7 @@ describe("RSC rendering", () => {
 
     expect(text).not.toContain("Unused.css");
 
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     response.processStringChunk(text);
 
     // Shared asset deduped across the two references that rendered.
@@ -438,13 +448,14 @@ describe("RSC rendering", () => {
       ],
     });
 
-    const rows = await renderToRscRows(createElement(Text, {}));
+    const rows = await renderToPayloadRows(createElement(Text, {}));
 
     expect(rows.find((row) => row.tag === "client")).toEqual({
       id: 1,
       tag: "client",
       value: {
         id: "app/Text.client.tsx#Text",
+        exportName: "Text",
         assets: [
           { href: "/assets/Inter.woff2", kind: "font", type: "font/woff2" },
         ],
@@ -464,7 +475,9 @@ describe("RSC rendering", () => {
       },
     });
 
-    await expect(renderToRscRows(createElement(Broken, {}))).resolves.toEqual([
+    await expect(
+      renderToPayloadRows(createElement(Broken, {})),
+    ).resolves.toEqual([
       { id: 0, tag: "error", value: { message: "manifest missing" } },
     ]);
   });
@@ -479,7 +492,7 @@ describe("RSC rendering", () => {
       return createElement("h2", null, "Server header");
     }
 
-    const rows = await renderToRscRows(
+    const rows = await renderToPayloadRows(
       createElement(
         Card,
         { header: createElement(Header, null) },
@@ -488,9 +501,9 @@ describe("RSC rendering", () => {
     );
     const root = rows.find(
       (row) => "id" in row && row.id === 0,
-    ) as TestRscRow & {
+    ) as TestPayloadRow & {
       tag: "model";
-      value: TestRscElementModel;
+      value: TestPayloadElementModel;
     };
 
     expect(root.value.props.header).toEqual({
@@ -514,14 +527,14 @@ describe("RSC rendering", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToRscStream(
+    const result = renderToPayloadStream(
       createElement("div", null, "Before ", createElement(Message, null)),
     );
 
     pending.resolve("Ready");
     await result.allReady;
 
-    const rows = parseTestRscRows(await readStream(result.stream));
+    const rows = parseTestPayloadRows(await readStream(result.stream));
 
     expect(rows).toEqual([
       {
@@ -556,14 +569,14 @@ describe("RSC rendering", () => {
 
     const pending = deferred<typeof Message>();
     const LazyMessage = lazy(() => pending.promise);
-    const result = renderToRscStream(
+    const result = renderToPayloadStream(
       createElement("div", null, createElement(LazyMessage, null)),
     );
 
     pending.resolve(Message);
     await result.allReady;
 
-    const rows = parseTestRscRows(await readStream(result.stream));
+    const rows = parseTestPayloadRows(await readStream(result.stream));
 
     expect(rows).toEqual([
       {
@@ -596,15 +609,19 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const result = renderToRscStream(
+    const result = renderToPayloadStream(
       createElement(Viewer, { value: pending.promise }),
     );
 
     pending.resolve("Ready");
     await result.allReady;
 
-    expect(parseTestRscRows(await readStream(result.stream))).toEqual([
-      { id: 1, tag: "client", value: { id: "app/Viewer.client.tsx#Viewer" } },
+    expect(parseTestPayloadRows(await readStream(result.stream))).toEqual([
+      {
+        id: 1,
+        tag: "client",
+        value: { id: "app/Viewer.client.tsx#Viewer", exportName: "Viewer" },
+      },
       {
         id: 0,
         tag: "model",
@@ -627,7 +644,7 @@ describe("RSC rendering", () => {
     }
 
     await expect(
-      renderToRscText(
+      renderToPayloadText(
         createElement(Theme, { value: "dark" }, createElement(Badge, null)),
       ),
     ).resolves.toContain('"children":"dark"');
@@ -640,7 +657,7 @@ describe("RSC rendering", () => {
       return createElement("span", null, readPromise(pending.promise));
     }
 
-    const result = renderToRscStream(
+    const result = renderToPayloadStream(
       createElement(
         Suspense,
         { fallback: createElement("em", null, "Loading") },
@@ -651,7 +668,7 @@ describe("RSC rendering", () => {
     pending.resolve("Ready");
     await result.allReady;
 
-    const rows = parseTestRscRows(await readStream(result.stream));
+    const rows = parseTestPayloadRows(await readStream(result.stream));
     expect(rows[0]).toEqual({
       id: 0,
       tag: "model",
@@ -678,14 +695,14 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const rows = await renderToRscRows(
+    const rows = await renderToPayloadRows(
       createElement(LikeButton, { initialCount: 12 }),
     );
     function ClientLikeButton() {
       return null;
     }
 
-    const node = decodeTestRscRows(rows, {
+    const node = decodeTestPayloadRows(rows, {
       resolveClientReference() {
         return ClientLikeButton;
       },
@@ -705,13 +722,17 @@ describe("RSC rendering", () => {
     });
 
     await expect(
-      renderToRscRows(createElement(Button, { action: () => undefined })),
+      renderToPayloadRows(createElement(Button, { action: () => undefined })),
     ).resolves.toEqual([
-      { id: 1, tag: "client", value: { id: "app/Button.client.tsx#Button" } },
+      {
+        id: 1,
+        tag: "client",
+        value: { id: "app/Button.client.tsx#Button", exportName: "Button" },
+      },
       {
         id: 0,
         tag: "error",
-        value: { message: "Functions cannot be passed to Client Components." },
+        value: { message: "Functions cannot be passed to client references." },
       },
     ]);
   });
@@ -722,7 +743,7 @@ describe("RSC rendering", () => {
     };
     const seen: string[] = [];
 
-    const rows = await renderToRscRows(createElement(Failing, null), {
+    const rows = await renderToPayloadRows(createElement(Failing, null), {
       onError(error) {
         seen.push(error instanceof Error ? error.message : String(error));
         return { digest: "digest-7" };
@@ -741,13 +762,13 @@ describe("RSC rendering", () => {
     };
 
     await expect(
-      renderToRscRows(createElement(Failing, null), {
+      renderToPayloadRows(createElement(Failing, null), {
         onError: () => undefined,
       }),
     ).resolves.toEqual([{ id: 0, tag: "error", value: {} }]);
 
     await expect(
-      renderToRscRows(createElement(Failing, null), {
+      renderToPayloadRows(createElement(Failing, null), {
         onError: () => {
           throw new Error("handler exploded");
         },
@@ -756,13 +777,13 @@ describe("RSC rendering", () => {
   });
 
   it("decodes error rows into digest-carrying errors with a generic message", () => {
-    const root = decodeTestRscRows([
+    const root = decodeTestPayloadRows([
       { id: 0, tag: "error", value: { digest: "digest-9" } },
     ]);
 
     let thrown: unknown;
     try {
-      evaluateRscNode(root);
+      evaluatePayloadNode(root);
     } catch (error) {
       thrown = error;
     }
@@ -772,13 +793,13 @@ describe("RSC rendering", () => {
     expect((thrown as Error).message).toBe("The server render failed.");
   });
 
-  it("marks refreshable RSC boundaries in the model", async () => {
-    const rows = await renderToRscRows(
+  it("marks refreshable payload boundaries in the model", async () => {
+    const rows = await renderToPayloadRows(
       createElement(
         "section",
         null,
         createElement(
-          RscBoundary,
+          PayloadBoundary,
           { id: "post" },
           createElement("p", null, "Initial"),
         ),
@@ -810,26 +831,26 @@ describe("RSC rendering", () => {
     ]);
   });
 
-  it("rejects duplicate RSC boundary ids", async () => {
-    const rows = await renderToRscRows(
+  it("rejects duplicate payload boundary ids", async () => {
+    const rows = await renderToPayloadRows(
       createElement(
         "section",
         null,
-        createElement(RscBoundary, { id: "post" }, "First"),
-        createElement(RscBoundary, { id: "post" }, "Second"),
+        createElement(PayloadBoundary, { id: "post" }, "First"),
+        createElement(PayloadBoundary, { id: "post" }, "Second"),
       ),
     );
 
     expect(rows).toContainEqual({
       id: 1,
       tag: "error",
-      value: { message: 'Duplicate RSC boundary id "post".' },
+      value: { message: 'Duplicate payload boundary id "post".' },
     });
   });
 
   it("renders boundary refresh rows", async () => {
     await expect(
-      renderToRscRows(createElement("p", null, "Updated"), {
+      renderToPayloadRows(createElement("p", null, "Updated"), {
         refreshBoundary: "post",
       }),
     ).resolves.toEqual([
@@ -847,7 +868,7 @@ describe("RSC rendering", () => {
   });
 
   it("processes streamed rows incrementally", async () => {
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     let notifications = 0;
     response.subscribe(() => {
       notifications += 1;
@@ -858,11 +879,11 @@ describe("RSC rendering", () => {
 
     response.processStringChunk(',"value":"Ready"}\n');
     expect(notifications).toBe(1);
-    expect(evaluateRscNode(response.getRoot())).toBe("Ready");
+    expect(evaluatePayloadNode(response.getRoot())).toBe("Ready");
   });
 
   it("binds refresh rows to a normal Fig root render handle", async () => {
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     const rendered: FigNode[] = [];
     const unsubscribe = response.bindRoot({
       render(node) {
@@ -870,28 +891,28 @@ describe("RSC rendering", () => {
       },
     });
 
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(
+      await renderToPayloadRows(
         createElement(
           "section",
           null,
           createElement(
-            RscBoundary,
+            PayloadBoundary,
             { id: "post" },
             createElement("p", null, "Initial"),
           ),
         ),
       ),
     );
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(createElement("p", null, "Updated"), {
+      await renderToPayloadRows(createElement("p", null, "Updated"), {
         refreshBoundary: "post",
       }),
     );
 
-    const evaluated = evaluateRscNode(rendered[rendered.length - 1]);
+    const evaluated = evaluatePayloadNode(rendered[rendered.length - 1]);
 
     expect(rendered).toHaveLength(3);
     expect(evaluated).toMatchObject({
@@ -917,7 +938,7 @@ describe("RSC rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const response = createRscResponse({
+    const response = createPayloadResponse({
       resolveClientReference: ({ id }) =>
         function Resolved() {
           return id;
@@ -933,14 +954,14 @@ describe("RSC rendering", () => {
 
     // Initial payload: a client reference outlined to chunk 1, beside a
     // refreshable boundary.
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(
+      await renderToPayloadRows(
         createElement(
           "section",
           null,
           createElement(First, {}),
-          createElement(RscBoundary, { id: "slot" }, "before"),
+          createElement(PayloadBoundary, { id: "slot" }, "before"),
         ),
       ),
     );
@@ -949,77 +970,79 @@ describe("RSC rendering", () => {
     // restarts at id 1 on the server and would overwrite chunk 1 (First) in the
     // shared chunks Map without per-payload namespacing.
     response.beginRefreshPayload();
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(createElement(Second, {}), {
+      await renderToPayloadRows(createElement(Second, {}), {
         refreshBoundary: "slot",
       }),
     );
 
     // First still resolves to "first" (chunk 1 intact); the boundary shows the
     // refreshed "second".
-    expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
       props: { children: ["first", "second"] },
       type: "section",
     });
   });
 
-  it("pipes readable streams into an RSC response", async () => {
-    const response = createRscResponse();
+  it("pipes readable streams into a payload response", async () => {
+    const response = createPayloadResponse();
     await processStreamInto(
       response,
-      streamFromString(await renderToRscText(createElement("p", null, "Hi"))),
+      streamFromString(
+        await renderToPayloadText(createElement("p", null, "Hi")),
+      ),
     );
 
-    expect(evaluateRscNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
       props: { children: "Hi" },
       type: "p",
     });
   });
 
-  it("flushes a final RSC row without a trailing newline", async () => {
-    const response = createRscResponse();
+  it("flushes a final payload row without a trailing newline", async () => {
+    const response = createPayloadResponse();
     await processStreamInto(
       response,
       streamFromString('{"id":0,"tag":"model","value":"Done"}'),
     );
 
-    expect(evaluateRscNode(response.getRoot())).toBe("Done");
+    expect(evaluatePayloadNode(response.getRoot())).toBe("Done");
   });
 
-  it("fetches initial RSC streams with an RSC accept header", async () => {
-    const response = createRscResponse();
+  it("fetches initial payload streams with a payload accept header", async () => {
+    const response = createPayloadResponse();
     let requestHeaders: Headers | null = null;
     let requestSignal: AbortSignal | null = null;
     const controller = new AbortController();
-    const fetchImpl: RscFetch = async (_input, init) => {
+    const fetchImpl: PayloadFetch = async (_input, init) => {
       requestHeaders = new Headers(init?.headers);
       requestSignal = init?.signal ?? null;
       return new Response(
-        await renderToRscText(createElement("p", null, "Fetched")),
+        await renderToPayloadText(createElement("p", null, "Fetched")),
         {
-          headers: { "content-type": "text/x-component; charset=utf-8" },
+          headers: { "content-type": "text/x-fig-payload; charset=utf-8" },
         },
       );
     };
 
-    await fetchRsc(response, "/rsc", {
+    await fetchPayload(response, "/payload", {
       fetch: fetchImpl,
       signal: controller.signal,
     });
 
     expect(requireHeaders(requestHeaders).get("accept")).toBe(
-      "text/x-component; charset=utf-8",
+      "text/x-fig-payload; charset=utf-8",
     );
     expect(requestSignal).toBe(controller.signal);
-    expect(evaluateRscNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
       props: { children: "Fetched" },
       type: "p",
     });
   });
 
-  it("cancels initial RSC fetches before mutating the response", async () => {
-    const response = createRscResponse();
+  it("cancels initial payload fetches before mutating the response", async () => {
+    const response = createPayloadResponse();
     const controller = new AbortController();
     let fetches = 0;
     let notifications = 0;
@@ -1031,7 +1054,7 @@ describe("RSC rendering", () => {
 
     let error: unknown;
     try {
-      await fetchRsc(response, "/rsc", {
+      await fetchPayload(response, "/payload", {
         fetch: async () => {
           fetches += 1;
           return new Response("unreachable");
@@ -1042,13 +1065,13 @@ describe("RSC rendering", () => {
       error = caught;
     }
 
-    expect(isRscRequestCancelled(error)).toBe(true);
+    expect(isPayloadRequestCancelled(error)).toBe(true);
     expect(fetches).toBe(0);
     expect(notifications).toBe(0);
   });
 
-  it("cancels partial RSC streams without flushing buffered rows", async () => {
-    const response = createRscResponse();
+  it("cancels partial payload streams without flushing buffered rows", async () => {
+    const response = createPayloadResponse();
     const stream = controlledTextStream();
     const controller = new AbortController();
     let notifications = 0;
@@ -1056,7 +1079,7 @@ describe("RSC rendering", () => {
       notifications += 1;
     });
 
-    const request = fetchRsc(response, "/rsc", {
+    const request = fetchPayload(response, "/payload", {
       fetch: async () => new Response(stream.stream),
       signal: controller.signal,
     });
@@ -1072,17 +1095,17 @@ describe("RSC rendering", () => {
       error = caught;
     }
 
-    expect(isRscRequestCancelled(error)).toBe(true);
+    expect(isPayloadRequestCancelled(error)).toBe(true);
     expect(notifications).toBe(0);
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     let requestHeaders: Headers | null = null;
-    const fetchImpl: RscFetch = async (_input, init) => {
+    const fetchImpl: PayloadFetch = async (_input, init) => {
       requestHeaders = new Headers(init?.headers);
       return new Response(
-        await renderToRscText(createElement("p", null, "Fetched refresh"), {
+        await renderToPayloadText(createElement("p", null, "Fetched refresh"), {
           refreshBoundary: "post",
         }),
       );
@@ -1094,30 +1117,30 @@ describe("RSC rendering", () => {
       },
     });
 
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(
+      await renderToPayloadRows(
         createElement(
           "section",
           null,
           createElement(
-            RscBoundary,
+            PayloadBoundary,
             { id: "post" },
             createElement("p", null, "Initial"),
           ),
         ),
       ),
     );
-    await fetchRsc(response, "/rsc/post", {
+    await fetchPayload(response, "/payload/post", {
       fetch: fetchImpl,
-      headers: { accept: "custom/rsc" },
+      headers: { accept: "custom/payload" },
       refreshBoundary: "post",
     });
 
     const headers = requireHeaders(requestHeaders);
-    expect(headers.get("accept")).toBe("custom/rsc");
-    expect(headers.get("x-fig-rsc-boundary")).toBe("post");
-    expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
+    expect(headers.get("accept")).toBe("custom/payload");
+    expect(headers.get("x-fig-payload-boundary")).toBe("post");
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
       props: {
         children: {
           props: { children: "Fetched refresh" },
@@ -1129,7 +1152,7 @@ describe("RSC rendering", () => {
   });
 
   it("cancels boundary refresh streams without replacing existing content", async () => {
-    const response = createRscResponse();
+    const response = createPayloadResponse();
     const stream = controlledTextStream();
     const controller = new AbortController();
     const rendered: FigNode[] = [];
@@ -1139,14 +1162,14 @@ describe("RSC rendering", () => {
       },
     });
 
-    processTestRscRows(
+    processTestPayloadRows(
       response,
-      await renderToRscRows(
+      await renderToPayloadRows(
         createElement(
           "section",
           null,
           createElement(
-            RscBoundary,
+            PayloadBoundary,
             { id: "post" },
             createElement("p", null, "Initial"),
           ),
@@ -1154,7 +1177,7 @@ describe("RSC rendering", () => {
       ),
     );
 
-    const request = fetchRsc(response, "/rsc/post", {
+    const request = fetchPayload(response, "/payload/post", {
       fetch: async () => new Response(stream.stream),
       refreshBoundary: "post",
       signal: controller.signal,
@@ -1171,8 +1194,8 @@ describe("RSC rendering", () => {
       error = caught;
     }
 
-    expect(isRscRequestCancelled(error)).toBe(true);
-    expect(evaluateRscNode(rendered[rendered.length - 1])).toMatchObject({
+    expect(isPayloadRequestCancelled(error)).toBe(true);
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
       props: {
         children: {
           props: { children: "Initial" },
@@ -1183,26 +1206,26 @@ describe("RSC rendering", () => {
     });
   });
 
-  it("rejects failed RSC fetches before mutating the response", async () => {
-    const response = createRscResponse();
+  it("rejects failed payload fetches before mutating the response", async () => {
+    const response = createPayloadResponse();
     let notifications = 0;
     response.subscribe(() => {
       notifications += 1;
     });
 
     await expect(
-      fetchRsc(response, "/rsc", {
+      fetchPayload(response, "/payload", {
         fetch: async () => new Response("nope", { status: 500 }),
       }),
-    ).rejects.toThrow("RSC request failed with status 500.");
+    ).rejects.toThrow("Payload request failed with status 500.");
     expect(notifications).toBe(0);
   });
 
-  it("rejects malformed RSC streams as real failures", async () => {
-    const response = createRscResponse();
+  it("rejects malformed payload streams as real failures", async () => {
+    const response = createPayloadResponse();
 
     await expect(
-      fetchRsc(response, "/rsc", {
+      fetchPayload(response, "/payload", {
         fetch: async () => new Response(streamFromString("{not-json}\n")),
       }),
     ).rejects.toThrow(SyntaxError);

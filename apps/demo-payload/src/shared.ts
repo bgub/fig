@@ -1,9 +1,9 @@
 import { clientReference } from "@bgub/fig";
 
-export const appRootId = "fig-rsc-root";
-export const feedBoundaryId = "demo-rsc-feed";
+export const appRootId = "fig-payload-root";
+export const feedBoundaryId = "demo-payload-feed";
 export const refreshButtonReferenceId =
-  "apps/demo-rsc/src/client-components.tsx#RefreshButton";
+  "apps/demo-payload/src/client-components.tsx#RefreshButton";
 
 export interface RefreshButtonProps {
   boundary: string;

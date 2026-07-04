@@ -133,7 +133,7 @@ Client code imports the identity. If the server streamed a value for the same
 key, the client can read it as a hydrate-only entry. Since the identity has no
 client loader, `refreshData(userIdentity, id)` resolves with
 `{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs an
-RSC or framework refresh path.
+payload or framework refresh path.
 
 ## Activity, Errors, And DevTools
 

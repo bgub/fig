@@ -19,27 +19,27 @@ import {
   renderToDocumentStream,
 } from "@bgub/fig-server";
 import {
-  createRscResponse,
-  RscBoundary,
-  type RscClientReferenceRecord,
-  renderToRscStream,
-} from "@bgub/fig-server/rsc";
+  createPayloadResponse,
+  PayloadBoundary,
+  type PayloadClientReferenceRecord,
+  renderToPayloadStream,
+} from "@bgub/fig-server/payload";
 import type { Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
   DATA_STREAM_GLOBAL,
-  RSC_BOUNDARY_HEADER,
-  RSC_FRAME_ATTR,
-  RSC_ROUTE_ID_HEADER,
-  RSC_SEGMENT_ID_HEADER,
+  PAYLOAD_BOUNDARY_HEADER,
+  PAYLOAD_FRAME_ATTR,
+  PAYLOAD_ROUTE_ID_HEADER,
+  PAYLOAD_SEGMENT_ID_HEADER,
   ROOT_ELEMENT_ID,
-  RSC_SEGMENTS_SCRIPT_ID,
-  RSC_STREAM_GLOBAL,
+  PAYLOAD_SEGMENTS_SCRIPT_ID,
+  PAYLOAD_STREAM_GLOBAL,
   CLIENT_REFERENCE_MODULES_GLOBAL,
   ROUTER_STATE_SCRIPT_ID,
-  type SerializedRscFrame,
-  type SerializedRscSegment,
+  type SerializedPayloadFrame,
+  type SerializedPayloadSegment,
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import {
@@ -117,18 +117,18 @@ export function createRequestHandler(
     router.commit(location, result);
     const status = result.status === "notFound" ? 404 : 200;
     const nonce = options.nonce?.(request);
-    // Build the per-request data context once and share it across both the RSC
+    // Build the per-request data context once and share it across both the payload
     // render and the document render (a side-effecting factory must run once).
     const dataContext = options.dataContext?.(request);
 
-    const isRscRequest = isRscRouteRequest(request);
-    const refreshBoundary = isRscRequest
-      ? rscBoundaryHeader(request)
+    const isPayloadRequest = isPayloadRouteRequest(request);
+    const refreshBoundary = isPayloadRequest
+      ? payloadBoundaryHeader(request)
       : undefined;
-    // A `.server.tsx` route segment renders through the RSC stream. The document
+    // A `.server.tsx` route segment renders through the payload stream. The document
     // render can stream server-renderable HTML into the same slot, then the client
-    // mounts and refreshes the RSC payload for that segment.
-    const rscSegment = renderServerRouteSegment(
+    // mounts and refreshes the payload for that segment.
+    const payloadSegment = renderServerRouteSegment(
       result,
       router,
       dataContext,
@@ -137,37 +137,40 @@ export function createRequestHandler(
       refreshBoundary,
     );
 
-    if (isRscRequest) {
-      if (rscSegment === undefined) {
-        return new Response("No RSC segment for route.", { status: 404 });
+    if (isPayloadRequest) {
+      if (payloadSegment === undefined) {
+        return new Response("No payload segment for route.", { status: 404 });
       }
       if (
         refreshBoundary !== undefined &&
-        refreshBoundary !== rscSegment.metadata.routeId
+        refreshBoundary !== payloadSegment.metadata.routeId
       ) {
-        return new Response("RSC boundary does not match the route segment.", {
-          status: 400,
-        });
+        return new Response(
+          "Payload boundary does not match the route segment.",
+          {
+            status: 400,
+          },
+        );
       }
 
-      return new Response(streamRscSegmentRows(rscSegment), {
+      return new Response(streamPayloadSegmentRows(payloadSegment), {
         headers: {
-          "content-type": rscSegment.contentType,
-          [RSC_ROUTE_ID_HEADER]: rscSegment.metadata.routeId,
-          [RSC_SEGMENT_ID_HEADER]: rscSegment.metadata.id,
+          "content-type": payloadSegment.contentType,
+          [PAYLOAD_ROUTE_ID_HEADER]: payloadSegment.metadata.routeId,
+          [PAYLOAD_SEGMENT_ID_HEADER]: payloadSegment.metadata.id,
         },
         status,
       });
     }
 
-    const documentRsc =
-      rscSegment === undefined
+    const documentPayload =
+      payloadSegment === undefined
         ? undefined
-        : createDocumentRscSegment(rscSegment);
-    await documentRsc?.initialRootReady;
+        : createDocumentPayloadSegment(payloadSegment);
+    await documentPayload?.initialRootReady;
     const hoistedServerRouteResources = uniqueResources([
-      ...(rscSegment?.initialResources ?? []),
-      ...(documentRsc?.assetResources() ?? []),
+      ...(payloadSegment?.initialResources ?? []),
+      ...(documentPayload?.assetResources() ?? []),
     ]);
     const routerTree = createElement(
       ServerRouteRenderProvider,
@@ -175,11 +178,11 @@ export function createRequestHandler(
       createElement(RouterProvider, { router }),
     );
     const appTree =
-      documentRsc === undefined
+      documentPayload === undefined
         ? routerTree
         : createElement(
             ServerRouteContentProvider,
-            { store: documentRsc.store },
+            { store: documentPayload.store },
             routerTree,
           );
     const document = createElement(
@@ -221,22 +224,23 @@ export function createRequestHandler(
       });
     }
 
-    const rscSegments = rscSegment === undefined ? [] : [rscSegment.metadata];
-    const rscFrameStream =
-      documentRsc === undefined
+    const payloadSegments =
+      payloadSegment === undefined ? [] : [payloadSegment.metadata];
+    const payloadFrameStream =
+      documentPayload === undefined
         ? undefined
-        : streamRscSegmentFrames(documentRsc.frames, nonce);
+        : streamPayloadSegmentFrames(documentPayload.frames, nonce);
     const dataStream = createDocumentDataStream(nonce);
     const clientReferenceModules =
-      documentRsc === undefined
+      documentPayload === undefined
         ? []
-        : initialClientReferenceModules(documentRsc.clientReferences());
+        : initialClientReferenceModules(documentPayload.clientReferences());
 
     return new Response(
       injectDocumentStreams(render.stream, {
         afterBodyOpen: () =>
           renderStreamPrelude({
-            hasRscSegments: rscSegments.length > 0,
+            hasPayloadSegments: payloadSegments.length > 0,
             nonce,
           }),
         beforeBodyClose: () =>
@@ -247,10 +251,11 @@ export function createRequestHandler(
             location: location.href,
             loaderData: collectLoaderData(result),
             nonce,
-            rscSegments,
+            payloadSegments,
           }),
         beforeHtmlChunk: () => dataStream.flush(render.getData()),
-        companionStreams: rscFrameStream === undefined ? [] : [rscFrameStream],
+        companionStreams:
+          payloadFrameStream === undefined ? [] : [payloadFrameStream],
       }),
       {
         headers: { "content-type": render.contentType },
@@ -336,17 +341,17 @@ function collectLoaderData(result: LoadResult): Record<string, unknown> {
   return loaderData;
 }
 
-interface ServerRscSegment {
+interface ServerPayloadSegment {
   contentType: string;
   initialResources: readonly FigAssetResource[];
-  metadata: SerializedRscSegment;
+  metadata: SerializedPayloadSegment;
   stream: ReadableStream<Uint8Array>;
 }
 
-interface DocumentRscSegment {
+interface DocumentPayloadSegment {
   assetResources(): readonly FigAssetResource[];
-  clientReferences(): readonly RscClientReferenceRecord[];
-  frames: ServerRscSegment;
+  clientReferences(): readonly PayloadClientReferenceRecord[];
+  frames: ServerPayloadSegment;
   initialRootReady: Promise<void>;
   store: ServerRouteContentStore;
 }
@@ -356,17 +361,17 @@ interface ClientReferenceModule {
   module: string;
 }
 
-function createDocumentRscSegment(
-  segment: ServerRscSegment,
-): DocumentRscSegment {
+function createDocumentPayloadSegment(
+  segment: ServerPayloadSegment,
+): DocumentPayloadSegment {
   const [decodeStream, frameStream] = segment.stream.tee();
-  const response = createRscResponse({
+  const response = createPayloadResponse({
     resolveClientReference: (metadata) =>
       metadata.ssr === true
         ? resolveServerClientReference(metadata)
         : undefined,
   });
-  const initialRootReady = decodeDocumentRscStream(response, decodeStream);
+  const initialRootReady = decodeDocumentPayloadStream(response, decodeStream);
 
   return {
     assetResources: () => response.getAssetResources(),
@@ -381,10 +386,10 @@ function createDocumentRscSegment(
 }
 
 // Waits for the initial root row (or one tick, whichever is first) so the
-// document render can include server-renderable RSC markup when the payload
+// document render can include server-renderable payload markup when the payload
 // is already buffered, without blocking the shell on slow segments.
-function decodeDocumentRscStream(
-  response: ReturnType<typeof createRscResponse>,
+function decodeDocumentPayloadStream(
+  response: ReturnType<typeof createPayloadResponse>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
   void response.processStream(stream).catch(() => undefined);
@@ -409,7 +414,7 @@ function createDocumentServerRouteContentStore(
 }
 
 function initialClientReferenceModules(
-  references: readonly RscClientReferenceRecord[],
+  references: readonly PayloadClientReferenceRecord[],
 ): ClientReferenceModule[] {
   const seen = new Set<string>();
   const modules: ClientReferenceModule[] = [];
@@ -438,7 +443,7 @@ function renderServerRouteSegment(
     | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
   refreshBoundary: string | undefined,
-): ServerRscSegment | undefined {
+): ServerPayloadSegment | undefined {
   if (result.status !== "match") return undefined;
   const segment = firstServerRouteSegment(result.matches);
   if (segment === undefined) return undefined;
@@ -460,18 +465,18 @@ function renderServerRouteSegment(
   const routeContent =
     routeAssets.length === 0 ? routeNode : assets(routeAssets, routeNode);
   const refreshesSegment = refreshBoundary === routeId;
-  const rsc = renderToRscStream(
+  const payload = renderToPayloadStream(
     createElement(
       Fragment,
       null,
       refreshesSegment
         ? routeContent
-        : createElement(RscBoundary, { id: routeId }, routeContent),
+        : createElement(PayloadBoundary, { id: routeId }, routeContent),
     ),
     {
       clientReferenceAssets,
       dataContext,
-      // A throw inside a server component becomes an RSC "error" row (it
+      // A throw inside a server component becomes a payload "error" row (it
       // doesn't reject allReady), so the request would otherwise return 200
       // with no server log. Log it here; only the digest crosses the wire and
       // the client error boundary renders on its side.
@@ -485,12 +490,12 @@ function renderServerRouteSegment(
       refreshBoundary: refreshesSegment ? refreshBoundary : undefined,
     },
   );
-  void rsc.allReady.catch(() => undefined);
+  void payload.allReady.catch(() => undefined);
   return {
-    contentType: rsc.contentType,
+    contentType: payload.contentType,
     initialResources: routeAssets,
     metadata: { id: routeId, routeId },
-    stream: rsc.stream,
+    stream: payload.stream,
   };
 }
 
@@ -551,35 +556,35 @@ function isResourceArray(
   return Array.isArray(resources);
 }
 
-function isRscRouteRequest(request: Request): boolean {
-  return request.headers.get("accept")?.includes("text/x-component") === true;
+function isPayloadRouteRequest(request: Request): boolean {
+  return request.headers.get("accept")?.includes("text/x-fig-payload") === true;
 }
 
-function rscBoundaryHeader(request: Request): string | undefined {
-  const value = request.headers.get(RSC_BOUNDARY_HEADER);
+function payloadBoundaryHeader(request: Request): string | undefined {
+  const value = request.headers.get(PAYLOAD_BOUNDARY_HEADER);
   return value === null || value === "" ? undefined : value;
 }
 
-function streamRscSegmentFrames(
-  segment: ServerRscSegment,
+function streamPayloadSegmentFrames(
+  segment: ServerPayloadSegment,
   nonce: string | undefined,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return streamRscSegment(segment, (chunk) =>
+  return streamPayloadSegment(segment, (chunk) =>
     chunk.length === 0
       ? undefined
-      : encoder.encode(rscFrameScript(segment.metadata.id, chunk, nonce)),
+      : encoder.encode(payloadFrameScript(segment.metadata.id, chunk, nonce)),
   );
 }
 
-function streamRscSegmentRows(
-  segment: ServerRscSegment,
+function streamPayloadSegmentRows(
+  segment: ServerPayloadSegment,
 ): ReadableStream<Uint8Array> {
-  return streamRscSegment(segment, (_chunk, value) => value);
+  return streamPayloadSegment(segment, (_chunk, value) => value);
 }
 
-function streamRscSegment(
-  segment: ServerRscSegment,
+function streamPayloadSegment(
+  segment: ServerPayloadSegment,
   emit: (
     chunk: string,
     value: Uint8Array | undefined,
@@ -613,12 +618,14 @@ function streamRscSegment(
 }
 
 function renderStreamPrelude(input: {
-  hasRscSegments: boolean;
+  hasPayloadSegments: boolean;
   nonce: string | undefined;
 }): string {
   return [
     dataStreamBootstrapScript(input.nonce),
-    ...(input.hasRscSegments ? [rscStreamBootstrapScript(input.nonce)] : []),
+    ...(input.hasPayloadSegments
+      ? [payloadStreamBootstrapScript(input.nonce)]
+      : []),
   ].join("");
 }
 
@@ -629,7 +636,7 @@ function renderBootstrap(input: {
   location: string;
   loaderData: Record<string, unknown>;
   nonce: string | undefined;
-  rscSegments: readonly SerializedRscSegment[];
+  payloadSegments: readonly SerializedPayloadSegment[];
 }): string {
   const state: SerializedRouterState = {
     href: input.location,
@@ -645,8 +652,8 @@ function renderBootstrap(input: {
     `<script id="${DATA_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
       input.dataEntries,
     )}</script>`,
-    `<script id="${RSC_SEGMENTS_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
-      input.rscSegments,
+    `<script id="${PAYLOAD_SEGMENTS_SCRIPT_ID}" type="application/json"${nonceAttr}>${escapeJson(
+      input.payloadSegments,
     )}</script>`,
     input.clientReferenceModules.length === 0
       ? clientEntryScript(input.clientEntry, nonceAttr)
@@ -969,25 +976,25 @@ function dataFrameScript(
   );
 }
 
-function rscStreamBootstrapScript(nonce: string | undefined): string {
+function payloadStreamBootstrapScript(nonce: string | undefined): string {
   const nonceAttr =
     nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${RSC_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${RSC_STREAM_GLOBAL}={q:q,p:function(f){q.push(f);for(var i=0;i<l.length;i++)l[i](f)},s:function(fn){l.push(fn);for(var i=0;i<q.length;i++)fn(q[i]);return function(){var n=[];for(var j=0;j<l.length;j++)if(l[j]!==fn)n.push(l[j]);l=n}}};})();</script>`;
+  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${PAYLOAD_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${PAYLOAD_STREAM_GLOBAL}={q:q,p:function(f){q.push(f);for(var i=0;i<l.length;i++)l[i](f)},s:function(fn){l.push(fn);for(var i=0;i<q.length;i++)fn(q[i]);return function(){var n=[];for(var j=0;j<l.length;j++)if(l[j]!==fn)n.push(l[j]);l=n}}};})();</script>`;
 }
 
-function rscFrameScript(
+function payloadFrameScript(
   segmentId: string,
   chunk: string,
   nonce: string | undefined,
 ): string {
   const nonceAttr =
     nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  const frame: SerializedRscFrame = { chunk, id: segmentId };
+  const frame: SerializedPayloadFrame = { chunk, id: segmentId };
   return (
-    `<script type="application/json" ${RSC_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
+    `<script type="application/json" ${PAYLOAD_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
       frame,
     )}</script>` +
-    `<script${nonceAttr}>globalThis.${RSC_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
+    `<script${nonceAttr}>globalThis.${PAYLOAD_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
   );
 }
 

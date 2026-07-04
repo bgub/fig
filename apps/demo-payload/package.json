@@ -1,5 +1,5 @@
 {
-  "name": "@bgub/fig-demo-rsc",
+  "name": "@bgub/fig-demo-payload",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "serve:watch": "node --watch dist/server.js"
   },
   "portless": {
-    "name": "fig-demo-rsc",
+    "name": "fig-demo-payload",
     "script": "dev:app"
   },
   "dependencies": {

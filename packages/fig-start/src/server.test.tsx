@@ -8,7 +8,7 @@ import {
   Suspense,
 } from "@bgub/fig";
 import { dataResource, readData } from "@bgub/fig-data";
-import { createRscResponse } from "@bgub/fig-server/rsc";
+import { createPayloadResponse } from "@bgub/fig-server/payload";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,12 +18,12 @@ import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
-  RSC_BOUNDARY_HEADER,
-  RSC_FRAME_ATTR,
-  RSC_ROUTE_ID_HEADER,
-  RSC_SEGMENTS_SCRIPT_ID,
-  RSC_SEGMENT_ID_HEADER,
-  RSC_SLOT_ATTR,
+  PAYLOAD_BOUNDARY_HEADER,
+  PAYLOAD_FRAME_ATTR,
+  PAYLOAD_ROUTE_ID_HEADER,
+  PAYLOAD_SEGMENTS_SCRIPT_ID,
+  PAYLOAD_SEGMENT_ID_HEADER,
+  PAYLOAD_SLOT_ATTR,
   ROUTER_STATE_SCRIPT_ID,
 } from "./bootstrap.ts";
 import { Outlet } from "./components.tsx";
@@ -187,22 +187,22 @@ describe("@bgub/fig-start server handler", () => {
     expect(html).toContain("Nothing here");
   });
 
-  it("streams an RSC segment + SSR slot for a .server.tsx route", async () => {
+  it("streams a payload segment + SSR slot for a .server.tsx route", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/dashboard"),
     );
     const html = await response.text();
 
-    expect(html).toContain(`${RSC_SLOT_ATTR}="/dashboard"`);
+    expect(html).toContain(`${PAYLOAD_SLOT_ATTR}="/dashboard"`);
     expect(html).toContain("server markup ");
     expect(html).toContain("data-fig-client-reference");
-    // The RSC payload is streamed as segment metadata plus row frame scripts.
-    expect(html).toContain(RSC_SEGMENTS_SCRIPT_ID);
-    expect(html).toContain(RSC_FRAME_ATTR);
+    // The payload is streamed as segment metadata plus row frame scripts.
+    expect(html).toContain(PAYLOAD_SEGMENTS_SCRIPT_ID);
+    expect(html).toContain(PAYLOAD_FRAME_ATTR);
     expect(html).toContain(islandId);
     expect(html).toContain('"routeId":"/dashboard"');
-    expect(html.indexOf(RSC_FRAME_ATTR)).toBeLessThan(
-      html.indexOf(RSC_SEGMENTS_SCRIPT_ID),
+    expect(html.indexOf(PAYLOAD_FRAME_ATTR)).toBeLessThan(
+      html.indexOf(PAYLOAD_SEGMENTS_SCRIPT_ID),
     );
   });
 
@@ -225,32 +225,36 @@ describe("@bgub/fig-start server handler", () => {
     );
   });
 
-  it("serves raw RSC rows for client navigation requests", async () => {
+  it("serves raw payload rows for client navigation requests", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/dashboard", {
-        headers: { accept: "text/x-component; charset=utf-8" },
+        headers: { accept: "text/x-fig-payload; charset=utf-8" },
       }),
     );
     const rows = await response.text();
 
-    expect(response.headers.get("content-type")).toContain("text/x-component");
-    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/dashboard");
-    expect(response.headers.get(RSC_SEGMENT_ID_HEADER)).toBe("/dashboard");
+    expect(response.headers.get("content-type")).toContain(
+      "text/x-fig-payload",
+    );
+    expect(response.headers.get(PAYLOAD_ROUTE_ID_HEADER)).toBe("/dashboard");
+    expect(response.headers.get(PAYLOAD_SEGMENT_ID_HEADER)).toBe("/dashboard");
     expect(rows).toContain(islandId);
-    expect(rows).not.toContain(RSC_FRAME_ATTR);
+    expect(rows).not.toContain(PAYLOAD_FRAME_ATTR);
     expect(rows).not.toContain("<html");
   });
 
-  it("provides route hook context while rendering server route RSC rows", async () => {
+  it("provides route hook context while rendering server route payload rows", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/server-posts/42", {
-        headers: { accept: "text/x-component; charset=utf-8" },
+        headers: { accept: "text/x-fig-payload; charset=utf-8" },
       }),
     );
     const rows = await response.text();
 
-    expect(response.headers.get("content-type")).toContain("text/x-component");
-    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe(
+    expect(response.headers.get("content-type")).toContain(
+      "text/x-fig-payload",
+    );
+    expect(response.headers.get(PAYLOAD_ROUTE_ID_HEADER)).toBe(
       "/server-posts/$postId",
     );
     expect(rows).toContain("Server post 42 (42)");
@@ -263,7 +267,7 @@ describe("@bgub/fig-start server handler", () => {
         component: () => createElement("main", null, createElement(Outlet)),
       }),
       markServerRoute(
-        createFileRoute("/rsc-layout")({
+        createFileRoute("/payload-layout")({
           component: () =>
             createElement(
               "section",
@@ -273,7 +277,7 @@ describe("@bgub/fig-start server handler", () => {
             ),
         }),
       ),
-      createFileRoute("/rsc-layout/child")({
+      createFileRoute("/payload-layout/child")({
         component: () => createElement("p", null, "Nested child"),
       }),
     ];
@@ -283,31 +287,33 @@ describe("@bgub/fig-start server handler", () => {
     });
 
     const document = await handler(
-      new Request("http://localhost/rsc-layout/child"),
+      new Request("http://localhost/payload-layout/child"),
     );
     const html = await document.text();
     expect(html).toContain("Server layout");
     expect(html).toContain("Nested child");
-    expect(html).toContain(`${RSC_SLOT_ATTR}="/rsc-layout"`);
+    expect(html).toContain(`${PAYLOAD_SLOT_ATTR}="/payload-layout"`);
 
-    const rsc = await handler(
-      new Request("http://localhost/rsc-layout/child", {
-        headers: { accept: "text/x-component; charset=utf-8" },
+    const payload = await handler(
+      new Request("http://localhost/payload-layout/child", {
+        headers: { accept: "text/x-fig-payload; charset=utf-8" },
       }),
     );
-    const rows = await rsc.text();
-    expect(rsc.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/rsc-layout");
+    const rows = await payload.text();
+    expect(payload.headers.get(PAYLOAD_ROUTE_ID_HEADER)).toBe(
+      "/payload-layout",
+    );
     expect(rows).toContain("Server layout");
     expect(rows).toContain("Nested child");
   });
 
-  it("renders same-segment RSC refreshes as boundary rows", async () => {
+  it("renders same-segment payload refreshes as boundary rows", async () => {
     const nestedRoutes = [
       createRootRoute({
         component: () => createElement("main", null, createElement(Outlet)),
       }),
       markServerRoute(
-        createFileRoute("/rsc-layout")({
+        createFileRoute("/payload-layout")({
           component: () =>
             createElement(
               "section",
@@ -317,10 +323,10 @@ describe("@bgub/fig-start server handler", () => {
             ),
         }),
       ),
-      createFileRoute("/rsc-layout/a")({
+      createFileRoute("/payload-layout/a")({
         component: () => createElement("p", null, "Child A"),
       }),
-      createFileRoute("/rsc-layout/b")({
+      createFileRoute("/payload-layout/b")({
         component: () => createElement("p", null, "Child B"),
       }),
     ];
@@ -330,18 +336,20 @@ describe("@bgub/fig-start server handler", () => {
     });
 
     const response = await handler(
-      new Request("http://localhost/rsc-layout/b", {
+      new Request("http://localhost/payload-layout/b", {
         headers: {
-          accept: "text/x-component; charset=utf-8",
-          [RSC_BOUNDARY_HEADER]: "/rsc-layout",
+          accept: "text/x-fig-payload; charset=utf-8",
+          [PAYLOAD_BOUNDARY_HEADER]: "/payload-layout",
         },
       }),
     );
     const rows = await response.text();
 
-    expect(response.headers.get(RSC_ROUTE_ID_HEADER)).toBe("/rsc-layout");
+    expect(response.headers.get(PAYLOAD_ROUTE_ID_HEADER)).toBe(
+      "/payload-layout",
+    );
     expect(rows).toContain('"tag":"refresh"');
-    expect(rows).toContain('"boundary":"/rsc-layout"');
+    expect(rows).toContain('"boundary":"/payload-layout"');
     expect(rows).toContain("Child B");
   });
 
@@ -416,7 +424,7 @@ describe("@bgub/fig-start server handler", () => {
     expect(await svg.text()).toBe("<svg></svg>");
   });
 
-  it("uses client-reference asset resolvers for server route RSC rows", async () => {
+  it("uses client-reference asset resolvers for server route payload rows", async () => {
     const handler = createRequestHandler({
       clientEntry: "/client.js",
       clientReferenceAssets: ({ id }) =>
@@ -427,7 +435,7 @@ describe("@bgub/fig-start server handler", () => {
 
     const response = await handler(
       new Request("http://localhost/dashboard", {
-        headers: { accept: "text/x-component; charset=utf-8" },
+        headers: { accept: "text/x-fig-payload; charset=utf-8" },
       }),
     );
     const rows = await response.text();
@@ -436,7 +444,7 @@ describe("@bgub/fig-start server handler", () => {
     expect(rows).toContain("/assets/island.css");
   });
 
-  it("uses server-route asset resolvers for server route RSC rows", async () => {
+  it("uses server-route asset resolvers for server route payload rows", async () => {
     const handler = createRequestHandler({
       clientEntry: "/client.js",
       clientReferenceAssets: ({ id }) =>
@@ -449,15 +457,15 @@ describe("@bgub/fig-start server handler", () => {
 
     const response = await handler(
       new Request("http://localhost/dashboard", {
-        headers: { accept: "text/x-component; charset=utf-8" },
+        headers: { accept: "text/x-fig-payload; charset=utf-8" },
       }),
     );
     const rows = await response.text();
-    const rsc = createRscResponse();
-    rsc.processStringChunk(rows);
+    const payload = createPayloadResponse();
+    payload.processStringChunk(rows);
 
     expect(rows).toContain("/assets/dashboard.css");
-    expect(rsc.getAssetResources()).toEqual([
+    expect(payload.getAssetResources()).toEqual([
       stylesheet("/assets/dashboard.css"),
       stylesheet("/assets/island.css"),
     ]);
@@ -484,17 +492,17 @@ describe("@bgub/fig-start server handler", () => {
     expect(head).toContain('<link rel="stylesheet" href="/assets/island.css"');
   });
 
-  it("omits RSC frames for ordinary isomorphic routes", async () => {
+  it("omits payload frames for ordinary isomorphic routes", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/about"),
     );
     const html = await response.text();
-    expect(html).toContain(`<script id="${RSC_SEGMENTS_SCRIPT_ID}"`);
+    expect(html).toContain(`<script id="${PAYLOAD_SEGMENTS_SCRIPT_ID}"`);
     expect(html).toContain("[]");
-    expect(html).not.toContain(RSC_FRAME_ATTR);
+    expect(html).not.toContain(PAYLOAD_FRAME_ATTR);
   });
 
-  it("sends the document bootstrap before a slow RSC segment completes", async () => {
+  it("sends the document bootstrap before a slow payload segment completes", async () => {
     const pending = deferred<string>();
     const slowRoutes = [
       createRootRoute({
@@ -518,11 +526,15 @@ describe("@bgub/fig-start server handler", () => {
     if (reader === undefined) throw new Error("Expected response body.");
 
     const decoder = new TextDecoder();
-    const firstText = await readUntil(reader, decoder, RSC_SEGMENTS_SCRIPT_ID);
+    const firstText = await readUntil(
+      reader,
+      decoder,
+      PAYLOAD_SEGMENTS_SCRIPT_ID,
+    );
 
-    expect(firstText).toContain(`${RSC_SLOT_ATTR}="/slow"`);
+    expect(firstText).toContain(`${PAYLOAD_SLOT_ATTR}="/slow"`);
     expect(firstText).toContain("fig:suspense:pending");
-    expect(firstText).toContain(RSC_SEGMENTS_SCRIPT_ID);
+    expect(firstText).toContain(PAYLOAD_SEGMENTS_SCRIPT_ID);
     expect(firstText).not.toContain("slow ready");
 
     pending.resolve("slow ready");
@@ -530,7 +542,7 @@ describe("@bgub/fig-start server handler", () => {
     expect(rest).toContain("slow ready");
   });
 
-  it("logs streamed RSC render errors", async () => {
+  it("logs streamed payload render errors", async () => {
     const errorRoutes = [
       createRootRoute({
         component: () =>
@@ -539,7 +551,7 @@ describe("@bgub/fig-start server handler", () => {
       markServerRoute(
         createFileRoute("/broken")({
           component: () => {
-            throw new Error("rsc exploded");
+            throw new Error("payload exploded");
           },
         }),
       ),
@@ -557,18 +569,18 @@ describe("@bgub/fig-start server handler", () => {
     try {
       const response = await handler(new Request("http://localhost/broken"));
       const html = await response.text();
-      expect(html).toContain(RSC_FRAME_ATTR);
+      expect(html).toContain(PAYLOAD_FRAME_ATTR);
       // Only the digest crosses the wire; the raw server message stays out of
       // the payload and lands in the server log instead.
       expect(html).toContain("fig-start-error");
-      expect(html).not.toContain("rsc exploded");
+      expect(html).not.toContain("payload exploded");
     } finally {
       console.error = previousError;
     }
 
-    expect(messages.some((message) => message.includes("rsc exploded"))).toBe(
-      true,
-    );
+    expect(
+      messages.some((message) => message.includes("payload exploded")),
+    ).toBe(true);
   });
 
   it("builds the data context once per server-route request", async () => {
@@ -583,11 +595,11 @@ describe("@bgub/fig-start server handler", () => {
       routes,
     });
     await handler(new Request("http://localhost/dashboard"));
-    // One context shared by the RSC render and the document render.
+    // One context shared by the payload render and the document render.
     expect(calls).toBe(1);
   });
 
-  it("renders server route components once for document HTML and RSC frames", async () => {
+  it("renders server route components once for document HTML and payload frames", async () => {
     let renders = 0;
     const singlePassRoutes = [
       createRootRoute({
@@ -611,7 +623,7 @@ describe("@bgub/fig-start server handler", () => {
     const html = await response.text();
 
     expect(html).toContain("Single pass");
-    expect(html).toContain(RSC_FRAME_ATTR);
+    expect(html).toContain(PAYLOAD_FRAME_ATTR);
     expect(renders).toBe(1);
   });
 

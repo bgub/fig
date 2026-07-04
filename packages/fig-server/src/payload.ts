@@ -63,13 +63,13 @@ import type { ServerErrorPayload } from "./types.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
-export interface RscRenderResult {
+export interface PayloadRenderResult {
   allReady: Promise<void>;
   contentType: string;
   stream: ReadableStream<Uint8Array>;
 }
 
-export interface RscRenderOptions {
+export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
@@ -83,7 +83,7 @@ export interface RscRenderOptions {
   refreshBoundary?: string;
 }
 
-export interface RscRootLike {
+export interface PayloadRootLike {
   data?: FigDataStoreHandle;
   render(node: FigNode): void;
 }
@@ -113,7 +113,7 @@ type SerializedAssetResource =
   | Pick<FontResource, (typeof streamedAssetFields.font)[number]>
   | Pick<PreconnectResource, (typeof streamedAssetFields.preconnect)[number]>;
 
-type RscRow =
+type PayloadRow =
   | { tag: "assets"; value: SerializedAssetResource[] }
   | {
       id: number;
@@ -121,33 +121,34 @@ type RscRow =
       value: {
         id: string;
         assets?: SerializedAssetResource[];
+        exportName?: string;
         ssr?: true;
       };
     }
   | { tag: "data"; value: FigDataHydrationEntry[] }
   | { id: number; tag: "error"; value: ServerErrorPayload }
-  | { id: number; tag: "model"; value: RscModel }
-  | { boundary: string; tag: "refresh"; value: RscModel };
+  | { id: number; tag: "model"; value: PayloadModel }
+  | { boundary: string; tag: "refresh"; value: PayloadModel };
 
-type RscModel =
+type PayloadModel =
   | null
   | boolean
   | number
   | string
-  | RscModel[]
-  | { [key: string]: RscModel }
-  | RscElementModel
-  | RscSpecialModel;
+  | PayloadModel[]
+  | { [key: string]: PayloadModel }
+  | PayloadElementModel
+  | PayloadSpecialModel;
 
-type RscElementModel = {
+type PayloadElementModel = {
   $fig: "element";
   key: Key | null;
-  props: Record<string, RscModel>;
-  type: string | RscSpecialModel;
+  props: Record<string, PayloadModel>;
+  type: string | PayloadSpecialModel;
 };
 
-type RscSpecialModel =
-  | { $fig: "boundary"; child: RscModel; id: string }
+type PayloadSpecialModel =
+  | { $fig: "boundary"; child: PayloadModel; id: string }
   | { $fig: "client"; id: number }
   | { $fig: "fragment" }
   | { $fig: "lazy"; id: number }
@@ -155,29 +156,34 @@ type RscSpecialModel =
   | { $fig: "suspense" }
   | { $fig: "undefined" };
 
-export interface RscClientReferenceMetadata {
+export interface PayloadClientReferenceMetadata {
+  // Opaque unique key for loading and dedupe. Fig's bundler tooling authors
+  // ids as "<module specifier>#<export>", but only the server ever splits
+  // that convention — it derives exportName once at serialization, so
+  // loaders and the client treat id as a black box.
   id: string;
+  exportName?: string;
   ssr?: boolean;
 }
 
-export interface RscClientReferenceRecord extends RscClientReferenceMetadata {
+export interface PayloadClientReferenceRecord extends PayloadClientReferenceMetadata {
   assets?: readonly FigAssetResource[];
 }
 
-export interface RscResponseOptions {
+export interface PayloadResponseOptions {
   loadClientReference?: (
-    metadata: RscClientReferenceMetadata,
+    metadata: PayloadClientReferenceMetadata,
   ) => Promise<unknown>;
   resolveClientReference?: (
-    metadata: RscClientReferenceMetadata,
+    metadata: PayloadClientReferenceMetadata,
   ) => ElementType<any> | undefined;
 }
 
-export interface RscResponse {
+export interface PayloadResponse {
   beginRefreshPayload(): void;
-  bindRoot(root: RscRootLike): () => void;
+  bindRoot(root: PayloadRootLike): () => void;
   getAssetResources(): readonly FigAssetResource[];
-  getClientReferences(): readonly RscClientReferenceRecord[];
+  getClientReferences(): readonly PayloadClientReferenceRecord[];
   getRoot(): FigNode;
   preloadClientReferences(): Promise<void>;
   processStream(stream: ReadableStream<Uint8Array>): Promise<void>;
@@ -189,24 +195,24 @@ export interface RscResponse {
   subscribe(listener: () => void): () => void;
 }
 
-export type RscFetch = (
+export type PayloadFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
-export interface RscFetchOptions extends RequestInit {
-  fetch?: RscFetch;
+export interface PayloadFetchOptions extends RequestInit {
+  fetch?: PayloadFetch;
   refreshBoundary?: string;
 }
 
-class RscRequestCancelledError extends Error {
+class PayloadRequestCancelledError extends Error {
   constructor() {
-    super("RSC request cancelled.");
-    this.name = "RscRequestCancelledError";
+    super("Payload request cancelled.");
+    this.name = "PayloadRequestCancelledError";
   }
 }
 
-type RscRequest = {
+type PayloadRequest = {
   allReady: Deferred<void>;
   boundaryIds: Set<string> | null;
   clientReferenceRows: Map<string, number>;
@@ -217,7 +223,7 @@ type RscRequest = {
   emittedDataKeys: Set<string>;
   nextRowId: number;
   nextUseId: number;
-  onError: RscRenderOptions["onError"];
+  onError: PayloadRenderOptions["onError"];
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: string[];
@@ -241,13 +247,13 @@ type RenderFrame = {
   // Built lazily on the first function component; reused for the whole task
   // (the dispatcher reads context through the frame, so it stays current).
   dispatcher: RenderDispatcher | null;
-  request: RscRequest;
+  request: PayloadRequest;
 };
 
 type DecodedChunk = {
   decoded: unknown;
   hasDecoded: boolean;
-  model: RscModel | null;
+  model: PayloadModel | null;
   promise: Promise<unknown>;
   reject(reason: unknown): void;
   resolve(value: unknown): void;
@@ -255,24 +261,24 @@ type DecodedChunk = {
   value: unknown;
 };
 
-const contentType = "text/x-component; charset=utf-8";
+const contentType = "text/x-fig-payload; charset=utf-8";
 const textEncoder = new TextEncoder();
-const RscBoundarySymbol = Symbol.for("fig.rsc-boundary");
+const PayloadBoundarySymbol = Symbol.for("fig.payload-boundary");
 
-type RscBoundaryProps = { children?: FigNode; id: string };
+type PayloadBoundaryProps = { children?: FigNode; id: string };
 
-export const RscBoundary: {
-  (props: RscBoundaryProps): FigNode;
+export const PayloadBoundary: {
+  (props: PayloadBoundaryProps): FigNode;
   readonly $$typeof: symbol;
-} = Object.assign((props: RscBoundaryProps) => props.children, {
-  $$typeof: RscBoundarySymbol,
+} = Object.assign((props: PayloadBoundaryProps) => props.children, {
+  $$typeof: PayloadBoundarySymbol,
 });
 
-export function renderToRscStream(
+export function renderToPayloadStream(
   node: FigNode,
-  options: RscRenderOptions = {},
-): RscRenderResult {
-  const request = createRscRequest(node, options);
+  options: PayloadRenderOptions = {},
+): PayloadRenderResult {
+  const request = createPayloadRequest(node, options);
   return {
     allReady: request.allReady.promise,
     contentType,
@@ -280,14 +286,14 @@ export function renderToRscStream(
   };
 }
 
-export function createRscResponse(
-  options: RscResponseOptions = {},
-): RscResponse {
-  return new RscResponseImpl(options);
+export function createPayloadResponse(
+  options: PayloadResponseOptions = {},
+): PayloadResponse {
+  return new PayloadResponseImpl(options);
 }
 
-async function processRscStream(
-  response: RscResponse,
+async function processPayloadStream(
+  response: PayloadResponse,
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal | null,
 ): Promise<void> {
@@ -299,19 +305,19 @@ async function processRscStream(
   response.processStringChunk("\n");
 }
 
-export function isRscRequestCancelled(error: unknown): boolean {
+export function isPayloadRequestCancelled(error: unknown): boolean {
   return (
-    error instanceof RscRequestCancelledError ||
+    error instanceof PayloadRequestCancelledError ||
     (typeof DOMException !== "undefined" &&
       error instanceof DOMException &&
       error.name === "AbortError")
   );
 }
 
-export async function fetchRsc(
-  response: RscResponse,
+export async function fetchPayload(
+  response: PayloadResponse,
   input: RequestInfo | URL,
-  options: RscFetchOptions = {},
+  options: PayloadFetchOptions = {},
 ): Promise<Response> {
   const {
     fetch: fetchImpl = globalThis.fetch,
@@ -321,36 +327,36 @@ export async function fetchRsc(
     ...init
   } = options;
   if (fetchImpl === undefined) {
-    throw new Error("fetchRsc requires a fetch implementation.");
+    throw new Error("fetchPayload requires a fetch implementation.");
   }
   throwIfAborted(signal);
 
   const result = await fetchImpl(input, {
     ...init,
-    headers: appendRscHeaders(headers, refreshBoundary),
+    headers: appendPayloadHeaders(headers, refreshBoundary),
     signal,
   });
   throwIfAborted(signal);
   if (!result.ok) {
-    throw new Error(`RSC request failed with status ${result.status}.`);
+    throw new Error(`Payload request failed with status ${result.status}.`);
   }
   if (result.body === null) {
-    throw new Error("RSC response did not include a body.");
+    throw new Error("Payload response did not include a body.");
   }
 
   // A refresh reuses this response's chunks Map but its row ids restart at 1 on
   // the server; namespace them past existing chunks before decoding the stream.
   if (refreshBoundary !== undefined) response.beginRefreshPayload();
 
-  await processRscStream(response, result.body, signal);
+  await processPayloadStream(response, result.body, signal);
   return result;
 }
 
-function createRscRequest(
+function createPayloadRequest(
   node: FigNode,
-  options: RscRenderOptions,
-): RscRequest {
-  const request: RscRequest = {
+  options: PayloadRenderOptions,
+): PayloadRequest {
+  const request: PayloadRequest = {
     allReady: deferred<void>(),
     boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
     clientReferenceRows: new Map(),
@@ -397,18 +403,18 @@ function createRscRequest(
   return request;
 }
 
-interface RscClientReferenceEntry {
+interface PayloadClientReferenceEntry {
   component?: ElementType;
   load: Promise<unknown>;
 }
 
-class RscResponseImpl implements RscResponse {
+class PayloadResponseImpl implements PayloadResponse {
   private readonly assetResources = new Map<string, FigAssetResource>();
-  private readonly boundaries = new Map<string, RscModel>();
+  private readonly boundaries = new Map<string, PayloadModel>();
   private readonly decodedBoundaries = new Map<string, FigNode>();
   private readonly clientReferences = new Map<
     string,
-    RscClientReferenceRecord
+    PayloadClientReferenceRecord
   >();
   private readonly chunks = new Map<number, DecodedChunk>();
   // One entry per loader-backed reference id: stable component identity keeps
@@ -417,7 +423,7 @@ class RscResponseImpl implements RscResponse {
   // first render read resolves synchronously instead of suspending.
   private readonly clientReferenceEntries = new Map<
     string,
-    RscClientReferenceEntry
+    PayloadClientReferenceEntry
   >();
   private listeners = new Set<() => void>();
   private resolveRootReady: () => void = () => undefined;
@@ -430,7 +436,7 @@ class RscResponseImpl implements RscResponse {
   private rowIdBase = 0;
   private stringBuffer = "";
 
-  constructor(private readonly options: RscResponseOptions) {}
+  constructor(private readonly options: PayloadResponseOptions) {}
 
   beginRefreshPayload(): void {
     // Refresh payloads restart their row ids at 1 on the server, but every
@@ -445,7 +451,7 @@ class RscResponseImpl implements RscResponse {
     return [...this.assetResources.values()];
   }
 
-  getClientReferences(): readonly RscClientReferenceRecord[] {
+  getClientReferences(): readonly PayloadClientReferenceRecord[] {
     return [...this.clientReferences.values()];
   }
 
@@ -469,12 +475,13 @@ class RscResponseImpl implements RscResponse {
   }
 
   recordClientReference(
-    value: Extract<RscRow, { tag: "client" }>["value"],
+    value: Extract<PayloadRow, { tag: "client" }>["value"],
   ): void {
     if (this.clientReferences.has(value.id)) return;
-    const reference: RscClientReferenceRecord = { id: value.id };
+    const reference: PayloadClientReferenceRecord = { id: value.id };
     const assets = value.assets?.filter(isFigAssetResource);
     if (assets !== undefined) reference.assets = assets;
+    if (value.exportName !== undefined) reference.exportName = value.exportName;
     if (value.ssr === true) reference.ssr = true;
     this.clientReferences.set(value.id, reference);
 
@@ -482,15 +489,15 @@ class RscResponseImpl implements RscResponse {
     // overlaps the rest of the stream (and any asset gates) instead of
     // serializing behind them.
     const load = this.options.loadClientReference;
-    if (
-      load !== undefined &&
-      this.options.resolveClientReference?.({ id: value.id }) === undefined
-    ) {
-      this.clientReferenceEntry({ id: value.id }, load);
+    if (load !== undefined) {
+      const metadata = clientRowMetadata(value);
+      if (this.options.resolveClientReference?.(metadata) === undefined) {
+        this.clientReferenceEntry(metadata, load);
+      }
     }
   }
 
-  bindRoot(root: RscRootLike): () => void {
+  bindRoot(root: PayloadRootLike): () => void {
     this.rootData = root.data ?? null;
     this.hydratePendingData();
     const render = () => root.render(this.getRoot());
@@ -500,12 +507,12 @@ class RscResponseImpl implements RscResponse {
   }
 
   getRoot(): FigNode {
-    return createElement(RscResponseRoot, {
+    return createElement(PayloadResponseRoot, {
       response: this,
     });
   }
 
-  private processRow(row: RscRow): void {
+  private processRow(row: PayloadRow): void {
     if (this.rowIdBase > 0) shiftRowIds(row, this.rowIdBase);
 
     if (row.tag === "data") {
@@ -539,7 +546,7 @@ class RscResponseImpl implements RscResponse {
   }
 
   processStream(stream: ReadableStream<Uint8Array>): Promise<void> {
-    return processRscStream(this, stream);
+    return processPayloadStream(this, stream);
   }
 
   processStringChunk(chunk: string): void {
@@ -571,7 +578,7 @@ class RscResponseImpl implements RscResponse {
     }
   }
 
-  readBoundary(id: string, initial: RscModel): FigNode {
+  readBoundary(id: string, initial: PayloadModel): FigNode {
     let decoded = this.decodedBoundaries.get(id);
     if (decoded === undefined) {
       decoded = decodeModel(
@@ -599,7 +606,7 @@ class RscResponseImpl implements RscResponse {
     return chunk.decoded as FigNode;
   }
 
-  decodeClientReference(metadata: RscClientReferenceMetadata): ElementType {
+  decodeClientReference(metadata: PayloadClientReferenceMetadata): ElementType {
     const cached = this.clientReferenceEntries.get(metadata.id)?.component;
     if (cached !== undefined) return cached;
 
@@ -611,11 +618,11 @@ class RscResponseImpl implements RscResponse {
       const entry = this.clientReferenceEntry(metadata, load);
       let type: ElementType | null = null;
 
-      entry.component = function RscClientComponent(props: Props) {
+      entry.component = function PayloadClientComponent(props: Props) {
         if (type === null) {
           type = resolveClientReferenceExport(
             readPromise(entry.load),
-            metadata.id,
+            metadata,
           );
         }
         return createElement(type, props);
@@ -641,9 +648,9 @@ class RscResponseImpl implements RscResponse {
   }
 
   private clientReferenceEntry(
-    metadata: RscClientReferenceMetadata,
-    load: (metadata: RscClientReferenceMetadata) => Promise<unknown>,
-  ): RscClientReferenceEntry {
+    metadata: PayloadClientReferenceMetadata,
+    load: (metadata: PayloadClientReferenceMetadata) => Promise<unknown>,
+  ): PayloadClientReferenceEntry {
     let entry = this.clientReferenceEntries.get(metadata.id);
     if (entry === undefined) {
       entry = { load: load(metadata) };
@@ -673,12 +680,12 @@ class RscResponseImpl implements RscResponse {
   }
 
   private processLine(line: string): void {
-    if (line.length > 0) this.processRow(JSON.parse(line) as RscRow);
+    if (line.length > 0) this.processRow(JSON.parse(line) as PayloadRow);
   }
 }
 
 function createTask(
-  request: RscRequest,
+  request: PayloadRequest,
   id: number,
   kind: Task["kind"],
   value: unknown,
@@ -688,7 +695,7 @@ function createTask(
   return { contextValues, id, kind, value };
 }
 
-function performWork(request: RscRequest): void {
+function performWork(request: PayloadRequest): void {
   if (request.status === "closed") return;
   if (request.status === "opening") request.status = "open";
 
@@ -700,7 +707,7 @@ function performWork(request: RscRequest): void {
   flushRows(request);
 }
 
-function retryTask(request: RscRequest, task: Task): void {
+function retryTask(request: PayloadRequest, task: Task): void {
   const frame = createRenderFrame(
     request,
     cloneContextValues(task.contextValues),
@@ -740,12 +747,12 @@ function retryTask(request: RscRequest, task: Task): void {
   }
 }
 
-function finishTask(request: RscRequest): void {
+function finishTask(request: PayloadRequest): void {
   request.pendingTasks -= 1;
   if (request.pendingTasks === 0) request.allReady.resolve(undefined);
 }
 
-function emitDataRows(request: RscRequest): void {
+function emitDataRows(request: PayloadRequest): void {
   const entries: FigDataHydrationEntry[] = [];
 
   for (const snapshot of request.dataStore.inspectDataEntries()) {
@@ -766,17 +773,17 @@ function emitDataRows(request: RscRequest): void {
 }
 
 function createRenderFrame(
-  request: RscRequest,
+  request: PayloadRequest,
   contextValues: ContextValues,
 ): RenderFrame {
   return { contextValues, dispatcher: null, request };
 }
 
-function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
+function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
   return createStaticDispatcher({
     contextValues: frame.contextValues,
     externalStoreError:
-      "useExternalStore requires getServerSnapshot during RSC render.",
+      "useExternalStore requires getServerSnapshot during payload render.",
     readPromise: readThenable,
     readData(resource, args) {
       return frame.request.dataStore.readData(resource, args, frame);
@@ -785,15 +792,15 @@ function createRscDispatcher(frame: RenderFrame): RenderDispatcher {
       frame.request.dataStore.preloadData(resource, ...args);
     },
     useId() {
-      const id = `fig-rsc-${frame.request.nextUseId.toString(32)}`;
+      const id = `fig-pl-${frame.request.nextUseId.toString(32)}`;
       frame.request.nextUseId += 1;
       return id;
     },
-    updateError: "State updates are not allowed during RSC render.",
+    updateError: "State updates are not allowed during payload render.",
   });
 }
 
-function serializeNode(node: FigNode, frame: RenderFrame): RscModel {
+function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
   if (Array.isArray(node)) {
     return flattenChildArrays(node).map((child) =>
       serializeNodeOrLazy(child, frame),
@@ -814,7 +821,7 @@ function serializeNode(node: FigNode, frame: RenderFrame): RscModel {
   return serializeElement(node, frame);
 }
 
-function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): RscModel {
+function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): PayloadModel {
   try {
     return serializeNode(node, frame);
   } catch (error) {
@@ -825,7 +832,10 @@ function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): RscModel {
   }
 }
 
-function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
+function serializeElement(
+  element: FigElement,
+  frame: RenderFrame,
+): PayloadModel {
   const type = element.type;
 
   if (typeof type === "string") {
@@ -845,14 +855,14 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
     );
   }
 
-  if (isRscBoundary(type)) {
+  if (isPayloadBoundary(type)) {
     const id = element.props.id;
     if (typeof id !== "string" || id.length === 0) {
-      throw new Error("RSC boundaries require a non-empty string id.");
+      throw new Error("Payload boundaries require a non-empty string id.");
     }
     if (frame.request.boundaryIds !== null) {
       if (frame.request.boundaryIds.has(id)) {
-        throw new Error(`Duplicate RSC boundary id "${id}".`);
+        throw new Error(`Duplicate payload boundary id "${id}".`);
       }
       frame.request.boundaryIds.add(id);
     }
@@ -888,14 +898,14 @@ function serializeElement(element: FigElement, frame: RenderFrame): RscModel {
     return serializeFunctionComponent(type as Component, element.props, frame);
   }
 
-  throw new Error("Unsupported Fig element type during RSC render.");
+  throw new Error("Unsupported Fig element type during payload render.");
 }
 
 function serializeElementModel(
   element: FigElement,
-  type: RscElementModel["type"],
+  type: PayloadElementModel["type"],
   frame: RenderFrame,
-): RscElementModel {
+): PayloadElementModel {
   return {
     $fig: "element",
     key: element.key,
@@ -908,8 +918,8 @@ function serializeFunctionComponent(
   type: Component,
   props: Props,
   frame: RenderFrame,
-): RscModel {
-  frame.dispatcher ??= createRscDispatcher(frame);
+): PayloadModel {
+  frame.dispatcher ??= createPayloadDispatcher(frame);
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
 
@@ -927,13 +937,13 @@ function serializeContextProvider(
   context: FigContext<unknown>,
   props: Props,
   frame: RenderFrame,
-): RscModel {
+): PayloadModel {
   return withContextValue(frame.contextValues, context, props.value, () =>
     serializeNode(props.children, frame),
   );
 }
 
-function serializeAssets(props: Props, frame: RenderFrame): RscModel {
+function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   const serialized = serializeAssetResources(frame.request, props.assets);
   if (serialized.length > 0) {
     emitRow(frame.request, { tag: "assets", value: serialized });
@@ -944,8 +954,8 @@ function serializeAssets(props: Props, frame: RenderFrame): RscModel {
 function serializeProps(
   props: Props,
   frame: RenderFrame,
-): { [key: string]: RscModel } {
-  const serialized: { [key: string]: RscModel } = {};
+): { [key: string]: PayloadModel } {
+  const serialized: { [key: string]: PayloadModel } = {};
 
   for (const [name, value] of Object.entries(props)) {
     serialized[name] = serializeValue(value, frame);
@@ -954,7 +964,7 @@ function serializeProps(
   return serialized;
 }
 
-function serializeValue(value: unknown, frame: RenderFrame): RscModel {
+function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
   if (value === null) return null;
   if (value === undefined) return { $fig: "undefined" };
 
@@ -973,7 +983,7 @@ function serializeValue(value: unknown, frame: RenderFrame): RscModel {
       return { $fig: "client", id: emitClientReference(frame.request, value) };
     }
 
-    throw new Error("Functions cannot be passed to Client Components.");
+    throw new Error("Functions cannot be passed to client references.");
   }
 
   if (isThenable(value)) {
@@ -990,18 +1000,18 @@ function serializeValue(value: unknown, frame: RenderFrame): RscModel {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new Error(
-        `Cannot serialize ${prototype?.constructor?.name ?? "object"} to RSC.`,
+        `Cannot serialize ${prototype?.constructor?.name ?? "object"} into the payload.`,
       );
     }
 
-    const serialized: { [key: string]: RscModel } = {};
+    const serialized: { [key: string]: PayloadModel } = {};
     for (const [name, child] of Object.entries(value)) {
       serialized[name] = serializeValue(child, frame);
     }
     return serialized;
   }
 
-  throw new Error(`Cannot serialize ${typeof value} to RSC.`);
+  throw new Error(`Cannot serialize ${typeof value} into the payload.`);
 }
 
 function outlineTask(
@@ -1010,7 +1020,7 @@ function outlineTask(
   value: unknown,
   referenceKind: "lazy" | "promise",
   wakeable: Thenable,
-): RscSpecialModel {
+): PayloadSpecialModel {
   const request = frame.request;
   const id = request.nextRowId++;
   const task = createTask(
@@ -1030,10 +1040,10 @@ function outlineTask(
 }
 
 function outlineError(
-  request: RscRequest,
+  request: PayloadRequest,
   error: unknown,
   referenceKind: "lazy" | "promise",
-): RscSpecialModel {
+): PayloadSpecialModel {
   const id = request.nextRowId++;
   emitRow(request, {
     id,
@@ -1046,10 +1056,10 @@ function outlineError(
 // The onError return value is authoritative, like the HTML renderer's
 // reportBoundaryError: message crosses the wire only when the handler says
 // so. Without a handler, development keeps the real message for debugging
-// (RSC errors never re-execute on the client, so the wire is the only
+// (payload errors never re-execute on the client, so the wire is the only
 // surface) and production sends an empty payload.
 function errorRowPayload(
-  request: RscRequest,
+  request: PayloadRequest,
   error: unknown,
 ): ServerErrorPayload {
   if (request.onError === undefined) {
@@ -1065,8 +1075,26 @@ function errorRowPayload(
   }
 }
 
+// The metadata shape hooks receive: the wire row minus assets (those are
+// recorded separately and never concern loaders/resolvers).
+function clientRowMetadata(
+  value: Extract<PayloadRow, { tag: "client" }>["value"],
+): PayloadClientReferenceMetadata {
+  const metadata: PayloadClientReferenceMetadata = { id: value.id };
+  if (value.exportName !== undefined) metadata.exportName = value.exportName;
+  if (value.ssr === true) metadata.ssr = true;
+  return metadata;
+}
+
+function clientReferenceExportName(id: string): string | undefined {
+  const hashIndex = id.lastIndexOf("#");
+  if (hashIndex === -1) return undefined;
+  const exportName = id.slice(hashIndex + 1);
+  return exportName === "" ? undefined : exportName;
+}
+
 function emitClientReference(
-  request: RscRequest,
+  request: PayloadRequest,
   reference: FigClientReference,
 ): number {
   const existing = request.clientReferenceRows.get(reference.id);
@@ -1079,10 +1107,14 @@ function emitClientReference(
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
   const assets = serializeClientReferenceAssets(request, reference);
-  const value: Extract<RscRow, { tag: "client" }>["value"] = {
+  const value: Extract<PayloadRow, { tag: "client" }>["value"] = {
     id: reference.id,
   };
   if (assets.length > 0) value.assets = assets;
+  // The "<module>#<export>" authoring convention is split here, once, so the
+  // wire is self-describing and the client never string-parses ids.
+  const exportName = clientReferenceExportName(reference.id);
+  if (exportName !== undefined) value.exportName = exportName;
   if (reference.ssr !== undefined) value.ssr = true;
   const id = request.nextRowId++;
   request.clientReferenceRows.set(reference.id, id);
@@ -1095,7 +1127,7 @@ function emitClientReference(
 }
 
 function serializeClientReferenceAssets(
-  request: RscRequest,
+  request: PayloadRequest,
   reference: FigClientReference,
 ): SerializedAssetResource[] {
   return serializeAssetResources(
@@ -1105,7 +1137,7 @@ function serializeClientReferenceAssets(
 }
 
 function serializeAssetResources(
-  request: RscRequest,
+  request: PayloadRequest,
   value: unknown,
 ): SerializedAssetResource[] {
   const input = isFigAssetResource(value)
@@ -1131,7 +1163,7 @@ function serializeAssetResources(
 }
 
 function collectClientReferenceAssets(
-  request: RscRequest,
+  request: PayloadRequest,
   reference: FigClientReference,
 ): readonly FigAssetResource[] {
   const resources = [...clientReferenceAssets(reference)];
@@ -1144,11 +1176,13 @@ function collectClientReferenceAssets(
 function serializeAssetResource(
   resource: FigAssetResource,
 ): SerializedAssetResource {
-  // The RSC asset wire format is descriptor-only and intentionally does not
+  // The payload asset wire format is descriptor-only and intentionally does not
   // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
   // SSR/head resources still round-trip keys through data-fig-resource-key.
   if (resource.kind === "title" || resource.kind === "meta") {
-    throw new Error("Head-only resources cannot be serialized to RSC.");
+    throw new Error(
+      "Head-only resources cannot be serialized into the payload.",
+    );
   }
 
   const output: Record<string, unknown> = {};
@@ -1159,12 +1193,12 @@ function serializeAssetResource(
   return output as SerializedAssetResource;
 }
 
-function emitRow(request: RscRequest, row: RscRow): void {
+function emitRow(request: PayloadRequest, row: PayloadRow): void {
   request.queuedRows.push(`${JSON.stringify(row)}\n`);
   flushRows(request);
 }
 
-function pingTask(request: RscRequest, task: Task): void {
+function pingTask(request: PayloadRequest, task: Task): void {
   if (request.status === "closed") return;
   request.pingedTasks.push(task);
   // Many thenables settling in one tick ping many tasks; one performWork
@@ -1177,7 +1211,7 @@ function pingTask(request: RscRequest, task: Task): void {
   });
 }
 
-function flushRows(request: RscRequest): void {
+function flushRows(request: PayloadRequest): void {
   if (request.controller === null || request.status === "closed") return;
   if (request.status === "opening") return;
 
@@ -1193,7 +1227,7 @@ function flushRows(request: RscRequest): void {
   }
 }
 
-function closeWithError(request: RscRequest, error: unknown): void {
+function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.status === "closed") return;
   request.status = "closed";
   request.dataStore.dispose();
@@ -1217,7 +1251,7 @@ function flattenChildArrays(children: FigChild[]): FigChild[] {
 
 function invalidChildError(value: unknown): Error {
   return new Error(
-    `Invalid Fig child in RSC render: ${describeInvalidChild(value)}.`,
+    `Invalid Fig child in payload render: ${describeInvalidChild(value)}.`,
   );
 }
 
@@ -1259,12 +1293,12 @@ async function readTextStream(
 }
 
 function throwIfAborted(signal?: AbortSignal | null): void {
-  if (signal?.aborted) throw new RscRequestCancelledError();
+  if (signal?.aborted) throw new PayloadRequestCancelledError();
 }
 
 function resolveDecodedRow(
-  response: RscResponseImpl,
-  row: Extract<RscRow, { id: number }>,
+  response: PayloadResponseImpl,
+  row: Extract<PayloadRow, { id: number }>,
 ): void {
   const chunk = response.getChunk(row.id);
 
@@ -1285,11 +1319,7 @@ function resolveDecodedRow(
   if (row.tag === "client") {
     response.recordClientReference(row.value);
     response.recordAssetResources(row.value.assets);
-    value = response.decodeClientReference(
-      row.value.ssr === true
-        ? { id: row.value.id, ssr: true }
-        : { id: row.value.id },
-    );
+    value = response.decodeClientReference(clientRowMetadata(row.value));
   } else {
     value = decodeModel(response, row.value);
   }
@@ -1300,7 +1330,7 @@ function resolveDecodedRow(
   chunk.resolve(value);
 }
 
-function shiftRowIds(row: RscRow, offset: number): void {
+function shiftRowIds(row: PayloadRow, offset: number): void {
   if (row.tag === "client" || row.tag === "error" || row.tag === "model") {
     // The row's own chunk id. A client row's value.id is a string module id and
     // must not be shifted.
@@ -1311,7 +1341,7 @@ function shiftRowIds(row: RscRow, offset: number): void {
   }
 }
 
-function shiftModelIds(model: RscModel, offset: number): void {
+function shiftModelIds(model: PayloadModel, offset: number): void {
   if (model === null || typeof model !== "object") return;
 
   if (Array.isArray(model)) {
@@ -1320,7 +1350,7 @@ function shiftModelIds(model: RscModel, offset: number): void {
   }
 
   if ("$fig" in model) {
-    const special = model as RscElementModel | RscSpecialModel;
+    const special = model as PayloadElementModel | PayloadSpecialModel;
     switch (special.$fig) {
       case "client":
       case "lazy":
@@ -1343,7 +1373,10 @@ function shiftModelIds(model: RscModel, offset: number): void {
   for (const value of Object.values(model)) shiftModelIds(value, offset);
 }
 
-function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
+function decodeModel(
+  response: PayloadResponseImpl,
+  model: PayloadModel,
+): unknown {
   if (model === null) return null;
   if (Array.isArray(model))
     return model.map((item) => decodeModel(response, item));
@@ -1353,7 +1386,7 @@ function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
   if ("$fig" in model) {
     return decodeSpecialModel(
       response,
-      model as RscElementModel | RscSpecialModel,
+      model as PayloadElementModel | PayloadSpecialModel,
     );
   }
 
@@ -1365,12 +1398,12 @@ function decodeModel(response: RscResponseImpl, model: RscModel): unknown {
 }
 
 function decodeSpecialModel(
-  response: RscResponseImpl,
-  model: RscElementModel | RscSpecialModel,
+  response: PayloadResponseImpl,
+  model: PayloadElementModel | PayloadSpecialModel,
 ): unknown {
   switch (model.$fig) {
     case "boundary":
-      return createElement(RscBoundarySlot, {
+      return createElement(PayloadBoundarySlot, {
         id: model.id,
         initial: model.child,
         response,
@@ -1388,7 +1421,7 @@ function decodeSpecialModel(
     case "fragment":
       return Fragment;
     case "lazy":
-      return createElement(RscLazyNode, { id: model.id, response });
+      return createElement(PayloadLazyNode, { id: model.id, response });
     case "promise":
       return response.getChunk(model.id).promise;
     case "suspense":
@@ -1399,60 +1432,63 @@ function decodeSpecialModel(
 }
 
 function decodeElementType(
-  response: RscResponseImpl,
-  type: string | RscSpecialModel,
+  response: PayloadResponseImpl,
+  type: string | PayloadSpecialModel,
 ): ElementType<any> {
   if (typeof type === "string") return type;
   return decodeSpecialModel(response, type) as ElementType<any>;
 }
 
-function RscResponseRoot(props: { response: RscResponseImpl }): FigNode {
+function PayloadResponseRoot(props: {
+  response: PayloadResponseImpl;
+}): FigNode {
   return props.response.readChunk(0);
 }
 
-function RscBoundarySlot(props: {
+function PayloadBoundarySlot(props: {
   id: string;
-  initial: RscModel;
-  response: RscResponseImpl;
+  initial: PayloadModel;
+  response: PayloadResponseImpl;
 }): FigNode {
   return props.response.readBoundary(props.id, props.initial);
 }
 
-function RscLazyNode(props: {
+function PayloadLazyNode(props: {
   id: number;
-  response: RscResponseImpl;
+  response: PayloadResponseImpl;
 }): FigNode {
   return props.response.readChunk(props.id);
 }
 
 function resolveClientReferenceExport(
   moduleValue: unknown,
-  id: string,
+  metadata: PayloadClientReferenceMetadata,
 ): ElementType<any> {
   if (typeof moduleValue === "function") return moduleValue as ElementType<any>;
 
-  if (typeof moduleValue === "object" && moduleValue !== null) {
-    const exportName = id.includes("#")
-      ? id.slice(id.lastIndexOf("#") + 1)
-      : "";
-    const candidate =
-      exportName === ""
-        ? undefined
-        : (moduleValue as Record<string, unknown>)[exportName];
-
+  if (
+    typeof moduleValue === "object" &&
+    moduleValue !== null &&
+    metadata.exportName !== undefined
+  ) {
+    const candidate = (moduleValue as Record<string, unknown>)[
+      metadata.exportName
+    ];
     if (typeof candidate === "function") return candidate as ElementType<any>;
   }
 
-  throw new Error(`Client reference "${id}" did not load a component.`);
+  throw new Error(
+    `Client reference "${metadata.id}" did not load a component.`,
+  );
 }
 
-function appendRscHeaders(
+function appendPayloadHeaders(
   headers: HeadersInit | undefined,
   boundary?: string,
 ): Headers {
   const next = new Headers(headers);
   if (!next.has("accept")) next.set("accept", contentType);
-  if (boundary !== undefined) next.set("x-fig-rsc-boundary", boundary);
+  if (boundary !== undefined) next.set("x-fig-payload-boundary", boundary);
   return next;
 }
 
@@ -1478,9 +1514,9 @@ function getOrCreateChunk(
   return chunk;
 }
 
-function isRscBoundary(value: unknown): value is typeof RscBoundary {
+function isPayloadBoundary(value: unknown): value is typeof PayloadBoundary {
   return (
     typeof value === "function" &&
-    (value as typeof RscBoundary).$$typeof === RscBoundarySymbol
+    (value as typeof PayloadBoundary).$$typeof === PayloadBoundarySymbol
   );
 }

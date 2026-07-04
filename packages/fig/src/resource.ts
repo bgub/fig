@@ -218,7 +218,7 @@ export function assetResourceKey(resource: FigAssetResource): string {
       return `script:${resource.src}`;
     case "font":
       // A font is loaded as <link rel="preload" as="font">, so it must share the
-      // preload-font key space across every package (SSR registry, RSC record,
+      // preload-font key space across every package (SSR registry, payload record,
       // client insert) — otherwise a font() and an equivalent preload(href,
       // "font") would key separately and fail to dedupe.
       return `preload:font:${resource.href}`;

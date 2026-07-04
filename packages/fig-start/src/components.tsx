@@ -8,7 +8,7 @@ import {
   useCallback,
   useExternalStore,
 } from "@bgub/fig";
-import { RSC_SLOT_ATTR } from "./bootstrap.ts";
+import { PAYLOAD_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
 import { hrefFrom } from "./location.ts";
@@ -100,7 +100,7 @@ export function Outlet(): FigNode {
   return serverRoute && serverRouteMode === "document"
     ? createElement(
         "div",
-        { [RSC_SLOT_ATTR]: match.routeId },
+        { [PAYLOAD_SLOT_ATTR]: match.routeId },
         createElement(
           Suspense,
           { fallback: null },
@@ -116,7 +116,7 @@ export function Outlet(): FigNode {
 function ServerRouteSlot(props: { routeId: string }): FigNode {
   return createElement(
     "div",
-    { [RSC_SLOT_ATTR]: props.routeId },
+    { [PAYLOAD_SLOT_ATTR]: props.routeId },
     createElement(ServerRouteContent, { routeId: props.routeId }),
   );
 }

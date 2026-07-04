@@ -72,7 +72,7 @@ Deliberate divergences:
   instead of Node-specific streams. This keeps the same API shape across modern
   Node, edge runtimes, Deno, Bun, and browser-like environments.
 - Server render errors cross the wire only through the explicit
-  `onError → { digest?, message? }` contract, shared by the HTML and RSC
+  `onError → { digest?, message? }` contract, shared by the HTML and payload
   renderers: the handler's payload is authoritative, production defaults to an
   empty payload, and development defaults to including the message because
   server errors never re-execute on the client.
@@ -102,8 +102,8 @@ Future goal:
   hydration, delegated events, `bind`, portals, native DOM props, and
   `unsafeHTML`.
 - [`@bgub/fig-server`](./packages/fig-server/README.md): streaming server
-  rendering, Suspense streaming, resource hoisting, server errors, and RSC
-  helpers.
+  rendering, Suspense streaming, resource hoisting, server errors, and the
+  server-component payload helpers.
 - [`@bgub/fig-reconciler`](./packages/fig-reconciler/README.md): renderer
   internals for custom host configs, including the cooperative task
   scheduler.
@@ -163,7 +163,7 @@ The demo sites run through Portless:
 
 - `https://fig-demo-client.localhost`
 - `https://fig-demo-ssr.localhost`
-- `https://fig-demo-rsc.localhost`
+- `https://fig-demo-payload.localhost`
 
 Use a demo package's `dev:app` script to run the underlying server without
 Portless.
