@@ -14,6 +14,7 @@ The goal is to keep React's modern model while dropping legacy cruft such as cla
 - Use **data resources** for keyed async values, cache entries, server reads, and the APIs that refresh, invalidate, revalidate, or recompute them.
 - Use **asset resources** for CSS, scripts, module preloads, fonts, preconnects, and other render-discovered assets that are discovered, deduped, loaded, retained, and sometimes gated before reveal.
 - Avoid the unqualified term "resources" when discussing APIs, protocol work, or implementation plans where the distinction matters.
+- Use **payload** for the server-component wire layer (`@bgub/fig-server/payload`: row streaming, client references, boundary refreshes). Do not call it RSC or Flight — those are React brands; the format is Fig's own.
 
 ## Design Choices
 
