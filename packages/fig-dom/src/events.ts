@@ -2,7 +2,7 @@ import {
   type EventPriority,
   type HydrationTargetResult,
   runWithEventPriority,
-} from "./priority.ts";
+} from "@bgub/fig-reconciler";
 import { isElementNode, isEmptyPropValue, parentOf } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
