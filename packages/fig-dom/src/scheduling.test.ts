@@ -1,15 +1,16 @@
 import { createElement, useState } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import { batchedUpdates, createRoot, flushSync, on } from "./index.ts";
+import { createRoot, flushSync, on } from "./index.ts";
 import { runWithEventPriority } from "./priority.ts";
 import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
 describe("@bgub/fig-dom scheduling", () => {
-  it("batches updates until the outer callback exits", async () => {
+  it("batches same-tick updates automatically, without an explicit batch", async () => {
     let renders = 0;
-    let setCount: ((updater: (count: number) => number) => void) | null = null;
+    let setCount: (updater: (count: number) => number) => void = () =>
+      undefined;
 
     function Counter() {
       renders += 1;
@@ -25,11 +26,11 @@ describe("@bgub/fig-dom scheduling", () => {
     // Each pass renders twice in development (strict shadow pass).
     expect(renders).toBe(2);
 
-    batchedUpdates(() => {
-      setCount?.((count) => count + 1);
-      setCount?.((count) => count + 1);
-      expect(container.textContent).toBe("0");
-    });
+    // No batchedUpdates wrapper: same-tick updates from any source coalesce
+    // into one scheduled render pass (there is no legacy opt-in API).
+    setCount((count) => count + 1);
+    setCount((count) => count + 1);
+    expect(container.textContent).toBe("0");
 
     await delay();
     expect(container.textContent).toBe("2");

@@ -120,13 +120,6 @@ import {
 
 export type EventPriority = "default" | "continuous" | "discrete";
 
-export function getCurrentUpdatePriority(): EventPriority {
-  const lane = requestUpdateLane();
-  if (lane === SyncLane) return "discrete";
-  if (lane === InputContinuousLane) return "continuous";
-  return "default";
-}
-
 export function runWithEventPriority<T>(
   priority: EventPriority,
   callback: () => T,
@@ -781,12 +774,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     request: {
       kind: "client" | "hydration";
       options?: FigRootOptions;
-      reuse?: boolean;
     },
   ): R {
-    const existing = roots.get(container as object);
-    if (existing !== undefined) {
-      if (request.reuse === true) return existing;
+    if (roots.has(container as object)) {
       throw duplicateRootError(request.kind);
     }
 
@@ -877,14 +867,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         mountedRoots.delete(root);
       },
     };
-  }
-
-  function render(children: FigNode, container: Container): FigRoot {
-    const root = rootHandle(
-      rootForContainer(container, { kind: "client", reuse: true }),
-    );
-    root.render(children);
-    return root;
   }
 
   function hydrateTarget(
@@ -4159,7 +4141,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     createRoot,
     hydrateRoot,
     hydrateTarget,
-    render,
     flushSync,
     scheduleRefresh,
   };

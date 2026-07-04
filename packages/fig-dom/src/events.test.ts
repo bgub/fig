@@ -1,10 +1,9 @@
 import { createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 // White-box import of the reconciler's lane module (aliased to source, so it
-// shares state with the reconciler under test): the public
-// getCurrentUpdatePriority collapses every lane below continuous to
-// "default", which would hide a regression that ran handlers at
-// transition/idle lanes.
+// shares state with the reconciler under test): lanes are the precise
+// observable for handler priority — any public projection would collapse
+// tiers and hide a regression that ran handlers at transition/idle lanes.
 import {
   DefaultLane,
   InputContinuousLane,
@@ -12,7 +11,6 @@ import {
   SyncLane,
 } from "../../fig-reconciler/src/lanes.ts";
 import { createRoot, flushSync, on } from "./index.ts";
-import { getCurrentUpdatePriority } from "./priority.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
@@ -25,11 +23,9 @@ function render(node: FigNode, container: Element): void {
 describe("@bgub/fig-dom events", () => {
   it("runs DOM event handlers with event priority", () => {
     const lanes: number[] = [];
-    const priorities: string[] = [];
     const container = new FakeElement("root");
     const record = () => {
       lanes.push(requestUpdateLane());
-      priorities.push(getCurrentUpdatePriority());
     };
 
     flushSync(() =>
@@ -51,7 +47,6 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("load");
 
     expect(lanes).toEqual([SyncLane, InputContinuousLane, DefaultLane]);
-    expect(priorities).toEqual(["discrete", "continuous", "default"]);
   });
 
   it("runs press interactions at discrete priority", () => {

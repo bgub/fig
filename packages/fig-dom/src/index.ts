@@ -237,7 +237,6 @@ const renderer = createRenderer(hostConfig);
 setEventBatching(renderer.batchedUpdates);
 configureDomRefreshScheduler(renderer.scheduleRefresh);
 
-export const batchedUpdates = renderer.batchedUpdates;
 export const flushSync = renderer.flushSync;
 
 export type { FigRootOptions };

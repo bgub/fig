@@ -16,7 +16,6 @@ The short version: **the original Fig ideas are consistently better than their R
 
 - `useReactiveEvent` — the name inverts the semantics; the project's own docs call it the "non-reactive event hook." `useEvent` or `useStableEvent`.
 - `renderToString` — the name promises react-dom/server semantics but the behavior is "buffer the stream," so suspended trees yield fallbacks, staging divs, and inline scripts in the "string." Either make it a true settle-then-emit `prerender` (clean HTML, no runtime scripts — genuinely useful for SSG/emails) or rename it honestly. Relatedly, `onShellError` duplicates the rejecting `shellReady` promise — React needed the callback only for its Node-callback API; Fig has the promise, drop the callback.
-- `render(children, container)` on the reconciler's public return — a pre-React-18 shape that exists for the reconciler's own tests; move to a test helper. Same for exported-but-unconsumed `getCurrentUpdatePriority` and fig-dom's public `batchedUpdates` (React 17 legacy; auto-batching makes it cargo-cult bait).
 
 ## Decisions to make explicitly rather than inherit
 

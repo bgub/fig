@@ -1,11 +1,6 @@
 import { createElement, readPromise, stylesheet, Suspense } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  batchedUpdates,
-  createRoot,
-  flushSync,
-  insertAssetResources,
-} from "./index.ts";
+import { createRoot, flushSync, insertAssetResources } from "./index.ts";
 import {
   deferred,
   delay,
@@ -62,20 +57,29 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Now");
   });
 
-  it("flushes batched root work inside flushSync", () => {
+  it("coalesces same-tick root renders into one async commit", async () => {
+    let renders = 0;
+
+    function App({ label }: { label: string }) {
+      renders += 1;
+      return createElement("main", null, label);
+    }
+
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
-    flushSync(() => root.render(createElement("main", null, "Before")));
+    // No batching API: root work is scheduled, and same-tick renders
+    // coalesce automatically, so nothing has committed yet.
+    root.render(createElement(App, { label: "First" }));
+    root.render(createElement(App, { label: "Second" }));
+    expect(container.textContent).toBe("");
 
-    batchedUpdates(() => {
-      root.render(createElement("main", null, "After"));
-      expect(container.textContent).toBe("Before");
+    await delay();
 
-      flushSync(() => undefined);
-
-      expect(container.textContent).toBe("After");
-    });
+    // One render pass (strict-doubled in development) committed the last
+    // render call; the superseded one never rendered.
+    expect(container.textContent).toBe("Second");
+    expect(renders).toBe(2);
   });
 
   it("creates SVG, MathML, and foreignObject elements in the right namespace", () => {
