@@ -46,7 +46,6 @@ let summaryLoadCount = 0;
 
 // Isomorphic data: this loader is safe in both the server and browser bundles.
 export const postSummaryResource = dataResource<[string], PostSummary>({
-  name: "PostSummary",
   key: (id: string) => ["post-summary", id],
   load: async (id: string) => {
     await new Promise((resolve) => setTimeout(resolve, 80));

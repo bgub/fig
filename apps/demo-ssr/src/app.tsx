@@ -50,7 +50,6 @@ export const serverInfoRemoteResource = dataResource.remote<
   ServerDataContext
 >({
   id: serverInfoResourceId,
-  name: "ServerInfo",
   key: serverInfoKey,
 });
 
@@ -63,7 +62,6 @@ export const serverOnlyInfoHydrationResource = dataResource<
   ServerOnlyInfo,
   ServerDataContext
 >({
-  name: "ServerOnlyInfo",
   key: serverOnlyInfoKey,
 });
 

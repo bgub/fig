@@ -20,7 +20,6 @@ Define a resource with `dataResource`:
 import { dataResource } from "@bgub/fig-data";
 
 export const userResource = dataResource({
-  name: "User",
   key: (id: string) => ["user", id],
   load: async (id, { context, signal }) => context.users.find(id, { signal }),
 });
@@ -191,7 +190,6 @@ import { dataResource } from "@bgub/fig-data";
 export const userKey = (id: string) => ["user", id] as const;
 
 export const userResource = dataResource({
-  name: "User",
   key: userKey,
 });
 ```
@@ -202,7 +200,6 @@ import { serverDataResource } from "@bgub/fig-data/server";
 import { userKey } from "./user-data.ts";
 
 export const userServerResource = serverDataResource({
-  name: "User",
   key: userKey,
   load: async (id, { context, signal }) => context.users.find(id, { signal }),
 });
@@ -211,6 +208,10 @@ export const userServerResource = serverDataResource({
 Browser components import and read `userResource`. Server code imports and
 preloads or reads `userServerResource`. Because both resources return the same
 key, they address the same store entry.
+
+If you import a `.server.ts(x)` module from browser code, use the
+`@bgub/fig-data/vite` plugin so the server loader is replaced by a client stub.
+Fig Start includes this transform.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed
 a value for that key, `readData(userResource, id)` can read it. If the client
@@ -232,7 +233,6 @@ A server resource can opt into direct client refreshes:
 import { serverDataResource } from "@bgub/fig-data/server";
 
 export const userResource = serverDataResource({
-  name: "User",
   remote: true,
   key: (id: string) => ["user", id],
   load: async (id, { context, signal }) => context.users.find(id, { signal }),
@@ -243,10 +243,15 @@ export const userResource = serverDataResource({
 server-only and no direct data endpoint should be generated.
 
 In Fig Start, a browser import of a `remote: true` server resource becomes a
-generated `dataResource.remote(...)` stub. The real server resource is
-registered behind the data endpoint. Reads still prefer hydrated values; cache
-misses and explicit refreshes call the endpoint through the root's
-`dataRemoteFetch` transport.
+generated `dataResource.remote(...)` stub. The stub id comes from the
+root-relative server module path and export name; there is no manual `name`
+registry. The real server resource is registered behind the data endpoint.
+Reads still prefer hydrated values; cache misses and explicit refreshes call
+the endpoint through the root's `dataRemoteFetch` transport with the original
+resource arguments.
+
+Remote loaders are public endpoints. Validate and authorize those
+client-controlled arguments inside the loader using the request/app context.
 
 If a remote stub is used without a remote fetcher, refresh resolves with:
 

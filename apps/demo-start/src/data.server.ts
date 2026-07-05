@@ -30,7 +30,6 @@ export const postResource = serverDataResource<
     posts: PostService;
   }
 >({
-  name: "ServerPost",
   key: postResourceKey,
   load: async (id: string, { context }) => {
     const post = await context.posts.find(id);
@@ -47,7 +46,6 @@ export const remotePostStatusResource = serverDataResource<
   RemotePostStatus,
   { posts: PostService }
 >({
-  name: "RemotePostStatus",
   remote: true,
   key: (id: string) => ["remote-post-status", id],
   load: async (id: string, { context }) => {

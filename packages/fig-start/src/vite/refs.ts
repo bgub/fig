@@ -1,11 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  type ClientRef,
-  rootRelative,
+  discoverServerDataResources,
   type ServerDataResourceRef,
-  transformServerModule,
-} from "./transform.ts";
+} from "../../../fig-data/src/vite/index.ts";
+import { type ClientRef, transformServerModule } from "./transform.ts";
+import { rootRelative } from "./path-utils.ts";
 
 export interface ServerRouteRef {
   id: string;
@@ -51,8 +51,8 @@ export async function collectServerDataResources(
 
   for (const file of files) {
     const code = await readFile(file, "utf8");
-    const result = await transformServerModule(code, file, root);
-    for (const ref of result.serverDataResources) refs.set(ref.id, ref);
+    const resources = await discoverServerDataResources(code, file, root);
+    for (const ref of resources) refs.set(ref.id, ref);
   }
   return [...refs.values()];
 }

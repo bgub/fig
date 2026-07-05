@@ -12,7 +12,6 @@ export const serverInfoResource = serverDataResource<
   ServerInfo,
   ServerDataContext
 >({
-  name: "ServerInfo",
   remote: true,
   key: serverInfoKey,
   load: ({ context }) =>
@@ -28,7 +27,6 @@ export const serverOnlyInfoResource = serverDataResource<
   ServerOnlyInfo,
   ServerDataContext
 >({
-  name: "ServerOnlyInfo",
   key: serverOnlyInfoKey,
   load: ({ context }) => ({
     region: context.info?.region ?? "unknown",

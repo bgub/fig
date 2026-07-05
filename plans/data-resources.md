@@ -201,11 +201,10 @@ and find a hydrated entry; only the loader is stripped.
 ```ts
 interface DataResourceOptions<TArgs extends unknown[], TValue, TStoreContext> {
   key: (...args: TArgs) => readonly [string, ...DataResourceKeyInput[]];
-  load: (
+  load?: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
   ) => TValue | Promise<TValue>;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  name?: string;
 }
 
 interface DataResourceLoadContext<TStoreContext = unknown> {

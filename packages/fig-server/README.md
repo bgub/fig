@@ -120,7 +120,6 @@ import { renderToStream } from "@bgub/fig-server";
 const userResource = serverDataResource<[string], { name: string }>({
   key: (id) => ["user", id],
   load: async (id, { context }) => context.users.find(id),
-  name: "User",
 });
 
 function Profile({ id }: { id: string }) {

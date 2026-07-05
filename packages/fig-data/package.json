@@ -20,6 +20,11 @@
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js",
       "default": "./dist/server.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "import": "./dist/vite/index.js",
+      "default": "./dist/vite/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -43,7 +48,12 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-typescript": "^7.25.0",
     "@bgub/fig": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "^20.19.0"
+  }
 }

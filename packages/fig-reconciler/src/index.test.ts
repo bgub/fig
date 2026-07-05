@@ -328,7 +328,6 @@ describe("reconciler", () => {
     const messageResource = dataResource({
       key: (id: string) => ["devtools-message", id],
       load: () => "Loaded",
-      name: "Message",
     });
 
     function Message() {
@@ -342,7 +341,6 @@ describe("reconciler", () => {
         canonicalKey: '["devtools-message","one"]',
         hasValue: true,
         key: ["devtools-message", "one"],
-        name: "Message",
         pending: false,
         stale: false,
         status: "fulfilled",

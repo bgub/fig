@@ -54,7 +54,6 @@ export type DataResourceLoadContext<TStoreContext = RegisteredContext> =
 interface DataResourceBaseOptions<TArgs extends unknown[]> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  name?: string;
 }
 
 export interface DataResourceOptions<
@@ -178,7 +177,6 @@ export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
       return createDataResource({
         debugArgs: options.debugArgs,
         key: options.key,
-        name: options.name,
         remote: { id: options.id },
       });
     },
@@ -245,7 +243,6 @@ function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     debugArgs: options.debugArgs,
     key: options.key,
     load: "load" in options ? options.load : undefined,
-    name: options.name,
     remote:
       "remote" in options && typeof options.remote === "object"
         ? options.remote
@@ -510,7 +507,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       });
     }
 
-    return this.readCurrentValue(entry, resource);
+    return this.readCurrentValue(entry);
   }
 
   refreshData<TArgs extends unknown[], TValue, TStoreContext>(
@@ -702,8 +699,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (!this.canLoad(resource)) {
       const error = new Error(
         resource.remote === undefined
-          ? `Data resource "${resource.name ?? entry.canonicalKey}" has no loader and no hydrated value.`
-          : `Remote data resource "${resource.name ?? entry.canonicalKey}" has no remote fetcher and no hydrated value.`,
+          ? `Data resource "${entry.canonicalKey}" has no loader and no hydrated value.`
+          : `Remote data resource "${entry.canonicalKey}" has no remote fetcher and no hydrated value.`,
       );
       entry.error = error;
       entry.status = "rejected";
@@ -925,7 +922,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       error: entry.status === "rejected" ? entry.error : undefined,
       hasValue,
       key: entry.key,
-      name: entry.resource?.name,
       pending: entry.pending !== null,
       refreshError: entry.refreshError,
       stale: entry.stale,
@@ -935,10 +931,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     };
   }
 
-  private readCurrentValue<TValue, TArgs extends unknown[], TStoreContext>(
-    entry: Entry<Owner, Lane>,
-    resource: DataResource<TArgs, TValue, TStoreContext>,
-  ): TValue {
+  private readCurrentValue<TValue>(entry: Entry<Owner, Lane>): TValue {
     if (entryHasValue(entry)) {
       return entry.value as TValue;
     }
@@ -947,7 +940,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     if (entry.pending === null) {
       throw new Error(
-        `Data resource "${resource.name ?? entry.canonicalKey}" has no pending load.`,
+        `Data resource "${entry.canonicalKey}" has no pending load.`,
       );
     }
 

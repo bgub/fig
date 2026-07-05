@@ -795,7 +795,7 @@ function dataResourceSection(entry: DataResourceSnapshot): FigNode {
 
 function dataResourceRows(entry: DataResourceSnapshot): FigNode[] {
   const rows = [
-    row(entry.name ?? entry.canonicalKey, entry.status),
+    row(entry.canonicalKey, entry.status),
     row("Key", formatValue(entry.key)),
     row("Subscribers", String(entry.subscriberCount)),
     row("Stale", entry.stale ? "yes" : "no"),

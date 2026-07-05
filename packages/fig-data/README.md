@@ -14,7 +14,6 @@ import { createRoot, on } from "@bgub/fig-dom";
 import { dataResource, readData, refreshData } from "@bgub/fig-data";
 
 const userResource = dataResource({
-  name: "User",
   key: (id: string) => ["user", id],
   load: async (id: string, { signal }) => {
     const response = await fetch(`/api/users/${id}`, { signal });
@@ -57,7 +56,8 @@ plain objects. Object keys are canonicalized in sorted order. `undefined`,
 `NaN`, infinities, functions, symbols, dates, maps, sets, promises, class
 instances, and cycles are invalid.
 
-The key is the whole identity. The resource `name` is only for diagnostics and
+The key is the whole cache identity. Fig uses the canonical key for reads,
+dedupe, invalidation, refresh, SSR serialization, hydration, diagnostics, and
 DevTools.
 
 ## Refresh And Invalidate
@@ -140,17 +140,16 @@ For server-only data, split the browser-safe key resource from the server
 loader:
 
 ```ts
+import { dataResource } from "@bgub/fig-data";
 import { serverDataResource } from "@bgub/fig-data/server";
 
 export const userKey = (id: string) => ["user", id];
 
 export const userResource = dataResource<[string], User>({
-  name: "User",
   key: userKey,
 });
 
 export const userServerResource = serverDataResource({
-  name: "User",
   key: userKey,
   load: async (id, { context }) => context.db.user.find(id),
 });
@@ -159,11 +158,15 @@ export const userServerResource = serverDataResource({
 Client code imports the loader-less resource. If the server streamed a value
 for the same key, the client can read it as a hydrate-only entry. Since the
 resource has no client loader, `refreshData(userResource, id)` resolves with
-`{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs an
+`{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs a
 payload or framework refresh path.
 
-Fig Start server modules can opt a server resource into direct client refreshes
-with literal `remote: true`:
+Browser bundles need the `@bgub/fig-data/vite` transform so imports of
+`.server.ts(x)` modules become loader-free client stubs instead of bundling the
+server loader. Fig Start includes this transform automatically.
+
+Fig Start server modules can also opt a server resource into direct client
+refreshes with literal `remote: true`:
 
 ```ts
 import { serverDataResource } from "@bgub/fig-data/server";
@@ -176,8 +179,11 @@ export const userResource = serverDataResource({
 ```
 
 The client import becomes a remote stub only for resources that opt in this
-way. Hydrated values are still used first; cache misses and `refreshData(...)`
-use the root's remote data transport. If no transport is installed, refresh resolves with
+way. The stub id is generated from the root-relative server module path and the
+export name, matching Fig payload client-reference ids. Hydrated values are
+still used first; cache misses and `refreshData(...)` send the original
+resource arguments through the root's remote data transport. If no transport is
+installed, refresh resolves with
 `{ status: "unsupported", reason: "no-remote-fetcher" }`. Server route payload
 navigations do not make an extra data request — data read during the payload
 render streams in that same payload response.
@@ -193,5 +199,5 @@ Initial load errors are keyed. `ErrorBoundary` reports the failed keys on
 before remounting or changing the boundary key.
 
 Fig DevTools root snapshots include data-resource entries with their normalized
-keys, names, statuses, stale state, subscriber counts, current values, and
-errors. The in-page DevTools exposes them in the `Data` tab.
+keys, statuses, stale state, subscriber counts, current values, and errors. The
+in-page DevTools exposes them in the `Data` tab.

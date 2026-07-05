@@ -87,7 +87,7 @@ export type StartHandler = (request: Request) => Promise<Response>;
 
 export type StartServerDataResource = Pick<
   DataResource<never[], unknown, RegisteredDataContext>,
-  "key" | "load" | "name"
+  "key" | "load"
 >;
 
 type StartServerDataResourceLoadContext = {

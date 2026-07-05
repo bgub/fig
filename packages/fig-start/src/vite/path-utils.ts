@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { rootRelative } from "./transform.ts";
+import { dirname, relative, resolve, sep } from "node:path";
 
 export interface OutputOptions {
   dir?: string;
@@ -13,6 +12,10 @@ export function hash(value: string): string {
 
 export function normalizePath(path: string): string {
   return path.split("\\").join("/");
+}
+
+export function rootRelative(root: string, absolutePath: string): string {
+  return `/${relative(root, absolutePath).split(sep).join("/")}`;
 }
 
 export function outputDirectory(root: string, options: OutputOptions): string {

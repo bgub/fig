@@ -17,7 +17,6 @@ export interface ServerDataResourceOptions<
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
   ) => TValue | PromiseLike<TValue>;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  name?: string;
   remote?: true;
 }
 

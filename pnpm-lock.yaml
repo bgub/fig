@@ -177,9 +177,22 @@ importers:
 
   packages/fig-data:
     dependencies:
+      '@babel/core':
+        specifier: ^7.25.0
+        version: 7.29.0
+      '@babel/preset-typescript':
+        specifier: ^7.25.0
+        version: 7.29.7(@babel/core@7.29.0)
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
+    devDependencies:
+      '@types/babel__core':
+        specifier: ^7.20.5
+        version: 7.20.5
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.41
 
   packages/fig-devtools:
     dependencies:

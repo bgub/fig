@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
-import { hash } from "./path-utils.ts";
-import { rootRelative } from "./transform.ts";
+import { hash, rootRelative } from "./path-utils.ts";
 
 export async function renderStaticAssetModule(
   context: unknown,

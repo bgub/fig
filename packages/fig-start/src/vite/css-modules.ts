@@ -2,8 +2,7 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { CSS_MODULE_PREFIX, resolvedVirtualId } from "./ids.ts";
-import { hash } from "./path-utils.ts";
-import { rootRelative } from "./transform.ts";
+import { hash, rootRelative } from "./path-utils.ts";
 
 export async function renderCssModule(
   context: unknown,

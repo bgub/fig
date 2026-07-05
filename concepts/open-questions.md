@@ -33,14 +33,13 @@ From `plans/data-resources.md` (open questions that survived shipping):
 - Should the stable data API ever move from `@bgub/fig-data` into
   `@bgub/fig`, and should the renderer bridge become versioned
   `RenderDispatcher` methods instead of the `@bgub/fig/internal` slot?
-- Server-only packaging: how much should rely on loader-less shared resources
-  plus `serverDataResource`, versus a compiler/framework transform?
 - Prefix invalidation (`["user"]`-prefix sweeps): core surface or framework
   concern?
 - A first-class `ErrorBoundary` retry/reset API for failed keys (today:
   function fallback + invalidate + remount-by-key composes it manually).
-- Payload refresh ↔ data keys: the minimal protocol change that maps keys to
-  refreshed payload boundaries without overfitting to one framework.
+- Payload refresh ↔ data keys: payload streams data rows in the same response;
+  still open is a targeted protocol that maps invalidated keys to refreshed
+  payload boundaries without overfitting to one framework.
 - **SSR value fidelity** (unlogged elsewhere): a `TValue` containing
   `Date`/`Map`/`undefined` type-checks, streams, and hydrates as mangled
   JSON with no error. Decide: optional `serialize`/`deserialize` on

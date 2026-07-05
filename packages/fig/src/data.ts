@@ -28,7 +28,6 @@ export interface FigDataResource<
   readonly load?: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
   ) => TValue | PromiseLike<TValue>;
-  readonly name?: string;
   readonly remote?: DataResourceRemote;
 }
 
@@ -68,7 +67,6 @@ export interface FigDataStoreEntrySnapshot {
   error?: unknown;
   hasValue: boolean;
   key: DataResourceKey;
-  name?: string;
   pending: boolean;
   refreshError?: unknown;
   stale: boolean;

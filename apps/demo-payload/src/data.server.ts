@@ -15,7 +15,6 @@ export const payloadAuditResource = serverDataResource<
   PayloadAudit,
   PayloadDataContext
 >({
-  name: "PayloadAudit",
   key: (seed: number) => ["payload-audit", seed],
   load: (seed: number, { context }) => ({
     requestId: context.requestId ?? "unknown",

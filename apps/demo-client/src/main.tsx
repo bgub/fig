@@ -130,7 +130,6 @@ let profileLoadCount = 0;
 // Suspense. The loader runs once per key and the result is cached until it is
 // invalidated, refreshed, or evicted.
 const profileResource = dataResource<[string], Profile>({
-  name: "Profile",
   key: (handle) => ["profile", handle],
   load: async (handle, { signal }) => {
     profileLoadCount += 1;

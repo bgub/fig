@@ -48,15 +48,27 @@ export const userResource = serverDataResource({
 });
 ```
 
-`serverDataResource` can only be imported from `.server.ts(x)` files. `remote`
-is deliberately opt-in and must be the literal `true`; omitting it keeps the
-resource server-only and no direct data endpoint is generated. The Fig Start
-transform turns browser imports of a remote `.server.ts(x)` export into a
-`dataResource.remote(...)` stub with the same key and a stable resource id.
-Reads still hit hydrated values first; on a cache miss or explicit refresh, a
-root with a `dataRemoteFetch` transport can call the server resource by id.
-Without that transport, remote stubs report
+`serverDataResource` can only be imported from `.server.ts(x)` files. The
+`@bgub/fig-data/vite` transform is the packaging contract: browser imports of
+server-file resources become stubs that keep the browser-safe `key` and strip
+the server loader. Server-file modules imported without that transform must
+fail before server code enters the client bundle.
+
+`remote` is deliberately opt-in and must be the literal `true`; omitting it
+keeps the resource server-only and no direct data endpoint is generated. The
+remote stub uses a stable generated resource id:
+`<root-relative-server-module>#<exportName>`. This mirrors payload client
+references and avoids a user-authored global `name` registry. Reads still hit
+hydrated values first; on a cache miss or explicit refresh, a root with a
+`dataRemoteFetch` transport calls that server resource by id with the original
+read/refresh arguments. The key is not sent as the authority because
+`key(args)` is not invertible. Without that transport, remote stubs report
 `{ status: "unsupported", reason: "no-remote-fetcher" }`.
+
+Remote resource arguments must be serializable by the data transport. Remote
+resources should not rely on `debugArgs` to hide non-serializable loader inputs,
+because the server endpoint runs `load(...args)` and therefore receives the
+actual client-controlled arguments.
 
 ## Typed Context
 
@@ -111,6 +123,12 @@ vocabulary:
 
 Loads are generation-guarded: a superseded load's settlement is inert.
 
+Invalidating a hydrate-only entry that has no client loader and no remote
+fetcher marks it stale but leaves the fulfilled value readable. It revalidates
+only when a server render or payload refresh hydrates a newer value. It must
+not self-destruct into a rejected "missing loader" entry just because a client
+invalidation targeted it.
+
 ## Ambient Store Vs Explicit Handle
 
 The free functions (`readData` aside) resolve an **ambient store** that is
@@ -128,14 +146,25 @@ process cache. `partition` namespaces a store's keys. Server renders collect
 settled entries (`getData()` on render results; `data` rows in the payload
 stream); the client hydrates them via `createRoot({ initialData })` or
 `root.data.hydrate(entries)`, and hydrate-only values are readable
-immediately. Only settled values stream (a refreshing entry's transient
-stale value never wins over its incoming fresh value).
+immediately.
+
+Hydration into a live store is a completed refresh pushed by the server:
+create the entry if missing, abort any in-flight load for that key as
+superseded, bump the entry generation, clear stale/error/refresh-error state,
+store the incoming value, and publish subscribers. Only settled values hydrate;
+a local refreshing entry's transient stale value never wins over the incoming
+fresh value.
 
 Payload navigation does not make a second data request: data read while
 rendering the server route segment streams in the same payload response as
 `data` rows. The direct remote-data endpoint is only for client-side cache
 misses and invalidations outside a route payload render, and only for
 `serverDataResource` exports that explicitly declare `remote: true`.
+
+Remote loaders are public request handlers. They must authenticate, authorize,
+and validate client-controlled arguments exactly like any manually written API
+route. The loader context carries the request/application context needed for
+those checks.
 
 ## Error Attribution
 

@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./internal": "./src/internal.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.ts",
+    "./vite": "./src/vite/index.ts"
   },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],
