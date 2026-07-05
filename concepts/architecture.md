@@ -26,7 +26,7 @@ signatures — that is what gives consumers semver protection).
   are exported because their contract is "consistent with fig-server's own
   HTML emission".
 - `@bgub/fig-data` — every _runtime_ data API. This exclusivity is
-  load-bearing (see the registration slot below).
+  load-bearing (see the lazy store installation protocol below).
 - `@bgub/fig-start`, `@bgub/fig-vite`, `@bgub/fig-refresh`,
   `@bgub/fig-devtools` — framework, bundler, HMR, and DevTools layers on top.
 
@@ -39,8 +39,10 @@ fig-server is a fully separate render implementation (it depends only on
 The cross-package protocol registry, versioned together with the sibling
 packages and never for apps:
 
-- injection slots: the render dispatcher, the data-store factory, the
-  transition handler;
+- injection slots: the render dispatcher and transition handler;
+- the lazy data-store protocol: the internal symbol that lets
+  `@bgub/fig-data` resources carry their store factory to renderers without
+  import-time registration;
 - the element model: `$$typeof` brand predicates (`isValidElement`,
   `isSuspense`, ...), `collectChildren`/`NormalizedChild`, thenable registry
   (`readThenable`/`trackThenable`);
@@ -52,16 +54,21 @@ merged text nodes into HTML and hydration matches them against client fiber
 children — the two sides must not drift. Same for the thenable registry:
 promise identity keyed suspend/resume must agree between client and server.
 
-## The Registration Slot
+## Lazy Data-Store Installation
 
-Renderers never bundle `@bgub/fig-data`. Importing that package registers its
-store factory into a slot on `@bgub/fig/internal` (a module side effect,
-reflected in its `sideEffects` flag). Roots created before it loads hold a stub
-store that upgrades itself in place on registration (covering code-split apps)
-and buffers `hydrate()`/`initialData` entries for replay. The invariant that
-makes this safe: every runtime data API is importable only from
-`@bgub/fig-data`, so no data read can precede registration. Type exports do not
-weaken it — data-protocol types export from `@bgub/fig` proper.
+Renderers never bundle `@bgub/fig-data`, and importing `@bgub/fig-data` has no
+registration side effect. Instead, each data resource created by that package
+carries the store factory on an internal symbol from `@bgub/fig/internal`.
+Roots created before fig-data loads hold a stub store that buffers
+`hydrate()`/`initialData` entries. The first real data operation
+(`readData`, `preloadData`, `invalidateData`, or `refreshData`) passes a
+resource to the stub; the stub installs the real store from the resource's
+factory and replays buffered hydration entries.
+
+The invariant that makes this safe: every runtime data API is importable only
+from `@bgub/fig-data`, so a real data operation necessarily has a resource
+created by that package. Type exports do not weaken it — data-protocol types
+export from `@bgub/fig` proper.
 
 ## Boundaries That Never Leak
 

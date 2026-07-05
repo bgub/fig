@@ -10,6 +10,7 @@ import {
   type FigContext,
   type FigDataRemoteFetcher,
   type FigDataHydrationEntry,
+  type FigDataResource,
   type FigDataStoreHandle,
   type FigElement,
   type FigNode,
@@ -29,12 +30,11 @@ import {
   isAssets,
   isSuspense,
   isValidElement,
-  onDataStoreFactoryRegistered,
-  resolveDataStoreFactory,
   setCurrentDispatcher,
   setCurrentDataStore,
   setTransitionHandler,
   type FigDataStore,
+  type FigDataStoreFactory,
   type FigDataStoreHost,
   type RenderDispatcher,
 } from "@bgub/fig/internal";
@@ -4846,41 +4846,39 @@ function tagFor(element: FigElement): Tag {
   return FunctionTag;
 }
 
-// Every data-reading API (dataResource, readData, ...) is importable only
-// from @bgub/fig-data, and importing it registers the real store factory —
-// so a root created before the package loads can safely hold this stub: no
-// read can precede registration. The stub upgrades itself in place when the
-// factory arrives (covering code-split apps whose only fig-data import is a
-// lazy chunk) and buffers hydrate() entries so createRoot({initialData})
-// behaves identically either way.
-function createRootDataStore(host: FigDataStoreHost): FigDataStore {
-  const factory = resolveDataStoreFactory();
-  if (factory !== null) return factory(host);
+// Renderer bundles do not import @bgub/fig-data. Instead, resources created by
+// that package carry the store factory on an internal symbol. Roots buffer
+// initialData until the first real data resource operation lazily installs the
+// store, covering code-split apps whose only fig-data import is a lazy chunk.
+const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 
+function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   let inner: FigDataStore | null = null;
   let buffered: FigDataHydrationEntry[] | null = null;
   let disposed = false;
 
-  const unsubscribe = onDataStoreFactoryRegistered(() => {
-    if (disposed) return;
-    inner = (
-      resolveDataStoreFactory() as NonNullable<
-        ReturnType<typeof resolveDataStoreFactory>
-      >
-    )(host);
-    if (buffered !== null) inner.hydrate(buffered);
-    buffered = null;
-  });
+  function installStore<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  ): FigDataStore {
+    if (inner !== null) return inner;
+    if (disposed) {
+      throw new Error("Data resource APIs require a live Fig root.");
+    }
 
-  function requireStore(): FigDataStore {
-    if (inner === null) {
+    const factory = (
+      resource as FigDataResource & Record<symbol, FigDataStoreFactory>
+    )[DataStoreFactorySymbol];
+    if (factory === undefined) {
       throw new Error("Data resource APIs require @bgub/fig-data.");
     }
 
+    inner = factory(host);
+    if (buffered !== null) inner.hydrate(buffered);
+    buffered = null;
     return inner;
   }
 
-  return {
+  const store: FigDataStore = {
     hydrate(entries) {
       if (inner !== null) {
         inner.hydrate(entries);
@@ -4889,19 +4887,26 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       (buffered ??= []).push(...entries);
     },
     run(callback) {
-      return inner !== null ? inner.run(callback) : callback();
+      if (inner !== null) return inner.run(callback);
+
+      const previousStore = setCurrentDataStore(store);
+      try {
+        return callback();
+      } finally {
+        setCurrentDataStore(previousStore);
+      }
     },
     readData(resource, args, owner) {
-      return requireStore().readData(resource, args, owner);
+      return installStore(resource).readData(resource, args, owner);
     },
     preloadData(resource, ...args) {
-      requireStore().preloadData(resource, ...args);
+      installStore(resource).preloadData(resource, ...args);
     },
     invalidateData(resource, ...args) {
-      requireStore().invalidateData(resource, ...args);
+      installStore(resource).invalidateData(resource, ...args);
     },
     refreshData(resource, ...args) {
-      return requireStore().refreshData(resource, ...args);
+      return installStore(resource).refreshData(resource, ...args);
     },
     commitDataDependencies(owner, previousOwner) {
       inner?.commitDataDependencies(owner, previousOwner);
@@ -4917,7 +4922,6 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     },
     dispose() {
       disposed = true;
-      unsubscribe();
       inner?.dispose();
       inner = null;
       buffered = null;
@@ -4929,6 +4933,8 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       return inner?.snapshot() ?? buffered?.slice() ?? [];
     },
   };
+
+  return store;
 }
 
 function sameType<Container, Instance, TextInstance>(

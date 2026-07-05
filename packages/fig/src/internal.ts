@@ -78,10 +78,7 @@ export {
 export {
   dataResourceKeysForError,
   markDataResourceError,
-  onDataStoreFactoryRegistered,
-  registerDataStoreFactory,
   resolveCurrentDataStore,
-  resolveDataStoreFactory,
   setCurrentDataStore,
   type DataRefreshResult,
   type DataResourceRemote,

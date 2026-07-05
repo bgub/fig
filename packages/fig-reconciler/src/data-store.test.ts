@@ -1,8 +1,6 @@
-// These tests intentionally avoid a static @bgub/fig-data import: the module
-// registers the real store factory as a side effect, and this file exercises
-// the stub store that roots hold before that happens. Test order matters —
-// the dynamic import in the upgrade test registers the factory for the rest
-// of the file.
+// These tests intentionally avoid a static @bgub/fig-data import: roots should
+// be able to render and buffer initial data before the package loads, then
+// install the real store lazily from the first actual data resource.
 import { createElement } from "@bgub/fig";
 import type { FigDataResource, FigDataStore } from "@bgub/fig/internal";
 import { describe, expect, it } from "vite-plus/test";
@@ -81,10 +79,10 @@ describe("root data store without @bgub/fig-data", () => {
     ).toThrow("Data resource APIs require @bgub/fig-data.");
   });
 
-  it("buffers initialData and upgrades live roots in place on registration", async () => {
+  it("buffers initialData and installs the store from the first data resource", async () => {
     const { createRoot, flushSync } = createRenderer(host);
 
-    // A root disposed before registration must unsubscribe cleanly.
+    // A root disposed before fig-data loads should remain inert.
     const abandoned = createRoot(new TestElement("root"));
     abandoned.unmount();
 
@@ -94,8 +92,6 @@ describe("root data store without @bgub/fig-data", () => {
     });
     flushSync(() => root.render(createElement("span", null, "static")));
 
-    // Loading the package registers the factory; the live root's stub must
-    // upgrade in place and replay the buffered hydration entries.
     const { dataResource, readData } = await import("@bgub/fig-data");
     const greeting = dataResource<[], string>({
       key: () => ["greeting"],

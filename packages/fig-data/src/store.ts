@@ -4,7 +4,6 @@ import {
   preloadDataResource,
   readDataResource,
   refreshDataResource,
-  registerDataStoreFactory,
   resolveCurrentDataStore,
   setCurrentDataStore,
   type DataRefreshResult,
@@ -16,6 +15,7 @@ import {
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataResource,
+  type FigDataStoreFactory,
   type FigDataStore,
   type FigDataStoreEntrySnapshot,
   type FigDataStoreHandle,
@@ -155,10 +155,13 @@ interface LoadOptions<Lane> {
 type AbortReason = "superseded" | "store-disposed" | "evicted";
 
 const DataResourceSymbol = Symbol.for("fig.data-resource");
+const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
+
+const dataStoreFactory = createDataStore as FigDataStoreFactory;
 
 export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
   function sharedDataResource<
@@ -238,16 +241,18 @@ function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     | DataResourceRemoteCreateOptions<TArgs>
     | DataResourceOptions<TArgs, TValue, TStoreContext>,
 ): DataResource<TArgs, TValue, TStoreContext> {
-  return {
+  const resource = {
     $$typeof: DataResourceSymbol,
     debugArgs: options.debugArgs,
     key: options.key,
     load: "load" in options ? options.load : undefined,
-    remote:
-      "remote" in options && typeof options.remote === "object"
-        ? options.remote
-        : undefined,
+    remote: "remote" in options ? options.remote : undefined,
   };
+  (
+    resource as DataResource<TArgs, TValue, TStoreContext> &
+      Record<symbol, FigDataStoreFactory>
+  )[DataStoreFactorySymbol] = dataStoreFactory;
+  return resource;
 }
 
 class DefaultDataStore<Owner extends object, Lane> implements DataStore<
@@ -1145,11 +1150,3 @@ export function runWithDataStore<T>(store: FigDataStore, callback: () => T): T {
 export function currentDataStore(): FigDataStore {
   return resolveCurrentDataStore();
 }
-
-// Module side effect (reflected in package.json "sideEffects"): loading this
-// package hands renderers the real store factory. Renderer bundles carry only
-// a stub until then, and roots created earlier upgrade in place — see
-// registerDataStoreFactory in @bgub/fig/internal.
-registerDataStoreFactory((host) =>
-  createDataStore(host as DataStoreHost<object, unknown>),
-);

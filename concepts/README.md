@@ -22,8 +22,8 @@ Questions → Provisional Stance).
   planned piece of work, in one place; items graduate into their owning
   concept file when resolved.
 - [architecture.md](./architecture.md) — package ownership doctrine, the
-  internal protocol registry, the data-store registration slot, boundaries
-  that never leak.
+  internal protocol registry, lazy data-store installation, boundaries that
+  never leak.
 - [rendering.md](./rendering.md) — element model, bailout tiers,
   always-strict dev rendering, pre-commit diagnostics, commit/batching.
 - [hooks.md](./hooks.md) — the AbortSignal contract table, state/effects/
