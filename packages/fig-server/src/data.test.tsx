@@ -1,6 +1,7 @@
 import { createElement } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig-data";
 import { createDataStore } from "@bgub/fig-data/internal";
+import { serverDataResource } from "@bgub/fig-data/server";
 import { describe, expect, it } from "vite-plus/test";
 import { readStream } from "./test-utils.ts";
 import { prerender, renderToStream } from "./index.ts";
@@ -8,10 +9,8 @@ import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
 
 describe("@bgub/fig-server data resources", () => {
   it("renders data resources and exposes fulfilled entries", async () => {
-    const userIdentity = dataResource.identity<[string], string>({
+    const userResource = serverDataResource<[string], string>({
       key: (id: string) => ["ssr-user", id],
-    });
-    const userResource = dataResource.server(userIdentity, {
       load: () => "Ada",
     });
 
@@ -30,10 +29,8 @@ describe("@bgub/fig-server data resources", () => {
   });
 
   it("returns data hydration entries from prerender", async () => {
-    const userIdentity = dataResource.identity<[string], string>({
+    const userResource = serverDataResource<[string], string>({
       key: (id: string) => ["prerender-user", id],
-    });
-    const userResource = dataResource.server(userIdentity, {
       load: () => "Ada",
     });
 
@@ -50,10 +47,8 @@ describe("@bgub/fig-server data resources", () => {
   });
 
   it("streams payload data rows before the model that may read them on the client", async () => {
-    const userIdentity = dataResource.identity<[string], { name: string }>({
+    const userResource = serverDataResource<[string], { name: string }>({
       key: (id: string) => ["payload-user", id],
-    });
-    const userResource = dataResource.server(userIdentity, {
       load: () => ({ name: "Grace" }),
     });
 

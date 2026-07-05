@@ -5,7 +5,7 @@ import {
   resolveClientReferenceAssets,
   resolveServerRouteAssets,
 } from "virtual:fig-start/server-manifest";
-import { postService } from "./data.ts";
+import { serverDataResources } from "virtual:fig-start/server-data-resources";
 import { start } from "./start.tsx";
 
 const startConfig: StartConfig = start;
@@ -36,9 +36,9 @@ void startDevServer({
   appUrl: new URL("./server.js", import.meta.url).href,
   clientReferenceAssets,
   context: () => ({ appName }),
-  dataContext: () => ({ posts: postService }),
   port: Number(process.env.PORT ?? 3000),
   publicUrl: "https://fig-demo-start.localhost/",
+  serverDataResources,
   serverRouteAssets,
 });
 

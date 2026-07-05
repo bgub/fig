@@ -11,7 +11,7 @@
     "prepare": "./scripts/prepare-effect.sh",
     "test": "vp test",
     "test:dom": "vp run --filter @bgub/fig-dom test",
-    "test:e2e": "vp run --concurrency-limit 1 --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client test:e2e",
+    "test:e2e": "vp run --concurrency-limit 1 --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-client --filter @bgub/fig-demo-start --filter @bgub/fig-demo-payload test:e2e",
     "test:reconciler": "vp run --filter @bgub/fig-reconciler test",
     "test:watch": "vp test watch",
     "size": "size-limit"

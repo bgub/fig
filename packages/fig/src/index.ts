@@ -87,6 +87,8 @@ export type {
   DataResourceKey,
   DataResourceKeyInput,
   DataResourceLoadContext,
+  DataResourceRemote,
+  FigDataRemoteFetcher,
   FigDataHydrationEntry,
   FigDataResource,
   FigDataStoreHandle,

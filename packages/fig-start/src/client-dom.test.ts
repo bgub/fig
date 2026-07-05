@@ -9,6 +9,7 @@ import {
   Suspense,
 } from "@bgub/fig";
 import { dataResource, readData } from "@bgub/fig-data";
+import { serverDataResource } from "@bgub/fig-data/server";
 import { describe, expect, it } from "vite-plus/test";
 import { hydrateStart } from "./client.ts";
 import { Outlet } from "./components.tsx";
@@ -393,10 +394,8 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
   it("hydrates document data streamed after the bootstrap snapshot", async () => {
     const pending = deferred<string>();
     let loadCalls = 0;
-    const identity = dataResource.identity<[string], string>({
+    const resource = serverDataResource<[string], string>({
       key: (id) => ["client-document-stream", id],
-    });
-    const resource = dataResource.server(identity, {
       load: () => {
         loadCalls += 1;
         return pending.promise;
@@ -448,6 +447,68 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
 
     expect(document.querySelector(".data")?.textContent).toBe("Streamed data");
     expect(loadCalls).toBe(1);
+  });
+
+  it("fetches remote data resources for client route cache misses", async () => {
+    let loadCalls = 0;
+    const clientResource = dataResource.remote<[string], string>({
+      id: "test#remoteUser",
+      key: (id) => ["remote-client-user", id],
+    });
+    const serverResource = serverDataResource({
+      key: (id: string) => ["remote-client-user", id],
+      load: (id: string) => {
+        loadCalls += 1;
+        return `User ${id}`;
+      },
+    });
+    function RemoteUser(): FigNode {
+      return createElement(
+        "span",
+        { class: "remote-user" },
+        readData(clientResource, "one"),
+      );
+    }
+    const remoteRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => createElement("h1", null, "Home"),
+      }),
+      createFileRoute("/remote")({
+        component: () =>
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Loading") },
+            createElement(RemoteUser),
+          ),
+      }),
+    ];
+    await installServerRenderedDocument("/", remoteRoutes);
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: remoteRoutes,
+      serverDataResources: {
+        "test#remoteUser": serverResource,
+      },
+    });
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => handler(toRequest(input, init));
+
+    try {
+      const router = hydrateStart({ routes: remoteRoutes });
+      await router.navigate("/remote");
+      await flush();
+
+      expect(document.querySelector(".remote-user")?.textContent).toBe(
+        "User one",
+      );
+      expect(loadCalls).toBe(1);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 
   it("reports missing client-reference resolvers during server route navigation", async () => {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   type ClientRef,
   rootRelative,
+  type ServerDataResourceRef,
   transformServerModule,
 } from "./transform.ts";
 
@@ -42,6 +43,20 @@ export async function collectServerRoutes(
   return [...refs.values()];
 }
 
+export async function collectServerDataResources(
+  root: string,
+): Promise<ServerDataResourceRef[]> {
+  const files = await findServerModules(join(root, "src"));
+  const refs = new Map<string, ServerDataResourceRef>();
+
+  for (const file of files) {
+    const code = await readFile(file, "utf8");
+    const result = await transformServerModule(code, file, root);
+    for (const ref of result.serverDataResources) refs.set(ref.id, ref);
+  }
+  return [...refs.values()];
+}
+
 async function findServerModules(dir: string): Promise<string[]> {
   let entries;
   try {
@@ -55,7 +70,10 @@ async function findServerModules(dir: string): Promise<string[]> {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await findServerModules(full)));
-    } else if (entry.name.endsWith(".server.tsx")) {
+    } else if (
+      entry.name.endsWith(".server.ts") ||
+      entry.name.endsWith(".server.tsx")
+    ) {
       files.push(full);
     }
   }

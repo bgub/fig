@@ -5,10 +5,16 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
 }) => {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
+  const dataRequests: string[] = [];
 
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/__fig/data") {
+      dataRequests.push(request.postData() ?? "");
+    }
   });
 
   await page.goto("/", { waitUntil: "commit" });
@@ -21,6 +27,28 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
     "data-fig-hydrated",
     "true",
   );
+  const isomorphicData = page.locator('[data-ssr-data-kind="isomorphic"]');
+  const serverInfoValue = page.locator('[data-ssr-data-value="server-info"]');
+  const serverOnlyData = page.locator('[data-ssr-data-kind="server-only"]');
+  await expect(isomorphicData).toContainText("Loaded on the server (Node");
+  await expect(serverInfoValue).toContainText("us-west (origin)");
+  await expect(serverOnlyData).toContainText(
+    "Loaded only by the server renderer (Node",
+  );
+
+  await page.getByRole("button", { name: "Refresh data resource" }).click();
+  await expect.poll(() => dataRequests.length).toBe(1);
+  await expect(isomorphicData).toContainText("Loaded on the server (Node");
+  await expect(serverInfoValue).toContainText("us-west (origin)");
+  await expect(serverOnlyData).toContainText(
+    "Loaded only by the server renderer (Node",
+  );
+
+  await page.getByRole("button", { name: "Refresh anyways (errors)" }).click();
+  await expect(page.locator("[data-ssr-data-error]")).toContainText(
+    "Unsupported refresh: no-client-loader.",
+  );
+  expect(dataRequests).toHaveLength(1);
 
   const shellButton = page.getByRole("button", { name: "Shell clicks: 0" });
   await expect(shellButton).toBeVisible();

@@ -97,7 +97,7 @@ describe("root data store without @bgub/fig-data", () => {
     // Loading the package registers the factory; the live root's stub must
     // upgrade in place and replay the buffered hydration entries.
     const { dataResource, readData } = await import("@bgub/fig-data");
-    const greeting = dataResource.identity<[], string>({
+    const greeting = dataResource<[], string>({
       key: () => ["greeting"],
     });
 
@@ -110,7 +110,7 @@ describe("root data store without @bgub/fig-data", () => {
 
     // Post-upgrade, handle methods delegate to the real store.
     root.data.hydrate([{ key: ["late"], value: "late" }]);
-    const late = dataResource.identity<[], string>({ key: () => ["late"] });
+    const late = dataResource<[], string>({ key: () => ["late"] });
     function Late() {
       return createElement("span", null, readData(late));
     }

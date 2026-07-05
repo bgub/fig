@@ -354,7 +354,7 @@ describe("@bgub/fig-dom data resources", () => {
   });
 
   it("hydrates initial data entries before the first client read", () => {
-    const hydratedResource = dataResource.identity<[string], string>({
+    const hydratedResource = dataResource<[string], string>({
       key: (id: string) => ["hydrated", id],
     });
 
@@ -380,8 +380,8 @@ describe("@bgub/fig-dom data resources", () => {
     expect(container.textContent).toBe("Hydrated");
   });
 
-  it("reports unsupported refreshes for identity-only resources", async () => {
-    const hydratedResource = dataResource.identity<[string], string>({
+  it("reports unsupported refreshes for loader-less resources", async () => {
+    const hydratedResource = dataResource<[string], string>({
       key: (id: string) => ["hydrate-only", id],
     });
 

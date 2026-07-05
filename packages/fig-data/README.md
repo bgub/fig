@@ -136,25 +136,51 @@ const userResource = dataResource({
 Server renderers expose fulfilled data entries with `getData()`. Pass those
 entries to the client root as `initialData` to hydrate by key.
 
-For server-only data, split the serializable key identity from the server
+For server-only data, split the browser-safe key resource from the server
 loader:
 
 ```ts
-export const userIdentity = dataResource.identity<[string], User>({
+import { serverDataResource } from "@bgub/fig-data/server";
+
+export const userKey = (id: string) => ["user", id];
+
+export const userResource = dataResource<[string], User>({
   name: "User",
-  key: (id) => ["user", id],
+  key: userKey,
 });
 
-export const userResource = dataResource.server(userIdentity, {
+export const userServerResource = serverDataResource({
+  name: "User",
+  key: userKey,
   load: async (id, { context }) => context.db.user.find(id),
 });
 ```
 
-Client code imports the identity. If the server streamed a value for the same
-key, the client can read it as a hydrate-only entry. Since the identity has no
-client loader, `refreshData(userIdentity, id)` resolves with
+Client code imports the loader-less resource. If the server streamed a value
+for the same key, the client can read it as a hydrate-only entry. Since the
+resource has no client loader, `refreshData(userResource, id)` resolves with
 `{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs an
 payload or framework refresh path.
+
+Fig Start server modules can opt a server resource into direct client refreshes
+with literal `remote: true`:
+
+```ts
+import { serverDataResource } from "@bgub/fig-data/server";
+
+export const userResource = serverDataResource({
+  remote: true,
+  key: (id: string) => ["user", id],
+  load: async (id, { context }) => context.db.user.find(id),
+});
+```
+
+The client import becomes a remote stub only for resources that opt in this
+way. Hydrated values are still used first; cache misses and `refreshData(...)`
+use the root's remote data transport. If no transport is installed, refresh resolves with
+`{ status: "unsupported", reason: "no-remote-fetcher" }`. Server route payload
+navigations do not make an extra data request — data read during the payload
+render streams in that same payload response.
 
 ## Activity, Errors, And DevTools
 

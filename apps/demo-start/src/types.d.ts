@@ -40,3 +40,7 @@ declare module "virtual:fig-start/server-manifest" {
     id: string;
   }): import("@bgub/fig").FigAssetResourceList;
 }
+
+declare module "virtual:fig-start/server-data-resources" {
+  export const serverDataResources: Record<string, unknown>;
+}

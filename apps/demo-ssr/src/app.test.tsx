@@ -6,6 +6,7 @@ import {
   demoRootId,
   streamIdentifierPrefix,
 } from "./app.tsx";
+import { serverInfoResource, serverOnlyInfoResource } from "./data.server.ts";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -36,7 +37,11 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 function renderDemo(request: DemoRequest) {
   return renderToStream(
     <div id={demoRootId}>
-      <App request={request} />
+      <App
+        request={request}
+        serverInfoResource={serverInfoResource}
+        serverOnlyInfoResource={serverOnlyInfoResource}
+      />
     </div>,
     { identifierPrefix: streamIdentifierPrefix },
   );

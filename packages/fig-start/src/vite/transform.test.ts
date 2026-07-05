@@ -123,6 +123,7 @@ export const Route = createFileRoute("/dashboard")({
 });
 function Dashboard() { return <Island />; }`,
       "/project/src/routes/dashboard.server.tsx",
+      root,
     );
 
     expect(out.routePath).toBe("/dashboard");
@@ -146,6 +147,7 @@ export const Route = createFileRoute(path)({
 });
 function Dashboard() { return null; }`,
       "/project/src/routes/dashboard.server.tsx",
+      root,
     );
 
     expect(out.routePath).toBe(null);
@@ -157,6 +159,7 @@ function Dashboard() { return null; }`,
     const out = await transformServerRouteClientStub(
       `export function readSecret() { return "secret"; }`,
       "/project/src/server-only.server.tsx",
+      root,
     );
 
     expect(out.routePath).toBe(null);
@@ -174,6 +177,142 @@ function Dashboard() { return null; }`,
         root,
       ),
     ).rejects.toThrow(/import \* as/);
+  });
+
+  it("discovers remote server data resources in server modules", async () => {
+    const out = await transformServerModule(
+      `import { serverDataResource } from "@bgub/fig-data/server";
+export const userResource = serverDataResource({
+  name: "User",
+  remote: true,
+  key: (id: string) => ["user", id],
+  load: async (id: string) => ({ id }),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.serverDataResources).toEqual([
+      {
+        exportName: "userResource",
+        id: "/src/data/user.server.ts#userResource",
+        specifier: "/src/data/user.server.ts",
+      },
+    ]);
+  });
+
+  it("does not register server-only data resources for endpoints", async () => {
+    const out = await transformServerModule(
+      `import { serverDataResource } from "@bgub/fig-data/server";
+export const userResource = serverDataResource({
+  name: "User",
+  key: (id: string) => ["user", id],
+  load: async (id: string) => ({ id }),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.serverDataResources).toEqual([]);
+  });
+
+  it("stubs remote server data resources for browser bundles", async () => {
+    const out = await transformServerRouteClientStub(
+      `import { serverDataResource } from "@bgub/fig-data/server";
+import { db } from "./db.server.ts";
+export const userResource = serverDataResource({
+  name: "User",
+  remote: true,
+  key: (id: string) => ["user", id],
+  load: async (id: string) => db.user(id),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.routePath).toBe(null);
+    expect(out.remoteResources).toHaveLength(1);
+    expect(out.code).toContain("dataResource as __figDataResource");
+    expect(out.code).toContain("__figDataResource.remote");
+    expect(out.code).toContain('"/src/data/user.server.ts#userResource"');
+    expect(out.code).toContain('key: (id: string) => ["user", id]');
+    expect(out.code).toContain('name: "User"');
+    expect(out.code).not.toContain("db.user");
+  });
+
+  it("does not stub server-only data resources for browser bundles", async () => {
+    const out = await transformServerRouteClientStub(
+      `import { serverDataResource } from "@bgub/fig-data/server";
+import { db } from "./db.server.ts";
+export const userResource = serverDataResource({
+  name: "User",
+  key: (id: string) => ["user", id],
+  load: async (id: string) => db.user(id),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.remoteResources).toEqual([]);
+    expect(out.code).toContain("Cannot import server module");
+    expect(out.code).not.toContain("__figDataResource.remote");
+    expect(out.code).not.toContain("db.user");
+  });
+
+  it("preserves shared imports referenced by remote data resource stubs", async () => {
+    const out = await transformServerRouteClientStub(
+      `import { serverDataResource } from "@bgub/fig-data/server";
+import { userKey as keyForUser, userName } from "./user.keys.ts";
+import { db } from "./db.server.ts";
+export const userResource = serverDataResource({
+  name: userName,
+  remote: true,
+  key: keyForUser,
+  load: async (id: string) => db.user(id),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.code).toContain(
+      `import { userKey as keyForUser } from "./user.keys.ts";`,
+    );
+    expect(out.code).toContain(`import { userName } from "./user.keys.ts";`);
+    expect(out.code).toContain("key: keyForUser");
+    expect(out.code).toContain("name: userName");
+    expect(out.code).not.toContain("db.server");
+  });
+
+  it("rejects remote data resource stubs that reference server-only imports", async () => {
+    await expect(
+      transformServerRouteClientStub(
+        `import { serverDataResource } from "@bgub/fig-data/server";
+import { userKey } from "./user.keys.server.ts";
+export const userResource = serverDataResource({
+  remote: true,
+  key: userKey,
+  load: async (id: string) => ({ id }),
+});`,
+        "/project/src/data/user.server.ts",
+        root,
+      ),
+    ).rejects.toThrow(/cannot import "\.\/user\.keys\.server\.ts"/);
+  });
+
+  it("rejects non-literal remote server data resource options", async () => {
+    await expect(
+      transformServerRouteClientStub(
+        `import { serverDataResource } from "@bgub/fig-data/server";
+const isRemote = true;
+export const userResource = serverDataResource({
+  remote: isRemote,
+  key: (id: string) => ["user", id],
+  load: async (id: string) => ({ id }),
+});`,
+        "/project/src/data/user.server.ts",
+        root,
+      ),
+    ).rejects.toThrow(/must use remote: true/);
   });
 
   it("derives a stable id from root-relative path + export", () => {

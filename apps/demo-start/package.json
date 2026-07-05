@@ -4,12 +4,14 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
+    "build:e2e": "vp run --filter @bgub/fig-demo-start... build",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs start",
     "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",
-    "test": "vp test run --passWithNoTests"
+    "test": "vp test run --passWithNoTests",
+    "test:e2e": "sh ../../scripts/free-port.sh 4183 && playwright test"
   },
   "portless": {
     "name": "fig-demo-start",
@@ -23,6 +25,7 @@
     "@bgub/fig-start": "workspace:*"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20.19.0"
   }
 }

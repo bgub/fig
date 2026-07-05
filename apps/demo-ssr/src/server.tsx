@@ -8,6 +8,8 @@ import {
 import { assets, meta, title } from "@bgub/fig";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig";
+import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig-data";
+import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
 import {
   App,
   clientDataFor,
@@ -17,10 +19,13 @@ import {
   demoDataScriptId,
   demoRootId,
   scaledDemoDelay,
+  type ServerDataContext,
+  serverInfoResourceId,
   type ServerInfo,
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
+import { serverInfoResource, serverOnlyInfoResource } from "./data.server.ts";
 import {
   devReloadScript,
   handleDevReloadRequest,
@@ -31,8 +36,33 @@ import { styles } from "./styles.ts";
 const port = Number(process.env.PORT ?? 4180);
 const logRecoveredErrors = process.env.FIG_STREAM_DEMO_LOG_ERRORS === "1";
 const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
+const dataEndpointPath = "/__fig/data";
 const noStore = { "cache-control": "no-store" };
 const textPlain = { "content-type": "text/plain; charset=utf-8" };
+
+interface DataResourceRequestBody {
+  args: readonly unknown[];
+  id: string;
+}
+
+interface DataEndpointContext extends ServerDataContext {
+  info: ServerInfo;
+  requestId: string;
+}
+
+interface CallableServerDataResource {
+  key: (...args: unknown[]) => DataResourceKey;
+  load: (
+    ...argsAndContext: [
+      ...unknown[],
+      DataResourceLoadContext<DataEndpointContext>,
+    ]
+  ) => unknown;
+}
+
+const dataResourceRegistry: Record<string, unknown> = {
+  [serverInfoResourceId]: serverInfoResource,
+};
 
 watchDevReloadFile(clientScriptUrl);
 
@@ -59,6 +89,11 @@ async function handleRequest(
     : (request.headers.host ?? `127.0.0.1:${port}`);
   const url = new URL(request.url ?? "/", `http://${host}`);
   if (handleDevReloadRequest(request, response, url)) return;
+
+  if (url.pathname === dataEndpointPath) {
+    await handleDataResourceRequest(request, response);
+    return;
+  }
 
   if (url.pathname === "/style.css") {
     send(response, 200, styles, {
@@ -93,11 +128,7 @@ async function handleRequest(
     abortDelay,
     new Date().toLocaleTimeString(),
   );
-  const serverInfo: ServerInfo = {
-    region: "us-west (origin)",
-    renderedAt: new Date().toLocaleTimeString(),
-    runtime: `Node ${process.version}`,
-  };
+  const dataContext = dataEndpointContext(nonce.slice(0, 8));
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -115,13 +146,17 @@ async function handleRequest(
             }),
           ],
           <div id={demoRootId}>
-            <App request={demoRequest} />
+            <App
+              request={demoRequest}
+              serverInfoResource={serverInfoResource}
+              serverOnlyInfoResource={serverOnlyInfoResource}
+            />
           </div>,
         )}
       </body>
     </html>,
     {
-      dataContext: { info: serverInfo },
+      dataContext,
       identifierPrefix: streamIdentifierPrefix,
       nonce,
       onError(error, info) {
@@ -180,6 +215,103 @@ async function handleRequest(
     if (abortTimer !== null) clearTimeout(abortTimer);
     if (!closed && !response.writableEnded) response.end();
   }
+}
+
+async function handleDataResourceRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Method not allowed." });
+    return;
+  }
+
+  const body = await readDataResourceRequestBody(request);
+  if (body === null) {
+    sendJson(response, 400, { error: "Invalid request." });
+    return;
+  }
+
+  const resource = dataResourceForId(body.id);
+  if (resource === null) {
+    sendJson(response, 404, { error: "Unknown data resource." });
+    return;
+  }
+
+  const args = [...body.args];
+  let key: DataResourceKey;
+  try {
+    key = resource.key(...args);
+    normalizeDataResourceKey(key);
+  } catch {
+    sendJson(response, 400, { error: "Invalid data resource key." });
+    return;
+  }
+
+  const controller = new AbortController();
+  request.once("aborted", () => controller.abort());
+
+  try {
+    const value = await resource.load(...args, {
+      context: dataEndpointContext(),
+      signal: controller.signal,
+    });
+    sendJson(response, 200, { key, value });
+  } catch {
+    sendJson(response, 500, { error: "Data resource failed." });
+  }
+}
+
+function dataResourceForId(id: string): CallableServerDataResource | null {
+  return callableServerDataResource(dataResourceRegistry[id]);
+}
+
+function callableServerDataResource(
+  value: unknown,
+): CallableServerDataResource | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Partial<CallableServerDataResource>;
+  return typeof record.key === "function" && typeof record.load === "function"
+    ? (record as CallableServerDataResource)
+    : null;
+}
+
+async function readDataResourceRequestBody(
+  request: IncomingMessage,
+): Promise<DataResourceRequestBody | null> {
+  let body: unknown;
+  try {
+    body = JSON.parse(await readRequestText(request));
+  } catch {
+    return null;
+  }
+
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as Record<string, unknown>;
+  return typeof record.id === "string" && Array.isArray(record.args)
+    ? { args: record.args, id: record.id }
+    : null;
+}
+
+async function readRequestText(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function dataEndpointContext(
+  requestId = randomUUID().slice(0, 8),
+): DataEndpointContext {
+  return {
+    info: {
+      region: "us-west (origin)",
+      renderedAt: new Date().toLocaleTimeString(),
+      runtime: `Node ${process.version}`,
+    },
+    requestId,
+  };
 }
 
 function abortDelayFor(url: URL): number | null {
@@ -311,6 +443,17 @@ function send(
 ): void {
   response.writeHead(status, headers);
   response.end(body);
+}
+
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+): void {
+  send(response, status, JSON.stringify(body), {
+    ...noStore,
+    "content-type": "application/json; charset=utf-8",
+  });
 }
 
 async function sendFile(

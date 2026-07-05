@@ -64,7 +64,7 @@ describe("@bgub/fig-data", () => {
   it("drops dependencies from abandoned render attempts on reset", () => {
     const scheduled: object[] = [];
     const owner = {};
-    const resource = dataResource({
+    const resource = dataResource<[string], string>({
       key: (id: string) => ["reset", id],
       load: (id: string) => id,
     });
@@ -193,7 +193,7 @@ describe("@bgub/fig-data", () => {
 
   it("does not create entries for unsupported refreshes with no value", async () => {
     const changes: string[] = [];
-    const hydrateOnlyResource = dataResource.identity<[string], string>({
+    const hydrateOnlyResource = dataResource<[string], string>({
       key: (id) => ["hydrate-only-missing", id],
     });
     const store = createDataStore<object, null>({
@@ -210,6 +210,43 @@ describe("@bgub/fig-data", () => {
       status: "unsupported",
     });
     expect(changes).toEqual([]);
+  });
+
+  it("loads remote resources through the store host fetcher", () => {
+    const owner = {};
+    const remoteResource = dataResource.remote<[string], string>({
+      id: "users#name",
+      key: (id) => ["remote-user", id],
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      remoteFetch: (resource, args) => {
+        expect(resource).toEqual({ id: "users#name" });
+        expect(args).toEqual(["one"]);
+        return "Ada";
+      },
+      schedule: () => undefined,
+    });
+
+    expect(store.readData(remoteResource, ["one"], owner)).toBe("Ada");
+  });
+
+  it("keeps remote resources unsupported without a host fetcher", async () => {
+    const remoteResource = dataResource.remote<[string], string>({
+      id: "users#missing",
+      key: (id) => ["remote-missing", id],
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await expect(store.refreshData(remoteResource, "one")).resolves.toEqual({
+      reason: "no-remote-fetcher",
+      status: "unsupported",
+    });
   });
 
   it("supersedes older fulfilled-value refreshes", async () => {

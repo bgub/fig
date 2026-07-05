@@ -1,5 +1,8 @@
 import { lazy, readPromise, Suspense } from "@bgub/fig";
+import { readData } from "@bgub/fig-data";
 import { PayloadBoundary } from "@bgub/fig-server/payload";
+import { payloadSummaryResource } from "./data.ts";
+import { payloadAuditResource } from "./data.server.ts";
 import { feedBoundaryId, RefreshButtonRef } from "./shared.ts";
 import { AppFrame } from "./shell.tsx";
 
@@ -58,6 +61,9 @@ export function PayloadApp({ data }: { data: DemoData }) {
 }
 
 export function Dashboard({ data }: { data: DemoData }) {
+  const summary = readData(payloadSummaryResource, data.seed);
+  const audit = readData(payloadAuditResource, data.seed);
+
   return (
     <section class="panel tone-ok dashboard-panel" data-seed={data.seed}>
       <div class="panel-header">
@@ -85,6 +91,18 @@ export function Dashboard({ data }: { data: DemoData }) {
         <section class="panel">
           <h3>Dispatch region</h3>
           <p class="muted">{data.stats.region}</p>
+        </section>
+        <section class="panel">
+          <h3>Shared data</h3>
+          <p class="muted" data-payload-data-kind="isomorphic">
+            {summary.source} · {summary.bucket} · load {summary.reads}
+          </p>
+        </section>
+        <section class="panel">
+          <h3>Server data</h3>
+          <p class="muted" data-payload-data-kind="server-only">
+            {audit.source} · request {audit.requestId} · seed {audit.seed}
+          </p>
         </section>
         <section class="panel">
           <h3>Refresh scope</h3>

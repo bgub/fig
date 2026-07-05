@@ -7,7 +7,8 @@ import {
   stylesheet,
   Suspense,
 } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig-data";
+import { serverDataResource } from "@bgub/fig-data/server";
 import { createPayloadResponse } from "@bgub/fig-server/payload";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
+  DATA_ENDPOINT_PATH,
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
   PAYLOAD_BOUNDARY_HEADER,
@@ -355,10 +357,8 @@ describe("@bgub/fig-start server handler", () => {
 
   it("streams document data discovered after the bootstrap snapshot", async () => {
     const pending = deferred<string>();
-    const identity = dataResource.identity<[string], string>({
+    const resource = serverDataResource<[string], string>({
       key: (id) => ["document-stream", id],
-    });
-    const resource = dataResource.server(identity, {
       load: () => pending.promise,
     });
     function SlowData(): FigNode {
@@ -396,6 +396,48 @@ describe("@bgub/fig-start server handler", () => {
 
     expect(rest).toContain(DATA_FRAME_ATTR);
     expect(rest).toContain("Streamed value");
+  });
+
+  it("serves only registered remote data resources", async () => {
+    const remoteResource = serverDataResource({
+      key: (id: string) => ["remote-endpoint", id],
+      load: async (id: string, { context }) =>
+        `${(context as { prefix: string }).prefix}${id}`,
+    });
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      dataContext: () => ({ prefix: "user-" }),
+      routes,
+      serverDataResources: {
+        "test#remoteResource": remoteResource,
+      },
+    });
+
+    const response = await handler(
+      new Request(`http://localhost${DATA_ENDPOINT_PATH}`, {
+        body: JSON.stringify({
+          args: ["one"],
+          id: "test#remoteResource",
+        }),
+        method: "POST",
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      key: ["remote-endpoint", "one"],
+      value: "user-one",
+    });
+
+    const missing = await handler(
+      new Request(`http://localhost${DATA_ENDPOINT_PATH}`, {
+        body: JSON.stringify({
+          args: ["one"],
+          id: "test#missing",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(missing.status).toBe(404);
   });
 
   it("serves configured static assets", async () => {

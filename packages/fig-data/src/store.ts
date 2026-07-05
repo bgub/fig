@@ -11,6 +11,8 @@ import {
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext as FigDataResourceLoadContext,
+  type DataResourceRemote,
+  type FigDataRemoteFetcher,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataResource,
@@ -25,6 +27,8 @@ export {
   type DataRefreshResult,
   type DataResourceKey,
   type DataResourceKeyInput,
+  type DataResourceRemote,
+  type FigDataRemoteFetcher,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
 };
@@ -47,17 +51,20 @@ export type RegisteredContext = Register extends { context: infer C }
 export type DataResourceLoadContext<TStoreContext = RegisteredContext> =
   FigDataResourceLoadContext<TStoreContext>;
 
+interface DataResourceBaseOptions<TArgs extends unknown[]> {
+  key: (...args: TArgs) => DataResourceKey;
+  debugArgs?: (...args: TArgs) => DataResourceKeyInput;
+  name?: string;
+}
+
 export interface DataResourceOptions<
   TArgs extends unknown[],
   TValue,
   TStoreContext = RegisteredContext,
-> {
-  key: (...args: TArgs) => DataResourceKey;
-  load: (
+> extends DataResourceBaseOptions<TArgs> {
+  load?: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
   ) => TValue | PromiseLike<TValue>;
-  debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  name?: string;
 }
 
 export type DataResource<
@@ -74,6 +81,7 @@ export interface DataStoreHost<Owner extends object, Lane> {
   onEntryEvict?: (entry: DataStoreEntrySnapshot) => void;
   partition?: DataResourceKeyInput;
   preloadRetentionMs?: number;
+  remoteFetch?: FigDataRemoteFetcher;
   schedule(owner: Owner, lane: Lane): void;
 }
 
@@ -90,29 +98,21 @@ export interface DataResourceFactory {
   <TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
     options: DataResourceOptions<TArgs, TValue, TStoreContext>,
   ): DataResource<TArgs, TValue, TStoreContext>;
-  identity<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
-    options: DataResourceIdentityOptions<TArgs>,
-  ): DataResource<TArgs, TValue, TStoreContext>;
-  server<TArgs extends unknown[], TValue, TStoreContext>(
-    identity: DataResource<TArgs, TValue, TStoreContext>,
-    options: DataResourceServerOptions<TArgs, TValue, TStoreContext>,
+  remote<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
+    options: DataResourceRemoteOptions<TArgs>,
   ): DataResource<TArgs, TValue, TStoreContext>;
 }
 
-export interface DataResourceIdentityOptions<TArgs extends unknown[]> {
-  key: (...args: TArgs) => DataResourceKey;
-  debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  name?: string;
-}
-
-export interface DataResourceServerOptions<
+export interface DataResourceRemoteOptions<
   TArgs extends unknown[],
-  TValue,
-  TStoreContext = RegisteredContext,
-> {
-  load: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
-  ) => TValue | PromiseLike<TValue>;
+> extends DataResourceBaseOptions<TArgs> {
+  id: string;
+}
+
+interface DataResourceRemoteCreateOptions<
+  TArgs extends unknown[],
+> extends DataResourceBaseOptions<TArgs> {
+  remote: DataResourceRemote;
 }
 
 interface Entry<Owner extends object, Lane> {
@@ -172,24 +172,14 @@ export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
     return createDataResource(options);
   },
   {
-    identity<
-      TArgs extends unknown[],
-      TValue,
-      TStoreContext = RegisteredContext,
-    >(
-      options: DataResourceIdentityOptions<TArgs>,
-    ): DataResource<TArgs, TValue, TStoreContext> {
-      return createDataResource(options);
-    },
-    server<TArgs extends unknown[], TValue, TStoreContext>(
-      identity: DataResource<TArgs, TValue, TStoreContext>,
-      options: DataResourceServerOptions<TArgs, TValue, TStoreContext>,
+    remote<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
+      options: DataResourceRemoteOptions<TArgs>,
     ): DataResource<TArgs, TValue, TStoreContext> {
       return createDataResource({
-        debugArgs: identity.debugArgs,
-        key: identity.key,
-        load: options.load,
-        name: identity.name,
+        debugArgs: options.debugArgs,
+        key: options.key,
+        name: options.name,
+        remote: { id: options.id },
       });
     },
   },
@@ -247,7 +237,7 @@ export function normalizeDataResourceKey(key: DataResourceKey): string {
 
 function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
   options:
-    | DataResourceIdentityOptions<TArgs>
+    | DataResourceRemoteCreateOptions<TArgs>
     | DataResourceOptions<TArgs, TValue, TStoreContext>,
 ): DataResource<TArgs, TValue, TStoreContext> {
   return {
@@ -256,6 +246,10 @@ function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     key: options.key,
     load: "load" in options ? options.load : undefined,
     name: options.name,
+    remote:
+      "remote" in options && typeof options.remote === "object"
+        ? options.remote
+        : undefined,
   };
 }
 
@@ -468,7 +462,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue, TStoreContext>,
     ...args: TArgs
   ): void {
-    if (this.disposed || resource.load === undefined) return;
+    if (this.disposed || !this.canLoad(resource)) return;
 
     const { entry } = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
@@ -497,7 +491,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.stale &&
       entry.pending === null &&
       entry.refreshError === undefined &&
-      resource.load !== undefined
+      this.canLoad(resource)
     ) {
       // A failed background refresh keeps the stale value and records
       // refreshError; do not auto-retry on every subsequent read or a
@@ -531,14 +525,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       });
     }
 
-    if (resource.load === undefined) {
+    if (!this.canLoad(resource)) {
       const { entry } = this.entryFor(resource, args, false);
       if (entry === null) {
-        return Promise.resolve(unsupportedRefreshResult<TValue>());
+        return Promise.resolve(
+          unsupportedRefreshResult<TValue>(resource.remote),
+        );
       }
 
       this.clearInactiveTimer(entry);
-      return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
+      return Promise.resolve(
+        unsupportedRefreshResult<TValue>(resource.remote, entry),
+      );
     }
 
     const { entry } = this.entryFor(resource, args, true);
@@ -680,6 +678,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       : `${this.partitionKey}:${canonicalKey}`;
   }
 
+  private canLoad<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: DataResource<TArgs, TValue, TStoreContext>,
+  ): boolean {
+    return (
+      resource.load !== undefined ||
+      (resource.remote !== undefined && this.host.remoteFetch !== undefined)
+    );
+  }
+
   private startLoad<TArgs extends unknown[], TValue, TStoreContext>(
     entry: Entry<Owner, Lane>,
     resource: DataResource<TArgs, TValue, TStoreContext>,
@@ -692,15 +699,19 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(abortedRefreshResult(entry, "store-disposed"));
     }
 
-    if (resource.load === undefined) {
+    if (!this.canLoad(resource)) {
       const error = new Error(
-        `Data resource "${resource.name ?? entry.canonicalKey}" has no loader and no hydrated value.`,
+        resource.remote === undefined
+          ? `Data resource "${resource.name ?? entry.canonicalKey}" has no loader and no hydrated value.`
+          : `Remote data resource "${resource.name ?? entry.canonicalKey}" has no remote fetcher and no hydrated value.`,
       );
       entry.error = error;
       entry.status = "rejected";
       markDataResourceError(error, entry.key);
       this.notifyEntryChange(entry);
-      return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
+      return Promise.resolve(
+        unsupportedRefreshResult<TValue>(resource.remote, entry),
+      );
     }
 
     this.abortActiveLoad(entry, "superseded");
@@ -717,10 +728,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     let loaded: TValue | PromiseLike<TValue>;
     try {
-      loaded = resource.load(...args, {
-        context: this.host.context as TStoreContext,
-        signal: controller.signal,
-      });
+      loaded = this.loadResource(resource, args, controller.signal);
     } catch (error) {
       loaded = Promise.reject(error);
     }
@@ -789,6 +797,26 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     void Promise.resolve(loaded).then(fulfill, reject);
 
     return pending.promise;
+  }
+
+  private loadResource<TArgs extends unknown[], TValue, TStoreContext>(
+    resource: DataResource<TArgs, TValue, TStoreContext>,
+    args: TArgs,
+    signal: AbortSignal,
+  ): TValue | PromiseLike<TValue> {
+    if (resource.load !== undefined) {
+      return resource.load(...args, {
+        context: this.host.context as TStoreContext,
+        signal,
+      });
+    }
+
+    const remote = resource.remote;
+    const remoteFetch = this.host.remoteFetch;
+    if (remote === undefined || remoteFetch === undefined) {
+      throw new Error("Data resource load started without a loader.");
+    }
+    return remoteFetch(remote, args, signal) as TValue | PromiseLike<TValue>;
   }
 
   private publish(entry: Entry<Owner, Lane>): void {
@@ -968,9 +996,12 @@ function unsupportedRefreshResult<
   T,
   Owner extends object = object,
   Lane = unknown,
->(entry?: Entry<Owner, Lane>): DataRefreshResult<T> {
+>(
+  remote?: DataResourceRemote,
+  entry?: Entry<Owner, Lane>,
+): DataRefreshResult<T> {
   const result: DataRefreshResult<T> = {
-    reason: "no-client-loader",
+    reason: remote === undefined ? "no-client-loader" : "no-remote-fetcher",
     status: "unsupported",
   };
 

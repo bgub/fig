@@ -10,6 +10,7 @@ import {
   type Props,
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
+import type { DataResource, DataResourceKey } from "@bgub/fig-data";
 import {
   normalizeDataResourceKey,
   type RegisteredContext as RegisteredDataContext,
@@ -28,6 +29,7 @@ import {
 import type { Server } from "node:http";
 import {
   DATA_SCRIPT_ID,
+  DATA_ENDPOINT_PATH,
   DATA_FRAME_ATTR,
   DATA_STREAM_GLOBAL,
   PAYLOAD_BOUNDARY_HEADER,
@@ -77,10 +79,28 @@ export interface StartHandlerOptions {
   htmlLang?: string;
   nonce?: (request: Request) => string;
   routes: readonly AnyRoute[];
+  serverDataResources?: Record<string, unknown>;
   serverRouteAssets?: (metadata: { id: string }) => FigAssetResourceList;
 }
 
 export type StartHandler = (request: Request) => Promise<Response>;
+
+export type StartServerDataResource = Pick<
+  DataResource<never[], unknown, RegisteredDataContext>,
+  "key" | "load" | "name"
+>;
+
+type StartServerDataResourceLoadContext = {
+  context: RegisteredDataContext;
+  signal: AbortSignal;
+};
+
+interface CallableStartServerDataResource {
+  key: (...args: unknown[]) => DataResourceKey;
+  load: (
+    ...argsAndContext: [...unknown[], StartServerDataResourceLoadContext]
+  ) => unknown;
+}
 
 // Web-standard request handler (use directly on edge runtimes or in tests).
 // Most apps use startServer() instead.
@@ -98,6 +118,11 @@ export function createRequestHandler(
           "content-type": asset.contentType ?? contentTypeFor(url.pathname),
         },
       });
+    }
+
+    const dataContext = options.dataContext?.(request);
+    if (url.pathname === DATA_ENDPOINT_PATH) {
+      return handleDataResourceRequest(options, request, dataContext);
     }
 
     const routerContext = (await options.context?.(request)) ?? {};
@@ -118,10 +143,6 @@ export function createRequestHandler(
     router.commit(location, result);
     const status = result.status === "notFound" ? 404 : 200;
     const nonce = options.nonce?.(request);
-    // Build the per-request data context once and share it across both the payload
-    // render and the document render (a side-effecting factory must run once).
-    const dataContext = options.dataContext?.(request);
-
     const isPayloadRequest = isPayloadRouteRequest(request);
     const refreshBoundary = isPayloadRequest
       ? payloadBoundaryHeader(request)
@@ -564,6 +585,83 @@ function isPayloadRouteRequest(request: Request): boolean {
 function payloadBoundaryHeader(request: Request): string | undefined {
   const value = request.headers.get(PAYLOAD_BOUNDARY_HEADER);
   return value === null || value === "" ? undefined : value;
+}
+
+interface DataResourceRequestBody {
+  args: unknown[];
+  id: string;
+}
+
+async function handleDataResourceRequest(
+  options: StartHandlerOptions,
+  request: Request,
+  dataContext: RegisteredDataContext,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed." }, 405);
+  }
+
+  const body = await readDataResourceRequestBody(request);
+  if (body === null) return jsonResponse({ error: "Invalid request." }, 400);
+
+  const resource = callableStartServerDataResource(
+    options.serverDataResources?.[body.id],
+  );
+  if (resource === null) {
+    return jsonResponse({ error: "Unknown data resource." }, 404);
+  }
+
+  let key: DataResourceKey;
+  try {
+    key = resource.key(...body.args);
+    normalizeDataResourceKey(key);
+  } catch {
+    return jsonResponse({ error: "Invalid data resource key." }, 400);
+  }
+
+  try {
+    const value = await resource.load(...body.args, {
+      context: dataContext,
+      signal: request.signal,
+    });
+    return jsonResponse({ key, value }, 200);
+  } catch {
+    return jsonResponse({ error: "Data resource failed." }, 500);
+  }
+}
+
+function callableStartServerDataResource(
+  value: unknown,
+): CallableStartServerDataResource | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Partial<CallableStartServerDataResource>;
+  return typeof record.key === "function" && typeof record.load === "function"
+    ? (record as CallableStartServerDataResource)
+    : null;
+}
+
+async function readDataResourceRequestBody(
+  request: Request,
+): Promise<DataResourceRequestBody | null> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return null;
+  }
+
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as Record<string, unknown>;
+  return typeof record.id === "string" && Array.isArray(record.args)
+    ? { args: record.args, id: record.id }
+    : null;
+}
+
+function jsonResponse(value: unknown, status: number): Response {
+  return new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status,
+  });
 }
 
 function streamPayloadSegmentFrames(

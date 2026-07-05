@@ -44,6 +44,7 @@ export function startFigStartClient() {
     await expect(plugin.load(serverId ?? "")).resolves.toBe(
       `import { startServer } from "@bgub/fig-start/server";
 import { resolveClientReferenceAssets, resolveServerRouteAssets } from "virtual:fig-start/server-manifest";
+import { serverDataResources } from "virtual:fig-start/server-data-resources";
 import { start } from "/src/start.tsx";
 
 const { appName, onRecoverableError, ...serverOptions } = start;
@@ -67,6 +68,7 @@ startServer({
   appUrl: import.meta.url,
   clientReferenceAssets,
   context: () => ({ appName }),
+  serverDataResources,
   serverRouteAssets,
 }).catch((error) => {
   console.error(error);
@@ -95,6 +97,21 @@ export {};
     );
   });
 
+  it("rejects server data resource imports outside server modules", async () => {
+    const plugin = figStart();
+
+    await expect(
+      plugin.transform(
+        `import { serverDataResource } from "@bgub/fig-data/server";
+export const user = serverDataResource({
+  key: (id: string) => ["user", id],
+  load: async (id: string) => ({ id }),
+});`,
+        "/project/src/user.ts",
+      ),
+    ).rejects.toThrow(/serverDataResource may only be imported/);
+  });
+
   it("resolves root-relative imports from generated virtual modules", () => {
     const plugin = figStart();
     plugin.configResolved({ root: "/project" });
@@ -110,6 +127,12 @@ export {};
     ).toBe("/project/src/start.tsx");
     expect(
       plugin.resolveId("/src/start.tsx", "\0virtual:fig-start/server-manifest"),
+    ).toBe("/project/src/start.tsx");
+    expect(
+      plugin.resolveId(
+        "/src/start.tsx",
+        "\0virtual:fig-start/server-data-resources",
+      ),
     ).toBe("/project/src/start.tsx");
   });
 

@@ -3,6 +3,7 @@
 
 export const ROUTER_STATE_SCRIPT_ID = "__fig_start_state__";
 export const DATA_SCRIPT_ID = "__fig_start_data__";
+export const DATA_ENDPOINT_PATH = "/__fig/data";
 export const DATA_FRAME_ATTR = "data-fig-data-frame";
 export const DATA_STREAM_GLOBAL = "__figStartData";
 export const PAYLOAD_SEGMENTS_SCRIPT_ID = "__fig_start_payload_segments__";

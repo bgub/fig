@@ -16,8 +16,8 @@ function Home(): FigNode {
         layouts, route loaders, and data that streams in over Suspense.
       </p>
       <p>
-        <Link class="font-medium text-teal-700" to="/posts">
-          Browse the posts →
+        <Link class="font-medium text-teal-700" to="/data">
+          Explore data resources →
         </Link>
       </p>
     </section>

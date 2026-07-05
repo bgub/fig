@@ -131,14 +131,9 @@ the streamed entry — no id-to-resource registry), and namespace-level tooling:
 Variants communicate runtime constraints:
 
 - `dataResource(...)`: shared definition. The loader must be safe in every
-  runtime where it can be read.
-- `dataResource.client(...)`: deferred. A client-only definition needs real SSR
-  semantics — a server read must degrade its Suspense boundary to client render
-  and stay out of serialization — none of which an unenforced flag provided, so
-  the variant was removed until that behavior is built.
-- `dataResource.server(...)`: deferred until the server-only packaging strategy
-  exists (see Packaging And Layering). A runtime throw is enough for
-  experimentation but not for a stable server-only guarantee.
+  runtime where it can be read; omit `load` for a hydrate-only resource.
+- `serverDataResource(...)`: server-only definition from `@bgub/fig-data/server`;
+  stable packaging comes from `.server.ts(x)` ownership and framework stubs.
 
 ### `readData` Versus `readPromise`
 
@@ -195,8 +190,8 @@ runtime read would throw. Fig should support one of:
 
 - split definition and loader APIs, where client code imports only the
   serializable key shape and server code attaches the loader, or
-- a framework/compiler transform that replaces `dataResource.server(...)`
-  loaders with client stubs before bundling.
+- a framework/compiler transform that replaces `serverDataResource(...)`
+  exports with client stubs before bundling.
 
 The client stub must keep the `key` function so the client can compute the key
 and find a hydrated entry; only the loader is stripped.
@@ -777,8 +772,9 @@ precise.
 
 ### Phase 4: Server-Only Packaging
 
-- The first stable `dataResource.server(...)` strategy: split identity/loader
-  APIs or a compiler/framework transform, keeping the `key` on the client stub.
+- The first stable `serverDataResource(...)` strategy: loader-less shared
+  resources plus server-loader resources, or a compiler/framework transform,
+  keeping the `key` on the client stub.
 - Dev diagnostics for streamed entries whose namespace is missing or drifted in
   the client build; lint/codegen guidance for key stability.
 
@@ -800,8 +796,8 @@ precise.
   store only?
 - What is the exact action-local collector API, and does the standalone-helper
   convenience justify ambient resolution over an injected handle?
-- Split identity/loader APIs or a compiler/framework transform for the first
-  server-only packaging strategy?
+- Loader-less shared resources plus server-loader resources, or a
+  compiler/framework transform for the first server-only packaging strategy?
 - Should prefix invalidation (`["user"]`-prefix) be part of the core surface or a
   framework concern?
 - What should the first ErrorBoundary retry/reset API look like for failed keys?

@@ -12,6 +12,7 @@ import {
   DEV_ENV_ID,
   MANIFEST_ID,
   ROOT_RELATIVE_VIRTUAL_IDS,
+  SERVER_DATA_RESOURCES_ID,
   SERVER_ENTRY_ID,
   SERVER_MANIFEST_ID,
   SERVER_ROUTE_ASSETS_ID,
@@ -30,6 +31,7 @@ import {
   renderClientRuntime,
   renderDevEnv,
   renderManifest,
+  renderServerDataResources,
   renderServerEntry,
   renderServerManifest,
   renderServerRouteAssetModule,
@@ -42,6 +44,7 @@ import {
 } from "./static-assets.ts";
 import { isTailwindCssEntry, transformTailwindCss } from "./tailwind.ts";
 import {
+  assertNoServerDataResourceImport,
   transformServerModule,
   transformServerRouteClientStub,
 } from "./transform.ts";
@@ -104,6 +107,7 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
     [SERVER_MANIFEST_ID]: () => renderServerManifest(root),
     [CLIENT_ENTRY_ID]: () => renderClientEntry(clientNodeEnv),
     [CLIENT_RUNTIME_ID]: () => renderClientRuntime(),
+    [SERVER_DATA_RESOURCES_ID]: () => renderServerDataResources(root),
     [SERVER_ENTRY_ID]: () => renderServerEntry(),
     [DEV_ENV_ID]: () => renderDevEnv(clientNodeEnv),
     [SERVER_ROUTE_ASSETS_ID]: () => renderServerRouteAssets(root),
@@ -207,16 +211,26 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
 
       if (clean.startsWith("\0")) return null;
 
-      if (!clean.endsWith(".server.tsx") || clean.includes("/node_modules/")) {
+      if (clean.includes("/node_modules/")) {
+        return null;
+      }
+      if (!isServerModuleId(clean)) {
+        if (code.includes("@bgub/fig-data/server")) {
+          await assertNoServerDataResourceImport(code, clean);
+        }
         return null;
       }
       if (transformTarget(target, options) === "client") {
-        const result = await transformServerRouteClientStub(code, clean);
+        const result = await transformServerRouteClientStub(code, clean, root);
         return { code: result.code, map: result.map };
       }
 
       const result = await transformServerModule(code, clean, root);
-      if (result.clientRefs.length === 0 && !result.marksServerRoute) {
+      if (
+        result.clientRefs.length === 0 &&
+        result.serverDataResources.length === 0 &&
+        !result.marksServerRoute
+      ) {
         return null;
       }
       return { code: result.code, map: result.map };
@@ -313,6 +327,10 @@ function isGeneratedRootRelativeImporter(
 
 function isCssId(id: string): boolean {
   return id.endsWith(".css");
+}
+
+function isServerModuleId(id: string): boolean {
+  return id.endsWith(".server.ts") || id.endsWith(".server.tsx");
 }
 
 function transformTarget(

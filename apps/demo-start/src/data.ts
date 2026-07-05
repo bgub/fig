@@ -1,4 +1,4 @@
-import { dataResource } from "@bgub/fig-data";
+import { dataResource, type DataResourceKey } from "@bgub/fig-data";
 
 export interface Post {
   body: string;
@@ -35,13 +35,32 @@ export const postService: PostService = {
   },
 };
 
-// A keyed async render input. Reading it suspends; on the server the value
-// streams in over Suspense and is serialized for client hydration.
-export const postResource = dataResource({
-  key: (id: string) => ["post", id],
-  load: async (id: string, { context }) => {
-    const post = await context.posts.find(id);
+export interface PostSummary {
+  id: string;
+  loadCount: number;
+  source: "browser" | "server";
+  title: string;
+}
+
+let summaryLoadCount = 0;
+
+// Isomorphic data: this loader is safe in both the server and browser bundles.
+export const postSummaryResource = dataResource<[string], PostSummary>({
+  name: "PostSummary",
+  key: (id: string) => ["post-summary", id],
+  load: async (id: string) => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const post = POSTS[id];
     if (post === undefined) throw new Error(`No post with id "${id}".`);
-    return post;
+    return {
+      id,
+      loadCount: ++summaryLoadCount,
+      source: typeof document === "undefined" ? "server" : "browser",
+      title: post.title,
+    };
   },
 });
+
+export function postResourceKey(id: string): DataResourceKey {
+  return ["server-post", id];
+}

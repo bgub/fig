@@ -4,11 +4,16 @@ import {
   CLIENT_ASSET_MANIFEST_FILE,
   CLIENT_RUNTIME_ID,
   DEV_ENV_ID,
+  SERVER_DATA_RESOURCES_ID,
   SERVER_ROUTE_ASSETS_ID,
   SERVER_ROUTE_ASSET_MODULE_PREFIX,
 } from "./ids.ts";
 import { rootAbsolutePath, rootRelativeImport } from "./path-utils.ts";
-import { collectClientRefs, collectServerRoutes } from "./refs.ts";
+import {
+  collectClientRefs,
+  collectServerDataResources,
+  collectServerRoutes,
+} from "./refs.ts";
 
 export async function renderManifest(root: string): Promise<string> {
   const refs = await collectClientRefs(root);
@@ -171,6 +176,29 @@ export {};
 `;
 }
 
+export async function renderServerDataResources(root: string): Promise<string> {
+  const resources = await collectServerDataResources(root);
+  if (resources.length === 0) {
+    return "export const serverDataResources = {};\n";
+  }
+
+  const imports = resources
+    .map(
+      (resource, index) =>
+        `import { ${resource.exportName} as resource${index} } from ${JSON.stringify(
+          resource.specifier,
+        )};`,
+    )
+    .join("\n");
+  const entries = resources
+    .map(
+      (resource, index) => `  ${JSON.stringify(resource.id)}: resource${index}`,
+    )
+    .join(",\n");
+
+  return `${imports}\nexport const serverDataResources = {\n${entries}\n};\n`;
+}
+
 export async function renderServerRouteAssetModule(
   root: string,
   specifier: string,
@@ -205,6 +233,7 @@ export function renderServerEntry(): string {
   // Strip client-only fields so the rest spread forwards just server options.
   return `import { startServer } from "@bgub/fig-start/server";
 import { resolveClientReferenceAssets, resolveServerRouteAssets } from "virtual:fig-start/server-manifest";
+import { serverDataResources } from "${SERVER_DATA_RESOURCES_ID}";
 import { start } from "/src/start.tsx";
 
 const { appName, onRecoverableError, ...serverOptions } = start;
@@ -228,6 +257,7 @@ startServer({
   appUrl: import.meta.url,
   clientReferenceAssets,
   context: () => ({ appName }),
+  serverDataResources,
   serverRouteAssets,
 }).catch((error) => {
   console.error(error);

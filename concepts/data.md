@@ -27,12 +27,36 @@ normalizes `-0`, and sorts object keys. Dev builds fingerprint key/args
 drift (a `debugArgs` escape hatch exists for intentionally non-serializable
 args).
 
-Variants: `dataResource.identity(options)` declares a key-only resource (no
-client loader — hydrate-only); `dataResource.server(identity, { load })`
-attaches a server-only loader to that identity. Loader-backed vs
-hydrate-only is the entry's refresh mode: hydrate-only entries revalidate
-only through a server/payload refresh path and report
+Variants: `dataResource(options)` may omit `load` to declare a key-only
+resource (no client loader — hydrate-only); `serverDataResource(options)`
+declares a server-only loader in a `.server.ts(x)` module. Loader-backed vs
+hydrate-only is the entry's refresh mode: hydrate-only entries revalidate only
+through a server/payload refresh path and report
 `{ status: "unsupported", reason: "no-client-loader" }` from `refreshData`.
+
+Server-file resources may also opt into direct client refreshes with
+`serverDataResource({ remote: true, ... })`:
+
+```ts
+// user.server.ts
+import { serverDataResource } from "@bgub/fig-data/server";
+
+export const userResource = serverDataResource({
+  remote: true,
+  key: (id: string) => ["user", id],
+  load: async (id, { context }) => context.db.user.find(id),
+});
+```
+
+`serverDataResource` can only be imported from `.server.ts(x)` files. `remote`
+is deliberately opt-in and must be the literal `true`; omitting it keeps the
+resource server-only and no direct data endpoint is generated. The Fig Start
+transform turns browser imports of a remote `.server.ts(x)` export into a
+`dataResource.remote(...)` stub with the same key and a stable resource id.
+Reads still hit hydrated values first; on a cache miss or explicit refresh, a
+root with a `dataRemoteFetch` transport can call the server resource by id.
+Without that transport, remote stubs report
+`{ status: "unsupported", reason: "no-remote-fetcher" }`.
 
 ## Typed Context
 
@@ -106,6 +130,12 @@ stream); the client hydrates them via `createRoot({ initialData })` or
 `root.data.hydrate(entries)`, and hydrate-only values are readable
 immediately. Only settled values stream (a refreshing entry's transient
 stale value never wins over its incoming fresh value).
+
+Payload navigation does not make a second data request: data read while
+rendering the server route segment streams in the same payload response as
+`data` rows. The direct remote-data endpoint is only for client-side cache
+misses and invalidations outside a route payload render, and only for
+`serverDataResource` exports that explicitly declare `remote: true`.
 
 ## Error Attribution
 

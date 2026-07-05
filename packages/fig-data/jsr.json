@@ -4,7 +4,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./internal": "./src/internal.ts"
+    "./internal": "./src/internal.ts",
+    "./server": "./src/server.ts"
   },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],

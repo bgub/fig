@@ -21,6 +21,7 @@ import {
 } from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
+  DATA_ENDPOINT_PATH,
   DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
   DATA_STREAM_GLOBAL,
@@ -118,6 +119,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     ),
     {
       initialData,
+      dataRemoteFetch: fetchRemoteDataResource,
       onRecoverableError: options.onRecoverableError,
     },
   );
@@ -753,6 +755,30 @@ function hasClientReferenceResolver(
 
 function payloadRouteUrl(location: RouterLocation): string {
   return location.pathname + location.search;
+}
+
+async function fetchRemoteDataResource(
+  resource: { id: string },
+  args: readonly unknown[],
+  signal: AbortSignal,
+): Promise<unknown> {
+  const response = await fetch(DATA_ENDPOINT_PATH, {
+    body: JSON.stringify({ args, id: resource.id }),
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    method: "POST",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Data resource request failed with status ${response.status}.`,
+    );
+  }
+
+  const body = (await response.json()) as { value?: unknown };
+  return body.value;
 }
 
 function reportPayloadFetchError(

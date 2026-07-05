@@ -13,6 +13,10 @@ export interface DataResourceLoadContext<TStoreContext = unknown> {
   context: TStoreContext;
 }
 
+export interface DataResourceRemote {
+  id: string;
+}
+
 export interface FigDataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
@@ -25,6 +29,7 @@ export interface FigDataResource<
     ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
   ) => TValue | PromiseLike<TValue>;
   readonly name?: string;
+  readonly remote?: DataResourceRemote;
 }
 
 export type DataRefreshResult<T> =
@@ -35,7 +40,17 @@ export type DataRefreshResult<T> =
       reason: "superseded" | "store-disposed" | "evicted";
       staleValue?: T;
     }
-  | { status: "unsupported"; reason: "no-client-loader"; staleValue?: T };
+  | {
+      status: "unsupported";
+      reason: "no-client-loader" | "no-remote-fetcher";
+      staleValue?: T;
+    };
+
+export type FigDataRemoteFetcher = (
+  resource: DataResourceRemote,
+  args: readonly unknown[],
+  signal: AbortSignal,
+) => unknown;
 
 export interface FigDataHydrationEntry {
   key: DataResourceKey;
@@ -107,6 +122,7 @@ export interface FigDataStore extends FigDataStoreHandle {
 // register directly.
 export interface FigDataStoreHost {
   context: unknown;
+  remoteFetch?: FigDataRemoteFetcher;
   getLane(): unknown;
   partition?: DataResourceKeyInput;
   schedule(owner: object, lane: unknown): void;

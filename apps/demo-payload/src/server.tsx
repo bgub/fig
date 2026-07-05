@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createServer,
@@ -86,7 +87,10 @@ async function sendPayload(
   const refreshingFeed = boundary === feedBoundaryId;
   const result = renderToPayloadStream(
     refreshingFeed ? <Dashboard data={data} /> : <PayloadApp data={data} />,
-    refreshingFeed ? { refreshBoundary: boundary } : undefined,
+    {
+      dataContext: { requestId: randomUUID().slice(0, 8) },
+      refreshBoundary: refreshingFeed ? boundary : undefined,
+    },
   );
 
   response.writeHead(200, {

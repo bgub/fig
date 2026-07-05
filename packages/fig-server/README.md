@@ -113,18 +113,15 @@ Server render requests have their own data-resource store. Reads through
 available through `result.getData()`:
 
 ```tsx
-import { dataResource, readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig-data";
+import { serverDataResource } from "@bgub/fig-data/server";
 import { renderToStream } from "@bgub/fig-server";
 
-const userResource = dataResource.server(
-  dataResource.identity<[string], { name: string }>({
-    key: (id) => ["user", id],
-    name: "User",
-  }),
-  {
-    load: async (id, { context }) => context.users.find(id),
-  },
-);
+const userResource = serverDataResource<[string], { name: string }>({
+  key: (id) => ["user", id],
+  load: async (id, { context }) => context.users.find(id),
+  name: "User",
+});
 
 function Profile({ id }: { id: string }) {
   const user = readData(userResource, id);
@@ -140,9 +137,9 @@ const initialData = result.getData();
 ```
 
 Pass `initialData` to `createRoot(...)` or `hydrateRoot(...)` on the client to
-hydrate those values by key. Client imports can use the identity-only resource;
-if no client loader exists, `refreshData(...)` reports `unsupported` and a
-framework/payload refresh path should revalidate the key.
+hydrate those values by key. Client imports can use a loader-less resource with
+the same key; if no client loader exists, `refreshData(...)` reports
+`unsupported` and a framework/payload refresh path should revalidate the key.
 
 ## Resources
 

@@ -1,4 +1,6 @@
+import { serverDataResource } from "@bgub/fig-data/server";
 import { describe, expect, it } from "vite-plus/test";
+import { DATA_ENDPOINT_PATH } from "../bootstrap.ts";
 import { StartConfigError, StartListenError } from "./errors.ts";
 import { runStartRuntime } from "./runtime.ts";
 import { closeServer, makeTestApp, serverPort } from "./test-app.ts";
@@ -31,6 +33,49 @@ describe("start runtime", () => {
       expect(page.status).toBe(200);
       await expect(page.text()).resolves.toContain("Runtime route");
       expect(logs).toEqual(["Fig Start: https://fig.example/"]);
+    } finally {
+      await closeServer(server);
+      await app.cleanup();
+    }
+  });
+
+  it("forwards request bodies to the web handler", async () => {
+    const app = await makeTestApp("Runtime");
+    const resource = serverDataResource({
+      key: (id: string) => ["runtime-body", id],
+      load: async (id: string, { context }) =>
+        `${(context as { prefix: string }).prefix}${id}`,
+    });
+    const server = await runStartRuntime({
+      config: {
+        appUrl: app.appUrl,
+        env: {},
+        mode: "production",
+        port: 0,
+      },
+      handlerOptions: {
+        dataContext: () => ({ prefix: "body-" }),
+        routes: app.routes,
+        serverDataResources: { "test#resource": resource },
+      },
+      log: () => undefined,
+    });
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${serverPort(server)}${DATA_ENDPOINT_PATH}`,
+        {
+          body: JSON.stringify({ args: ["ok"], id: "test#resource" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        key: ["runtime-body", "ok"],
+        value: "body-ok",
+      });
     } finally {
       await closeServer(server);
       await app.cleanup();

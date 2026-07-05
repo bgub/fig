@@ -8,6 +8,7 @@ import {
   type ExternalStoreSubscribe,
   type DataResourceKeyInput,
   type FigContext,
+  type FigDataRemoteFetcher,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
   type FigElement,
@@ -355,6 +356,7 @@ export interface FigRoot {
 export interface FigRootOptions {
   dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
+  dataRemoteFetch?: FigDataRemoteFetcher;
   initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
   devtools?: boolean;
@@ -806,6 +808,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       context: options.dataContext ?? {},
       getLane: requestUpdateLane,
       partition: options.dataPartition,
+      remoteFetch: options.dataRemoteFetch,
       schedule(owner, lane) {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },

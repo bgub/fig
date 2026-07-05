@@ -33,9 +33,8 @@ From `plans/data-resources.md` (open questions that survived shipping):
 - Should the stable data API ever move from `@bgub/fig-data` into
   `@bgub/fig`, and should the renderer bridge become versioned
   `RenderDispatcher` methods instead of the `@bgub/fig/internal` slot?
-- Server-only packaging: keep the split identity/loader APIs
-  (`dataResource.identity` + `.server`), or add a compiler/framework
-  transform?
+- Server-only packaging: how much should rely on loader-less shared resources
+  plus `serverDataResource`, versus a compiler/framework transform?
 - Prefix invalidation (`["user"]`-prefix sweeps): core surface or framework
   concern?
 - A first-class `ErrorBoundary` retry/reset API for failed keys (today:

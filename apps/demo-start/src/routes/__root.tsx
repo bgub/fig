@@ -15,6 +15,7 @@ function RootLayout(): FigNode {
           <Link to="/">Home</Link>
           <Link to="/about">About</Link>
           <Link to="/asset-lab">Assets</Link>
+          <Link to="/data">Data</Link>
           <Link to="/dashboard">Dashboard</Link>
           <Link to="/posts">Posts</Link>
         </nav>

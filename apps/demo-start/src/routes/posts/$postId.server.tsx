@@ -1,7 +1,7 @@
 import type { FigNode } from "@bgub/fig";
 import { readData } from "@bgub/fig-data";
 import { createFileRoute, Link } from "@bgub/fig-start";
-import { postResource } from "../../data.ts";
+import { postResource } from "../../data.server.ts";
 
 export const Route = createFileRoute("/posts/$postId")({
   // Return-style loader: typed via Route.useLoaderData(), resolved before render.
@@ -22,8 +22,9 @@ function PostPage(): FigNode {
     <article class="space-y-4 rounded-lg border border-slate-300 bg-white p-5">
       <h2 class="text-2xl font-semibold tracking-tight">{post.title}</h2>
       <p class="text-slate-700">{post.body}</p>
-      <p class="text-sm text-slate-500">
-        route param: {postId} · loader requestedId: {requestedId}
+      <p class="text-sm text-slate-500" data-server-post="true">
+        server-only resource · route param: {postId} · loader requestedId:{" "}
+        {requestedId}
       </p>
       <p>
         <Link class="font-medium text-teal-700" to="/posts">

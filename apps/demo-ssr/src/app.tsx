@@ -8,7 +8,14 @@ import {
   useTransition,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { dataResource, readData } from "@bgub/fig-data";
+import {
+  dataResource,
+  readData,
+  readDataStore,
+  type DataRefreshResult,
+  type DataResource,
+  type DataResourceKey,
+} from "@bgub/fig-data";
 
 type Resource<T> = Promise<T> | T;
 
@@ -18,26 +25,46 @@ export interface ServerInfo {
   runtime: string;
 }
 
-export interface ServerDataContext {
-  info?: ServerInfo;
+export interface ServerOnlyInfo {
+  region: string;
+  requestId: string;
+  runtime: string;
 }
 
-// Read on the server with request-scoped context, fulfilled into the store, and
-// streamed to the client via getData() -> initialData. The client reads the
-// hydrated value synchronously instead of recomputing it.
-export const serverInfoResource = dataResource<
+export interface ServerDataContext {
+  info?: ServerInfo;
+  requestId?: string;
+}
+
+export const serverInfoResourceId = "demo-ssr#server-info";
+
+export function serverInfoKey(): DataResourceKey {
+  return ["server-info"];
+}
+
+// SSR passes the server loader for the initial render. The browser uses this
+// remote stub to refresh through the demo's handwritten /__fig/data endpoint.
+export const serverInfoRemoteResource = dataResource.remote<
   [],
   ServerInfo,
   ServerDataContext
 >({
+  id: serverInfoResourceId,
   name: "ServerInfo",
-  key: () => ["server-info"],
-  load: ({ context }) =>
-    context.info ?? {
-      region: "unknown",
-      renderedAt: new Date().toLocaleTimeString(),
-      runtime: "client fallback (not hydrated)",
-    },
+  key: serverInfoKey,
+});
+
+export function serverOnlyInfoKey(): DataResourceKey {
+  return ["server-only-info"];
+}
+
+export const serverOnlyInfoHydrationResource = dataResource<
+  [],
+  ServerOnlyInfo,
+  ServerDataContext
+>({
+  name: "ServerOnlyInfo",
+  key: serverOnlyInfoKey,
 });
 
 export interface DemoRequest {
@@ -75,7 +102,15 @@ const LazyStreamPanel = lazy(() =>
   delay(LazyPanelContent, scaledDemoDelay(1300)),
 );
 
-export function App({ request }: { request: DemoRequest }) {
+export function App({
+  request,
+  serverInfoResource = serverInfoRemoteResource,
+  serverOnlyInfoResource = serverOnlyInfoHydrationResource,
+}: {
+  request: DemoRequest;
+  serverInfoResource?: DataResource<[], ServerInfo, ServerDataContext>;
+  serverOnlyInfoResource?: DataResource<[], ServerOnlyInfo, ServerDataContext>;
+}) {
   const isAbort = request.abortDelay !== null;
 
   return (
@@ -112,7 +147,8 @@ export function App({ request }: { request: DemoRequest }) {
             </div>
           </header>
           <section class="grid">
-            <ServerInfoPanel />
+            <ServerInfoPanel resource={serverInfoResource} />
+            <ServerOnlyInfoPanel resource={serverOnlyInfoResource} />
             <Suspense
               fallback={
                 <Panel
@@ -215,23 +251,111 @@ export function clientDataFor(request: DemoRequest): ClientData {
   };
 }
 
-function ServerInfoPanel() {
-  const info = readData(serverInfoResource);
+function ServerInfoPanel({
+  resource,
+}: {
+  resource: DataResource<[], ServerInfo, ServerDataContext>;
+}) {
+  const data = readDataStore();
+  const info = readData(resource);
 
   return (
     <Panel
       class="data-panel"
-      description={`${info.region} · rendered at ${info.renderedAt}`}
+      description={
+        <span data-ssr-data-value="server-info">
+          {info.region} · rendered at {info.renderedAt}
+        </span>
+      }
       tag="hydrated"
       title="Server data resource"
       tone="ok"
     >
-      <p class="muted">
+      <p class="muted" data-ssr-data-kind="isomorphic">
         Loaded on the server ({info.runtime}) and hydrated by key, so the client
         reuses this value without a refetch.
       </p>
+      <div class="panel-actions">
+        <button
+          class="button primary"
+          data-demo-control="refresh-server-data"
+          events={[
+            on("click", () => {
+              void data.refreshData(resource);
+            }),
+          ]}
+          type="button"
+        >
+          Refresh data resource
+        </button>
+      </div>
     </Panel>
   );
+}
+
+function ServerOnlyInfoPanel({
+  resource,
+}: {
+  resource: DataResource<[], ServerOnlyInfo, ServerDataContext>;
+}) {
+  const data = readDataStore();
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const info = readData(resource);
+
+  return (
+    <Panel
+      class="data-panel"
+      description={`${info.region} · request ${info.requestId}`}
+      tag="server-only"
+      title="Server-only data"
+      tone="ok"
+    >
+      <p class="muted" data-ssr-data-kind="server-only">
+        Loaded only by the server renderer ({info.runtime}) and hydrated into
+        the client store under the shared identity key.
+      </p>
+      <div class="panel-actions">
+        <button
+          class="button"
+          data-demo-control="refresh-server-only-data"
+          events={[
+            on("click", () => {
+              void data.refreshData(resource).then(
+                (result) => setRefreshMessage(refreshResultMessage(result)),
+                (error: unknown) =>
+                  setRefreshMessage(`Refresh failed: ${errorMessage(error)}`),
+              );
+            }),
+          ]}
+          type="button"
+        >
+          Refresh anyways (errors)
+        </button>
+      </div>
+      {refreshMessage === null ? null : (
+        <p class="muted" data-ssr-data-error="">
+          {refreshMessage}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+function refreshResultMessage<T>(result: DataRefreshResult<T>): string {
+  switch (result.status) {
+    case "fulfilled":
+      return "Refresh unexpectedly succeeded.";
+    case "rejected":
+      return `Refresh failed: ${errorMessage(result.error)}`;
+    case "aborted":
+      return `Refresh aborted: ${result.reason}.`;
+    case "unsupported":
+      return `Unsupported refresh: ${result.reason}.`;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function SuspenseContent({ resource }: { resource: Resource<string> }) {

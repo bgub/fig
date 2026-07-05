@@ -13,6 +13,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig-data/internal", "packages/fig-data/src/internal.ts"],
+  ["@bgub/fig-data/server", "packages/fig-data/src/server.ts"],
   ["@bgub/fig-data", "packages/fig-data/src/index.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
   ["@bgub/fig-dom/refresh", "packages/fig-dom/src/refresh.ts"],
@@ -48,7 +49,11 @@ const libraryEntries: Record<string, string[]> = {
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
   ],
-  "packages/fig-data": ["./src/index.ts", "./src/internal.ts"],
+  "packages/fig-data": [
+    "./src/index.ts",
+    "./src/internal.ts",
+    "./src/server.ts",
+  ],
   "packages/fig-devtools": ["./src/index.ts"],
   "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts"],
   "packages/fig-reconciler": [

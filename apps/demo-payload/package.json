@@ -4,11 +4,13 @@
   "type": "module",
   "scripts": {
     "build": "vp pack",
+    "build:e2e": "vp run --filter @bgub/fig-demo-payload... build",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs node",
     "dev:build": "vp pack --watch",
     "serve": "node dist/server.js",
-    "serve:watch": "node --watch dist/server.js"
+    "serve:watch": "node --watch dist/server.js",
+    "test:e2e": "sh ../../scripts/free-port.sh 4184 && playwright test"
   },
   "portless": {
     "name": "fig-demo-payload",
@@ -16,11 +18,13 @@
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
+    "@bgub/fig-data": "workspace:*",
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20.19.0"
   }
 }

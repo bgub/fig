@@ -21,6 +21,10 @@ export interface StartRuntimeInput {
   log: (message: string) => void;
 }
 
+function requestCanHaveBody(method: string): boolean {
+  return method !== "GET" && method !== "HEAD";
+}
+
 // Runtime boundary: starts the server program as the Node main fiber and hands
 // the caller a Promise for the listening server. NodeRuntime owns SIGINT/SIGTERM
 // interruption; the platform HTTP layer owns scoped listen/close.
@@ -57,9 +61,13 @@ export function runStartRuntime(input: StartRuntimeInput): Promise<Server> {
           Effect.gen(function* () {
             const request = yield* HttpServerRequest.HttpServerRequest;
             const host = request.headers.host ?? "localhost";
+            const body = requestCanHaveBody(request.method)
+              ? yield* request.arrayBuffer
+              : undefined;
             const response = yield* Effect.promise(() => {
               return appHandler(
                 new Request(`http://${host}${request.url}`, {
+                  body,
                   headers: request.headers,
                   method: request.method,
                 }),
