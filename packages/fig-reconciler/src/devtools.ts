@@ -5,7 +5,7 @@ import {
   Fragment,
   type Props,
 } from "@bgub/fig";
-import type { FigDataStoreEntrySnapshot } from "@bgub/fig/internal";
+import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 
 export type FigDevtoolsFiberKind =
   | "root"
@@ -88,7 +88,7 @@ export interface FigDevtoolsRootSnapshot {
   id: number;
   rendererId: number;
   committedAt: number;
-  dataResources: FigDataStoreEntrySnapshot[];
+  dataResources: DataStoreEntrySnapshot[];
   pendingWork: FigDevtoolsWorkLabel[];
   suspendedWork: FigDevtoolsWorkLabel[];
   pingedWork: FigDevtoolsWorkLabel[];

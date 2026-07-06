@@ -9,7 +9,7 @@ import {
   type DataResourceKeyInput,
   type FigContext,
   type FigDataHydrationEntry,
-  type FigDataResource,
+  type DataResource,
   type FigDataStoreHandle,
   type FigElement,
   type FigNode,
@@ -4853,7 +4853,7 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   let disposed = false;
 
   function installStore<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
   ): FigDataStore {
     if (inner !== null) return inner;
     if (disposed) {
@@ -4861,7 +4861,7 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     }
 
     const factory = (
-      resource as FigDataResource & Record<symbol, FigDataStoreFactory>
+      resource as DataResource & Record<symbol, FigDataStoreFactory>
     )[DataStoreFactorySymbol];
     if (factory === undefined) {
       throw new Error("Data resource APIs require @bgub/fig.");

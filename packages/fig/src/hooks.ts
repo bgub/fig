@@ -1,5 +1,5 @@
 import type { FigContext } from "./context.ts";
-import type { FigDataResource, FigDataStore } from "./data.ts";
+import type { DataResource, FigDataStore } from "./data.ts";
 import { resolveCurrentDataStore } from "./data.ts";
 
 // The useState updater: accepts the next state, or an updater function of
@@ -60,11 +60,11 @@ export interface RenderDispatcher {
   ): (...args: StableEventArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
   readData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
   preloadData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
   readPromise<T>(promise: PromiseLike<T>): T;
@@ -186,7 +186,7 @@ export function readPromise<T>(promise: PromiseLike<T>): T {
 }
 
 export function readData<TArgs extends unknown[], TValue>(
-  resource: FigDataResource<TArgs, TValue>,
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): TValue {
   return resolveDispatcher(
@@ -195,7 +195,7 @@ export function readData<TArgs extends unknown[], TValue>(
 }
 
 export function preloadData<TArgs extends unknown[], TValue>(
-  resource: FigDataResource<TArgs, TValue>,
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): void {
   if (currentDispatcher !== null) {

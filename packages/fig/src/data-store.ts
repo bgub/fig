@@ -9,10 +9,10 @@ import {
   type DataResourceLoadContext,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
-  type FigDataResource,
+  type DataResource,
   type FigDataStoreFactory,
   type FigDataStore,
-  type FigDataStoreEntrySnapshot,
+  type DataStoreEntrySnapshot,
   type FigDataStoreHandle,
 } from "./data.ts";
 
@@ -25,11 +25,6 @@ export interface DataResourceOptions<TArgs extends unknown[], TValue> {
     ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
 }
-
-export type DataResource<
-  TArgs extends unknown[] = unknown[],
-  TValue = unknown,
-> = FigDataResource<TArgs, TValue>;
 
 export interface DataStoreHost<Owner extends object, Lane> {
   getLane(): Lane;
@@ -47,8 +42,6 @@ export interface DataStore<
 > extends FigDataStore {
   readonly host: DataStoreHost<Owner, Lane>;
 }
-
-export type DataStoreEntrySnapshot = FigDataStoreEntrySnapshot;
 
 interface Entry<Owner extends object, Lane> {
   canonicalKey: string;
@@ -346,7 +339,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return entries;
   }
 
-  inspectDataEntries(): FigDataStoreEntrySnapshot[] {
+  inspectDataEntries(): DataStoreEntrySnapshot[] {
     return Array.from(this.entries.values(), (entry) =>
       this.snapshotEntry(entry),
     );

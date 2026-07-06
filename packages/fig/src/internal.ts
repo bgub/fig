@@ -79,9 +79,9 @@ export {
   type DataResourceLoadContext,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
-  type FigDataResource,
+  type DataResource,
   type FigDataStore,
-  type FigDataStoreEntrySnapshot,
+  type DataStoreEntrySnapshot,
   type FigDataStoreFactory,
   type FigDataStoreHandle,
   type FigDataStoreHost,
@@ -93,6 +93,5 @@ export {
   normalizeDataResourceKey,
   runWithDataStore,
   type DataStore,
-  type DataStoreEntrySnapshot,
   type DataStoreHost,
 } from "./data-store.ts";

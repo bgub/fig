@@ -88,7 +88,7 @@ export type {
   DataResourceKeyInput,
   DataResourceLoadContext,
   FigDataHydrationEntry,
-  FigDataResource,
+  DataResource,
   FigDataStoreHandle,
 } from "./data.ts";
 
@@ -104,6 +104,5 @@ export {
   invalidateDataPrefix,
   readDataStore,
   refreshData,
-  type DataResource,
   type DataResourceOptions,
 } from "./data-store.ts";

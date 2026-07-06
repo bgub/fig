@@ -1,5 +1,5 @@
 import type { FigContext, StateSetter } from "@bgub/fig";
-import type { FigDataResource, RenderDispatcher } from "@bgub/fig/internal";
+import type { DataResource, RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
@@ -7,11 +7,11 @@ interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
   preloadData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
   readData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
   readPromise<T>(promise: PromiseLike<T>): T;

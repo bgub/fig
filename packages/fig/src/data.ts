@@ -12,7 +12,7 @@ export interface DataResourceLoadContext {
   signal: AbortSignal;
 }
 
-export interface FigDataResource<
+export interface DataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
 > {
@@ -49,7 +49,7 @@ export type FigDataEntryStatus =
   | "rejected"
   | "refreshing";
 
-export interface FigDataStoreEntrySnapshot {
+export interface DataStoreEntrySnapshot {
   canonicalKey: string;
   error?: unknown;
   hasValue: boolean;
@@ -71,18 +71,18 @@ export interface FigDataStoreEntrySnapshot {
 export interface FigDataStoreHandle {
   hydrate(entries: readonly FigDataHydrationEntry[]): void;
   invalidateData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): void;
   invalidateDataError(error: unknown): boolean;
   invalidateDataKey(key: DataResourceKey): void;
   invalidateDataPrefix(prefix: DataResourceKey): void;
   preloadData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): void;
   refreshData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): Promise<DataRefreshResult<TValue>>;
   run<T>(callback: () => T): T;
@@ -94,12 +94,12 @@ export interface FigDataStore extends FigDataStoreHandle {
   releaseDataOwner(owner: object): void;
   resetDataDependencies(owner: object): void;
   dispose(): void;
-  inspectDataEntries(): FigDataStoreEntrySnapshot[];
+  inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the
   // subscribing owner trails them.
   readData<TArgs extends unknown[], TValue>(
-    resource: FigDataResource<TArgs, TValue>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     owner: object,
   ): TValue;

@@ -2,7 +2,7 @@
 // be able to render and buffer initial data before the package loads, then
 // install the real store lazily from the first actual data resource.
 import { createElement } from "@bgub/fig";
-import type { FigDataResource, FigDataStore } from "@bgub/fig/internal";
+import type { DataResource, FigDataStore } from "@bgub/fig/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { createRenderer, type HostConfig } from "./index.ts";
 
@@ -72,7 +72,7 @@ describe("root data store without @bgub/fig", () => {
   it("throws a helpful error for data reads before the package loads", () => {
     const { createRoot } = createRenderer(host);
     const root = createRoot(new TestElement("root"));
-    const fakeResource = {} as FigDataResource<[], string>;
+    const fakeResource = {} as DataResource<[], string>;
 
     expect(() =>
       (root.data as FigDataStore).readData(fakeResource, [], {}),
