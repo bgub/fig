@@ -4,7 +4,7 @@ Fig data resources are keyed async values tied into rendering, scheduling, SSR, 
 
 - a per-root store of entries keyed by resource keys
 - a render-time read verb: `readData`
-- two freshness verbs: `invalidateData` and `refreshData`
+- freshness verbs: `invalidateData`, `invalidateDataPrefix`, and `refreshData`
 - server serialization of fulfilled entries
 
 The point isn't to replace every feature of a query library. Fig owns the parts that need renderer cooperation: committed subscriptions, cancellation, scheduling, error attribution, and the server-to-client handoff.
@@ -52,9 +52,12 @@ Use `preloadData(resource, ...args)` to start a load without subscribing — use
 
 ## Freshness
 
-There are two freshness verbs:
+The freshness verbs are:
 
 - `invalidateData(resource, ...args)` marks an entry stale. The next read reloads lazily. It also clears a cached rejection so a remounted boundary can retry.
+- `invalidateDataPrefix(prefix)` marks every existing entry whose key starts
+  with the structured key prefix stale, for example `["user"]` targets
+  `["user", id]` entries without matching string lookalikes.
 - `refreshData(resource, ...args)` fetches immediately. It never rejects; it resolves to a result object.
 
 `refreshData` result statuses are:
@@ -237,7 +240,7 @@ The stored error isn't mutated. Fig keeps attribution in a side table, so ordina
 
 ## Why this is in Fig
 
-Most cache mechanics could be userland: maps, dedupe, retention timers, thrown promises, even the two freshness verbs. The part that needs Fig is the render lifecycle.
+Most cache mechanics could be userland: maps, dedupe, retention timers, thrown promises, even the freshness verbs. The part that needs Fig is the render lifecycle.
 
 Fig can tell the difference between:
 
@@ -250,7 +253,7 @@ That distinction matters for cancellation, stale dependency cleanup, and schedul
 
 The server story also needs renderer cooperation. The server store is scoped to the render request, fulfilled entries are serialized alongside the HTML or payload that needed them, and the client hydrates those entries before its first read.
 
-Fig keeps the surface narrow. It doesn't absorb polling, focus refetch, retry policies, optimistic updates, pagination, or mutation state machines. Those compose in userland from resources, the two freshness verbs, and `AbortSignal`.
+Fig keeps the surface narrow. It doesn't absorb polling, focus refetch, retry policies, optimistic updates, pagination, or mutation state machines. Those compose in userland from resources, the freshness verbs, and `AbortSignal`.
 
 ---
 

@@ -430,12 +430,14 @@ with data cache behavior.
   stylesheet has loaded or errored (errors resolve the gate so a failed sheet
   never blocks reveal forever). Stylesheets are critical by default; opt out
   with `blocking: "none"`. Preloads, preconnects, scripts, and fonts are
-  inserted but never gate. No production consumer wires
-  `getAssetResources()` → `insertAssetResources()` yet; awaiting this promise to
-  gate reveal of newly decoded RSC content is the headline Phase 4/5 deliverable.
+  inserted but never gate. If a later payload depends on a critical stylesheet
+  Fig inserted earlier and that stylesheet is still loading, the later caller
+  joins the same pending gate. Stylesheets already present from server-rendered
+  HTML dedupe without gating.
 - Tests cover head insertion, within-call/cross-call/SSR dedupe, critical
-  stylesheet load gating, error-resolves-the-gate, and non-critical
-  non-gating.
+  stylesheet load gating, duplicate pending stylesheet gating,
+  already-loaded/SSR stylesheet non-gating, error-resolves-the-gate, and
+  non-critical non-gating.
 
   Fonts are inserted (and deduped) as their `<link rel="preload" as="font">`
   form. `figResourceKey` keys a `font` under that same `preload:font:<href>`
@@ -443,39 +445,33 @@ with data cache behavior.
   across every package — the SSR registry, the RSC record, and client insertion
   all dedupe them together rather than emitting two identical links.
 
-  Known limitation: a critical stylesheet found already present (e.g. streamed
-  by SSR) is deduped but not re-gated, so the promise can resolve before an
-  in-flight copy finishes loading. Re-gating it naively would hang on an
-  already-loaded sheet (its `load` event has already fired), so robust gating
-  needs load-state detection; deferred until a caller actually wires reveal to
-  this promise. Precedence-based ordering and client-document-lifetime
-  ownership tracking remain future refinements (see Visibility And Retention).
+  Precedence-based ordering and client-document-lifetime ownership tracking
+  remain future refinements (see Visibility And Retention).
 
-### Phase 4: Refresh Integration
+### Phase 4: Refresh Integration — implemented
 
-- Carry newly discovered asset resources in RSC refresh payloads.
-- Gate refreshed boundaries before commit/reveal.
-- Dedupe against SSR initial asset resources and earlier RSC payloads.
+- Payload refreshes carry newly discovered asset resources through the same
+  client rows as initial payloads.
+- Fig Start inserts and gates those assets before revealing refreshed boundary
+  content; the last visible server-route tree remains mounted while a refreshed
+  tree waits on newly discovered stylesheets.
+- Refresh assets dedupe against SSR initial asset resources, earlier payloads,
+  and still-pending stylesheets inserted by other payloads.
+- Tests cover a same-route payload refresh that discovers a new stylesheet,
+  keeps the previous content visible while the sheet is pending, sends the
+  boundary refresh header, and reveals only after `load`.
 
-Deferred review findings to resolve alongside the consumer wiring (each is only
-reachable once a consumer awaits the gate, so they ride with this work):
+Resolved review findings from consumer wiring:
 
-- Author-supplied `key` does not round-trip through SSR/host DOM, so a keyed
+- Author-supplied `key` round-trips through SSR/host DOM, so a keyed
   stream asset never dedupes against a server/host-rendered element (default
-  `href`/`src` keys round-trip fine). Emit a `data-fig-resource-key` attribute
-  and parse it back, or fall keyed stream assets back to the `href`/`src` key
-  space for DOM reconciliation.
-- The wire `resources` array is decoded as trusted `SerializedAssetResource[]`
-  with no runtime guard; an unknown `kind` yields an `undefined` key. Guard
-  `recordAssetResources`/`insertAssetResources` with `isFigResource` and drop
-  unknown kinds (mirroring the render-side guard).
-- `serializeClientReferenceAssets` ships the live `FigResource` via an unchecked
-  cast, so `blocking`/`key` travel the wire beyond the documented shape. Add an
-  explicit field projection/whitelist and pin the serialized field set with a
-  test.
-- `isCriticalStylesheet` ignores `media`, so a media-mismatched sheet (e.g.
-  `print`) needlessly delays reveal; refine it with `matchMedia` when gating is
-  wired.
+  `href`/`src` keys round-trip fine too).
+- The wire `resources` array is guarded with `isFigAssetResource`; unknown
+  kinds are dropped before keying or insertion.
+- `serializeClientReferenceAssets` projects the serialized asset field set
+  explicitly and omits `undefined` fields, so author-only fields such as `key`
+  stay out of the payload wire.
+- `isCriticalStylesheet` respects `media` through `matchMedia` when available.
 
 ### Phase 5: Bundler Manifest Integration
 
@@ -491,6 +487,4 @@ reachable once a consumer awaits the gate, so they ride with this work):
 - How should stylesheet precedence interact with segment-level streaming order?
 - Should `title` and `meta` ever travel through the RSC asset-resource path, or
   should document metadata remain SSR/framework-owned?
-- How should the client reconcile asset resources already present in
-  server-rendered HTML with asset resources discovered during RSC hydration?
 - What is the minimal bundler manifest shape Fig should require?

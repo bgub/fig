@@ -76,21 +76,21 @@ After our two clicks, the queue holds `[A: transition, c => c + 10]`, `[B: sync,
 
 A lane is one bit in a 31-bit bitmask; a lower bit means higher priority. The taxonomy:
 
-| Lane                 | What lands there                                                                 |
-| -------------------- | -------------------------------------------------------------------------------- |
-| `SyncLane`           | discrete events (click, keydown, ...) — the user expects an immediate response    |
-| `InputContinuousLane`| continuous events (scroll, pointermove, drag) — urgent, but fine to coalesce      |
-| `GestureLane`        | gesture-driven updates                                                            |
-| `DefaultLane`        | code running in no special context (timers, network callbacks)                    |
-| `TransitionLane` ×14 | `transition()` updates; overlapping transitions claim distinct lanes round-robin  |
-| `RetryLane` ×4       | suspense retries (a thrown promise resolved, re-render the boundary)              |
-| `DeferredLane`       | `useLaggedValue` re-renders                                                       |
-| `OffscreenLane`      | updates inside hidden Activity subtrees                                           |
-| `IdleLane`           | idle work                                                                         |
+| Lane                  | What lands there                                                                 |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `SyncLane`            | discrete events (click, keydown, ...) — the user expects an immediate response   |
+| `InputContinuousLane` | continuous events (scroll, pointermove, drag) — urgent, but fine to coalesce     |
+| `GestureLane`         | gesture-driven updates                                                           |
+| `DefaultLane`         | code running in no special context (timers, network callbacks)                   |
+| `TransitionLane` ×14  | `transition()` updates; overlapping transitions claim distinct lanes round-robin |
+| `RetryLane` ×4        | suspense retries (a thrown promise resolved, re-render the boundary)             |
+| `DeferredLane`        | `useLaggedValue` re-renders                                                      |
+| `OffscreenLane`       | updates inside hidden Activity subtrees                                          |
+| `IdleLane`            | idle work                                                                        |
 
 Most of these also have hydration twins (`SyncHydrationLane`, `DefaultHydrationLane`, `SelectiveHydrationLane`, ...); those matter in doc 4.
 
-Why bits instead of a priority number? Merging is OR, membership is AND, and a *set* of lanes can render as one mask — all 14 transition lanes render as a group, so overlapping transitions batch into one pass for free.
+Why bits instead of a priority number? Merging is OR, membership is AND, and a _set_ of lanes can render as one mask — all 14 transition lanes render as a group, so overlapping transitions batch into one pass for free.
 
 ### From setter to root
 
@@ -122,13 +122,13 @@ Quick event-loop recap, because this whole layer is shaped by it: JS is single-t
 
 The scheduler itself is a small internal module (not a published package) that knows nothing about fibers or lanes — it just runs prioritized callbacks. Lanes map down to five tiers:
 
-| Tier         | Lanes                 | Timeout                |
-| ------------ | --------------------- | ---------------------- |
-| Immediate    | sync                  | −1ms (born expired)    |
-| UserBlocking | input, gesture        | 250ms                  |
-| Normal       | default, transitions  | 5s                     |
-| Low          | retries               | 10s                    |
-| Idle         | idle, offscreen       | effectively never      |
+| Tier         | Lanes                | Timeout             |
+| ------------ | -------------------- | ------------------- |
+| Immediate    | sync                 | −1ms (born expired) |
+| UserBlocking | input, gesture       | 250ms               |
+| Normal       | default, transitions | 5s                  |
+| Low          | retries              | 10s                 |
+| Idle         | idle, offscreen      | effectively never   |
 
 - One min-heap of tasks, sorted by expiration time (now + the tier's timeout).
 - Work runs in posted macrotasks: `setImmediate` in Node, `MessageChannel` in browsers. Not `setTimeout` — nested `setTimeout(0)` gets clamped to 4ms+, which would waste most of a frame per hop. (`setTimeout` is the last-resort fallback.)
@@ -150,7 +150,7 @@ A `SyncLane` update does not render inside your `setCount` call — it still sch
 
 ## The render path
 
-The sync task fires, and Fig starts building the WIP tree: walk the current tree depth-first, re-rendering components and comparing new children against old as it goes — this comparison *is* the diff. If a node's inputs (props + state + context) haven't changed and its `childLanes` say nothing below has work, Fig reuses the current tree's node wholesale and skips the whole subtree. Nodes that changed get flagged with what has to happen to the DOM: insert, update, delete.
+The sync task fires, and Fig starts building the WIP tree: walk the current tree depth-first, re-rendering components and comparing new children against old as it goes — this comparison _is_ the diff. If a node's inputs (props + state + context) haven't changed and its `childLanes` say nothing below has work, Fig reuses the current tree's node wholesale and skips the whole subtree. Nodes that changed get flagged with what has to happen to the DOM: insert, update, delete.
 
 The interesting work in our scenario happens when the render reaches our `useState` hook and processes its queue.
 
@@ -160,7 +160,7 @@ The render walks the hook's queue in dispatch order, but only applies updates wh
 
 - `memoizedState` — what the screen shows now; it may have "jumped ahead" past skipped updates
 - `baseState` — where a future replay must restart from: the running state pinned at the first skipped update. Everything before the first skip is settled forever and folds into this value.
-- `baseQueue` — everything from the first skip onward, in original order, including clones of updates that *did* apply this render (with their lane cleared to "always apply"), because they must re-run on top of the skipped ones later to preserve dispatch order
+- `baseQueue` — everything from the first skip onward, in original order, including clones of updates that _did_ apply this render (with their lane cleared to "always apply"), because they must re-run on top of the skipped ones later to preserve dispatch order
 
 Walk it with our queue — `count = 1`, `[A: transition, c => c + 10]`, `[B: sync, c => c * 2]`:
 
@@ -193,7 +193,7 @@ Pre-mutation:
 
 Mutation:
 
-- Deletions first. Each deleted subtree tears down in order: release its data-store subscriptions → abort everything (every effect's controller, stable-event signals, in-flight transitions and actions) → remove the host nodes. Unmount cleanup *is* this abort step — Fig has no cleanup functions, so unmount means firing abort signals, and they fire while the nodes are still in the DOM.
+- Deletions first. Each deleted subtree tears down in order: release its data-store subscriptions → abort everything (every effect's controller, stable-event signals, in-flight transitions and actions) → remove the host nodes. Unmount cleanup _is_ this abort step — Fig has no cleanup functions, so unmount means firing abort signals, and they fire while the nodes are still in the DOM.
 - Then the flag walk: placements run (contiguous new siblings inserted in one pass), host prop/text updates, portals. Adopted subtrees are skipped entirely — the render bailouts pay off a second time here.
 
 The swap:
@@ -219,7 +219,7 @@ Not rAF — it falls out of the task layer. The flush is just a normal-priority 
 
 The AbortSignal contract, mechanically:
 
-1. Abort the previous controller. This abort *is* the cleanup step — dependency-change cleanup and unmount cleanup are the same mechanism.
+1. Abort the previous controller. This abort _is_ the cleanup step — dependency-change cleanup and unmount cleanup are the same mechanism.
 2. Make a fresh `AbortController`.
 3. Call `effect.create(signal)` with the ambient data store set (so `preloadData` / `invalidateData` work synchronously inside effects).
 4. Dev only: a first-time effect is then aborted and re-run with another fresh signal — the always-strict behavior that flushes out effects ignoring their signal.

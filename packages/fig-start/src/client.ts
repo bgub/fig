@@ -14,9 +14,14 @@ import { assetResourceKey } from "@bgub/fig/internal";
 import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
   createPayloadResponse,
+  decodePayloadDataEntries,
+  decodePayloadDataEntry,
+  decodePayloadValue,
+  encodePayloadValue,
   fetchPayload,
   isPayloadRequestCancelled,
   type PayloadClientReferenceMetadata,
+  type PayloadDataHydrationEntry,
   type PayloadResponse,
 } from "@bgub/fig-server/payload";
 import {
@@ -87,7 +92,9 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     href: currentHref(),
     loaderData: {},
   });
-  const initialData = readJson<FigDataHydrationEntry[]>(DATA_SCRIPT_ID, []);
+  const initialData = decodePayloadDataEntries(
+    readJson<PayloadDataHydrationEntry[]>(DATA_SCRIPT_ID, []),
+  );
 
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
@@ -140,7 +147,8 @@ interface PayloadStream {
 }
 
 interface DataStream {
-  p(entries: readonly FigDataHydrationEntry[]): void;
+  decoded?: true;
+  p(entries: readonly PayloadDataHydrationEntry[]): void;
   q: FigDataHydrationEntry[];
   s(listener: (entries: readonly FigDataHydrationEntry[]) => void): () => void;
 }
@@ -315,6 +323,7 @@ interface ServerRouteEntry {
   routeId: string;
   unsubscribeResponse: (() => void) | null;
   version: number;
+  visibleNode: FigNode;
 }
 
 interface ServerRouteEntryOptions {
@@ -358,6 +367,7 @@ function createServerRouteContent(
       render: (node) => {
         entry.node = node;
         ensureEntryAssets(entry);
+        if (entry.assetGate === null) entry.visibleNode = entry.node;
         notify(entry);
       },
     });
@@ -396,6 +406,7 @@ function createServerRouteContent(
       routeId,
       unsubscribeResponse: null,
       version: 0,
+      visibleNode: response.getRoot(),
     };
     entries.set(routeId, entry);
     bindEntry(entry);
@@ -546,9 +557,9 @@ function createServerRouteContent(
     },
     // Pre-commit gate for navigations that mount a NEW server route: without
     // a renderable entry, committing would swap the old page for an empty
-    // slot. Same-route URL changes are intentionally not gated — the entry
-    // stays mounted and renderActiveRoute refreshes it in place after the
-    // commit (stale content visible while revalidating).
+    // slot. Same-route URL changes keep the entry mounted; a gated refresh
+    // renders the last visible node until the newly decoded node's assets are
+    // ready.
     async prepare(location, matches) {
       const match = firstServerRouteMatch(matches);
       if (match === undefined) return;
@@ -564,7 +575,7 @@ function createServerRouteContent(
       if (entry === undefined) return null;
       if (!entryRenderable(entry)) return null;
       entry.revealed = true;
-      return serverRouteNode(entry.node);
+      return serverRouteNode(entry.visibleNode);
     },
     renderActiveRoute() {
       const state = router.getState();
@@ -644,6 +655,7 @@ function settleEntryGate(
   if (entry.assetGate !== currentGate) return;
   entry.assetGate = null;
   revealEntryClientReferences(entry);
+  entry.visibleNode = entry.node;
   entry.version += 1;
   for (const listener of entry.listeners) listener();
 }
@@ -763,7 +775,10 @@ async function fetchRemoteDataResource(
   signal: AbortSignal,
 ): Promise<unknown> {
   const response = await fetch(DATA_ENDPOINT_PATH, {
-    body: JSON.stringify({ args, id: resource.id }),
+    body: JSON.stringify({
+      args: args.map((arg) => encodePayloadValue(arg)),
+      id: resource.id,
+    }),
     headers: {
       accept: "application/json",
       "content-type": "application/json",
@@ -777,8 +792,10 @@ async function fetchRemoteDataResource(
     );
   }
 
-  const body = (await response.json()) as { value?: unknown };
-  return body.value;
+  const body = (await response.json()) as {
+    value?: PayloadDataHydrationEntry["value"];
+  };
+  return body.value === undefined ? undefined : decodePayloadValue(body.value);
 }
 
 function reportPayloadFetchError(
@@ -840,25 +857,33 @@ function readDataStream(): DataStream | null {
 
 function getDataStream(): DataStream {
   const current = readDataStream();
-  if (current !== null) {
+  if (current?.decoded === true) {
     appendMissingDataEntries(current, readDataFramesFromDocument());
     return current;
   }
 
-  const stream = createDataStream(readDataFramesFromDocument());
+  const stream = createDataStream(
+    current === null
+      ? readDataFramesFromDocument()
+      : queuedPayloadDataEntries(current),
+  );
   (globalThis as Record<string, unknown>)[DATA_STREAM_GLOBAL] = stream;
+  if (current !== null) {
+    appendMissingDataEntries(stream, readDataFramesFromDocument());
+  }
   return stream;
 }
 
 function createDataStream(
-  initialEntries: readonly FigDataHydrationEntry[],
+  initialEntries: readonly PayloadDataHydrationEntry[],
 ): DataStream {
   let listeners: Array<(entries: readonly FigDataHydrationEntry[]) => void> =
     [];
   const stream: DataStream = {
-    q: [...initialEntries],
+    decoded: true,
+    q: initialEntries.map(decodePayloadDataEntry),
     p(entries) {
-      const next = [...entries];
+      const next = entries.map(decodePayloadDataEntry);
       stream.q.push(...next);
       for (const listener of listeners) listener(next);
     },
@@ -873,6 +898,12 @@ function createDataStream(
   return stream;
 }
 
+function queuedPayloadDataEntries(
+  stream: DataStream,
+): PayloadDataHydrationEntry[] {
+  return stream.q as unknown as PayloadDataHydrationEntry[];
+}
+
 function isDataStream(value: unknown): value is DataStream {
   return (
     typeof value === "object" &&
@@ -883,11 +914,11 @@ function isDataStream(value: unknown): value is DataStream {
   );
 }
 
-function readDataFramesFromDocument(): FigDataHydrationEntry[] {
+function readDataFramesFromDocument(): PayloadDataHydrationEntry[] {
   return Array.from(
     document.querySelectorAll(`script[${DATA_FRAME_ATTR}]`),
     (element) =>
-      JSON.parse(element.textContent ?? "[]") as FigDataHydrationEntry[],
+      JSON.parse(element.textContent ?? "[]") as PayloadDataHydrationEntry[],
   ).flat();
 }
 
@@ -910,11 +941,12 @@ function getPayloadStream(): PayloadStream {
 
 function appendMissingDataEntries(
   stream: DataStream,
-  entries: readonly FigDataHydrationEntry[],
+  entries: readonly PayloadDataHydrationEntry[],
 ): void {
   const seen = new Set(stream.q.map((entry) => JSON.stringify(entry)));
   const next = entries.filter((entry) => {
-    const key = JSON.stringify(entry);
+    const decoded = decodePayloadDataEntry(entry);
+    const key = JSON.stringify(decoded);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

@@ -33,29 +33,25 @@ From `plans/data-resources.md` (open questions that survived shipping):
 - Should the stable data API ever move from `@bgub/fig-data` into
   `@bgub/fig`, and should the renderer bridge become versioned
   `RenderDispatcher` methods instead of the `@bgub/fig/internal` slot?
-- Prefix invalidation (`["user"]`-prefix sweeps): core surface or framework
-  concern?
 - A first-class `ErrorBoundary` retry/reset API for failed keys (today:
   function fallback + invalidate + remount-by-key composes it manually).
 - Payload refresh ↔ data keys: payload streams data rows in the same response;
   still open is a targeted protocol that maps invalidated keys to refreshed
   payload boundaries without overfitting to one framework.
-- **SSR value fidelity** (unlogged elsewhere): a `TValue` containing
-  `Date`/`Map`/`undefined` type-checks, streams, and hydrates as mangled
-  JSON with no error. Decide: optional `serialize`/`deserialize` on
-  resources, or a documented JSON-value bound on hydration-eligible types.
+- **Payload codec productization** — value fidelity for `Date`/`Map`/
+  `undefined` and related non-JSON values now lives in the payload value
+  codec. Still open: whether Fig Start exposes codec selection as a first-class
+  option, when to ship a binary codec, and whether binary codec ids need
+  explicit versioning beyond the opaque implementation id.
 
 ## Asset Resources
 
-From `plans/asset-resources.md` (phases 4–5 unimplemented):
+From `plans/asset-resources.md` (phase 5 unimplemented):
 
-- **Refresh integration** — asset rows accompanying payload boundary
-  refreshes, inserted/gated like initial-stream assets.
 - **Bundler manifest integration** — the minimal manifest shape Fig requires
   for client-reference assets (also README's standing "future goal").
 - Open: should all client-reference stylesheets block reveal by default; how
   stylesheet precedence interacts with segment streaming order; how the
-  client reconciles server-rendered assets with payload-discovered ones;
   whether `title`/`meta` ever travel the payload asset path.
 
 ## fig-start

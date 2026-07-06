@@ -4,7 +4,7 @@ Key-addressable async data resources for Fig.
 
 Data resources are render-time inputs with stable keys. Fig dedupes loads by
 key, wires missing values to `Suspense`, tracks committed readers, and lets
-applications invalidate or refresh specific entries.
+applications invalidate or refresh specific entries and key prefixes.
 
 ## Basic Usage
 
@@ -66,6 +66,11 @@ DevTools.
 currently observed, Fig schedules the readers; the next read keeps showing the
 last fulfilled value and starts a background reload. If nobody is observing the
 key, invalidation is lazy and does not fetch.
+
+`invalidateDataPrefix(prefix)` marks every existing entry whose structured key
+starts with `prefix` stale. For example, `invalidateDataPrefix(["user"])`
+targets entries like `["user", id]`. Prefix matching uses the same canonical
+key encoder as normal reads, so delimiter-shaped strings do not collide.
 
 `refreshData(resource, ...args)` fetches immediately and resolves with a result
 instead of rejecting:

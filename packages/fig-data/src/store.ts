@@ -207,6 +207,14 @@ export function invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
   invalidateDataResource(resource, args);
 }
 
+export function invalidateDataPrefix(prefix: DataResourceKey): void {
+  resolveCurrentDataStore(
+    "invalidateDataPrefix() must be called synchronously while Fig is executing — " +
+      "during render, an event handler, an action, or an effect. Capture " +
+      "readDataStore() (or root.data) synchronously and call the handle instead.",
+  ).invalidateDataPrefix(prefix);
+}
+
 export function refreshData<TArgs extends unknown[], TValue, TStoreContext>(
   resource: DataResource<TArgs, TValue, TStoreContext>,
   ...args: TArgs
@@ -443,21 +451,24 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const { entry } = this.entryFor(resource, args, false);
     if (entry === null) return;
 
-    entry.stale = true;
-    // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
-    // explicit invalidation is a fresh "this is stale, fetch again" intent.
-    entry.refreshError = undefined;
-    if (entry.status === "rejected") {
-      // The same intent applies to a cached rejection: without this, every
-      // read rethrows the old error forever — remounting an ErrorBoundary
-      // could never recover. Back to pending, so the next read loads afresh.
-      entry.error = undefined;
-      entry.status = "pending";
-    }
-    this.notifyEntryChange(entry);
-    if (entry.subscribers.size === 0) return;
+    this.invalidateEntry(entry, this.host.getLane());
+  }
 
-    this.scheduleSubscribers(entry, this.host.getLane());
+  invalidateDataPrefix(prefix: DataResourceKey): void {
+    if (this.disposed) return;
+
+    const normalizedPrefix = normalizeKey(prefix).key;
+    const matches: Entry<Owner, Lane>[] = [];
+    for (const entry of this.entries.values()) {
+      if (dataResourceKeyStartsWith(entry.key, normalizedPrefix)) {
+        matches.push(entry);
+      }
+    }
+
+    if (matches.length === 0) return;
+
+    const lane = this.host.getLane();
+    for (const entry of matches) this.invalidateEntry(entry, lane);
   }
 
   preloadData<TArgs extends unknown[], TValue, TStoreContext>(
@@ -951,6 +962,24 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     throw entry.pending.promise;
   }
+
+  private invalidateEntry(entry: Entry<Owner, Lane>, lane: Lane): void {
+    entry.stale = true;
+    // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
+    // explicit invalidation is a fresh "this is stale, fetch again" intent.
+    entry.refreshError = undefined;
+    if (entry.status === "rejected") {
+      // The same intent applies to a cached rejection: without this, every
+      // read rethrows the old error forever — remounting an ErrorBoundary
+      // could never recover. Back to pending, so the next read loads afresh.
+      entry.error = undefined;
+      entry.status = "pending";
+    }
+    this.notifyEntryChange(entry);
+    if (entry.subscribers.size === 0) return;
+
+    this.scheduleSubscribers(entry, lane);
+  }
 }
 
 function normalizeKey(key: DataResourceKey): NormalizedKey {
@@ -964,6 +993,24 @@ function normalizeKey(key: DataResourceKey): NormalizedKey {
     canonical: encodeArray(key, "key"),
     key,
   };
+}
+
+function dataResourceKeyStartsWith(
+  key: DataResourceKey,
+  prefix: DataResourceKey,
+): boolean {
+  if (prefix.length > key.length) return false;
+
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (
+      encodeValue(key[index], `key[${index}]`) !==
+      encodeValue(prefix[index], `prefix[${index}]`)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function entryHasValue<Owner extends object, Lane>(

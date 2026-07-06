@@ -343,6 +343,76 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     }
   });
 
+  it("keeps refreshed server route content visible until new stylesheets load", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => createElement("h1", null, "Home"),
+      }),
+      markServerRoute(
+        createFileRoute("/payload-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement("h2", null, "Server layout"),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/payload-layout/a")({
+        component: () => createElement("p", { class: "child" }, "Child A"),
+      }),
+      createFileRoute("/payload-layout/styled")({
+        component: () => createElement(StyledIsland, {}),
+      }),
+    ];
+    await installServerRenderedDocument("/", nestedRoutes);
+    const restoreFetch = installHandlerFetch(nestedRoutes);
+    const previousFetch = globalThis.fetch;
+    const requests: Request[] = [];
+    globalThis.fetch = async (input, init) => {
+      requests.push(toRequest(input, init));
+      return previousFetch(input, init);
+    };
+
+    try {
+      const router = hydrateStart({
+        routes: nestedRoutes,
+        loadClientReference,
+      });
+      await router.navigate("/payload-layout/a");
+      await flush();
+      expect(document.querySelector(".child")?.textContent).toBe("Child A");
+
+      const navigation = router.navigate("/payload-layout/styled");
+      await flush();
+
+      const link = document.head.querySelector('link[rel="stylesheet"]');
+      expect(link?.getAttribute("href")).toBe(styledIslandHref);
+      expect(requests.at(-1)?.headers.get(PAYLOAD_BOUNDARY_HEADER)).toBe(
+        "/payload-layout",
+      );
+      expect(document.querySelector(".child")?.textContent).toBe("Child A");
+      expect(document.querySelector(".styled-island")).toBeNull();
+
+      link?.dispatchEvent(new Event("load"));
+      await navigation;
+      await flush();
+
+      expect(document.querySelector(".child")).toBeNull();
+      expect(document.querySelector(".styled-island")?.textContent).toBe(
+        "styled!",
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreFetch();
+    }
+  });
+
   it("mounts an initial server route document payload without relying on client-reference suspension", async () => {
     const nestedRoutes = [
       createRootRoute({

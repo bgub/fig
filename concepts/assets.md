@@ -43,7 +43,11 @@ On the client, `insertAssetResources` inserts descriptors idempotently (by
 key) and returns load tracking. Suspense reveal gates on blocking assets:
 streamed boundary completions wait for their stylesheets to load before the
 reveal op runs (the inline runtime's `r()` helper), so content never flashes
-unstyled. Non-blocking kinds (preloads, preconnects) never gate.
+unstyled. Payload boundary refreshes follow the same rule: refreshed content
+keeps the last revealed tree visible until newly required stylesheets load.
+If a later payload depends on a stylesheet Fig already inserted and that sheet
+is still loading, it joins the existing gate. Non-blocking kinds (preloads,
+preconnects) never gate.
 
 ## Diagnostics
 

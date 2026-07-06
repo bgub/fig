@@ -123,8 +123,8 @@ the streamed entry — no id-to-resource registry), and namespace-level tooling:
 
 - **collision detection**: an entry records which resource loaded it; in
   development, a read or load of the same key by a _different_ resource warns.
-- **prefix operations** (future): a flat namespaced keyspace makes
-  `["user"]`-prefix invalidation natural, TanStack-style.
+- **prefix operations**: `invalidateDataPrefix(["user"])` marks every existing
+  entry below that structured key prefix stale.
 
 ### Definition Variants
 
@@ -498,10 +498,11 @@ visible UI before replacement work commits.
 Fig exposes two revalidation verbs. They split cleanly along two axes that
 happen to align, so each has a coherent role rather than overlapping:
 
-|                                     | fetches when                          | returns                      | use                                                  |
-| ----------------------------------- | ------------------------------------- | ---------------------------- | ---------------------------------------------------- |
-| `invalidateData(resource, ...args)` | only if the key is currently observed | `void`                       | declarative "this is stale, update what's on screen" |
-| `refreshData(resource, ...args)`    | always, now                           | `Promise<DataRefreshResult>` | imperative "reload and let me await it"              |
+|                                     | fetches when                          | returns                      | use                                                     |
+| ----------------------------------- | ------------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `invalidateData(resource, ...args)` | only if the key is currently observed | `void`                       | declarative "this is stale, update what's on screen"    |
+| `invalidateDataPrefix(prefix)`      | only for currently observed matches   | `void`                       | declarative "everything under this key prefix is stale" |
+| `refreshData(resource, ...args)`    | always, now                           | `Promise<DataRefreshResult>` | imperative "reload and let me await it"                 |
 
 `invalidateData(...)` marks the key stale, clears any recorded `refreshError`
 (re-arming auto-refresh after an earlier background-refresh failure), and
@@ -797,8 +798,6 @@ precise.
   convenience justify ambient resolution over an injected handle?
 - Loader-less shared resources plus server-loader resources, or a
   compiler/framework transform for the first server-only packaging strategy?
-- Should prefix invalidation (`["user"]`-prefix) be part of the core surface or a
-  framework concern?
 - What should the first ErrorBoundary retry/reset API look like for failed keys?
 - What is the minimum RSC protocol change to map keys to refreshed payloads
   without overfitting to one framework?

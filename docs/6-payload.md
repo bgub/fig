@@ -1,6 +1,6 @@
 # Payload (server components)
 
-Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows of JSON, crosses the wire, and becomes a live Fig tree in the browser. It lives at `@bgub/fig-server/payload`, and the terminology rule from doc 1 applies: it's *payload*, never "RSC" or "Flight". Those are React brands; the format is Fig's own, and this doc shows you the actual bytes.
+Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire through a codec, and becomes a live Fig tree in the browser. It lives at `@bgub/fig-server/payload`, and the terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
 
 Like docs 3 and 4, this one follows a single scenario end to end.
 
@@ -52,7 +52,7 @@ const { stream, allReady, contentType } = renderToPayloadStream(
 
 ## What's on the wire
 
-Newline-delimited JSON rows, MIME type `text/x-fig-payload`. For our scenario, three rows (each is one line on the wire; wrapped here for readability):
+Payload is a semantic row model plus a pluggable byte codec. The default codec is `jsonPayloadCodec`, identified by `codec=json` in the content type (`text/x-fig-payload; codec=json; charset=utf-8`), and it encodes rows as newline-delimited JSON. For our scenario, three JSON-codec rows look like this (each is one line on the wire; wrapped here for readability):
 
 ```
 {"id":1,"tag":"client","value":{"id":"src/like-button.tsx#LikeButton","exportName":"LikeButton"}}
@@ -73,16 +73,22 @@ Reading them in order:
 
 The full row vocabulary:
 
-| Tag       | Carries                                                                  |
-| --------- | ------------------------------------------------------------------------ |
-| `model`   | a serialized tree chunk; id 0 is the root                                |
-| `client`  | a client reference: `{ id, exportName?, assets?, ssr? }`                 |
-| `data`    | settled data-resource entries (doc 5's map rows)                         |
-| `assets`  | stream-safe asset descriptors (doc 7)                                    |
-| `error`   | `{ digest?, message? }` under the server `onError` contract (doc 4)      |
-| `refresh` | a boundary refresh: replaces one `PayloadBoundary`'s content by id       |
+| Tag       | Carries                                                             |
+| --------- | ------------------------------------------------------------------- |
+| `model`   | a serialized tree chunk; id 0 is the root                           |
+| `client`  | a client reference: `{ id, exportName?, assets?, ssr? }`            |
+| `data`    | settled data-resource entries (doc 5's map rows)                    |
+| `assets`  | stream-safe asset descriptors (doc 7)                               |
+| `error`   | `{ digest?, message? }` under the server `onError` contract (doc 4) |
+| `refresh` | a boundary refresh: replaces one `PayloadBoundary`'s content by id  |
 
-Some things are deliberately absent: server actions, temporary references, binary row encodings. Fig controls both ends of the wire, so rows stay plain JSON you can read in the network tab. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
+Some things are deliberately absent from the row model: server actions and temporary references. The byte encoding is deliberately pluggable: JSON is the readable default for development, and a binary production codec can be added without changing the row semantics. Codec ids identify implementations, not stable public formats. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
+
+## Serialization fidelity
+
+Payload data is not just `JSON.stringify` with crossed fingers. The shared value codec round-trips JSON scalars/arrays, plain objects (including a user-authored `$fig` key), `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global `Symbol.for` symbols. It rejects functions, cycles, class instances/non-plain objects, and non-global symbols.
+
+Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. Fig Start uses the same helpers for data hydration and remote data resource args/results, so data values don't silently degrade to JSON.
 
 ## Suspense holes fill by row id
 
@@ -104,6 +110,7 @@ response.bindRoot(createRoot(container));
 ```
 
 - `processStream(stream)` is the blessed ingestion seam (`processStringChunk` is the low-level escape hatch).
+- `renderToPayloadStream(node, { codec })` and `createPayloadResponse({ codec })` must agree on the codec implementation. `fetchPayload` sends the response codec in `Accept` and checks the response `codec=` content-type parameter before decoding.
 - Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it. `preloadClientReferences()` awaits whatever is in flight.
 - `rootReady` resolves when the root row decodes. It never rejects — race it against your own timeout or error UI.
 - `bindRoot(root)` renders the decoded tree into a Fig root and replays streamed `data` rows into `root.data` — the doc 5 handoff, completed.

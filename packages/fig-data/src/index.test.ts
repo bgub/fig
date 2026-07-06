@@ -2,10 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   dataResource,
   invalidateData,
+  invalidateDataPrefix,
   preloadData,
   refreshData,
 } from "./index.ts";
-import { createDataStore } from "./internal.ts";
+import { createDataStore, normalizeDataResourceKey } from "./internal.ts";
 
 declare global {
   namespace FigData {
@@ -18,6 +19,43 @@ declare global {
 const never = new Promise<never>(() => undefined);
 
 describe("@bgub/fig-data", () => {
+  it("encodes data keys structurally without delimiter collisions", () => {
+    const keys = [
+      ["key", "a,b"],
+      ["key", "a", "b"],
+      ["key", "a:b"],
+      ["key", { a: "b" }],
+      ["key", '["x"]'],
+      ["key", ["x"]],
+      ["key", '{"x":1}'],
+      ["key", { x: 1 }],
+      ["key", "a|b"],
+    ] as const;
+
+    const encoded = keys.map(normalizeDataResourceKey);
+    expect(new Set(encoded).size).toBe(keys.length);
+    expect(encoded).toEqual([
+      '["key","a,b"]',
+      '["key","a","b"]',
+      '["key","a:b"]',
+      '["key",{"a":"b"}]',
+      '["key","[\\"x\\"]"]',
+      '["key",["x"]]',
+      '["key","{\\"x\\":1}"]',
+      '["key",{"x":1}]',
+      '["key","a|b"]',
+    ]);
+  });
+
+  it("canonicalizes data key objects and negative zero", () => {
+    expect(normalizeDataResourceKey(["key", { b: 1, a: -0 }])).toBe(
+      '["key",{"a":0,"b":1}]',
+    );
+    expect(normalizeDataResourceKey(["key", { a: -0, b: 1 }])).toBe(
+      '["key",{"a":0,"b":1}]',
+    );
+  });
+
   it("passes store context to loaders", async () => {
     const messageResource = dataResource({
       key: (id: string) => ["message", id],
@@ -189,6 +227,90 @@ describe("@bgub/fig-data", () => {
     await delay();
 
     expect(loads).toBe(1);
+  });
+
+  it("invalidates observed keys by prefix", () => {
+    const userOwner = {};
+    const postOwner = {};
+    const scheduled: object[] = [];
+    const userResource = dataResource<[string], string>({
+      key: (id: string) => ["entity", "user", id],
+      load: (id: string) => `user-${id}`,
+    });
+    const postResource = dataResource<[string], string>({
+      key: (id: string) => ["entity", "post", id],
+      load: (id: string) => `post-${id}`,
+    });
+    const store = createDataStore<object, string>({
+      context: {},
+      getLane: () => "mutation",
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    expect(store.readData(userResource, ["one"], userOwner)).toBe("user-one");
+    expect(store.readData(postResource, ["one"], postOwner)).toBe("post-one");
+    store.commitDataDependencies(userOwner, null);
+    store.commitDataDependencies(postOwner, null);
+
+    store.run(() => invalidateDataPrefix(["entity", "user"]));
+
+    expect(scheduled).toEqual([userOwner]);
+    const byKey = new Map(
+      store.inspectDataEntries().map((entry) => [entry.canonicalKey, entry]),
+    );
+    expect(byKey.get('["entity","user","one"]')?.stale).toBe(true);
+    expect(byKey.get('["entity","post","one"]')?.stale).toBe(false);
+  });
+
+  it("matches invalidation prefixes structurally", () => {
+    const exactOwner = {};
+    const delimiterOwner = {};
+    const namespaceOwner = {};
+    const scheduled: object[] = [];
+    const resource = dataResource<[string], string>({
+      key: (key: string) => ["prefix", key],
+      load: (key: string) => key,
+    });
+    const nestedResource = dataResource<
+      [{ label: string; scope: string[] }],
+      string
+    >({
+      key: (input: { label: string; scope: string[] }) => [
+        "prefix",
+        { label: input.label, scope: input.scope },
+      ],
+      load: () => "nested",
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    expect(store.readData(resource, ["user"], exactOwner)).toBe("user");
+    expect(store.readData(resource, ["user|settings"], delimiterOwner)).toBe(
+      "user|settings",
+    );
+    expect(
+      store.readData(
+        nestedResource,
+        [{ label: "profile", scope: ["public"] }],
+        namespaceOwner,
+      ),
+    ).toBe("nested");
+    store.commitDataDependencies(exactOwner, null);
+    store.commitDataDependencies(delimiterOwner, null);
+    store.commitDataDependencies(namespaceOwner, null);
+
+    store.invalidateDataPrefix(["prefix", "user"]);
+    expect(scheduled).toEqual([exactOwner]);
+
+    scheduled.length = 0;
+    store.invalidateDataPrefix([
+      "prefix",
+      { scope: ["public"], label: "profile" },
+    ]);
+    expect(scheduled).toEqual([namespaceOwner]);
   });
 
   it("does not create entries for unsupported refreshes with no value", async () => {

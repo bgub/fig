@@ -47,7 +47,7 @@ Fig uses the platform's names: `class`, `for`, `tabindex`, `stroke-width`. The R
 
 ## Effects: AbortSignal in, nothing out
 
-Effects receive a signal and must return `undefined` — a React-style returned cleanup is a type error. Abort *is* the cleanup: Fig aborts the signal on dependency change and on unmount.
+Effects receive a signal and must return `undefined` — a React-style returned cleanup is a type error. Abort _is_ the cleanup: Fig aborts the signal on dependency change and on unmount.
 
 ```tsx
 useReactive(
@@ -70,7 +70,7 @@ useReactive((signal) => {
 }, []);
 ```
 
-The effect hooks are named for *when* they run: `useReactive` (React: `useEffect`, after paint), `useBeforePaint` (React: `useLayoutEffect`), `useBeforeLayout` (React: `useInsertionEffect`). There's no mount-only hook; `useReactive(fn, [])` is the idiom.
+The effect hooks are named for _when_ they run: `useReactive` (React: `useEffect`, after paint), `useBeforePaint` (React: `useLayoutEffect`), `useBeforeLayout` (React: `useInsertionEffect`). There's no mount-only hook; `useReactive(fn, [])` is the idiom.
 
 ## No refs — `bind`
 
@@ -121,7 +121,7 @@ function Profile({ id }: { id: string }) {
 }
 ```
 
-Two freshness verbs make up the whole vocabulary: `invalidateData` (mark stale, reload lazily) and `refreshData` (fetch now). Errors from the loader hit your nearest `ErrorBoundary`; loading states hit your nearest `Suspense`.
+The freshness vocabulary stays small: `invalidateData` marks one key stale, `invalidateDataPrefix` marks a key prefix stale, and `refreshData` fetches now. Errors from the loader hit your nearest `ErrorBoundary`; loading states hit your nearest `Suspense`.
 
 ## Transitions get a signal too
 

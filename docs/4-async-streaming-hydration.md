@@ -4,7 +4,7 @@ Doc 3 built the machine — lanes, the work loop, render, commit — and followe
 
 ## The async lifecycle
 
-Everything async in Fig rides one trick: `readPromise` and `readData` *throw* the pending promise. A component that isn't ready doesn't return partial UI — it throws, the render abandons that attempt, and the machinery from doc 3 (lanes, parked work, retries) handles the rest.
+Everything async in Fig rides one trick: `readPromise` and `readData` _throw_ the pending promise. A component that isn't ready doesn't return partial UI — it throws, the render abandons that attempt, and the machinery from doc 3 (lanes, parked work, retries) handles the rest.
 
 ### What happens when a render suspends
 
@@ -62,7 +62,7 @@ Server render errors cross the wire only through `onError(error, info) => { dige
 
 ### Not to be confused with payload
 
-This HTML+ops protocol carries rendered UI; its consumer is the browser's HTML parser plus the inline runtime. Payload (`@bgub/fig-server/payload`) is the server-component wire format: newline-delimited JSON rows carrying element trees, consumed by Fig's client runtime. Both stream, both handle suspense, different layers. (Payload is doc 6.)
+This HTML+ops protocol carries rendered UI; its consumer is the browser's HTML parser plus the inline runtime. Payload (`@bgub/fig-server/payload`) is the server-component wire layer: row-encoded element trees consumed by Fig's client runtime, with JSON as the default codec. Both stream, both handle suspense, different layers. (Payload is doc 6.)
 
 ## The hydration lifecycle
 
@@ -70,7 +70,7 @@ Hydration is the client render adopting the server's DOM instead of creating nod
 
 ### Dehydrated boundaries are first-class
 
-fig-dom parses the streaming markers (`<!--fig:suspense:...-->`) into `DehydratedSuspenseBoundary` objects — marker knowledge lives in the renderer package, behind hydration host hooks. A dehydrated boundary commits *as* a fiber without touching its server DOM: the tree around it is live and interactive while the boundary hydrates later, at its own priority (the hydration-twin lanes from doc 3's taxonomy). Streaming and hydration overlap freely — segments can still be arriving while hydration proceeds, and a boundary whose content completes gets its retry scheduled (the `c` op pings the retry hook the client attached).
+fig-dom parses the streaming markers (`<!--fig:suspense:...-->`) into `DehydratedSuspenseBoundary` objects — marker knowledge lives in the renderer package, behind hydration host hooks. A dehydrated boundary commits _as_ a fiber without touching its server DOM: the tree around it is live and interactive while the boundary hydrates later, at its own priority (the hydration-twin lanes from doc 3's taxonomy). Streaming and hydration overlap freely — segments can still be arriving while hydration proceeds, and a boundary whose content completes gets its retry scheduled (the `c` op pings the retry hook the client attached).
 
 ### Selective hydration
 

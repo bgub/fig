@@ -33,7 +33,7 @@ First, what stays: Fig keeps the modern React runtime model wholesale — compon
 
 ### Data is built in, not bolted on
 
-`dataResource` defines keyed async values where the key *is* the identity. No id registry, no React-Query-sized vocabulary:
+`dataResource` defines keyed async values where the key _is_ the identity. No id registry, no React-Query-sized vocabulary:
 
 - `readData` suspends while loading, and errors hit your `ErrorBoundary`
 - Freshness is exactly two verbs: `invalidateData` (mark stale) and `refreshData` (load now)
@@ -57,7 +57,7 @@ Events are declared as descriptors: `events={[on("click", (event, signal) => ...
 ### Names mean what they say
 
 - Native platform names where they're clearer: `class`, `for`, `tabindex`, native event names
-- Hooks are named for *when* they run: `useReactive` (React: `useEffect`), `useBeforePaint` (React: `useLayoutEffect`)
+- Hooks are named for _when_ they run: `useReactive` (React: `useEffect`), `useBeforePaint` (React: `useLayoutEffect`)
 - The server entry points form one `renderTo*` grid instead of a pile of unrelated names
 - The server-component wire layer is called "payload" — never "RSC" or "Flight"
 
@@ -67,11 +67,13 @@ React's `use(resource)` is three explicit verbs: `readContext`, `readPromise`, `
 
 ### One cancellation contract
 
-Effects, events, binds, stable events, actions, data loaders, and `useTransition` callbacks all receive an `AbortSignal`, and none of them return a cleanup. Abort *is* the cleanup. (Top-level `transition()` is the one exception — it has nothing to cancel against.)
+Effects, events, binds, stable events, actions, data loaders, and `useTransition` callbacks all receive an `AbortSignal`, and none of them return a cleanup. Abort _is_ the cleanup. (Top-level `transition()` is the one exception — it has nothing to cancel against.)
 
 ### Server components, specified
 
-Fig's server components serialize to payload, Fig's own wire format: plain newline-delimited JSON, specified and stable rather than an internal framework detail.
+Fig's server components serialize to payload, Fig's own wire layer: a specified
+row model with pluggable codecs. The default JSON codec is readable in
+development; the byte format itself is not promised as a stable public format.
 
 ### Dev mode is strict and loud
 

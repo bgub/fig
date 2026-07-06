@@ -1,6 +1,6 @@
 # Asset resources
 
-The last of doc 1's headlines without its own doc. Asset resources are render-discovered delivery assets — CSS, scripts, module preloads, fonts, preconnects, titles, meta — discovered during render, deduped, loaded, and sometimes gated before reveal. (Keyed async *values* are data resources, doc 5. The two share the "resource" word and nothing else.)
+The last of doc 1's headlines without its own doc. Asset resources are render-discovered delivery assets — CSS, scripts, module preloads, fonts, preconnects, titles, meta — discovered during render, deduped, loaded, and sometimes gated before reveal. (Keyed async _values_ are data resources, doc 5. The two share the "resource" word and nothing else.)
 
 ## Creators, not hoistable magic
 
@@ -36,9 +36,9 @@ Same-key entries with different definitions throw (`AssetResourceConflictError`)
 
 Each kind has a destination:
 
-| Destination | Kinds                                                          | Where it lands                              |
-| ----------- | -------------------------------------------------------------- | ------------------------------------------- |
-| head        | `title`, `meta`                                                | document state, sealed with the shell        |
+| Destination | Kinds                                                                    | Where it lands                           |
+| ----------- | ------------------------------------------------------------------------ | ---------------------------------------- |
+| head        | `title`, `meta`                                                          | document state, sealed with the shell    |
 | stream      | `stylesheet`, `script`, `preload`, `modulepreload`, `font`, `preconnect` | emitted near the segment that needs them |
 
 The sealing rules differ by mode. In streaming SSR the head is sealed when the shell flushes, so a head-destined asset discovered inside suspended content arrives too late (dev warns; see diagnostics). `prerender` holds every flush until all tasks settle (doc 4), so it seals the head at flush and late-discovered head assets still land.
@@ -49,7 +49,7 @@ Only streamed kinds travel on the payload wire — doc 6's `assets` rows — ser
 
 On the client, `insertAssetResources` (from `@bgub/fig-dom`) inserts descriptors idempotently by key and returns load tracking.
 
-The reveal gate is the part you've already seen from the other side: doc 4's inline runtime has an `r` op that delays a boundary completion until its stylesheets load. That's this system. A streamed boundary's content waits for its blocking stylesheets before the swap runs, so streamed content never flashes unstyled. Non-blocking kinds (preloads, preconnects) never gate, and a stylesheet can opt out with `blocking: "none"`.
+The reveal gate is the part you've already seen from the other side: doc 4's inline runtime has an `r` op that delays a boundary completion until its stylesheets load. That's this system. A streamed boundary's content waits for its blocking stylesheets before the swap runs, so streamed content never flashes unstyled. Payload boundary refreshes use the same gate: old content remains visible until newly discovered blocking stylesheets are ready. Non-blocking kinds (preloads, preconnects) never gate, and a stylesheet can opt out with `blocking: "none"`.
 
 ## Diagnostics
 

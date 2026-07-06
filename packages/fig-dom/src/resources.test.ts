@@ -71,6 +71,24 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(links()).toHaveLength(1);
   });
 
+  it("does not gate on server-rendered head stylesheets", async () => {
+    const ssr = new FakeElement("link");
+    ssr.setAttribute("rel", "stylesheet");
+    ssr.setAttribute("href", "/a.css");
+    head.appendChild(ssr);
+
+    let settled = false;
+    const ready = insertAssetResources([stylesheet("/a.css")]);
+    void ready.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+
+    expect(links()).toHaveLength(1);
+    expect(settled).toBe(true);
+  });
+
   it("dedupes keyed assets against server-rendered head elements", () => {
     const ssr = new FakeElement("link");
     ssr.setAttribute("rel", "stylesheet");
@@ -98,6 +116,48 @@ describe("@bgub/fig-dom asset resources", () => {
     void insertAssetResources([preload("/a.woff2", "font")]);
 
     expect(links()).toHaveLength(1);
+  });
+
+  it("gates later dependents on a pending inserted stylesheet", async () => {
+    let firstSettled = false;
+    let secondSettled = false;
+    const first = insertAssetResources([stylesheet("/a.css")]);
+    const second = insertAssetResources([stylesheet("/a.css")]);
+    void first.then(() => {
+      firstSettled = true;
+    });
+    void second.then(() => {
+      secondSettled = true;
+    });
+
+    await Promise.resolve();
+
+    expect(links()).toHaveLength(1);
+    expect(firstSettled).toBe(false);
+    expect(secondSettled).toBe(false);
+
+    links()[0]?.dispatch("load");
+    await Promise.all([first, second]);
+
+    expect(firstSettled).toBe(true);
+    expect(secondSettled).toBe(true);
+  });
+
+  it("does not gate on an already-loaded inserted stylesheet", async () => {
+    const first = insertAssetResources([stylesheet("/a.css")]);
+    links()[0]?.dispatch("load");
+    await first;
+
+    let settled = false;
+    const second = insertAssetResources([stylesheet("/a.css")]);
+    void second.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+
+    expect(links()).toHaveLength(1);
+    expect(settled).toBe(true);
   });
 
   it("gates reveal on a critical stylesheet load", async () => {
@@ -132,6 +192,15 @@ describe("@bgub/fig-dom asset resources", () => {
         font("/a.woff2", "font/woff2"),
       ]),
     ).resolves.toBeUndefined();
+  });
+
+  it("does not gate duplicate non-blocking stylesheets", async () => {
+    void insertAssetResources([stylesheet("/a.css", { blocking: "none" })]);
+
+    await expect(
+      insertAssetResources([stylesheet("/a.css", { blocking: "none" })]),
+    ).resolves.toBeUndefined();
+    expect(links()).toHaveLength(1);
   });
 
   it("does not gate on media-mismatched stylesheets", async () => {

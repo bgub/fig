@@ -168,9 +168,10 @@ spec.
 ## Payload
 
 - Fig's server-component layer is `@bgub/fig-server/payload` — its own wire
-  format, not React Flight: newline-delimited JSON rows, MIME
-  `text/x-fig-payload`, refresh header `x-fig-payload-boundary`, `fig-pl-`
-  id prefixes.
+  layer, not React Flight: a semantic row model plus a pluggable codec. The
+  default codec is newline-delimited JSON with MIME
+  `text/x-fig-payload; codec=json; charset=utf-8`; refresh requests use
+  `x-fig-payload-boundary`, and payload-rendered ids use `fig-pl-` prefixes.
 - API: `renderToPayloadStream` (server), `createPayloadResponse` /
   `fetchPayload` / `processStream` (client), `PayloadBoundary` +
   `refreshBoundary` for targeted server-rendered boundary refreshes (no React
@@ -183,6 +184,6 @@ spec.
   their modules preloaded.
 - Error rows carry the `onError`-controlled `{ digest?, message? }` payload —
   raw server exception text never ships in production.
-- Deliberately absent from the protocol: server actions, temporary
-  references, and binary row encodings — Fig controls both ends, so rows are
-  plain JSON.
+- Deliberately absent from the row model: server actions and temporary
+  references. Binary row encodings are allowed as codecs; JSON is just the
+  readable default.

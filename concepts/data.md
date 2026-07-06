@@ -114,6 +114,10 @@ vocabulary:
   lazily. It also clears a cached _rejection_ (back to pending) so a
   remounted `ErrorBoundary` retries afresh, and clears a stored
   `refreshError` so read-triggered revalidation re-arms.
+- `invalidateDataPrefix(prefix)` — mark every existing entry whose structured
+  key starts with `prefix` stale. Prefixes use the same key tuple format, so
+  `["user"]` matches `["user", "42"]`; matching is structural, not string
+  prefix matching.
 - `refreshData(resource, ...args)` — fetch now. **Never rejects**; it
   resolves a result union: `fulfilled`, `rejected { error, staleValue? }`,
   `aborted { reason: "superseded" | "store-disposed" | "evicted" }`, or
@@ -137,7 +141,8 @@ synchronous prefix of actions and transitions, and effects (which run inside
 `dataStore.run`). After an `await` the slot is gone. Async flows capture the
 **explicit handle** — `readDataStore()` during any synchronous window, or
 `root.data` — and call the same variadic methods
-(`invalidateData`/`preloadData`/`refreshData`/`hydrate`/`run`) on it.
+(`invalidateData`/`invalidateDataPrefix`/`preloadData`/`refreshData`/
+`hydrate`/`run`) on it.
 
 ## Stores, Scopes, And SSR Handoff
 

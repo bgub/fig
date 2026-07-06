@@ -1,6 +1,7 @@
 export {
   dataResource,
   invalidateData,
+  invalidateDataPrefix,
   preloadData,
   readData,
   readDataStore,

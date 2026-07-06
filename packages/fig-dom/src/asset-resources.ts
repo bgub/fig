@@ -18,6 +18,7 @@ import { elementName, isElementNode } from "./tree.ts";
 interface DocumentResourceEntry {
   count: number;
   element: Element;
+  ready: Promise<void> | null;
 }
 
 interface DocumentResourceMeta {
@@ -51,7 +52,7 @@ export function adoptDocumentResource(
     document.createElement(type);
 
   if (adopted === undefined) {
-    registry.set(key, { count: 0, element });
+    registry.set(key, { count: 0, element, ready: null });
     documentResourceMeta.set(element, { key, kind: resource.kind });
   }
 
@@ -89,7 +90,7 @@ export function acquireDocumentResource(element: Element): Element {
   }
 
   if (entry === undefined) {
-    registry.set(meta.key, { count: 1, element });
+    registry.set(meta.key, { count: 1, element, ready: null });
   } else {
     entry.count += 1;
   }
@@ -265,20 +266,33 @@ export function insertAssetResources(
 
     if (existing !== null) {
       // Already present (SSR, a host-rendered element, or a prior call):
-      // adopt it into the registry for O(1) future lookups, but do not
-      // re-gate.
-      if (registry.get(key)?.element !== existing) {
-        registry.set(key, { count: 1, element: existing });
+      // adopt it into the registry for O(1) future lookups. If Fig inserted it
+      // and it is still loading, dependents join that pending gate.
+      let entry = registry.get(key);
+      if (entry?.element !== existing) {
+        entry = { count: 1, element: existing, ready: null };
+        registry.set(key, entry);
         documentResourceMeta.set(existing, { key, kind: asset.kind });
+      }
+      if (isCriticalStylesheet(asset) && entry.ready !== null) {
+        gates.push(entry.ready);
       }
       continue;
     }
 
     const element = createAssetResourceElement(asset);
+    const entry: DocumentResourceEntry = {
+      count: 1,
+      element,
+      ready: null,
+    };
     const gate = isCriticalStylesheet(asset)
-      ? whenResourceSettled(element)
+      ? whenResourceSettled(element).then(() => {
+          if (registry.get(key) === entry) entry.ready = null;
+        })
       : null;
-    registry.set(key, { count: 1, element });
+    entry.ready = gate;
+    registry.set(key, entry);
     documentResourceMeta.set(element, { key, kind: asset.kind });
     head.appendChild(element);
 

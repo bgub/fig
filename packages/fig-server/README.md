@@ -232,13 +232,23 @@ Suspense reveal gating as explicit `assets(...)` wrappers.
 ```ts
 import {
   createPayloadResponse,
+  decodePayloadValue,
+  encodePayloadValue,
   fetchPayload,
+  jsonPayloadCodec,
   renderToPayloadStream,
   PayloadBoundary,
+  type PayloadCodec,
 } from "@bgub/fig-server/payload";
 ```
 
-`renderToPayloadStream(node, options?)` renders a server-component payload.
+`renderToPayloadStream(node, options?)` renders a server-component payload. The
+default `jsonPayloadCodec` writes one readable JSON row per newline and
+identifies itself with `text/x-fig-payload; codec=json; charset=utf-8`. Pass a
+custom `PayloadCodec` to both `renderToPayloadStream(node, { codec })` and
+`createPayloadResponse({ codec })` when both ends should use a different byte
+encoding. Codec ids are implementation ids, not stable public wire formats.
+
 Pass `refreshBoundary` to render a targeted boundary refresh:
 
 ```tsx
@@ -248,6 +258,14 @@ renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" });
 `createPayloadResponse()` decodes streamed rows on the client, and
 `fetchPayload(response, input, options?)` fetches and processes a payload. Pass
 `refreshBoundary` to `fetchPayload` to request and apply a boundary refresh.
+`fetchPayload` sends the response codec in `Accept` and checks the response
+`codec=` content-type parameter before decoding.
+
+`encodePayloadValue` / `decodePayloadValue` are low-level helpers for payload
+integrations that need the same data-value fidelity as payload data rows:
+`undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and
+global `Symbol.for` symbols round-trip; functions, cycles, class instances, and
+non-global symbols are rejected.
 
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useExternalStore` server snapshots, no-op server

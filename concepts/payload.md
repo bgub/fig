@@ -1,6 +1,6 @@
 # Payload
 
-Status: stable
+Status: stable API; byte encoding intentionally unstable
 
 Fig's server-component wire layer — `@bgub/fig-server/payload`. The
 terminology rule: it is **payload**, never "RSC" or "Flight"; those are React
@@ -8,14 +8,32 @@ brands and the format is Fig's own.
 
 ## Wire Format
 
-Newline-delimited JSON rows, MIME `text/x-fig-payload`, refresh header
-`x-fig-payload-boundary`, `fig-pl-` useId prefixes. Row tags:
+Payload is a semantic row model plus a pluggable byte codec. The row model is
+the contract; the exact byte layout is an implementation detail selected by a
+`PayloadCodec`.
+
+The built-in development codec is `jsonPayloadCodec`:
+
+- id: `json`
+- MIME: `text/x-fig-payload; codec=json; charset=utf-8`
+- encoding: newline-delimited JSON rows
+
+Custom codecs expose their own opaque `id`, `contentType`, `encodeRow(row)`,
+and `createDecoder(onRow)`. Fig checks the `codec=` content-type parameter at
+transport boundaries so a client using one codec does not decode a stream from
+another. Codec ids identify implementations, not stable public formats; a
+future binary codec can change its internal byte layout while retaining the
+same row semantics.
+
+Payload refreshes use the `x-fig-payload-boundary` header. Ids minted by
+`useId` during payload render use the `fig-pl-` prefix. Row tags:
 
 - `model` — a serialized tree chunk (id 0 is the root). Trees serialize as
   `$fig`-tagged nodes: elements, fragments, suspense, boundaries, and
   outlined `lazy`/`promise` references that suspend-and-fill by row id.
 - `client` — a client reference: `{ id, exportName?, assets?, ssr? }`.
-- `data` — settled data-resource hydration entries (see data.md).
+- `data` — settled data-resource hydration entries encoded with the payload
+  value codec (see data.md).
 - `assets` — stream-safe asset descriptors (see assets.md).
 - `error` — `{ digest?, message? }` under the server `onError` contract; the
   decoded chunk rejects with a digest-carrying error.
@@ -23,8 +41,34 @@ Newline-delimited JSON rows, MIME `text/x-fig-payload`, refresh header
   by id without replacing the app shell (no React equivalent — React
   refetches whole trees).
 
-Deliberately absent: server actions, temporary references, binary row
-encodings — Fig controls both ends, so rows stay plain JSON.
+Deliberately absent from the row model: server actions and temporary
+references. Binary byte encodings are allowed as codecs, but no binary codec is
+currently the public default.
+
+## Value Serialization
+
+Payload values are not plain `JSON.stringify` payloads. The shared value codec
+round-trips:
+
+- JSON scalars and arrays
+- plain objects, including objects with a user-authored `$fig` key
+- `undefined`
+- `Date`
+- `Map`
+- `Set`
+- `BigInt`
+- `NaN`, `Infinity`, `-Infinity`, and `-0`
+- global symbols created with `Symbol.for`
+
+It rejects functions, cyclic object graphs, class instances/non-plain objects,
+and non-global symbols. Server component values can additionally contain Fig
+elements, client references, and promises; those are serialized by the payload
+renderer into row references before the value codec handles ordinary data.
+
+The same helpers back payload data rows and Fig Start's remote data transport:
+`encodePayloadValue` / `decodePayloadValue` for values and
+`encodePayloadDataEntries` / `decodePayloadDataEntries` for hydrated data
+entries.
 
 ## Client References
 
@@ -40,18 +84,20 @@ server-render through their `ssr` component with modules preloaded.
 
 ## API
 
-Server: `renderToPayloadStream(node, { onError?, refreshBoundary?,
+Server: `renderToPayloadStream(node, { codec?, onError?, refreshBoundary?,
 clientReferenceAssets?, dataContext?, dataPartition? })` returns
 `{ stream, allReady, contentType }`. `PayloadBoundary` marks refreshable
 subtrees (dev throws on duplicate ids).
 
-Client: `createPayloadResponse({ loadClientReference?,
+Client: `createPayloadResponse({ codec?, loadClientReference?,
 resolveClientReference? })` decodes rows — `processStream(stream)` is the
-blessed ingestion seam (`processStringChunk` is the low-level escape hatch),
-`rootReady` resolves when the root row decodes (never rejects; race it),
-`bindRoot(root)` renders into a Fig root and replays streamed data into
-`root.data`, `preloadClientReferences()` awaits in-flight module loads, and
-`fetchPayload(response, input, { refreshBoundary? })` fetches and ingests
-(namespacing refresh row ids past mounted chunks). Decoded chunks are
-memoized so unchanged subtrees bail out of re-renders; refresh rows drop the
-decode caches so refreshed boundaries get fresh identities.
+blessed ingestion seam (`processBytesChunk` and `processStringChunk` are
+low-level escape hatches), `rootReady` resolves when the root row decodes
+(never rejects; race it), `bindRoot(root)` renders into a Fig root and replays
+streamed data into `root.data`, `preloadClientReferences()` awaits in-flight
+module loads, and `fetchPayload(response, input, { refreshBoundary? })`
+fetches and ingests (sending the response codec in `Accept`, checking the
+response codec id, and namespacing refresh row ids past mounted chunks).
+Decoded chunks are memoized so unchanged subtrees bail out of re-renders;
+refresh rows drop the decode caches so refreshed boundaries get fresh
+identities.

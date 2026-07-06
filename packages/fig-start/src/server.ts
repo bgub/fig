@@ -22,8 +22,13 @@ import {
 } from "@bgub/fig-server";
 import {
   createPayloadResponse,
+  decodePayloadValue,
+  encodePayloadDataEntries,
+  encodePayloadValue,
   PayloadBoundary,
   type PayloadClientReferenceRecord,
+  type PayloadDataHydrationEntry,
+  type PayloadModel,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
 import type { Server } from "node:http";
@@ -588,7 +593,7 @@ function payloadBoundaryHeader(request: Request): string | undefined {
 }
 
 interface DataResourceRequestBody {
-  args: unknown[];
+  args: PayloadModel[];
   id: string;
 }
 
@@ -612,19 +617,20 @@ async function handleDataResourceRequest(
   }
 
   let key: DataResourceKey;
+  const args = body.args.map((arg) => decodePayloadValue(arg));
   try {
-    key = resource.key(...body.args);
+    key = resource.key(...args);
     normalizeDataResourceKey(key);
   } catch {
     return jsonResponse({ error: "Invalid data resource key." }, 400);
   }
 
   try {
-    const value = await resource.load(...body.args, {
+    const value = await resource.load(...args, {
       context: dataContext,
       signal: request.signal,
     });
-    return jsonResponse({ key, value }, 200);
+    return jsonResponse({ key, value: encodePayloadValue(value) }, 200);
   } catch {
     return jsonResponse({ error: "Data resource failed." }, 500);
   }
@@ -731,7 +737,7 @@ function renderStreamPrelude(input: {
 function renderBootstrap(input: {
   clientEntry: string;
   clientReferenceModules: readonly ClientReferenceModule[];
-  dataEntries: readonly FigDataHydrationEntry[];
+  dataEntries: readonly PayloadDataHydrationEntry[];
   location: string;
   loaderData: Record<string, unknown>;
   nonce: string | undefined;
@@ -794,7 +800,9 @@ function ssrClientReferenceBootstrapScript(
 
 interface DocumentDataStream {
   flush(entries: readonly FigDataHydrationEntry[]): string;
-  initial(entries: readonly FigDataHydrationEntry[]): FigDataHydrationEntry[];
+  initial(
+    entries: readonly FigDataHydrationEntry[],
+  ): PayloadDataHydrationEntry[];
 }
 
 function createDocumentDataStream(
@@ -820,7 +828,7 @@ function createDocumentDataStream(
       const next = unsent(entries);
       return next.length === 0 ? "" : dataFrameScript(next, nonce);
     },
-    initial: unsent,
+    initial: (entries) => encodePayloadDataEntries(unsent(entries)),
   };
 }
 
@@ -1069,7 +1077,7 @@ function dataFrameScript(
     nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
   return (
     `<script type="application/json" ${DATA_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
-      entries,
+      encodePayloadDataEntries(entries),
     )}</script>` +
     `<script${nonceAttr}>globalThis.${DATA_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
   );

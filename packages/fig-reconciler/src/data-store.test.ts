@@ -112,5 +112,12 @@ describe("root data store without @bgub/fig-data", () => {
     }
     flushSync(() => root.render(createElement(Late, null)));
     expect(container.textContent).toBe("late");
+
+    root.data.invalidateDataPrefix(["late"]);
+    expect(
+      (root.data as FigDataStore)
+        .inspectDataEntries()
+        .find((entry) => entry.canonicalKey === '["late"]')?.stale,
+    ).toBe(true);
   });
 });

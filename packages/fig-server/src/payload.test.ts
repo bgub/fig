@@ -33,6 +33,7 @@ import {
   createPayloadResponse,
   fetchPayload,
   isPayloadRequestCancelled,
+  jsonPayloadCodec,
   PayloadBoundary,
   type PayloadClientReferenceMetadata,
   type PayloadFetch,
@@ -138,6 +139,16 @@ function evaluatePayloadNode(node: FigNode): FigNode {
       children: evaluatePayloadNode(node.props.children),
     },
   };
+}
+
+function readPayloadRoot(response: ReturnType<typeof createPayloadResponse>) {
+  const root = response.getRoot();
+  if (!isValidElement(root) || typeof root.type !== "function") {
+    throw new Error("Expected payload response root.");
+  }
+  return (root.type as ElementType & ((props: FigElement["props"]) => FigNode))(
+    root.props,
+  );
 }
 
 function unwrapFunctionComponent(node: FigNode): FigNode {
@@ -636,6 +647,74 @@ describe("payload rendering", () => {
     ]);
   });
 
+  it("round-trips built-in payload values through the JSON codec", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const date = new Date("2026-07-06T12:34:56.789Z");
+    const symbol = Symbol.for("fig.payload.test");
+    const payload = {
+      bigint: 12345678901234567890n,
+      date,
+      map: new Map<unknown, unknown>([
+        ["date", date],
+        [symbol, new Set([NaN, Infinity])],
+      ]),
+      numbers: [NaN, -0, Infinity, -Infinity],
+      object: { $fig: "literal", value: undefined },
+      symbol,
+    };
+
+    const rows = await renderToPayloadRows(
+      createElement(Viewer, { value: payload }),
+    );
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(response, rows);
+
+    const decoded = readPayloadRoot(response);
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+    const value = decoded.props.value as typeof payload;
+
+    expect(value.bigint).toBe(12345678901234567890n);
+    expect(value.date).toEqual(date);
+    expect(value.symbol).toBe(symbol);
+    expect(value.object).toEqual({ $fig: "literal", value: undefined });
+    expect(value.map.get("date")).toEqual(date);
+
+    const decodedSet = value.map.get(symbol) as Set<number>;
+    expect(Number.isNaN([...decodedSet][0])).toBe(true);
+    expect(decodedSet.has(Infinity)).toBe(true);
+    expect(Number.isNaN(value.numbers[0])).toBe(true);
+    expect(Object.is(value.numbers[1], -0)).toBe(true);
+    expect(value.numbers[2]).toBe(Infinity);
+    expect(value.numbers[3]).toBe(-Infinity);
+  });
+
+  it("rejects payload codec mismatches during fetch", async () => {
+    const response = createPayloadResponse({
+      codec: {
+        ...jsonPayloadCodec,
+        contentType: "text/x-fig-payload; codec=custom; charset=utf-8",
+        id: "custom",
+      },
+    });
+
+    await expect(
+      fetchPayload(response, "/payload", {
+        fetch: async () =>
+          new Response(
+            await renderToPayloadText(createElement("p", null, "Fetched")),
+            { headers: { "content-type": jsonPayloadCodec.contentType } },
+          ),
+      }),
+    ).rejects.toThrow(
+      'Payload codec mismatch: response used "json" but this client expects "custom".',
+    );
+  });
+
   it("keeps Fig context available while rendering server components", async () => {
     const Theme = createContext("light");
 
@@ -1021,7 +1100,7 @@ describe("payload rendering", () => {
       return new Response(
         await renderToPayloadText(createElement("p", null, "Fetched")),
         {
-          headers: { "content-type": "text/x-fig-payload; charset=utf-8" },
+          headers: { "content-type": jsonPayloadCodec.contentType },
         },
       );
     };
@@ -1032,7 +1111,7 @@ describe("payload rendering", () => {
     });
 
     expect(requireHeaders(requestHeaders).get("accept")).toBe(
-      "text/x-fig-payload; charset=utf-8",
+      jsonPayloadCodec.contentType,
     );
     expect(requestSignal).toBe(controller.signal);
     expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
