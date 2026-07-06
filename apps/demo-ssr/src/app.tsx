@@ -286,6 +286,18 @@ function ServerInfoPanel({
         >
           Refresh data resource
         </button>
+        <button
+          class="button"
+          data-demo-control="invalidate-server-data-key"
+          events={[
+            on("click", () => {
+              data.invalidateDataKey(serverInfoKey());
+            }),
+          ]}
+          type="button"
+        >
+          Invalidate exact key
+        </button>
       </div>
     </Panel>
   );

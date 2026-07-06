@@ -88,6 +88,23 @@ test("runs benchmark page and renders summarized results", async ({ page }) => {
   expect(errors()).toEqual([]);
 });
 
+test("invalidates client data by exact key", async ({ page }) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.goto("/#resources", { waitUntil: "commit" });
+  await expect(
+    page.getByRole("heading", { name: "Context + lazy" }),
+  ).toBeVisible();
+
+  const profile = page.locator('[data-profile-resource="ada"]');
+  await expect(profile).toContainText("Ada Lovelace");
+  await expect(profile).toContainText("load #1");
+
+  await page.getByRole("button", { name: "Invalidate key" }).click();
+  await expect(profile).toContainText("load #2");
+  expect(errors()).toEqual([]);
+});
+
 test("devtools hide and select mode inspect Fig host nodes", async ({
   page,
 }) => {

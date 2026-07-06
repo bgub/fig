@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   dataResource,
   invalidateData,
+  invalidateDataError,
+  invalidateDataKey,
   invalidateDataPrefix,
   preloadData,
   refreshData,
@@ -313,6 +315,33 @@ describe("@bgub/fig-data", () => {
     expect(scheduled).toEqual([namespaceOwner]);
   });
 
+  it("invalidates an exact structural key", () => {
+    const owner = {};
+    const scheduled: object[] = [];
+    const resource = dataResource<[{ a: number; b: number }], string>({
+      key: (input) => ["exact-key", input],
+      load: () => "value",
+    });
+    const store = createDataStore<object, string>({
+      context: {},
+      getLane: () => "retry",
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    expect(store.readData(resource, [{ a: 1, b: 2 }], owner)).toBe("value");
+    store.commitDataDependencies(owner, null);
+
+    store.run(() => invalidateDataKey(["exact-key", { b: 2, a: 1 }]));
+
+    expect(scheduled).toEqual([owner]);
+    expect(
+      store
+        .inspectDataEntries()
+        .find((entry) => entry.canonicalKey === '["exact-key",{"a":1,"b":2}]')
+        ?.stale,
+    ).toBe(true);
+  });
+
   it("does not create entries for unsupported refreshes with no value", async () => {
     const changes: string[] = [];
     const hydrateOnlyResource = dataResource<[string], string>({
@@ -620,6 +649,74 @@ describe("@bgub/fig-data", () => {
 
     expect(store.readData(flakyResource, ["one"], owner)).toBe("recovered");
     expect(attempts).toBe(2);
+  });
+
+  it("invalidates every key attributed to a data error", async () => {
+    const firstOwner = {};
+    const secondOwner = {};
+    const scheduled: object[] = [];
+    const sharedError = new Error("shared failure");
+    const attempts = new Map<string, number>();
+    const flakyResource = dataResource<[string], string>({
+      key: (id) => ["flaky-error", id],
+      load: (id) => {
+        const nextAttempts = (attempts.get(id) ?? 0) + 1;
+        attempts.set(id, nextAttempts);
+        return nextAttempts === 1
+          ? Promise.reject(sharedError)
+          : Promise.resolve(`recovered-${id}`);
+      },
+    });
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow();
+    store.commitDataDependencies(firstOwner, null);
+    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
+    store.commitDataDependencies(secondOwner, null);
+    await delay();
+
+    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow(
+      sharedError,
+    );
+    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow(
+      sharedError,
+    );
+
+    scheduled.length = 0;
+    expect(store.run(() => invalidateDataError(sharedError))).toBe(true);
+    expect(scheduled).toEqual([firstOwner, secondOwner]);
+
+    const byKey = new Map(
+      store.inspectDataEntries().map((entry) => [entry.canonicalKey, entry]),
+    );
+    expect(byKey.get('["flaky-error","one"]')?.status).toBe("pending");
+    expect(byKey.get('["flaky-error","two"]')?.status).toBe("pending");
+
+    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow();
+    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
+    await delay();
+
+    expect(store.readData(flakyResource, ["one"], firstOwner)).toBe(
+      "recovered-one",
+    );
+    expect(store.readData(flakyResource, ["two"], secondOwner)).toBe(
+      "recovered-two",
+    );
+  });
+
+  it("does not invalidate untagged errors", () => {
+    const store = createDataStore<object, null>({
+      context: {},
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    expect(store.invalidateDataError(new Error("plain"))).toBe(false);
+    expect(store.run(() => invalidateDataError("plain"))).toBe(false);
   });
 
   it("recovers a rejected entry through refreshData", async () => {

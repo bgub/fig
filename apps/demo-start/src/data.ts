@@ -44,9 +44,13 @@ export interface PostSummary {
 
 let summaryLoadCount = 0;
 
+export function postSummaryResourceKey(id: string): DataResourceKey {
+  return ["post-summary", id];
+}
+
 // Isomorphic data: this loader is safe in both the server and browser bundles.
 export const postSummaryResource = dataResource<[string], PostSummary>({
-  key: (id: string) => ["post-summary", id],
+  key: postSummaryResourceKey,
   load: async (id: string) => {
     await new Promise((resolve) => setTimeout(resolve, 80));
     const post = POSTS[id];

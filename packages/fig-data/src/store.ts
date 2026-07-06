@@ -1,4 +1,5 @@
 import {
+  dataResourceKeysForError,
   invalidateDataResource,
   markDataResourceError,
   preloadDataResource,
@@ -207,12 +208,18 @@ export function invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
   invalidateDataResource(resource, args);
 }
 
+export function invalidateDataError(error: unknown): boolean {
+  return resolveDataMutationStore("invalidateDataError").invalidateDataError(
+    error,
+  );
+}
+
+export function invalidateDataKey(key: DataResourceKey): void {
+  resolveDataMutationStore("invalidateDataKey").invalidateDataKey(key);
+}
+
 export function invalidateDataPrefix(prefix: DataResourceKey): void {
-  resolveCurrentDataStore(
-    "invalidateDataPrefix() must be called synchronously while Fig is executing — " +
-      "during render, an event handler, an action, or an effect. Capture " +
-      "readDataStore() (or root.data) synchronously and call the handle instead.",
-  ).invalidateDataPrefix(prefix);
+  resolveDataMutationStore("invalidateDataPrefix").invalidateDataPrefix(prefix);
 }
 
 export function refreshData<TArgs extends unknown[], TValue, TStoreContext>(
@@ -231,6 +238,14 @@ export function readDataStore(): FigDataStoreHandle {
     "readDataStore() must be called synchronously while Fig is executing — " +
       "during render, an event handler, an action, or an effect. Capture " +
       "the handle there and use it after awaits.",
+  );
+}
+
+function resolveDataMutationStore(name: string): FigDataStore {
+  return resolveCurrentDataStore(
+    `${name}() must be called synchronously while Fig is executing — ` +
+      "during render, an event handler, an action, or an effect. Capture " +
+      "readDataStore() (or root.data) synchronously and call the handle instead.",
   );
 }
 
@@ -454,21 +469,43 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.invalidateEntry(entry, this.host.getLane());
   }
 
+  invalidateDataError(error: unknown): boolean {
+    if (this.disposed) return false;
+
+    const keys = dataResourceKeysForError(error);
+    if (keys === undefined || keys.length === 0) return false;
+
+    const entries: Entry<Owner, Lane>[] = [];
+    for (const key of keys) {
+      const entry = this.entryForKey(key);
+      if (entry !== null) entries.push(entry);
+    }
+
+    this.invalidateEntries(entries);
+    return true;
+  }
+
+  invalidateDataKey(key: DataResourceKey): void {
+    if (this.disposed) return;
+
+    const entry = this.entryForKey(key);
+    if (entry === null) return;
+
+    this.invalidateEntry(entry, this.host.getLane());
+  }
+
   invalidateDataPrefix(prefix: DataResourceKey): void {
     if (this.disposed) return;
 
     const normalizedPrefix = normalizeKey(prefix).key;
-    const matches: Entry<Owner, Lane>[] = [];
+    const entries: Entry<Owner, Lane>[] = [];
     for (const entry of this.entries.values()) {
       if (dataResourceKeyStartsWith(entry.key, normalizedPrefix)) {
-        matches.push(entry);
+        entries.push(entry);
       }
     }
 
-    if (matches.length === 0) return;
-
-    const lane = this.host.getLane();
-    for (const entry of matches) this.invalidateEntry(entry, lane);
+    this.invalidateEntries(entries);
   }
 
   preloadData<TArgs extends unknown[], TValue, TStoreContext>(
@@ -638,6 +675,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.entries.set(key, entry);
     this.notifyEntryChange(entry);
     return { entry, key };
+  }
+
+  private entryForKey(key: DataResourceKey): Entry<Owner, Lane> | null {
+    const normalized = normalizeKey(key);
+    return this.entries.get(this.storeKey(normalized.canonical)) ?? null;
   }
 
   private createEntry(
@@ -979,6 +1021,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (entry.subscribers.size === 0) return;
 
     this.scheduleSubscribers(entry, lane);
+  }
+
+  private invalidateEntries(entries: readonly Entry<Owner, Lane>[]): void {
+    if (entries.length === 0) return;
+
+    const lane = this.host.getLane();
+    for (const entry of entries) this.invalidateEntry(entry, lane);
   }
 }
 

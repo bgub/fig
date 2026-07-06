@@ -55,6 +55,9 @@ Use `preloadData(resource, ...args)` to start a load without subscribing — use
 The freshness verbs are:
 
 - `invalidateData(resource, ...args)` marks an entry stale. The next read reloads lazily. It also clears a cached rejection so a remounted boundary can retry.
+- `invalidateDataKey(key)` marks one exact structured key stale.
+- `invalidateDataError(error)` invalidates every exact key Fig attributed to a
+  caught data error and returns whether the error carried data keys.
 - `invalidateDataPrefix(prefix)` marks every existing entry whose key starts
   with the structured key prefix stale, for example `["user"]` targets
   `["user", id]` entries without matching string lookalikes.
@@ -229,11 +232,11 @@ The value comes from root options on the client and per-request render options o
 
 ## Errors
 
-Errors thrown through `readData` are tagged with the failed data keys. An `ErrorBoundary` can inspect `ErrorInfo.dataResourceKeys` and show a targeted retry UI.
+Errors thrown through `readData` are tagged with the failed data keys. An `ErrorBoundary` can inspect `ErrorInfo.dataResourceKeys` and show a targeted retry UI. The shortcut for the common case is `invalidateDataError(error)`, which resets every key attributed to the caught error before the UI remounts/resets the boundary.
 
 A common retry flow is:
 
-1. invalidate or refresh the failed key
+1. call `invalidateDataError(error)` or invalidate/refresh the failed key
 2. reset/remount the boundary
 
 The stored error isn't mutated. Fig keeps attribution in a side table, so ordinary error objects remain ordinary error objects.

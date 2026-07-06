@@ -23,9 +23,11 @@ import {
 import {
   dataResource,
   invalidateData,
+  invalidateDataKey,
   preloadData,
   readData,
   refreshData,
+  type DataResourceKey,
 } from "@bgub/fig-data";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToHtml } from "@bgub/fig-server";
@@ -126,11 +128,15 @@ const profiles: Record<string, { name: string }> = {
 
 let profileLoadCount = 0;
 
+function profileResourceKey(handle: string): DataResourceKey {
+  return ["profile", handle];
+}
+
 // A client data resource: keyed by handle, deduped across reads, and wired to
 // Suspense. The loader runs once per key and the result is cached until it is
 // invalidated, refreshed, or evicted.
 const profileResource = dataResource<[string], Profile>({
-  key: (handle) => ["profile", handle],
+  key: profileResourceKey,
   load: async (handle, { signal }) => {
     profileLoadCount += 1;
     await delayValue(undefined, 700, signal);
@@ -582,6 +588,14 @@ function DataResourceCard() {
         </Command>
         <Command
           run={() => {
+            invalidateDataKey(profileResourceKey(handle));
+            setStatus(`Invalidated the exact key for "${handle}".`);
+          }}
+        >
+          Invalidate key
+        </Command>
+        <Command
+          run={() => {
             const upcoming = nextHandle(handle);
             preloadData(profileResource, upcoming);
             setStatus(`Preloaded "${upcoming}" so switching is instant.`);
@@ -602,7 +616,7 @@ function ProfileView({ handle }: { handle: string }) {
   const profile = readData(profileResource, handle);
 
   return (
-    <div class="hydration-status">
+    <div class="hydration-status" data-profile-resource={profile.handle}>
       <span class="tag">{profile.handle}</span>
       <span>
         <strong>{profile.name}</strong> · loaded at {profile.loadedAt} (load #

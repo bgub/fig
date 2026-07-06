@@ -114,6 +114,13 @@ vocabulary:
   lazily. It also clears a cached _rejection_ (back to pending) so a
   remounted `ErrorBoundary` retries afresh, and clears a stored
   `refreshError` so read-triggered revalidation re-arms.
+- `invalidateDataKey(key)` — same invalidation semantics, but targets an
+  exact serialized data-resource key when the resource definition/arguments
+  are not available.
+- `invalidateDataError(error)` — inspect Fig's data-error attribution side
+  table and invalidate every exact key associated with that error. Returns
+  `true` when the error carried data keys, so fallback UIs can decide whether
+  a data retry button is meaningful.
 - `invalidateDataPrefix(prefix)` — mark every existing entry whose structured
   key starts with `prefix` stale. Prefixes use the same key tuple format, so
   `["user"]` matches `["user", "42"]`; matching is structural, not string
@@ -141,8 +148,8 @@ synchronous prefix of actions and transitions, and effects (which run inside
 `dataStore.run`). After an `await` the slot is gone. Async flows capture the
 **explicit handle** — `readDataStore()` during any synchronous window, or
 `root.data` — and call the same variadic methods
-(`invalidateData`/`invalidateDataPrefix`/`preloadData`/`refreshData`/
-`hydrate`/`run`) on it.
+(`invalidateData`/`invalidateDataKey`/`invalidateDataError`/
+`invalidateDataPrefix`/`preloadData`/`refreshData`/`hydrate`/`run`) on it.
 
 ## Stores, Scopes, And SSR Handoff
 
@@ -175,4 +182,6 @@ those checks.
 
 Object errors thrown through `readData` are tagged (WeakMap, GC-safe) so
 `ErrorInfo.dataResourceKeys` reports which keys failed — boundaries can show
-targeted recovery UI.
+targeted recovery UI. `invalidateDataError(error)` is the cache-side half of
+that loop: it resets all keys attributed to the caught error, and the UI still
+chooses when to reset or remount the boundary.

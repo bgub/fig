@@ -21,11 +21,21 @@ test("renders and refreshes isomorphic and remote data resources", async ({
   await expect(isomorphic).toContainText("Hello Fig · browser · load 1");
   expect(dataRequests).toEqual([]);
 
+  await page.getByRole("button", { name: "Invalidate isomorphic key" }).click();
+  await expect(isomorphic).toContainText("Hello Fig · browser · load 2");
+  expect(dataRequests).toEqual([]);
+
   const remoteBefore = await remote.textContent();
   await page.getByRole("button", { name: "Refresh remote" }).click();
   await expect(remote).not.toHaveText(remoteBefore ?? "");
   await expect(remote).toContainText("File-based routing · server-remote");
   expect(dataRequests).toHaveLength(1);
+
+  const remoteAfterRefresh = await remote.textContent();
+  await page.getByRole("button", { name: "Invalidate remote key" }).click();
+  await expect(remote).not.toHaveText(remoteAfterRefresh ?? "");
+  await expect(remote).toContainText("File-based routing · server-remote");
+  expect(dataRequests).toHaveLength(2);
   expect(errors()).toEqual([]);
 });
 

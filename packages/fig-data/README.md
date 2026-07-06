@@ -67,6 +67,12 @@ currently observed, Fig schedules the readers; the next read keeps showing the
 last fulfilled value and starts a background reload. If nobody is observing the
 key, invalidation is lazy and does not fetch.
 
+`invalidateDataKey(key)` applies the same stale/reset semantics to one exact
+structured key. `invalidateDataError(error)` invalidates every exact key Fig
+attributed to a caught data error and returns whether any data keys were found.
+Use it from an `ErrorBoundary` fallback before remounting or resetting the
+boundary.
+
 `invalidateDataPrefix(prefix)` marks every existing entry whose structured key
 starts with `prefix` stale. For example, `invalidateDataPrefix(["user"])`
 targets entries like `["user", id]`. Prefix matching uses the same canonical
@@ -200,8 +206,8 @@ Invalidating a hidden-only key schedules offscreen prerender work and keeps the
 DOM hidden.
 
 Initial load errors are keyed. `ErrorBoundary` reports the failed keys on
-`info.dataResourceKeys`; reset flows should refresh or invalidate those keys
-before remounting or changing the boundary key.
+`info.dataResourceKeys`; reset flows can call `invalidateDataError(error)` or
+refresh/invalidate those keys before remounting or changing the boundary key.
 
 Fig DevTools root snapshots include data-resource entries with their normalized
 keys, statuses, stale state, subscriber counts, current values, and errors. The

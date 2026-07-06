@@ -22,9 +22,9 @@ client-render markers), or host commit failures.
 
 "Fetch failed → show error → retry" composes without side channels:
 `readData` throws the real error into the boundary; the function `fallback`
-renders it with a retry affordance; retry calls
-`invalidateData` (which resets a cached rejection back to pending) and
-remounts the boundary by key; the fresh read loads afresh.
+renders it with a retry affordance; retry calls `invalidateDataError(error)`
+or `invalidateDataKey(key)` (which reset cached rejections back to pending)
+and remounts the boundary by key; the fresh read loads afresh.
 
 ## Uncaught Routing
 

@@ -87,6 +87,8 @@ export interface FigDataStoreHandle {
     resource: FigDataResource<TArgs, TValue, TStoreContext>,
     ...args: TArgs
   ): void;
+  invalidateDataError(error: unknown): boolean;
+  invalidateDataKey(key: DataResourceKey): void;
   invalidateDataPrefix(prefix: DataResourceKey): void;
   preloadData<TArgs extends unknown[], TValue, TStoreContext>(
     resource: FigDataResource<TArgs, TValue, TStoreContext>,

@@ -44,11 +44,16 @@ test("hydrates the streamed shell and revealed Suspense content", async ({
     "Loaded only by the server renderer (Node",
   );
 
+  await page.getByRole("button", { name: "Invalidate exact key" }).click();
+  await expect.poll(() => dataRequests.length).toBe(2);
+  await expect(isomorphicData).toContainText("Loaded on the server (Node");
+  await expect(serverInfoValue).toContainText("us-west (origin)");
+
   await page.getByRole("button", { name: "Refresh anyways (errors)" }).click();
   await expect(page.locator("[data-ssr-data-error]")).toContainText(
     "Unsupported refresh: no-client-loader.",
   );
-  expect(dataRequests).toHaveLength(1);
+  expect(dataRequests).toHaveLength(2);
 
   const shellButton = page.getByRole("button", { name: "Shell clicks: 0" });
   await expect(shellButton).toBeVisible();

@@ -1,8 +1,8 @@
 import { type FigNode, Suspense } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { readData, readDataStore } from "@bgub/fig-data";
+import { invalidateDataKey, readData, readDataStore } from "@bgub/fig-data";
 import { createFileRoute, Link } from "@bgub/fig-start";
-import { postSummaryResource } from "../data.ts";
+import { postSummaryResource, postSummaryResourceKey } from "../data.ts";
 import { remotePostStatusResource } from "../data.server.ts";
 
 export const Route = createFileRoute("/data")({
@@ -42,8 +42,16 @@ function IsomorphicPanel(): FigNode {
 
   return (
     <DataCard
-      action="Refresh isomorphic"
-      onAction={() => void data.refreshData(postSummaryResource, "1")}
+      actions={[
+        {
+          label: "Refresh isomorphic",
+          run: () => void data.refreshData(postSummaryResource, "1"),
+        },
+        {
+          label: "Invalidate isomorphic key",
+          run: () => invalidateDataKey(postSummaryResourceKey("1")),
+        },
+      ]}
       title="Isomorphic"
       value={`${summary.title} · ${summary.source} · load ${summary.loadCount}`}
     />
@@ -56,17 +64,29 @@ function RemotePanel(): FigNode {
 
   return (
     <DataCard
-      action="Refresh remote"
-      onAction={() => void data.refreshData(remotePostStatusResource, "2")}
+      actions={[
+        {
+          label: "Refresh remote",
+          run: () => void data.refreshData(remotePostStatusResource, "2"),
+        },
+        {
+          label: "Invalidate remote key",
+          run: () => invalidateDataKey(remotePostStatusResource.key("2")),
+        },
+      ]}
       title="Remote server"
       value={`${status.title} · ${status.source} · load ${status.refreshCount}`}
     />
   );
 }
 
+interface DataCardAction {
+  label: string;
+  run: () => void;
+}
+
 function DataCard(props: {
-  action?: string;
-  onAction?: () => void;
+  actions?: readonly DataCardAction[];
   title: string;
   value: string;
 }): FigNode {
@@ -76,13 +96,18 @@ function DataCard(props: {
       <p class="text-slate-700" data-data-value={props.title}>
         {props.value}
       </p>
-      {props.action === undefined || props.onAction === undefined ? null : (
-        <button
-          class="rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
-          events={[on("click", props.onAction)]}
-        >
-          {props.action}
-        </button>
+      {props.actions === undefined ? null : (
+        <div class="flex flex-wrap gap-2">
+          {props.actions.map((action) => (
+            <button
+              class="rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
+              events={[on("click", action.run)]}
+              key={action.label}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
       )}
     </article>
   );

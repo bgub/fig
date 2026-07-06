@@ -4905,6 +4905,12 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     invalidateData(resource, ...args) {
       installStore(resource).invalidateData(resource, ...args);
     },
+    invalidateDataError(error) {
+      return inner?.invalidateDataError(error) ?? false;
+    },
+    invalidateDataKey(key) {
+      inner?.invalidateDataKey(key);
+    },
     invalidateDataPrefix(prefix) {
       inner?.invalidateDataPrefix(prefix);
     },
