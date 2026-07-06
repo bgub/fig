@@ -33,7 +33,7 @@ API — batching is automatic. Duplicate roots on one container throw;
 live store) and frees the container for a fresh root.
 
 `FigRootOptions`: `onUncaughtError`, `onRecoverableError`,
-`identifierPrefix`, `initialData`, `dataContext`, `dataPartition`, plus
+`identifierPrefix`, `initialData`, `dataPartition`, plus
 dev `devtools`.
 
 ## The Scheduler

@@ -43,8 +43,7 @@ describe("start runtime", () => {
     const app = await makeTestApp("Runtime");
     const resource = serverDataResource({
       key: (id: string) => ["runtime-body", id],
-      load: async (id: string, { context }) =>
-        `${(context as { prefix: string }).prefix}${id}`,
+      load: async (id: string) => `body-${id}`,
     });
     const server = await runStartRuntime({
       config: {
@@ -54,7 +53,6 @@ describe("start runtime", () => {
         port: 0,
       },
       handlerOptions: {
-        dataContext: () => ({ prefix: "body-" }),
         routes: app.routes,
         serverDataResources: { "test#resource": resource },
       },

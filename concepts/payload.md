@@ -85,7 +85,7 @@ server-render through their `ssr` component with modules preloaded.
 ## API
 
 Server: `renderToPayloadStream(node, { codec?, onError?, refreshBoundary?,
-clientReferenceAssets?, dataContext?, dataPartition? })` returns
+clientReferenceAssets?, dataPartition? })` returns
 `{ stream, allReady, contentType }`. `PayloadBoundary` marks refreshable
 subtrees (dev throws on duplicate ids).
 

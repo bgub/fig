@@ -71,7 +71,6 @@ export interface PayloadRenderResult {
 export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   codec?: PayloadCodec;
-  dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
   /**
    * Decides what crosses the wire when a server render throws, mirroring the
@@ -489,7 +488,6 @@ function createPayloadRequest(
     codec: options.codec ?? jsonPayloadCodec,
     controller: null,
     dataStore: createDataStore<object, null>({
-      context: options.dataContext ?? {},
       getLane: () => null,
       partition: options.dataPartition,
       schedule: () => undefined,

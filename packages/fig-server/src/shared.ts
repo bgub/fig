@@ -6,12 +6,12 @@ export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
-  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  preloadData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
-  readData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  readData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
   readPromise<T>(promise: PromiseLike<T>): T;

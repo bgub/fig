@@ -202,7 +202,7 @@ export const userResource = serverDataResource({
 
 In Fig Start, a browser import of a `remote: true` server resource becomes a generated `dataResource.remote(...)` stub. The stub id comes from the root-relative server module path and export name; there's no manual `name` registry. The real server resource is registered behind the data endpoint. Reads still prefer hydrated values; cache misses and explicit refreshes call the endpoint through the root's `dataRemoteFetch` transport with the original resource arguments.
 
-Remote loaders are public endpoints. Validate and authorize those client-controlled arguments inside the loader using the request/app context.
+Remote loaders are public endpoints. Validate and authorize those client-controlled arguments inside the loader or the framework endpoint that invokes it.
 
 If a remote stub is used without a remote fetcher, refresh resolves with:
 
@@ -211,24 +211,6 @@ If a remote stub is used without a remote fetcher, refresh resolves with:
 ```
 
 Payload navigations are separate. If the new route reads server data while rendering its payload, that data should stream in the payload response itself, not through an extra remote data request.
-
-## Context
-
-Loaders receive `{ signal, context }`. Register the app-wide context type once:
-
-```ts
-declare global {
-  namespace FigData {
-    interface Register {
-      context: {
-        users: UserService;
-      };
-    }
-  }
-}
-```
-
-The value comes from root options on the client and per-request render options on the server. This keeps resources typed without threading a generic context through every call site.
 
 ## Errors
 

@@ -6,14 +6,6 @@ declare namespace FigStart {
   }
 }
 
-// Register the app's data-resource context type once too. This is separate
-// from the router context at runtime.
-declare namespace FigData {
-  interface Register {
-    context: { posts: import("./data.ts").PostService };
-  }
-}
-
 declare module "*.module.css" {
   const classes: Record<string, string>;
   export default classes;

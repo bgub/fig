@@ -10,14 +10,6 @@ import {
 } from "./index.ts";
 import { createDataStore, normalizeDataResourceKey } from "./internal.ts";
 
-declare global {
-  namespace FigData {
-    interface Register {
-      context: { prefix: string };
-    }
-  }
-}
-
 const never = new Promise<never>(() => undefined);
 
 describe("@bgub/fig-data", () => {
@@ -58,16 +50,16 @@ describe("@bgub/fig-data", () => {
     );
   });
 
-  it("passes store context to loaders", async () => {
+  it("passes loader arguments and abort signals to loaders", async () => {
+    const signals: AbortSignal[] = [];
     const messageResource = dataResource({
       key: (id: string) => ["message", id],
-      load: (id: string, { context }) => {
-        const prefix: string = context.prefix;
-        return `${prefix}${id}`;
+      load: (id: string, { signal }) => {
+        signals.push(signal);
+        return `hello-${id}`;
       },
     });
     const store = createDataStore<object, null>({
-      context: { prefix: "hello-" },
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -76,6 +68,8 @@ describe("@bgub/fig-data", () => {
       status: "fulfilled",
       value: "hello-one",
     });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
   });
 
   it("evicts inactive fulfilled entries after their retention window", async () => {
@@ -86,7 +80,6 @@ describe("@bgub/fig-data", () => {
       load: () => "ready",
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       inactiveRetentionMs: 0,
       onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
@@ -109,7 +102,6 @@ describe("@bgub/fig-data", () => {
       load: (id: string) => id,
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -146,7 +138,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       inactiveRetentionMs: Number.POSITIVE_INFINITY,
       onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
@@ -170,7 +161,6 @@ describe("@bgub/fig-data", () => {
       load: () => never,
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -195,7 +185,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -219,7 +208,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -244,7 +232,6 @@ describe("@bgub/fig-data", () => {
       load: (id: string) => `post-${id}`,
     });
     const store = createDataStore<object, string>({
-      context: {},
       getLane: () => "mutation",
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -284,7 +271,6 @@ describe("@bgub/fig-data", () => {
       load: () => "nested",
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -323,7 +309,6 @@ describe("@bgub/fig-data", () => {
       load: () => "value",
     });
     const store = createDataStore<object, string>({
-      context: {},
       getLane: () => "retry",
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -348,7 +333,6 @@ describe("@bgub/fig-data", () => {
       key: (id) => ["hydrate-only-missing", id],
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       onEntryChange: (entry) => changes.push(entry.canonicalKey),
       schedule: () => undefined,
@@ -370,7 +354,6 @@ describe("@bgub/fig-data", () => {
       key: (id) => ["remote-user", id],
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       remoteFetch: (resource, args) => {
         expect(resource).toEqual({ id: "users#name" });
@@ -389,7 +372,6 @@ describe("@bgub/fig-data", () => {
       key: (id) => ["remote-missing", id],
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -418,7 +400,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -456,7 +437,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -496,7 +476,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -521,7 +500,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -553,7 +531,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -580,7 +557,6 @@ describe("@bgub/fig-data", () => {
       load: () => never,
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       inactiveRetentionMs: Number.POSITIVE_INFINITY,
       preloadRetentionMs: 0,
@@ -614,7 +590,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -668,7 +643,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -710,7 +684,6 @@ describe("@bgub/fig-data", () => {
 
   it("does not invalidate untagged errors", () => {
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -731,7 +704,6 @@ describe("@bgub/fig-data", () => {
       },
     });
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });

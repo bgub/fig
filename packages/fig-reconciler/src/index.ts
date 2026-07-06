@@ -354,7 +354,6 @@ export interface FigRoot {
 }
 
 export interface FigRootOptions {
-  dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
   dataRemoteFetch?: FigDataRemoteFetcher;
   initialData?: readonly FigDataHydrationEntry[];
@@ -805,7 +804,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   function createFiberRoot(container: Container, options: FigRootOptions): R {
     const current = fiber(RootTag, null, null, { children: null }, null);
     const dataStore = createRootDataStore({
-      context: options.dataContext ?? {},
       getLane: requestUpdateLane,
       partition: options.dataPartition,
       remoteFetch: options.dataRemoteFetch,
@@ -4857,8 +4855,8 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   let buffered: FigDataHydrationEntry[] | null = null;
   let disposed = false;
 
-  function installStore<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  function installStore<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
   ): FigDataStore {
     if (inner !== null) return inner;
     if (disposed) {

@@ -229,7 +229,6 @@ export function createServerRenderRequest(
     completedRootSegment: null,
     controller: null,
     dataStore: createDataStore<object, null>({
-      context: options.dataContext ?? {},
       getLane: () => null,
       partition: options.dataPartition,
       schedule: () => undefined,

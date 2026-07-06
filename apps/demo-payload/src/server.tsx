@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createServer,
@@ -88,7 +87,6 @@ async function sendPayload(
   const result = renderToPayloadStream(
     refreshingFeed ? <Dashboard data={data} /> : <PayloadApp data={data} />,
     {
-      dataContext: { requestId: randomUUID().slice(0, 8) },
       refreshBoundary: refreshingFeed ? boundary : undefined,
     },
   );

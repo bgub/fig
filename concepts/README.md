@@ -33,9 +33,9 @@ Questions → Provisional Stance).
   native propagation (focus/blur stance), replay, `bind`.
 - [jsx.md](./jsx.md) — namespace placement, `HostProps`, React-habit traps,
   the stage-2 external-package plan.
-- [data.md](./data.md) — data resources: key identity, typed context
-  (`FigData.Register`), read semantics, the freshness verbs, ambient store
-  vs explicit handle, SSR handoff.
+- [data.md](./data.md) — data resources: key identity, loader inputs, read
+  semantics, the freshness verbs, ambient store vs explicit handle, SSR
+  handoff.
 - [assets.md](./assets.md) — asset resources: creators, dedupe keys,
   destinations, reveal gating.
 - [server-rendering.md](./server-rendering.md) — the entry grid, streaming

@@ -119,7 +119,7 @@ import { renderToStream } from "@bgub/fig-server";
 
 const userResource = serverDataResource<[string], { name: string }>({
   key: (id) => ["user", id],
-  load: async (id, { context }) => context.users.find(id),
+  load: async (id, { signal }) => fetchUser(id, signal),
 });
 
 function Profile({ id }: { id: string }) {
@@ -127,9 +127,7 @@ function Profile({ id }: { id: string }) {
   return <h1>{user.name}</h1>;
 }
 
-const result = renderToStream(<Profile id="one" />, {
-  dataContext: { users },
-});
+const result = renderToStream(<Profile id="one" />);
 await result.allReady;
 
 const initialData = result.getData();

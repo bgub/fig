@@ -4,29 +4,20 @@ import type {
   DataResourceKey,
   DataResourceKeyInput,
   DataResourceLoadContext,
-  RegisteredContext,
 } from "./store.ts";
 
-export interface ServerDataResourceOptions<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext = RegisteredContext,
-> {
+export interface ServerDataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   load: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   remote?: true;
 }
 
-export function serverDataResource<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext = RegisteredContext,
->(
-  options: ServerDataResourceOptions<TArgs, TValue, TStoreContext>,
-): DataResource<TArgs, TValue, TStoreContext> {
+export function serverDataResource<TArgs extends unknown[], TValue>(
+  options: ServerDataResourceOptions<TArgs, TValue>,
+): DataResource<TArgs, TValue> {
   return dataResource(options);
 }
 
@@ -35,5 +26,4 @@ export type {
   DataResourceKey,
   DataResourceKeyInput,
   DataResourceLoadContext,
-  RegisteredContext,
 };

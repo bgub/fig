@@ -10,7 +10,7 @@ import {
   type DataRefreshResult,
   type DataResourceKey,
   type DataResourceKeyInput,
-  type DataResourceLoadContext as FigDataResourceLoadContext,
+  type DataResourceLoadContext,
   type DataResourceRemote,
   type FigDataRemoteFetcher,
   type FigDataEntryStatus,
@@ -28,29 +28,12 @@ export {
   type DataRefreshResult,
   type DataResourceKey,
   type DataResourceKeyInput,
+  type DataResourceLoadContext,
   type DataResourceRemote,
   type FigDataRemoteFetcher,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
 };
-
-declare global {
-  namespace FigData {
-    // Apps can augment this once to set app-wide data resource types.
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-    interface Register {}
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface Register extends FigData.Register {}
-
-export type RegisteredContext = Register extends { context: infer C }
-  ? C
-  : unknown;
-
-export type DataResourceLoadContext<TStoreContext = RegisteredContext> =
-  FigDataResourceLoadContext<TStoreContext>;
 
 interface DataResourceBaseOptions<TArgs extends unknown[]> {
   key: (...args: TArgs) => DataResourceKey;
@@ -60,21 +43,18 @@ interface DataResourceBaseOptions<TArgs extends unknown[]> {
 export interface DataResourceOptions<
   TArgs extends unknown[],
   TValue,
-  TStoreContext = RegisteredContext,
 > extends DataResourceBaseOptions<TArgs> {
   load?: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
 }
 
 export type DataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
-  TStoreContext = RegisteredContext,
-> = FigDataResource<TArgs, TValue, TStoreContext>;
+> = FigDataResource<TArgs, TValue>;
 
 export interface DataStoreHost<Owner extends object, Lane> {
-  context: unknown;
   getLane(): Lane;
   inactiveRetentionMs?: number;
   onEntryChange?: (entry: DataStoreEntrySnapshot) => void;
@@ -95,12 +75,12 @@ export interface DataStore<
 export type DataStoreEntrySnapshot = FigDataStoreEntrySnapshot;
 
 export interface DataResourceFactory {
-  <TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
-    options: DataResourceOptions<TArgs, TValue, TStoreContext>,
-  ): DataResource<TArgs, TValue, TStoreContext>;
-  remote<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
+  <TArgs extends unknown[], TValue>(
+    options: DataResourceOptions<TArgs, TValue>,
+  ): DataResource<TArgs, TValue>;
+  remote<TArgs extends unknown[], TValue>(
     options: DataResourceRemoteOptions<TArgs>,
-  ): DataResource<TArgs, TValue, TStoreContext>;
+  ): DataResource<TArgs, TValue>;
 }
 
 export interface DataResourceRemoteOptions<
@@ -127,7 +107,7 @@ interface Entry<Owner extends object, Lane> {
   pending: PendingResult<unknown> | null;
   preloadTimer: TimerHandle | null;
   refreshError: unknown;
-  resource: DataResource<unknown[], unknown, unknown> | null;
+  resource: DataResource<unknown[], unknown> | null;
   stale: boolean;
   status: FigDataEntryStatus;
   storeKey: string;
@@ -165,19 +145,15 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 const dataStoreFactory = createDataStore as FigDataStoreFactory;
 
 export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
-  function sharedDataResource<
-    TArgs extends unknown[],
-    TValue,
-    TStoreContext = RegisteredContext,
-  >(
-    options: DataResourceOptions<TArgs, TValue, TStoreContext>,
-  ): DataResource<TArgs, TValue, TStoreContext> {
+  function sharedDataResource<TArgs extends unknown[], TValue>(
+    options: DataResourceOptions<TArgs, TValue>,
+  ): DataResource<TArgs, TValue> {
     return createDataResource(options);
   },
   {
-    remote<TArgs extends unknown[], TValue, TStoreContext = RegisteredContext>(
+    remote<TArgs extends unknown[], TValue>(
       options: DataResourceRemoteOptions<TArgs>,
-    ): DataResource<TArgs, TValue, TStoreContext> {
+    ): DataResource<TArgs, TValue> {
       return createDataResource({
         debugArgs: options.debugArgs,
         key: options.key,
@@ -187,22 +163,22 @@ export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
   },
 );
 
-export function readData<TArgs extends unknown[], TValue, TStoreContext>(
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+export function readData<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): TValue {
   return readDataResource(resource, args);
 }
 
-export function preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+export function preloadData<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): void {
   preloadDataResource(resource, args);
 }
 
-export function invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+export function invalidateData<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): void {
   invalidateDataResource(resource, args);
@@ -222,8 +198,8 @@ export function invalidateDataPrefix(prefix: DataResourceKey): void {
   resolveDataMutationStore("invalidateDataPrefix").invalidateDataPrefix(prefix);
 }
 
-export function refreshData<TArgs extends unknown[], TValue, TStoreContext>(
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+export function refreshData<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): Promise<DataRefreshResult<TValue>> {
   return refreshDataResource(resource, args);
@@ -259,11 +235,11 @@ export function normalizeDataResourceKey(key: DataResourceKey): string {
   return normalizeKey(key).canonical;
 }
 
-function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
+function createDataResource<TArgs extends unknown[], TValue>(
   options:
     | DataResourceRemoteCreateOptions<TArgs>
-    | DataResourceOptions<TArgs, TValue, TStoreContext>,
-): DataResource<TArgs, TValue, TStoreContext> {
+    | DataResourceOptions<TArgs, TValue>,
+): DataResource<TArgs, TValue> {
   const resource = {
     $$typeof: DataResourceSymbol,
     debugArgs: options.debugArgs,
@@ -272,7 +248,7 @@ function createDataResource<TArgs extends unknown[], TValue, TStoreContext>(
     remote: "remote" in options ? options.remote : undefined,
   };
   (
-    resource as DataResource<TArgs, TValue, TStoreContext> &
+    resource as DataResource<TArgs, TValue> &
       Record<symbol, FigDataStoreFactory>
   )[DataStoreFactorySymbol] = dataStoreFactory;
   return resource;
@@ -457,8 +433,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     );
   }
 
-  invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  invalidateData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): void {
     if (this.disposed) return;
@@ -508,8 +484,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.invalidateEntries(entries);
   }
 
-  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  preloadData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): void {
     if (this.disposed || !this.canLoad(resource)) return;
@@ -526,8 +502,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     });
   }
 
-  readData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  readData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     owner: Owner,
   ): TValue {
@@ -563,8 +539,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return this.readCurrentValue(entry);
   }
 
-  refreshData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  refreshData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): Promise<DataRefreshResult<TValue>> {
     if (this.disposed) {
@@ -621,18 +597,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     keys.add(key);
   }
 
-  private entryFor<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  private entryFor<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: true,
   ): { entry: Entry<Owner, Lane>; key: string };
-  private entryFor<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  private entryFor<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: false,
   ): { entry: Entry<Owner, Lane> | null; key: string };
-  private entryFor<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  private entryFor<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: boolean,
   ): { entry: Entry<Owner, Lane> | null; key: string } {
@@ -663,7 +639,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entry = this.createEntry(
       normalized,
       key,
-      resource as DataResource<unknown[], unknown, unknown>,
+      resource as DataResource<unknown[], unknown>,
       fingerprint,
       "pending",
       undefined,
@@ -685,7 +661,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private createEntry(
     normalized: NormalizedKey,
     storeKey: string,
-    resource: DataResource<unknown[], unknown, unknown> | null,
+    resource: DataResource<unknown[], unknown> | null,
     fingerprint: string | null,
     status: FigDataEntryStatus,
     value: unknown,
@@ -733,8 +709,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       : `${this.partitionKey}:${canonicalKey}`;
   }
 
-  private canLoad<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  private canLoad<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
   ): boolean {
     return (
       resource.load !== undefined ||
@@ -742,9 +718,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     );
   }
 
-  private startLoad<TArgs extends unknown[], TValue, TStoreContext>(
+  private startLoad<TArgs extends unknown[], TValue>(
     entry: Entry<Owner, Lane>,
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     options: LoadOptions<Lane>,
   ): Promise<DataRefreshResult<TValue>> {
@@ -854,14 +830,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return pending.promise;
   }
 
-  private loadResource<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: DataResource<TArgs, TValue, TStoreContext>,
+  private loadResource<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
     args: TArgs,
     signal: AbortSignal,
   ): TValue | PromiseLike<TValue> {
     if (resource.load !== undefined) {
       return resource.load(...args, {
-        context: this.host.context as TStoreContext,
         signal,
       });
     }
@@ -1106,8 +1081,8 @@ function unsupportedRefreshResult<
   return result;
 }
 
-function fingerprintFor<TArgs extends unknown[], TValue, TStoreContext>(
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+function fingerprintFor<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
   args: TArgs,
 ): string | null {
   if (resource.debugArgs !== undefined) {
@@ -1126,17 +1101,16 @@ function diagnoseEntryDrift<
   Lane,
   TArgs extends unknown[],
   TValue,
-  TStoreContext,
 >(
   entry: Entry<Owner, Lane>,
-  resource: DataResource<TArgs, TValue, TStoreContext>,
+  resource: DataResource<TArgs, TValue>,
   key: string,
   fingerprint: string | null,
 ): void {
   if (process.env.NODE_ENV === "production") return;
 
   if (entry.resource === null) {
-    entry.resource = resource as DataResource<unknown[], unknown, unknown>;
+    entry.resource = resource as DataResource<unknown[], unknown>;
   } else if (entry.resource !== resource) {
     warn(`Data resource key ${key} was read by multiple resource definitions.`);
   }

@@ -6,18 +6,10 @@ export interface PayloadAudit {
   source: "server-only";
 }
 
-export interface PayloadDataContext {
-  requestId?: string;
-}
-
-export const payloadAuditResource = serverDataResource<
-  [number],
-  PayloadAudit,
-  PayloadDataContext
->({
+export const payloadAuditResource = serverDataResource<[number], PayloadAudit>({
   key: (seed: number) => ["payload-audit", seed],
-  load: (seed: number, { context }) => ({
-    requestId: context.requestId ?? "unknown",
+  load: (seed: number) => ({
+    requestId: `seed-${seed}`,
     seed,
     source: "server-only",
   }),

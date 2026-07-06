@@ -22,6 +22,4 @@ export type {
   FigDataRemoteFetcher,
   FigDataHydrationEntry,
   FigDataStoreHandle,
-  Register,
-  RegisteredContext,
 } from "./store.ts";

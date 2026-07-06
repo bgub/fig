@@ -63,12 +63,12 @@ export interface RenderDispatcher {
     handler: (...args: Args) => Result,
   ): (...args: StableEventArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
-  readData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  readData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
-  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  preloadData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
   readPromise<T>(promise: PromiseLike<T>): T;
@@ -189,12 +189,8 @@ export function readPromise<T>(promise: PromiseLike<T>): T {
   ).readPromise(promise);
 }
 
-export function readDataResource<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext,
->(
-  resource: FigDataResource<TArgs, TValue, TStoreContext>,
+export function readDataResource<TArgs extends unknown[], TValue>(
+  resource: FigDataResource<TArgs, TValue>,
   args: TArgs,
 ): TValue {
   return resolveDispatcher(
@@ -202,11 +198,10 @@ export function readDataResource<
   ).readData(resource, args);
 }
 
-export function preloadDataResource<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext,
->(resource: FigDataResource<TArgs, TValue, TStoreContext>, args: TArgs): void {
+export function preloadDataResource<TArgs extends unknown[], TValue>(
+  resource: FigDataResource<TArgs, TValue>,
+  args: TArgs,
+): void {
   if (currentDispatcher !== null) {
     currentDispatcher.preloadData(resource, args);
     return;
@@ -215,20 +210,15 @@ export function preloadDataResource<
   resolveDataStore().preloadData(resource, ...args);
 }
 
-export function invalidateDataResource<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext,
->(resource: FigDataResource<TArgs, TValue, TStoreContext>, args: TArgs): void {
+export function invalidateDataResource<TArgs extends unknown[], TValue>(
+  resource: FigDataResource<TArgs, TValue>,
+  args: TArgs,
+): void {
   resolveDataStore().invalidateData(resource, ...args);
 }
 
-export function refreshDataResource<
-  TArgs extends unknown[],
-  TValue,
-  TStoreContext,
->(
-  resource: FigDataResource<TArgs, TValue, TStoreContext>,
+export function refreshDataResource<TArgs extends unknown[], TValue>(
+  resource: FigDataResource<TArgs, TValue>,
   args: TArgs,
 ): Promise<DataRefreshResult<TValue>> {
   return resolveDataStore().refreshData(resource, ...args);

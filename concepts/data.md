@@ -10,7 +10,7 @@ freshness verbs. (Asset delivery is a separate concept — see assets.md.)
 ```ts
 const userResource = dataResource({
   key: (id: string) => ["user", id],
-  load: async (id, { signal, context }) => fetchUser(id, signal),
+  load: async (id, { signal }) => fetchUser(id, signal),
 });
 ```
 
@@ -44,7 +44,7 @@ import { serverDataResource } from "@bgub/fig-data/server";
 export const userResource = serverDataResource({
   remote: true,
   key: (id: string) => ["user", id],
-  load: async (id, { context }) => context.db.user.find(id),
+  load: async (id, { signal }) => fetchUserFromServer(id, signal),
 });
 ```
 
@@ -70,25 +70,19 @@ resources should not rely on `debugArgs` to hide non-serializable loader inputs,
 because the server endpoint runs `load(...args)` and therefore receives the
 actual client-controlled arguments.
 
-## Typed Context
+## Loader Inputs
 
-Loaders receive `{ signal, context }`. The context type is registered once,
-app-wide, via module augmentation — no phantom generic threading:
+Loaders receive the resource arguments followed by `{ signal }`. Fig-data does
+not own app/request context or dependency injection; frameworks and adapters
+that need request state should close over it when defining per-request server
+resources, or route remote data requests through their own endpoint code.
 
-```ts
-declare global {
-  namespace FigData {
-    interface Register {
-      context: { db: Database };
-    }
-  }
-}
-```
-
-`RegisteredContext` then flows as the default `TStoreContext` through
-`dataResource`, `DataResourceLoadContext`, and friends. The store host's
-`context` value comes from root options (`dataContext`) on the client and
-per-request options on the server.
+Exploring: remote resources are the case closures cannot cover — they are
+module-level, shared with the client, and their `load` runs in the framework
+data endpoint with only `{ signal }`. Whether fig-start should provide an
+ambient per-request context (e.g. `AsyncLocalStorage`-backed) for remote
+loaders, or keep the stance that apps needing request state own their
+endpoint, is open (`concepts/open-questions.md`).
 
 ## Reads
 

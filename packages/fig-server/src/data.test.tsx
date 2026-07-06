@@ -70,7 +70,6 @@ describe("@bgub/fig-server data resources", () => {
 
     const response = createPayloadResponse();
     const store = createDataStore<object, null>({
-      context: {},
       getLane: () => null,
       schedule: () => undefined,
     });

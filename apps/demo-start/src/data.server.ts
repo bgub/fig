@@ -1,5 +1,5 @@
 import { serverDataResource } from "@bgub/fig-data/server";
-import { postResourceKey, type Post, type PostService } from "./data.ts";
+import { postResourceKey, postService, type Post } from "./data.ts";
 
 export interface RemotePostStatus {
   id: string;
@@ -23,16 +23,10 @@ function nextRemoteRefreshCount(): number {
 
 // Server-only data: server route payloads can read this loader, while browser
 // bundles never import this route-only resource.
-export const postResource = serverDataResource<
-  [string],
-  Post,
-  {
-    posts: PostService;
-  }
->({
+export const postResource = serverDataResource<[string], Post>({
   key: postResourceKey,
-  load: async (id: string, { context }) => {
-    const post = await context.posts.find(id);
+  load: async (id: string) => {
+    const post = await postService.find(id);
     if (post === undefined) throw new Error(`No post with id "${id}".`);
     return post;
   },
@@ -43,13 +37,12 @@ export const postResource = serverDataResource<
 // data endpoint instead of bundling this loader.
 export const remotePostStatusResource = serverDataResource<
   [string],
-  RemotePostStatus,
-  { posts: PostService }
+  RemotePostStatus
 >({
   remote: true,
   key: (id: string) => ["remote-post-status", id],
-  load: async (id: string, { context }) => {
-    const post = await context.posts.find(id);
+  load: async (id: string) => {
+    const post = await postService.find(id);
     if (post === undefined) throw new Error(`No post with id "${id}".`);
     return {
       id,

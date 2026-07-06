@@ -415,12 +415,10 @@ describe("@bgub/fig-start server handler", () => {
   it("serves only registered remote data resources", async () => {
     const remoteResource = serverDataResource({
       key: (id: string) => ["remote-endpoint", id],
-      load: async (id: string, { context }) =>
-        `${(context as { prefix: string }).prefix}${id}`,
+      load: async (id: string) => `user-${id}`,
     });
     const handler = createRequestHandler({
       clientEntry: "/client.js",
-      dataContext: () => ({ prefix: "user-" }),
       routes,
       serverDataResources: {
         "test#remoteResource": remoteResource,
@@ -637,22 +635,6 @@ describe("@bgub/fig-start server handler", () => {
     expect(
       messages.some((message) => message.includes("payload exploded")),
     ).toBe(true);
-  });
-
-  it("builds the data context once per server-route request", async () => {
-    let calls = 0;
-    const handler = createRequestHandler({
-      clientEntry: "/client.js",
-      context: () => ({ allow: true }),
-      dataContext: () => {
-        calls += 1;
-        return {};
-      },
-      routes,
-    });
-    await handler(new Request("http://localhost/dashboard"));
-    // One context shared by the payload render and the document render.
-    expect(calls).toBe(1);
   });
 
   it("renders server route components once for document HTML and payload frames", async () => {

@@ -26,7 +26,6 @@ export interface ServerRenderOptions {
     props: Props,
   ) => FigNode;
   resolveAssetKey?: (type: ElementType) => string | undefined;
-  dataContext?: unknown;
   dataPartition?: DataResourceKeyInput;
   assets?: Record<string, FigAssetResourceList>;
   signal?: AbortSignal;

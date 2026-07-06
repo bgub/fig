@@ -11,10 +11,7 @@ import {
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
 import type { DataResource, DataResourceKey } from "@bgub/fig-data";
-import {
-  normalizeDataResourceKey,
-  type RegisteredContext as RegisteredDataContext,
-} from "@bgub/fig-data/internal";
+import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
 import {
   escapeAttribute,
   escapeText,
@@ -76,8 +73,6 @@ export interface StartHandlerOptions {
   // Per-request context for beforeLoad/loader (e.g. a data/query client). May
   // return a promise; it is awaited before routing.
   context?: (request: Request) => unknown;
-  // Per-request context passed to Fig data resources during server render.
-  dataContext?: (request: Request) => RegisteredDataContext;
   // Extra <head> content (e.g. <title>, <meta>). fig-server lowers host
   // title/meta/link into hoisted document resources.
   head?: FigNode;
@@ -93,12 +88,11 @@ export interface StartHandlerOptions {
 export type StartHandler = (request: Request) => Promise<Response>;
 
 export type StartServerDataResource = Pick<
-  DataResource<never[], unknown, RegisteredDataContext>,
+  DataResource<never[], unknown>,
   "key" | "load"
 >;
 
 type StartServerDataResourceLoadContext = {
-  context: RegisteredDataContext;
   signal: AbortSignal;
 };
 
@@ -127,9 +121,8 @@ export function createRequestHandler(
       });
     }
 
-    const dataContext = options.dataContext?.(request);
     if (url.pathname === DATA_ENDPOINT_PATH) {
-      return handleDataResourceRequest(options, request, dataContext);
+      return handleDataResourceRequest(options, request);
     }
 
     const routerContext = (await options.context?.(request)) ?? {};
@@ -160,7 +153,6 @@ export function createRequestHandler(
     const payloadSegment = renderServerRouteSegment(
       result,
       router,
-      dataContext,
       options.clientReferenceAssets,
       options.serverRouteAssets,
       refreshBoundary,
@@ -240,7 +232,6 @@ export function createRequestHandler(
 
     const render = renderToDocumentStream(document, {
       clientReferenceFallback: clientReferencePlaceholder,
-      dataContext,
       nonce,
       onError: () => ({ digest: "fig-start-error" }),
     });
@@ -465,7 +456,6 @@ function initialClientReferenceModules(
 function renderServerRouteSegment(
   result: LoadResult,
   router: Router,
-  dataContext: unknown,
   clientReferenceAssets:
     | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
@@ -505,7 +495,6 @@ function renderServerRouteSegment(
     ),
     {
       clientReferenceAssets,
-      dataContext,
       // A throw inside a server component becomes a payload "error" row (it
       // doesn't reject allReady), so the request would otherwise return 200
       // with no server log. Log it here; only the digest crosses the wire and
@@ -603,7 +592,6 @@ interface DataResourceRequestBody {
 async function handleDataResourceRequest(
   options: StartHandlerOptions,
   request: Request,
-  dataContext: RegisteredDataContext,
 ): Promise<Response> {
   if (request.method !== "POST") {
     return jsonResponse({ error: "Method not allowed." }, 405);
@@ -630,7 +618,6 @@ async function handleDataResourceRequest(
 
   try {
     const value = await resource.load(...args, {
-      context: dataContext,
       signal: request.signal,
     });
     return jsonResponse({ key, value: encodePayloadValue(value) }, 200);

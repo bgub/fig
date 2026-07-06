@@ -31,11 +31,6 @@ export interface ServerOnlyInfo {
   runtime: string;
 }
 
-export interface ServerDataContext {
-  info?: ServerInfo;
-  requestId?: string;
-}
-
 export const serverInfoResourceId = "demo-ssr#server-info";
 
 export function serverInfoKey(): DataResourceKey {
@@ -44,11 +39,7 @@ export function serverInfoKey(): DataResourceKey {
 
 // SSR passes the server loader for the initial render. The browser uses this
 // remote stub to refresh through the demo's handwritten /__fig/data endpoint.
-export const serverInfoRemoteResource = dataResource.remote<
-  [],
-  ServerInfo,
-  ServerDataContext
->({
+export const serverInfoRemoteResource = dataResource.remote<[], ServerInfo>({
   id: serverInfoResourceId,
   key: serverInfoKey,
 });
@@ -57,13 +48,11 @@ export function serverOnlyInfoKey(): DataResourceKey {
   return ["server-only-info"];
 }
 
-export const serverOnlyInfoHydrationResource = dataResource<
-  [],
-  ServerOnlyInfo,
-  ServerDataContext
->({
-  key: serverOnlyInfoKey,
-});
+export const serverOnlyInfoHydrationResource = dataResource<[], ServerOnlyInfo>(
+  {
+    key: serverOnlyInfoKey,
+  },
+);
 
 export interface DemoRequest {
   abortDelay: number | null;
@@ -106,8 +95,8 @@ export function App({
   serverOnlyInfoResource = serverOnlyInfoHydrationResource,
 }: {
   request: DemoRequest;
-  serverInfoResource?: DataResource<[], ServerInfo, ServerDataContext>;
-  serverOnlyInfoResource?: DataResource<[], ServerOnlyInfo, ServerDataContext>;
+  serverInfoResource?: DataResource<[], ServerInfo>;
+  serverOnlyInfoResource?: DataResource<[], ServerOnlyInfo>;
 }) {
   const isAbort = request.abortDelay !== null;
 
@@ -252,7 +241,7 @@ export function clientDataFor(request: DemoRequest): ClientData {
 function ServerInfoPanel({
   resource,
 }: {
-  resource: DataResource<[], ServerInfo, ServerDataContext>;
+  resource: DataResource<[], ServerInfo>;
 }) {
   const data = readDataStore();
   const info = readData(resource);
@@ -306,7 +295,7 @@ function ServerInfoPanel({
 function ServerOnlyInfoPanel({
   resource,
 }: {
-  resource: DataResource<[], ServerOnlyInfo, ServerDataContext>;
+  resource: DataResource<[], ServerOnlyInfo>;
 }) {
   const data = readDataStore();
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);

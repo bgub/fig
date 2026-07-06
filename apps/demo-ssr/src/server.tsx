@@ -19,13 +19,16 @@ import {
   demoDataScriptId,
   demoRootId,
   scaledDemoDelay,
-  type ServerDataContext,
   serverInfoResourceId,
-  type ServerInfo,
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
-import { serverInfoResource, serverOnlyInfoResource } from "./data.server.ts";
+import {
+  createServerInfo,
+  createServerInfoResource,
+  createServerOnlyInfoResource,
+  serverInfoResource,
+} from "./data.server.ts";
 import {
   devReloadScript,
   handleDevReloadRequest,
@@ -45,19 +48,9 @@ interface DataResourceRequestBody {
   id: string;
 }
 
-interface DataEndpointContext extends ServerDataContext {
-  info: ServerInfo;
-  requestId: string;
-}
-
 interface CallableServerDataResource {
   key: (...args: unknown[]) => DataResourceKey;
-  load: (
-    ...argsAndContext: [
-      ...unknown[],
-      DataResourceLoadContext<DataEndpointContext>,
-    ]
-  ) => unknown;
+  load: (...argsAndContext: [...unknown[], DataResourceLoadContext]) => unknown;
 }
 
 const dataResourceRegistry: Record<string, unknown> = {
@@ -128,7 +121,8 @@ async function handleRequest(
     abortDelay,
     new Date().toLocaleTimeString(),
   );
-  const dataContext = dataEndpointContext(nonce.slice(0, 8));
+  const requestId = nonce.slice(0, 8);
+  const serverInfo = createServerInfo();
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -148,15 +142,17 @@ async function handleRequest(
           <div id={demoRootId}>
             <App
               request={demoRequest}
-              serverInfoResource={serverInfoResource}
-              serverOnlyInfoResource={serverOnlyInfoResource}
+              serverInfoResource={createServerInfoResource(serverInfo)}
+              serverOnlyInfoResource={createServerOnlyInfoResource(
+                requestId,
+                serverInfo,
+              )}
             />
           </div>,
         )}
       </body>
     </html>,
     {
-      dataContext,
       identifierPrefix: streamIdentifierPrefix,
       nonce,
       onError(error, info) {
@@ -253,7 +249,6 @@ async function handleDataResourceRequest(
 
   try {
     const value = await resource.load(...args, {
-      context: dataEndpointContext(),
       signal: controller.signal,
     });
     sendJson(response, 200, { key, value });
@@ -299,19 +294,6 @@ async function readRequestText(request: IncomingMessage): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
-}
-
-function dataEndpointContext(
-  requestId = randomUUID().slice(0, 8),
-): DataEndpointContext {
-  return {
-    info: {
-      region: "us-west (origin)",
-      renderedAt: new Date().toLocaleTimeString(),
-      runtime: `Node ${process.version}`,
-    },
-    requestId,
-  };
 }
 
 function abortDelayFor(url: URL): number | null {

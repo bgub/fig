@@ -46,7 +46,7 @@ import { renderToPayloadStream } from "@bgub/fig-server/payload";
 
 const { stream, allReady, contentType } = renderToPayloadStream(
   <ProfilePage id="42" />,
-  { dataContext: { users } },
+  { onError: () => ({ digest: "profile-page" }) },
 );
 ```
 

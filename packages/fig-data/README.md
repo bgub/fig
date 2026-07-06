@@ -117,30 +117,11 @@ await save();
 data.run(() => refreshData(userResource, "one"));
 ```
 
-Client roots accept `dataContext`, `dataPartition`, and `initialData` options.
-The context is passed to every loader in that store; the partition separates a
-store's internal keyspace without changing public resource keys.
-
-Apps can register the data context type once so loaders do not need a third
-generic parameter:
-
-```ts
-declare namespace FigData {
-  interface Register {
-    context: { db: DbClient };
-  }
-}
-```
-
-After registration, `context` in resource loaders is typed as that app context
-by default:
-
-```ts
-const userResource = dataResource({
-  key: (id: string) => ["user", id],
-  load: (id, { context }) => context.db.user.find(id),
-});
-```
+Client roots accept `dataPartition` and `initialData` options. The partition
+separates a store's internal keyspace without changing public resource keys.
+Loaders receive only their resource arguments plus `{ signal }`; app services,
+request cookies, and auth state belong in the surrounding adapter or closure,
+not in the fig-data store.
 
 ## Server Values And Hydration
 
@@ -162,7 +143,7 @@ export const userResource = dataResource<[string], User>({
 
 export const userServerResource = serverDataResource({
   key: userKey,
-  load: async (id, { context }) => context.db.user.find(id),
+  load: async (id, { signal }) => fetchUser(id, signal),
 });
 ```
 
@@ -185,7 +166,7 @@ import { serverDataResource } from "@bgub/fig-data/server";
 export const userResource = serverDataResource({
   remote: true,
   key: (id: string) => ["user", id],
-  load: async (id, { context }) => context.db.user.find(id),
+  load: async (id, { signal }) => fetchUser(id, signal),
 });
 ```
 

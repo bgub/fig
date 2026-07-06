@@ -199,21 +199,16 @@ and find a hydrated entry; only the loader is stripped.
 ## Resource Definitions
 
 ```ts
-interface DataResourceOptions<TArgs extends unknown[], TValue, TStoreContext> {
+interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => readonly [string, ...DataResourceKeyInput[]];
   load?: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | Promise<TValue>;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
 }
 
-interface DataResourceLoadContext<TStoreContext = unknown> {
+interface DataResourceLoadContext {
   signal: AbortSignal;
-  /**
-   * Store-scoped values supplied when the store is created: request auth,
-   * headers, cookies, DB/session handles, framework context. Empty by default.
-   */
-  context: TStoreContext;
 }
 ```
 

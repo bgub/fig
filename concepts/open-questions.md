@@ -36,6 +36,14 @@ From `plans/data-resources.md` (open questions that survived shipping):
   codec. Still open: whether Fig Start exposes codec selection as a first-class
   option, when to ship a binary codec, and whether binary codec ids need
   explicit versioning beyond the opaque implementation id.
+- **Request state for remote loaders** — removing store context left one case
+  without a first-class replacement: a `remote: true` resource's `load` runs
+  in the framework data endpoint as `load(...args, { signal })`, and closures
+  can't help because remote resources are module-level and shared with the
+  client. A remote loader that needs per-request auth or services must reach
+  for ambient state. Open: whether fig-start provides an
+  `AsyncLocalStorage`-backed request context, or the stance stays "apps that
+  need request state own their endpoint." → `concepts/data.md`
 
 ## Asset Resources
 

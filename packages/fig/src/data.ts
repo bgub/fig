@@ -8,9 +8,8 @@ export type DataResourceKeyInput =
 
 export type DataResourceKey = readonly [string, ...DataResourceKeyInput[]];
 
-export interface DataResourceLoadContext<TStoreContext = unknown> {
+export interface DataResourceLoadContext {
   signal: AbortSignal;
-  context: TStoreContext;
 }
 
 export interface DataResourceRemote {
@@ -20,13 +19,12 @@ export interface DataResourceRemote {
 export interface FigDataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
-  TStoreContext = unknown,
 > {
   readonly $$typeof: symbol;
   readonly debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   readonly key: (...args: TArgs) => DataResourceKey;
   readonly load?: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext<TStoreContext>]
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
   readonly remote?: DataResourceRemote;
 }
@@ -83,19 +81,19 @@ export interface FigDataStoreEntrySnapshot {
 // its methods instead.
 export interface FigDataStoreHandle {
   hydrate(entries: readonly FigDataHydrationEntry[]): void;
-  invalidateData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  invalidateData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     ...args: TArgs
   ): void;
   invalidateDataError(error: unknown): boolean;
   invalidateDataKey(key: DataResourceKey): void;
   invalidateDataPrefix(prefix: DataResourceKey): void;
-  preloadData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  preloadData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     ...args: TArgs
   ): void;
-  refreshData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  refreshData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     ...args: TArgs
   ): Promise<DataRefreshResult<TValue>>;
   run<T>(callback: () => T): T;
@@ -111,8 +109,8 @@ export interface FigDataStore extends FigDataStoreHandle {
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the
   // subscribing owner trails them.
-  readData<TArgs extends unknown[], TValue, TStoreContext>(
-    resource: FigDataResource<TArgs, TValue, TStoreContext>,
+  readData<TArgs extends unknown[], TValue>(
+    resource: FigDataResource<TArgs, TValue>,
     args: TArgs,
     owner: object,
   ): TValue;
@@ -122,7 +120,6 @@ export interface FigDataStore extends FigDataStoreHandle {
 // compatible with @bgub/fig-data's DataStoreHost so its createDataStore can
 // register directly.
 export interface FigDataStoreHost {
-  context: unknown;
   remoteFetch?: FigDataRemoteFetcher;
   getLane(): unknown;
   partition?: DataResourceKeyInput;
