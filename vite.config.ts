@@ -8,6 +8,7 @@ const workspaceRoot = workspacePath(".");
 const packagePath =
   relative(workspaceRoot, process.cwd()).replaceAll("\\", "/") || ".";
 const isPackCommand = process.argv.some((arg) => arg.includes("pack-bin"));
+const isDevSourcePack = process.env.FIG_DEV_SOURCE === "1";
 const figSourceAliasEntries = [
   ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
@@ -219,9 +220,8 @@ function packConfigFor(path: string): PackConfig | undefined {
       return [
         {
           entry: ["./src/server.tsx"],
-          deps: {
-            neverBundle: [figPackages],
-          },
+          alias: isDevSourcePack ? sourceAliases : undefined,
+          deps: figServerDeps(),
           platform: "node",
           format: "esm",
           dts: false,
@@ -250,9 +250,8 @@ function packConfigFor(path: string): PackConfig | undefined {
             "dev-server": "./src/dev-server.ts",
             server: "virtual:fig-start/server-entry",
           },
-          deps: {
-            neverBundle: [figPackages],
-          },
+          alias: isDevSourcePack ? sourceAliases : undefined,
+          deps: figServerDeps(),
           platform: "node",
           format: "esm",
           dts: false,
@@ -286,6 +285,12 @@ function packConfigFor(path: string): PackConfig | undefined {
     default:
       return undefined;
   }
+}
+
+function figServerDeps() {
+  return isDevSourcePack
+    ? { alwaysBundle: [figPackages] }
+    : { neverBundle: [figPackages] };
 }
 
 function demoClientPackConfig(): PackConfig {

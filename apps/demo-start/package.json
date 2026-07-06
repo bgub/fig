@@ -7,7 +7,7 @@
     "build:e2e": "vp run --filter @bgub/fig-demo-start... build",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs start",
-    "dev:build": "vp pack --watch",
+    "dev:build": "vp pack --watch --no-clean",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",
     "test": "vp test run --passWithNoTests",

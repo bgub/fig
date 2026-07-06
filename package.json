@@ -3,11 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp run -r build",
+    "build": "sh -c 'missing=; for d in packages/*; do [ -d \"$d/dist\" ] || missing=1; done; if [ -n \"$missing\" ]; then vp run --no-cache --filter \"./packages/*\" build; else vp run --cache --filter \"./packages/*\" build; fi' && vp run --no-cache --filter './apps/*' build",
     "check": "vp check",
-    "dev": "vp run -r --parallel --log labeled dev",
-    "dev:demos": "turbo run dev --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-payload --filter @bgub/fig-demo-start --ui=tui",
-    "dev:demos:stream": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-payload --filter @bgub/fig-demo-start --parallel --log labeled dev",
+    "dev": "FIG_DEV_SOURCE=1 FIG_DEV_SERVER_SKIP_SETUP=1 vp run --filter './apps/demo-client' --filter './apps/demo-hmr' --filter './apps/demo-payload' --filter './apps/demo-ssr' --filter './apps/demo-start' --parallel --log labeled dev",
     "generate:jsx-attributes": "node scripts/generate-jsx-attributes.mjs",
     "prepare": "./scripts/prepare-effect.sh",
     "test": "vp test",
@@ -47,7 +45,6 @@
     "portless": "^0.14.0",
     "size-limit": "^8.2.4",
     "svg-element-attributes": "2.1.0",
-    "turbo": "^2.10.2",
     "typescript": "^5.9.2",
     "vite-plus": "catalog:"
   },

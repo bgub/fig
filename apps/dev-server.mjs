@@ -19,26 +19,39 @@ if (typeof packageName !== "string") {
 
 const logger = createLogger({ portlessUrl: portlessUrlFor(packageJson) });
 const tasks = createTaskGroup();
+const skipSetup = process.env.FIG_DEV_SERVER_SKIP_SETUP === "1";
 
 process.on("SIGINT", () => stopAndExit("SIGINT"));
 process.on("SIGTERM", () => stopAndExit("SIGTERM"));
 
-await tasks.run(
-  "setup",
+if (!skipSetup) {
+  await tasks.run(
+    "setup",
+    "vp",
+    ["run", "--filter", `${packageName}...`, "build"],
+    logger,
+  );
+}
+
+const build = tasks.startProcess(
+  "build",
   "vp",
-  ["run", "--filter", `${packageName}...`, "build"],
+  ["pack", "--watch", "--no-clean"],
   logger,
 );
+if (skipSetup) await waitForInitialBuild(build);
 
 const running = [
-  tasks.startProcess("build", "vp", ["pack", "--watch"], logger),
+  build,
   mode === "node" || mode === "start"
     ? tasks.startProcess(
         "server",
         process.execPath,
-        mode === "start"
-          ? ["dist/dev-server.js"]
-          : ["--watch", "--watch-preserve-output", "dist/server.js"],
+        [
+          "--watch",
+          "--watch-preserve-output",
+          mode === "start" ? "dist/dev-server.js" : "dist/server.js",
+        ],
         logger,
       )
     : tasks.track(
@@ -63,4 +76,15 @@ for (const task of running) {
 function stopAndExit(signal) {
   tasks.stop(signal);
   process.exit(0);
+}
+
+function waitForInitialBuild(task) {
+  return new Promise((resolve, reject) => {
+    task.onLine((line) => {
+      if (/\b(?:Build complete|Rebuilt)\b/.test(line)) resolve();
+    });
+    task.onExit((code, signal) => {
+      reject(new Error(`Initial app build exited early: ${signal ?? code}.`));
+    });
+  });
 }

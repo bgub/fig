@@ -7,7 +7,7 @@
     "build:e2e": "vp run --filter @bgub/fig-demo-payload... build",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs node",
-    "dev:build": "vp pack --watch",
+    "dev:build": "vp pack --watch --no-clean",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",
     "test:e2e": "sh ../../scripts/free-port.sh 4184 && playwright test"

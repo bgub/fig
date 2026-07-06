@@ -112,12 +112,11 @@ pnpm test
 Demo apps live in [`apps/`](./apps).
 
 ```bash
-pnpm dev:demos
+pnpm dev
 ```
 
-`pnpm dev:demos` uses Turbo only as a development-time terminal UI for the demo
-apps. Vite Plus remains the build, test, and package task runner; use
-`pnpm dev:demos:stream` for the non-TUI labeled stream output.
+`pnpm dev` starts one Vite Plus workspace watcher for packages, then runs the
+demo apps after the package builds are ready.
 
 The demo sites run through Portless:
 

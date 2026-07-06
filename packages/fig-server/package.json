@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "vp pack",
-    "dev": "vp pack --watch",
+    "dev": "vp pack --watch --no-clean",
     "test": "vp test run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",

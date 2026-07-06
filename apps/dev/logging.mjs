@@ -7,8 +7,8 @@ export function createLogger(options = {}) {
       if (trimmed.length === 0) return;
       output.write(`[${label}] ${formatLine(label, trimmed, portlessUrl)}\n`);
     },
-    pipe(label, stream, output = process.stdout) {
-      pipeLines(label, stream, output, portlessUrl);
+    pipe(label, stream, output = process.stdout, onLine) {
+      pipeLines(label, stream, output, portlessUrl, onLine);
     },
   };
 }
@@ -20,7 +20,7 @@ export function portlessUrlFor(pkg) {
     : null;
 }
 
-function pipeLines(label, stream, output, portlessUrl) {
+function pipeLines(label, stream, output, portlessUrl, onLine) {
   if (stream === null) return;
 
   let pending = "";
@@ -33,6 +33,7 @@ function pipeLines(label, stream, output, portlessUrl) {
     for (const line of lines) {
       const trimmed = line.trimEnd();
       if (trimmed.length > 0) {
+        onLine?.(trimmed);
         output.write(`[${label}] ${formatLine(label, trimmed, portlessUrl)}\n`);
       }
     }
@@ -40,6 +41,7 @@ function pipeLines(label, stream, output, portlessUrl) {
   stream.on("end", () => {
     const trimmed = pending.trimEnd();
     if (trimmed.length > 0) {
+      onLine?.(trimmed);
       output.write(`[${label}] ${formatLine(label, trimmed, portlessUrl)}\n`);
     }
     pending = "";

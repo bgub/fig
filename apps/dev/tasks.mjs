@@ -25,16 +25,24 @@ export function createTaskGroup() {
         });
       });
     },
-    startProcess(label, command, args, logger) {
+    startProcess(label, command, args, logger, options = {}) {
+      const lineListeners = new Set();
       const child = spawn(command, args, {
         shell: process.platform === "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
+      const onLine = (line) => {
+        options.onLine?.(line);
+        for (const listener of lineListeners) listener(line);
+      };
 
-      logger.pipe(label, child.stdout, process.stdout);
-      logger.pipe(label, child.stderr, process.stderr);
+      logger.pipe(label, child.stdout, process.stdout, onLine);
+      logger.pipe(label, child.stderr, process.stderr, onLine);
 
       return track(running, {
+        onLine(listener) {
+          lineListeners.add(listener);
+        },
         onExit(listener) {
           child.on("exit", listener);
         },
