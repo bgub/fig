@@ -67,14 +67,7 @@ export {
   type AssetResourceDestination,
   type AssetResourceHostAttribute,
 } from "./resource.ts";
-export {
-  invalidateDataResource,
-  preloadDataResource,
-  readDataResource,
-  refreshDataResource,
-  setCurrentDispatcher,
-  type RenderDispatcher,
-} from "./hooks.ts";
+export { setCurrentDispatcher, type RenderDispatcher } from "./hooks.ts";
 export {
   dataResourceKeysForError,
   markDataResourceError,

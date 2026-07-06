@@ -1,9 +1,5 @@
 import type { FigContext } from "./context.ts";
-import type {
-  DataRefreshResult,
-  FigDataResource,
-  FigDataStore,
-} from "./data.ts";
+import type { FigDataResource, FigDataStore } from "./data.ts";
 import { resolveCurrentDataStore } from "./data.ts";
 
 // The useState updater: accepts the next state, or an updater function of
@@ -189,18 +185,18 @@ export function readPromise<T>(promise: PromiseLike<T>): T {
   ).readPromise(promise);
 }
 
-export function readDataResource<TArgs extends unknown[], TValue>(
+export function readData<TArgs extends unknown[], TValue>(
   resource: FigDataResource<TArgs, TValue>,
-  args: TArgs,
+  ...args: TArgs
 ): TValue {
   return resolveDispatcher(
     "readData can only be called while rendering a component.",
   ).readData(resource, args);
 }
 
-export function preloadDataResource<TArgs extends unknown[], TValue>(
+export function preloadData<TArgs extends unknown[], TValue>(
   resource: FigDataResource<TArgs, TValue>,
-  args: TArgs,
+  ...args: TArgs
 ): void {
   if (currentDispatcher !== null) {
     currentDispatcher.preloadData(resource, args);
@@ -208,20 +204,6 @@ export function preloadDataResource<TArgs extends unknown[], TValue>(
   }
 
   resolveDataStore().preloadData(resource, ...args);
-}
-
-export function invalidateDataResource<TArgs extends unknown[], TValue>(
-  resource: FigDataResource<TArgs, TValue>,
-  args: TArgs,
-): void {
-  resolveDataStore().invalidateData(resource, ...args);
-}
-
-export function refreshDataResource<TArgs extends unknown[], TValue>(
-  resource: FigDataResource<TArgs, TValue>,
-  args: TArgs,
-): Promise<DataRefreshResult<TValue>> {
-  return resolveDataStore().refreshData(resource, ...args);
 }
 
 export function setCurrentDispatcher(

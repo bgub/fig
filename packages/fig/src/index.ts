@@ -95,14 +95,13 @@ export type {
 // The data layer: definitions and freshness verbs. The store implementation
 // travels with dataResource itself (a factory slot on each resource), so
 // bundles that never define a resource never ship the store.
+export { preloadData, readData } from "./hooks.ts";
 export {
   dataResource,
   invalidateData,
   invalidateDataError,
   invalidateDataKey,
   invalidateDataPrefix,
-  preloadData,
-  readData,
   readDataStore,
   refreshData,
   type DataResource,

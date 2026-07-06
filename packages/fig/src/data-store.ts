@@ -15,33 +15,12 @@ import {
   type FigDataStoreEntrySnapshot,
   type FigDataStoreHandle,
 } from "./data.ts";
-import {
-  invalidateDataResource,
-  preloadDataResource,
-  readDataResource,
-  refreshDataResource,
-} from "./hooks.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
-export {
-  type DataRefreshResult,
-  type DataResourceKey,
-  type DataResourceKeyInput,
-  type DataResourceLoadContext,
-  type FigDataHydrationEntry,
-  type FigDataStoreHandle,
-};
-
-interface DataResourceBaseOptions<TArgs extends unknown[]> {
+export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-}
-
-export interface DataResourceOptions<
-  TArgs extends unknown[],
-  TValue,
-> extends DataResourceBaseOptions<TArgs> {
   load?: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
@@ -123,28 +102,24 @@ const dataStoreFactory = createDataStore as FigDataStoreFactory;
 export function dataResource<TArgs extends unknown[], TValue>(
   options: DataResourceOptions<TArgs, TValue>,
 ): DataResource<TArgs, TValue> {
-  return createDataResource(options);
-}
-
-export function readData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): TValue {
-  return readDataResource(resource, args);
-}
-
-export function preloadData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): void {
-  preloadDataResource(resource, args);
+  const resource = {
+    $$typeof: DataResourceSymbol,
+    debugArgs: options.debugArgs,
+    key: options.key,
+    load: options.load,
+  };
+  (
+    resource as DataResource<TArgs, TValue> &
+      Record<symbol, FigDataStoreFactory>
+  )[DataStoreFactorySymbol] = dataStoreFactory;
+  return resource;
 }
 
 export function invalidateData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): void {
-  invalidateDataResource(resource, args);
+  resolveDataMutationStore("invalidateData").invalidateData(resource, ...args);
 }
 
 export function invalidateDataError(error: unknown): boolean {
@@ -165,7 +140,7 @@ export function refreshData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
 ): Promise<DataRefreshResult<TValue>> {
-  return refreshDataResource(resource, args);
+  return resolveDataMutationStore("refreshData").refreshData(resource, ...args);
 }
 
 // Captures the ambient store as an explicit handle. Call it synchronously
@@ -196,22 +171,6 @@ export function createDataStore<Owner extends object, Lane>(
 
 export function normalizeDataResourceKey(key: DataResourceKey): string {
   return normalizeKey(key).canonical;
-}
-
-function createDataResource<TArgs extends unknown[], TValue>(
-  options: DataResourceOptions<TArgs, TValue>,
-): DataResource<TArgs, TValue> {
-  const resource = {
-    $$typeof: DataResourceSymbol,
-    debugArgs: options.debugArgs,
-    key: options.key,
-    load: options.load,
-  };
-  (
-    resource as DataResource<TArgs, TValue> &
-      Record<symbol, FigDataStoreFactory>
-  )[DataStoreFactorySymbol] = dataStoreFactory;
-  return resource;
 }
 
 class DefaultDataStore<Owner extends object, Lane> implements DataStore<
@@ -448,7 +407,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): void {
-    if (this.disposed || !this.canLoad(resource)) return;
+    if (this.disposed || resource.load === undefined) return;
 
     const { entry } = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
@@ -477,7 +436,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.stale &&
       entry.pending === null &&
       entry.refreshError === undefined &&
-      this.canLoad(resource)
+      resource.load !== undefined
     ) {
       // A failed background refresh keeps the stale value and records
       // refreshError; do not auto-retry on every subsequent read or a
@@ -511,7 +470,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       });
     }
 
-    if (!this.canLoad(resource)) {
+    if (resource.load === undefined) {
       const { entry } = this.entryFor(resource, args, false);
       if (entry === null) {
         return Promise.resolve(unsupportedRefreshResult<TValue>());
@@ -665,12 +624,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       : `${this.partitionKey}:${canonicalKey}`;
   }
 
-  private canLoad<TArgs extends unknown[], TValue>(
-    resource: DataResource<TArgs, TValue>,
-  ): boolean {
-    return resource.load !== undefined;
-  }
-
   private startLoad<TArgs extends unknown[], TValue>(
     entry: Entry<Owner, Lane>,
     resource: DataResource<TArgs, TValue>,
@@ -678,12 +631,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     options: LoadOptions<Lane>,
   ): Promise<DataRefreshResult<TValue>> {
     const hadValue = entryHasValue(entry);
+    const load = resource.load;
 
     if (this.disposed) {
       return Promise.resolve(abortedRefreshResult(entry, "store-disposed"));
     }
 
-    if (!this.canLoad(resource)) {
+    if (load === undefined) {
       const error = new Error(
         `Data resource "${entry.canonicalKey}" has no loader and no hydrated value.`,
       );
@@ -708,7 +662,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     let loaded: TValue | PromiseLike<TValue>;
     try {
-      loaded = this.loadResource(resource, args, controller.signal);
+      loaded = load(...args, { signal: controller.signal });
     } catch (error) {
       loaded = Promise.reject(error);
     }
@@ -718,7 +672,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         entry,
         "superseded",
       );
-      settlePendingResult(pending, result);
+      pending.resolve(result);
       return result;
     };
     const fulfill = (value: TValue): DataRefreshResult<TValue> => {
@@ -735,7 +689,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.value = value;
       this.publish(entry);
       const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
-      settlePendingResult(pending, result);
+      pending.resolve(result);
       return result;
     };
     const reject = (error: unknown): DataRefreshResult<TValue> => {
@@ -756,7 +710,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           staleValue: entry.value as TValue,
           status: "rejected",
         };
-        settlePendingResult(pending, result);
+        pending.resolve(result);
         return result;
       }
 
@@ -765,7 +719,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       markDataResourceError(error, entry.key);
       this.publish(entry);
       const result: DataRefreshResult<TValue> = { error, status: "rejected" };
-      settlePendingResult(pending, result);
+      pending.resolve(result);
       return result;
     };
 
@@ -777,17 +731,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     void Promise.resolve(loaded).then(fulfill, reject);
 
     return pending.promise;
-  }
-
-  private loadResource<TArgs extends unknown[], TValue>(
-    resource: DataResource<TArgs, TValue>,
-    args: TArgs,
-    signal: AbortSignal,
-  ): TValue | PromiseLike<TValue> {
-    if (resource.load === undefined) {
-      throw new Error("Data resource load started without a loader.");
-    }
-    return resource.load(...args, { signal });
   }
 
   private publish(entry: Entry<Owner, Lane>): void {
@@ -813,7 +756,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.controller?.abort();
     entry.controller = null;
     entry.pending = null;
-    settlePendingResult(pending, abortedRefreshResult(entry, reason));
+    pending.resolve(abortedRefreshResult(entry, reason));
   }
 
   private retainPreload(entry: Entry<Owner, Lane>): void {
@@ -1135,13 +1078,6 @@ function createPendingResult<T>(): PendingResult<T> {
     promise,
     resolve,
   };
-}
-
-function settlePendingResult<T>(
-  pending: PendingResult<T>,
-  result: DataRefreshResult<T>,
-): void {
-  pending.resolve(result);
 }
 
 function scheduleStoreTimer(callback: () => void, delay: number): TimerHandle {
