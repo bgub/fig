@@ -33,11 +33,10 @@ From `plans/data-resources.md` (open questions that survived shipping):
 - Should the stable data API ever move from `@bgub/fig-data` into
   `@bgub/fig`, and should the renderer bridge become versioned
   `RenderDispatcher` methods instead of the `@bgub/fig/internal` slot?
-- A first-class `ErrorBoundary` retry/reset API for failed keys (today:
-  function fallback + invalidate + remount-by-key composes it manually).
-- Payload refresh ↔ data keys: payload streams data rows in the same response;
-  still open is a targeted protocol that maps invalidated keys to refreshed
-  payload boundaries without overfitting to one framework.
+- **ErrorBoundary reset ergonomics** — data-key attribution and invalidation
+  now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still
+  open: whether `ErrorBoundary` should expose a first-class reset/retry
+  affordance instead of making userland remount the boundary by key.
 - **Payload codec productization** — value fidelity for `Date`/`Map`/
   `undefined` and related non-JSON values now lives in the payload value
   codec. Still open: whether Fig Start exposes codec selection as a first-class
@@ -50,9 +49,8 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
 
 - **Bundler manifest integration** — the minimal manifest shape Fig requires
   for client-reference assets (also README's standing "future goal").
-- Open: should all client-reference stylesheets block reveal by default; how
-  stylesheet precedence interacts with segment streaming order; how the
-  whether `title`/`meta` ever travel the payload asset path.
+- Open: how stylesheet precedence interacts with independently streamed
+  segments once bundler-discovered stylesheets are common.
 
 ## fig-start
 
