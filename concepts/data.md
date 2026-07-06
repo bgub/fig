@@ -101,8 +101,10 @@ subscribers evict after an inactivity window (default 5 minutes).
 
 ## The Freshness Verbs
 
-Deliberately narrow — two verbs with crisp semantics, not a react-query
-vocabulary:
+Deliberately narrow — two semantics with crisp meanings, not a react-query
+vocabulary: **mark stale** (invalidate; the next read reloads lazily) and
+**fetch now** (refresh). The invalidate variants differ only in targeting —
+by resource and args, by exact key, by attributed error, by key prefix:
 
 - `invalidateData(resource, ...args)` — mark stale; the next read reloads
   lazily. It also clears a cached _rejection_ (back to pending) so a
@@ -169,8 +171,9 @@ misses and invalidations outside a route payload render, and only for
 
 Remote loaders are public request handlers. They must authenticate, authorize,
 and validate client-controlled arguments exactly like any manually written API
-route. The loader context carries the request/application context needed for
-those checks.
+route. Loaders receive no request context (see Loader Inputs), so those checks
+live in the loader's own module scope or in the framework endpoint that
+invokes it.
 
 ## Error Attribution
 
