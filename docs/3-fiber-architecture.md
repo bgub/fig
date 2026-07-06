@@ -1,195 +1,263 @@
-# fiber architecture
+# Fiber architecture
 
-## render lifecycle
+Doc 1 claimed Fig keeps React's runtime model: components, fibers, lanes, scheduling. This doc is that machine in detail. Instead of cataloging the parts, it follows one update through the whole pipeline, introducing each mechanism at the moment the story needs it.
 
-high-level: `state update -> schedule -> render -> commit`
+## The scenario
 
-fig follows almost exactly the same philosophy as react fiber.
+```tsx
+import { useState, transition } from "@bgub/fig";
+import { on } from "@bgub/fig-dom";
 
-- your ui is just a tree. every node has exactly 1 parent and between 0 and arbitrarily many children. when `useState()` is called from a node, fig stores the state on that node in the tree
-- when there's a state update (or on first load of the app), we schedule the render step.
-- in the render step, we build a "WIP tree" by walking the current tree node-by-node in depth-first search, comparing as we go — this comparison IS the diff. if a node's inputs (props + state + context) haven't changed and nothing below it has work, we reuse the current tree's version of that node wholesale and skip its whole subtree. nodes that DID change get flagged with what needs to happen to the DOM (insert, update, delete)
-- if we detect that we've been rendering for more than 5ms, we yield back to the browser (so it can paint + process user input). resuming is cheap because every node carries pointers to its child, sibling, and parent — "where we were" is just the node we were on, and the half-built WIP tree can be picked up (or thrown away entirely) at any time
-- finally, when the entire WIP tree is ready, we commit: apply the flagged DOM changes and swap the WIP tree in as the new current tree. unlike rendering, commit is synchronous and never partial — the user never sees a half-updated screen. splitting the work this way (render = figure out what changed, interruptible; commit = apply it, atomic) is the whole trick
-- after commit, effects run: layout-timed ones synchronously before the browser paints, `useReactive` ones after paint
+function Counter() {
+  const [count, setCount] = useState(1);
+  return (
+    <>
+      <button events={[on("click", () => setCount((c) => c * 2))]}>
+        double
+      </button>
+      <button
+        events={[on("click", () => transition(() => setCount((c) => c + 10)))]}
+      >
+        add ten
+      </button>
+      <ExpensiveChart count={count} />
+    </>
+  );
+}
+```
 
-## schedule - more details
+`ExpensiveChart` is slow to render. The user clicks "add ten", and while Fig is rendering that update in the background, they click "double".
 
-let's get into the nitty gritty.
+Here's what the user sees: the screen shows 2 immediately, then settles at 22 a moment later. Not 12 — even though the ×2 rendered first, the final state is `(1 + 10) × 2`, as if the updates had run in the order they were dispatched. The rest of this doc is everything Fig does to make both of those things true: the instant 2 and the correct 22.
 
-each node ("fiber") has a `memoizedState` field which points to the first hook of a linked list: `Hook -> Hook -> Hook -> null` — one hook per hook call site, in call order (this is why hook order must be stable: there are no names, just position in the list).
+The pipeline, which is also the map of this doc:
 
-Each `Hook` (for `useState`) has:
+```
+setCount(...)                    (the write path)
+  stamp a lane on the update
+  append it to the hook's queue
+  mark lanes up the tree, schedule on the root
+        ↓
+scheduler picks a lane set       (the scheduler)
+        ↓
+render                           (the render path)
+  build the WIP tree: diff, bail out, time-slice
+  process hook queues: skip + rebase by lane
+        ↓
+commit                           (commit)
+  mutate the DOM, swap trees, run effects
+```
 
-- `memoizedState` — the current state, i.e. what this render pass computed and the screen shows.
-- `queue.dispatch` - the setter, i.e. `setCount`
+One framing note before the details: render and commit are split on purpose. Render figures out what changed — it's interruptible, abandonable, and never touches the DOM. Commit applies the changes — synchronous, atomic, never partial. The user never sees a half-updated screen, and Fig can throw away a half-finished render at any time. That split is the whole trick; everything else in this doc is machinery serving it.
+
+## The write path
+
+### The hook and its queue
+
+Every node in the tree (a "fiber") has a `memoizedState` field pointing at the first hook of a linked list: `Hook → Hook → Hook → null`, one per hook call site, in call order. That's why hook order must be stable: there are no names, just positions in the list.
+
+The `Hook` for our `useState(1)` holds:
+
+- `memoizedState` — the current state, i.e. what the last render computed and the screen shows
+- `queue.dispatch` — the setter, i.e. `setCount`
 - `queue.pending` — a queue of state updates in dispatch order, each stored as `{ action, lane, next }`
-- `baseState` + `baseQueue` — the rebase ledger (explained below)
+- `baseState` + `baseQueue` — the rebase ledger (it earns its keep in the render path)
 
-every call to the setter appends one `{ action, lane }` node to the queue:
+Every setter call appends one `{ action, lane }` node:
 
-- `action` is whatever you passed, stored raw and evaluated at render time: either the next state value or a `prev => next` function. (this is why `setCount(count + 1)` three times gives +1 but `setCount(c => c + 1)` three times gives +3 — values stamp over each other, functions chain)
-- `lane` is the priority, stamped per-update at dispatch time. `requestUpdateLane()` takes no arguments — it reads an ambient "current lane" set by whoever is running your code: fig-dom event dispatch sets it by event type (click → sync, scroll → continuous), `transition()` sets a transition lane, nothing → default lane. so one hook's queue can hold updates at several different priorities at once
+- `action` is whatever you passed, stored raw and evaluated at render time: either a next value or a `prev => next` function. This is why `setCount(count + 1)` three times gives +1 but `setCount(c => c + 1)` three times gives +3 — values stamp over each other, functions chain.
+- `lane` is the priority, stamped per-update at dispatch time.
 
-when a render eventually processes this queue, it only applies updates whose lane is in that render's lane mask — skipped updates aren't lost, they're rebased and replayed in order later. but that's render-step work; details in the next section. the rest of THIS section is the write path: how a stamped update becomes a scheduled render.
+After our two clicks, the queue holds `[A: transition, c => c + 10]`, `[B: sync, c => c * 2]`. One hook, two priorities.
 
-### lanes
+### Where the lane comes from
 
-a lane is one bit in a 31-bit bitmask. lower bit = higher priority. the taxonomy:
+`requestUpdateLane()` takes no arguments. It reads an ambient "current lane" set by whoever is running your code: fig-dom's event dispatch sets it by event type (click → sync, scroll → continuous), `transition()` sets a transition lane, and code running in no special context gets the default lane. Update A was dispatched inside `transition()`, so it carries a transition lane; update B came straight from a click handler, so it carries the sync lane.
 
-- `SyncLane` — discrete events (click, keydown, ...): things where the user expects an immediate response
-- `InputContinuousLane` — continuous events (scroll, pointermove, drag): urgent, but fine to coalesce
-- `DefaultLane` — updates from code running in no special context (timers, network callbacks)
-- `GestureLane` — gesture-driven updates
-- 14 `TransitionLane`s — `transition()` updates. multiple bits so overlapping transitions get distinct lanes (claimed round-robin)
-- 4 `RetryLane`s — suspense retries (a thrown promise resolved, re-render the boundary)
-- `DeferredLane` (`useLaggedValue` re-renders), `OffscreenLane` (updates inside hidden Activity subtrees), `IdleLane`
-- plus hydration twins of most of the above (`SyncHydrationLane`, `DefaultHydrationLane`, `SelectiveHydrationLane`, ...)
+A lane is one bit in a 31-bit bitmask; a lower bit means higher priority. The taxonomy:
 
-why bits instead of a priority number? merging is OR, membership is AND, and a _set_ of lanes can render as one mask — all 14 transition lanes render as a group, so overlapping transitions batch into one pass for free.
+| Lane                 | What lands there                                                                 |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `SyncLane`           | discrete events (click, keydown, ...) — the user expects an immediate response    |
+| `InputContinuousLane`| continuous events (scroll, pointermove, drag) — urgent, but fine to coalesce      |
+| `GestureLane`        | gesture-driven updates                                                            |
+| `DefaultLane`        | code running in no special context (timers, network callbacks)                    |
+| `TransitionLane` ×14 | `transition()` updates; overlapping transitions claim distinct lanes round-robin  |
+| `RetryLane` ×4       | suspense retries (a thrown promise resolved, re-render the boundary)              |
+| `DeferredLane`       | `useLaggedValue` re-renders                                                       |
+| `OffscreenLane`      | updates inside hidden Activity subtrees                                           |
+| `IdleLane`           | idle work                                                                         |
 
-### from setter to root: `pendingLanes`
+Most of these also have hydration twins (`SyncHydrationLane`, `DefaultHydrationLane`, `SelectiveHydrationLane`, ...); those matter in doc 4.
 
-appending to the hook queue is only half of what the setter does. it also (`scheduleFiber`):
+Why bits instead of a priority number? Merging is OR, membership is AND, and a *set* of lanes can render as one mask — all 14 transition lanes render as a group, so overlapping transitions batch into one pass for free.
+
+### From setter to root
+
+Appending to the hook queue is only half of what the setter does. It also (`scheduleFiber`):
 
 - marks the lane on the fiber's own `lanes`
-- walks up the `return` pointers marking `childLanes` on every ancestor — this is how the render step later knows "something below here has work" (the bailout check from the overview)
+- walks up the `return` pointers marking `childLanes` on every ancestor — this is how a later render knows "something below here has work" without visiting it
 - ORs the lane into `root.pendingLanes` and asks the root to schedule a render
 
-the root then decides what to actually render (`getNextLanes`):
+Both of our clicks did all three. The interesting part is what the root does with two pending priorities at once.
 
-1. expired lanes first (see starvation below)
-2. otherwise the highest-priority pending lane that isn't suspended (suspended = that lane's render hit an unresolved promise; it's parked until the promise resolves and "pings" it back schedulable — the full story is doc 4)
+## The scheduler
+
+### Picking what to render
+
+`getNextLanes` decides what the next render works on:
+
+1. expired lanes first (see starvation, below)
+2. otherwise the highest-priority pending lane that isn't suspended — suspended meaning that lane's render hit an unresolved promise and is parked until the promise resolves and "pings" it back schedulable (doc 4's territory)
 3. transitions and retries are picked as whole groups, not single lanes
 
-scheduling is idempotent: if a callback is already scheduled at the same priority, a new update just rides along — its bit is already in `pendingLanes`. if HIGHER-priority work arrives, the scheduled callback is cancelled and replaced, and an in-progress lower-priority render gets its half-built WIP tree discarded and restarted. that's interruption, and it's cheap precisely because rendering never touched the DOM.
+Scheduling is idempotent. If a callback is already scheduled at the same priority, a new update just rides along — its bit is already in `pendingLanes`. If higher-priority work arrives, the scheduled callback is cancelled and replaced, and an in-progress lower-priority render has its half-built WIP tree discarded.
 
-### the scheduler
+That last case is our scenario. When "double" lands, the transition render for A is mid-flight through `ExpensiveChart`. Its WIP tree is thrown away and a sync-priority task takes its place. This is interruption, and it's cheap precisely because rendering never touched the DOM — there's nothing to undo.
 
-quick event-loop recap, because this whole layer is shaped by it: JS is single-threaded, and the browser can only paint and process input BETWEEN tasks. one long task = frozen page. so rendering without jank means splitting work into small macrotasks and handing the thread back constantly. that's the entire design brief.
+### The task layer
 
-the scheduler is a small internal module (not a published package) that knows nothing about fibers or lanes — it just runs prioritized callbacks:
+Quick event-loop recap, because this whole layer is shaped by it: JS is single-threaded, and the browser can only paint and process input between tasks. One long task means a frozen page, so rendering without jank means splitting work into small macrotasks and handing the thread back constantly.
 
-- five tiers, mapped down from lanes: sync → Immediate, input/gesture → UserBlocking, default + transitions → Normal, retries → Low, idle/offscreen → Idle
-- one min-heap of tasks, sorted by expiration time = now + the tier's timeout (Immediate: −1ms, i.e. born expired; UserBlocking: 250ms; Normal: 5s; Low: 10s; Idle: effectively never)
-- work runs in posted macrotasks: `setImmediate` in node, `MessageChannel` in browsers — NOT `setTimeout`, because nested `setTimeout(0)` gets clamped to 4ms+, which would waste most of a frame per hop (`setTimeout` is the last-resort fallback)
-- each hop flushes tasks until the 5ms frame budget elapses (or a commit requested a paint), then posts another hop if work remains
-- a render that yields mid-tree keeps its WIP tree + position on the root and simply gets rescheduled — the next hop picks up where it left off
+The scheduler itself is a small internal module (not a published package) that knows nothing about fibers or lanes — it just runs prioritized callbacks. Lanes map down to five tiers:
 
-### starvation
+| Tier         | Lanes                 | Timeout                |
+| ------------ | --------------------- | ---------------------- |
+| Immediate    | sync                  | −1ms (born expired)    |
+| UserBlocking | input, gesture        | 250ms                  |
+| Normal       | default, transitions  | 5s                     |
+| Low          | retries               | 10s                    |
+| Idle         | idle, offscreen       | effectively never      |
 
-time-slicing has a failure mode: a steady stream of high-priority work could postpone low-priority work forever. two safety nets, one per layer:
+- One min-heap of tasks, sorted by expiration time (now + the tier's timeout).
+- Work runs in posted macrotasks: `setImmediate` in Node, `MessageChannel` in browsers. Not `setTimeout` — nested `setTimeout(0)` gets clamped to 4ms+, which would waste most of a frame per hop. (`setTimeout` is the last-resort fallback.)
+- Each hop flushes tasks until a 5ms frame budget elapses (or a commit requested a paint), then posts another hop if work remains.
+- A render that yields mid-tree keeps its WIP tree and position on the root and simply gets rescheduled; the next hop picks up where it left off. Resuming is cheap because every fiber carries pointers to its child, sibling, and parent — "where we were" is just the node we were on.
 
-- lane level: pending lanes get expiration times when first seen (sync/input/gesture: 250ms, default/transition: 5s; retries and idle work never expire — they're genuinely background). once expired, a lane goes into `root.expiredLanes` and `getNextLanes` picks it before EVERYTHING else — even newly arriving clicks can't cut in line anymore
-- task level: once a task's expiration time passes, the work loop runs it even past the 5ms frame budget
+### Starvation
 
-net effect: a transition can be delayed by a stream of clicks, but never indefinitely.
+Time-slicing has a failure mode: a steady stream of high-priority work could postpone low-priority work forever. Suppose the user keeps clicking "double" — when does the transition ever get to render? Two safety nets, one per layer:
 
-### what "sync" actually means
+- Lane level: pending lanes get expiration times when first seen (sync/input/gesture: 250ms, default/transition: 5s; retries and idle work never expire — they're genuinely background). Once expired, a lane goes into `root.expiredLanes` and `getNextLanes` picks it before everything else; even newly arriving clicks can't cut in line anymore.
+- Task level: once a task's expiration time passes, the work loop runs it even past the 5ms frame budget.
 
-a `SyncLane` update does NOT render inside your `setState` call — it still schedules a task (Immediate tier, next macrotask hop). "sync" means the render, once started, doesn't time-slice and can't be interrupted. actually-synchronous flushing is what `flushSync` does, and it's the only escape hatch from automatic batching.
+Net effect: our transition can be delayed by a stream of clicks, but never indefinitely.
 
-## render - more details
+### What "sync" actually means
 
-the schedule section covered the write path; this is the read path. the scheduled task fires, and we start building the WIP tree. the first thing rendering a component does is process each of its hooks' update queues.
+A `SyncLane` update does not render inside your `setCount` call — it still schedules a task (Immediate tier, next macrotask hop). "Sync" means the render, once started, doesn't time-slice and can't be interrupted. Actually-synchronous flushing is what `flushSync` does, and it's the only escape hatch from automatic batching.
 
-### processing the update queue
+## The render path
 
-the render walks each hook's queue in dispatch order, but only APPLIES updates whose lane bit is in this render's lane mask (one bitwise AND per update). skipped updates aren't dropped — they're rebased, which is what `baseState` + `baseQueue` are for:
+The sync task fires, and Fig starts building the WIP tree: walk the current tree depth-first, re-rendering components and comparing new children against old as it goes — this comparison *is* the diff. If a node's inputs (props + state + context) haven't changed and its `childLanes` say nothing below has work, Fig reuses the current tree's node wholesale and skips the whole subtree. Nodes that changed get flagged with what has to happen to the DOM: insert, update, delete.
 
-- `memoizedState` = what the screen shows now (may have "jumped ahead" past skipped updates)
-- `baseState` = where a future replay must restart from: the running state pinned at the FIRST skipped update. everything before the first skip is settled forever and folds into this value
-- `baseQueue` = everything from the first skip onward, in original order — including clones of updates that DID apply this render (lane cleared to "always apply"), because they must re-run on top of the skipped ones later to preserve dispatch order
+The interesting work in our scenario happens when the render reaches our `useState` hook and processes its queue.
 
-worked example: `count = 1`, queue = [A: transition, `c => c + 10`], [B: click, `c => c * 2`]
+### Processing the update queue
 
-- sync render (mask = sync only): A skipped → pin `baseState = 1`, baseQueue = [A]. B applies → screen shows 2. but something before B was skipped, so a clone B' (lane cleared) also goes in → baseQueue = [A, B']
-- transition render later: replay from `baseState = 1`: A → 11, B' → 22. final = (1 + 10) × 2, exactly as if they'd run in dispatch order
+The render walks the hook's queue in dispatch order, but only applies updates whose lane bit is in this render's lane mask (one bitwise AND per update). Skipped updates aren't dropped — they're rebased, which is what `baseState` and `baseQueue` are for:
 
-so high-priority state can jump ahead visually (click feels instant), but every queue eventually replays in dispatch order — fast now, correct later. without the B' clone the final would be 2 + 10 = 12, i.e. reordered.
+- `memoizedState` — what the screen shows now; it may have "jumped ahead" past skipped updates
+- `baseState` — where a future replay must restart from: the running state pinned at the first skipped update. Everything before the first skip is settled forever and folds into this value.
+- `baseQueue` — everything from the first skip onward, in original order, including clones of updates that *did* apply this render (with their lane cleared to "always apply"), because they must re-run on top of the skipped ones later to preserve dispatch order
 
-(implementation detail, only matters when reading source: `queue.pending` is a circular list pointing at the NEWEST node, so append is O(1) and `pending.next` wraps to the oldest)
+Walk it with our queue — `count = 1`, `[A: transition, c => c + 10]`, `[B: sync, c => c * 2]`:
 
-## commit - more details
+- The sync render's mask contains only the sync lane. A is skipped: pin `baseState = 1`, `baseQueue = [A]`. B applies: `memoizedState = 2`. But something before B was skipped, so a clone B′ with its lane cleared goes in too: `baseQueue = [A, B′]`.
+- The component renders with `count = 2`, and commit puts 2 on screen (next section).
+- The transition render later replays from `baseState = 1`: A gives 11, B′ gives 22. Final state: `(1 + 10) × 2`, exactly as if the updates had run in dispatch order.
 
-commit is one synchronous, never-yielding pass with a strict internal order. the order exists to bracket two moments: "the DOM changes" and "the browser paints". the three effect hooks are named for exactly where they sit relative to those two moments:
+Without the B′ clone, the replay would run A on top of the already-shown 2 and land on `2 + 10 = 12` — the updates would have effectively reordered. With it, high-priority state can jump ahead visually (the click feels instant) while every queue still replays in dispatch order.
 
-`useBeforeLayout → [deletions → mutations → SWAP current] → useBeforePaint → (browser paints) → useReactive`
+In the source: `queue.pending` is a circular list pointing at the newest node, so append is O(1) and `pending.next` wraps around to the oldest.
 
-react analogs (fig's names say WHEN they run, react's don't): `useBeforeLayout` = `useInsertionEffect`, `useBeforePaint` = `useLayoutEffect`, `useReactive` = `useEffect`
+## Commit
 
-### commit executes; render already decided
+The sync render finishes its WIP tree; now Fig has to put 2 on screen. Commit is one synchronous, never-yielding pass with a strict internal order. The order exists to bracket two moments — "the DOM changes" and "the browser paints" — and the three effect hooks are named for where they sit relative to those moments:
 
-by the time commit runs, every decision is made: fibers carry flags (insert / update / delete), parents carry deletion lists, and each fiber has an `effects` array holding ONLY the effects whose deps changed — that filtering happened during render, not commit. commit is pure execution: no diffing, no dep comparison.
+`useBeforeLayout → [deletions → mutations → swap current] → useBeforePaint → (browser paints) → useReactive`
 
-### the timeline
+React analogs: `useBeforeLayout` = `useInsertionEffect`, `useBeforePaint` = `useLayoutEffect`, `useReactive` = `useEffect`.
 
-pre-mutation:
+### Render decided; commit executes
 
-- swap `useStableEvent` handlers (react: `useEffectEvent`) + action instances to the newly-rendered versions — stable identity outside, fresh values inside, and commit is the moment the swap happens
-- run `useBeforeLayout` effects — BEFORE any host mutation, even deletions. this is the css-in-js slot: inject style rules before the nodes that need them exist
+By the time commit runs, every decision is made: fibers carry flags (insert / update / delete), parents carry deletion lists, and each fiber has an `effects` array holding only the effects whose deps changed — that filtering happened during render, not commit. Commit is pure execution: no diffing, no dep comparison.
 
-mutation:
+### The timeline
 
-- deletions first. each deleted subtree tears down in order: release its data-store subscriptions → abort everything (every effect's controller, stable-event signals, in-flight transitions/actions) → remove the host nodes. unmount cleanup IS this abort step — fig has no cleanup functions, so unmount = firing abort signals, and they fire while the nodes are still in the DOM
-- then the flag walk: placement runs (contiguous new siblings inserted in one run), host prop/text updates, portals. adopted subtrees are skipped entirely — the render bailouts pay off a second time here
+Pre-mutation:
 
-the swap:
+- Swap `useStableEvent` handlers (React: `useEffectEvent`) and action instances to the newly-rendered versions. Stable identity outside, fresh values inside, and commit is the moment the swap happens.
+- Run `useBeforeLayout` effects, before any host mutation — even deletions. This is the CSS-in-JS slot: inject style rules before the nodes that need them exist.
 
-- `root.current = finishedWork` — MID-commit: after mutations, before layout-timed effects. from this point "the current tree" means the new one. lane bookkeeping happens here too (finished lanes cleared from `pendingLanes`)
+Mutation:
 
-post-mutation, still pre-paint (same task — the browser hasn't painted yet):
+- Deletions first. Each deleted subtree tears down in order: release its data-store subscriptions → abort everything (every effect's controller, stable-event signals, in-flight transitions and actions) → remove the host nodes. Unmount cleanup *is* this abort step — Fig has no cleanup functions, so unmount means firing abort signals, and they fire while the nodes are still in the DOM.
+- Then the flag walk: placements run (contiguous new siblings inserted in one pass), host prop/text updates, portals. Adopted subtrees are skipped entirely — the render bailouts pay off a second time here.
 
-- `useExternalStore` (react: `useSyncExternalStore`) resubscribes + re-checks snapshots; if a store changed DURING render (tearing), schedule an immediate sync re-render
-- run `useBeforePaint` effects — the DOM is fully mutated, so measuring reads real layout, and anything they write still lands before the user sees a frame
-- flush error callbacks: `ErrorBoundary` `onError` for errors caught this render, then the root's `onRecoverableError`
+The swap:
 
-deferred:
+- `root.current = finishedWork`, mid-commit: after mutations, before layout-timed effects. From this point "the current tree" means the new one. Lane bookkeeping happens here too — finished lanes are cleared from `pendingLanes`. (In our scenario the sync bit clears; the transition bit is still there, waiting.)
 
-- `useReactive` effects are collected into a pending list and a normal-priority task is scheduled to flush them. this happens in a `finally`, paired with clearing fiber flags — a throwing commit step can't leave stale flags or lost effects
-- last line of commit: `requestPaint()` — the work loop yields at its next check, the browser paints, THEN the reactive task runs
+Post-mutation, still pre-paint (same task — the browser hasn't painted yet):
 
-### why useReactive is "after paint"
+- `useExternalStore` (React: `useSyncExternalStore`) resubscribes and re-checks snapshots; if a store changed during render (tearing), an immediate sync re-render is scheduled.
+- `useBeforePaint` effects run. The DOM is fully mutated, so measuring reads real layout, and anything they write still lands before the user sees a frame.
+- Error callbacks flush: `ErrorBoundary` `onError` for errors caught this render, then the root's `onRecoverableError`.
 
-not rAF — it falls out of the scheduler section: the flush is just a normal-priority task, but `requestPaint()` forces a yield first, the browser paints in the gap, and the next macrotask hop runs the effects. one guarantee on top: if a new render starts before that task fires, pending reactive effects flush FIRST (cancel the task, run them now) — so reactive effects can be delayed past paint, but never past the next render. no render ever observes un-run effects.
+Deferred:
 
-### how one effect runs
+- `useReactive` effects are collected into a pending list, and a normal-priority task is scheduled to flush them. This happens in a `finally`, paired with clearing fiber flags, so a throwing commit step can't leave stale flags or lost effects.
+- The last line of commit is `requestPaint()`: the work loop yields at its next check, the browser paints, and then the reactive task runs.
 
-the AbortSignal contract, mechanically:
+### Why useReactive is "after paint"
 
-1. abort the previous controller — this abort IS the cleanup step. dependency-change cleanup and unmount cleanup are the same mechanism
-2. make a fresh `AbortController`
-3. call `effect.create(signal)` with the ambient data store set (so `preloadData` / `invalidateData` work synchronously inside effects)
-4. dev only: a first-time effect is then aborted and re-run with another fresh signal — the always-strict behavior that flushes out effects ignoring their signal
+Not rAF — it falls out of the task layer. The flush is just a normal-priority task, but `requestPaint()` forces a yield first, and the browser paints in the gap before the next macrotask hop runs the effects. One guarantee on top: if a new render starts before that task fires, pending reactive effects flush first (the task is cancelled and they run immediately). So reactive effects can be delayed past paint, but never past the next render — no render ever observes un-run effects.
 
-the `create` call is wrapped in try/catch, so a throwing effect can never kill the commit or a scheduler tick: the error routes to the nearest `ErrorBoundary` (captured + scheduled as a normal re-render), else the root's uncaught-error path.
+### How one effect runs
 
-## dev behavior
+The AbortSignal contract, mechanically:
 
-dev's job is to make mistakes loud BEFORE they commit: strict double-rendering makes impure renders loud, the double-abort makes ignored abort signals loud, pre-commit diagnostics make invalid trees loud. (we've already brushed against two of these — the shadow pass in render, the strict effect re-run in commit; this section is the consolidated story.)
+1. Abort the previous controller. This abort *is* the cleanup step — dependency-change cleanup and unmount cleanup are the same mechanism.
+2. Make a fresh `AbortController`.
+3. Call `effect.create(signal)` with the ambient data store set (so `preloadData` / `invalidateData` work synchronously inside effects).
+4. Dev only: a first-time effect is then aborted and re-run with another fresh signal — the always-strict behavior that flushes out effects ignoring their signal.
 
-### always-strict rendering
+The `create` call is wrapped in try/catch, so a throwing effect can never kill the commit or a scheduler tick: the error routes to the nearest `ErrorBoundary` (captured and scheduled as a normal re-render), or else to the root's uncaught-error path.
 
-- there is no `StrictMode` component and no opt-out — dev always strict-renders. it's a stance, not a default: nothing to wrap, nothing to disable
-- the shadow pass: every render invokes the component twice, and the FIRST invocation is discarded — its hooks, effects, and consumed update queues are thrown away and restored, and no reconciliation happens on it. only the second invocation commits. purpose: non-idempotent renders (mutating during render, impure component bodies) produce visibly wrong results instead of silently working
-- the effect/bind double-run: first-time effects and `bind` callbacks run → abort → run again with a fresh signal, once per hook lifetime. tracked by a `strictRan` flag set BEFORE the first call, so a render nested inside an effect can't re-enter the cycle. purpose: effects that ignore their AbortSignal break visibly in dev instead of leaking in prod
-- client-only: server rendering never double-invokes
+## The replay
 
-### pre-commit diagnostics
+The user is looking at 2, and `pendingLanes` still holds the transition bit. The scheduler comes back around at Normal priority and the render path runs again — this time the mask includes the transition lane, so the queue replays from `baseState = 1`: A gives 11, B′ gives 22. `ExpensiveChart` renders with 22, time-sliced now that nothing urgent is competing, and a second commit puts it on screen.
 
-invalid render input THROWS before commit instead of warning after — the committed tree is never built from input fig considers invalid:
+That closes the loop from the top of the doc: the instant 2 is sync work jumping the queue and skipping what it can't afford to wait for; the correct 22 is the skipped work rebasing and replaying in dispatch order. (If the transition render had suspended on data instead of finishing, that's doc 4.)
+
+## Dev behavior
+
+Dev's job is to make mistakes loud before they commit: strict double-rendering makes impure renders loud, the double-abort makes ignored abort signals loud, and pre-commit diagnostics make invalid trees loud. (The effect double-run already appeared in the commit section; this is the consolidated story.)
+
+### Always-strict rendering
+
+- There is no `StrictMode` component and no opt-out — dev always strict-renders. It's a stance, not a default: nothing to wrap, nothing to disable.
+- The shadow pass: every render invokes the component twice, and the first invocation is discarded — its hooks, effects, and consumed update queues are thrown away and restored, and no reconciliation happens on it. Only the second invocation commits. Purpose: non-idempotent renders (mutating during render, impure component bodies) produce visibly wrong results instead of silently working.
+- The effect/bind double-run: first-time effects and `bind` callbacks run → abort → run again with a fresh signal, once per hook lifetime. Tracked by a `strictRan` flag set before the first call, so a render nested inside an effect can't re-enter the cycle. Purpose: effects that ignore their AbortSignal break visibly in dev instead of leaking in prod.
+- Client-only: server rendering never double-invokes.
+
+### Pre-commit diagnostics
+
+Invalid render input throws before commit instead of warning after — the committed tree is never built from input Fig considers invalid:
 
 - duplicate sibling keys
 - invalid children
 - render-phase state updates
-- invalid DOM nesting — the rules model actual HTML parser scoping (button/table scope boundaries, li/dd/dt implied end tags; whitespace-only text and hoisted asset tags are exempt), and they run on BOTH sides: the client validates at fiber creation, the server threads an ancestor stack so suspended segments validate against their logical position
+- invalid DOM nesting — the rules model actual HTML parser scoping (button/table scope boundaries, li/dd/dt implied end tags; whitespace-only text and hoisted asset tags are exempt), and they run on both sides: the client validates at fiber creation, and the server threads an ancestor stack so suspended segments validate against their logical position
 
-### how it all disappears in production
+### How it all disappears in production
 
-everything above is gated behind inline `process.env.NODE_ENV !== "production"` checks, so bundlers strip it — no dev/prod package split, no runtime flag. even the lane NAME table survives only for tests and diagnostics; production code uses raw mask checks.
+Everything above is gated behind inline `process.env.NODE_ENV !== "production"` checks, so bundlers strip it — no dev/prod package split, no runtime flag. Even the lane name table survives only for tests and diagnostics; production code uses raw mask checks.
 
-(other subsystems ship their own dev diagnostics — the `onChange` → `on("input")` steering warning in events, key/args drift fingerprinting in fig-data, late head-asset warnings in assets — but those belong to their own docs. dev-only tooling seams, for completeness: `fig-reconciler/devtools` for commit snapshots and `fig-reconciler/refresh` for HMR)
+(Other subsystems ship their own dev diagnostics — the `onChange` → `on("input")` steering warning in events, key/args drift fingerprinting in fig-data, late head-asset warnings in assets — but those belong to their own docs. Dev-only tooling seams, for completeness: `fig-reconciler/devtools` for commit snapshots and `fig-reconciler/refresh` for HMR.)
 
 ---
 
-next: doc 4 — how suspense rides this machinery, on the client (async lifecycle), on the server (streaming), and across the two (hydration).
+Next: doc 4 — how suspense rides this machinery, on the client (async lifecycle), on the server (streaming), and across the two (hydration).

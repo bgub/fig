@@ -1,8 +1,8 @@
-# quickstart
+# Quickstart
 
-if you know react, you already know 90% of fig. this doc is the other 10% — the differences you'll hit in your first hour, with code. (the exhaustive list lives in concepts/intentional-differences-from-react.md; the internals are doc 3.)
+If you know React, you already know 90% of Fig. This doc is the other 10%: the differences you'll hit in your first hour, with code. (The exhaustive list lives in `concepts/intentional-differences-from-react.md`; the internals are doc 3.)
 
-## hello fig
+## Hello Fig
 
 ```tsx
 import { useState } from "@bgub/fig";
@@ -23,13 +23,13 @@ function Counter() {
 createRoot(document.getElementById("root")!).render(<Counter />);
 ```
 
-three things to notice: `class` not `className`, events declared via `on()` descriptors not `onClick` props, and the packages — `@bgub/fig` is the component model, `@bgub/fig-dom` is the browser.
+Three things to notice: `class` instead of `className`, events declared with `on()` descriptors instead of `onClick` props, and the package split — `@bgub/fig` is the component model, `@bgub/fig-dom` is the browser renderer.
 
-## native names everywhere
+## Native names everywhere
 
-fig uses the platform's names: `class`, `for`, `tabindex`, `stroke-width`. the react aliases (`className`, `htmlFor`, `onClick`, `ref`, `dangerouslySetInnerHTML`) aren't just unsupported — they're COMPILE errors, so migration mistakes surface in the editor, not at runtime.
+Fig uses the platform's names: `class`, `for`, `tabindex`, `stroke-width`. The React aliases (`className`, `htmlFor`, `onClick`, `ref`, `dangerouslySetInnerHTML`) are compile errors, so migration mistakes surface in the editor, not at runtime.
 
-## events
+## Events
 
 ```tsx
 <input
@@ -40,14 +40,14 @@ fig uses the platform's names: `class`, `for`, `tabindex`, `stroke-width`. the r
 />
 ```
 
-- `event` is the NATIVE event — no synthetic wrapper, no pooling
-- propagation is native with no exceptions: `focus`/`blur` don't bubble (use `focusin`/`focusout` for ancestor tracking), no `mouseenter`/`mouseleave` emulation
-- there is no onChange-that-is-really-onInput: `on("input")` is what you want; `change` fires on commit like the platform says
-- the `signal` aborts on re-entry and listener removal — same cancellation contract as everything else in fig (next section)
+- `event` is the native event. No synthetic wrapper, no pooling.
+- Propagation is native with no exceptions: `focus`/`blur` don't bubble (use `focusin`/`focusout` for ancestor tracking), and there's no `mouseenter`/`mouseleave` emulation.
+- There's no onChange-that-is-really-onInput. `on("input")` is what you want; `change` fires on commit, like the platform says.
+- The `signal` aborts on re-entry and on listener removal — the same cancellation contract as everything else in Fig (next section).
 
-## effects: AbortSignal in, nothing out
+## Effects: AbortSignal in, nothing out
 
-effects receive a signal and must return `undefined` — a react-style returned cleanup is a type error. abort IS the cleanup: fig aborts on dependency change and on unmount.
+Effects receive a signal and must return `undefined` — a React-style returned cleanup is a type error. Abort *is* the cleanup: Fig aborts the signal on dependency change and on unmount.
 
 ```tsx
 useReactive(
@@ -61,7 +61,7 @@ useReactive(
 );
 ```
 
-for imperative teardown, listen to the signal:
+For imperative teardown, listen to the signal:
 
 ```tsx
 useReactive((signal) => {
@@ -70,11 +70,11 @@ useReactive((signal) => {
 }, []);
 ```
 
-the effect hooks are named for WHEN they run: `useReactive` (react: `useEffect`, after paint), `useBeforePaint` (react: `useLayoutEffect`), `useBeforeLayout` (react: `useInsertionEffect`). there's no mount-only hook — `useReactive(fn, [])` is the idiom.
+The effect hooks are named for *when* they run: `useReactive` (React: `useEffect`, after paint), `useBeforePaint` (React: `useLayoutEffect`), `useBeforeLayout` (React: `useInsertionEffect`). There's no mount-only hook; `useReactive(fn, [])` is the idiom.
 
-## no refs — `bind`
+## No refs — `bind`
 
-DOM access is a normal prop taking `(node, signal)`. no `useRef`, no `forwardRef`, no `.current` threading:
+DOM access is a normal prop taking `(node, signal)`. No `useRef`, no `forwardRef`, no `.current` threading:
 
 ```tsx
 <input
@@ -84,11 +84,11 @@ DOM access is a normal prop taking `(node, signal)`. no `useRef`, no `forwardRef
 />
 ```
 
-the signal aborts on identity change and unmount. `composeBind(...)` merges several binds. for mutable storage that isn't DOM access, `useMemo(() => ({ current: null }), [])`.
+The signal aborts on identity change and unmount. `composeBind(...)` merges several binds. For mutable storage that isn't DOM access, use `useMemo(() => ({ current: null }), [])`.
 
-## explicit reads instead of `use()`
+## Explicit reads instead of `use()`
 
-react's overloaded `use(resource)` is three explicit verbs:
+React's overloaded `use(resource)` is three explicit verbs:
 
 ```tsx
 const theme = readContext(Theme); // context — a render-time input, not a hook slot
@@ -96,7 +96,7 @@ const value = readPromise(promise); // suspends; keyed by promise identity
 const user = readData(userResource, id); // suspends; cache-keyed (from @bgub/fig-data)
 ```
 
-context objects are their own provider — no `.Provider`, no `Consumer`:
+Context objects are their own provider — no `.Provider`, no `Consumer`:
 
 ```tsx
 const Theme = createContext("light");
@@ -105,7 +105,7 @@ const Theme = createContext("light");
 </Theme>;
 ```
 
-## data is built in
+## Data is built in
 
 ```tsx
 import { dataResource, readData, invalidateData } from "@bgub/fig-data";
@@ -121,9 +121,9 @@ function Profile({ id }: { id: string }) {
 }
 ```
 
-two freshness verbs, that's the whole vocabulary: `invalidateData` (mark stale, reload lazily) and `refreshData` (fetch now). errors from the loader hit your nearest `ErrorBoundary`; loading states hit your nearest `Suspense`.
+Two freshness verbs make up the whole vocabulary: `invalidateData` (mark stale, reload lazily) and `refreshData` (fetch now). Errors from the loader hit your nearest `ErrorBoundary`; loading states hit your nearest `Suspense`.
 
-## transitions get a signal too
+## Transitions get a signal too
 
 ```tsx
 const [isPending, start] = useTransition();
@@ -136,19 +136,19 @@ start(async (signal) => {
 });
 ```
 
-superseded/unmounted runs are aborted and retired — last run wins, no stale clobbering. top-level `transition(cb)` exists for scopes without a hook.
+Superseded and unmounted runs are aborted and retired — last run wins, with no stale clobbering. Top-level `transition(cb)` exists for scopes without a hook.
 
-## what's gone (and what replaces it)
+## What's gone (and what replaces it)
 
-- `memo()` → nothing needed: fig's render bailouts preserve child identity, so unchanged siblings skip automatically
-- `useRef` → `bind` for DOM, `useMemo(() => ({ current: null }), [])` for storage
+- `memo()` → nothing needed: Fig's render bailouts preserve child identity, so unchanged siblings skip automatically
+- `useRef` → `bind` for DOM access, `useMemo(() => ({ current: null }), [])` for storage
 - `useReducer` → userland over `useState`
-- class components, string refs, legacy context, `StrictMode` (dev is ALWAYS strict), `forwardRef`, `Consumer`, `batchedUpdates` (batching is automatic; `flushSync` is the escape hatch)
+- Class components, string refs, legacy context, `StrictMode` (dev is always strict), `forwardRef`, `Consumer`, `batchedUpdates` (batching is automatic; `flushSync` is the escape hatch)
 - `ErrorBoundary` is a built-in component, not a class you write
 
-## rename cheat sheet
+## Rename cheat sheet
 
-| react                       | fig                                  |
+| React                       | Fig                                  |
 | --------------------------- | ------------------------------------ |
 | `className` / `htmlFor`     | `class` / `for`                      |
 | `onClick={fn}`              | `events={[on("click", fn)]}`         |
@@ -164,4 +164,4 @@ superseded/unmounted runs are aborted and retired — last run wins, no stale cl
 | `use(ctx)` / `use(promise)` | `readContext` / `readPromise`        |
 | RSC / Flight                | payload (`@bgub/fig-server/payload`) |
 
-next: doc 3 explains what the runtime actually does with all of this (lanes, scheduling, rendering, commit); doc 4 covers suspense, streaming SSR, and hydration.
+Next: doc 3 explains what the runtime actually does with all of this (lanes, scheduling, rendering, commit); doc 4 covers suspense, streaming SSR, and hydration.
