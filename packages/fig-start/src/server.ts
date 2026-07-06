@@ -81,6 +81,8 @@ export interface StartHandlerOptions {
   // Extra <head> content (e.g. <title>, <meta>). fig-server lowers host
   // title/meta/link into hoisted document resources.
   head?: FigNode;
+  // Per-request props for the framework-owned <html> element.
+  html?: (request: Request) => Props;
   htmlLang?: string;
   nonce?: (request: Request) => string;
   routes: readonly AnyRoute[];
@@ -212,9 +214,10 @@ export function createRequestHandler(
             { store: documentPayload.store },
             routerTree,
           );
+    const htmlProps = options.html?.(request) ?? {};
     const document = createElement(
       "html",
-      { lang: options.htmlLang ?? "en" },
+      { lang: options.htmlLang ?? "en", ...htmlProps },
       createElement(
         "head",
         null,

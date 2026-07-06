@@ -161,6 +161,20 @@ describe("@bgub/fig-start server handler", () => {
     );
   });
 
+  it("allows apps to set per-request html props", async () => {
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      html: () => ({ class: "dark", suppressHydrationWarning: true }),
+      routes,
+    });
+
+    const response = await handler(new Request("http://localhost/about"));
+    const html = await response.text();
+
+    expect(html).toContain('<html lang="en" class="dark">');
+    expect(html).not.toContain("suppressHydrationWarning");
+  });
+
   it("serializes loader data for hydration", async () => {
     const response = await handlerFor(true)(
       new Request("http://localhost/posts/42"),
