@@ -174,7 +174,7 @@ export const userServerResource = serverDataResource({
 
 Browser components import and read `userResource`. Server code imports and preloads or reads `userServerResource`. Because both resources return the same key, they address the same store entry.
 
-If you import a `.server.ts(x)` module from browser code, use the `@bgub/fig/vite` plugin so the server loader is replaced by a client stub. Fig Start includes this transform.
+If you import a `.server.ts(x)` module from browser code, use the `figData` plugin from `@bgub/fig-vite` so the server loader is replaced by a client stub. Fig Start includes this transform.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed a value for that key, `readData(userResource, id)` can read it. If the client tries to refresh it directly, the result is:
 

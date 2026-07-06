@@ -18,7 +18,9 @@ signatures — that is what gives consumers semver protection).
   `dataResource`, the freshness verbs, and the store implementation (which
   stays out of data-free bundles; see the lazy store installation protocol
   below). The `./server` subpath is the server-file authoring entry
-  (`serverDataResource`), and `./vite` is its packaging transform.
+  (`serverDataResource`); its packaging transform ships as `figData` in
+  `@bgub/fig-vite` (version-synced — build-time skew is benign, runtime
+  symbol skew is not).
 - `@bgub/fig-dom` — the browser boundary: `createRoot`/`hydrateRoot`/
   `createPortal`, `flushSync`, `on()`/`events`, `bind`/`composeBind`,
   `insertAssetResources`, host-prop JSX types, and the `./refresh` HMR subpath.

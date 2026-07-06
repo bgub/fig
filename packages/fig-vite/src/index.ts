@@ -62,3 +62,22 @@ export { register, setSignature };
 }
 
 export { transformModule };
+
+export {
+  figData,
+  type FigDataPlugin,
+  type FigDataPluginOptions,
+} from "./data/index.ts";
+export {
+  assertNoServerDataResourceImport,
+  collectServerDataResourceStubs,
+  dataResourceId,
+  discoverServerDataResources,
+  rootRelative,
+  transformServerDataClientStub,
+} from "./data/transform.ts";
+export type {
+  ClientDataResourceStub,
+  ServerDataClientStubResult,
+  ServerDataResourceRef,
+} from "./data/transform.ts";

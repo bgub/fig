@@ -1,7 +1,7 @@
 {
   "name": "@bgub/fig-vite",
   "version": "0.0.1",
-  "description": "Fig Vite plugin (Fast Refresh / HMR transform)",
+  "description": "Fig Vite plugins (Fast Refresh / HMR and data-resource transforms)",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
   "type": "module",
@@ -37,6 +37,7 @@
     "@babel/preset-typescript": "^7.25.0"
   },
   "devDependencies": {
-    "@types/babel__core": "^7.20.5"
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "^20.19.0"
   }
 }

@@ -35,7 +35,7 @@ through a server/payload refresh path and report
 `{ status: "unsupported", reason: "no-client-loader" }` from `refreshData`.
 
 `serverDataResource` can only be imported from `.server.ts(x)` files. The
-`@bgub/fig/vite` transform is the packaging contract: browser imports of
+`figData` transform (`@bgub/fig-vite`) is the packaging contract: browser imports of
 server-file resources become key-only stubs (the browser-safe `key` survives;
 the server loader is stripped). Server-file modules imported without that
 transform must fail before server code enters the client bundle.

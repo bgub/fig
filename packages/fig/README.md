@@ -290,7 +290,7 @@ resource has no client loader, `refreshData(userResource, id)` resolves with
 `{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs a
 payload or framework refresh path.
 
-Browser bundles need the `@bgub/fig/vite` transform so imports of
+Browser bundles need the `figData` transform from `@bgub/fig-vite` so imports of
 `.server.ts(x)` modules become loader-free client stubs instead of bundling the
 server loader. Fig Start includes this transform automatically.
 

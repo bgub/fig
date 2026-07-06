@@ -43,7 +43,7 @@ import {
   renderStaticAssetModule,
 } from "./static-assets.ts";
 import { isTailwindCssEntry, transformTailwindCss } from "./tailwind.ts";
-import { assertNoServerDataResourceImport } from "../../../fig/src/vite/index.ts";
+import { assertNoServerDataResourceImport } from "../../../fig-vite/src/data/index.ts";
 import {
   assertNoRemoteDataResourceImport,
   REMOTE_DATA_RESOURCE_CALLEE,

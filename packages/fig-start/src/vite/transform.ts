@@ -6,7 +6,7 @@ import {
   discoverServerDataResources,
   type ClientDataResourceStub,
   type ServerDataResourceRef,
-} from "../../../fig/src/vite/index.ts";
+} from "../../../fig-vite/src/data/index.ts";
 import { rootRelative } from "./path-utils.ts";
 
 // The callee that declares a Fig Start remote server resource. Fig's data
