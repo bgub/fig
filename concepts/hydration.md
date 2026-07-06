@@ -32,19 +32,29 @@ with dehydrated content triggers its hydration at input priority.
 Server-only attributes and styles are preserved (extensions and edge-injected
 markers survive), with a dev warning when they diverge from the client
 render; text mismatches recover with a root client render (reported through
-`onRecoverableError`, digests included). There is deliberately **no**
-`suppressHydrationWarning` clone — see the exploration below.
+`onRecoverableError`, digests included). Host elements support React's
+`suppressHydrationWarning` prop as a one-level escape hatch for intentional
+text/attribute divergence; it does not suppress structural mismatches and is
+not rendered as a DOM attribute. Fig Start owns the document shell and lets
+apps supply per-request `<html>` props; request-known shell state like a
+cookie-backed theme should be rendered there instead of patched by a hydration
+script.
 
 ## Exploring: Hydration-Stable Environment
 
-Environment-dependent first renders (time, locale, time zone, color scheme,
-viewport) are the legitimate mismatch class. The direction is a
-hydration-stable environment primitive rather than a mismatch opt-out: the
-app captures the environment values that affect HTML on the server,
+Environment-dependent first renders (time, locale, time zone, viewport) are
+the legitimate mismatch class. The direction is a hydration-stable
+environment primitive rather than a mismatch opt-out: the app captures the
+environment values that affect HTML on the server,
 serializes them with the document, and the client's hydration render reads
 that same snapshot; after hydration, browser-backed stores publish live
 values through normal subscription flow (the `useExternalStore`
 server-snapshot pattern, made first-class).
+
+Values the server can already know from the request should stay outside this
+primitive. For example, color scheme should usually be a cookie-backed app
+preference rendered into the Fig Start document shell, with `system` resolved
+by CSS media queries.
 
 Sketch (fig-start level):
 
@@ -53,7 +63,6 @@ createRequestHandler({
   hydrationEnv(request) {
     return {
       locale: request.headers.get("accept-language") ?? "en-US",
-      colorScheme: themeFromCookie(request) ?? "light",
       now: Date.now(),
     };
   },
@@ -63,15 +72,14 @@ createRequestHandler({
 Open questions: ownership (fig-start vs fig-dom vs a core primitive), one
 app-wide snapshot vs nested scopes, how the client learns hydration finished
 (to switch to live values), whether the snapshot rides the fig-start
-bootstrap path or a renderer-level slot, whether color scheme additionally
-needs a pre-hydration `<html>` mutation helper against first-paint flashes,
-and whether bare `hydrateRoot` should accept a snapshot option.
+bootstrap path or a renderer-level slot, and whether bare `hydrateRoot` should
+accept a snapshot option.
 
-Provisional stance: do not add a `suppressHydrationWarning` clone — it is
-easy to add later and hard to remove. Prototype the environment snapshot in
-fig-start first; if a divergence class remains that cannot be modeled as
-snapshot-plus-post-hydration-update, add a smaller, named escape hatch for
-that class rather than a universal mismatch silencer.
+Provisional stance: keep `suppressHydrationWarning` compatible but narrow.
+Prototype the environment snapshot in fig-start first; if a divergence class
+remains that cannot be modeled as snapshot-plus-post-hydration-update or a
+one-level host escape hatch, add a smaller, named escape hatch for that class
+rather than a broader mismatch silencer.
 
 Prior art surveyed: React/Next (placeholder-until-mount, client-only,
 `suppressHydrationWarning`), Vue 3.5 (`data-allow-mismatch` — the explicit

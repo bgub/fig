@@ -241,6 +241,7 @@ function reservedProp(name: string): boolean {
     name === "key" ||
     name === "events" ||
     name === "bind" ||
+    name === "suppressHydrationWarning" ||
     name === "unsafeHTML" ||
     /^on[A-Z]/.test(name)
   );

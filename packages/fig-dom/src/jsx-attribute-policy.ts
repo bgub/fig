@@ -30,6 +30,7 @@ interface FigHostProps<E extends Element> {
   events?: HostEvents | EmptyPropValue;
   key?: Key | null;
   style?: HostStyle | EmptyPropValue;
+  suppressHydrationWarning?: boolean | null;
   unsafeHTML?: string | EmptyPropValue;
 }
 

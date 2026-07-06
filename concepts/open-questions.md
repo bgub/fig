@@ -10,13 +10,15 @@ and leaves this list.
 ## Hydration
 
 - **Hydration-stable environment** — the one intentional-divergence class
-  (time, locale, color scheme, viewport) gets a serialized environment
-  snapshot the client's hydration render reads, not a
-  `suppressHydrationWarning` clone. Open: ownership (fig-start vs fig-dom vs
-  core), app-wide vs nested scopes, how the client learns hydration finished,
-  bootstrap-path vs renderer-slot serialization, a pre-hydration `<html>`
-  helper for color-scheme flash, a `hydrateRoot` snapshot option, and the
-  missing-snapshot failure mode. → `concepts/hydration.md`
+  (time, locale, viewport) gets a serialized environment snapshot the
+  client's hydration render reads, not a broad mismatch opt-out. Open:
+  ownership (fig-start vs fig-dom vs core), app-wide vs nested scopes, how the
+  client learns hydration finished, bootstrap-path vs renderer-slot
+  serialization, a `hydrateRoot` snapshot option, and the missing-snapshot
+  failure mode. Request-known shell state like cookie-backed color scheme
+  belongs in the Fig Start document shell. `suppressHydrationWarning` now
+  exists only as React-compatible one-level host escape hatch. →
+  `concepts/hydration.md`
 
 ## Data Resources
 

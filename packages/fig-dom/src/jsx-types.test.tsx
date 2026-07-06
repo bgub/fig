@@ -34,6 +34,7 @@ function typeChecks(): FigNode[] {
     ),
     expectNode(<div style={{ color: "red", "--gap": "4px" }} />),
     expectNode(<div unsafeHTML="<b>trusted</b>" />),
+    expectNode(<time suppressHydrationWarning>{Date.now()}</time>),
     expectNode(
       <circle bind={(node) => void (node satisfies SVGCircleElement)} />,
     ),

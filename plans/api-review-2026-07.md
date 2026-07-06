@@ -26,7 +26,7 @@ These aren't wrong, but they're currently accidents rather than choices, and eac
 - Done: **controlled inputs** use the explicit Fig model: `value` is authoritative at commit time and controls only the live DOM value; `defaultValue` owns the default value/HTML representation. Fig does not emulate React's synchronous post-event lock.
 - Done: **`events` array identity** accepts falsy holes (`isOpen && on(...)`) while preserving listener slot identity. The ambiguous declarative `once` option was also dropped from Fig event options.
 - Done: **numeric style values** still do not get a React-style px auto-suffix, but development builds now warn when they are ignored.
-- **No hydration-mismatch opt-out**: intentional server/client divergence (timestamps, locales) currently has no per-element escape hatch — decide whether that's a stance or a gap.
+- Done: **hydration-mismatch opt-out** uses React's `suppressHydrationWarning` surface for one host element level.
 - Done: **`TStoreContext`** now defaults to the app-wide `FigData.Register["context"]` type, so fig-start apps can type data loaders once without threading the third generic through every resource.
 
 ## What's genuinely better than React (leave alone)

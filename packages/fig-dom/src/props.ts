@@ -176,7 +176,10 @@ export function hydrateElement(element: Element, nextProps: Props): void {
 
   updateElement(element, {}, nextProps, { hydrating: true });
 
-  if (process.env.NODE_ENV !== "production") {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    nextProps.suppressHydrationWarning !== true
+  ) {
     warnExtraHydratedAttributes(
       element,
       nextProps,
@@ -615,6 +618,7 @@ function reserved(name: string): boolean {
   return (
     name === "children" ||
     name === "key" ||
+    name === "suppressHydrationWarning" ||
     name === "unsafeHTML" ||
     event(name)
   );

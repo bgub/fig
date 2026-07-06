@@ -177,6 +177,73 @@ describe("@bgub/fig-dom hydration", () => {
     ]);
   });
 
+  it("suppresses one-level hydration warnings on host elements", () => {
+    const container = new FakeElement("root");
+    const button = new FakeElement("button");
+    button.setAttribute("data-server", "extra");
+    container.appendChild(button);
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement("button", {
+            id: "client",
+            suppressHydrationWarning: true,
+          }),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(button.attributes["data-server"]).toBe("extra");
+    expect(button.attributes.suppressHydrationWarning).toBeUndefined();
+    expect(errors).toEqual([]);
+  });
+
+  it("does not suppress hydration warnings on descendants", () => {
+    const container = new FakeElement("root");
+    const div = new FakeElement("div");
+    const span = new FakeElement("span");
+    span.setAttribute("data-server", "extra");
+    div.appendChild(span);
+    container.appendChild(div);
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement(
+            "div",
+            { suppressHydrationWarning: true },
+            createElement("span", { id: "client" }),
+          ),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([
+      "Hydration preserved extra server attributes or styles on <span>: " +
+        "data-server. They were preserved, so this element now differs " +
+        "from a pure client render.",
+    ]);
+  });
+
   it("does not warn about attributes set by a bind during hydration", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");

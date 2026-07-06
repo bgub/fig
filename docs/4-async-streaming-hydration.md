@@ -88,7 +88,7 @@ A dehydrated boundary whose hydration attempt suspends stays dehydrated: the ser
 
 - Server-only attributes and styles are preserved (browser extensions and edge-injected markers survive), with a dev warning when they diverge from the client render.
 - Text mismatches recover with a root client render, reported through `onRecoverableError` (digest included).
-- There is deliberately no `suppressHydrationWarning` clone. The legitimate mismatch class (time, locale, viewport, color scheme) is being designed as a hydration-stable environment snapshot instead — capture on the server, hydrate against the same snapshot, go live after. (Still exploring; see `concepts/hydration.md`.)
+- Host elements support React's `suppressHydrationWarning` prop as a one-level escape hatch for intentional text/attribute divergence. It does not suppress structural mismatches. Request-known shell state like cookie-backed color scheme belongs in the Fig Start document shell; the broader legitimate mismatch class (time, locale, viewport) is still being designed as a hydration-stable environment snapshot — capture on the server, hydrate against the same snapshot, go live after. (Still exploring; see `concepts/hydration.md`.)
 
 ---
 
