@@ -13,8 +13,12 @@ signatures — that is what gives consumers semver protection).
 
 - `@bgub/fig` — the component model: elements and the JSX runtime, components
   (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`, `Assets`), hooks, the
-  read verbs (`readContext`, `readPromise`), `transition`, `lazy`,
-  `clientReference`, asset-resource creators, and all data-protocol _types_.
+  read verbs (`readContext`, `readPromise`, `readData`), `transition`, `lazy`,
+  `clientReference`, asset-resource creators, and the data layer —
+  `dataResource`, the freshness verbs, and the store implementation (which
+  stays out of data-free bundles; see the lazy store installation protocol
+  below). The `./server` subpath is the server-file authoring entry
+  (`serverDataResource`), and `./vite` is its packaging transform.
 - `@bgub/fig-dom` — the browser boundary: `createRoot`/`hydrateRoot`/
   `createPortal`, `flushSync`, `on()`/`events`, `bind`/`composeBind`,
   `insertAssetResources`, host-prop JSX types, and the `./refresh` HMR subpath.
@@ -25,14 +29,12 @@ signatures — that is what gives consumers semver protection).
   and the `./payload` server-component layer. `escapeAttribute`/`escapeText`
   are exported because their contract is "consistent with fig-server's own
   HTML emission".
-- `@bgub/fig-data` — every _runtime_ data API. This exclusivity is
-  load-bearing (see the lazy store installation protocol below).
 - `@bgub/fig-start`, `@bgub/fig-vite`, `@bgub/fig-refresh`,
   `@bgub/fig-devtools` — framework, bundler, HMR, and DevTools layers on top.
 
 fig-server is a fully separate render implementation (it depends only on
-`@bgub/fig` and `@bgub/fig-data`, never on the reconciler) — that split is why
-`HostConfig` never grew a server mode.
+`@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never
+grew a server mode.
 
 ## The Internal Entry (`@bgub/fig/internal`)
 
@@ -40,9 +42,8 @@ The cross-package protocol registry, versioned together with the sibling
 packages and never for apps:
 
 - injection slots: the render dispatcher and transition handler;
-- the lazy data-store protocol: the internal symbol that lets
-  `@bgub/fig-data` resources carry their store factory to renderers without
-  import-time registration;
+- the lazy data-store protocol: the internal symbol that lets data resources
+  carry their store factory to renderers without import-time registration;
 - the element model: `$$typeof` brand predicates (`isValidElement`,
   `isSuspense`, ...), `collectChildren`/`NormalizedChild`, thenable registry
   (`readThenable`/`trackThenable`);
@@ -56,19 +57,20 @@ promise identity keyed suspend/resume must agree between client and server.
 
 ## Lazy Data-Store Installation
 
-Renderers never bundle `@bgub/fig-data`, and importing `@bgub/fig-data` has no
-registration side effect. Instead, each data resource created by that package
-carries the store factory on an internal symbol from `@bgub/fig/internal`.
-Roots created before fig-data loads hold a stub store that buffers
-`hydrate()`/`initialData` entries. The first real data operation
-(`readData`, `preloadData`, `invalidateData`, or `refreshData`) passes a
-resource to the stub; the stub installs the real store from the resource's
-factory and replays buffered hydration entries.
+Renderers never import the store implementation, and no fig entry installs it
+as an import side effect. Instead, each resource created by `dataResource`
+carries the store factory on an internal symbol, so the implementation's only
+bundle reference is `dataResource` itself — a bundle that never defines a
+resource never ships the store. Roots created before any resource exists hold
+a stub store that buffers `hydrate()`/`initialData` entries. The first real
+data operation (`readData`, `preloadData`, `invalidateData`, or
+`refreshData`) passes a resource to the stub; the stub installs the real
+store from the resource's factory and replays buffered hydration entries.
 
-The invariant that makes this safe: every runtime data API is importable only
-from `@bgub/fig-data`, so a real data operation necessarily has a resource
-created by that package. Type exports do not weaken it — data-protocol types
-export from `@bgub/fig` proper.
+The invariant that makes this safe: every runtime data operation takes a
+resource, and every resource comes from `dataResource`, which carries the
+factory. Type exports do not weaken it — the data-protocol types have no
+runtime footprint.
 
 ## Boundaries That Never Leak
 

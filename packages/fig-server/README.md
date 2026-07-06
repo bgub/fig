@@ -109,12 +109,12 @@ an empty string.
 ## Data Resources
 
 Server render requests have their own data-resource store. Reads through
-`@bgub/fig-data` dedupe by key within the request and fulfilled entries are
+`@bgub/fig` dedupe by key within the request and fulfilled entries are
 available through `result.getData()`:
 
 ```tsx
-import { readData } from "@bgub/fig-data";
-import { serverDataResource } from "@bgub/fig-data/server";
+import { readData } from "@bgub/fig";
+import { serverDataResource } from "@bgub/fig/server";
 import { renderToStream } from "@bgub/fig-server";
 
 const userResource = serverDataResource<[string], { name: string }>({

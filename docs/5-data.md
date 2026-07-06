@@ -14,7 +14,7 @@ The point isn't to replace every feature of a query library. Fig owns the parts 
 Define a resource with `dataResource`:
 
 ```ts
-import { dataResource } from "@bgub/fig-data";
+import { dataResource } from "@bgub/fig";
 
 export const userResource = dataResource({
   key: (id: string) => ["user", id],
@@ -92,7 +92,7 @@ Every root owns a data store. Server renders get a fresh store per request. Ther
 The free functions `invalidateData`, `preloadData`, and `refreshData` use an ambient store. That ambient store exists only while Fig is executing synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects. After an `await`, capture an explicit handle first:
 
 ```ts
-import { readDataStore } from "@bgub/fig-data";
+import { readDataStore } from "@bgub/fig";
 
 function RefreshButton() {
   const data = readDataStore();
@@ -151,7 +151,7 @@ Sometimes the loader can only run on the server because it imports a database, f
 
 ```ts
 // user-data.ts
-import { dataResource } from "@bgub/fig-data";
+import { dataResource } from "@bgub/fig";
 
 export const userKey = (id: string) => ["user", id] as const;
 
@@ -162,7 +162,7 @@ export const userResource = dataResource({
 
 ```ts
 // user-data.server.ts
-import { serverDataResource } from "@bgub/fig-data/server";
+import { serverDataResource } from "@bgub/fig/server";
 import { db } from "./db.server.ts";
 import { userKey } from "./user-data.ts";
 
@@ -174,7 +174,7 @@ export const userServerResource = serverDataResource({
 
 Browser components import and read `userResource`. Server code imports and preloads or reads `userServerResource`. Because both resources return the same key, they address the same store entry.
 
-If you import a `.server.ts(x)` module from browser code, use the `@bgub/fig-data/vite` plugin so the server loader is replaced by a client stub. Fig Start includes this transform.
+If you import a `.server.ts(x)` module from browser code, use the `@bgub/fig/vite` plugin so the server loader is replaced by a client stub. Fig Start includes this transform.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed a value for that key, `readData(userResource, id)` can read it. If the client tries to refresh it directly, the result is:
 
@@ -186,7 +186,7 @@ Fresh data for hydrate-only resources must come through a server render, payload
 
 ## Remote server data
 
-Sometimes the client should be able to refresh a server value directly — outside a document render or payload navigation. fig-data deliberately has no verb for this: an HTTP endpoint has to exist to serve the refresh, and endpoints belong to the framework layer.
+Sometimes the client should be able to refresh a server value directly — outside a document render or payload navigation. Fig's data layer deliberately has no verb for this: an HTTP endpoint has to exist to serve the refresh, and endpoints belong to the framework layer.
 
 In Fig Start, declare the resource with `remoteDataResource` instead of `serverDataResource`:
 

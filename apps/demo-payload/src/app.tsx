@@ -1,5 +1,5 @@
 import { lazy, readPromise, Suspense } from "@bgub/fig";
-import { readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig";
 import { PayloadBoundary } from "@bgub/fig-server/payload";
 import { payloadSummaryResource } from "./data.ts";
 import { payloadAuditResource } from "./data.server.ts";

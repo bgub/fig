@@ -4841,10 +4841,10 @@ function tagFor(element: FigElement): Tag {
   return FunctionTag;
 }
 
-// Renderer bundles do not import @bgub/fig-data. Instead, resources created by
+// Renderer bundles do not import @bgub/fig. Instead, resources created by
 // that package carry the store factory on an internal symbol. Roots buffer
 // initialData until the first real data resource operation lazily installs the
-// store, covering code-split apps whose only fig-data import is a lazy chunk.
+// store, covering code-split apps whose only dataResource import is a lazy chunk.
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 
 function createRootDataStore(host: FigDataStoreHost): FigDataStore {
@@ -4864,7 +4864,7 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       resource as FigDataResource & Record<symbol, FigDataStoreFactory>
     )[DataStoreFactorySymbol];
     if (factory === undefined) {
-      throw new Error("Data resource APIs require @bgub/fig-data.");
+      throw new Error("Data resource APIs require @bgub/fig.");
     }
 
     inner = factory(host);

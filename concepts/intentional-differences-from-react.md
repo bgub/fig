@@ -15,7 +15,7 @@ spec.
 - Every export has exactly one home: behavior lives in the package whose
   domain defines it (`@bgub/fig` the component model, `@bgub/fig-dom` the
   browser boundary, `@bgub/fig-reconciler` renderer authoring,
-  `@bgub/fig-server` server rendering + payload, `@bgub/fig-data` runtime
+  `@bgub/fig-server` server rendering + payload, `@bgub/fig` runtime
   data APIs). Renderer packages never mirror core symbols; a package
   re-exports a _type_ only when it appears in that package's own public
   signatures.
@@ -32,7 +32,7 @@ spec.
   is no mount-only hook — `useReactive(fn, [])` is the idiom.
 - React's broad `use(resource)` is split into explicit reads: `readContext`
   (context is a render-time input, not a hook slot), `readPromise` (identity-
-  keyed, not call-position-keyed), and `readData` from `@bgub/fig-data`
+  keyed, not call-position-keyed), and `readData` from `@bgub/fig`
   (cache-keyed).
 - Context objects are their own provider (`<Ctx value={...}>`); there is no
   `Consumer` and no `displayName`.
@@ -48,7 +48,7 @@ spec.
   reset by remount/key change, `fallback` may be `(error, info) => FigNode`.
   It does not catch promises, event handler errors, async callbacks, server
   render errors, or host commit failures.
-- Data is a separate package (`@bgub/fig-data`) that renderers never bundle;
+- Data is a separate package (`@bgub/fig`) that renderers never bundle;
   resources carry the data-store factory on an internal symbol so importing the
   package has no registration side effect. Keys are explicit arrays with a strict
   canonical encoder — no `JSON.stringify` traps. The verb set is deliberately
@@ -59,7 +59,7 @@ spec.
   explicit handle (`readDataStore()` or `root.data`).
 - Data-protocol _types_ (`FigDataStoreHandle`, `FigDataHydrationEntry`, ...)
   export from `@bgub/fig`; runtime data APIs export exclusively from
-  `@bgub/fig-data`.
+  `@bgub/fig`.
 - Asset resources replace React 19 hoistables: explicit creators
   (`stylesheet`, `preload`, `modulepreload`, `font`, `preconnect`, `script`,
   `title`, `meta`) producing plain data with documented dedupe keys; host

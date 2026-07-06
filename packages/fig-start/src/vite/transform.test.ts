@@ -54,7 +54,7 @@ export function Dashboard() {
 
   it("ignores non-client imports and reports no client refs", async () => {
     const out = await transformServerModule(
-      `import { readData } from "@bgub/fig-data";\nexport function X(){ return null; }`,
+      `import { readData } from "@bgub/fig";\nexport function X(){ return null; }`,
       "/project/src/x.server.tsx",
       root,
     );
@@ -202,7 +202,7 @@ export const userResource = remoteDataResource({
 
   it("does not register server-only data resources for endpoints", async () => {
     const out = await transformServerModule(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 export const userResource = serverDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),
@@ -216,7 +216,7 @@ export const userResource = serverDataResource({
 
   it("stubs server data resources for browser bundles", async () => {
     const out = await transformServerRouteClientStub(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 import { remoteDataResource } from "@bgub/fig-start/server";
 import { db } from "./db.server.ts";
 export const localResource = serverDataResource({
@@ -246,7 +246,7 @@ export const userResource = remoteDataResource({
 
   it("does not import the remote loader for stubs without remote resources", async () => {
     const out = await transformServerRouteClientStub(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 export const localResource = serverDataResource({
   key: (id: string) => ["local-user", id],
   load: async (id: string) => ({ id }),

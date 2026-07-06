@@ -2,7 +2,7 @@ import { relative, sep } from "node:path";
 import babel, { type PluginObj } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 
-const SERVER_DATA_RESOURCE_MODULE = "@bgub/fig-data/server";
+const SERVER_DATA_RESOURCE_MODULE = "@bgub/fig/server";
 
 export interface ServerDataResourceRef {
   exportName: string;
@@ -125,9 +125,7 @@ function clientStubCode(stubs: readonly ClientDataResourceStub[]): string {
   for (const stub of stubs) {
     for (const code of stub.importCodes) imports.add(code);
   }
-  imports.add(
-    `import { dataResource as __figDataResource } from "@bgub/fig-data";`,
-  );
+  imports.add(`import { dataResource as __figDataResource } from "@bgub/fig";`);
 
   for (const stub of stubs) {
     exports.push(

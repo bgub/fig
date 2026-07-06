@@ -93,7 +93,7 @@ React's overloaded `use(resource)` is three explicit verbs:
 ```tsx
 const theme = readContext(Theme); // context — a render-time input, not a hook slot
 const value = readPromise(promise); // suspends; keyed by promise identity
-const user = readData(userResource, id); // suspends; cache-keyed (from @bgub/fig-data)
+const user = readData(userResource, id); // suspends; cache-keyed (from @bgub/fig)
 ```
 
 Context objects are their own provider — no `.Provider`, no `Consumer`:
@@ -108,7 +108,7 @@ const Theme = createContext("light");
 ## Data is built in
 
 ```tsx
-import { dataResource, readData, invalidateData } from "@bgub/fig-data";
+import { dataResource, readData, invalidateData } from "@bgub/fig";
 
 const userResource = dataResource({
   key: (id: string) => ["user", id],

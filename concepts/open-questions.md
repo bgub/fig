@@ -24,9 +24,6 @@ and leaves this list.
 
 From `plans/data-resources.md` (open questions that survived shipping):
 
-- Should the stable data API ever move from `@bgub/fig-data` into
-  `@bgub/fig`, and should the renderer bridge become versioned
-  `RenderDispatcher` methods instead of the `@bgub/fig/internal` slot?
 - **ErrorBoundary reset ergonomics** — data-key attribution and invalidation
   now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still
   open: whether `ErrorBoundary` should expose a first-class reset/retry

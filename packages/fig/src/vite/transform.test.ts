@@ -9,10 +9,10 @@ import {
 
 const root = "/project";
 
-describe("@bgub/fig-data/vite transform", () => {
+describe("@bgub/fig/vite transform", () => {
   it("stubs server-only data resources as hydrate-only browser resources", async () => {
     const out = await transformServerDataClientStub(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 import { db } from "./db.server.ts";
 export const userResource = serverDataResource({
   key: (id: string) => ["user", id],
@@ -55,7 +55,7 @@ export const userResource = remoteDataResource({
   });
 
   it("discovers declarations of the requested callee only", async () => {
-    const code = `import { serverDataResource } from "@bgub/fig-data/server";
+    const code = `import { serverDataResource } from "@bgub/fig/server";
 import { remoteDataResource } from "@bgub/fig-start/server";
 export const localResource = serverDataResource({
   key: () => ["local"],
@@ -97,7 +97,7 @@ export const remoteResource = remoteDataResource({
 
   it("preserves shared imports referenced by browser stubs", async () => {
     const out = await transformServerDataClientStub(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 import { userKey as keyForUser } from "./user.keys.ts";
 import { db } from "./db.server.ts";
 export const userResource = serverDataResource({
@@ -118,7 +118,7 @@ export const userResource = serverDataResource({
   it("rejects stubs that reference server-only imports", async () => {
     await expect(
       transformServerDataClientStub(
-        `import { serverDataResource } from "@bgub/fig-data/server";
+        `import { serverDataResource } from "@bgub/fig/server";
 import { userKey } from "./user.keys.server.ts";
 export const userResource = serverDataResource({
   key: userKey,
@@ -133,7 +133,7 @@ export const userResource = serverDataResource({
   it("rejects exported isomorphic dataResource declarations", async () => {
     await expect(
       transformServerDataClientStub(
-        `import { dataResource } from "@bgub/fig-data";
+        `import { dataResource } from "@bgub/fig";
 export const userResource = dataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),

@@ -35,7 +35,7 @@ through a server/payload refresh path and report
 `{ status: "unsupported", reason: "no-client-loader" }` from `refreshData`.
 
 `serverDataResource` can only be imported from `.server.ts(x)` files. The
-`@bgub/fig-data/vite` transform is the packaging contract: browser imports of
+`@bgub/fig/vite` transform is the packaging contract: browser imports of
 server-file resources become key-only stubs (the browser-safe `key` survives;
 the server loader is stripped). Server-file modules imported without that
 transform must fail before server code enters the client bundle.
@@ -46,21 +46,21 @@ see Remote Refresh Is A Framework Layer.
 
 ## Loader Inputs
 
-Loaders receive the resource arguments followed by `{ signal }`. Fig-data does
-not own app/request context or dependency injection; frameworks and adapters
+Loaders receive the resource arguments followed by `{ signal }`. The data
+layer does not own app/request context or dependency injection; frameworks and adapters
 that need request state should close over it when defining per-request server
 resources, or route remote data requests through their own endpoint code.
 
 Exploring: remote loaders run inside the framework data endpoint, which owns
 the request — so whether those loaders get an ambient per-request context
 (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is
-Fig Start's decision, not a fig-data contract
+Fig Start's decision, not a core data contract
 (`concepts/open-questions.md`).
 
 ## Remote Refresh Is A Framework Layer
 
 "Refresh this server value directly from the browser" is deliberately not a
-fig-data concept: an endpoint must exist to serve the refresh, and endpoints
+core data concept: an endpoint must exist to serve the refresh, and endpoints
 belong to frameworks. Fig Start owns that layer with `remoteDataResource`
 (from `@bgub/fig-start/server`, declared in `.server.ts(x)` files exactly like
 `serverDataResource`).

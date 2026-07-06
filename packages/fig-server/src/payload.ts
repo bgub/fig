@@ -48,8 +48,8 @@ import {
   createDataStore,
   normalizeDataResourceKey,
   type DataStore,
-} from "@bgub/fig-data/internal";
-import type { DataResourceKeyInput } from "@bgub/fig-data";
+} from "@bgub/fig/internal";
+import type { DataResourceKeyInput } from "@bgub/fig";
 import {
   type ContextValues,
   type Deferred,

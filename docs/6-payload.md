@@ -10,7 +10,7 @@ A profile page renders on the server. It reads data (doc 5) and includes one int
 
 ```tsx
 // profile-page.tsx — runs only on the server
-import { readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig";
 import { userResource } from "./user-data.server.ts";
 import { LikeButton } from "./like-button-ref.ts";
 

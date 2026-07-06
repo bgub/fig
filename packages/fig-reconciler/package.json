@@ -46,6 +46,6 @@
     "@bgub/fig": "workspace:*"
   },
   "devDependencies": {
-    "@bgub/fig-data": "workspace:*"
+    "@bgub/fig": "workspace:*"
   }
 }

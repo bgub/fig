@@ -1,4 +1,4 @@
-import { dataResource, type DataResourceKey } from "@bgub/fig-data";
+import { dataResource, type DataResourceKey } from "@bgub/fig";
 
 export interface Post {
   body: string;

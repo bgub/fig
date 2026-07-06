@@ -41,6 +41,6 @@
     "@bgub/fig-reconciler": "workspace:*"
   },
   "devDependencies": {
-    "@bgub/fig-data": "workspace:*"
+    "@bgub/fig": "workspace:*"
   }
 }

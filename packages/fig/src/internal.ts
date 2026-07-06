@@ -94,3 +94,12 @@ export {
   type FigDataStoreHost,
 } from "./data.ts";
 export { setTransitionHandler } from "./transition.ts";
+export {
+  createDataStore,
+  currentDataStore,
+  normalizeDataResourceKey,
+  runWithDataStore,
+  type DataStore,
+  type DataStoreEntrySnapshot,
+  type DataStoreHost,
+} from "./data-store.ts";

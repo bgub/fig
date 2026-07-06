@@ -63,7 +63,7 @@ export interface FigDataStoreEntrySnapshot {
 }
 
 // The explicit, app-facing store surface (FigRoot.data, readDataStore()).
-// The free functions in @bgub/fig-data resolve the ambient store slot, which
+// The free functions in @bgub/fig resolve the ambient store slot, which
 // is only set while Fig executes synchronously — render, event handlers, the
 // synchronous prefix of actions and transitions, and effects. After an
 // `await` the slot is gone, so async flows capture this handle first and call
@@ -106,7 +106,7 @@ export interface FigDataStore extends FigDataStoreHandle {
 }
 
 // The host callbacks a renderer hands to the data-store factory. Structurally
-// compatible with @bgub/fig-data's DataStoreHost so its createDataStore can
+// compatible with @bgub/fig's DataStoreHost so its createDataStore can
 // register directly.
 export interface FigDataStoreHost {
   getLane(): unknown;

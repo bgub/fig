@@ -43,7 +43,7 @@ import {
   renderStaticAssetModule,
 } from "./static-assets.ts";
 import { isTailwindCssEntry, transformTailwindCss } from "./tailwind.ts";
-import { assertNoServerDataResourceImport } from "../../../fig-data/src/vite/index.ts";
+import { assertNoServerDataResourceImport } from "../../../fig/src/vite/index.ts";
 import {
   assertNoRemoteDataResourceImport,
   REMOTE_DATA_RESOURCE_CALLEE,
@@ -217,7 +217,7 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
         return null;
       }
       if (!isServerModuleId(clean)) {
-        if (code.includes("@bgub/fig-data/server")) {
+        if (code.includes("@bgub/fig/server")) {
           await assertNoServerDataResourceImport(code, clean);
         }
         if (code.includes(REMOTE_DATA_RESOURCE_CALLEE)) {

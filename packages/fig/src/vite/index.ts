@@ -36,7 +36,7 @@ export function figData(options: FigDataPluginOptions = {}): FigDataPlugin {
       }
 
       if (!isServerModuleId(clean)) {
-        if (code.includes("@bgub/fig-data/server")) {
+        if (code.includes("@bgub/fig/server")) {
           await assertNoServerDataResourceImport(code, clean);
         }
         return null;

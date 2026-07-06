@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
   discoverServerDataResources,
   type ServerDataResourceRef,
-} from "../../../fig-data/src/vite/index.ts";
+} from "../../../fig/src/vite/index.ts";
 import {
   type ClientRef,
   REMOTE_DATA_RESOURCE_CALLEE,

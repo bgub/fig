@@ -16,8 +16,8 @@ import {
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
-} from "@bgub/fig-data";
-import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
+} from "@bgub/fig";
+import { normalizeDataResourceKey } from "@bgub/fig/internal";
 import {
   escapeAttribute,
   escapeText,

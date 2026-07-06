@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import { figData } from "./index.ts";
 
-describe("@bgub/fig-data/vite plugin", () => {
+describe("@bgub/fig/vite plugin", () => {
   it("stubs server data resources for client bundles", async () => {
     const plugin = figData({ target: "client" });
     plugin.configResolved({ root: "/project" });
 
     const result = await plugin.transform(
-      `import { serverDataResource } from "@bgub/fig-data/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 export const userResource = serverDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),
@@ -27,7 +27,7 @@ export const userResource = serverDataResource({
 
     await expect(
       plugin.transform(
-        `import { serverDataResource } from "@bgub/fig-data/server";
+        `import { serverDataResource } from "@bgub/fig/server";
 export const userResource = serverDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),

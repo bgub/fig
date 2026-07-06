@@ -93,4 +93,4 @@ inputs, not hook slots: `readContext(context)` (context objects are their own
 provider; reads are tracked so provider updates mark matching consumers, and
 propagation stops at nested providers of the same context), `readPromise`
 (identity-keyed, not call-position-keyed), and `readData` from
-`@bgub/fig-data` (cache-keyed — see data.md).
+`@bgub/fig` (cache-keyed — see data.md).

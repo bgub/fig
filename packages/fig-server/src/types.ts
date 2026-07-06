@@ -7,7 +7,7 @@ import type {
   FigDataHydrationEntry,
   Props,
 } from "@bgub/fig";
-import type { DataResourceKeyInput } from "@bgub/fig-data";
+import type { DataResourceKeyInput } from "@bgub/fig";
 
 export interface ServerRenderOptions {
   /**

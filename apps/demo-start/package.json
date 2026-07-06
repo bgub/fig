@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
-    "@bgub/fig-data": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
     "@bgub/fig-start": "workspace:*"

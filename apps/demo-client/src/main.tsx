@@ -28,7 +28,7 @@ import {
   readData,
   refreshData,
   type DataResourceKey,
-} from "@bgub/fig-data";
+} from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToHtml } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";

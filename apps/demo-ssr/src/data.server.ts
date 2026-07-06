@@ -1,4 +1,4 @@
-import { serverDataResource } from "@bgub/fig-data/server";
+import { serverDataResource } from "@bgub/fig/server";
 import {
   serverInfoKey,
   serverOnlyInfoKey,

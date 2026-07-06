@@ -1,10 +1,6 @@
 import {
   dataResourceKeysForError,
-  invalidateDataResource,
   markDataResourceError,
-  preloadDataResource,
-  readDataResource,
-  refreshDataResource,
   resolveCurrentDataStore,
   setCurrentDataStore,
   type DataRefreshResult,
@@ -18,7 +14,13 @@ import {
   type FigDataStore,
   type FigDataStoreEntrySnapshot,
   type FigDataStoreHandle,
-} from "@bgub/fig/internal";
+} from "./data.ts";
+import {
+  invalidateDataResource,
+  preloadDataResource,
+  readDataResource,
+  refreshDataResource,
+} from "./hooks.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 

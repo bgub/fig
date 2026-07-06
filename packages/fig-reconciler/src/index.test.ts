@@ -10,7 +10,7 @@ import {
   useMemo,
   useState,
 } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig-data";
+import { dataResource, readData } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
 import { requestPaint } from "./scheduler.ts";
 import { afterEach, describe, expect, it } from "vite-plus/test";

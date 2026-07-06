@@ -20,11 +20,13 @@
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "1.1 kB"
+      "limit": "5 kB"
     },
     {
-      "path": "packages/fig-data/dist/index.js",
-      "limit": "3.9 kB"
+      "name": "fig core without data",
+      "path": "packages/fig/dist/index.js",
+      "import": "{ createElement, useState, useReactive, readPromise, Suspense }",
+      "limit": "1.1 kB"
     },
     {
       "path": "packages/fig-dom/dist/index.js",

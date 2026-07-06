@@ -8,8 +8,8 @@ import {
 import { assets, meta, title } from "@bgub/fig";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig";
-import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig-data";
-import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
+import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig";
+import { normalizeDataResourceKey } from "@bgub/fig/internal";
 import {
   App,
   clientDataFor,

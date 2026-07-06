@@ -256,7 +256,7 @@ Invalid render input throws before commit instead of warning after — the commi
 
 Everything above is gated behind inline `process.env.NODE_ENV !== "production"` checks, so bundlers strip it — no dev/prod package split, no runtime flag. Even the lane name table survives only for tests and diagnostics; production code uses raw mask checks.
 
-(Other subsystems ship their own dev diagnostics — the `onChange` → `on("input")` steering warning in events, key/args drift fingerprinting in fig-data, late head-asset warnings in assets — but those belong to their own docs. Dev-only tooling seams, for completeness: `fig-reconciler/devtools` for commit snapshots and `fig-reconciler/refresh` for HMR.)
+(Other subsystems ship their own dev diagnostics — the `onChange` → `on("input")` steering warning in events, key/args drift fingerprinting in the data layer, late head-asset warnings in assets — but those belong to their own docs. Dev-only tooling seams, for completeness: `fig-reconciler/devtools` for commit snapshots and `fig-reconciler/refresh` for HMR.)
 
 ---
 

@@ -12,7 +12,7 @@ import { createDataStore, normalizeDataResourceKey } from "./internal.ts";
 
 const never = new Promise<never>(() => undefined);
 
-describe("@bgub/fig-data", () => {
+describe("@bgub/fig", () => {
   it("encodes data keys structurally without delimiter collisions", () => {
     const keys = [
       ["key", "a,b"],

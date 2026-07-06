@@ -15,7 +15,7 @@ import {
   type DataRefreshResult,
   type DataResource,
   type DataResourceKey,
-} from "@bgub/fig-data";
+} from "@bgub/fig";
 
 type Resource<T> = Promise<T> | T;
 

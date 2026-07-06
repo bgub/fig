@@ -16,6 +16,16 @@
       "import": "./dist/internal.js",
       "default": "./dist/internal.js"
     },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "import": "./dist/vite/index.js",
+      "default": "./dist/vite/index.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js",
@@ -47,5 +57,12 @@
     "url": "https://github.com/bgub/fig/issues"
   },
   "license": "MIT",
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "^20.19.0"
+  },
+  "dependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-typescript": "^7.25.0"
+  }
 }

@@ -7,8 +7,8 @@ import {
   stylesheet,
   Suspense,
 } from "@bgub/fig";
-import { readData } from "@bgub/fig-data";
-import { serverDataResource } from "@bgub/fig-data/server";
+import { readData } from "@bgub/fig";
+import { serverDataResource } from "@bgub/fig/server";
 import { createPayloadResponse } from "@bgub/fig-server/payload";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

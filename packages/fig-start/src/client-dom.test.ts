@@ -8,8 +8,8 @@ import {
   stylesheet,
   Suspense,
 } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig-data";
-import { serverDataResource } from "@bgub/fig-data/server";
+import { dataResource, readData } from "@bgub/fig";
+import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vite-plus/test";
 import { hydrateStart, remoteDataLoader } from "./client.ts";
 import { Outlet } from "./components.tsx";

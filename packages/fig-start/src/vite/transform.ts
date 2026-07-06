@@ -6,11 +6,11 @@ import {
   discoverServerDataResources,
   type ClientDataResourceStub,
   type ServerDataResourceRef,
-} from "../../../fig-data/src/vite/index.ts";
+} from "../../../fig/src/vite/index.ts";
 import { rootRelative } from "./path-utils.ts";
 
-// The callee that declares a Fig Start remote server resource. fig-data has
-// no remote concept: the framework owns the name, the endpoint registry, and
+// The callee that declares a Fig Start remote server resource. Fig's data
+// layer has no remote concept: the framework owns the name, the endpoint registry, and
 // the browser stub emission below.
 export const REMOTE_DATA_RESOURCE_CALLEE = "remoteDataResource";
 const REMOTE_DATA_RESOURCE_MODULE = "@bgub/fig-start/server";
@@ -162,9 +162,7 @@ function dataStubCode(
   for (const stub of [...serverStubs, ...remoteStubs]) {
     for (const code of stub.importCodes) imports.add(code);
   }
-  imports.add(
-    `import { dataResource as __figDataResource } from "@bgub/fig-data";`,
-  );
+  imports.add(`import { dataResource as __figDataResource } from "@bgub/fig";`);
   if (remoteStubs.length > 0) {
     imports.add(
       `import { remoteDataLoader as __figRemoteDataLoader } from "@bgub/fig-start/client";`,

@@ -102,7 +102,7 @@ export {};
 
     await expect(
       plugin.transform(
-        `import { serverDataResource } from "@bgub/fig-data/server";
+        `import { serverDataResource } from "@bgub/fig/server";
 export const user = serverDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),

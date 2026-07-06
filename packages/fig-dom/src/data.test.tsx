@@ -5,7 +5,7 @@ import {
   readData,
   readDataStore,
   refreshData,
-} from "@bgub/fig-data";
+} from "@bgub/fig";
 import {
   Activity,
   createElement,
@@ -14,7 +14,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import type { DataResourceKey } from "@bgub/fig-data";
+import type { DataResourceKey } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, on } from "./index.ts";
 import {

@@ -1,10 +1,10 @@
-import { dataResource } from "./store.ts";
+import { dataResource } from "./data-store.ts";
 import type {
   DataResource,
   DataResourceKey,
   DataResourceKeyInput,
   DataResourceLoadContext,
-} from "./store.ts";
+} from "./data-store.ts";
 
 export interface ServerDataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;

@@ -39,7 +39,7 @@ import {
   type NormalizedChild,
   invalidChildError,
 } from "@bgub/fig/internal";
-import { createDataStore, type DataStore } from "@bgub/fig-data/internal";
+import { createDataStore, type DataStore } from "@bgub/fig/internal";
 import {
   escapeAttribute,
   formTextContent,

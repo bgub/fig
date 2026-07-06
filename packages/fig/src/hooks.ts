@@ -10,7 +10,7 @@ import { resolveCurrentDataStore } from "./data.ts";
 // the previous state for stale-closure safety.
 export type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
-// Fig appends the AbortSignal after the runner's args (the fig-data loader
+// Fig appends the AbortSignal after the runner's args (the data-loader
 // shape). The signal aborts when a newer run supersedes this one, when the
 // owning component unmounts, and when an enclosing Activity hides.
 export type ActionStateAction<S, Args extends unknown[]> = (

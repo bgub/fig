@@ -1,6 +1,6 @@
 import { type FigNode, Suspense } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { invalidateDataKey, readData, readDataStore } from "@bgub/fig-data";
+import { invalidateDataKey, readData, readDataStore } from "@bgub/fig";
 import { createFileRoute, Link } from "@bgub/fig-start";
 import { postSummaryResource, postSummaryResourceKey } from "../data.ts";
 import { remotePostStatusResource } from "../data.server.ts";

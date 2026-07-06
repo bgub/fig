@@ -1,4 +1,4 @@
-import { dataResource } from "@bgub/fig-data";
+import { dataResource } from "@bgub/fig";
 
 export interface PayloadSummary {
   bucket: string;

@@ -56,9 +56,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../../packages/fig-data
       '@bgub/fig-devtools':
         specifier: workspace:*
         version: link:../../packages/fig-devtools
@@ -109,9 +106,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../../packages/fig-data
       '@bgub/fig-devtools':
         specifier: workspace:*
         version: link:../../packages/fig-devtools
@@ -134,9 +128,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../../packages/fig-data
       '@bgub/fig-devtools':
         specifier: workspace:*
         version: link:../../packages/fig-devtools
@@ -159,9 +150,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../../packages/fig-data
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
@@ -179,9 +167,7 @@ importers:
         specifier: ^20.19.0
         version: 20.19.41
 
-  packages/fig: {}
-
-  packages/fig-data:
+  packages/fig:
     dependencies:
       '@babel/core':
         specifier: ^7.25.0
@@ -189,9 +175,6 @@ importers:
       '@babel/preset-typescript':
         specifier: ^7.25.0
         version: 7.29.7(@babel/core@7.29.0)
-      '@bgub/fig':
-        specifier: workspace:*
-        version: link:../fig
     devDependencies:
       '@types/babel__core':
         specifier: ^7.20.5
@@ -220,20 +203,12 @@ importers:
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
-    devDependencies:
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../fig-data
 
   packages/fig-reconciler:
     dependencies:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
-    devDependencies:
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../fig-data
 
   packages/fig-refresh:
     dependencies:
@@ -246,9 +221,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../fig-data
 
   packages/fig-start:
     dependencies:
@@ -261,9 +233,6 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
-      '@bgub/fig-data':
-        specifier: workspace:*
-        version: link:../fig-data
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../fig-dom

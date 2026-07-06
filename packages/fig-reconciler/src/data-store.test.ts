@@ -1,4 +1,4 @@
-// These tests intentionally avoid a static @bgub/fig-data import: roots should
+// These tests intentionally avoid a static @bgub/fig import: roots should
 // be able to render and buffer initial data before the package loads, then
 // install the real store lazily from the first actual data resource.
 import { createElement } from "@bgub/fig";
@@ -57,7 +57,7 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
   },
 };
 
-describe("root data store without @bgub/fig-data", () => {
+describe("root data store without @bgub/fig", () => {
   it("renders on the stub store and run() executes the callback", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
@@ -76,7 +76,7 @@ describe("root data store without @bgub/fig-data", () => {
 
     expect(() =>
       (root.data as FigDataStore).readData(fakeResource, [], {}),
-    ).toThrow("Data resource APIs require @bgub/fig-data.");
+    ).toThrow("Data resource APIs require @bgub/fig.");
   });
 
   it("buffers initialData and installs the store from the first data resource", async () => {
@@ -92,7 +92,7 @@ describe("root data store without @bgub/fig-data", () => {
     });
     flushSync(() => root.render(createElement("span", null, "static")));
 
-    const { dataResource, readData } = await import("@bgub/fig-data");
+    const { dataResource, readData } = await import("@bgub/fig");
     const greeting = dataResource<[], string>({
       key: () => ["greeting"],
     });

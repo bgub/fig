@@ -1,4 +1,4 @@
-import { serverDataResource } from "@bgub/fig-data/server";
+import { serverDataResource } from "@bgub/fig/server";
 import { remoteDataResource } from "@bgub/fig-start/server";
 import { postResourceKey, postService, type Post } from "./data.ts";
 

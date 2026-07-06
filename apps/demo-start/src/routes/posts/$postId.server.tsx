@@ -1,5 +1,5 @@
 import type { FigNode } from "@bgub/fig";
-import { readData } from "@bgub/fig-data";
+import { readData } from "@bgub/fig";
 import { createFileRoute, Link } from "@bgub/fig-start";
 import { postResource } from "../../data.server.ts";
 
