@@ -1,9 +1,14 @@
 import type { StartConfig } from "@bgub/fig-start";
 import { routes } from "./routes.ts";
+import { themeFromCookie } from "./theme.ts";
 import "./styles.css";
 
 export const start = {
   appName: "Fig Start",
+  html: (request) => ({
+    class: themeFromCookie(request.headers.get("cookie")),
+    suppressHydrationWarning: true,
+  }),
   head: (
     <>
       <title>Fig Start</title>

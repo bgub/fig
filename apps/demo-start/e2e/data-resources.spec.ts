@@ -1,4 +1,5 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { collectBrowserErrors } from "./browser-errors.ts";
 
 test("renders and refreshes isomorphic and remote data resources", async ({
   page,
@@ -60,14 +61,3 @@ test("streams server-only data during payload navigation", async ({ page }) => {
   expect(dataRequests).toEqual([]);
   expect(errors()).toEqual([]);
 });
-
-function collectBrowserErrors(page: Page): () => string[] {
-  const errors: string[] = [];
-
-  page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
-  });
-
-  return () => errors;
-}
