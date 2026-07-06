@@ -29,12 +29,18 @@ importers:
       happy-dom:
         specifier: ^15.11.7
         version: 15.11.7
+      html-element-attributes:
+        specifier: 3.5.0
+        version: 3.5.0
       portless:
         specifier: ^0.14.0
         version: 0.14.0
       size-limit:
         specifier: ^8.2.4
         version: 8.2.6
+      svg-element-attributes:
+        specifier: 2.1.0
+        version: 2.1.0
       turbo:
         specifier: ^2.10.2
         version: 2.10.2
@@ -1979,6 +1985,9 @@ packages:
   hookable@6.1.1:
     resolution: {integrity: sha512-U9LYDy1CwhMCnprUfeAZWZGByVbhd54hwepegYTK7Pi5NvqEj63ifz5z+xukznehT7i6NIZRu89Ay1AZmRsLEQ==}
 
+  html-element-attributes@3.5.0:
+    resolution: {integrity: sha512-rU2BFhp0kQla9sqPBI46C+zbP6PFOtD7z6XNAJ6as+cGecCDXLx0W3aIs6XdPLmBBG/Fy1meRi/n65Exofz4Qw==}
+
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
 
@@ -2399,6 +2408,9 @@ packages:
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
+
+  svg-element-attributes@2.1.0:
+    resolution: {integrity: sha512-Tq0WY3uGw/rltlSlAsro/WWqbg5oNiaRwzq13I9H1m/dYjMjesuxKV76dGSlpacjslGyAis8VIwqPXaUUXw26w==}
 
   tailwindcss@4.3.2:
     resolution: {integrity: sha512-WtctNNSH8A9jlMIqxzuYumOHU5uGZyRv0Q5svQl+oEPy5w84YpBxdb7MdqyiSPQge5jTJ6zFQLq0PFygdccSBA==}
@@ -3973,6 +3985,8 @@ snapshots:
 
   hookable@6.1.1: {}
 
+  html-element-attributes@3.5.0: {}
+
   html-escaper@2.0.2: {}
 
   ignore@5.3.2: {}
@@ -4390,6 +4404,8 @@ snapshots:
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
+
+  svg-element-attributes@2.1.0: {}
 
   tailwindcss@4.3.2: {}
 

@@ -28,6 +28,10 @@ function typeChecks(): FigNode[] {
       />,
     ),
     expectNode(<label for="field">Name</label>),
+    expectNode(<input maxlength={20} readonly />),
+    expectNode(
+      <img alt="Preview" src="/preview.png" srcset="/preview.png 1x" />,
+    ),
     expectNode(<div style={{ color: "red", "--gap": "4px" }} />),
     expectNode(<div unsafeHTML="<b>trusted</b>" />),
     expectNode(
@@ -35,7 +39,7 @@ function typeChecks(): FigNode[] {
     ),
     expectNode(<path stroke-width="2" />),
     expectNode(<use xlink:href="#icon" />),
-    expectNode(<div data-testid="x" aria-hidden="true" />),
+    expectNode(<div data-testid="x" aria-hidden="true" role="button" />),
     expectNode(
       <my-widget
         class="custom"
@@ -77,6 +81,14 @@ function typeChecks(): FigNode[] {
     expectNode(<button onclick="alert(1)" />),
     // @ts-expect-error unknown non-custom element names are still rejected.
     expectNode(<widget />),
+    // @ts-expect-error unknown native attributes are rejected.
+    expectNode(<div clas="x" />),
+    // @ts-expect-error native attribute values are scalar, not Fig nodes.
+    expectNode(<div title={<span>Wrong shape</span>} />),
+    // @ts-expect-error SVG attributes use native names, not React aliases.
+    expectNode(<path strokeWidth="2" />),
+    // @ts-expect-error arbitrary object values are not host attributes.
+    expectNode(<button type={{ kind: "button" }} />),
 
     // Fig props are shape-checked.
     // @ts-expect-error events takes an array of on() descriptors, not a handler.

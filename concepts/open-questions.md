@@ -7,14 +7,6 @@ links its source (a concept file's `exploring` section or a plan in
 `plans/`); when an item resolves, it graduates into the owning concept file
 and leaves this list.
 
-## JSX
-
-- **Stage-2 attribute typing** — replace `HostProps`' open attribute index
-  with a closed vocabulary from an externally-maintained attribute package
-  (decided: no hand-curation) for typo protection; SVG/MathML-only tags
-  likely keep an open index. The chosen package must use native attribute
-  names, not React's. → `concepts/jsx.md`
-
 ## Hydration
 
 - **Hydration-stable environment** — the one intentional-divergence class

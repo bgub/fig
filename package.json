@@ -8,6 +8,7 @@
     "dev": "vp run -r --parallel --log labeled dev",
     "dev:demos": "turbo run dev --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-payload --filter @bgub/fig-demo-start --ui=tui",
     "dev:demos:stream": "vp run --filter @bgub/fig-demo-client --filter @bgub/fig-demo-ssr --filter @bgub/fig-demo-payload --filter @bgub/fig-demo-start --parallel --log labeled dev",
+    "generate:jsx-attributes": "node scripts/generate-jsx-attributes.mjs",
     "prepare": "./scripts/prepare-effect.sh",
     "test": "vp test",
     "test:dom": "vp run --filter @bgub/fig-dom test",
@@ -40,8 +41,10 @@
     "@types/node": "^20.19.0",
     "@vitest/coverage-istanbul": "4.1.5",
     "happy-dom": "^15.11.7",
+    "html-element-attributes": "3.5.0",
     "portless": "^0.14.0",
     "size-limit": "^8.2.4",
+    "svg-element-attributes": "2.1.0",
     "turbo": "^2.10.2",
     "typescript": "^5.9.2",
     "vite-plus": "catalog:"

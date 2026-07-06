@@ -1,6 +1,6 @@
 # JSX Types
 
-Status: stable (stage 1); stage 2 exploring
+Status: stable
 
 How JSX is typed, and who owns the host-prop vocabulary.
 
@@ -20,9 +20,9 @@ Host-prop vocabulary belongs to renderers: `@bgub/fig-dom` fills
 is in the program). A compilation with no renderer types in scope rejects
 intrinsic tags.
 
-## Stage 1: `HostProps<E>`
+## `HostProps<E, AttributeName>`
 
-One generic interface per tag, mapped from TypeScript's own
+One generic host-prop type per tag, mapped from TypeScript's own
 `HTML/SVG/MathMLElementTagNameMap`s (overlapping tags take the HTML typing;
 dashed names get the custom-element arm at the `HTMLElement` baseline):
 
@@ -36,22 +36,33 @@ dashed names get the custom-element arm at the `HTMLElement` baseline):
   `ref`, `dangerouslySetInnerHTML`, and the whole `on*` family via a
   template-literal index signature (which also rejects native inline-handler
   attributes).
-- Everything else is an open, natively-named attribute index (`class`,
-  `for`, `tabindex`, `aria-*`, `data-*`, `stroke-width`, `xlink:href`).
+- Everything else on HTML/SVG tags is a closed, natively-named attribute
+  vocabulary (`class`, `for`, `tabindex`, `aria-*`, `data-*`,
+  `stroke-width`, `xlink:href`) with scalar values only (`string`, `number`,
+  `true`, or Fig's empty values). This catches typos like `clas` and rejects
+  non-attribute values like `title={<div />}`. MathML and custom elements
+  deliberately keep an open attribute index because their useful vocabularies
+  are app-defined or not well-covered by the external sources.
 
 The contract is pinned by a type-level test
 (`fig-dom/src/jsx-types.test.tsx`) whose `@ts-expect-error` markers are
-enforced by typecheck — a regression that stops rejecting `className` fails
-the build.
+enforced by typecheck — a regression that stops rejecting `className`, host
+attribute typos, or object-valued native attributes fails the build.
 
-## Stage 2 (Exploring): Closed Attribute Vocabulary
+## Attribute Vocabulary
 
-Replace the open attribute index with a closed vocabulary from an
-**externally-maintained attribute package** (decision: do not hand-curate)
-for typo protection — which also removes the union-typed index, so
-`title={<div/>}` stops passing. Learned from a hand-curated prototype: a
-first-cut list misses real attributes immediately (`lang`, `charset`,
-`open`, `colspan`, `srcset`, ...), and SVG/MathML-only tags likely keep an
-open index (their vocabulary is huge and camelCase-heavy — `viewBox`, `cx`,
-`preserveAspectRatio` — matching no pattern). Whatever package is chosen must
-use native attribute names, not React's.
+The HTML/SVG attribute source is intentionally quarantined:
+
+- `scripts/generate-jsx-attributes.mjs` reads `html-element-attributes` and
+  `svg-element-attributes`.
+- `fig-dom/src/jsx-attributes.generated.ts` is a checked-in generated snapshot
+  of literal tag/attribute unions. It exists because those packages publish
+  widened `Record<string, string[]>` declarations, which TypeScript cannot use
+  directly as literal JSX prop names.
+- `fig-dom/src/jsx-attribute-policy.ts` is the small handwritten policy layer:
+  Fig props, React-habit traps, `aria-*`/`data-*`, `role`, legacy SVG namespace
+  attributes, scalar attribute values, and the open MathML/custom-element
+  escape hatches.
+
+This is deliberately easy to replace. The generated file is not a runtime
+dependency and should not accumulate Fig policy.
