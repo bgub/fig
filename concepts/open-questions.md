@@ -36,14 +36,6 @@ From `plans/data-resources.md` (open questions that survived shipping):
   codec. Still open: whether Fig Start exposes codec selection as a first-class
   option, when to ship a binary codec, and whether binary codec ids need
   explicit versioning beyond the opaque implementation id.
-- **Request state for remote loaders** — removing store context left one case
-  without a first-class replacement: a `remote: true` resource's `load` runs
-  in the framework data endpoint as `load(...args, { signal })`, and closures
-  can't help because remote resources are module-level and shared with the
-  client. A remote loader that needs per-request auth or services must reach
-  for ambient state. Open: whether fig-start provides an
-  `AsyncLocalStorage`-backed request context, or the stance stays "apps that
-  need request state own their endpoint." → `concepts/data.md`
 
 ## Asset Resources
 
@@ -62,6 +54,11 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
   boundary as the dev server.
 - **Server action transport** — deliberately left out of `useActionState`
   core; the framework layer owns the wire (`concepts/hooks.md`).
+- **Request state for remote data loaders** — `remoteDataResource` loaders
+  run inside fig-start's data endpoint, which owns the request; loaders
+  receive only `(...args, { signal })`. Open: whether fig-start provides an
+  ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those
+  loaders, or keeps auth and services in module scope. → `concepts/data.md`
 
 ## Performance
 

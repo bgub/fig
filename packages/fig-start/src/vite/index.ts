@@ -45,6 +45,8 @@ import {
 import { isTailwindCssEntry, transformTailwindCss } from "./tailwind.ts";
 import { assertNoServerDataResourceImport } from "../../../fig-data/src/vite/index.ts";
 import {
+  assertNoRemoteDataResourceImport,
+  REMOTE_DATA_RESOURCE_CALLEE,
   transformServerModule,
   transformServerRouteClientStub,
 } from "./transform.ts";
@@ -217,6 +219,9 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       if (!isServerModuleId(clean)) {
         if (code.includes("@bgub/fig-data/server")) {
           await assertNoServerDataResourceImport(code, clean);
+        }
+        if (code.includes(REMOTE_DATA_RESOURCE_CALLEE)) {
+          await assertNoRemoteDataResourceImport(code, clean);
         }
         return null;
       }

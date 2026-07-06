@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  assertNoRemoteDataResourceImport,
   clientRefId,
   transformServerModule,
   transformServerRouteClientStub,
@@ -179,11 +180,10 @@ function Dashboard() { return null; }`,
     ).rejects.toThrow(/import \* as/);
   });
 
-  it("discovers remote server data resources in server modules", async () => {
+  it("discovers remoteDataResource declarations in server modules", async () => {
     const out = await transformServerModule(
-      `import { serverDataResource } from "@bgub/fig-data/server";
-export const userResource = serverDataResource({
-  remote: true,
+      `import { remoteDataResource } from "@bgub/fig-start/server";
+export const userResource = remoteDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),
 });`,
@@ -217,13 +217,13 @@ export const userResource = serverDataResource({
   it("stubs server data resources for browser bundles", async () => {
     const out = await transformServerRouteClientStub(
       `import { serverDataResource } from "@bgub/fig-data/server";
+import { remoteDataResource } from "@bgub/fig-start/server";
 import { db } from "./db.server.ts";
 export const localResource = serverDataResource({
   key: (id: string) => ["local-user", id],
   load: async (id: string) => db.user(id),
 });
-export const userResource = serverDataResource({
-  remote: true,
+export const userResource = remoteDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => db.user(id),
 });`,
@@ -236,19 +236,34 @@ export const userResource = serverDataResource({
     expect(out.code).toContain(
       "export const localResource = __figDataResource",
     );
-    expect(out.code).toContain("__figDataResource.remote");
-    expect(out.code).toContain('"/src/data/user.server.ts#userResource"');
+    expect(out.code).toContain("remoteDataLoader as __figRemoteDataLoader");
+    expect(out.code).toContain(
+      'load: __figRemoteDataLoader("/src/data/user.server.ts#userResource")',
+    );
     expect(out.code).toContain('key: (id: string) => ["user", id]');
     expect(out.code).not.toContain("db.user");
   });
 
-  it("preserves shared imports referenced by remote data resource stubs", async () => {
+  it("does not import the remote loader for stubs without remote resources", async () => {
     const out = await transformServerRouteClientStub(
       `import { serverDataResource } from "@bgub/fig-data/server";
+export const localResource = serverDataResource({
+  key: (id: string) => ["local-user", id],
+  load: async (id: string) => ({ id }),
+});`,
+      "/project/src/data/user.server.ts",
+      root,
+    );
+
+    expect(out.code).not.toContain("__figRemoteDataLoader");
+  });
+
+  it("preserves shared imports referenced by remote data resource stubs", async () => {
+    const out = await transformServerRouteClientStub(
+      `import { remoteDataResource } from "@bgub/fig-start/server";
 import { userKey as keyForUser } from "./user.keys.ts";
 import { db } from "./db.server.ts";
-export const userResource = serverDataResource({
-  remote: true,
+export const userResource = remoteDataResource({
   key: keyForUser,
   load: async (id: string) => db.user(id),
 });`,
@@ -266,10 +281,9 @@ export const userResource = serverDataResource({
   it("rejects remote data resource stubs that reference server-only imports", async () => {
     await expect(
       transformServerRouteClientStub(
-        `import { serverDataResource } from "@bgub/fig-data/server";
+        `import { remoteDataResource } from "@bgub/fig-start/server";
 import { userKey } from "./user.keys.server.ts";
-export const userResource = serverDataResource({
-  remote: true,
+export const userResource = remoteDataResource({
   key: userKey,
   load: async (id: string) => ({ id }),
 });`,
@@ -279,20 +293,28 @@ export const userResource = serverDataResource({
     ).rejects.toThrow(/cannot import "\.\/user\.keys\.server\.ts"/);
   });
 
-  it("rejects non-literal remote server data resource options", async () => {
+  it("rejects remoteDataResource imports outside server modules", async () => {
     await expect(
-      transformServerRouteClientStub(
-        `import { serverDataResource } from "@bgub/fig-data/server";
-const isRemote = true;
-export const userResource = serverDataResource({
-  remote: isRemote,
+      assertNoRemoteDataResourceImport(
+        `import { remoteDataResource } from "@bgub/fig-start/server";
+export const userResource = remoteDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),
 });`,
-        "/project/src/data/user.server.ts",
-        root,
+        "/project/src/data/user.ts",
       ),
-    ).rejects.toThrow(/must use remote: true/);
+    ).rejects.toThrow(/remoteDataResource may only be imported/);
+  });
+
+  it("allows other fig-start server imports outside server modules", async () => {
+    await expect(
+      assertNoRemoteDataResourceImport(
+        `import { createRequestHandler } from "@bgub/fig-start/server";
+import type { remoteDataResource } from "@bgub/fig-start/server";
+export const handler = createRequestHandler({ clientEntry: "/c.js", routes: [] });`,
+        "/project/src/server.ts",
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("derives a stable id from root-relative path + export", () => {

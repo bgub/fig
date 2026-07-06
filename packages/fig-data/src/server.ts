@@ -12,7 +12,6 @@ export interface ServerDataResourceOptions<TArgs extends unknown[], TValue> {
     ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  remote?: true;
 }
 
 export function serverDataResource<TArgs extends unknown[], TValue>(

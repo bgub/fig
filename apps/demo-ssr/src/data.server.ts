@@ -16,7 +16,6 @@ export function createServerInfo(): ServerInfo {
 
 export function createServerInfoResource(info = createServerInfo()) {
   return serverDataResource<[], ServerInfo>({
-    remote: true,
     key: serverInfoKey,
     load: () => info,
   });
@@ -37,7 +36,6 @@ export function createServerOnlyInfoResource(
 }
 
 export const serverInfoResource = serverDataResource<[], ServerInfo>({
-  remote: true,
   key: serverInfoKey,
   load: () => createServerInfo(),
 });

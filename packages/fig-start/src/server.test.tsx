@@ -33,7 +33,7 @@ import { markServerRoute, serverClientReference } from "./internal.ts";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createClientAssetResolver } from "./server-assets.ts";
-import { createRequestHandler } from "./server.ts";
+import { createRequestHandler, remoteDataResource } from "./server.ts";
 
 // A manually-declared client reference (the @bgub/fig-start/vite plugin will
 // generate these from `.tsx` imports inside `.server.tsx`).
@@ -413,7 +413,7 @@ describe("@bgub/fig-start server handler", () => {
   });
 
   it("serves only registered remote data resources", async () => {
-    const remoteResource = serverDataResource({
+    const remoteResource = remoteDataResource({
       key: (id: string) => ["remote-endpoint", id],
       load: async (id: string) => `user-${id}`,
     });

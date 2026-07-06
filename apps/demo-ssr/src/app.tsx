@@ -33,15 +33,40 @@ export interface ServerOnlyInfo {
 
 export const serverInfoResourceId = "demo-ssr#server-info";
 
+export const demoDataEndpointPath = "/__fig/data";
+
 export function serverInfoKey(): DataResourceKey {
   return ["server-info"];
 }
 
-// SSR passes the server loader for the initial render. The browser uses this
-// remote stub to refresh through the demo's handwritten /__fig/data endpoint.
-export const serverInfoRemoteResource = dataResource.remote<[], ServerInfo>({
-  id: serverInfoResourceId,
+// SSR passes the server loader for the initial render. In the browser this
+// isomorphic resource's own loader refreshes through the demo's handwritten
+// /__fig/data endpoint — without a framework, a "remote" resource is just a
+// resource whose loader calls an endpoint the app owns.
+export const serverInfoRemoteResource = dataResource<[], ServerInfo>({
   key: serverInfoKey,
+  load: async ({ signal }) => {
+    const response = await fetch(demoDataEndpointPath, {
+      body: JSON.stringify({ args: [], id: serverInfoResourceId }),
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      method: "POST",
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Data resource request failed with status ${response.status}.`,
+      );
+    }
+
+    const body = (await response.json()) as { value?: ServerInfo };
+    if (body.value === undefined) {
+      throw new Error("Data resource response carried no value.");
+    }
+    return body.value;
+  },
 });
 
 export function serverOnlyInfoKey(): DataResourceKey {

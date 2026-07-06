@@ -10,7 +10,13 @@ import {
   type Props,
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
-import type { DataResource, DataResourceKey } from "@bgub/fig-data";
+import {
+  dataResource,
+  type DataResource,
+  type DataResourceKey,
+  type DataResourceKeyInput,
+  type DataResourceLoadContext,
+} from "@bgub/fig-data";
 import { normalizeDataResourceKey } from "@bgub/fig-data/internal";
 import {
   escapeAttribute,
@@ -91,6 +97,26 @@ export type StartServerDataResource = Pick<
   DataResource<never[], unknown>,
   "key" | "load"
 >;
+
+export interface RemoteDataResourceOptions<TArgs extends unknown[], TValue> {
+  key: (...args: TArgs) => DataResourceKey;
+  load: (
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
+  ) => TValue | PromiseLike<TValue>;
+  debugArgs?: (...args: TArgs) => DataResourceKeyInput;
+}
+
+// A server resource that additionally serves direct browser refreshes: Fig
+// Start registers it behind the framework data endpoint under a generated id,
+// and the transform compiles browser imports into a plain dataResource whose
+// loader calls that endpoint. Only declarable in .server.ts(x) files — the
+// loader is a public request handler, so it must validate and authorize its
+// client-controlled arguments.
+export function remoteDataResource<TArgs extends unknown[], TValue>(
+  options: RemoteDataResourceOptions<TArgs, TValue>,
+): DataResource<TArgs, TValue> {
+  return dataResource(options);
+}
 
 type StartServerDataResourceLoadContext = {
   signal: AbortSignal;

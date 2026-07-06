@@ -2,11 +2,18 @@ import { dirname, resolve } from "node:path";
 import babel, { type PluginObj } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 import {
+  collectServerDataResourceStubs,
   discoverServerDataResources,
-  transformServerDataClientStub,
+  type ClientDataResourceStub,
   type ServerDataResourceRef,
 } from "../../../fig-data/src/vite/index.ts";
 import { rootRelative } from "./path-utils.ts";
+
+// The callee that declares a Fig Start remote server resource. fig-data has
+// no remote concept: the framework owns the name, the endpoint registry, and
+// the browser stub emission below.
+export const REMOTE_DATA_RESOURCE_CALLEE = "remoteDataResource";
+const REMOTE_DATA_RESOURCE_MODULE = "@bgub/fig-start/server";
 
 export interface ClientRef {
   // Stable id ("<root-relative-path>#<Export>") shared by the server transform
@@ -70,7 +77,12 @@ export async function transformServerModule(
     ],
     sourceMaps: true,
   });
-  const serverDataResources = await discoverServerDataResources(code, id, root);
+  const serverDataResources = await discoverServerDataResources(
+    code,
+    id,
+    root,
+    REMOTE_DATA_RESOURCE_CALLEE,
+  );
 
   return {
     clientRefs,
@@ -97,9 +109,19 @@ export async function transformServerRouteClientStub(
     ],
     sourceMaps: false,
   });
-  const dataResult = await transformServerDataClientStub(code, id, root);
+  const serverStubs = await collectServerDataResourceStubs(code, id, root);
+  const remoteStubs = await collectServerDataResourceStubs(
+    code,
+    id,
+    root,
+    REMOTE_DATA_RESOURCE_CALLEE,
+  );
 
-  if (routePath === null && dataResult.stubs.length === 0) {
+  if (
+    routePath === null &&
+    serverStubs.length === 0 &&
+    remoteStubs.length === 0
+  ) {
     const stubCode =
       `throw new Error(${JSON.stringify(
         `Cannot import server module "${id}" in a browser bundle.`,
@@ -113,7 +135,9 @@ export async function transformServerRouteClientStub(
 
   const stubCode = [
     routePath === null ? "" : routeStubCode(routePath),
-    dataResult.stubs.length === 0 ? "" : dataResult.code,
+    serverStubs.length === 0 && remoteStubs.length === 0
+      ? ""
+      : dataStubCode(serverStubs, remoteStubs),
   ]
     .filter((part) => part.length > 0)
     .join("");
@@ -121,6 +145,105 @@ export async function transformServerRouteClientStub(
     code: stubCode,
     map: generatedSourceMap(id, stubCode),
     routePath,
+  };
+}
+
+// Browser stubs for a .server module's data resources. serverDataResource
+// declarations keep only their browser-safe key (hydrate-only);
+// remoteDataResource declarations become plain loader-backed resources whose
+// loader closes over the generated id and calls the framework data endpoint.
+function dataStubCode(
+  serverStubs: readonly ClientDataResourceStub[],
+  remoteStubs: readonly ClientDataResourceStub[],
+): string {
+  const imports = new Set<string>();
+  const exports: string[] = [];
+
+  for (const stub of [...serverStubs, ...remoteStubs]) {
+    for (const code of stub.importCodes) imports.add(code);
+  }
+  imports.add(
+    `import { dataResource as __figDataResource } from "@bgub/fig-data";`,
+  );
+  if (remoteStubs.length > 0) {
+    imports.add(
+      `import { remoteDataLoader as __figRemoteDataLoader } from "@bgub/fig-start/client";`,
+    );
+  }
+
+  for (const stub of serverStubs) {
+    exports.push(
+      `export const ${stub.exportName} = __figDataResource({ ${dataStubFields(
+        stub,
+      ).join(", ")} });`,
+    );
+  }
+  for (const stub of remoteStubs) {
+    const fields = [
+      ...dataStubFields(stub),
+      `load: __figRemoteDataLoader(${JSON.stringify(stub.id)})`,
+    ];
+    exports.push(
+      `export const ${stub.exportName} = __figDataResource({ ${fields.join(
+        ", ",
+      )} });`,
+    );
+  }
+
+  return `${[...imports].join("\n")}\n${exports.join("\n")}\n`;
+}
+
+function dataStubFields(stub: ClientDataResourceStub): string[] {
+  const fields = [`key: ${stub.keyCode}`];
+  if (stub.debugArgsCode !== undefined) {
+    fields.push(`debugArgs: ${stub.debugArgsCode}`);
+  }
+  return fields;
+}
+
+// remoteDataResource declares a public endpoint, so its declarations must
+// stay inside .server.ts(x) modules where the transform can see and strip
+// them. Importing it anywhere else fails the build.
+export async function assertNoRemoteDataResourceImport(
+  code: string,
+  id: string,
+): Promise<void> {
+  await transformTypeScript(code, id, {
+    plugins: [remoteDataResourceImportGuardBabelPlugin(id)],
+    sourceMaps: false,
+  });
+}
+
+function remoteDataResourceImportGuardBabelPlugin(
+  id: string,
+): (api: typeof babel) => PluginObj {
+  return (api) => {
+    void api;
+    const error =
+      `remoteDataResource may only be imported from .server.ts or ` +
+      `.server.tsx files. Move "${id}" to a .server.ts(x) file.`;
+
+    return {
+      name: "fig-start-remote-data-resource-import-guard",
+      visitor: {
+        ImportDeclaration(path) {
+          if (path.node.source.value !== REMOTE_DATA_RESOURCE_MODULE) return;
+          if (path.node.importKind === "type") return;
+          for (const specifier of path.node.specifiers) {
+            if (specifier.type !== "ImportSpecifier") continue;
+            if ("importKind" in specifier && specifier.importKind === "type") {
+              continue;
+            }
+            const imported = specifier.imported;
+            const name =
+              imported.type === "Identifier" ? imported.name : imported.value;
+            if (name === REMOTE_DATA_RESOURCE_CALLEE) {
+              throw path.buildCodeFrameError(error);
+            }
+          }
+        },
+      },
+    };
   };
 }
 

@@ -18,7 +18,7 @@ import { dataResource } from "@bgub/fig-data";
 
 export const userResource = dataResource({
   key: (id: string) => ["user", id],
-  load: async (id, { context, signal }) => context.users.find(id, { signal }),
+  load: async (id, { signal }) => fetchUser(id, { signal }),
 });
 ```
 
@@ -76,7 +76,7 @@ type DataRefreshResult<T> =
     }
   | {
       status: "unsupported";
-      reason: "no-client-loader" | "no-remote-fetcher";
+      reason: "no-client-loader";
       staleValue?: T;
     };
 ```
@@ -163,11 +163,12 @@ export const userResource = dataResource({
 ```ts
 // user-data.server.ts
 import { serverDataResource } from "@bgub/fig-data/server";
+import { db } from "./db.server.ts";
 import { userKey } from "./user-data.ts";
 
 export const userServerResource = serverDataResource({
   key: userKey,
-  load: async (id, { context, signal }) => context.users.find(id, { signal }),
+  load: async (id, { signal }) => db.users.find(id, { signal }),
 });
 ```
 
@@ -185,32 +186,30 @@ Fresh data for hydrate-only resources must come through a server render, payload
 
 ## Remote server data
 
-A server resource can opt into direct client refreshes:
+Sometimes the client should be able to refresh a server value directly — outside a document render or payload navigation. fig-data deliberately has no verb for this: an HTTP endpoint has to exist to serve the refresh, and endpoints belong to the framework layer.
+
+In Fig Start, declare the resource with `remoteDataResource` instead of `serverDataResource`:
 
 ```ts
 // user-data.server.ts
-import { serverDataResource } from "@bgub/fig-data/server";
+import { remoteDataResource } from "@bgub/fig-start/server";
+import { db } from "./db.server.ts";
 
-export const userResource = serverDataResource({
-  remote: true,
+export const userResource = remoteDataResource({
   key: (id: string) => ["user", id],
-  load: async (id, { context, signal }) => context.users.find(id, { signal }),
+  load: async (id, { signal }) => db.users.find(id, { signal }),
 });
 ```
 
-`remote: true` is explicit for security. Without it, the resource is server-only and no direct data endpoint should be generated.
+On the server it behaves exactly like `serverDataResource`, and Fig Start additionally registers it behind the framework data endpoint under a generated id (root-relative module path plus export name — no manual `name` registry). In the browser bundle, the transform compiles it into a plain `dataResource` whose loader calls that endpoint with the original arguments. The store never learns it's remote: reads prefer hydrated values, a cache miss or explicit refresh runs the transport loader, and a failed transport call is an ordinary `rejected` refresh result that keeps the stale value visible.
 
-In Fig Start, a browser import of a `remote: true` server resource becomes a generated `dataResource.remote(...)` stub. The stub id comes from the root-relative server module path and export name; there's no manual `name` registry. The real server resource is registered behind the data endpoint. Reads still prefer hydrated values; cache misses and explicit refreshes call the endpoint through the root's `dataRemoteFetch` transport with the original resource arguments.
+The choice between `serverDataResource` and `remoteDataResource` is the security decision. A `serverDataResource` value can only change through a server render or payload refresh; a `remoteDataResource` is a public endpoint. Validate and authorize the client-controlled arguments inside the loader like any hand-written API route.
 
-Remote loaders are public endpoints. Validate and authorize those client-controlled arguments inside the loader or the framework endpoint that invokes it.
-
-If a remote stub is used without a remote fetcher, refresh resolves with:
-
-```ts
-{ status: "unsupported", reason: "no-remote-fetcher" }
-```
+Remote arguments must survive the transport, so they must be serializable. Don't use `debugArgs` to hide non-serializable arguments — the endpoint runs `load(...args)` with the real client-sent values.
 
 Payload navigations are separate. If the new route reads server data while rendering its payload, that data should stream in the payload response itself, not through an extra remote data request.
+
+Outside Fig Start, a "remote resource" is nothing special: define an isomorphic `dataResource` whose loader fetches an endpoint you wrote yourself.
 
 ## Errors
 

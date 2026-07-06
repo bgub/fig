@@ -73,6 +73,7 @@ export type {
 } from "./transform.ts";
 export {
   assertNoServerDataResourceImport,
+  collectServerDataResourceStubs,
   dataResourceId,
   discoverServerDataResources,
   rootRelative,

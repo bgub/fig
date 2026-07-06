@@ -1,7 +1,6 @@
 import "./dev-env.ts";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import type { FigDataHydrationEntry } from "@bgub/fig";
-import type { DataResourceRemote } from "@bgub/fig-data";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   App,
@@ -12,7 +11,6 @@ import {
   demoRootId,
 } from "./app.tsx";
 
-const dataEndpointPath = "/__fig/data";
 const data = readClientData();
 const initialData = readInitialData();
 const root = document.getElementById(demoRootId);
@@ -27,7 +25,6 @@ createRoot(devtoolsContainer, { devtools: false }).render(
 );
 
 hydrateRoot(root, <App request={createClientRequest(data)} />, {
-  dataRemoteFetch: fetchRemoteDataResource,
   initialData,
   onRecoverableError(error) {
     document.body.dataset.recoverableHydrationError =
@@ -51,30 +48,6 @@ function readInitialData(): FigDataHydrationEntry[] {
   if (script === null) return [];
 
   return JSON.parse(script.textContent ?? "[]") as FigDataHydrationEntry[];
-}
-
-async function fetchRemoteDataResource(
-  resource: DataResourceRemote,
-  args: readonly unknown[],
-  signal: AbortSignal,
-): Promise<unknown> {
-  const response = await fetch(dataEndpointPath, {
-    body: JSON.stringify({ args, id: resource.id }),
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    method: "POST",
-    signal,
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Data resource request failed with status ${response.status}.`,
-    );
-  }
-
-  const body = (await response.json()) as { value?: unknown };
-  return body.value;
 }
 
 function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {

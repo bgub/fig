@@ -11,7 +11,7 @@ import {
 import { dataResource, readData } from "@bgub/fig-data";
 import { serverDataResource } from "@bgub/fig-data/server";
 import { describe, expect, it } from "vite-plus/test";
-import { hydrateStart } from "./client.ts";
+import { hydrateStart, remoteDataLoader } from "./client.ts";
 import { Outlet } from "./components.tsx";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -521,9 +521,14 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
 
   it("fetches remote data resources for client route cache misses", async () => {
     let loadCalls = 0;
-    const clientResource = dataResource.remote<[string], string>({
-      id: "test#remoteUser",
+    // Mirrors the browser stub the Fig Start transform emits for a
+    // remoteDataResource declaration.
+    const clientResource = dataResource<[string], string>({
       key: (id) => ["remote-client-user", id],
+      load: remoteDataLoader("test#remoteUser") as (
+        id: string,
+        context: { signal: AbortSignal },
+      ) => Promise<string>,
     });
     const serverResource = serverDataResource({
       key: (id: string) => ["remote-client-user", id],

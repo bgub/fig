@@ -12,10 +12,6 @@ export interface DataResourceLoadContext {
   signal: AbortSignal;
 }
 
-export interface DataResourceRemote {
-  id: string;
-}
-
 export interface FigDataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
@@ -26,7 +22,6 @@ export interface FigDataResource<
   readonly load?: (
     ...argsAndContext: [...TArgs, DataResourceLoadContext]
   ) => TValue | PromiseLike<TValue>;
-  readonly remote?: DataResourceRemote;
 }
 
 export type DataRefreshResult<T> =
@@ -39,15 +34,9 @@ export type DataRefreshResult<T> =
     }
   | {
       status: "unsupported";
-      reason: "no-client-loader" | "no-remote-fetcher";
+      reason: "no-client-loader";
       staleValue?: T;
     };
-
-export type FigDataRemoteFetcher = (
-  resource: DataResourceRemote,
-  args: readonly unknown[],
-  signal: AbortSignal,
-) => unknown;
 
 export interface FigDataHydrationEntry {
   key: DataResourceKey;
@@ -120,7 +109,6 @@ export interface FigDataStore extends FigDataStoreHandle {
 // compatible with @bgub/fig-data's DataStoreHost so its createDataStore can
 // register directly.
 export interface FigDataStoreHost {
-  remoteFetch?: FigDataRemoteFetcher;
   getLane(): unknown;
   partition?: DataResourceKeyInput;
   schedule(owner: object, lane: unknown): void;

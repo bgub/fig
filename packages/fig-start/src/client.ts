@@ -1,5 +1,6 @@
 import {
   createElement,
+  type DataResourceLoadContext,
   type ElementType,
   type FigNode,
   ErrorBoundary,
@@ -126,7 +127,6 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     ),
     {
       initialData,
-      dataRemoteFetch: fetchRemoteDataResource,
       onRecoverableError: options.onRecoverableError,
     },
   );
@@ -769,15 +769,32 @@ function payloadRouteUrl(location: RouterLocation): string {
   return location.pathname + location.search;
 }
 
-async function fetchRemoteDataResource(
-  resource: { id: string },
+// Loader factory the Fig Start transform bakes into browser stubs of
+// remoteDataResource declarations: the returned loader closes over the
+// generated resource id, so the store treats the stub as an ordinary
+// loader-backed resource whose loader calls the framework data endpoint.
+export function remoteDataLoader(
+  id: string,
+): (
+  ...argsAndContext: [...unknown[], DataResourceLoadContext]
+) => Promise<unknown> {
+  return (...argsAndContext) => {
+    const context = argsAndContext[
+      argsAndContext.length - 1
+    ] as DataResourceLoadContext;
+    return fetchRemoteData(id, argsAndContext.slice(0, -1), context.signal);
+  };
+}
+
+async function fetchRemoteData(
+  id: string,
   args: readonly unknown[],
   signal: AbortSignal,
 ): Promise<unknown> {
   const response = await fetch(DATA_ENDPOINT_PATH, {
     body: JSON.stringify({
       args: args.map((arg) => encodePayloadValue(arg)),
-      id: resource.id,
+      id,
     }),
     headers: {
       accept: "application/json",

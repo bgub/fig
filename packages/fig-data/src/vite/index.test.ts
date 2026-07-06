@@ -9,17 +9,16 @@ describe("@bgub/fig-data/vite plugin", () => {
     const result = await plugin.transform(
       `import { serverDataResource } from "@bgub/fig-data/server";
 export const userResource = serverDataResource({
-  remote: true,
   key: (id: string) => ["user", id],
   load: async (id: string) => ({ id }),
 });`,
       "/project/src/data/user.server.ts",
     );
 
-    expect(result?.code).toContain("__figDataResource.remote");
     expect(result?.code).toContain(
-      'id: "/src/data/user.server.ts#userResource"',
+      "export const userResource = __figDataResource",
     );
+    expect(result?.code).toContain('key: (id: string) => ["user", id]');
     expect(result?.code).not.toContain("load:");
   });
 

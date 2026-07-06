@@ -347,41 +347,6 @@ describe("@bgub/fig-data", () => {
     expect(changes).toEqual([]);
   });
 
-  it("loads remote resources through the store host fetcher", () => {
-    const owner = {};
-    const remoteResource = dataResource.remote<[string], string>({
-      id: "users#name",
-      key: (id) => ["remote-user", id],
-    });
-    const store = createDataStore<object, null>({
-      getLane: () => null,
-      remoteFetch: (resource, args) => {
-        expect(resource).toEqual({ id: "users#name" });
-        expect(args).toEqual(["one"]);
-        return "Ada";
-      },
-      schedule: () => undefined,
-    });
-
-    expect(store.readData(remoteResource, ["one"], owner)).toBe("Ada");
-  });
-
-  it("keeps remote resources unsupported without a host fetcher", async () => {
-    const remoteResource = dataResource.remote<[string], string>({
-      id: "users#missing",
-      key: (id) => ["remote-missing", id],
-    });
-    const store = createDataStore<object, null>({
-      getLane: () => null,
-      schedule: () => undefined,
-    });
-
-    await expect(store.refreshData(remoteResource, "one")).resolves.toEqual({
-      reason: "no-remote-fetcher",
-      status: "unsupported",
-    });
-  });
-
   it("supersedes older fulfilled-value refreshes", async () => {
     const firstRefresh = deferred<string>();
     const secondRefresh = deferred<string>();

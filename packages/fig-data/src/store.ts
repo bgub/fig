@@ -11,8 +11,6 @@ import {
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
-  type DataResourceRemote,
-  type FigDataRemoteFetcher,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataResource,
@@ -29,8 +27,6 @@ export {
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
-  type DataResourceRemote,
-  type FigDataRemoteFetcher,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
 };
@@ -61,7 +57,6 @@ export interface DataStoreHost<Owner extends object, Lane> {
   onEntryEvict?: (entry: DataStoreEntrySnapshot) => void;
   partition?: DataResourceKeyInput;
   preloadRetentionMs?: number;
-  remoteFetch?: FigDataRemoteFetcher;
   schedule(owner: Owner, lane: Lane): void;
 }
 
@@ -73,27 +68,6 @@ export interface DataStore<
 }
 
 export type DataStoreEntrySnapshot = FigDataStoreEntrySnapshot;
-
-export interface DataResourceFactory {
-  <TArgs extends unknown[], TValue>(
-    options: DataResourceOptions<TArgs, TValue>,
-  ): DataResource<TArgs, TValue>;
-  remote<TArgs extends unknown[], TValue>(
-    options: DataResourceRemoteOptions<TArgs>,
-  ): DataResource<TArgs, TValue>;
-}
-
-export interface DataResourceRemoteOptions<
-  TArgs extends unknown[],
-> extends DataResourceBaseOptions<TArgs> {
-  id: string;
-}
-
-interface DataResourceRemoteCreateOptions<
-  TArgs extends unknown[],
-> extends DataResourceBaseOptions<TArgs> {
-  remote: DataResourceRemote;
-}
 
 interface Entry<Owner extends object, Lane> {
   canonicalKey: string;
@@ -144,24 +118,11 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 const dataStoreFactory = createDataStore as FigDataStoreFactory;
 
-export const dataResource: DataResourceFactory = /* @__PURE__ */ Object.assign(
-  function sharedDataResource<TArgs extends unknown[], TValue>(
-    options: DataResourceOptions<TArgs, TValue>,
-  ): DataResource<TArgs, TValue> {
-    return createDataResource(options);
-  },
-  {
-    remote<TArgs extends unknown[], TValue>(
-      options: DataResourceRemoteOptions<TArgs>,
-    ): DataResource<TArgs, TValue> {
-      return createDataResource({
-        debugArgs: options.debugArgs,
-        key: options.key,
-        remote: { id: options.id },
-      });
-    },
-  },
-);
+export function dataResource<TArgs extends unknown[], TValue>(
+  options: DataResourceOptions<TArgs, TValue>,
+): DataResource<TArgs, TValue> {
+  return createDataResource(options);
+}
 
 export function readData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
@@ -236,16 +197,13 @@ export function normalizeDataResourceKey(key: DataResourceKey): string {
 }
 
 function createDataResource<TArgs extends unknown[], TValue>(
-  options:
-    | DataResourceRemoteCreateOptions<TArgs>
-    | DataResourceOptions<TArgs, TValue>,
+  options: DataResourceOptions<TArgs, TValue>,
 ): DataResource<TArgs, TValue> {
   const resource = {
     $$typeof: DataResourceSymbol,
     debugArgs: options.debugArgs,
     key: options.key,
-    load: "load" in options ? options.load : undefined,
-    remote: "remote" in options ? options.remote : undefined,
+    load: options.load,
   };
   (
     resource as DataResource<TArgs, TValue> &
@@ -554,15 +512,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (!this.canLoad(resource)) {
       const { entry } = this.entryFor(resource, args, false);
       if (entry === null) {
-        return Promise.resolve(
-          unsupportedRefreshResult<TValue>(resource.remote),
-        );
+        return Promise.resolve(unsupportedRefreshResult<TValue>());
       }
 
       this.clearInactiveTimer(entry);
-      return Promise.resolve(
-        unsupportedRefreshResult<TValue>(resource.remote, entry),
-      );
+      return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
     const { entry } = this.entryFor(resource, args, true);
@@ -712,10 +666,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private canLoad<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
   ): boolean {
-    return (
-      resource.load !== undefined ||
-      (resource.remote !== undefined && this.host.remoteFetch !== undefined)
-    );
+    return resource.load !== undefined;
   }
 
   private startLoad<TArgs extends unknown[], TValue>(
@@ -732,17 +683,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     if (!this.canLoad(resource)) {
       const error = new Error(
-        resource.remote === undefined
-          ? `Data resource "${entry.canonicalKey}" has no loader and no hydrated value.`
-          : `Remote data resource "${entry.canonicalKey}" has no remote fetcher and no hydrated value.`,
+        `Data resource "${entry.canonicalKey}" has no loader and no hydrated value.`,
       );
       entry.error = error;
       entry.status = "rejected";
       markDataResourceError(error, entry.key);
       this.notifyEntryChange(entry);
-      return Promise.resolve(
-        unsupportedRefreshResult<TValue>(resource.remote, entry),
-      );
+      return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
     this.abortActiveLoad(entry, "superseded");
@@ -835,18 +782,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     args: TArgs,
     signal: AbortSignal,
   ): TValue | PromiseLike<TValue> {
-    if (resource.load !== undefined) {
-      return resource.load(...args, {
-        signal,
-      });
-    }
-
-    const remote = resource.remote;
-    const remoteFetch = this.host.remoteFetch;
-    if (remote === undefined || remoteFetch === undefined) {
+    if (resource.load === undefined) {
       throw new Error("Data resource load started without a loader.");
     }
-    return remoteFetch(remote, args, signal) as TValue | PromiseLike<TValue>;
+    return resource.load(...args, { signal });
   }
 
   private publish(entry: Entry<Owner, Lane>): void {
@@ -1065,12 +1004,9 @@ function unsupportedRefreshResult<
   T,
   Owner extends object = object,
   Lane = unknown,
->(
-  remote?: DataResourceRemote,
-  entry?: Entry<Owner, Lane>,
-): DataRefreshResult<T> {
+>(entry?: Entry<Owner, Lane>): DataRefreshResult<T> {
   const result: DataRefreshResult<T> = {
-    reason: remote === undefined ? "no-client-loader" : "no-remote-fetcher",
+    reason: "no-client-loader",
     status: "unsupported",
   };
 

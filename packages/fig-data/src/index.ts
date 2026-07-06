@@ -12,14 +12,10 @@ export {
 export type {
   DataRefreshResult,
   DataResource,
-  DataResourceFactory,
   DataResourceKey,
   DataResourceKeyInput,
   DataResourceLoadContext,
   DataResourceOptions,
-  DataResourceRemote,
-  DataResourceRemoteOptions,
-  FigDataRemoteFetcher,
   FigDataHydrationEntry,
   FigDataStoreHandle,
 } from "./store.ts";

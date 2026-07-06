@@ -16,7 +16,6 @@ export interface ClientDataResourceStub {
   id: string;
   importCodes: string[];
   keyCode: string;
-  remote: boolean;
 }
 
 export interface ServerDataClientStubResult {
@@ -27,7 +26,6 @@ export interface ServerDataClientStubResult {
 
 interface ServerDataResourceDeclaration extends ServerDataResourceRef {
   options: babel.NodePath<babel.types.ObjectExpression>;
-  remote: boolean;
 }
 
 export function rootRelative(root: string, absolutePath: string): string {
@@ -42,12 +40,14 @@ export async function discoverServerDataResources(
   code: string,
   id: string,
   root: string,
+  callee = "serverDataResource",
 ): Promise<ServerDataResourceRef[]> {
   const serverDataResources: ServerDataResourceRef[] = [];
 
   await transformTypeScript(code, id, {
     plugins: [
       serverDataDiscoveryBabelPlugin({
+        callee,
         filename: id,
         root,
         serverDataResources,
@@ -59,16 +59,23 @@ export async function discoverServerDataResources(
   return serverDataResources;
 }
 
-export async function transformServerDataClientStub(
+// Extracts the browser-safe pieces (key, debugArgs, their imports) of every
+// exported `<callee>({...})` declaration. The default collects fig-data's own
+// serverDataResource declarations; frameworks with their own server-resource
+// callees (Fig Start's remoteDataResource) pass theirs and emit their own
+// stub code from the result.
+export async function collectServerDataResourceStubs(
   code: string,
   id: string,
   root: string,
-): Promise<ServerDataClientStubResult> {
+  callee = "serverDataResource",
+): Promise<ClientDataResourceStub[]> {
   const stubs: ClientDataResourceStub[] = [];
 
   await transformTypeScript(code, id, {
     plugins: [
       clientStubDiscoveryBabelPlugin({
+        callee,
         filename: id,
         root,
         stubs,
@@ -76,6 +83,16 @@ export async function transformServerDataClientStub(
     ],
     sourceMaps: false,
   });
+
+  return stubs;
+}
+
+export async function transformServerDataClientStub(
+  code: string,
+  id: string,
+  root: string,
+): Promise<ServerDataClientStubResult> {
+  const stubs = await collectServerDataResourceStubs(code, id, root);
 
   const stubCode =
     stubs.length === 0
@@ -113,11 +130,8 @@ function clientStubCode(stubs: readonly ClientDataResourceStub[]): string {
   );
 
   for (const stub of stubs) {
-    const factory = stub.remote
-      ? "__figDataResource.remote"
-      : "__figDataResource";
     exports.push(
-      `export const ${stub.exportName} = ${factory}({ ${stubOptionFields(
+      `export const ${stub.exportName} = __figDataResource({ ${stubOptionFields(
         stub,
       ).join(", ")} });`,
     );
@@ -127,8 +141,7 @@ function clientStubCode(stubs: readonly ClientDataResourceStub[]): string {
 }
 
 function stubOptionFields(stub: ClientDataResourceStub): string[] {
-  const fields = stub.remote ? [`id: ${JSON.stringify(stub.id)}`] : [];
-  fields.push(`key: ${stub.keyCode}`);
+  const fields = [`key: ${stub.keyCode}`];
   if (stub.debugArgsCode !== undefined) {
     fields.push(`debugArgs: ${stub.debugArgsCode}`);
   }
@@ -136,6 +149,7 @@ function stubOptionFields(stub: ClientDataResourceStub): string[] {
 }
 
 function serverDataDiscoveryBabelPlugin(state: {
+  callee: string;
   filename: string;
   root: string;
   serverDataResources: ServerDataResourceRef[];
@@ -152,8 +166,9 @@ function serverDataDiscoveryBabelPlugin(state: {
             t,
             state.root,
             state.filename,
+            state.callee,
           );
-          if (declaration === null || !declaration.remote) return;
+          if (declaration === null) return;
           state.serverDataResources.push({
             exportName: declaration.exportName,
             id: declaration.id,
@@ -166,6 +181,7 @@ function serverDataDiscoveryBabelPlugin(state: {
 }
 
 function clientStubDiscoveryBabelPlugin(state: {
+  callee: string;
   filename: string;
   root: string;
   stubs: ClientDataResourceStub[];
@@ -177,11 +193,13 @@ function clientStubDiscoveryBabelPlugin(state: {
       name: "fig-data-server-resource-client-stub",
       visitor: {
         VariableDeclarator(path) {
+          assertNoIsomorphicDataResourceExport(path, t);
           const stub = clientDataResourceStubFromDeclarator(
             path,
             t,
             state.root,
             state.filename,
+            state.callee,
           );
           if (stub !== null) state.stubs.push(stub);
         },
@@ -190,15 +208,42 @@ function clientStubDiscoveryBabelPlugin(state: {
   };
 }
 
+// An exported isomorphic dataResource in a .server module would silently
+// vanish from the generated browser stub; fail with directions instead.
+function assertNoIsomorphicDataResourceExport(
+  path: babel.NodePath<babel.types.VariableDeclarator>,
+  t: typeof babel.types,
+): void {
+  const exportName = exportedConstName(path, t);
+  if (exportName === null) return;
+  if (!t.isCallExpression(path.node.init)) return;
+  if (!t.isIdentifier(path.node.init.callee, { name: "dataResource" })) return;
+
+  throw path.buildCodeFrameError(
+    `Isomorphic data resource "${exportName}" cannot be exported from a ` +
+      `.server module: browser stubs only carry server resource keys, so ` +
+      `this export would be missing in browser bundles. Move it to a ` +
+      `shared module, or declare it with serverDataResource if the loader ` +
+      `is server-only.`,
+  );
+}
+
 function clientDataResourceStubFromDeclarator(
   path: babel.NodePath<babel.types.VariableDeclarator>,
   t: typeof babel.types,
   root: string,
   filename: string,
+  callee: string,
 ): ClientDataResourceStub | null {
-  const declaration = serverDataResourceDeclaration(path, t, root, filename);
+  const declaration = serverDataResourceDeclaration(
+    path,
+    t,
+    root,
+    filename,
+    callee,
+  );
   if (declaration === null) return null;
-  const { exportName, id, options, remote } = declaration;
+  const { exportName, id, options } = declaration;
 
   const key = propertyValue(options, "key");
   if (key === null) {
@@ -216,7 +261,6 @@ function clientDataResourceStubFromDeclarator(
       propertyValue(options, "debugArgs"),
     ]),
     keyCode: key.getSource(),
-    remote,
   };
 }
 
@@ -225,11 +269,12 @@ function serverDataResourceDeclaration(
   t: typeof babel.types,
   root: string,
   filename: string,
+  callee: string,
 ): ServerDataResourceDeclaration | null {
   const exportName = exportedConstName(path, t);
   if (exportName === null) return null;
   if (!t.isCallExpression(path.node.init)) return null;
-  if (!t.isIdentifier(path.node.init.callee, { name: "serverDataResource" })) {
+  if (!t.isIdentifier(path.node.init.callee, { name: callee })) {
     return null;
   }
 
@@ -241,25 +286,8 @@ function serverDataResourceDeclaration(
     exportName,
     id: dataResourceId(specifier, exportName),
     options,
-    remote: remoteServerDataResourceOption(path, options, exportName),
     specifier,
   };
-}
-
-function remoteServerDataResourceOption(
-  path: babel.NodePath,
-  options: babel.NodePath<babel.types.ObjectExpression>,
-  exportName: string,
-): boolean {
-  const remote = propertyValue(options, "remote");
-  if (remote === null) return false;
-  if (remote.isBooleanLiteral({ value: true })) return true;
-
-  throw path.buildCodeFrameError(
-    `Server data resource "${exportName}" must use ` +
-      `remote: true to expose a browser refresh endpoint. Omit remote for ` +
-      `server-only resources.`,
-  );
 }
 
 function dependencyImportsForClientStub(

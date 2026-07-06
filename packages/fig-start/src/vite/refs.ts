@@ -4,7 +4,11 @@ import {
   discoverServerDataResources,
   type ServerDataResourceRef,
 } from "../../../fig-data/src/vite/index.ts";
-import { type ClientRef, transformServerModule } from "./transform.ts";
+import {
+  type ClientRef,
+  REMOTE_DATA_RESOURCE_CALLEE,
+  transformServerModule,
+} from "./transform.ts";
 import { rootRelative } from "./path-utils.ts";
 
 export interface ServerRouteRef {
@@ -51,7 +55,12 @@ export async function collectServerDataResources(
 
   for (const file of files) {
     const code = await readFile(file, "utf8");
-    const resources = await discoverServerDataResources(code, file, root);
+    const resources = await discoverServerDataResources(
+      code,
+      file,
+      root,
+      REMOTE_DATA_RESOURCE_CALLEE,
+    );
     for (const ref of resources) refs.set(ref.id, ref);
   }
   return [...refs.values()];

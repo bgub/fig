@@ -34,41 +34,15 @@ hydrate-only is the entry's refresh mode: hydrate-only entries revalidate only
 through a server/payload refresh path and report
 `{ status: "unsupported", reason: "no-client-loader" }` from `refreshData`.
 
-Server-file resources may also opt into direct client refreshes with
-`serverDataResource({ remote: true, ... })`:
-
-```ts
-// user.server.ts
-import { serverDataResource } from "@bgub/fig-data/server";
-
-export const userResource = serverDataResource({
-  remote: true,
-  key: (id: string) => ["user", id],
-  load: async (id, { signal }) => fetchUserFromServer(id, signal),
-});
-```
-
 `serverDataResource` can only be imported from `.server.ts(x)` files. The
 `@bgub/fig-data/vite` transform is the packaging contract: browser imports of
-server-file resources become stubs that keep the browser-safe `key` and strip
-the server loader. Server-file modules imported without that transform must
-fail before server code enters the client bundle.
+server-file resources become key-only stubs (the browser-safe `key` survives;
+the server loader is stripped). Server-file modules imported without that
+transform must fail before server code enters the client bundle.
 
-`remote` is deliberately opt-in and must be the literal `true`; omitting it
-keeps the resource server-only and no direct data endpoint is generated. The
-remote stub uses a stable generated resource id:
-`<root-relative-server-module>#<exportName>`. This mirrors payload client
-references and avoids a user-authored global `name` registry. Reads still hit
-hydrated values first; on a cache miss or explicit refresh, a root with a
-`dataRemoteFetch` transport calls that server resource by id with the original
-read/refresh arguments. The key is not sent as the authority because
-`key(args)` is not invertible. Without that transport, remote stubs report
-`{ status: "unsupported", reason: "no-remote-fetcher" }`.
-
-Remote resource arguments must be serializable by the data transport. Remote
-resources should not rely on `debugArgs` to hide non-serializable loader inputs,
-because the server endpoint runs `load(...args)` and therefore receives the
-actual client-controlled arguments.
+Those two loader placements — loader-backed and hydrate-only — are the only
+resource kinds the store knows. There is deliberately no third "remote" kind:
+see Remote Refresh Is A Framework Layer.
 
 ## Loader Inputs
 
@@ -77,12 +51,45 @@ not own app/request context or dependency injection; frameworks and adapters
 that need request state should close over it when defining per-request server
 resources, or route remote data requests through their own endpoint code.
 
-Exploring: remote resources are the case closures cannot cover — they are
-module-level, shared with the client, and their `load` runs in the framework
-data endpoint with only `{ signal }`. Whether fig-start should provide an
-ambient per-request context (e.g. `AsyncLocalStorage`-backed) for remote
-loaders, or keep the stance that apps needing request state own their
-endpoint, is open (`concepts/open-questions.md`).
+Exploring: remote loaders run inside the framework data endpoint, which owns
+the request — so whether those loaders get an ambient per-request context
+(e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is
+Fig Start's decision, not a fig-data contract
+(`concepts/open-questions.md`).
+
+## Remote Refresh Is A Framework Layer
+
+"Refresh this server value directly from the browser" is deliberately not a
+fig-data concept: an endpoint must exist to serve the refresh, and endpoints
+belong to frameworks. Fig Start owns that layer with `remoteDataResource`
+(from `@bgub/fig-start/server`, declared in `.server.ts(x)` files exactly like
+`serverDataResource`).
+
+On the server, a `remoteDataResource` is an ordinary server resource that Fig
+Start additionally registers behind its data endpoint under a stable generated
+id: `<root-relative-server-module>#<exportName>`, mirroring payload client
+references — no user-authored name registry. On the client, Fig Start's
+transform compiles it into a plain isomorphic `dataResource` whose loader
+closes over that id and calls the framework transport with the original
+arguments. The id is the wire authority, not the key, because `key(args)` is
+not invertible.
+
+The store never learns any of this: it sees an ordinary loader-backed
+resource. Reads prefer hydrated values, cache misses and explicit refreshes
+run the transport loader, generation guarding and abort semantics apply
+unchanged, and a transport failure is a normal `rejected` refresh result with
+the stale value kept.
+
+Remote arguments must be serializable by the framework transport, and remote
+resources must not rely on `debugArgs` to hide non-serializable loader inputs:
+the endpoint runs `load(...args)` with the actual client-controlled arguments.
+Remote loaders are public request handlers — they must authenticate,
+authorize, and validate exactly like any hand-written API route, using module
+scope or whatever request context the framework endpoint provides (see Loader
+Inputs).
+
+Without a framework, the same shape is a one-liner: an isomorphic
+`dataResource` whose client loader fetches an endpoint the app owns.
 
 ## Reads
 
@@ -130,11 +137,11 @@ by resource and args, by exact key, by attributed error, by key prefix:
 
 Loads are generation-guarded: a superseded load's settlement is inert.
 
-Invalidating a hydrate-only entry that has no client loader and no remote
-fetcher marks it stale but leaves the fulfilled value readable. It revalidates
-only when a server render or payload refresh hydrates a newer value. It must
-not self-destruct into a rejected "missing loader" entry just because a client
-invalidation targeted it.
+Invalidating a hydrate-only entry (no client loader) marks it stale but
+leaves the fulfilled value readable. It revalidates only when a server render
+or payload refresh hydrates a newer value. It must not self-destruct into a
+rejected "missing loader" entry just because a client invalidation targeted
+it.
 
 ## Ambient Store Vs Explicit Handle
 
@@ -165,15 +172,9 @@ fresh value.
 
 Payload navigation does not make a second data request: data read while
 rendering the server route segment streams in the same payload response as
-`data` rows. The direct remote-data endpoint is only for client-side cache
-misses and invalidations outside a route payload render, and only for
-`serverDataResource` exports that explicitly declare `remote: true`.
-
-Remote loaders are public request handlers. They must authenticate, authorize,
-and validate client-controlled arguments exactly like any manually written API
-route. Loaders receive no request context (see Loader Inputs), so those checks
-live in the loader's own module scope or in the framework endpoint that
-invokes it.
+`data` rows. The framework data endpoint (Fig Start's `remoteDataResource` —
+see Remote Refresh Is A Framework Layer) serves only client-side cache misses
+and refreshes outside a route payload render.
 
 ## Error Attribution
 

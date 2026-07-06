@@ -1,4 +1,5 @@
 import { serverDataResource } from "@bgub/fig-data/server";
+import { remoteDataResource } from "@bgub/fig-start/server";
 import { postResourceKey, postService, type Post } from "./data.ts";
 
 export interface RemotePostStatus {
@@ -33,13 +34,12 @@ export const postResource = serverDataResource<[string], Post>({
 });
 
 // Server data with remote refresh: browser imports of this `.server.ts` export
-// become a dataResource.remote(...) stub, so client refreshes call Fig Start's
-// data endpoint instead of bundling this loader.
-export const remotePostStatusResource = serverDataResource<
+// become a plain dataResource whose loader calls Fig Start's data endpoint,
+// so client refreshes never bundle this loader.
+export const remotePostStatusResource = remoteDataResource<
   [string],
   RemotePostStatus
 >({
-  remote: true,
   key: (id: string) => ["remote-post-status", id],
   load: async (id: string) => {
     const post = await postService.find(id);
