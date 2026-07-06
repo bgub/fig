@@ -1,10 +1,10 @@
 import {
+  Assets,
   createElement,
   type FigClientReference,
   type FigElement,
   type FigNode,
   type Props,
-  Assets,
 } from "./element.ts";
 
 export type AssetResourceBlocking = "reveal" | "none";

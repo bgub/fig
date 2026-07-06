@@ -1,23 +1,21 @@
+import type { Server } from "node:http";
 import {
-  createElement,
-  type FigClientReference,
-  type FigDataHydrationEntry,
-  type FigNode,
-  type FigAssetResource,
-  type FigAssetResourceList,
-  Fragment,
   assets,
-  type Props,
-} from "@bgub/fig";
-import { assetResourceKey } from "@bgub/fig/internal";
-import {
-  dataResource,
+  createElement,
   type DataResource,
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
+  dataResource,
+  type FigAssetResource,
+  type FigAssetResourceList,
+  type FigClientReference,
+  type FigDataHydrationEntry,
+  type FigNode,
+  Fragment,
+  type Props,
 } from "@bgub/fig";
-import { normalizeDataResourceKey } from "@bgub/fig/internal";
+import { assetResourceKey, normalizeDataResourceKey } from "@bgub/fig/internal";
 import {
   escapeAttribute,
   escapeText,
@@ -34,20 +32,19 @@ import {
   type PayloadModel,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
-import type { Server } from "node:http";
 import {
-  DATA_SCRIPT_ID,
+  CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
   DATA_FRAME_ATTR,
+  DATA_SCRIPT_ID,
   DATA_STREAM_GLOBAL,
   PAYLOAD_BOUNDARY_HEADER,
   PAYLOAD_FRAME_ATTR,
   PAYLOAD_ROUTE_ID_HEADER,
   PAYLOAD_SEGMENT_ID_HEADER,
-  ROOT_ELEMENT_ID,
   PAYLOAD_SEGMENTS_SCRIPT_ID,
   PAYLOAD_STREAM_GLOBAL,
-  CLIENT_REFERENCE_MODULES_GLOBAL,
+  ROOT_ELEMENT_ID,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedPayloadFrame,
   type SerializedPayloadSegment,
@@ -57,15 +54,15 @@ import {
   Outlet,
   RouterProvider,
   ServerRouteContentProvider,
-  ServerRouteRenderProvider,
   type ServerRouteContentStore,
+  ServerRouteRenderProvider,
 } from "./components.tsx";
 import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute, resolveServerClientReference } from "./internal.ts";
+import type { AnyRoute } from "./route.ts";
 import type { LoadResult } from "./router.ts";
 import { createRouter } from "./router.ts";
 import { RouterContext } from "./router-context.ts";
-import type { AnyRoute } from "./route.ts";
 import { contentTypeFor } from "./server-runtime/content-type.ts";
 import { runStartRuntime } from "./server-runtime/runtime.ts";
 

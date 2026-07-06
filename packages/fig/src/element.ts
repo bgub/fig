@@ -1,5 +1,5 @@
-import { readPromise } from "./hooks.ts";
 import type { DataResourceKey } from "./data.ts";
+import { readPromise } from "./hooks.ts";
 import type { ClientReferenceAssets } from "./resource.ts";
 
 export type Key = string | number;

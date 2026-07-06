@@ -1,7 +1,7 @@
 import { createElement, useState } from "@bgub/fig";
+import { runWithEventPriority } from "@bgub/fig-reconciler";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, on } from "./index.ts";
-import { runWithEventPriority } from "@bgub/fig-reconciler";
 import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();

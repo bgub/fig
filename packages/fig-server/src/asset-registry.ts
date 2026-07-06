@@ -1,8 +1,8 @@
 import { type FigAssetResource, type Props } from "@bgub/fig";
 import {
-  assetResourceKey,
   assetResourceDestination,
   assetResourceHostAttributes,
+  assetResourceKey,
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 

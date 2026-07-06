@@ -1,4 +1,3 @@
-import { NormalPriority } from "./scheduler.ts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   AllTransitionLanes,
@@ -22,8 +21,8 @@ import {
   NonIdleLanes,
   NoTimestamp,
   OffscreenLane,
-  requestUpdateLane,
   RetryLanes,
+  requestUpdateLane,
   runWithPriority,
   runWithTransition,
   SelectiveHydrationLane,
@@ -33,6 +32,7 @@ import {
   TransitionLane2,
   TransitionLane3,
 } from "./lanes.ts";
+import { NormalPriority } from "./scheduler.ts";
 
 function root(): LaneRoot {
   return {

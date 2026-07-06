@@ -1,10 +1,10 @@
 import { type FigAssetResource, type Props } from "@bgub/fig";
 import {
-  assetResourceKey,
-  isFigAssetResource,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
   assetResourceHostAttributes,
+  assetResourceKey,
+  isFigAssetResource,
 } from "@bgub/fig/internal";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { updateElement } from "./props.ts";

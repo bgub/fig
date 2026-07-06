@@ -1,6 +1,6 @@
 import type { FigNode } from "@bgub/fig";
-import type { RouteParams } from "./path-types.ts";
 import type { RegisteredContext } from "./index.ts";
+import type { RouteParams } from "./path-types.ts";
 
 export type { RegisteredContext } from "./index.ts";
 

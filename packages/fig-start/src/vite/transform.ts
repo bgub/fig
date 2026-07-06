@@ -2,9 +2,9 @@ import { dirname, resolve } from "node:path";
 import babel, { type PluginObj } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 import {
+  type ClientDataResourceStub,
   collectServerDataResourceStubs,
   discoverServerDataResources,
-  type ClientDataResourceStub,
   type ServerDataResourceRef,
 } from "../../../fig-vite/src/data/index.ts";
 import { rootRelative } from "./path-utils.ts";

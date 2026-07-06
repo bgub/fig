@@ -2,25 +2,26 @@
 import {
   clientReference,
   createElement,
+  dataResource,
   type FigNode,
   modulepreload,
+  readData,
   readPromise,
-  stylesheet,
   Suspense,
+  stylesheet,
 } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vite-plus/test";
-import { hydrateStart, remoteDataLoader } from "./client.ts";
-import { Outlet } from "./components.tsx";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   PAYLOAD_BOUNDARY_HEADER,
 } from "./bootstrap.ts";
+import { hydrateStart, remoteDataLoader } from "./client.ts";
+import { Outlet } from "./components.tsx";
 import { markServerRoute, serverClientReference } from "./internal.ts";
+import type { AnyRoute } from "./route.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRequestHandler } from "./server.ts";
-import type { AnyRoute } from "./route.ts";
 
 // A manual client reference (the @bgub/fig-start/vite plugin generates these).
 const islandId = "test/Island.tsx#Island";

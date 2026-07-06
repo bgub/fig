@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
+import type { StartHandler } from "../server.ts";
 import {
   type ClientAssetResolver,
   isServableAssetPath,
   requestPathname,
 } from "../server-assets.ts";
-import type { StartHandler } from "../server.ts";
 import { contentTypeFor } from "./content-type.ts";
 
 // Wraps the route handler with built-client-asset serving, staying entirely

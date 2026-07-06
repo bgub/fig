@@ -1,31 +1,32 @@
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { assertNoServerDataResourceImport } from "../../../fig-vite/src/data/index.ts";
 import {
   type OutputBundle,
   renderClientAssetManifest,
 } from "./asset-manifest.ts";
-import {
-  CSS_MODULE_PREFIX,
-  CLIENT_ASSET_MANIFEST_FILE,
-  CLIENT_ENTRY_ID,
-  CLIENT_RUNTIME_ID,
-  DEV_ENV_ID,
-  MANIFEST_ID,
-  ROOT_RELATIVE_VIRTUAL_IDS,
-  SERVER_DATA_RESOURCES_ID,
-  SERVER_ENTRY_ID,
-  SERVER_MANIFEST_ID,
-  SERVER_ROUTE_ASSETS_ID,
-  SERVER_ROUTE_ASSET_MODULE_PREFIX,
-  resolvedVirtualId,
-} from "./ids.ts";
-import { outputDirectory, type OutputOptions } from "./path-utils.ts";
 import {
   decodeIdPath,
   encodeIdPath,
   isCssModuleSpecifier,
   renderCssModule,
 } from "./css-modules.ts";
+import {
+  CLIENT_ASSET_MANIFEST_FILE,
+  CLIENT_ENTRY_ID,
+  CLIENT_RUNTIME_ID,
+  CSS_MODULE_PREFIX,
+  DEV_ENV_ID,
+  MANIFEST_ID,
+  ROOT_RELATIVE_VIRTUAL_IDS,
+  resolvedVirtualId,
+  SERVER_DATA_RESOURCES_ID,
+  SERVER_ENTRY_ID,
+  SERVER_MANIFEST_ID,
+  SERVER_ROUTE_ASSET_MODULE_PREFIX,
+  SERVER_ROUTE_ASSETS_ID,
+} from "./ids.ts";
+import { type OutputOptions, outputDirectory } from "./path-utils.ts";
 import {
   renderClientEntry,
   renderClientRuntime,
@@ -43,7 +44,6 @@ import {
   renderStaticAssetModule,
 } from "./static-assets.ts";
 import { isTailwindCssEntry, transformTailwindCss } from "./tailwind.ts";
-import { assertNoServerDataResourceImport } from "../../../fig-vite/src/data/index.ts";
 import {
   assertNoRemoteDataResourceImport,
   REMOTE_DATA_RESOURCE_CALLEE,

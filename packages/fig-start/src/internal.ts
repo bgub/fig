@@ -1,6 +1,6 @@
 import {
-  clientReference,
   type ClientReferenceOptions,
+  clientReference,
   type ElementType,
   type FigClientReference,
   type Props,

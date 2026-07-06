@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
+import { assetImportSpecifiers } from "./asset-imports.ts";
 import { cssModuleHref, cssModuleIdPath } from "./css-modules.ts";
+import {
+  CLIENT_ENTRY_ID,
+  resolvedVirtualId,
+  SERVER_ROUTE_ASSET_MODULE_PREFIX,
+} from "./ids.ts";
 import {
   normalizePath,
   outputHref,
@@ -12,12 +18,6 @@ import {
   isPreloadableAsset,
   staticAssetHref,
 } from "./static-assets.ts";
-import {
-  CLIENT_ENTRY_ID,
-  SERVER_ROUTE_ASSET_MODULE_PREFIX,
-  resolvedVirtualId,
-} from "./ids.ts";
-import { assetImportSpecifiers } from "./asset-imports.ts";
 
 export type OutputBundle = Record<string, OutputAsset | OutputChunk>;
 

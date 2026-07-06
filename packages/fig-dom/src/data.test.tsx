@@ -1,20 +1,18 @@
+import type { DataResourceKey } from "@bgub/fig";
 import {
+  Activity,
+  createElement,
   dataResource,
+  ErrorBoundary,
   invalidateData,
   preloadData,
   readData,
   readDataStore,
   refreshData,
-} from "@bgub/fig";
-import {
-  Activity,
-  createElement,
-  ErrorBoundary,
   Suspense,
   useReactive,
   useState,
 } from "@bgub/fig";
-import type { DataResourceKey } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, on } from "./index.ts";
 import {

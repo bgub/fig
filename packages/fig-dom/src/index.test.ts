@@ -1,4 +1,4 @@
-import { createElement, readPromise, stylesheet, Suspense } from "@bgub/fig";
+import { createElement, readPromise, Suspense, stylesheet } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, insertAssetResources } from "./index.ts";
 import {

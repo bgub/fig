@@ -12,8 +12,8 @@ import { PAYLOAD_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
 import { hrefFrom } from "./location.ts";
-import type { RouterLocation } from "./types.ts";
 import { RouterContext, useRouter, useRouterState } from "./router-context.ts";
+import type { RouterLocation } from "./types.ts";
 
 // Tracks how deep into the matched chain we are. Each rendered route component
 // is wrapped one level deeper, so an <Outlet/> inside it renders the next match.

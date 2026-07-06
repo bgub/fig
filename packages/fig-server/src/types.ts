@@ -1,13 +1,13 @@
 import type {
+  DataResourceKeyInput,
   ElementType,
-  FigClientReference,
-  FigNode,
   FigAssetResource,
   FigAssetResourceList,
+  FigClientReference,
   FigDataHydrationEntry,
+  FigNode,
   Props,
 } from "@bgub/fig";
-import type { DataResourceKeyInput } from "@bgub/fig";
 
 export interface ServerRenderOptions {
   /**

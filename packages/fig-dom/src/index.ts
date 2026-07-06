@@ -11,23 +11,17 @@ import {
   validateTextNesting,
 } from "@bgub/fig/internal";
 import {
-  acquireDocumentResource,
-  adoptDocumentResource,
-  releaseDocumentResource,
-  updateHoistedResource,
-} from "./asset-resources.ts";
-import {
-  isWithinSuspenseBoundary,
-  removeNode,
-  removeSuspenseBoundaryRange,
-  suspenseBoundaryFor,
-} from "./suspense-markers.ts";
-import {
   createRenderer,
   type FigRoot,
   type FigRootOptions,
   type HostConfig,
 } from "@bgub/fig-reconciler";
+import {
+  acquireDocumentResource,
+  adoptDocumentResource,
+  releaseDocumentResource,
+  updateHoistedResource,
+} from "./asset-resources.ts";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { composeBind, resumeBind, suspendBind } from "./bind.ts";
 import {
@@ -39,8 +33,14 @@ import {
   setEventBatching,
   unregisterRoot,
 } from "./events.ts";
-import { configureDomRefreshScheduler } from "./refresh.ts";
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
+import { configureDomRefreshScheduler } from "./refresh.ts";
+import {
+  isWithinSuspenseBoundary,
+  removeNode,
+  removeSuspenseBoundaryRange,
+  suspenseBoundaryFor,
+} from "./suspense-markers.ts";
 import {
   elementName,
   htmlNamespace,
@@ -56,6 +56,13 @@ type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
 declare const process: { env: { NODE_ENV?: string } };
 
 export { insertAssetResources } from "./asset-resources.ts";
+export type { Bind } from "./bind.ts";
+export {
+  type EventCallback,
+  type EventDescriptor,
+  type EventOptions,
+  on,
+} from "./events.ts";
 export type {
   EmptyPropValue,
   HostEvents,
@@ -64,13 +71,6 @@ export type {
   HostStyle,
 } from "./jsx.ts";
 export { composeBind };
-export type { Bind } from "./bind.ts";
-export {
-  type EventCallback,
-  type EventDescriptor,
-  type EventOptions,
-  on,
-} from "./events.ts";
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>

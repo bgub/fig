@@ -1,4 +1,4 @@
-import { transformModule, type TransformResult } from "./transform.ts";
+import { type TransformResult, transformModule } from "./transform.ts";
 
 const VIRTUAL_ID = "virtual:fig-refresh";
 const RESOLVED_VIRTUAL_ID = "\0virtual:fig-refresh";
@@ -61,13 +61,16 @@ export { register, setSignature };
 `;
 }
 
-export { transformModule };
-
 export {
-  figData,
   type FigDataPlugin,
   type FigDataPluginOptions,
+  figData,
 } from "./data/index.ts";
+export type {
+  ClientDataResourceStub,
+  ServerDataClientStubResult,
+  ServerDataResourceRef,
+} from "./data/transform.ts";
 export {
   assertNoServerDataResourceImport,
   collectServerDataResourceStubs,
@@ -76,8 +79,4 @@ export {
   rootRelative,
   transformServerDataClientStub,
 } from "./data/transform.ts";
-export type {
-  ClientDataResourceStub,
-  ServerDataClientStubResult,
-  ServerDataResourceRef,
-} from "./data/transform.ts";
+export { transformModule };

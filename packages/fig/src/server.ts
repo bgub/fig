@@ -4,7 +4,7 @@ import type {
   DataResourceKeyInput,
   DataResourceLoadContext,
 } from "./data.ts";
-import { dataResource, type DataResourceOptions } from "./data-store.ts";
+import { type DataResourceOptions, dataResource } from "./data-store.ts";
 
 // Same options as dataResource, but the server-only loader is required —
 // a load-less declaration belongs in a shared module as a key-only resource.

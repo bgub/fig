@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
+import { rootRelative } from "./path-utils.ts";
 import {
   assertNoRemoteDataResourceImport,
   clientRefId,
   transformServerModule,
   transformServerRouteClientStub,
 } from "./transform.ts";
-import { rootRelative } from "./path-utils.ts";
 
 const root = "/project";
 

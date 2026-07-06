@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
-import { StartConfigError } from "./errors.ts";
 import { normalizeStartRuntimeConfig } from "./config.ts";
+import { StartConfigError } from "./errors.ts";
 
 describe("normalizeStartRuntimeConfig", () => {
   it("defaults to development mode and no client asset cache", async () => {

@@ -25,7 +25,7 @@ export function jsx(
 // The automatic-runtime contract is exactly jsx/jsxs/jsxDEV/Fragment. jsxDEV
 // aliases jsx: the dev transform's extra arguments (isStaticChildren, source,
 // self) are ignored — Fig builds component stacks from fibers instead.
-export { jsx as jsxs, jsx as jsxDEV, Fragment };
+export { Fragment, jsx as jsxs, jsx as jsxDEV };
 
 // The JSX namespace TypeScript resolves under jsxImportSource: "@bgub/fig".
 // IntrinsicElements is deliberately empty here: host-prop vocabulary belongs

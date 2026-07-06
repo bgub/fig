@@ -1,13 +1,13 @@
-import { describe, expect, it } from "vite-plus/test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { figStart } from "./index.ts";
+import { describe, expect, it } from "vite-plus/test";
 import {
   CLIENT_ENTRY_ID,
   CLIENT_RUNTIME_ID,
   resolvedVirtualId,
 } from "./ids.ts";
+import { figStart } from "./index.ts";
 
 describe("@bgub/fig-start/vite plugin", () => {
   it("serves generated client and server entries", async () => {

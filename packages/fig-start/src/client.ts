@@ -2,13 +2,13 @@ import {
   createElement,
   type DataResourceLoadContext,
   type ElementType,
-  type FigNode,
   ErrorBoundary,
+  type FigDataHydrationEntry,
+  type FigDataStoreHandle,
+  type FigNode,
   type Props,
   readPromise,
   Suspense,
-  type FigDataHydrationEntry,
-  type FigDataStoreHandle,
   useExternalStore,
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
@@ -28,17 +28,17 @@ import {
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
-  DATA_SCRIPT_ID,
   DATA_FRAME_ATTR,
+  DATA_SCRIPT_ID,
   DATA_STREAM_GLOBAL,
-  ROOT_ELEMENT_ID,
   PAYLOAD_FRAME_ATTR,
   PAYLOAD_SEGMENTS_SCRIPT_ID,
   PAYLOAD_STREAM_GLOBAL,
+  ROOT_ELEMENT_ID,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedPayloadFrame,
-  type SerializedRouterState,
   type SerializedPayloadSegment,
+  type SerializedRouterState,
 } from "./bootstrap.ts";
 import {
   RouterProvider,
@@ -47,8 +47,8 @@ import {
 } from "./components.tsx";
 import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
-import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { AnyRoute } from "./route.ts";
+import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { RouterLocation } from "./types.ts";
 
 type ServerRouteResponse = ReturnType<typeof createPayloadResponse>;

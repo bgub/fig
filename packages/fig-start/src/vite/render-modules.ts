@@ -5,8 +5,8 @@ import {
   CLIENT_RUNTIME_ID,
   DEV_ENV_ID,
   SERVER_DATA_RESOURCES_ID,
-  SERVER_ROUTE_ASSETS_ID,
   SERVER_ROUTE_ASSET_MODULE_PREFIX,
+  SERVER_ROUTE_ASSETS_ID,
 } from "./ids.ts";
 import { rootAbsolutePath, rootRelativeImport } from "./path-utils.ts";
 import {

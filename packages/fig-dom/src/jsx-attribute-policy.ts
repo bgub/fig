@@ -1,12 +1,12 @@
 import type { FigNode, Key } from "@bgub/fig";
+import type { Bind } from "./bind.ts";
+import type { EventDescriptor } from "./events.ts";
 import type {
   HtmlAttributeNameByTag,
   HtmlGlobalAttributeName,
   SvgAttributeNameByTag,
   SvgGlobalAttributeName,
 } from "./jsx-attributes.generated.ts";
-import type { Bind } from "./bind.ts";
-import type { EventDescriptor } from "./events.ts";
 
 // This file is the hand-written policy layer over the generated attribute
 // snapshot. Keep external vocabulary churn in jsx-attributes.generated.ts and

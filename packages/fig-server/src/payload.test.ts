@@ -1,20 +1,20 @@
 import {
+  assets,
   clientReference,
   createContext,
   createElement,
   type ElementType,
   type FigElement,
   type FigNode,
-  font,
   Fragment,
+  font,
   lazy,
   modulepreload,
   preload,
   readContext,
   readPromise,
-  assets,
-  stylesheet,
   Suspense,
+  stylesheet,
   title,
 } from "@bgub/fig";
 import {
@@ -22,12 +22,6 @@ import {
   readThenable,
   setCurrentDispatcher,
 } from "@bgub/fig/internal";
-import { createStaticDispatcher, deferred } from "./shared.ts";
-import {
-  controlledTextStream,
-  readStream,
-  streamFromString,
-} from "./test-utils.ts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   createPayloadResponse,
@@ -39,6 +33,12 @@ import {
   type PayloadFetch,
   renderToPayloadStream,
 } from "./payload.ts";
+import { createStaticDispatcher, deferred } from "./shared.ts";
+import {
+  controlledTextStream,
+  readStream,
+  streamFromString,
+} from "./test-utils.ts";
 
 type TestPayloadModel =
   | null

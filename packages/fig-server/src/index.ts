@@ -107,13 +107,13 @@ async function readStreamToString(
 }
 
 export type {
+  ServerAssetDestination,
+  ServerAssetErrorInfo,
+  ServerDocumentRenderResult,
   ServerErrorInfo,
   ServerErrorPayload,
-  ServerDocumentRenderResult,
   ServerFragmentRenderResult,
   ServerPrerenderOptions,
   ServerPrerenderResult,
-  ServerAssetDestination,
-  ServerAssetErrorInfo,
   ServerRenderOptions,
 } from "./types.ts";

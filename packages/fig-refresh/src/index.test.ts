@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
 import type { RefreshUpdate } from "@bgub/fig-reconciler/refresh";
+import { describe, expect, it } from "vite-plus/test";
 import {
   getFamilyByType,
   injectScheduleRefresh,

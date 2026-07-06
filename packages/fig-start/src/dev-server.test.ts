@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
+import { startDevServer } from "./dev-server.ts";
 import {
   closeServer,
   makeTestApp,
   serverPort,
 } from "./server-runtime/test-app.ts";
-import { startDevServer } from "./dev-server.ts";
 
 describe("startDevServer", () => {
   it("serves client assets and routes in development mode", async () => {

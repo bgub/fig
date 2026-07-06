@@ -4,12 +4,12 @@ import {
   discoverServerDataResources,
   type ServerDataResourceRef,
 } from "../../../fig-vite/src/data/index.ts";
+import { rootRelative } from "./path-utils.ts";
 import {
   type ClientRef,
   REMOTE_DATA_RESOURCE_CALLEE,
   transformServerModule,
 } from "./transform.ts";
-import { rootRelative } from "./path-utils.ts";
 
 export interface ServerRouteRef {
   id: string;

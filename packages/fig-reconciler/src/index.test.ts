@@ -1,25 +1,26 @@
 import {
+  assets,
   createElement,
+  dataResource,
   ErrorBoundary,
   meta,
+  readData,
   readPromise,
-  assets,
-  stylesheet,
   Suspense,
+  stylesheet,
   title,
   useMemo,
   useState,
 } from "@bgub/fig";
-import { dataResource, readData } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
-import { requestPaint } from "./scheduler.ts";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { createRenderer, type HostConfig } from "./index.ts";
 import type {
   FigDevtoolsCommitInspection,
   FigDevtoolsGlobalHook,
   FigDevtoolsRootSnapshot,
 } from "./devtools.ts";
+import { createRenderer, type HostConfig } from "./index.ts";
+import { requestPaint } from "./scheduler.ts";
 
 class TestText {
   parentNode: TestElement | null = null;

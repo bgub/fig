@@ -1,19 +1,19 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   clientReference,
   createElement,
   type FigNode,
   modulepreload,
+  readData,
   readPromise,
-  stylesheet,
   Suspense,
+  stylesheet,
 } from "@bgub/fig";
-import { readData } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
 import { createPayloadResponse } from "@bgub/fig-server/payload";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -23,8 +23,8 @@ import {
   PAYLOAD_BOUNDARY_HEADER,
   PAYLOAD_FRAME_ATTR,
   PAYLOAD_ROUTE_ID_HEADER,
-  PAYLOAD_SEGMENTS_SCRIPT_ID,
   PAYLOAD_SEGMENT_ID_HEADER,
+  PAYLOAD_SEGMENTS_SCRIPT_ID,
   PAYLOAD_SLOT_ATTR,
   ROUTER_STATE_SCRIPT_ID,
 } from "./bootstrap.ts";
@@ -32,8 +32,8 @@ import { Outlet } from "./components.tsx";
 import { markServerRoute, serverClientReference } from "./internal.ts";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
-import { createClientAssetResolver } from "./server-assets.ts";
 import { createRequestHandler, remoteDataResource } from "./server.ts";
+import { createClientAssetResolver } from "./server-assets.ts";
 
 // A manually-declared client reference (the @bgub/fig-start/vite plugin will
 // generate these from `.tsx` imports inside `.server.tsx`).

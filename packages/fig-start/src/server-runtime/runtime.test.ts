@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { DATA_ENDPOINT_PATH } from "../bootstrap.ts";
-import { StartConfigError, StartListenError } from "./errors.ts";
 import { remoteDataResource } from "../server.ts";
+import { StartConfigError, StartListenError } from "./errors.ts";
 import { runStartRuntime } from "./runtime.ts";
 import { closeServer, makeTestApp, serverPort } from "./test-app.ts";
 

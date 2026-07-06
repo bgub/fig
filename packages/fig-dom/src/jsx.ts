@@ -2,8 +2,8 @@
 import type {} from "@bgub/fig/jsx-runtime";
 import type {
   HtmlHostProps,
-  OpenHtmlHostProps,
   OpenHostProps,
+  OpenHtmlHostProps,
   SvgHostProps,
 } from "./jsx-attribute-policy.ts";
 
@@ -13,8 +13,8 @@ export type {
   HostProps,
   HostStyle,
   HtmlHostProps,
-  OpenHtmlHostProps,
   OpenHostProps,
+  OpenHtmlHostProps,
   OpenSvgHostProps,
   SvgHostProps,
 } from "./jsx-attribute-policy.ts";

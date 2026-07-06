@@ -1,11 +1,10 @@
-import { createElement } from "@bgub/fig";
-import { readData } from "@bgub/fig";
+import { createElement, readData } from "@bgub/fig";
 import { createDataStore } from "@bgub/fig/internal";
 import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vite-plus/test";
-import { readStream } from "./test-utils.ts";
 import { prerender, renderToStream } from "./index.ts";
 import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
+import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
   it("renders data resources and exposes fulfilled entries", async () => {

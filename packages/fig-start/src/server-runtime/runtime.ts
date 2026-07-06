@@ -1,14 +1,14 @@
+import { createServer, type Server } from "node:http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Cause, Deferred, Effect, Exit, Runtime } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { createServer, type Server } from "node:http";
-import { createClientAssetResolver } from "../server-assets.ts";
 import type { StartHandlerOptions } from "../server.ts";
 import { createRequestHandler } from "../server.ts";
+import { createClientAssetResolver } from "../server-assets.ts";
 import {
-  type StartRuntimeConfigInput,
   normalizeStartRuntimeConfig,
+  type StartRuntimeConfigInput,
 } from "./config.ts";
 import { type StartConfigError, StartListenError } from "./errors.ts";
 import { createStartWebHandler } from "./web-handler.ts";

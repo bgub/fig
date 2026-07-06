@@ -1,4 +1,5 @@
 import {
+  type FigAssetResource,
   font,
   meta,
   modulepreload,
@@ -6,7 +7,6 @@ import {
   script,
   stylesheet,
   title,
-  type FigAssetResource,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { AssetResourceRegistry } from "./asset-registry.ts";

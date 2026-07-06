@@ -54,8 +54,8 @@ export type {
 export {
   isRedirect,
   type Redirect,
-  redirect,
   type RedirectOptions,
+  redirect,
 } from "./redirect.ts";
 export {
   type AnyRoute,

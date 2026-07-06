@@ -1,16 +1,39 @@
 export { createContext, type FigContext } from "./context.ts";
+// Data-protocol types referenced by public renderer APIs (root.data,
+// createRoot({ initialData }), the server results' getData()). Types only:
+// every runtime data API is importable exclusively from @bgub/fig —
+// that split is what lets renderer bundles ship without the store
+// implementation, and type exports do not weaken it.
+export type {
+  DataRefreshResult,
+  DataResource,
+  DataResourceKey,
+  DataResourceKeyInput,
+  DataResourceLoadContext,
+  FigDataHydrationEntry,
+  FigDataStoreHandle,
+} from "./data.ts";
 export {
+  type DataResourceOptions,
+  dataResource,
+  invalidateData,
+  invalidateDataError,
+  invalidateDataKey,
+  invalidateDataPrefix,
+  readDataStore,
+  refreshData,
+} from "./data-store.ts";
+export {
+  Activity,
+  type ActivityMode,
+  type ActivityProps,
+  type ClientReferenceOptions,
   clientReference,
   createElement,
   createElement as h,
   createPortalNode,
-  ErrorBoundary,
-  Fragment,
-  lazy,
-  Activity,
-  Suspense,
-  type ClientReferenceOptions,
   type ElementType,
+  ErrorBoundary,
   type ErrorBoundaryProps,
   type ErrorInfo,
   type FigClientReference,
@@ -18,16 +41,30 @@ export {
   type FigNode,
   type FigPortal,
   type FigText,
+  Fragment,
   type Key,
   type LazyLoader,
+  lazy,
   type Props,
-  type ActivityMode,
-  type ActivityProps,
+  Suspense,
   type SuspenseProps,
 } from "./element.ts";
+// The data layer: definitions and freshness verbs. The store implementation
+// travels with dataResource itself (a factory slot on each resource), so
+// bundles that never define a resource never ship the store.
 export {
+  type ActionStateAction,
+  type ActionStateRunner,
+  type DependencyList,
+  type EffectCallback,
+  type ExternalStoreSubscribe,
+  preloadData,
   readContext,
+  readData,
   readPromise,
+  type StableEventArgs,
+  type StartTransition,
+  type StateSetter,
   useActionState,
   useBeforeLayout,
   useBeforePaint,
@@ -40,69 +77,32 @@ export {
   useStableEvent,
   useState,
   useTransition,
-  type ActionStateAction,
-  type ActionStateRunner,
-  type DependencyList,
-  type EffectCallback,
-  type ExternalStoreSubscribe,
-  type StableEventArgs,
-  type StateSetter,
-  type StartTransition,
 } from "./hooks.ts";
 export {
+  type AssetResourceBlocking,
+  type AssetsOptions,
   assets,
-  font,
-  clientReferenceAssets,
-  meta,
-  modulepreload,
-  preconnect,
-  preload,
-  script,
-  stylesheet,
-  title,
   type ClientReferenceAssets,
   type CrossOrigin,
+  clientReferenceAssets,
   type FetchPriority,
   type FigAssetResource,
   type FigAssetResourceList,
   type FontResource,
+  font,
   type MetaResource,
   type ModulePreloadResource,
+  meta,
+  modulepreload,
   type PreconnectResource,
   type PreloadResource,
-  type AssetResourceBlocking,
-  type AssetsOptions,
+  preconnect,
+  preload,
   type ScriptResource,
   type StylesheetResource,
+  script,
+  stylesheet,
   type TitleResource,
+  title,
 } from "./resource.ts";
-export { transition, type TransitionHandler } from "./transition.ts";
-// Data-protocol types referenced by public renderer APIs (root.data,
-// createRoot({ initialData }), the server results' getData()). Types only:
-// every runtime data API is importable exclusively from @bgub/fig —
-// that split is what lets renderer bundles ship without the store
-// implementation, and type exports do not weaken it.
-export type {
-  DataRefreshResult,
-  DataResourceKey,
-  DataResourceKeyInput,
-  DataResourceLoadContext,
-  FigDataHydrationEntry,
-  DataResource,
-  FigDataStoreHandle,
-} from "./data.ts";
-
-// The data layer: definitions and freshness verbs. The store implementation
-// travels with dataResource itself (a factory slot on each resource), so
-// bundles that never define a resource never ship the store.
-export { preloadData, readData } from "./hooks.ts";
-export {
-  dataResource,
-  invalidateData,
-  invalidateDataError,
-  invalidateDataKey,
-  invalidateDataPrefix,
-  readDataStore,
-  refreshData,
-  type DataResourceOptions,
-} from "./data-store.ts";
+export { type TransitionHandler, transition } from "./transition.ts";

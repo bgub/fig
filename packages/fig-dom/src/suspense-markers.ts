@@ -1,13 +1,13 @@
-import type {
-  DehydratedSuspenseBoundary,
-  DehydratedSuspenseError,
-} from "@bgub/fig-reconciler";
 import {
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
   SUSPENSE_END_MARKER,
   SUSPENSE_PENDING_PREFIX,
 } from "@bgub/fig/internal";
+import type {
+  DehydratedSuspenseBoundary,
+  DehydratedSuspenseError,
+} from "@bgub/fig-reconciler";
 
 // Parsing of the server's Suspense streaming markers (see
 // @bgub/fig/internal suspense-protocol) into dehydrated boundaries, plus the

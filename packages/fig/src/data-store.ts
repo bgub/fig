@@ -1,19 +1,19 @@
 import {
-  dataResourceKeysForError,
-  markDataResourceError,
-  resolveCurrentDataStore,
-  setCurrentDataStore,
   type DataRefreshResult,
+  type DataResource,
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
+  type DataStoreEntrySnapshot,
+  dataResourceKeysForError,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
-  type DataResource,
-  type FigDataStoreFactory,
   type FigDataStore,
-  type DataStoreEntrySnapshot,
+  type FigDataStoreFactory,
   type FigDataStoreHandle,
+  markDataResourceError,
+  resolveCurrentDataStore,
+  setCurrentDataStore,
 } from "./data.ts";
 
 declare const process: { env: { NODE_ENV?: string } };

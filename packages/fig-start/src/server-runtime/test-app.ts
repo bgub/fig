@@ -1,11 +1,11 @@
-import { createElement } from "@bgub/fig";
-import type { Server } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createFileRoute, createRootRoute } from "../route.ts";
+import { createElement } from "@bgub/fig";
 import type { AnyRoute } from "../route.ts";
+import { createFileRoute, createRootRoute } from "../route.ts";
 
 // Shared server test fixture: a temp app dir with built client/server stubs
 // and a two-route tree whose rendered text is `${label} route`/`${label} home`.
