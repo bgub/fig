@@ -40,6 +40,13 @@ import {
   streamFromString,
 } from "./test-utils.ts";
 
+// The cancellation test observes Node's unhandled-rejection reporting; the
+// package compiles without @types/node, so declare the two hooks it uses.
+declare const process: {
+  on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+};
+
 type TestPayloadModel =
   | null
   | boolean
@@ -1230,6 +1237,39 @@ describe("payload rendering", () => {
 
     expect(isPayloadRequestCancelled(error)).toBe(true);
     expect(notifications).toBe(0);
+  });
+
+  it("cancelling a payload stream leaves no unhandled rejection", async () => {
+    const pending = deferred<string>();
+
+    function Slow() {
+      return createElement("p", null, readPromise(pending.promise));
+    }
+
+    const result = renderToPayloadStream(
+      createElement("section", null, createElement(Slow, null)),
+    );
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      // Client disconnect: the consumer cancels without awaiting allReady.
+      await result.stream.cancel(new Error("client disconnected"));
+      // unhandledRejection fires after the microtask queue drains; give it
+      // two macrotasks to surface before attaching our own handler.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
+    // Awaiting callers still observe the rejection.
+    await expect(result.allReady).rejects.toThrow("client disconnected");
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {

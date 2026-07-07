@@ -503,6 +503,11 @@ function createPayloadRequest(
     stream: null as never,
     workScheduled: false,
   };
+  // allReady also rejects through the stream when a consumer cancels (the
+  // normal client-disconnect path); the pre-attached no-op handler keeps it
+  // from becoming an unhandled rejection for callers that do not await it
+  // (await-ers still observe the rejection).
+  void request.allReady.promise.catch(() => undefined);
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
