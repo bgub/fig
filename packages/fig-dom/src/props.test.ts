@@ -437,6 +437,53 @@ describe("@bgub/fig-dom props", () => {
     expect(input.checked).toBe(true);
   });
 
+  it("controls checked without clobbering the default checked attribute", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    // defaultChecked deliberately precedes checked: with a single shared
+    // attribute the later prop would win, so this pins order-independence.
+    const app = (checked: boolean) =>
+      createElement("input", { defaultChecked: true, checked });
+
+    flushSync(() => root.render(app(false)));
+
+    const input = container.childNodes[0] as FakeElement;
+    expect(input.checked).toBe(false);
+    expect(input.defaultChecked).toBe(true);
+    expect(input.attributes.checked).toBe("true");
+
+    // The user toggles; the controlled prop re-asserts on commit without
+    // rewriting the element's default — form.reset() must still restore
+    // defaultChecked, not the last controlled state.
+    input.checked = true;
+    flushSync(() => root.render(app(false)));
+    expect(input.checked).toBe(false);
+    expect(input.defaultChecked).toBe(true);
+    expect(input.attributes.checked).toBe("true");
+
+    flushSync(() => root.render(app(true)));
+    expect(input.checked).toBe(true);
+    expect(input.defaultChecked).toBe(true);
+    expect(input.attributes.checked).toBe("true");
+  });
+
+  it("leaves the checked attribute untouched for controlled-only inputs", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("input", { checked: true })));
+
+    const input = container.childNodes[0] as FakeElement;
+    expect(input.checked).toBe(true);
+    expect(input.defaultChecked).toBe(false);
+    expect(input.attributes.checked).toBeUndefined();
+
+    flushSync(() => root.render(createElement("input", { checked: false })));
+    expect(input.checked).toBe(false);
+    expect(input.defaultChecked).toBe(false);
+    expect(input.attributes.checked).toBeUndefined();
+  });
+
   it("updates textarea content through value and defaultValue", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

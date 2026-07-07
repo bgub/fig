@@ -99,7 +99,10 @@ spec.
   scary-named string prop), not `dangerouslySetInnerHTML`.
 - Form `value` props are authoritative at commit time, not synchronously
   locked after native input events. `value` controls the live DOM value;
-  `defaultValue` owns the default value and HTML representation.
+  `defaultValue` owns the default value and HTML representation. The same
+  split applies to checkboxes and radios: `checked` writes only the live
+  property; `defaultChecked` owns the `checked` content attribute (the
+  `defaultChecked` reflection form reset restores).
 - JSX host-prop types come from the renderer: core's `JSX.IntrinsicElements`
   is deliberately empty and `@bgub/fig-dom` augments it with a per-tag
   `HostProps<E>` map, so `bind` infers the concrete element type per tag

@@ -387,11 +387,18 @@ function setChecked(
   options: { defaultChecked?: boolean; live?: boolean },
 ): void {
   const checked = value === true;
-  setAttribute(element, "checked", checked);
-  if (options.defaultChecked === true && "defaultChecked" in element) {
-    (element as unknown as { defaultChecked: boolean }).defaultChecked =
-      checked;
+
+  // The checked content attribute IS defaultChecked's reflection, so only
+  // the defaultChecked prop may touch it — a controlled `checked` writes the
+  // live property alone, mirroring value/defaultValue above.
+  if (options.defaultChecked === true) {
+    if ("defaultChecked" in element) {
+      (element as unknown as { defaultChecked: boolean }).defaultChecked =
+        checked;
+    }
+    setAttribute(element, "checked", checked);
   }
+
   if (options.live === true && "checked" in element) {
     (element as unknown as { checked: boolean }).checked = checked;
   }
