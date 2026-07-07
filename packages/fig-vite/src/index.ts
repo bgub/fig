@@ -1,7 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { type TransformResult, transformModule } from "./transform.ts";
 
 const VIRTUAL_ID = "virtual:fig-refresh";
 const RESOLVED_VIRTUAL_ID = "\0virtual:fig-refresh";
+const REFRESH_RUNTIME_IMPORT = viteFileImport(
+  import.meta.resolve("@bgub/fig-refresh"),
+);
+const DOM_REFRESH_IMPORT = viteFileImport(
+  import.meta.resolve("@bgub/fig-dom/refresh"),
+);
 
 export interface FigRefreshOptions {
   // Files to consider for the refresh transform. Defaults to JS/TS(X).
@@ -15,7 +22,11 @@ export interface FigVitePlugin {
   load(id: string): string | null;
   name: string;
   resolveId(id: string): string | null;
-  transform(code: string, id: string): Promise<TransformResult | null>;
+  transform(
+    code: string,
+    id: string,
+    options?: { ssr?: boolean },
+  ): Promise<TransformResult | null>;
 }
 
 export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
@@ -31,7 +42,9 @@ export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
     load(id) {
       return id === RESOLVED_VIRTUAL_ID ? virtualModuleCode() : null;
     },
-    async transform(code, id) {
+    async transform(code, id, transformOptions) {
+      if (transformOptions?.ssr === true) return null;
+
       const clean = id.split("?")[0] ?? id;
       if (clean.includes("/node_modules/") || !include.test(clean)) return null;
       return transformModule(code, clean);
@@ -42,8 +55,10 @@ export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
 // The virtual runtime module: wires the renderer to the refresh runtime once,
 // and exposes register/setSignature plus a microtask-batched refresh trigger.
 function virtualModuleCode(): string {
-  return `import { injectScheduleRefresh, performRefresh, register, setSignature } from "@bgub/fig-refresh";
-import { scheduleRefresh } from "@bgub/fig-dom/refresh";
+  return `import { injectScheduleRefresh, performRefresh, register, setSignature } from ${JSON.stringify(
+    REFRESH_RUNTIME_IMPORT,
+  )};
+import { scheduleRefresh } from ${JSON.stringify(DOM_REFRESH_IMPORT)};
 
 injectScheduleRefresh(scheduleRefresh);
 
@@ -59,6 +74,10 @@ export function enqueueRefresh() {
 
 export { register, setSignature };
 `;
+}
+
+function viteFileImport(url: string): string {
+  return `/@fs/${fileURLToPath(url)}`;
 }
 
 export {

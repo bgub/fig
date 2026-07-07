@@ -787,11 +787,65 @@ describe("payload rendering", () => {
       },
     });
 
-    expect(unwrapFunctionComponent(node)).toMatchObject({
+    expect(
+      unwrapFunctionComponent(unwrapFunctionComponent(node)),
+    ).toMatchObject({
       key: null,
       props: { initialCount: 12 },
       type: ClientLikeButton,
     });
+  });
+
+  it("preserves resolved client-reference component identity across refreshes", async () => {
+    const LikeButton = clientReference<{ initialCount: number }>({
+      id: "app/LikeButton.client.tsx#LikeButton",
+      load: () => Promise.resolve({}),
+    });
+
+    function ClientLikeButton() {
+      return null;
+    }
+
+    const response = createPayloadResponse({
+      resolveClientReference() {
+        return ClientLikeButton;
+      },
+    });
+
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          PayloadBoundary,
+          { id: "slot" },
+          createElement(LikeButton, { initialCount: 1 }),
+        ),
+      ),
+    );
+    const first = unwrapFunctionComponent(readPayloadRoot(response));
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(LikeButton, { initialCount: 2 }),
+        { refreshBoundary: "slot" },
+      ),
+    );
+    const refreshed = unwrapFunctionComponent(readPayloadRoot(response));
+
+    expect(first).toMatchObject({
+      key: null,
+      props: { initialCount: 1 },
+    });
+    expect(refreshed).toMatchObject({
+      key: null,
+      props: { initialCount: 2 },
+    });
+    expect(isValidElement(first) && isValidElement(refreshed)).toBe(true);
+    if (isValidElement(first) && isValidElement(refreshed)) {
+      expect(first.type).toBe(refreshed.type);
+    }
   });
 
   it("rejects functions passed across the server-to-client boundary", async () => {

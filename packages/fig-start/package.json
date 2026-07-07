@@ -37,6 +37,9 @@
       "default": "./dist/vite/index.js"
     }
   },
+  "bin": {
+    "fig-start": "./dist/cli.js"
+  },
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "files": [
@@ -62,9 +65,12 @@
     "@babel/preset-typescript": "^7.25.0",
     "@bgub/fig": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-refresh": "workspace:*",
     "@bgub/fig-server": "workspace:*",
+    "@bgub/fig-vite": "workspace:*",
     "@effect/platform-node": "4.0.0-beta.92",
-    "effect": "4.0.0-beta.92"
+    "effect": "4.0.0-beta.92",
+    "vite": "^7.3.2"
   },
   "peerDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

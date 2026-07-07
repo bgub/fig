@@ -9,15 +9,11 @@ export async function renderCssModule(
   root: string,
   id: string,
 ): Promise<string> {
-  const source = await readFile(id, "utf8");
-  const classes = cssModuleClasses(source, root, id);
-  const css = rewriteCssModuleClasses(source, classes);
+  const { classes, css } = await renderCssModuleStyles(root, id);
   const href = cssModuleHref(root, id);
-  const emitFile = (context as { emitFile?: (asset: unknown) => void })
-    .emitFile;
 
-  if (typeof emitFile === "function") {
-    emitFile.call(context, {
+  if (hasEmitFile(context)) {
+    context.emitFile({
       fileName: href.slice(1),
       source: css,
       type: "asset",
@@ -25,6 +21,29 @@ export async function renderCssModule(
   }
 
   return `const classes = ${JSON.stringify(classes)};\nexport default classes;\n`;
+}
+
+export async function renderCssModuleStyles(
+  root: string,
+  id: string,
+): Promise<{ classes: Record<string, string>; css: string }> {
+  const source = await readFile(id, "utf8");
+  const classes = cssModuleClasses(source, root, id);
+  const css = rewriteCssModuleClasses(source, classes);
+  return { classes, css };
+}
+
+interface EmitFileContext {
+  emitFile(asset: unknown): void;
+}
+
+function hasEmitFile(context: unknown): context is EmitFileContext {
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    "emitFile" in context &&
+    typeof context.emitFile === "function"
+  );
 }
 
 export function cssModuleHref(root: string, id: string): string {

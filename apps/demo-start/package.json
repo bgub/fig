@@ -6,7 +6,7 @@
     "build": "vp pack",
     "build:e2e": "vp run --filter @bgub/fig-demo-start... build",
     "dev": "portless",
-    "dev:app": "node ../dev-server.mjs start",
+    "dev:app": "fig-start dev --tailwind --public-url https://fig-demo-start.localhost/",
     "dev:build": "vp pack --watch --no-clean",
     "serve": "node dist/server.js",
     "serve:watch": "node --watch dist/server.js",

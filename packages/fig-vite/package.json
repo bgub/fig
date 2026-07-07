@@ -34,7 +34,9 @@
   "license": "MIT",
   "dependencies": {
     "@babel/core": "^7.25.0",
-    "@babel/preset-typescript": "^7.25.0"
+    "@babel/preset-typescript": "^7.25.0",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-refresh": "workspace:*"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",

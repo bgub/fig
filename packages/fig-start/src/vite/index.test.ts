@@ -8,6 +8,7 @@ import {
   resolvedVirtualId,
 } from "./ids.ts";
 import { figStart } from "./index.ts";
+import { staticAssetHref } from "./static-assets.ts";
 
 describe("@bgub/fig-start/vite plugin", () => {
   it("serves generated client and server entries", async () => {
@@ -49,6 +50,13 @@ import { start } from "/src/start.tsx";
 
 const { appName, onRecoverableError, ...serverOptions } = start;
 
+async function context(request) {
+  const appContext = await serverOptions.context?.(request);
+  return appContext === null || typeof appContext !== "object"
+    ? { appName }
+    : { appName, ...appContext };
+}
+
 function clientReferenceAssets(metadata) {
   const generated = resolveClientReferenceAssets(metadata);
   const app = serverOptions.clientReferenceAssets?.(metadata);
@@ -67,7 +75,7 @@ startServer({
   ...serverOptions,
   appUrl: import.meta.url,
   clientReferenceAssets,
-  context: () => ({ appName }),
+  context,
   serverDataResources,
   serverRouteAssets,
 }).catch((error) => {
@@ -254,9 +262,14 @@ export function Dashboard() {
     await writeFile(
       join(root, "src", "routes", "Island.tsx"),
       `import styles from "./Island.module.css";
+import markHref from "./island-mark.svg";
 export function Island() {
-  return <button class={styles.root}>Island</button>;
+  return <button class={styles.root}><img src={markHref} />Island</button>;
 }`,
+    );
+    await writeFile(
+      join(root, "src", "routes", "island-mark.svg"),
+      "<svg></svg>",
     );
 
     const plugin = figStart();
@@ -265,11 +278,15 @@ export function Island() {
 
     try {
       const code = await plugin.load(id ?? "");
+      const islandMarkHref = staticAssetHref(
+        root,
+        join(root, "src", "routes", "island-mark.svg"),
+      );
       expect(code).toContain('"/src/routes/Island.tsx#Island"');
       expect(code).toContain("const routes = {");
       expect(code).toContain('"/dashboard": { assets: [], css: [] }');
       expect(code).toContain("css: []");
-      expect(code).toContain("assets: []");
+      expect(code).toContain(`assets: ${JSON.stringify([islandMarkHref])}`);
       expect(code).toContain('module: "/src/routes/Island.tsx"');
       expect(code).toContain(
         'readFileSync(new URL("./fig-start-client-assets.json"',

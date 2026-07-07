@@ -2,7 +2,10 @@
 // args then see this typed context with no codegen.
 declare namespace FigStart {
   interface Register {
-    context: { appName: string };
+    context: {
+      appName: string;
+      serverTheme?: import("./theme.ts").ThemePreference;
+    };
   }
 }
 

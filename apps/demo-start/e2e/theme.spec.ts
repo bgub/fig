@@ -1,7 +1,8 @@
-import { expect, test, type BrowserContext } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { collectBrowserErrors } from "./browser-errors.ts";
 
 const THEME_COOKIE_NAME = "fig-demo-theme";
+type ThemePreference = "dark" | "light" | "system";
 
 test("applies system theme before client hydration when no cookie exists", async ({
   page,
@@ -18,10 +19,9 @@ test("applies system theme before client hydration when no cookie exists", async
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
-  const shell = page.locator(".fig-start-shell");
-  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
-  await expect(shell).toHaveAttribute("data-theme", "system");
-  await expect(shell).toHaveCSS("background-color", "rgb(16, 24, 32)");
+  await expectTheme(page, "system", {
+    backgroundColor: "rgb(16, 24, 32)",
+  });
   expect(await themeCookie(page.context())).toBeNull();
   expect(errors()).toEqual([]);
 });
@@ -43,10 +43,26 @@ test("uses stored theme before client hydration when system theme disagrees", as
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
-  const shell = page.locator(".fig-start-shell");
-  await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
-  await expect(shell).toHaveAttribute("data-theme", "system");
-  await expect(shell).toHaveCSS("background-color", "rgb(245, 247, 248)");
+  await expectTheme(page, "light", {
+    backgroundColor: "rgb(245, 247, 248)",
+  });
+  expect(errors()).toEqual([]);
+});
+
+test("keeps stored theme while data route Suspense resolves", async ({
+  context,
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await setThemeCookie(context, "dark");
+  await page.goto("/data", { waitUntil: "commit" });
+
+  await expectTheme(page, "dark");
+  await expect(page.locator('[data-data-value="Isomorphic"]')).toContainText(
+    "Hello Fig · server",
+  );
+  await expectTheme(page, "dark");
   expect(errors()).toEqual([]);
 });
 
@@ -60,41 +76,22 @@ test("hydrates, changes, and persists the shell theme", async ({
 
   await page.goto("/", { waitUntil: "commit" });
 
-  const shell = page.locator(".fig-start-shell");
-  await expect(page.locator("html")).toHaveClass(/(^| )dark( |$)/);
-  await expect(shell).toHaveAttribute("data-theme", "dark");
-
+  await expectTheme(page, "dark");
   const themeGroup = page.getByRole("group", { name: "Theme" });
-  await expect(
-    themeGroup.getByRole("button", { name: "Dark" }),
-  ).toHaveAttribute("aria-pressed", "true");
 
   await themeGroup.getByRole("button", { name: "Light" }).click();
 
-  await expect(shell).toHaveAttribute("data-theme", "light");
-  await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
-  await expect(
-    themeGroup.getByRole("button", { name: "Light" }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expectTheme(page, "light");
   await expect.poll(() => themeCookie(context)).toBe("light");
 
   await themeGroup.getByRole("button", { name: "System" }).click();
 
-  await expect(shell).toHaveAttribute("data-theme", "system");
-  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
-  await expect(
-    themeGroup.getByRole("button", { name: "System" }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expectTheme(page, "system");
   await expect.poll(() => themeCookie(context)).toBe("system");
 
   await page.reload({ waitUntil: "commit" });
 
-  await expect(shell).toHaveAttribute("data-theme", "system");
-  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
-  await expect(page.getByRole("button", { name: "System" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expectTheme(page, "system");
   expect(errors()).toEqual([]);
 });
 
@@ -107,26 +104,42 @@ test("changes away from system theme on the first click", async ({
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/", { waitUntil: "commit" });
 
-  const shell = page.locator(".fig-start-shell");
   const themeGroup = page.getByRole("group", { name: "Theme" });
-  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
-  await expect(shell).toHaveAttribute("data-theme", "system");
-  await expect(shell).toHaveCSS("background-color", "rgb(16, 24, 32)");
-  await expect(
-    themeGroup.getByRole("button", { name: "System" }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expectTheme(page, "system", {
+    backgroundColor: "rgb(16, 24, 32)",
+  });
 
   await themeGroup.getByRole("button", { name: "Light" }).click();
 
-  await expect(shell).toHaveAttribute("data-theme", "light");
-  await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
-  await expect(shell).toHaveCSS("background-color", "rgb(245, 247, 248)");
-  await expect(
-    themeGroup.getByRole("button", { name: "Light" }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expectTheme(page, "light", {
+    backgroundColor: "rgb(245, 247, 248)",
+  });
   await expect.poll(() => themeCookie(context)).toBe("light");
   expect(errors()).toEqual([]);
 });
+
+async function expectTheme(
+  page: Page,
+  theme: ThemePreference,
+  options: { backgroundColor?: string } = {},
+): Promise<void> {
+  const shell = page.locator(".fig-start-shell");
+  await expect(page.locator("html")).toHaveClass(
+    new RegExp(`(^| )${theme}( |$)`),
+  );
+  await expect(shell).toHaveAttribute("data-theme", theme);
+  await expect(
+    page.getByRole("button", { name: themeLabel(theme) }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  if (options.backgroundColor !== undefined) {
+    await expect(shell).toHaveCSS("background-color", options.backgroundColor);
+  }
+}
+
+function themeLabel(theme: ThemePreference): string {
+  return theme[0]?.toUpperCase() + theme.slice(1);
+}
 
 async function setThemeCookie(
   context: BrowserContext,

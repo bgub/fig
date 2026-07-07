@@ -5,8 +5,11 @@ import "./styles.css";
 
 export const start = {
   appName: "Fig Start",
+  context: (request) => ({
+    serverTheme: requestTheme(request),
+  }),
   html: (request) => ({
-    class: themeFromCookie(request.headers.get("cookie")),
+    class: requestTheme(request),
     suppressHydrationWarning: true,
   }),
   head: (
@@ -21,3 +24,7 @@ export const start = {
   },
   routes,
 } satisfies StartConfig;
+
+function requestTheme(request: Request) {
+  return themeFromCookie(request.headers.get("cookie"));
+}

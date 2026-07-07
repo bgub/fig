@@ -31,6 +31,8 @@ import {
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
   DATA_STREAM_GLOBAL,
+  DEV_SERVER_UPDATE_EVENT,
+  type DevServerUpdateMessage,
   PAYLOAD_FRAME_ATTR,
   PAYLOAD_SEGMENTS_SCRIPT_ID,
   PAYLOAD_STREAM_GLOBAL,
@@ -52,6 +54,19 @@ import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { RouterLocation } from "./types.ts";
 
 type ServerRouteResponse = ReturnType<typeof createPayloadResponse>;
+
+interface ViteHotContext {
+  on(
+    event: typeof DEV_SERVER_UPDATE_EVENT,
+    callback: (message: DevServerUpdateMessage) => void,
+  ): void;
+}
+
+declare global {
+  interface ImportMeta {
+    readonly hot?: ViteHotContext;
+  }
+}
 
 export interface StartClientOptions {
   container?: Element | null;
@@ -99,7 +114,11 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
 
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
-  const serverRouteContent = createServerRouteContent(options, router);
+  const serverRouteContent = createServerRouteContent(
+    options,
+    router,
+    createClientReferenceTypeCache(),
+  );
 
   // If the matched route was a `.server.tsx`, the document carries its payload
   // payload as streamed segment frames.
@@ -134,6 +153,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   getDataStream().s((entries) => root.data.hydrate(entries));
 
   installServerRouteFetcher(router, serverRouteContent);
+  installDevServerUpdateHandler(serverRouteContent);
   installLinkInterceptor(router);
   installPopStateHandler(router);
 
@@ -155,6 +175,7 @@ interface DataStream {
 
 function createServerRouteResponse(
   options: StartClientOptions,
+  clientReferenceTypes: ClientReferenceTypeCache,
   clientReferenceHydrationGate?: ClientReferenceHydrationGate,
 ): ServerRouteResponse {
   if (clientReferenceHydrationGate !== undefined) {
@@ -163,6 +184,7 @@ function createServerRouteResponse(
         createHydratableClientReference(
           options,
           metadata,
+          clientReferenceTypes,
           clientReferenceHydrationGate,
         ),
     });
@@ -170,17 +192,23 @@ function createServerRouteResponse(
 
   return createPayloadResponse({
     loadClientReference: options.loadClientReference,
-    resolveClientReference: options.resolveClientReference,
+    resolveClientReference: (metadata) =>
+      resolveStableClientReference(options, metadata, clientReferenceTypes),
   });
 }
 
 function createHydratableClientReference(
   options: StartClientOptions,
   metadata: PayloadClientReferenceMetadata,
+  clientReferenceTypes: ClientReferenceTypeCache,
   hydrationGate: ClientReferenceHydrationGate,
 ): ElementType {
   if (metadata.ssr === true) {
-    return createSsrHydratableClientReference(options, metadata);
+    return requireStableClientReference(
+      options,
+      metadata,
+      clientReferenceTypes,
+    );
   }
 
   const resolved =
@@ -216,22 +244,68 @@ function createHydratableClientReference(
   };
 }
 
-function createSsrHydratableClientReference(
+interface ClientReferenceTypeCache {
+  types: Map<string, ElementType>;
+}
+
+function createClientReferenceTypeCache(): ClientReferenceTypeCache {
+  return { types: new Map() };
+}
+
+function resolveStableClientReference(
   options: StartClientOptions,
   metadata: PayloadClientReferenceMetadata,
-): ElementType {
+  clientReferenceTypes: ClientReferenceTypeCache,
+): ElementType | undefined {
+  const cached = clientReferenceTypes.types.get(metadata.id);
+  if (cached !== undefined) return cached;
+
   const resolved =
     resolvePreloadedClientReference(metadata) ??
     options.resolveClientReference?.(metadata);
+  const loaded =
+    resolved === undefined
+      ? options.loadClientReference?.(metadata)
+      : undefined;
 
-  return function StartSsrHydratableClientReference(
+  if (resolved !== undefined) {
+    const type = function StartStableResolvedClientReference(
+      props: Props & { children?: FigNode },
+    ): FigNode {
+      return createElement(resolved, props);
+    };
+    clientReferenceTypes.types.set(metadata.id, type);
+    return type;
+  }
+
+  if (loaded === undefined) return undefined;
+
+  const type = function StartStableLoadedClientReference(
     props: Props & { children?: FigNode },
   ): FigNode {
-    if (resolved !== undefined) return createElement(resolved, props);
-    throw new Error(
-      `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`,
+    const loadedType = resolveClientReferenceExport(
+      readPromise(loaded),
+      metadata.id,
     );
+    return createElement(loadedType, props);
   };
+  clientReferenceTypes.types.set(metadata.id, type);
+  return type;
+}
+
+function requireStableClientReference(
+  options: StartClientOptions,
+  metadata: PayloadClientReferenceMetadata,
+  clientReferenceTypes: ClientReferenceTypeCache,
+): ElementType {
+  return (
+    resolveStableClientReference(options, metadata, clientReferenceTypes) ??
+    function MissingStableClientReference(): FigNode {
+      throw new Error(
+        `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`,
+      );
+    }
+  );
 }
 
 function clientReferencePlaceholder(metadata: { id: string }): FigNode {
@@ -303,6 +377,7 @@ interface ServerRouteContent extends ServerRouteContentStore {
     stream: PayloadStream,
     url: string,
   ): void;
+  refreshActiveRoute(): void;
   renderActiveRoute(): void;
 }
 
@@ -336,7 +411,7 @@ interface ServerRouteEntryOptions {
 
 interface ServerRouteControl {
   complete(): void;
-  refresh(url: string): void;
+  refresh(url: string, options?: { force?: boolean }): void;
 }
 
 interface ClientReferenceHydrationGate {
@@ -349,6 +424,7 @@ interface ClientReferenceHydrationGate {
 function createServerRouteContent(
   options: StartClientOptions,
   router: FigRouter,
+  clientReferenceTypes: ClientReferenceTypeCache,
 ): ServerRouteContent {
   const entries = new Map<string, ServerRouteEntry>();
   const pendingListeners = new Map<string, Set<() => void>>();
@@ -428,8 +504,8 @@ function createServerRouteContent(
         entry.payloadComplete = true;
         notify(entry);
       },
-      refresh(url) {
-        if (url === entry.currentUrl) return;
+      refresh(url, refreshOptions) {
+        if (url === entry.currentUrl && refreshOptions?.force !== true) return;
         entry.currentUrl = url;
         entry.activeRefresh?.abort();
         const controller = new AbortController();
@@ -458,7 +534,7 @@ function createServerRouteContent(
   }
 
   function startEntryFetch(routeId: string, url: string): ServerRouteEntry {
-    const response = createServerRouteResponse(options);
+    const response = createServerRouteResponse(options, clientReferenceTypes);
     const controller = new AbortController();
     const entry = createEntry(routeId, response, {
       dispose: () => controller.abort(),
@@ -542,7 +618,11 @@ function createServerRouteContent(
       const clientReferenceHydrationGate = createClientReferenceHydrationGate();
       const entry = createEntry(
         segment.routeId,
-        createServerRouteResponse(options, clientReferenceHydrationGate),
+        createServerRouteResponse(
+          options,
+          clientReferenceTypes,
+          clientReferenceHydrationGate,
+        ),
         {
           clientReferenceHydrationGate,
           hydrateWithPendingAssets: true,
@@ -577,19 +657,25 @@ function createServerRouteContent(
       entry.revealed = true;
       return serverRouteNode(entry.visibleNode);
     },
+    refreshActiveRoute() {
+      refreshActiveServerRoute(
+        router,
+        entryForRoute,
+        startEntryFetch,
+        (entry) =>
+          control(entry).refresh(payloadRouteUrl(router.getState().location), {
+            force: true,
+          }),
+      );
+    },
     renderActiveRoute() {
-      const state = router.getState();
-      if (state.status !== "idle") return;
-      const match = firstServerRouteMatch(state.matches);
-      if (match === undefined) return;
-      const url = payloadRouteUrl(state.location);
-      const existing = entryForRoute(match.routeId);
-      if (existing !== undefined) {
-        control(existing).refresh(url);
-        return;
-      }
-
-      startEntryFetch(match.routeId, url);
+      refreshActiveServerRoute(
+        router,
+        entryForRoute,
+        startEntryFetch,
+        (entry) =>
+          control(entry).refresh(payloadRouteUrl(router.getState().location)),
+      );
     },
     subscribe(routeId, listener) {
       const entry = entries.get(routeId);
@@ -612,6 +698,26 @@ function createServerRouteContent(
       };
     },
   };
+}
+
+function refreshActiveServerRoute(
+  router: FigRouter,
+  entryForRoute: (routeId: string) => ServerRouteEntry | undefined,
+  startEntryFetch: (routeId: string, url: string) => ServerRouteEntry,
+  refreshEntry: (entry: ServerRouteEntry) => void,
+): void {
+  const state = router.getState();
+  if (state.status !== "idle") return;
+  const match = firstServerRouteMatch(state.matches);
+  if (match === undefined) return;
+  const url = payloadRouteUrl(state.location);
+  const existing = entryForRoute(match.routeId);
+  if (existing !== undefined) {
+    refreshEntry(existing);
+    return;
+  }
+
+  startEntryFetch(match.routeId, url);
 }
 
 function serverRouteNode(node: FigNode): FigNode {
@@ -703,6 +809,36 @@ function installServerRouteFetcher(
       content.renderActiveRoute();
     });
   });
+}
+
+function installDevServerUpdateHandler(content: ServerRouteContent): void {
+  const hot = import.meta.hot;
+  if (hot === undefined) return;
+
+  let queued = false;
+  let running = false;
+
+  hot.on(DEV_SERVER_UPDATE_EVENT, () => {
+    queued = true;
+    if (running) return;
+    running = true;
+    runQueuedDevServerUpdates();
+  });
+
+  function runQueuedDevServerUpdates(): void {
+    try {
+      while (queued) {
+        queued = false;
+        content.refreshActiveRoute();
+      }
+    } finally {
+      running = false;
+      if (queued) {
+        running = true;
+        runQueuedDevServerUpdates();
+      }
+    }
+  }
 }
 
 function firstServerRouteMatch(

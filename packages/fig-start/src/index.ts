@@ -29,7 +29,7 @@ export type StartConfig = Pick<
   StartClientOptions,
   "onRecoverableError" | "routes"
 > &
-  Omit<StartServerOptions, "appUrl" | "context" | "routes"> & {
+  Omit<StartServerOptions, "appUrl" | "routes"> & {
     appName: string;
   };
 

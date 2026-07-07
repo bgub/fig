@@ -219,15 +219,24 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../fig-dom
+      '@bgub/fig-refresh':
+        specifier: workspace:*
+        version: link:../fig-refresh
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:../fig-server
+      '@bgub/fig-vite':
+        specifier: workspace:*
+        version: link:../fig-vite
       '@effect/platform-node':
         specifier: 4.0.0-beta.92
         version: 4.0.0-beta.92(effect@4.0.0-beta.92)(ioredis@5.11.1)
       effect:
         specifier: 4.0.0-beta.92
         version: 4.0.0-beta.92
+      vite:
+        specifier: ^7.3.2
+        version: 7.3.2(@types/node@20.19.41)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.2
@@ -250,6 +259,12 @@ importers:
       '@babel/preset-typescript':
         specifier: ^7.25.0
         version: 7.29.7(@babel/core@7.29.0)
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
+      '@bgub/fig-refresh':
+        specifier: workspace:*
+        version: link:../fig-refresh
     devDependencies:
       '@types/babel__core':
         specifier: ^7.20.5

@@ -509,13 +509,13 @@ function renderServerRouteSegment(
     routeAssets.length === 0 ? routeNode : assets(routeAssets, routeNode);
   const refreshesSegment = refreshBoundary === routeId;
   const payload = renderToPayloadStream(
-    createElement(
-      Fragment,
-      null,
-      refreshesSegment
-        ? routeContent
-        : createElement(PayloadBoundary, { id: routeId }, routeContent),
-    ),
+    refreshesSegment
+      ? routeContent
+      : createElement(
+          Fragment,
+          null,
+          createElement(PayloadBoundary, { id: routeId }, routeContent),
+        ),
     {
       clientReferenceAssets,
       // A throw inside a server component becomes a payload "error" row (it

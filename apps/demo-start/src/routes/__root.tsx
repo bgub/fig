@@ -1,4 +1,4 @@
-import { type FigNode, Suspense, useBeforePaint, useState } from "@bgub/fig";
+import { type FigNode, Suspense, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { createRootRoute, Link, Outlet } from "@bgub/fig-start";
 import {
@@ -9,17 +9,15 @@ import {
 
 export const Route = createRootRoute({
   component: RootLayout,
+  loader: ({ context }) => ({
+    initialTheme: context.serverTheme ?? browserThemePreference(),
+  }),
   notFoundComponent: NotFound,
 });
 
 function RootLayout(): FigNode {
-  const [theme, setTheme] = useState<ThemePreference>("system");
-
-  useBeforePaint(() => {
-    const next = browserThemePreference();
-    if (next !== theme) setTheme(next);
-    return undefined;
-  }, [theme]);
+  const { initialTheme } = Route.useLoaderData();
+  const [theme, setTheme] = useState<ThemePreference>(initialTheme);
 
   return (
     <div class="fig-start-shell min-h-screen" data-theme={theme}>

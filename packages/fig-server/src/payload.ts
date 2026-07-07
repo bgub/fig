@@ -547,6 +547,10 @@ class PayloadResponseImpl implements PayloadResponse {
     string,
     PayloadClientReferenceEntry
   >();
+  private readonly resolvedClientReferenceComponents = new Map<
+    string,
+    ElementType
+  >();
   private listeners = new Set<() => void>();
   private resolveRootReady: () => void = () => undefined;
   readonly rootReady: Promise<void> = new Promise((resolve) => {
@@ -735,11 +739,22 @@ class PayloadResponseImpl implements PayloadResponse {
   }
 
   decodeClientReference(metadata: PayloadClientReferenceMetadata): ElementType {
+    const resolvedCached = this.resolvedClientReferenceComponents.get(
+      metadata.id,
+    );
+    if (resolvedCached !== undefined) return resolvedCached;
+
     const cached = this.clientReferenceEntries.get(metadata.id)?.component;
     if (cached !== undefined) return cached;
 
     const resolved = this.options.resolveClientReference?.(metadata);
-    if (resolved !== undefined) return resolved;
+    if (resolved !== undefined) {
+      const component = function PayloadResolvedClientComponent(props: Props) {
+        return createElement(resolved, props);
+      };
+      this.resolvedClientReferenceComponents.set(metadata.id, component);
+      return component;
+    }
 
     const load = this.options.loadClientReference;
     if (load !== undefined) {

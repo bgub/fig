@@ -10,6 +10,7 @@ export const PAYLOAD_SEGMENTS_SCRIPT_ID = "__fig_start_payload_segments__";
 export const PAYLOAD_FRAME_ATTR = "data-fig-payload-frame";
 export const PAYLOAD_STREAM_GLOBAL = "__figStartPayload";
 export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
+export const DEV_SERVER_UPDATE_EVENT = "fig-start:server-update";
 export const PAYLOAD_BOUNDARY_HEADER = "x-fig-payload-boundary";
 export const PAYLOAD_ROUTE_ID_HEADER = "x-fig-payload-route-id";
 export const PAYLOAD_SEGMENT_ID_HEADER = "x-fig-payload-segment-id";
@@ -36,6 +37,11 @@ export interface SerializedPayloadSegment {
 export interface SerializedPayloadFrame {
   chunk: string;
   id: string;
+}
+
+export interface DevServerUpdateMessage {
+  kind: "server";
+  path: string;
 }
 
 // Whether a payload contains any client references (needs a client-reference

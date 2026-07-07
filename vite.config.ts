@@ -60,6 +60,7 @@ const libraryEntries: Record<string, string[]> = {
   "packages/fig-vite": ["./src/index.ts"],
   "packages/fig-server": ["./src/index.ts", "./src/payload.ts"],
   "packages/fig-start": [
+    "./src/cli.ts",
     "./src/index.ts",
     "./src/server.ts",
     "./src/client.ts",

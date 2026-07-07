@@ -1,6 +1,8 @@
 import type { Server } from "node:http";
 import type { StartHandlerOptions } from "./server.ts";
 import { runStartRuntime } from "./server-runtime/runtime.ts";
+export { startViteDevServer } from "./dev-server/vite-runtime.ts";
+export type { StartViteDevServerOptions } from "./dev-server/vite-runtime.ts";
 
 export interface StartDevServerOptions extends Omit<
   StartHandlerOptions,

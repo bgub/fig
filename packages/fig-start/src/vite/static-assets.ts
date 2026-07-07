@@ -8,11 +8,9 @@ export async function renderStaticAssetModule(
   id: string,
 ): Promise<string> {
   const href = staticAssetHref(root, id);
-  const emitFile = (context as { emitFile?: (asset: unknown) => void })
-    .emitFile;
 
-  if (typeof emitFile === "function") {
-    emitFile.call(context, {
+  if (hasEmitFile(context)) {
+    context.emitFile({
       fileName: href.slice(1),
       source: await readFile(id),
       type: "asset",
@@ -20,6 +18,19 @@ export async function renderStaticAssetModule(
   }
 
   return `export default ${JSON.stringify(href)};\n`;
+}
+
+interface EmitFileContext {
+  emitFile(asset: unknown): void;
+}
+
+function hasEmitFile(context: unknown): context is EmitFileContext {
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    "emitFile" in context &&
+    typeof context.emitFile === "function"
+  );
 }
 
 export function staticAssetHref(root: string, id: string): string {

@@ -9,11 +9,13 @@ import {
   SERVER_ROUTE_ASSETS_ID,
 } from "./ids.ts";
 import { rootAbsolutePath, rootRelativeImport } from "./path-utils.ts";
+import { rootAbsolutePathForImport, rootRelative } from "./path-utils.ts";
 import {
   collectClientRefs,
   collectServerDataResources,
   collectServerRoutes,
 } from "./refs.ts";
+import { staticAssetHref } from "./static-assets.ts";
 
 export async function renderManifest(root: string): Promise<string> {
   const refs = await collectClientRefs(root);
@@ -40,27 +42,47 @@ export function loadClientReference(metadata) {
 export async function renderServerManifest(root: string): Promise<string> {
   const refs = await collectClientRefs(root);
   const routes = await collectServerRoutes(root);
-  const entries = refs
+  const refEntries = await Promise.all(
+    refs.map(async (ref) => {
+      const assets = await sourceDevAssetHrefsForModule(root, ref.specifier);
+      return { assets, ref };
+    }),
+  );
+  const routeEntries = await Promise.all(
+    routes.map(async (route) => {
+      const assets = await sourceDevAssetHrefsForModule(root, route.specifier);
+      return { assets, route };
+    }),
+  );
+  const entries = refEntries
     .map(
-      (ref) =>
-        `  ${JSON.stringify(ref.id)}: { assets: [], css: [], module: ${JSON.stringify(
+      ({ assets, ref }) =>
+        `  ${JSON.stringify(ref.id)}: { assets: ${JSON.stringify(
+          assets.assets,
+        )}, css: ${JSON.stringify(assets.css)}, module: ${JSON.stringify(
           ref.specifier,
         )} }`,
     )
     .join(",\n");
-  const routeEntries = routes
-    .map((route) => `  ${JSON.stringify(route.id)}: { assets: [], css: [] }`)
+  const routeCode = routeEntries
+    .map(
+      ({ assets, route }) =>
+        `  ${JSON.stringify(route.id)}: { assets: ${JSON.stringify(
+          assets.assets,
+        )}, css: ${JSON.stringify(assets.css)} }`,
+    )
     .join(",\n");
 
   return `import { readFileSync } from "node:fs";
 import { modulepreload, preload, stylesheet } from "@bgub/fig";
 
 const refs = {\n${entries}\n};
-const routes = {\n${routeEntries}\n};
+const routes = {\n${routeCode}\n};
 let clientAssetManifest;
 let warnedClientAssetManifest = false;
 
 function readClientAssetManifest() {
+  if (import.meta.url.includes("virtual:fig-start/")) return {};
   const shouldCache = process.env.NODE_ENV === "production";
   if (shouldCache && clientAssetManifest !== undefined) return clientAssetManifest;
   try {
@@ -219,6 +241,30 @@ export async function renderServerRouteAssetModule(
   return `${statements.join("\n")}\nexport {};\n`;
 }
 
+async function sourceDevAssetHrefsForModule(
+  root: string,
+  specifier: string,
+): Promise<{ assets: string[]; css: string[] }> {
+  const code = await readFile(rootAbsolutePath(root, specifier), "utf8").catch(
+    () => "",
+  );
+  const assets: string[] = [];
+  const css: string[] = [];
+
+  for (const source of assetImportSpecifiers(code)) {
+    const id = rootAbsolutePathForImport(root, specifier, source);
+    if (id === null) continue;
+    if (isCssSpecifier(source)) css.push(rootRelative(root, id));
+    else assets.push(staticAssetHref(root, id));
+  }
+
+  return { assets: unique(assets), css: unique(css) };
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 export function renderDevEnv(clientNodeEnv?: string): string {
   if (clientNodeEnv === undefined) return "export {};\n";
 
@@ -238,6 +284,13 @@ import { start } from "/src/start.tsx";
 
 const { appName, onRecoverableError, ...serverOptions } = start;
 
+async function context(request) {
+  const appContext = await serverOptions.context?.(request);
+  return appContext === null || typeof appContext !== "object"
+    ? { appName }
+    : { appName, ...appContext };
+}
+
 function clientReferenceAssets(metadata) {
   const generated = resolveClientReferenceAssets(metadata);
   const app = serverOptions.clientReferenceAssets?.(metadata);
@@ -256,7 +309,7 @@ startServer({
   ...serverOptions,
   appUrl: import.meta.url,
   clientReferenceAssets,
-  context: () => ({ appName }),
+  context,
   serverDataResources,
   serverRouteAssets,
 }).catch((error) => {

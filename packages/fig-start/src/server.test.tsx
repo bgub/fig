@@ -366,6 +366,8 @@ describe("@bgub/fig-start server handler", () => {
     );
     expect(rows).toContain('"tag":"refresh"');
     expect(rows).toContain('"boundary":"/payload-layout"');
+    expect(rows).toContain('"type":"section"');
+    expect(rows).not.toContain('"type":{"$fig":"fragment"}');
     expect(rows).toContain("Child B");
   });
 

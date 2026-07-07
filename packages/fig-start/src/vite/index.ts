@@ -69,6 +69,7 @@ export interface FigStartPlugin {
 
 export interface FigStartPluginOptions {
   clientNodeEnv?: "development" | "production";
+  emitAssets?: boolean;
   target?: "auto" | "client" | "server";
   tailwind?: boolean | { base?: string };
 }
@@ -99,6 +100,7 @@ const CLIENT_RUNTIME_NAMED_ENTRY = {
 export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
   let root = process.cwd();
   const clientNodeEnv = options.clientNodeEnv;
+  const emitAssets = options.emitAssets ?? true;
   const tailwind = options.tailwind ?? false;
   const target = options.target ?? "auto";
   const rootRelativeImporters = new Set(
@@ -182,7 +184,7 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
       const clean = id.split("?")[0] ?? id;
       if (clean.startsWith(resolvedVirtualId(CSS_MODULE_PREFIX))) {
         return renderCssModule(
-          this,
+          emitAssets ? this : undefined,
           root,
           decodeIdPath(
             clean.slice(resolvedVirtualId(CSS_MODULE_PREFIX).length),
@@ -190,7 +192,11 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
         );
       }
       if (isAssetId(clean)) {
-        return renderStaticAssetModule(this, root, clean);
+        return renderStaticAssetModule(
+          emitAssets ? this : undefined,
+          root,
+          clean,
+        );
       }
 
       const render = id.startsWith("\0")
