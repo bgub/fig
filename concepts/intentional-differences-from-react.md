@@ -48,10 +48,11 @@ spec.
   reset by remount/key change, `fallback` may be `(error, info) => FigNode`.
   It does not catch promises, event handler errors, async callbacks, server
   render errors, or host commit failures.
-- Data is a separate package (`@bgub/fig`) that renderers never bundle;
-  resources carry the data-store factory on an internal symbol so importing the
-  package has no registration side effect. Keys are explicit arrays with a strict
-  canonical encoder — no `JSON.stringify` traps. The verb set is deliberately
+- Data lives in `@bgub/fig`, but renderers never import the store
+  implementation directly; resources carry the data-store factory on an
+  internal symbol so importing the package has no registration side effect. Keys
+  are explicit arrays with a strict canonical encoder — no `JSON.stringify`
+  traps. The verb set is deliberately
   narrow: `invalidateData` (mark stale, lazily reload — including resetting
   cached rejections) and `refreshData` (fetch now; never rejects, returns a
   result union). The ambient free functions work only while Fig executes

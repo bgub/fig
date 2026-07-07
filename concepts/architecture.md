@@ -12,7 +12,7 @@ _type_ only when that type appears in its own public signatures (types follow
 signatures — that is what gives consumers semver protection).
 
 - `@bgub/fig` — the component model: elements and the JSX runtime, components
-  (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`, `Assets`), hooks, the
+  (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`), hooks, the
   read verbs (`readContext`, `readPromise`, `readData`), `transition`, `lazy`,
   `clientReference`, asset-resource creators, and the data layer —
   `dataResource`, the freshness verbs, and the store implementation (which

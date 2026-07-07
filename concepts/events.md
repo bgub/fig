@@ -11,15 +11,12 @@ Listeners are declared as `events={[on("click", (event, signal) => ...)]}` —
 an array of `on()` descriptors, not `onClick` props. Callbacks receive the
 **native** event plus an `AbortSignal` that aborts on re-entry and on
 listener removal (enforced even mid-dispatch). `on(type, callback, options?)`
-supports the `capture`/`once`/`passive` subset of listener options (`signal`
-is excluded — Fig owns the signal). Callback identity swaps in place without
-listener churn.
+supports `capture` and `passive` (`signal` is excluded — Fig owns the signal).
+Callback identity swaps in place without listener churn.
 
 Array entries may be `false | null | undefined` (conditional listeners), and
 array position is a listener's identity: slots match by index, so a key
-change (type/options) at a position tears down and recreates that slot. A
-consumed `once` slot stays as a tombstone — it does not re-arm under a stable
-declaration, and it does not shift its siblings.
+change (type/options) at a position tears down and recreates that slot.
 
 ## Delegation
 
