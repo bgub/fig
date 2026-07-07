@@ -9,7 +9,9 @@ import {
   Suspense,
   stylesheet,
   title,
+  useBeforeLayout,
   useMemo,
+  useReactive,
   useState,
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
@@ -978,6 +980,147 @@ describe("reconciler", () => {
     );
 
     expect(container.textContent).toBe("C:2A:2B:2");
+  });
+
+  it("applies state updates scheduled from useBeforeLayout effects", async () => {
+    const { createRoot } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      const [value, setValue] = useState("initial");
+      useBeforeLayout(() => {
+        setValue("measured");
+      }, []);
+      return createElement("span", null, value);
+    }
+
+    root.render(createElement(App, null));
+    await delay();
+
+    expect(container.textContent).toBe("measured");
+  });
+
+  it("keeps same-lane updates dispatched while a time-sliced render is yielded", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let setCount: ((updater: (count: number) => number) => void) | null = null;
+    let yieldThenUpdate = false;
+    let updated: Promise<void> = Promise.resolve();
+
+    function Counter() {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("span", null, "count:", count);
+    }
+
+    function Yielding() {
+      if (yieldThenUpdate) {
+        yieldThenUpdate = false;
+        requestPaint();
+        updated = new Promise((resolve) => {
+          queueMicrotask(() => {
+            // The counter fiber already rendered in this pass, and this update
+            // shares its lane with the yielded render — it must survive the
+            // commit of that in-flight pass.
+            setCount?.((count) => count + 1);
+            resolve();
+          });
+        });
+      }
+
+      return null;
+    }
+
+    function App({ label }: { label: string }) {
+      return createElement(
+        "main",
+        null,
+        createElement(Counter, null),
+        createElement(Yielding, null),
+        createElement("span", null, label),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { label: "first" })));
+    expect(container.textContent).toBe("count:0first");
+
+    yieldThenUpdate = true;
+    root.render(createElement(App, { label: "second" }));
+
+    await updated;
+    await delay();
+
+    expect(container.textContent).toBe("count:1second");
+  });
+
+  it("routes uncaught reactive effect errors to onUncaughtError and clears the root", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const uncaught: Array<{ error: unknown; stack: string }> = [];
+    const root = createRoot(container, {
+      onUncaughtError(error, info) {
+        uncaught.push({ error, stack: info.componentStack });
+      },
+    });
+
+    function Broken() {
+      useReactive(() => {
+        throw new Error("reactive boom");
+      }, []);
+      return createElement("span", null, "Primary");
+    }
+
+    flushSync(() => root.render(createElement(Broken, null)));
+    expect(container.textContent).toBe("Primary");
+
+    await delay();
+
+    expect(uncaught.map((report) => (report.error as Error).message)).toEqual([
+      "reactive boom",
+    ]);
+    expect(uncaught[0]?.stack).toContain("at Broken");
+    expect(container.textContent).toBe("");
+
+    // The scheduler tick must survive the failure: later work still runs.
+    flushSync(() => root.render(createElement("span", null, "Recovered")));
+    expect(container.textContent).toBe("Recovered");
+  });
+
+  it("routes standalone reactive effect errors to ancestor error boundaries", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const reports: string[] = [];
+    const root = createRoot(container);
+
+    function Broken() {
+      useReactive(() => {
+        throw new Error("reactive failed");
+      }, []);
+      return createElement("span", null, "Primary");
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError(error: unknown) {
+              reports.push((error as Error).message);
+            },
+          },
+          createElement(Broken, null),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("Primary");
+
+    await delay();
+
+    expect(container.textContent).toBe("Crashed");
+    expect(reports).toEqual(["reactive failed"]);
   });
 
   it("restarts yielded work when flushSync schedules higher-priority work", async () => {

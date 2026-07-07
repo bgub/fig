@@ -2968,7 +2968,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     deactivateHydration(root);
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
-    markRootFinished(root, root.pendingLanes & ~root.renderLanes);
+    // Remaining work is read from the committed tree, not just from
+    // pendingLanes minus renderLanes: an update dispatched after its fiber
+    // rendered but before this line (setState in a commit-phase effect, or a
+    // same-lane update while a time-sliced render of that lane was yielded)
+    // lands on a lane inside renderLanes, and stripping it here would park it
+    // in its hook queue forever. markLanes/markChildLanes recorded such
+    // updates on the finishedWork fibers (begin cleared the lanes that
+    // actually rendered), so merging finishedWork.lanes | childLanes revives
+    // exactly the work still owed without resurrecting completed lanes.
+    markRootFinished(
+      root,
+      (root.pendingLanes & ~root.renderLanes) |
+        finishedWork.lanes |
+        finishedWork.childLanes,
+    );
     if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
       markRootPending(root, OffscreenLane);
       // A suspension after reveal lane expansion may have marked offscreen
@@ -4541,8 +4555,31 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     root.reactiveCallback = scheduleCallback(NormalPriority, () => {
-      flushReactiveEffects(root);
+      performReactiveEffects(root);
     });
+  }
+
+  // The standalone reactive flush has no performRoot frame around its
+  // scheduler tick, so uncaught effect errors (handleEffectError rethrows
+  // when no ancestor boundary exists) are routed here exactly like
+  // performRoot's catch: clear the committed UI, report to onUncaughtError,
+  // and keep the error out of the scheduler tick — a throw there would
+  // strand queued tasks until the next scheduleCallback. Boundary-captured
+  // errors never reach the catch; they schedule the boundary instead.
+  function performReactiveEffects(root: R): void {
+    try {
+      flushReactiveEffects(root);
+    } catch (error) {
+      const info = root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
+      clearRootAfterUncaughtError(root);
+      reportUncaughtError(root, error, info);
+
+      if (root.onUncaughtError === null) {
+        setTimeout(() => {
+          throw error;
+        });
+      }
+    }
   }
 
   function flushPendingReactiveEffects(root: R): void {
