@@ -12,6 +12,7 @@ declare const process: { env: { NODE_ENV?: string } };
 
 interface SelectState {
   appliedDefault: boolean;
+  applyDefaultToInsertedOptions: boolean;
   controlled: boolean;
   value: unknown;
 }
@@ -446,12 +447,11 @@ function updateSelectOptions(
   const state = selectState.get(element);
   const shouldApply =
     !hydratingDefault &&
-    (controlled ||
-      (previousProps.value === undefined &&
-        previousProps.defaultValue === undefined &&
-        state?.appliedDefault !== true));
+    (controlled || (!controlled && options.initial === true));
   selectState.set(element, {
     appliedDefault: state?.appliedDefault === true || !controlled,
+    applyDefaultToInsertedOptions:
+      !hydratingDefault && !controlled && options.initial === true,
     controlled,
     value,
   });
@@ -470,9 +470,18 @@ export function updateParentSelect(
   const state = selectState.get(select);
   if (state === undefined) return;
   if (!state.controlled && state.appliedDefault && !applyDefault) return;
+  if (
+    !state.controlled &&
+    applyDefault &&
+    !state.applyDefaultToInsertedOptions
+  ) {
+    return;
+  }
 
   setSelectValue(select, state.value);
-  if (!state.controlled) state.appliedDefault = true;
+  if (!state.controlled) {
+    state.appliedDefault = true;
+  }
 }
 
 function setSelectValue(element: Element, value: unknown): void {

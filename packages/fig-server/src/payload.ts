@@ -1219,7 +1219,11 @@ function encodePayloadValueInternal(
     );
   }
   if (value instanceof Date) {
-    return { $fig: "date", value: value.toJSON() };
+    const json = value.toJSON();
+    if (json === null) {
+      throw new Error("Invalid Date values cannot be serialized.");
+    }
+    return { $fig: "date", value: json };
   }
   if (value instanceof Map) {
     return withSeen(value, seen, () => ({

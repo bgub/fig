@@ -364,6 +364,33 @@ describe("@bgub/fig-dom props", () => {
     expect(input.checked).toBe(true);
   });
 
+  it("ignores select default values that appear after mount", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const option = (value: string) =>
+      createElement("option", { value }, value.toUpperCase());
+    const app = (defaultValue?: string) =>
+      createElement(
+        "select",
+        defaultValue === undefined ? null : { defaultValue },
+        option("a"),
+        option("b"),
+      );
+
+    flushSync(() => root.render(app()));
+
+    const select = container.childNodes[0] as FakeElement;
+    const optionA = select.childNodes[0] as FakeElement;
+    const optionB = select.childNodes[1] as FakeElement;
+    optionA.selected = false;
+    optionB.selected = true;
+
+    flushSync(() => root.render(app("a")));
+
+    expect(optionA.selected).toBe(false);
+    expect(optionB.selected).toBe(true);
+  });
+
   it("preserves user selection when options are inserted", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

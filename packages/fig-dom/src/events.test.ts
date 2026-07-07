@@ -184,6 +184,39 @@ describe("@bgub/fig-dom events", () => {
     expect(calls).toEqual(["button:button", "main:main"]);
   });
 
+  it("lets events from a nested root bubble to outer root handlers", () => {
+    const calls: string[] = [];
+    const outerContainer = new FakeElement("outer-root");
+    const outerRoot = createRoot(outerContainer as unknown as Element);
+
+    flushSync(() =>
+      outerRoot.render(
+        createElement(
+          "section",
+          { events: [on("click", () => calls.push("outer"))] },
+          createElement("div", null),
+        ),
+      ),
+    );
+
+    const section = outerContainer.childNodes[0] as FakeElement;
+    const innerContainer = section.childNodes[0] as FakeElement;
+    const innerRoot = createRoot(innerContainer as unknown as Element);
+
+    flushSync(() =>
+      innerRoot.render(
+        createElement("button", {
+          events: [on("click", () => calls.push("inner"))],
+        }),
+      ),
+    );
+
+    const button = innerContainer.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["inner", "outer"]);
+  });
+
   it("attaches non-bubbling events directly to their element", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");

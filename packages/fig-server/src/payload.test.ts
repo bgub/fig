@@ -705,6 +705,30 @@ describe("payload rendering", () => {
     expect(value.numbers[3]).toBe(-Infinity);
   });
 
+  it("reports invalid Date payload values as root errors", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+
+    await expect(
+      renderToPayloadRows(
+        createElement(Viewer, { value: new Date(Number.NaN) }),
+      ),
+    ).resolves.toEqual([
+      {
+        id: 1,
+        tag: "client",
+        value: { exportName: "Viewer", id: "app/Viewer.client.tsx#Viewer" },
+      },
+      {
+        id: 0,
+        tag: "error",
+        value: { message: "Invalid Date values cannot be serialized." },
+      },
+    ]);
+  });
+
   it("decodes escaped $fig props with nested payload models", async () => {
     const Viewer = clientReference<{
       $fig: string;

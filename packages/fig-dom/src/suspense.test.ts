@@ -1,5 +1,6 @@
 import {
   createElement,
+  ErrorBoundary,
   lazy,
   readPromise,
   Suspense,
@@ -122,6 +123,52 @@ describe("@bgub/fig-dom suspense", () => {
 
     expect(container.textContent).toBe("Updated");
     expect(loads).toBe(1);
+  });
+
+  it("retries lazy loaders after rejection", async () => {
+    let loads = 0;
+
+    function Message({ label }: { label: string }) {
+      return createElement("span", null, label);
+    }
+
+    const first = deferred<typeof Message>();
+    const second = deferred<typeof Message>();
+    const LazyMessage = lazy<{ label: string }>(() => {
+      loads += 1;
+      return loads === 1 ? first.promise : second.promise;
+    });
+
+    function App({ attempt }: { attempt: number }) {
+      return createElement(
+        ErrorBoundary,
+        {
+          key: attempt,
+          fallback: createElement("span", null, "Crashed"),
+        },
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(LazyMessage, { label: "Ready" }),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement(App, { attempt: 0 })));
+    expect(container.textContent).toBe("Loading");
+    expect(loads).toBe(1);
+
+    first.reject(new Error("chunk failed"));
+    await delay();
+    expect(container.textContent).toBe("Loading");
+    expect(loads).toBe(2);
+
+    second.resolve(Message);
+    await delay();
+    expect(container.textContent).toBe("Ready");
   });
 
   it("keeps revealed Suspense content visible while transitions suspend", async () => {

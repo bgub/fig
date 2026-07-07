@@ -305,6 +305,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   hydrate(entries: readonly FigDataHydrationEntry[]): void {
+    if (this.disposed) return;
+
     for (const hydrated of entries) {
       const normalized = normalizeKey(hydrated.key);
       const storeKey = this.storeKey(normalized.canonical);
@@ -763,7 +765,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.preloadTimer = scheduleStoreTimer(
       () => {
         entry.preloadTimer = null;
-        if (entry.subscribers.size === 0 && entry.pending !== null) {
+        if (
+          entry.subscribers.size === 0 &&
+          entry.pending !== null &&
+          !entryHasValue(entry)
+        ) {
           this.evictEntry(entry, "evicted");
           return;
         }

@@ -501,7 +501,15 @@ function dispatchRootEvent(
   passive: boolean,
   event: Event,
 ): void {
-  if (listenerTargetFor(event.target) !== listenerTarget) return;
+  const targetListenerTarget = listenerTargetFor(event.target);
+  if (targetListenerTarget !== listenerTarget) {
+    const targetRecord =
+      targetListenerTarget === null
+        ? null
+        : (containerRecords.get(targetListenerTarget) ?? null);
+    if (targetRecord?.portalOwner?.root === root) return;
+    if (!targetWithinRoot(listenerTarget, event.target)) return;
+  }
   if (hydrateForEvent(root, type, event) === "blocked") return;
 
   const entries = extractDispatches(

@@ -112,6 +112,16 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("preserves leading newlines in pre and textarea content", async () => {
+    await expect(
+      renderToHtml(createElement("pre", null, "\ncode")),
+    ).resolves.toBe("<pre>\n\ncode</pre>");
+
+    await expect(
+      renderToHtml(createElement("textarea", { defaultValue: "\ndraft" })),
+    ).resolves.toBe("<textarea>\n\ndraft</textarea>");
+  });
+
   it("serializes namespaced SVG attribute aliases", async () => {
     const html = await renderToHtml(
       createElement(
@@ -385,6 +395,21 @@ describe("@bgub/fig-server", () => {
     );
     expect(result.html).not.toContain("Loading");
     expect(result.html).not.toContain("__figSSR");
+  });
+
+  it("preserves literal body text that looks like the old head marker", async () => {
+    await expect(
+      renderToDocumentHtml(
+        createElement(
+          "html",
+          null,
+          createElement("head", null),
+          createElement("body", null, " fig:head "),
+        ),
+      ),
+    ).resolves.toBe(
+      "<!doctype html><html><head></head><body> fig:head </body></html>",
+    );
   });
 
   it("renders stable prefixed ids", async () => {
@@ -1337,6 +1362,26 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('__figSSR.x("test-b-0","digest-1","Server failed")');
   });
 
+  it("includes server Suspense error messages in development without onError", async () => {
+    function Broken(): never {
+      throw new Error("server failed");
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(Broken, null),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    expect(html).toContain('__figSSR.x("test-b-0","","server failed")');
+  });
+
   it("does not reveal a boundary after a later segment errors", async () => {
     const first = deferred<string>();
     const second = deferred<string>();
@@ -1549,6 +1594,43 @@ describe("@bgub/fig-server", () => {
     await expect(result.allReady).resolves.toBeUndefined();
     expect(result.contentType).toBe("text/html; charset=utf-8");
     expect(await readStream(result.stream)).toBe("<p>Hi</p>");
+  });
+
+  it("removes caller abort listeners when a stream finishes", async () => {
+    const controller = new AbortController();
+    const abortListeners = new Set<EventListenerOrEventListenerObject>();
+    const originalAdd = controller.signal.addEventListener.bind(
+      controller.signal,
+    );
+    const originalRemove = controller.signal.removeEventListener.bind(
+      controller.signal,
+    );
+    const addEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ): void => {
+      if (type === "abort") abortListeners.add(listener);
+      return originalAdd(type, listener, options);
+    };
+    const removeEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ): void => {
+      if (type === "abort") abortListeners.delete(listener);
+      return originalRemove(type, listener, options);
+    };
+    controller.signal.addEventListener = addEventListener;
+    controller.signal.removeEventListener = removeEventListener;
+
+    const result = renderToStream(createElement("p", null, "Hi"), {
+      signal: controller.signal,
+    });
+
+    await result.allReady;
+    expect(await readStream(result.stream)).toBe("<p>Hi</p>");
+    expect(abortListeners.size).toBe(0);
   });
 
   it("rejects render-phase state updates", async () => {

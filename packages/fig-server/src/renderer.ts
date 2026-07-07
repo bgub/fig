@@ -82,6 +82,8 @@ declare const process: { env: { NODE_ENV?: string } };
 
 interface Request {
   abortableTasks: Set<Task>;
+  abortListener: (() => void) | null;
+  abortSignal: AbortSignal | null;
   allReady: Deferred<void>;
   completedBoundaries: Set<SuspenseBoundary>;
   completedRootSegment: Segment | null;
@@ -155,7 +157,7 @@ interface Task extends RenderScope {
 interface Segment {
   boundary: SuspenseBoundary | null;
   children: Segment[];
-  chunks: string[];
+  chunks: Array<string | typeof documentHeadMarker>;
   id: number | null;
   index: number;
   // True when the trailing edge of everything written so far — including the
@@ -195,6 +197,7 @@ type Component = (props: Props & { children?: FigNode }) => FigNode;
 interface RenderFrame extends RenderScope {
   dispatcher: RenderDispatcher;
   localIdCounter: number;
+  pendingLeadingNewlineHost: string | null;
   request: Request;
   segment: Segment;
 }
@@ -215,7 +218,7 @@ interface AssetSink {
 
 const errorStacks = new WeakMap<object, StackFrame>();
 const textEncoder = new TextEncoder();
-const documentHeadMarker = "\u0000fig:head\u0000";
+const documentHeadMarker = Symbol("fig.document-head");
 const RUNTIME_REF = "__figSSR";
 // Emitted between two adjacent text writes that come from different
 // normalized text children (component seams, resumed suspended segments).
@@ -248,6 +251,8 @@ export function createServerRenderRequest(
 
   const request: Request = {
     abortableTasks: new Set<Task>(),
+    abortListener: null,
+    abortSignal: options.signal ?? null,
     allReady,
     completedBoundaries: new Set(),
     completedRootSegment: null,
@@ -318,11 +323,9 @@ export function createServerRenderRequest(
   request.pingedTasks.push(rootTask);
 
   if (options.signal !== undefined) {
-    options.signal.addEventListener(
-      "abort",
-      () => abort(request, options.signal?.reason),
-      { once: true },
-    );
+    const abortListener = () => abort(request, options.signal?.reason);
+    request.abortListener = abortListener;
+    options.signal.addEventListener("abort", abortListener, { once: true });
   }
 
   request.workScheduled = true;
@@ -464,6 +467,7 @@ function createRenderFrame(
     ...scope,
     dispatcher: null as unknown as RenderDispatcher,
     localIdCounter: 0,
+    pendingLeadingNewlineHost: null,
     request,
     segment,
   };
@@ -516,10 +520,13 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
       validateTextNesting(text, frame.hostAncestors);
     }
     if (text !== "") {
+      const output = consumePendingLeadingNewline(frame)
+        ? preserveParserStrippedLeadingNewline(text)
+        : text;
       // Directly adjacent text from a different fiber: separate it so the
       // browser's parser yields one DOM text node per client text fiber.
       if (frame.segment.lastPushedText) frame.segment.write(TEXT_SEPARATOR);
-      writeText(text, frame.segment);
+      writeText(output, frame.segment);
       frame.segment.lastPushedText = true;
     }
     return;
@@ -766,6 +773,7 @@ function reportLateHeadAsset(
 }
 
 function renderSuspense(props: Props, frame: RenderFrame): void {
+  consumePendingLeadingNewline(frame);
   const fallbackAbortableTasks = new Set<Task>();
   const contentSegment = createSegment(0, null);
   const boundary = createBoundary(fallbackAbortableTasks, contentSegment);
@@ -879,18 +887,35 @@ function renderHostElement(
     throw new Error("Host elements cannot have both unsafeHTML and children.");
   }
 
+  consumePendingLeadingNewline(frame);
   writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
   if (isVoid) return;
 
+  const previousPendingLeadingNewlineHost = frame.pendingLeadingNewlineHost;
+  frame.pendingLeadingNewlineHost = leadingNewlineStrippedHost(type)
+    ? type
+    : null;
+
   if (unsafeHTML !== null) {
-    frame.segment.write(unsafeHTML);
+    frame.segment.write(
+      consumePendingLeadingNewline(frame)
+        ? preserveParserStrippedLeadingNewline(unsafeHTML)
+        : unsafeHTML,
+    );
+    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
     writeElementEnd(type, frame.segment);
     return;
   }
 
   const formText = formTextContent(type, props);
   if (formText !== null) {
-    writeText(formText, frame.segment);
+    writeText(
+      consumePendingLeadingNewline(frame)
+        ? preserveParserStrippedLeadingNewline(formText)
+        : formText,
+      frame.segment,
+    );
+    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
     writeElementEnd(type, frame.segment);
     return;
   }
@@ -909,9 +934,10 @@ function renderHostElement(
   } finally {
     frame.selectProps = previousSelectProps;
     frame.hostAncestors = previousHostAncestors;
+    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
   }
   if (document !== null && type === "head") {
-    frame.segment.write(documentHeadMarker);
+    writeDocumentHeadMarker(frame.segment);
   }
   writeElementEnd(type, frame.segment);
 }
@@ -1065,10 +1091,11 @@ function markBoundaryClientRendered(
   boundary: SuspenseBoundary,
   error: unknown,
   stack: StackFrame | null,
+  payload?: ServerErrorPayload,
 ): void {
   if (boundary.status !== "client-rendered") {
     boundary.status = "client-rendered";
-    boundary.error = reportBoundaryError(request, error, stack);
+    boundary.error = payload ?? reportBoundaryError(request, error, stack);
   }
 
   boundary.completedSegments = [];
@@ -1090,6 +1117,7 @@ function markBoundaryClientRendered(
 
 function abort(request: Request, reason?: unknown): void {
   if (request.status === "closed") return;
+  cleanupAbortListener(request);
   request.status = "aborting";
   request.dataStore.dispose();
   const error = abortError(reason);
@@ -1103,7 +1131,7 @@ function abort(request: Request, reason?: unknown): void {
   for (const task of Array.from(request.abortableTasks)) {
     const boundary = task.boundary;
     if (boundary !== null) {
-      markBoundaryClientRendered(request, boundary, error, task.stack);
+      markBoundaryClientRendered(request, boundary, error, task.stack, {});
     }
   }
 
@@ -1116,6 +1144,7 @@ function abort(request: Request, reason?: unknown): void {
 function fatalError(request: Request, error: unknown): void {
   if (request.status === "closed") return;
 
+  cleanupAbortListener(request);
   request.status = "closed";
   request.dataStore.dispose();
   request.fatalError = error;
@@ -1169,6 +1198,7 @@ function flushCompletedQueues(request: Request): void {
     request.clientRenderedBoundaries.size === 0 &&
     request.partialBoundaries.size === 0
   ) {
+    cleanupAbortListener(request);
     request.status = "closed";
     request.dataStore.dispose();
     request.controller.close();
@@ -1471,11 +1501,21 @@ function reportBoundaryError(
   stack: StackFrame | null,
 ): ServerErrorPayload {
   const info = { componentStack: componentStack(stackForError(error, stack)) };
+  if (request.onError === undefined) {
+    return process.env.NODE_ENV !== "production"
+      ? { message: errorMessage(error) }
+      : {};
+  }
+
   try {
-    return request.onError?.(error, info) ?? {};
+    return request.onError(error, info) ?? {};
   } catch {
     return {};
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function recordErrorStack(error: unknown, stack: StackFrame | null): void {
@@ -1522,11 +1562,17 @@ function createRuntimeName(identifierPrefix: string | undefined): string {
   return prefix === "" ? `__figSSR_${id}` : `__figSSR_${prefix}_${id}`;
 }
 
-function writeChunk(request: Request, chunk: string, segment: Segment): void {
-  if (request.document === null || chunk !== documentHeadMarker) {
+function writeChunk(
+  request: Request,
+  chunk: string | typeof documentHeadMarker,
+  segment: Segment,
+): void {
+  if (chunk !== documentHeadMarker) {
     write(request, chunk);
     return;
   }
+
+  if (request.document === null) return;
 
   write(request, request.assetRegistry.headHtml(request.nonce));
   flushAssetList(request, segment.assetResources, request.assetSink, new Set());
@@ -1534,6 +1580,32 @@ function writeChunk(request: Request, chunk: string, segment: Segment): void {
 
 function write(request: Request, chunk: string): void {
   request.writeBuffer.push(chunk);
+}
+
+function writeDocumentHeadMarker(segment: Segment): void {
+  segment.lastPushedText = false;
+  segment.chunks.push(documentHeadMarker);
+}
+
+function consumePendingLeadingNewline(frame: RenderFrame): boolean {
+  const pending = frame.pendingLeadingNewlineHost !== null;
+  frame.pendingLeadingNewlineHost = null;
+  return pending;
+}
+
+function leadingNewlineStrippedHost(type: string): boolean {
+  return type === "pre" || type === "textarea";
+}
+
+function preserveParserStrippedLeadingNewline(text: string): string {
+  return text.startsWith("\n") ? `\n${text}` : text;
+}
+
+function cleanupAbortListener(request: Request): void {
+  if (request.abortListener === null || request.abortSignal === null) return;
+  request.abortSignal.removeEventListener("abort", request.abortListener);
+  request.abortListener = null;
+  request.abortSignal = null;
 }
 
 function flushWriteBuffer(request: Request): void {

@@ -536,6 +536,34 @@ describe("@bgub/fig", () => {
     expect(entries[0]?.value).toBe("first");
   });
 
+  it("keeps value-bearing preload refreshes through the preload grace window", async () => {
+    let loads = 0;
+    const valueResource = dataResource({
+      key: (id: string) => ["refreshing-preload", id],
+      load: () => {
+        loads += 1;
+        return loads === 1 ? "first" : never;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      inactiveRetentionMs: Number.POSITIVE_INFINITY,
+      preloadRetentionMs: 0,
+      schedule: () => undefined,
+    });
+
+    store.run(() => preloadData(valueResource, "one"));
+    store.run(() => invalidateData(valueResource, "one"));
+    store.run(() => preloadData(valueResource, "one"));
+    await delay();
+
+    const entries = store.inspectDataEntries();
+    expect(loads).toBe(2);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.hasValue).toBe(true);
+    expect(entries[0]?.value).toBe("first");
+  });
+
   it("ignores store mutations after dispose", async () => {
     let loads = 0;
     const valueResource = dataResource({
@@ -551,6 +579,7 @@ describe("@bgub/fig", () => {
     });
 
     store.dispose();
+    store.hydrate([{ key: ["post-dispose", "hydrated"], value: "hydrated" }]);
     store.run(() => preloadData(valueResource, "one"));
     store.run(() => invalidateData(valueResource, "one"));
 
