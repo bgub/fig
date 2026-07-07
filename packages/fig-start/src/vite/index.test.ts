@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import {
   CLIENT_ENTRY_ID,
+  CLIENT_ROUTES_ID,
   CLIENT_RUNTIME_ID,
   resolvedVirtualId,
 } from "./ids.ts";
@@ -103,6 +104,95 @@ globalThis.process.env.NODE_ENV ??= "development";
 export {};
 `,
     );
+  });
+
+  it("serves lazy client routes without importing server route modules", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
+    await mkdir(join(root, "src", "routes"), { recursive: true });
+    await writeFile(
+      join(root, "src", "routes.ts"),
+      `import type { AnyRoute } from "@bgub/fig-start";
+import { Route as rootRoute } from "./routes/__root.tsx";
+import { Route as aboutRoute } from "./routes/about.tsx";
+import { Route as dashboardRoute } from "./routes/dashboard.server.tsx";
+
+export const routes: AnyRoute[] = [
+  rootRoute,
+  aboutRoute,
+  dashboardRoute,
+];`,
+    );
+    await writeFile(
+      join(root, "src", "routes", "__root.tsx"),
+      `import { createRootRoute } from "@bgub/fig-start";
+export const Route = createRootRoute({ component: Root });
+function Root() { return null; }`,
+    );
+    await writeFile(
+      join(root, "src", "routes", "about.tsx"),
+      `import { createFileRoute } from "@bgub/fig-start";
+export const Route = createFileRoute("/about")({ component: About });
+function About() { return null; }`,
+    );
+    await writeFile(
+      join(root, "src", "routes", "dashboard.server.tsx"),
+      `import { createFileRoute } from "@bgub/fig-start";
+import { secret } from "../secret.server.ts";
+export const Route = createFileRoute("/dashboard")({
+  loader: () => secret,
+  component: Dashboard,
+});
+function Dashboard() { return null; }`,
+    );
+
+    const plugin = figStart();
+    plugin.configResolved({ root });
+
+    try {
+      const id = plugin.resolveId(CLIENT_ROUTES_ID);
+      const code = await plugin.load(id ?? "");
+
+      expect(code).toContain(
+        'import { Route as __figRoute0 } from "/src/routes/__root.tsx";',
+      );
+      expect(code).toContain("let __figModule1;\nfunction __figLoadRoute1()");
+      expect(code).toContain('import("/src/routes/about.tsx")');
+      expect(code).toContain('createFileRoute("/dashboard")');
+      expect(code).toContain("__figMarkServerRoute");
+      expect(code).not.toContain("dashboard.server.tsx");
+      expect(code).not.toContain("secret.server.ts");
+      expect(code).toContain(
+        "const routes = [__figRoute0, __figRoute1, __figRoute2];",
+      );
+      expect(code).toContain('"/about": __figLoadRoute1');
+      expect(code).toContain("await __figPreloadInitialRoute(routes");
+      expect(code).toContain("export { routes };");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rewrites start route imports to the generated client route registry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
+    await mkdir(join(root, "src"), { recursive: true });
+    const startFile = join(root, "src", "start.tsx");
+    const plugin = figStart();
+    plugin.configResolved({ root });
+
+    try {
+      const result = await plugin.transform(
+        `import { routes } from "./routes.ts";
+export const start = { appName: "Fig Start", routes };`,
+        startFile,
+      );
+
+      expect(result?.code).toContain(
+        'import { routes } from "virtual:fig-start/client-routes";',
+      );
+      expect(result?.code).not.toContain("./routes.ts");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("rejects server data resource imports outside server modules", async () => {

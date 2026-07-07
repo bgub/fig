@@ -14,6 +14,7 @@ import {
 import {
   CLIENT_ASSET_MANIFEST_FILE,
   CLIENT_ENTRY_ID,
+  CLIENT_ROUTES_ID,
   CLIENT_RUNTIME_ID,
   CSS_MODULE_PREFIX,
   DEV_ENV_ID,
@@ -30,6 +31,7 @@ import { type OutputOptions, outputDirectory } from "./path-utils.ts";
 import {
   renderClientEntry,
   renderClientRuntime,
+  renderClientRoutes,
   renderDevEnv,
   renderManifest,
   renderServerDataResources,
@@ -49,6 +51,7 @@ import {
   REMOTE_DATA_RESOURCE_CALLEE,
   transformServerModule,
   transformServerRouteClientStub,
+  transformStartClientModule,
 } from "./transform.ts";
 
 export interface FigStartPlugin {
@@ -111,6 +114,7 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
     [SERVER_MANIFEST_ID]: () => renderServerManifest(root),
     [CLIENT_ENTRY_ID]: () => renderClientEntry(clientNodeEnv),
     [CLIENT_RUNTIME_ID]: () => renderClientRuntime(),
+    [CLIENT_ROUTES_ID]: () => renderClientRoutes(root),
     [SERVER_DATA_RESOURCES_ID]: () => renderServerDataResources(root),
     [SERVER_ENTRY_ID]: () => renderServerEntry(),
     [DEV_ENV_ID]: () => renderDevEnv(clientNodeEnv),
@@ -229,6 +233,12 @@ export function figStart(options: FigStartPluginOptions = {}): FigStartPlugin {
         if (code.includes(REMOTE_DATA_RESOURCE_CALLEE)) {
           await assertNoRemoteDataResourceImport(code, clean);
         }
+        if (
+          transformTarget(target, options) === "client" &&
+          isStartModuleId(root, clean)
+        ) {
+          return transformStartClientModule(code, clean, root);
+        }
         return null;
       }
       if (transformTarget(target, options) === "client") {
@@ -342,6 +352,13 @@ function isCssId(id: string): boolean {
 
 function isServerModuleId(id: string): boolean {
   return id.endsWith(".server.ts") || id.endsWith(".server.tsx");
+}
+
+function isStartModuleId(root: string, id: string): boolean {
+  return (
+    id === resolve(root, "src", "start.ts") ||
+    id === resolve(root, "src", "start.tsx")
+  );
 }
 
 function transformTarget(

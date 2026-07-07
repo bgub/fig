@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { assetImportSpecifiers, isCssSpecifier } from "./asset-imports.ts";
 import {
   CLIENT_ASSET_MANIFEST_FILE,
@@ -16,6 +17,10 @@ import {
   collectServerRoutes,
 } from "./refs.ts";
 import { staticAssetHref } from "./static-assets.ts";
+import {
+  discoverRouteDeclaration,
+  discoverRouteRegistry,
+} from "./transform.ts";
 
 export async function renderManifest(root: string): Promise<string> {
   const refs = await collectClientRefs(root);
@@ -181,6 +186,146 @@ export function startFigStartClient() {
 `;
 }
 
+export async function renderClientRoutes(root: string): Promise<string> {
+  const registryFile = await readRouteRegistryFile(root);
+  const registryCode = await readFile(registryFile, "utf8");
+  const registry = await discoverRouteRegistry(registryCode, registryFile);
+  const refsByLocalName = new Map(
+    registry.refs.map((ref) => [ref.localName, ref]),
+  );
+  const routeEntries = [];
+
+  for (const localName of registry.order) {
+    const ref = refsByLocalName.get(localName);
+    if (ref === undefined) continue;
+    const specifier = rootRelativeImport(
+      root,
+      rootRelative(root, registryFile),
+      ref.specifier,
+    );
+    const routeFile = rootAbsolutePath(root, specifier);
+    const routeCode = await readFile(routeFile, "utf8");
+    const declaration = await discoverRouteDeclaration(routeCode, routeFile);
+    routeEntries.push({ declaration, specifier });
+  }
+
+  const imports = new Set<string>();
+  const declarations: string[] = [];
+  const routeNames: string[] = [];
+  const routePreloads: string[] = [];
+  let needsLazyRouteRuntime = false;
+  let needsServerRouteRuntime = false;
+
+  routeEntries.forEach((entry, index) => {
+    const routeName = `__figRoute${index}`;
+    routeNames.push(routeName);
+
+    if (entry.declaration.kind === "root") {
+      declarations.push(
+        `import { Route as ${routeName} } from ${JSON.stringify(
+          entry.specifier,
+        )};`,
+      );
+      return;
+    }
+
+    if (entry.declaration.kind !== "file" || entry.declaration.path === null) {
+      declarations.push(
+        `import { Route as ${routeName} } from ${JSON.stringify(
+          entry.specifier,
+        )};`,
+      );
+      return;
+    }
+
+    if (isServerModuleSpecifier(entry.specifier)) {
+      needsServerRouteRuntime = true;
+      declarations.push(
+        `const ${routeName} = __figMarkServerRoute(createFileRoute(${JSON.stringify(
+          entry.declaration.path,
+        )})());`,
+      );
+      return;
+    }
+
+    needsLazyRouteRuntime = true;
+    const moduleName = `__figModule${index}`;
+    const loadName = `__figLoadRoute${index}`;
+    const componentName = `FigStartLazyRoute${index}`;
+    routePreloads.push(
+      `  ${JSON.stringify(entry.declaration.path)}: ${loadName}`,
+    );
+    declarations.push(
+      `let ${moduleName};
+function ${loadName}() {
+  return ${moduleName} ??= import(${JSON.stringify(entry.specifier)});
+}
+const ${routeName} = createFileRoute(${JSON.stringify(entry.declaration.path)})({
+  beforeLoad: async (args) => (await ${loadName}()).Route.options.beforeLoad?.(args),
+  loader: async (args) => (await ${loadName}()).Route.options.loader?.(args),
+  component: function ${componentName}() {
+    const Component = readPromise(${loadName}()).Route.options.component;
+    return Component === undefined ? createElement(Outlet, {}) : createElement(Component, {});
+  },
+});`,
+    );
+  });
+
+  if (needsLazyRouteRuntime) {
+    imports.add(
+      `import { buildRouteTree, createFileRoute, matchRoutes, Outlet } from "@bgub/fig-start";`,
+    );
+  } else if (needsServerRouteRuntime) {
+    imports.add(`import { createFileRoute } from "@bgub/fig-start";`);
+  }
+  if (needsLazyRouteRuntime) {
+    imports.add(`import { createElement, readPromise } from "@bgub/fig";`);
+  }
+  if (needsServerRouteRuntime) {
+    imports.add(
+      `import { markServerRoute as __figMarkServerRoute } from "@bgub/fig-start/internal";`,
+    );
+  }
+
+  const routesDeclaration = `const routes = [${routeNames.join(", ")}];`;
+  const preloadDeclaration =
+    routePreloads.length === 0
+      ? ""
+      : `${routesDeclaration}
+const __figRoutePreloads = {
+${routePreloads.join(",\n")}
+};
+await __figPreloadInitialRoute(routes, __figRoutePreloads);
+export { routes };
+
+async function __figPreloadInitialRoute(routes, preloads) {
+  if (typeof document === "undefined") return;
+  const href = __figInitialHref();
+  if (href === undefined) return;
+  const pathname = new URL(href, globalThis.location?.href ?? "http://localhost/").pathname;
+  const matches = matchRoutes(buildRouteTree(routes), pathname);
+  await Promise.all((matches ?? []).flatMap((match) => {
+    const preload = preloads[match.node.id];
+    return preload === undefined ? [] : [preload()];
+  }));
+}
+
+function __figInitialHref() {
+  const text = document.getElementById("__fig_start_state__")?.textContent;
+  if (text !== undefined && text !== null && text.length > 0) {
+    try {
+      const state = JSON.parse(text);
+      if (typeof state.href === "string") return state.href;
+    } catch {}
+  }
+  return globalThis.location?.href;
+}`;
+
+  return `${[...imports, ...declarations].join("\n")}
+${preloadDeclaration || `export ${routesDeclaration}`}
+`;
+}
+
 export async function renderServerRouteAssets(root: string): Promise<string> {
   const routes = await collectServerRoutes(root);
   const entries = routes
@@ -259,6 +404,31 @@ async function sourceDevAssetHrefsForModule(
   }
 
   return { assets: unique(assets), css: unique(css) };
+}
+
+async function readRouteRegistryFile(root: string): Promise<string> {
+  const candidates = [
+    resolve(root, "src", "routes.ts"),
+    resolve(root, "src", "routes.tsx"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch {
+      // Try the next supported extension.
+    }
+  }
+  throw new Error(
+    `Fig Start could not find a route registry at ${rootRelative(
+      dirname(root),
+      resolve(root, "src", "routes.ts"),
+    )} or ${rootRelative(dirname(root), resolve(root, "src", "routes.tsx"))}.`,
+  );
+}
+
+function isServerModuleSpecifier(specifier: string): boolean {
+  return specifier.endsWith(".server.ts") || specifier.endsWith(".server.tsx");
 }
 
 function unique(values: string[]): string[] {

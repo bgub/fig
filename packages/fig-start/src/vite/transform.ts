@@ -7,6 +7,7 @@ import {
   discoverServerDataResources,
   type ServerDataResourceRef,
 } from "../../../fig-vite/src/data/index.ts";
+import { CLIENT_ROUTES_ID } from "./ids.ts";
 import { rootRelative } from "./path-utils.ts";
 
 // The callee that declares a Fig Start remote server resource. Fig's data
@@ -38,6 +39,21 @@ export interface ClientRouteStubResult {
   code: string;
   map: unknown;
   routePath: string | null;
+}
+
+export interface RouteDeclaration {
+  kind: "file" | "root" | "unknown";
+  path: string | null;
+}
+
+export interface RouteRegistryRef {
+  localName: string;
+  specifier: string;
+}
+
+export interface RouteRegistry {
+  order: string[];
+  refs: RouteRegistryRef[];
 }
 
 export function clientRefId(specifier: string, exportName: string): string {
@@ -146,6 +162,68 @@ export async function transformServerRouteClientStub(
     map: generatedSourceMap(id, stubCode),
     routePath,
   };
+}
+
+export async function discoverRouteDeclaration(
+  code: string,
+  id: string,
+): Promise<RouteDeclaration> {
+  let declaration: RouteDeclaration = { kind: "unknown", path: null };
+
+  await transformTypeScript(code, id, {
+    plugins: [
+      routeDeclarationBabelPlugin({
+        setDeclaration: (next) => {
+          declaration = next;
+        },
+      }),
+    ],
+    sourceMaps: false,
+  });
+  return declaration;
+}
+
+export async function discoverRouteRegistry(
+  code: string,
+  id: string,
+): Promise<RouteRegistry> {
+  const refs = new Map<string, RouteRegistryRef>();
+  let order: string[] = [];
+
+  await transformTypeScript(code, id, {
+    plugins: [
+      routeRegistryBabelPlugin({
+        addRef: (ref) => refs.set(ref.localName, ref),
+        setOrder: (next) => {
+          order = next;
+        },
+      }),
+    ],
+    sourceMaps: false,
+  });
+  return { order, refs: [...refs.values()] };
+}
+
+export async function transformStartClientModule(
+  code: string,
+  id: string,
+  root: string,
+): Promise<{ code: string; map: unknown } | null> {
+  let changed = false;
+  const result = await transformTypeScript(code, id, {
+    plugins: [
+      routeImportRewriteBabelPlugin({
+        markChanged: () => {
+          changed = true;
+        },
+        root,
+      }),
+    ],
+    sourceMaps: true,
+  });
+
+  if (!changed) return null;
+  return { code: result?.code ?? code, map: result?.map };
 }
 
 // Browser stubs for a .server module's data resources. serverDataResource
@@ -295,6 +373,119 @@ function transformTypeScript(
     ],
     plugins: options.plugins,
   });
+}
+
+function routeImportRewriteBabelPlugin(state: {
+  markChanged: () => void;
+  root: string;
+}): (api: typeof babel) => PluginObj {
+  return (api) => {
+    void api;
+    return {
+      name: "fig-start-client-start-routes",
+      visitor: {
+        ImportDeclaration(path) {
+          if (path.node.importKind === "type") return;
+          if (!isRoutesRegistryImport(state.root, path.node.source.value)) {
+            return;
+          }
+          path.node.source.value = CLIENT_ROUTES_ID;
+          state.markChanged();
+        },
+      },
+    };
+  };
+}
+
+function isRoutesRegistryImport(root: string, source: string): boolean {
+  if (source === CLIENT_ROUTES_ID) return false;
+  if (source === "/src/routes.ts" || source === "/src/routes.tsx") {
+    return true;
+  }
+  const absolute = resolve(root, "src", source);
+  return (
+    absolute === resolve(root, "src", "routes.ts") ||
+    absolute === resolve(root, "src", "routes.tsx")
+  );
+}
+
+function routeRegistryBabelPlugin(state: {
+  addRef: (ref: RouteRegistryRef) => void;
+  setOrder: (order: string[]) => void;
+}): (api: typeof babel) => PluginObj {
+  return (api) => {
+    const t = api.types;
+    return {
+      name: "fig-start-route-registry-discovery",
+      visitor: {
+        ImportDeclaration(path) {
+          if (path.node.importKind === "type") return;
+          for (const specifier of path.node.specifiers) {
+            if (!t.isImportSpecifier(specifier)) continue;
+            const imported = specifier.imported;
+            const importedName = t.isIdentifier(imported)
+              ? imported.name
+              : imported.value;
+            if (importedName !== "Route") continue;
+            state.addRef({
+              localName: specifier.local.name,
+              specifier: path.node.source.value,
+            });
+          }
+        },
+        VariableDeclarator(path) {
+          if (!t.isIdentifier(path.node.id, { name: "routes" })) return;
+          const init = unwrapRouteRegistryInitializer(path.node.init, t);
+          if (!t.isArrayExpression(init)) return;
+          state.setOrder(
+            init.elements.flatMap((element) =>
+              t.isIdentifier(element) ? [element.name] : [],
+            ),
+          );
+        },
+      },
+    };
+  };
+}
+
+function unwrapRouteRegistryInitializer(
+  init: babel.types.Expression | null | undefined,
+  t: typeof babel.types,
+): babel.types.Expression | null | undefined {
+  let current = init;
+  while (
+    t.isTSAsExpression(current) ||
+    t.isTSSatisfiesExpression(current) ||
+    t.isTSTypeAssertion(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function routeDeclarationBabelPlugin(state: {
+  setDeclaration: (declaration: RouteDeclaration) => void;
+}): (api: typeof babel) => PluginObj {
+  return (api) => {
+    const t = api.types;
+
+    return {
+      name: "fig-start-route-declaration-discovery",
+      visitor: {
+        VariableDeclarator(path) {
+          if (!t.isIdentifier(path.node.id, { name: "Route" })) return;
+          if (isRootRouteInitializer(path.node.init, t)) {
+            state.setDeclaration({ kind: "root", path: "" });
+            return;
+          }
+          const routePath = routePathFromInitializer(path.node.init, t);
+          if (routePath !== null) {
+            state.setDeclaration({ kind: "file", path: routePath });
+          }
+        },
+      },
+    };
+  };
 }
 
 function serverComponentBabelPlugin(state: {
@@ -461,4 +652,14 @@ function routePathFromInitializer(
 
   const [pathArg] = createRouteCall.arguments;
   return t.isStringLiteral(pathArg) ? pathArg.value : null;
+}
+
+function isRootRouteInitializer(
+  init: babel.types.Expression | null | undefined,
+  t: typeof babel.types,
+): boolean {
+  return (
+    t.isCallExpression(init) &&
+    t.isIdentifier(init.callee, { name: "createRootRoute" })
+  );
 }

@@ -2,6 +2,7 @@ export const MANIFEST_ID = "virtual:fig-start/client-manifest";
 export const SERVER_MANIFEST_ID = "virtual:fig-start/server-manifest";
 export const CLIENT_ENTRY_ID = "virtual:fig-start/client-entry";
 export const CLIENT_RUNTIME_ID = "virtual:fig-start/client-runtime";
+export const CLIENT_ROUTES_ID = "virtual:fig-start/client-routes";
 export const SERVER_ENTRY_ID = "virtual:fig-start/server-entry";
 export const DEV_ENV_ID = "virtual:fig-start/dev-env";
 export const SERVER_DATA_RESOURCES_ID =
@@ -16,6 +17,7 @@ export const ROOT_RELATIVE_VIRTUAL_IDS = [
   MANIFEST_ID,
   CLIENT_ENTRY_ID,
   CLIENT_RUNTIME_ID,
+  CLIENT_ROUTES_ID,
   SERVER_ENTRY_ID,
   SERVER_DATA_RESOURCES_ID,
   SERVER_MANIFEST_ID,
