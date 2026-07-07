@@ -61,6 +61,10 @@ export function updateElement(
     const next = nextProps[name];
 
     if (name === "unsafeHTML") {
+      if (options.hydrating === true) {
+        unsafeHTMLValue(next);
+        continue;
+      }
       if (previous !== next) setUnsafeHTML(element, next);
       continue;
     }

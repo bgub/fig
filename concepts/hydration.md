@@ -34,13 +34,17 @@ with dehydrated content triggers its hydration at input priority.
 Server-only attributes and styles are preserved (extensions and edge-injected
 markers survive), with a dev warning when they diverge from the client
 render; text mismatches recover with a root client render (reported through
-`onRecoverableError`, digests included). Host elements support React's
+`onRecoverableError`, digests included). `unsafeHTML` is trusted as an opaque
+server subtree during hydration: Fig validates the client prop shape but does
+not raw-compare or reassign `innerHTML`, because browser serialization is not
+stable across equivalent HTML. Host elements support React's
 `suppressHydrationWarning` prop as a one-level escape hatch for intentional
-text/attribute divergence; it does not suppress structural mismatches and is
-not rendered as a DOM attribute. Fig Start owns the document shell and lets
-apps supply per-request `<html>` props; request-known shell state like a
-cookie-backed theme should be rendered there instead of patched by a hydration
-script.
+direct text/attribute divergence on that host element; it does not suppress
+structural mismatches, descendant component output, or deeper host children,
+and is not rendered as a DOM attribute. Fig Start owns the document shell and
+lets apps supply per-request `<html>` props; request-known shell state like a
+cookie-backed theme should be rendered there instead of patched by a
+hydration script.
 
 ## Exploring: Hydration-Stable Environment
 

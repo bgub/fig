@@ -118,7 +118,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     skipTextSeparators(node.nextSibling as Element | TextLike | null),
   canHydrateInstance: (node, type, props) =>
     isHydratableElement(node, type, props),
-  canHydrateTextInstance: (node) => isHydratableText(node),
+  canHydrateTextInstance: (node, text, suppressHydrationWarning) =>
+    isHydratableText(node) &&
+    (suppressHydrationWarning === true || node.nodeValue === text),
   // Hoisted asset resources never appear at their fiber's server position
   // (the server registers them and emits nothing inline): hydration must not
   // match them against the DOM cursor, and commit acquires/releases them in
@@ -396,8 +398,7 @@ function unsafeHTMLValue(props: Props): unknown {
 function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
   const expected = unsafeHTMLValue(props);
   if (expected === null) return true;
-  if (typeof expected !== "string" || !("innerHTML" in element)) return true;
-  return element.innerHTML === expected;
+  return typeof expected !== "string" || "innerHTML" in element;
 }
 
 function isHydratableText(node: Element | TextLike): boolean {

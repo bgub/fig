@@ -32,7 +32,7 @@ describe("@bgub/fig-dom hydration", () => {
     button.setAttribute("data-server", "preserve");
     button.style.color = "red";
     button.style.fontWeight = "bold";
-    button.appendChild(new FakeText("Server"));
+    button.appendChild(new FakeText("Client"));
     container.appendChild(button);
     const calls: string[] = [];
 
@@ -563,7 +563,7 @@ describe("@bgub/fig-dom hydration", () => {
       content: button,
       end,
       start,
-    } = suspenseDom("completed", "button", "Server");
+    } = suspenseDom("completed", "button", "Client");
     const calls: string[] = [];
 
     flushSync(() =>
@@ -582,7 +582,7 @@ describe("@bgub/fig-dom hydration", () => {
     );
 
     expect(container.childNodes).toEqual([start, button, end]);
-    expect(button.textContent).toBe("Server");
+    expect(button.textContent).toBe("Client");
 
     button.dispatch("click");
 
@@ -595,7 +595,7 @@ describe("@bgub/fig-dom hydration", () => {
     const { container, content: button } = suspenseDom(
       "completed",
       "button",
-      "Server",
+      "Client",
     );
     const calls: string[] = [];
 
@@ -716,11 +716,11 @@ describe("@bgub/fig-dom hydration", () => {
     expect(content.textContent).toBe("Server");
     expect(errors).toEqual([]);
 
-    resolve("Client");
+    resolve("Server");
     await delay();
 
     expect(container.childNodes).toEqual([content]);
-    expect(content.textContent).toBe("Client");
+    expect(content.textContent).toBe("Server");
     expect(errors).toEqual([]);
   });
 
@@ -820,6 +820,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("click");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     completePendingBoundary(parent, boundary);
 
     await delay();
@@ -827,6 +828,56 @@ describe("@bgub/fig-dom hydration", () => {
     expect(parent.childNodes).toEqual([boundary.content]);
     expect(boundary.content.textContent).toBe("Client");
     expect(calls).toEqual(["child:button"]);
+  });
+
+  it("replays blocked clicks when a completed pending boundary preserves the fallback target", async () => {
+    const boundary = suspenseDom("pending", "button", "Pending target");
+    const container = new FakeElement("root");
+    const parent = new FakeElement("section");
+    const calls: string[] = [];
+
+    container.appendChild(parent);
+    parent.appendChild(boundary.start);
+    if (boundary.placeholder !== null) parent.appendChild(boundary.placeholder);
+    parent.appendChild(boundary.content);
+    parent.appendChild(boundary.end);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "section",
+          { events: [on("click", () => calls.push("parent"))] },
+          createElement(
+            Suspense,
+            { fallback: createElement("button", null, "Pending target") },
+            createElement(
+              "button",
+              {
+                events: [
+                  on("click", (event) => {
+                    calls.push("child");
+                    event.stopPropagation();
+                  }),
+                ],
+              },
+              "Hydrated target",
+            ),
+          ),
+        ),
+      ),
+    );
+
+    boundary.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    completePendingBoundary(parent, boundary);
+
+    await delay();
+
+    expect(parent.childNodes).toEqual([boundary.content]);
+    expect(boundary.content.textContent).toBe("Hydrated target");
+    expect(calls).toEqual(["child"]);
   });
 
   it("resolves selective hydration per root for nested hydrated roots", async () => {
@@ -875,6 +926,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("click");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     completePendingBoundary(innerContainer, boundary);
     await delay();
 
@@ -915,6 +967,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("click");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     root?.unmount();
 
     // Every root listener (hydration capture listeners and delegated slot
@@ -967,10 +1020,12 @@ describe("@bgub/fig-dom hydration", () => {
 
     // The second boundary completes first: its click must wait for the
     // still-blocked keydown so replayed input keeps its order.
+    second.content.textContent = "Client";
     completePendingBoundary(container, second);
     await delay();
     expect(calls).toEqual([]);
 
+    first.content.textContent = "ClientA";
     completePendingBoundary(container, first);
     await delay();
     expect(calls).toEqual(["keydown", "click"]);
@@ -1018,6 +1073,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("click");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     completePendingBoundary(container, boundary);
     await delay();
 
@@ -1077,6 +1133,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("click");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     completePendingBoundary(parent, boundary);
     await delay();
 
@@ -1105,6 +1162,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.dispatch("input");
     expect(calls).toEqual([]);
 
+    boundary.content.textContent = "Client";
     completePendingBoundary(boundary.container, boundary);
 
     await delay();
@@ -1141,7 +1199,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     fallback.dispatch("click");
 
-    const serverContent = element("button", "Server");
+    const serverContent = element("button", "Client");
     if (placeholder === null) throw new Error("Expected pending placeholder.");
     start.data = "fig:suspense:completed";
     container.removeChild(placeholder);
@@ -1492,7 +1550,29 @@ describe("@bgub/fig-dom hydration", () => {
     expect(article.childNodes).toEqual([]);
   });
 
-  it("recovers when hydrated unsafe HTML does not match", () => {
+  it("hydrates non-canonical unsafe HTML without comparing raw strings", () => {
+    const container = new FakeElement("root");
+    const article = new FakeElement("article");
+    const recoverable = captureRecoverableErrors();
+    article.innerHTML = "<br>";
+    container.appendChild(article);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("article", {
+          unsafeHTML: "<br/>",
+        }),
+        { onRecoverableError: recoverable.capture },
+      ),
+    );
+
+    expect(container.childNodes).toEqual([article]);
+    expect(article.innerHTML).toBe("<br>");
+    expect(recoverable.errors).toEqual([]);
+  });
+
+  it("preserves hydrated unsafe HTML without reconciling raw mismatches", () => {
     const container = new FakeElement("root");
     const article = new FakeElement("article");
     const recoverable = captureRecoverableErrors();
@@ -1509,10 +1589,52 @@ describe("@bgub/fig-dom hydration", () => {
       ),
     );
 
-    const clientArticle = container.childNodes[0] as FakeElement;
-    expect(clientArticle).not.toBe(article);
-    expect(clientArticle.innerHTML).toBe("<strong>Client</strong>");
-    expect(recoverable.errors).toHaveLength(1);
+    expect(container.childNodes).toEqual([article]);
+    expect(article.innerHTML).toBe("<strong>Server</strong>");
+    expect(recoverable.errors).toEqual([]);
+  });
+
+  it("recovers from hydrated text mismatches", () => {
+    const container = new FakeElement("root");
+    const span = new FakeElement("span");
+    const recoverable = captureRecoverableErrors();
+    span.appendChild(new FakeText("Server"));
+    container.appendChild(span);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("span", null, "Client"),
+        { onRecoverableError: recoverable.capture },
+      ),
+    );
+
+    const clientSpan = container.childNodes[0] as FakeElement;
+    expect(clientSpan).not.toBe(span);
+    expect(clientSpan.textContent).toBe("Client");
+    expect(recoverable.messages()).toEqual([
+      "Hydration mismatch: expected text.",
+    ]);
+  });
+
+  it("suppresses hydrated text mismatch recovery when requested", () => {
+    const container = new FakeElement("root");
+    const span = new FakeElement("span");
+    const recoverable = captureRecoverableErrors();
+    span.appendChild(new FakeText("Server"));
+    container.appendChild(span);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("span", { suppressHydrationWarning: true }, "Client"),
+        { onRecoverableError: recoverable.capture },
+      ),
+    );
+
+    expect(container.childNodes).toEqual([span]);
+    expect(span.textContent).toBe("Client");
+    expect(recoverable.errors).toEqual([]);
   });
 
   it("keeps native SVG attributes aligned during hydration", () => {
