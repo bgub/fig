@@ -122,6 +122,16 @@ describe("lanes", () => {
     expect(getNextLanes(laneRoot)).toBe(TransitionLane1 | TransitionLane2);
   });
 
+  it("does not let expired lanes bypass suspended lanes", () => {
+    const laneRoot = root();
+    markRootUpdated(laneRoot, SyncLane);
+    markRootUpdated(laneRoot, TransitionLane1);
+    laneRoot.suspendedLanes = TransitionLane1;
+    laneRoot.expiredLanes = TransitionLane1;
+
+    expect(getNextLanes(laneRoot)).toBe(SyncLane);
+  });
+
   it("includes transitive entangled lanes", () => {
     const laneRoot = root();
 

@@ -143,13 +143,20 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
   const pending = root.pendingLanes;
   if (pending === NoLanes) return NoLanes;
 
-  let next = root.expiredLanes & pending;
+  const unblocked = pending & ~root.suspendedLanes;
+  const pinged = pending & root.pingedLanes;
+  let next = root.expiredLanes & unblocked;
   if (next === NoLanes) {
-    const suspended = pending & ~root.suspendedLanes;
-    next = getHighestPriorityLanes(suspended);
+    next = getHighestPriorityLanes(unblocked);
 
     if (next === NoLanes) {
-      next = getHighestPriorityLanes(pending & root.pingedLanes);
+      // Expired pinged work wins over fresh pinged work; NoLanes is 0, so the
+      // fallback only runs when no expired pinged lane exists.
+      const expiredPinged = root.expiredLanes & pinged;
+      next =
+        expiredPinged !== NoLanes
+          ? expiredPinged
+          : getHighestPriorityLanes(pinged);
     }
   }
 

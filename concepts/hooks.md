@@ -37,6 +37,12 @@ idiom. Dependency arrays are the honest choice without a compiler; the signal
 is for cleanup, not tracking. Effects run with the ambient data store set, so
 data APIs work synchronously inside them.
 
+In development, scheduling state from `useBeforeLayout` throws a diagnostic
+because that phase runs before host mutations. The diagnostic is raised through
+the normal effect-error path, so an ancestor ErrorBoundary may capture it;
+production builds do not include the diagnostic and the update follows normal
+scheduling.
+
 ## Stable Events
 
 `useStableEvent(handler)` is the general escape-from-reactivity primitive

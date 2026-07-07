@@ -7,12 +7,17 @@ import {
   readData,
   readPromise,
   Suspense,
+  type StartTransition,
   stylesheet,
   title,
   useBeforeLayout,
+  useBeforePaint,
+  useLaggedValue,
   useMemo,
   useReactive,
   useState,
+  useStableEvent,
+  useTransition,
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -108,6 +113,14 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
 };
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 const globalWithDevtoolsHook = globalThis as typeof globalThis & {
   __FIG_DEVTOOLS_GLOBAL_HOOK__?: FigDevtoolsGlobalHook;
@@ -982,8 +995,276 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("C:2A:2B:2");
   });
 
-  it("applies state updates scheduled from useBeforeLayout effects", async () => {
-    const { createRoot } = createRenderer(host);
+  it("commits flat sibling lists without overflowing the commit stack", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const itemCount = 12_000;
+    const items = Array.from({ length: itemCount }, (_item, index) => index);
+
+    function App({ version }: { version: number }) {
+      return createElement(
+        "main",
+        null,
+        items.map((item) =>
+          createElement("span", { key: item }, `${version}:${item}`),
+        ),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { version: 1 })));
+    flushSync(() => root.render(createElement(App, { version: 2 })));
+
+    const main = container.childNodes[0] as TestElement;
+    expect(main.childNodes).toHaveLength(itemCount);
+  });
+
+  it("reschedules remaining lanes after a root-level suspension", async () => {
+    const suspended = deferred<string>();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const controls: {
+      setValue: ((value: string) => void) | null;
+      start: StartTransition | null;
+      suspend: ((value: Promise<string>) => void) | null;
+    } = {
+      setValue: null,
+      start: null,
+      suspend: null,
+    };
+
+    function MaybeSuspend({ value }: { value: Promise<string> | null }) {
+      if (value !== null) readPromise(value);
+      return null;
+    }
+
+    function App() {
+      const [value, set] = useState("A");
+      const [promise, setPromise] = useState<Promise<string> | null>(null);
+      const [isPending, startTransition] = useTransition();
+      const lagged = useLaggedValue(value);
+      controls.setValue = set;
+      controls.suspend = setPromise;
+      controls.start = startTransition;
+
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        lagged,
+        createElement(MaybeSuspend, { value: promise }),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle A");
+
+    flushSync(() => controls.setValue?.("B"));
+    expect(container.textContent).toBe("Idle A");
+
+    const startTransition = controls.start;
+    const suspendWith = controls.suspend;
+    if (startTransition === null || suspendWith === null) {
+      throw new Error("Expected transition controls to be captured.");
+    }
+    startTransition(() => suspendWith(suspended.promise));
+    await delay();
+
+    expect(container.textContent).toBe("Pending B");
+  });
+
+  it("reschedules remaining lanes after preserving a committed Suspense boundary", async () => {
+    const suspended = deferred<string>();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const controls: {
+      setValue: ((value: string) => void) | null;
+      start: StartTransition | null;
+      suspend: ((value: Promise<string>) => void) | null;
+    } = {
+      setValue: null,
+      start: null,
+      suspend: null,
+    };
+
+    function MaybeSuspend({ value }: { value: Promise<string> | null }) {
+      if (value !== null) readPromise(value);
+      return createElement("span", null, "Ready");
+    }
+
+    function App() {
+      const [value, set] = useState("A");
+      const [promise, setPromise] = useState<Promise<string> | null>(null);
+      const [isPending, startTransition] = useTransition();
+      const lagged = useLaggedValue(value);
+      controls.setValue = set;
+      controls.suspend = setPromise;
+      controls.start = startTransition;
+
+      return createElement(
+        "main",
+        null,
+        isPending ? "Pending " : "Idle ",
+        lagged,
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(MaybeSuspend, { value: promise }),
+        ),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Idle AReady");
+
+    flushSync(() => controls.setValue?.("B"));
+    expect(container.textContent).toBe("Idle AReady");
+
+    const startTransition = controls.start;
+    const suspendWith = controls.suspend;
+    if (startTransition === null || suspendWith === null) {
+      throw new Error("Expected transition controls to be captured.");
+    }
+    startTransition(() => suspendWith(suspended.promise));
+    await delay();
+
+    expect(container.textContent).toBe("Pending BReady");
+  });
+
+  it("flushes useBeforePaint state updates before flushSync returns", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      const [value, setValue] = useState(0);
+      useBeforePaint(() => {
+        if (value === 0) setValue(1);
+      }, [value]);
+      return createElement("span", null, value);
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+
+    expect(container.textContent).toBe("1");
+  });
+
+  it("throws when post-commit sync updates exceed the nested update limit", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      const [value, setValue] = useState(0);
+      useBeforePaint(() => {
+        setValue((current) => current + 1);
+      });
+      return createElement("span", null, value);
+    }
+
+    expect(() =>
+      flushSync(() => root.render(createElement(App, null))),
+    ).toThrow("Maximum update depth exceeded.");
+  });
+
+  it("flushes pending reactive effects before a useBeforePaint update re-renders", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const calls: string[] = [];
+
+    function App() {
+      const [value, setValue] = useState(0);
+      useBeforePaint(() => {
+        if (value === 0) setValue(1);
+      }, [value]);
+      useReactive(() => {
+        calls.push(`reactive:${value}`);
+      }, [value]);
+      return createElement("span", null, value);
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+
+    expect(container.textContent).toBe("1");
+    expect(calls).toEqual(["reactive:0", "reactive:0"]);
+
+    await delay();
+    expect(calls).toEqual(["reactive:0", "reactive:0", "reactive:1"]);
+  });
+
+  it("defers re-entrant flushSync from useBeforePaint until the active commit finishes", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function App() {
+      const [value, setValue] = useState(0);
+      useBeforePaint(() => {
+        if (value === 0) {
+          flushSync(() => setValue(1));
+        }
+      }, [value]);
+      return createElement("span", null, value);
+    }
+
+    expect(() =>
+      flushSync(() => root.render(createElement(App, null))),
+    ).not.toThrow();
+    expect(container.textContent).toBe("1");
+  });
+
+  it("updates stable event handlers after walking past an adopted subtree", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let setValue: ((value: string) => void) | null = null;
+    let readValue: (() => string) | null = null;
+
+    function CleanSubtree() {
+      return createElement(
+        "section",
+        null,
+        createElement("span", null, "clean"),
+      );
+    }
+
+    function EventOwner() {
+      const [value, set] = useState("initial");
+      setValue = set;
+      readValue = useStableEvent(() => value);
+      return createElement("span", null, value);
+    }
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        createElement(CleanSubtree, null),
+        createElement(EventOwner, null),
+      );
+    }
+
+    function requireReadValue(): () => string {
+      if (readValue === null) {
+        throw new Error("Expected stable event handler to be captured.");
+      }
+      return readValue;
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(requireReadValue()()).toBe("initial");
+
+    flushSync(() => setValue?.("updated"));
+
+    expect(container.textContent).toBe("cleanupdated");
+    expect(requireReadValue()()).toBe("updated");
+  });
+
+  it("throws a diagnostic for state updates scheduled from useBeforeLayout effects", () => {
+    const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
     const root = createRoot(container);
 
@@ -995,10 +1276,9 @@ describe("reconciler", () => {
       return createElement("span", null, value);
     }
 
-    root.render(createElement(App, null));
-    await delay();
-
-    expect(container.textContent).toBe("measured");
+    expect(() =>
+      flushSync(() => root.render(createElement(App, null))),
+    ).toThrow("State updates are not allowed from useBeforeLayout effects.");
   });
 
   it("keeps same-lane updates dispatched while a time-sliced render is yielded", async () => {

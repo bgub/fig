@@ -119,6 +119,10 @@ spec.
 
 - Effects: `useReactive` (useEffect), `useBeforePaint` (useLayoutEffect),
   `useBeforeLayout` (useInsertionEffect) — named for _when_ they run.
+  `useBeforePaint` state updates flush synchronously before paint, including
+  any pending `useReactive` effects before the nested render. State updates
+  from `useBeforeLayout` are a dev error because that phase runs before host
+  mutations and is reserved for insertion-style work.
 - `useLaggedValue` (useDeferredValue), `useExternalStore`
   (useSyncExternalStore), `transition` (startTransition).
 - `useStableEvent` (useEffectEvent): "stable" names the identity guarantee

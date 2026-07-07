@@ -200,6 +200,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   canHydrateTextInstance?(
     node: HostNode<Instance, TextInstance>,
     text: string,
+    suppressHydrationWarning?: boolean,
   ): boolean;
   // Hoisted instances (asset resources) live out-of-band, not at their
   // fiber's DOM position: the server emits nothing inline for them, so they
@@ -565,6 +566,7 @@ interface SuspenseFallbackState<Container, Instance, TextInstance> {
 interface DehydratedSuspenseState<Instance, TextInstance> {
   kind: "dehydrated";
   boundary: DehydratedSuspenseBoundary<Instance, TextInstance>;
+  wasPending: boolean;
 }
 
 type SuspenseState<Container, Instance, TextInstance> =
@@ -651,6 +653,10 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   onUncaughtError: ((error: unknown, info: ErrorInfo) => void) | null;
   recoverableErrors: RecoverableErrorRecord[];
   uncaughtErrorInfo: ErrorInfo | null;
+  commitEffectPhases: number;
+  needsCommitDeletions: boolean;
+  needsDataDependencyCommit: boolean;
+  needsCaughtBoundaryErrorFlush: boolean;
   isHydrating: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
   hydratingSuspenseBoundary: Fiber<Container, Instance, TextInstance> | null;
@@ -704,6 +710,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   const abandonedHydrationBoundaries = new WeakSet<object>();
   let batchDepth = 0;
   let flushingSyncWork = false;
+  let commitDepth = 0;
+  let needsPostCommitSyncFlush = false;
+  let flushingPostCommitSyncWork = false;
+  let nestedPostCommitSyncFlushes = 0;
+  const nestedPostCommitSyncFlushLimit = 50;
+  let currentCommitEffectPhase: EffectPhase | null = null;
   // `hasHiddenBoundaries` gates the parent-walk in `hiddenSubtreeLane`: while it
   // is false no update can need the offscreen downgrade, so the walk is skipped.
   // It is set eagerly true whenever a hidden boundary is begun (covering the
@@ -834,6 +846,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       onUncaughtError: options.onUncaughtError ?? null,
       recoverableErrors: [],
       uncaughtErrorInfo: null,
+      commitEffectPhases: 0,
+      needsCommitDeletions: false,
+      needsDataDependencyCommit: false,
+      needsCaughtBoundaryErrorFlush: false,
       isHydrating: false,
       hydrationParent: null,
       hydratingSuspenseBoundary: null,
@@ -900,8 +916,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       : "blocked";
   }
 
-  function flushSync(callback: () => void): void {
-    runWithPriority(SyncLane, callback);
+  function flushSync<T>(callback: () => T): T {
+    const result = runWithPriority(SyncLane, callback);
+    flushSyncWork();
+    return result;
+  }
+
+  function flushSyncWork(): void {
+    if (commitDepth > 0) {
+      needsPostCommitSyncFlush = true;
+      return;
+    }
 
     // Save/restore rather than force false: a nested flushSync (e.g. unmount()
     // from a commit-phase effect) must not clear the flag while an outer flush is
@@ -921,6 +946,31 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     } finally {
       flushingSyncWork = previousFlushingSyncWork;
+    }
+  }
+
+  function flushPostCommitSyncWork(): void {
+    if (
+      commitDepth > 0 ||
+      !needsPostCommitSyncFlush ||
+      flushingPostCommitSyncWork
+    ) {
+      return;
+    }
+
+    flushingPostCommitSyncWork = true;
+    try {
+      do {
+        nestedPostCommitSyncFlushes += 1;
+        if (nestedPostCommitSyncFlushes > nestedPostCommitSyncFlushLimit) {
+          throw new Error("Maximum update depth exceeded.");
+        }
+        needsPostCommitSyncFlush = false;
+        flushSyncWork();
+      } while (needsPostCommitSyncFlush);
+    } finally {
+      nestedPostCommitSyncFlushes = 0;
+      flushingPostCommitSyncWork = false;
     }
   }
 
@@ -952,6 +1002,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   function markRootPending(root: R, lane: Lane): void {
     markRootUpdated(root, lane);
     pendingRoots.add(root);
+    if (currentCommitEffectPhase === BeforePaintEffect && isSyncLane(lane)) {
+      needsPostCommitSyncFlush = true;
+    }
+  }
+
+  function markCommitEffectPhase(root: R, phase: EffectPhase): void {
+    root.commitEffectPhases |= 1 << phase;
   }
 
   function scheduleOrBatchRoot(root: R): void {
@@ -988,6 +1045,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     } catch (error) {
       if (error === PreservedSuspense) {
         restartRootWork(root);
+        scheduleRoot(root);
         return;
       }
 
@@ -1001,6 +1059,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         restartRootWork(root);
         markRootSuspended(root, suspendedLanes);
         attachPing(root, error, suspendedLanes);
+        scheduleRoot(root);
         return;
       }
 
@@ -1128,8 +1187,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (root.finishedWork !== null) commitRoot(root, root.finishedWork);
-
     finishRootWork(root);
+    flushPostCommitSyncWork();
   }
 
   function finishRootWork(root: R): void {
@@ -1442,10 +1501,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hydrationHost = requireHydrationHostConfig();
     const hydratable = root.nextHydratableInstance;
     const text = String(node.props.nodeValue);
+    const suppressHydrationWarning =
+      (node.return?.tag === HostTag &&
+        node.return.props.suppressHydrationWarning === true) ||
+      canHydratePendingSuspenseTextMismatch(root);
 
     if (
       hydratable === null ||
-      !hydrationHost.canHydrateTextInstance(hydratable, text)
+      !hydrationHost.canHydrateTextInstance(
+        hydratable,
+        text,
+        suppressHydrationWarning,
+      )
     ) {
       throwHydrationMismatch(root, node, "text");
     }
@@ -1706,14 +1773,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function prepareHookRender(node: F): void {
+    const root = rootOf(node);
     renderingFiber = node;
     currentHook = node.alternate?.memoizedState ?? null;
     workInProgressHook = null;
     localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
-    rootOf(node).dataStore.resetDataDependencies(node);
+    root.dataStore.resetDataDependencies(node);
     node.dataDependenciesDirty = true;
+    root.needsDataDependencyCommit = true;
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -1867,7 +1936,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     const boundary = host.getSuspenseBoundary(hydratable);
     if (boundary === null) return false;
 
-    node.suspenseState = { kind: "dehydrated", boundary };
+    node.suspenseState = {
+      boundary,
+      kind: "dehydrated",
+      wasPending: boundary.status === "pending",
+    };
     host.registerSuspenseBoundaryRetry?.(boundary, () =>
       scheduleFiber(node, DefaultLane),
     );
@@ -1894,7 +1967,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       if (boundary.status === "pending") {
-        node.suspenseState = { kind: "dehydrated", boundary };
+        node.suspenseState = {
+          boundary,
+          kind: "dehydrated",
+          wasPending: true,
+        };
         return;
       }
     }
@@ -1927,6 +2004,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       recovery: "suspense",
       source: "server",
     });
+  }
+
+  function canHydratePendingSuspenseTextMismatch(root: R): boolean {
+    const boundary = root.hydratingSuspenseBoundary;
+    const state = boundary?.alternate?.suspenseState;
+    return state?.kind === "dehydrated" && state.wasPending;
   }
 
   function requireActivityHydrationHostConfig(): ActivityHydrationHostConfig {
@@ -2523,6 +2606,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     action: StateUpdate<S>,
     lane: Lane,
   ): void {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      currentCommitEffectPhase === BeforeLayoutEffect
+    ) {
+      throw new Error(
+        "State updates are not allowed from useBeforeLayout effects.",
+      );
+    }
+
     lane = hiddenSubtreeLane(fiber, lane);
     const update: HookUpdate<S> = { action, lane, next: null as never };
     update.next = update;
@@ -2625,6 +2717,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (hasChanged) {
       fiber.effects ??= [];
       fiber.effects.push(effect);
+      markCommitEffectPhase(rootOf(fiber), phase);
     }
   }
 
@@ -2881,6 +2974,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function appendDeletion(parent: F, child: F): void {
     parent.deletions ??= [];
     parent.deletions.push(child);
+    rootOf(parent).needsCommitDeletions = true;
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -2949,65 +3043,117 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitRoot(root: R, finishedWork: F): void {
-    commitLiveHookInstances(finishedWork.child);
-    if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
-    commitEffects(finishedWork.child, BeforeLayoutEffect);
-    if (root.clearContainerBeforeCommit) {
-      requireHydrationHostConfig().clearContainer(root.container);
-      root.clearContainerBeforeCommit = false;
-    }
-    commitDeletions(finishedWork);
-    commitDataDependencies(finishedWork.child);
-    commitMutationEffects(finishedWork.child);
-    if (hasHiddenBoundaries) commitHiddenBoundaryVisibility(finishedWork.child);
-    // Recompute from committed reality: the eager render-time set is sticky, so
-    // once the last hidden boundary reveals or unmounts this clears the flag and
-    // the per-update parent-walk is skipped again.
-    hasHiddenBoundaries = hiddenStates.size > 0;
-    root.current = finishedWork;
-    deactivateHydration(root);
-    root.hydrationInitialElement = NoHydrationInitialElement;
-    root.consumedPendingQueues = [];
-    // Remaining work is read from the committed tree, not just from
-    // pendingLanes minus renderLanes: an update dispatched after its fiber
-    // rendered but before this line (setState in a commit-phase effect, or a
-    // same-lane update while a time-sliced render of that lane was yielded)
-    // lands on a lane inside renderLanes, and stripping it here would park it
-    // in its hook queue forever. markLanes/markChildLanes recorded such
-    // updates on the finishedWork fibers (begin cleared the lanes that
-    // actually rendered), so merging finishedWork.lanes | childLanes revives
-    // exactly the work still owed without resurrecting completed lanes.
-    markRootFinished(
-      root,
-      (root.pendingLanes & ~root.renderLanes) |
-        finishedWork.lanes |
-        finishedWork.childLanes,
-    );
-    if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
-      markRootPending(root, OffscreenLane);
-      // A suspension after reveal lane expansion may have marked offscreen
-      // work suspended alongside the visible lanes; let idle retries proceed.
-      root.suspendedLanes &= ~OffscreenLane;
-    }
+    commitDepth += 1;
     try {
-      commitExternalStores(finishedWork.child);
-      scheduleDehydratedSuspenseRetries(root);
-      commitEffects(finishedWork.child, BeforePaintEffect);
-      flushCaughtBoundaryErrors(root, finishedWork.child);
+      commitLiveHookInstances(finishedWork.child);
+      if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
+      commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+      if (root.clearContainerBeforeCommit) {
+        requireHydrationHostConfig().clearContainer(root.container);
+        root.clearContainerBeforeCommit = false;
+      }
+      if (root.needsCommitDeletions) {
+        commitDeletions(finishedWork);
+        root.needsCommitDeletions = false;
+      }
+      if (root.needsDataDependencyCommit) {
+        commitDataDependencies(finishedWork.child);
+        root.needsDataDependencyCommit = false;
+      }
+      commitMutationEffects(finishedWork.child);
+      if (hasHiddenBoundaries)
+        commitHiddenBoundaryVisibility(finishedWork.child);
+      // Recompute from committed reality: the eager render-time set is sticky, so
+      // once the last hidden boundary reveals or unmounts this clears the flag and
+      // the per-update parent-walk is skipped again.
+      hasHiddenBoundaries = hiddenStates.size > 0;
+      root.current = finishedWork;
+      deactivateHydration(root);
+      root.hydrationInitialElement = NoHydrationInitialElement;
+      root.consumedPendingQueues = [];
+      // Remaining work is read from the committed tree, not just from
+      // pendingLanes minus renderLanes: an update dispatched after its fiber
+      // rendered but before this line (setState in a commit-phase effect, or a
+      // same-lane update while a time-sliced render of that lane was yielded)
+      // lands on a lane inside renderLanes, and stripping it here would park it
+      // in its hook queue forever. markLanes/markChildLanes recorded such
+      // updates on the finishedWork fibers (begin cleared the lanes that
+      // actually rendered), so merging finishedWork.lanes | childLanes revives
+      // exactly the work still owed without resurrecting completed lanes.
+      markRootFinished(
+        root,
+        (root.pendingLanes & ~root.renderLanes) |
+          finishedWork.lanes |
+          finishedWork.childLanes,
+      );
+      if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
+        markRootPending(root, OffscreenLane);
+        // A suspension after reveal lane expansion may have marked offscreen
+        // work suspended alongside the visible lanes; let idle retries proceed.
+        root.suspendedLanes &= ~OffscreenLane;
+      }
+      try {
+        commitExternalStores(finishedWork.child);
+        scheduleDehydratedSuspenseRetries(root);
+        commitEffects(root, finishedWork.child, BeforePaintEffect);
+        if (root.needsCaughtBoundaryErrorFlush) {
+          flushCaughtBoundaryErrors(root, finishedWork.child);
+          root.needsCaughtBoundaryErrorFlush = false;
+        }
+      } finally {
+        // Once the tree is current its flags must be cleared even when a
+        // commit step throws, or a later render would adopt stale flags.
+        collectReactiveEffects(root, finishedWork.child);
+        scheduleReactiveEffects(root);
+      }
+      if (process.env.NODE_ENV !== "production" && root.devtools) {
+        emitDevtoolsCommit(host, root);
+      }
+      flushRecoverableErrors(root);
+      // Host mutations just landed: make the work loop yield at its next check
+      // so the host paints before further scheduled work (React does the same
+      // from commitRoot).
+      requestPaint();
     } finally {
-      // Once the tree is current its flags must be cleared even when a
-      // commit step throws, or a later render would adopt stale flags.
-      collectReactiveEffects(root, finishedWork.child);
-      scheduleReactiveEffects(root);
+      commitDepth -= 1;
     }
-    if (process.env.NODE_ENV !== "production" && root.devtools) {
-      emitDevtoolsCommit(host, root);
+  }
+
+  function walkFiberForest(
+    node: F | null,
+    visitor: (node: F) => boolean | void,
+  ): void {
+    walkFiberTree(node, true, visitor);
+  }
+
+  function walkFiberSubtree(
+    node: F,
+    visitor: (node: F) => boolean | void,
+  ): void {
+    walkFiberTree(node, false, visitor);
+  }
+
+  function walkFiberTree(
+    node: F | null,
+    includeRootSiblings: boolean,
+    visitor: (node: F) => boolean | void,
+  ): void {
+    const stack: F[] = [];
+    let cursor = node;
+
+    while (cursor !== null) {
+      const shouldDescend = visitor(cursor) !== false && cursor.child !== null;
+
+      if ((includeRootSiblings || cursor !== node) && cursor.sibling !== null) {
+        stack.push(cursor.sibling);
+      }
+
+      if (shouldDescend) {
+        cursor = cursor.child;
+      } else {
+        cursor = stack.pop() ?? null;
+      }
     }
-    flushRecoverableErrors(root);
-    // Host mutations just landed: make the work loop yield at its next check
-    // so the host paints before further scheduled work (React does the same
-    // from commitRoot).
-    requestPaint();
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
@@ -3030,7 +3176,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F | null,
     boundaries: F[],
   ): void {
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+    walkFiberForest(node, (cursor) => {
       if (cursor.suspenseState?.kind === "dehydrated") {
         // A dehydrated boundary has no live children to descend into, but its
         // siblings may be retriable too (e.g. several boundaries inside one
@@ -3041,11 +3187,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         ) {
           boundaries.push(cursor);
         }
-        continue;
+        return false;
       }
-
-      collectRetriableDehydratedSuspense(cursor.child, boundaries);
-    }
+      return true;
+    });
   }
 
   function dehydratedSuspenseRetryLane(
@@ -3073,11 +3218,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function flushCaughtBoundaryErrors(root: R, node: F | null): void {
-    if (node === null) return;
-
-    flushCaughtBoundaryError(root, node);
-    flushCaughtBoundaryErrors(root, node.child);
-    flushCaughtBoundaryErrors(root, node.sibling);
+    walkFiberForest(node, (cursor) => {
+      flushCaughtBoundaryError(root, cursor);
+    });
   }
 
   function flushCaughtBoundaryError(root: R, node: F): void {
@@ -3145,6 +3288,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.clearContainerBeforeCommit = false;
     root.hydrationInitialElement = NoHydrationInitialElement;
     root.consumedPendingQueues = [];
+    root.commitEffectPhases = 0;
+    root.needsCommitDeletions = false;
+    root.needsDataDependencyCommit = false;
+    root.needsCaughtBoundaryErrorFlush = false;
     markRootFinished(root, NoLanes);
     pendingRoots.delete(root);
   }
@@ -3434,15 +3581,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function markHostSubtreeCommitted(node: F | null): void {
-    for (let child = node; child !== null; child = child.sibling) {
+    walkFiberForest(node, (child) => {
       // Hoisted descendants were left out of complete-time assembly; acquire
       // them on the subtree's first commit (moves find committedProps set).
       if (child.committedProps === null && isHoistedFiber(child)) {
         acquireHoistedInstance(child);
       }
       markHostCommitted(child);
-      markHostSubtreeCommitted(child.child);
-    }
+    });
   }
 
   function acquireHoistedInstance(node: F): void {
@@ -3460,29 +3606,25 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDeletions(node: F): void {
-    if (node.deletions !== null) {
-      const parent = isHostParent(node)
-        ? hostParentFor(node)
-        : hostParent(node);
-      for (const child of node.deletions) {
-        deleteFiberData(child);
-        abortFiberEffects(child);
-        remove(child, parent);
+    walkFiberSubtree(node, (cursor) => {
+      if (cursor.deletions !== null) {
+        const parent = isHostParent(cursor)
+          ? hostParentFor(cursor)
+          : hostParent(cursor);
+        for (const child of cursor.deletions) {
+          deleteFiberData(child);
+          abortFiberEffects(child);
+          remove(child, parent);
+        }
+        cursor.deletions = null;
       }
-      node.deletions = null;
-    }
 
-    if ((node.flags & AdoptedFlag) !== 0) return;
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      commitDeletions(child);
-    }
+      return (cursor.flags & AdoptedFlag) === 0;
+    });
   }
 
   function commitDataDependencies(node: F | null): void {
-    let cursor = node;
-
-    while (cursor !== null) {
+    walkFiberForest(node, (cursor) => {
       if (cursor.dataDependenciesDirty) {
         rootOf(cursor).dataStore.commitDataDependencies(
           cursor,
@@ -3493,12 +3635,8 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursor.alternate.dataDependenciesDirty = false;
       }
 
-      if ((cursor.flags & AdoptedFlag) === 0) {
-        commitDataDependencies(cursor.child);
-      }
-
-      cursor = cursor.sibling;
-    }
+      return (cursor.flags & AdoptedFlag) === 0;
+    });
   }
 
   function deleteFiberData(node: F): void {
@@ -3507,15 +3645,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
-    store.releaseDataOwner(node);
-    if (node.alternate !== null) store.releaseDataOwner(node.alternate);
-    // A hidden boundary removed from the tree stops counting toward
-    // `hasHiddenBoundaries`; both generations share the one state object.
-    if (node.activityState !== null) hiddenStates.delete(node.activityState);
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      deleteFiberDataFromStore(child, store);
-    }
+    walkFiberSubtree(node, (cursor) => {
+      store.releaseDataOwner(cursor);
+      if (cursor.alternate !== null) store.releaseDataOwner(cursor.alternate);
+      // A hidden boundary removed from the tree stops counting toward
+      // `hasHiddenBoundaries`; both generations share the one state object.
+      if (cursor.activityState !== null)
+        hiddenStates.delete(cursor.activityState);
+    });
   }
 
   function dehydratedActivityBoundary(node: F): Instance | null {
@@ -3880,6 +4017,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     error: unknown,
     source: F,
   ): F | null {
+    rootOf(boundary).needsCaughtBoundaryErrorFlush = true;
     boundary.errorBoundaryState = createErrorBoundaryState(error, source);
     reconcileCurrentChildren(
       boundary,
@@ -3893,6 +4031,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     error: unknown,
     source: F,
   ): void {
+    rootOf(boundary).needsCaughtBoundaryErrorFlush = true;
     const state = createErrorBoundaryState(error, source);
     boundary.errorBoundaryState = state;
     if (boundary.alternate !== null)
@@ -4431,6 +4570,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const effects = (owner.effects ??= []);
       if (!effects.includes(effect)) effects.push(effect);
+      markCommitEffectPhase(rootOf(owner), effect.phase);
     });
   }
 
@@ -4463,16 +4603,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitExternalStores(node: F | null): void {
-    if (node === null) return;
+    walkFiberForest(node, (cursor) => {
+      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
+        if (isExternalStoreHook(hook))
+          commitExternalStore(cursor, hook.memoizedState);
+      }
 
-    for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
-      if (isExternalStoreHook(hook))
-        commitExternalStore(node, hook.memoizedState);
-    }
-
-    // Subscriptions under hidden boundaries are deferred until reveal.
-    if (!isHiddenBoundary(node)) commitExternalStores(node.child);
-    commitExternalStores(node.sibling);
+      // Subscriptions under hidden boundaries are deferred until reveal.
+      return !isHiddenBoundary(cursor);
+    });
   }
 
   function commitExternalStore(
@@ -4507,30 +4646,53 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, SyncLane);
   }
 
-  function commitEffects(node: F | null, phase: EffectPhase): void {
-    visitEffects(node, (effect) => {
-      if (effect.phase === phase) runEffect(effect);
-    });
+  function commitEffects(root: R, node: F | null, phase: EffectPhase): void {
+    const mask = 1 << phase;
+    if ((root.commitEffectPhases & mask) === 0) return;
+
+    const runEffects = () => {
+      visitEffects(node, (effect) => {
+        if (effect.phase === phase) runCommitEffect(effect, phase);
+      });
+    };
+
+    if (phase === BeforePaintEffect) {
+      runWithPriority(SyncLane, runEffects);
+    } else {
+      runEffects();
+    }
+    root.commitEffectPhases &= ~mask;
+  }
+
+  function runCommitEffect(effect: Effect, phase: EffectPhase): void {
+    const previousPhase = currentCommitEffectPhase;
+    currentCommitEffectPhase = phase;
+    try {
+      runEffect(effect);
+    } finally {
+      currentCommitEffectPhase = previousPhase;
+    }
   }
 
   function collectReactiveEffects(root: R, node: F | null): void {
-    if (node === null) return;
+    walkFiberForest(node, (cursor) => {
+      for (const effect of cursor.effects ?? []) {
+        if (effect.phase === ReactiveEffect)
+          root.pendingReactiveEffects.push(effect);
+      }
 
-    for (const effect of node.effects ?? []) {
-      if (effect.phase === ReactiveEffect)
-        root.pendingReactiveEffects.push(effect);
-    }
-
-    node.effects = null;
-    const adopted = (node.flags & AdoptedFlag) !== 0;
-    // The last flag consumer in the commit clears them, so committed trees
-    // stay flag-clean and adopted subtrees never expose stale commit state.
-    node.flags = NoFlags;
-    if (!adopted) {
-      if (isHiddenBoundary(node)) clearHiddenSubtreeFlags(node.child);
-      else collectReactiveEffects(root, node.child);
-    }
-    collectReactiveEffects(root, node.sibling);
+      cursor.effects = null;
+      const adopted = (cursor.flags & AdoptedFlag) !== 0;
+      // The last flag consumer in the commit clears them, so committed trees
+      // stay flag-clean and adopted subtrees never expose stale commit state.
+      cursor.flags = NoFlags;
+      if (adopted) return false;
+      if (isHiddenBoundary(cursor)) {
+        clearHiddenSubtreeFlags(cursor.child);
+        return false;
+      }
+      return true;
+    });
   }
 
   // Hidden subtrees keep their deferred fiber.effects for reveal, but their
@@ -4538,12 +4700,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   // arming depends on those effect arrays surviving every commit while
   // hidden; no walk may null them below a hidden boundary.
   function clearHiddenSubtreeFlags(node: F | null): void {
-    if (node === null) return;
-
-    const adopted = (node.flags & AdoptedFlag) !== 0;
-    node.flags = NoFlags;
-    if (!adopted) clearHiddenSubtreeFlags(node.child);
-    clearHiddenSubtreeFlags(node.sibling);
+    walkFiberForest(node, (cursor) => {
+      const adopted = (cursor.flags & AdoptedFlag) !== 0;
+      cursor.flags = NoFlags;
+      return !adopted;
+    });
   }
 
   function scheduleReactiveEffects(root: R): void {
@@ -4600,14 +4761,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F | null,
     visitor: (effect: Effect) => void,
   ): void {
-    if (node === null) return;
+    walkFiberForest(node, (cursor) => {
+      for (const effect of cursor.effects ?? []) visitor(effect);
 
-    for (const effect of node.effects ?? []) visitor(effect);
-
-    if ((node.flags & AdoptedFlag) === 0 && !isHiddenBoundary(node)) {
-      visitEffects(node.child, visitor);
-    }
-    visitEffects(node.sibling, visitor);
+      return (cursor.flags & AdoptedFlag) === 0 && !isHiddenBoundary(cursor);
+    });
   }
 
   // Deliberately traverses adopted subtrees: unmount aborts and commit-time
@@ -4616,14 +4774,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F | null,
     visitor: (owner: F, hook: Hook) => void,
   ): void {
-    if (node === null) return;
-
-    for (let hook = node.memoizedState; hook !== null; hook = hook.next) {
-      visitor(node, hook);
-    }
-
-    visitFiberHooks(node.child, visitor);
-    visitFiberHooks(node.sibling, visitor);
+    walkFiberForest(node, (cursor) => {
+      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
+        visitor(cursor, hook);
+      }
+    });
   }
 
   function isExternalStoreHook(
