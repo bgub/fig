@@ -36,6 +36,7 @@ import {
   isClientReference,
   isContext,
   isErrorBoundary,
+  FigElementSymbol,
   isFigAssetResource,
   isPortal,
   isSuspense,
@@ -174,23 +175,26 @@ export type PayloadModel =
 
 type PayloadElementModel = {
   $fig: "element";
+  id?: number;
   key: Key | null;
   props: PayloadModel;
   type: string | PayloadSpecialModel;
 };
 
 type PayloadSpecialModel =
+  | { $fig: "array"; id: number; value: PayloadModel[] }
   | { $fig: "boundary"; child: PayloadModel; id: string }
   | { $fig: "bigint"; value: string }
   | { $fig: "client"; id: number }
   | { $fig: "date"; value: string }
   | { $fig: "fragment" }
   | { $fig: "lazy"; id: number }
-  | { $fig: "map"; entries: Array<[PayloadModel, PayloadModel]> }
+  | { $fig: "map"; entries: Array<[PayloadModel, PayloadModel]>; id: number }
   | { $fig: "number"; value: "Infinity" | "-Infinity" | "-0" | "NaN" }
-  | { $fig: "object"; value: Record<string, PayloadModel> }
+  | { $fig: "object"; id?: number; value: Record<string, PayloadModel> }
   | { $fig: "promise"; id: number }
-  | { $fig: "set"; values: PayloadModel[] }
+  | { $fig: "ref"; id: number }
+  | { $fig: "set"; id: number; values: PayloadModel[] }
   | { $fig: "symbol"; key: string }
   | { $fig: "suspense" }
   | { $fig: "undefined" };
@@ -199,11 +203,13 @@ type PayloadValueSpecialModel = Extract<
   PayloadSpecialModel,
   {
     $fig:
+      | "array"
       | "bigint"
       | "date"
       | "map"
       | "number"
       | "object"
+      | "ref"
       | "set"
       | "symbol"
       | "undefined";
@@ -302,6 +308,7 @@ type PayloadRequest = {
   dataStore: DataStore<object, null>;
   emittedAssetKeys: Set<string>;
   emittedDataKeys: Set<string>;
+  graph: PayloadGraphEncodeContext;
   nextRowId: number;
   nextUseId: number;
   onError: PayloadRenderOptions["onError"];
@@ -334,6 +341,19 @@ type RenderFrame = {
   stack: StackFrame | null;
 };
 
+interface PayloadGraphEncodeContext {
+  ids: WeakMap<object, number>;
+  nextId: number;
+}
+
+interface PayloadGraphDecodeContext {
+  refs: Map<number, unknown>;
+}
+
+interface PayloadObjectRef {
+  value: unknown;
+}
+
 interface StackFrame {
   name: string;
   parent: StackFrame | null;
@@ -353,6 +373,17 @@ type DecodedChunk = {
 const textEncoder = new TextEncoder();
 const PayloadBoundarySymbol = Symbol.for("fig.payload-boundary");
 const errorStacks = new WeakMap<object, StackFrame>();
+const childrenTreeProps = new Set(["children"]);
+const emptyTreeProps = new Set<string>();
+const suspenseTreeProps = new Set(["children", "fallback"]);
+
+function createPayloadGraphEncodeContext(): PayloadGraphEncodeContext {
+  return { ids: new WeakMap(), nextId: 1 };
+}
+
+function createPayloadGraphDecodeContext(): PayloadGraphDecodeContext {
+  return { refs: new Map() };
+}
 
 /**
  * Readable development-oriented codec: one JSON payload row per newline.
@@ -540,6 +571,7 @@ function createPayloadRequest(
     }),
     emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
+    graph: createPayloadGraphEncodeContext(),
     nextRowId: 1,
     nextUseId: 0,
     onError: options.onError,
@@ -614,6 +646,9 @@ class PayloadResponseImpl implements PayloadResponse {
     this.resolveRootReady = resolve;
   });
   private maxRowId = 0;
+  private maxObjectId = 0;
+  private objectIdBase = 0;
+  private readonly objectRefs = new Map<number, PayloadObjectRef>();
   private pendingData: FigDataHydrationEntry[] = [];
   private readonly retainedChunkRefs = new Map<number, number>();
   private rootData: FigDataStoreHandle | null = null;
@@ -634,6 +669,7 @@ class PayloadResponseImpl implements PayloadResponse {
     // cannot collide with — and clobber — still-mounted chunks from the initial
     // (or an earlier refresh) payload.
     this.rowIdBase = this.maxRowId;
+    this.objectIdBase = this.maxObjectId;
   }
 
   getAssetResources(): readonly FigAssetResource[] {
@@ -702,7 +738,10 @@ class PayloadResponseImpl implements PayloadResponse {
   }
 
   private processRow(row: PayloadRow): void {
-    if (this.rowIdBase > 0) shiftRowIds(row, this.rowIdBase);
+    if (this.rowIdBase > 0 || this.objectIdBase > 0) {
+      shiftRowIds(row, this.rowIdBase, this.objectIdBase);
+    }
+    updateMaxObjectIdFromRow(this, row);
 
     if (row.tag === "data") {
       this.pendingData.push(...decodePayloadDataEntries(row.value));
@@ -719,11 +758,12 @@ class PayloadResponseImpl implements PayloadResponse {
     if (row.tag === "refresh") {
       this.retainBoundaryChunks(row.boundary, row.value);
       this.boundaries.set(row.boundary, row.value);
-      // Refreshed content must reach its slot through fresh element
-      // identities (slots read the boundaries map without subscribing), so
-      // drop every decode cache; the caches only need to survive the common
-      // per-notify and per-re-render paths, and refreshes are rare.
       this.invalidateDecodeCaches();
+      this.decodedBoundaries.set(
+        row.boundary,
+        decodeModel(this, row.value) as FigNode,
+      );
+      this.pruneObjectRefs();
       this.notify();
       return;
     }
@@ -735,7 +775,10 @@ class PayloadResponseImpl implements PayloadResponse {
 
     resolveDecodedRow(this, row);
     if (row.id === 0) {
-      if (row.tag === "model") this.retainRootChunks(row.value);
+      if (row.tag === "model") {
+        this.retainRootChunks(row.value);
+        this.pruneObjectRefs();
+      }
       this.resolveRootReady();
       this.notify();
     }
@@ -773,6 +816,56 @@ class PayloadResponseImpl implements PayloadResponse {
     for (const chunk of this.chunks.values()) {
       chunk.decoded = undefined;
       chunk.hasDecoded = false;
+    }
+  }
+
+  defineObjectRef<T>(id: number, create: () => T, fill: (value: T) => void): T {
+    const existing = this.objectRefs.get(id);
+    if (existing !== undefined) return existing.value as T;
+
+    const value = create();
+    this.objectRefs.set(id, { value });
+    if (id > this.maxObjectId) this.maxObjectId = id;
+    try {
+      fill(value);
+      return value;
+    } catch (error) {
+      this.objectRefs.delete(id);
+      throw error;
+    }
+  }
+
+  readObjectRef(id: number): unknown {
+    const ref = this.objectRefs.get(id);
+    if (ref === undefined) {
+      throw new Error(`Payload referenced unknown object id ${id}.`);
+    }
+    return ref.value;
+  }
+
+  noteObjectId(id: number): void {
+    if (id > this.maxObjectId) this.maxObjectId = id;
+  }
+
+  prepareBoundaryInitial(id: string, initial: PayloadModel): void {
+    if (this.boundaries.has(id) || this.decodedBoundaries.has(id)) return;
+    this.decodedBoundaries.set(id, decodeModel(this, initial) as FigNode);
+  }
+
+  pruneObjectRefs(): void {
+    const retained = new Set<number>();
+    // Chunks are the graph-object lifetime boundary: releaseChunks removes
+    // dead chunks from this map, so scanning every remaining model keeps refs
+    // alive for transitive lazy chunks until chunk retention learns to release
+    // them transitively too.
+    for (const chunk of this.chunks.values()) {
+      if (chunk.model !== null) collectObjectIds(chunk.model, retained);
+    }
+    for (const model of this.boundaries.values()) {
+      collectObjectIds(model, retained);
+    }
+    for (const id of this.objectRefs.keys()) {
+      if (!retained.has(id)) this.objectRefs.delete(id);
     }
   }
 
@@ -1068,12 +1161,17 @@ function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
   if (isPortal(node)) return null;
   if (!isValidElement(node)) throw invalidChildError(node);
 
-  return serializeElement(node, frame);
+  return serializeElement(node, frame, false);
 }
 
-function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): PayloadModel {
+function serializeNodeOrLazy(
+  node: FigNode,
+  frame: RenderFrame,
+  preserveElementIdentity = false,
+): PayloadModel {
   try {
-    return serializeNode(node, frame);
+    if (!isValidElement(node)) return serializeNode(node, frame);
+    return serializeElement(node, frame, preserveElementIdentity);
   } catch (error) {
     if (isThenable(error)) {
       return outlineTask(frame, "node", node, "lazy", error);
@@ -1085,15 +1183,28 @@ function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): PayloadModel {
 function serializeElement(
   element: FigElement,
   frame: RenderFrame,
+  preserveIdentity: boolean,
 ): PayloadModel {
   const type = element.type;
 
   if (typeof type === "string") {
-    return serializeElementModel(element, type, frame);
+    return serializeElementModel(
+      element,
+      type,
+      frame,
+      preserveIdentity,
+      childrenTreeProps,
+    );
   }
 
   if (type === Fragment) {
-    return serializeElementModel(element, { $fig: "fragment" }, frame);
+    return serializeElementModel(
+      element,
+      { $fig: "fragment" },
+      frame,
+      preserveIdentity,
+      childrenTreeProps,
+    );
   }
 
   if (isClientReference(type)) {
@@ -1102,6 +1213,7 @@ function serializeElement(
       element,
       { $fig: "client", id: clientId },
       frame,
+      preserveIdentity,
     );
   }
 
@@ -1119,7 +1231,7 @@ function serializeElement(
 
     return {
       $fig: "boundary",
-      child: serializeValue(element.props.children, frame),
+      child: serializeTreeProp(element.props.children, frame),
       id,
     };
   }
@@ -1133,7 +1245,13 @@ function serializeElement(
   }
 
   if (isSuspense(type)) {
-    return serializeElementModel(element, { $fig: "suspense" }, frame);
+    return serializeElementModel(
+      element,
+      { $fig: "suspense" },
+      frame,
+      preserveIdentity,
+      suspenseTreeProps,
+    );
   }
 
   if (isErrorBoundary(type)) {
@@ -1155,11 +1273,18 @@ function serializeElementModel(
   element: FigElement,
   type: PayloadElementModel["type"],
   frame: RenderFrame,
-): PayloadElementModel {
+  preserveIdentity: boolean,
+  treeProps: ReadonlySet<string> = emptyTreeProps,
+): PayloadModel {
+  const id = preserveIdentity
+    ? defineGraphElement(frame.request.graph, element)
+    : undefined;
+  if (typeof id === "object") return id;
   return {
     $fig: "element",
+    ...(id === undefined ? null : { id }),
     key: element.key,
-    props: serializeProps(element.props, frame),
+    props: serializeProps(element.props, frame, treeProps),
     type,
   };
 }
@@ -1207,16 +1332,30 @@ function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   return serializeNode(props.children, frame);
 }
 
-function serializeProps(props: Props, frame: RenderFrame): PayloadModel {
-  const serialized: Record<string, PayloadModel> = {};
-
-  for (const [name, value] of Object.entries(props)) {
-    serialized[name] = serializeValue(value, frame);
+function serializeProps(
+  props: Props,
+  frame: RenderFrame,
+  treeProps: ReadonlySet<string>,
+): PayloadModel {
+  const value: Record<string, PayloadModel> = {};
+  for (const [name, child] of Object.entries(props)) {
+    value[name] = treeProps.has(name)
+      ? serializeTreeProp(child as FigNode, frame)
+      : serializeValue(child, frame);
   }
+  return {
+    $fig: "object",
+    value,
+  };
+}
 
-  return "$fig" in serialized
-    ? { $fig: "object", value: serialized }
-    : serialized;
+function serializeTreeProp(value: FigNode, frame: RenderFrame): PayloadModel {
+  if (Array.isArray(value)) {
+    return flattenChildArrays(value).map((child) =>
+      serializeNodeOrLazy(child, frame),
+    );
+  }
+  return serializeNodeOrLazy(value, frame);
 }
 
 function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
@@ -1233,19 +1372,24 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
   if (isThenable(value)) {
     return outlineTask(frame, "promise", value, "promise", value);
   }
-  if (isValidElement(value)) return serializeNodeOrLazy(value, frame);
+  if (isValidElement(value)) return serializeNodeOrLazy(value, frame, true);
   if (isPortal(value)) return null;
 
   if (typeof value === "object" && value !== null) {
     if (value instanceof Map || value instanceof Set || value instanceof Date) {
-      return encodePayloadValue(value);
+      return encodePayloadValueInternal(value, frame.request.graph);
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => serializeValue(item, frame));
+      return serializeArray(
+        value,
+        frame.request.graph,
+        () => value,
+        (item) => serializeValue(item, frame),
+      );
     }
 
-    return encodePayloadRecord(plainPayloadObject(value), (child) =>
+    return serializePlainObject(value, frame.request.graph, (child) =>
       serializeValue(child, frame),
     );
   }
@@ -1271,12 +1415,12 @@ function isPlainPayloadValue(value: unknown): boolean {
  * payload renderer before ordinary values reach this helper.
  */
 export function encodePayloadValue(value: unknown): PayloadModel {
-  return encodePayloadValueInternal(value, new WeakSet<object>());
+  return encodePayloadValueInternal(value, createPayloadGraphEncodeContext());
 }
 
 function encodePayloadValueInternal(
   value: unknown,
-  seen: WeakSet<object>,
+  graph: PayloadGraphEncodeContext,
 ): PayloadModel {
   if (value === null) return null;
   if (value === undefined) return { $fig: "undefined" };
@@ -1298,8 +1442,11 @@ function encodePayloadValueInternal(
   }
 
   if (Array.isArray(value)) {
-    return withSeen(value, seen, () =>
-      value.map((item) => encodePayloadValueInternal(item, seen)),
+    return serializeArray(
+      value,
+      graph,
+      () => value,
+      (item) => encodePayloadValueInternal(item, graph),
     );
   }
   if (value instanceof Date) {
@@ -1310,33 +1457,92 @@ function encodePayloadValueInternal(
     return { $fig: "date", value: json };
   }
   if (value instanceof Map) {
-    return withSeen(value, seen, () => ({
+    const existing = graphReference(graph, value);
+    if (existing !== null) return existing;
+    const id = defineGraphObject(graph, value);
+    return {
       $fig: "map",
+      id,
       entries: [...value.entries()].map(([key, item]) => [
-        encodePayloadValueInternal(key, seen),
-        encodePayloadValueInternal(item, seen),
+        encodePayloadValueInternal(key, graph),
+        encodePayloadValueInternal(item, graph),
       ]),
-    }));
+    };
   }
   if (value instanceof Set) {
-    return withSeen(value, seen, () => ({
+    const existing = graphReference(graph, value);
+    if (existing !== null) return existing;
+    const id = defineGraphObject(graph, value);
+    return {
       $fig: "set",
+      id,
       values: [...value.values()].map((item) =>
-        encodePayloadValueInternal(item, seen),
+        encodePayloadValueInternal(item, graph),
       ),
-    }));
+    };
   }
 
   if (typeof value === "object" && value !== null) {
-    const record = plainPayloadObject(value);
-    return withSeen(value, seen, () =>
-      encodePayloadRecord(record, (child) =>
-        encodePayloadValueInternal(child, seen),
-      ),
+    return serializePlainObject(value, graph, (child) =>
+      encodePayloadValueInternal(child, graph),
     );
   }
 
   throw new Error(`Cannot serialize ${typeof value} into the payload.`);
+}
+
+function graphReference(
+  graph: PayloadGraphEncodeContext,
+  value: object,
+): PayloadSpecialModel | null {
+  const id = graph.ids.get(value);
+  return id === undefined ? null : { $fig: "ref", id };
+}
+
+function defineGraphObject(
+  graph: PayloadGraphEncodeContext,
+  value: object,
+): number {
+  const id = graph.nextId;
+  graph.nextId += 1;
+  graph.ids.set(value, id);
+  return id;
+}
+
+function defineGraphElement(
+  graph: PayloadGraphEncodeContext,
+  value: FigElement,
+): number | PayloadSpecialModel {
+  const existing = graphReference(graph, value);
+  if (existing !== null) return existing;
+  return defineGraphObject(graph, value);
+}
+
+function serializeArray<T>(
+  value: object,
+  graph: PayloadGraphEncodeContext,
+  entries: () => readonly T[],
+  encodeChild: (value: T) => PayloadModel,
+): PayloadModel {
+  const existing = graphReference(graph, value);
+  if (existing !== null) return existing;
+  const id = defineGraphObject(graph, value);
+  return { $fig: "array", id, value: entries().map(encodeChild) };
+}
+
+function serializePlainObject(
+  value: object,
+  graph: PayloadGraphEncodeContext,
+  encodeChild: (value: unknown) => PayloadModel,
+): PayloadModel {
+  const existing = graphReference(graph, value);
+  if (existing !== null) return existing;
+  const id = defineGraphObject(graph, value);
+  return {
+    $fig: "object",
+    id,
+    value: encodePayloadRecord(plainPayloadObject(value), encodeChild),
+  };
 }
 
 function plainPayloadObject(value: object): Record<string, unknown> {
@@ -1352,12 +1558,12 @@ function plainPayloadObject(value: object): Record<string, unknown> {
 function encodePayloadRecord(
   record: Record<string, unknown>,
   encodeChild: (value: unknown) => PayloadModel,
-): PayloadModel {
+): Record<string, PayloadModel> {
   const encoded: Record<string, PayloadModel> = {};
   for (const [name, child] of Object.entries(record)) {
     encoded[name] = encodeChild(child);
   }
-  return "$fig" in encoded ? { $fig: "object", value: encoded } : encoded;
+  return encoded;
 }
 
 function encodePayloadNumber(value: number): number | PayloadSpecialModel {
@@ -1368,35 +1574,26 @@ function encodePayloadNumber(value: number): number | PayloadSpecialModel {
   return value;
 }
 
-function withSeen<T>(value: object, seen: WeakSet<object>, run: () => T): T {
-  if (seen.has(value)) {
-    throw new Error("Cannot serialize cyclic values into the payload.");
-  }
-  seen.add(value);
-  try {
-    return run();
-  } finally {
-    seen.delete(value);
-  }
-}
-
 /** Decode values produced by encodePayloadValue. */
 export function decodePayloadValue(model: PayloadModel): unknown {
-  return decodeModelValue(model);
+  return decodeModelValue(model, createPayloadGraphDecodeContext());
 }
 
-function decodeModelValue(model: PayloadModel): unknown {
+function decodeModelValue(
+  model: PayloadModel,
+  graph: PayloadGraphDecodeContext,
+): unknown {
   if (model === null) return null;
-  if (Array.isArray(model)) return model.map((item) => decodeModelValue(item));
+  if (Array.isArray(model))
+    return model.map((item) => decodeModelValue(item, graph));
   if (typeof model !== "object") return model;
 
   if (isPayloadValueSpecialModel(model)) {
-    return decodePayloadSpecialValue(model);
+    return decodePayloadSpecialValue(model, graph);
   }
 
-  return decodePayloadRecord(
-    model as Record<string, PayloadModel>,
-    decodeModelValue,
+  return decodePayloadRecord(model as Record<string, PayloadModel>, (child) =>
+    decodeModelValue(child, graph),
   );
 }
 
@@ -1407,35 +1604,55 @@ function isPayloadValueSpecialModel(
   const tag = model.$fig;
   return (
     tag === "bigint" ||
+    tag === "array" ||
     tag === "date" ||
     tag === "map" ||
     tag === "number" ||
     tag === "object" ||
+    tag === "ref" ||
     tag === "set" ||
     tag === "symbol" ||
     tag === "undefined"
   );
 }
 
-function decodePayloadSpecialValue(model: PayloadValueSpecialModel): unknown {
+function decodePayloadSpecialValue(
+  model: PayloadValueSpecialModel,
+  graph: PayloadGraphDecodeContext,
+): unknown {
   switch (model.$fig) {
+    case "array": {
+      const value: unknown[] = [];
+      graph.refs.set(model.id, value);
+      value.push(...model.value.map((item) => decodeModelValue(item, graph)));
+      return value;
+    }
     case "bigint":
       return BigInt(model.value);
     case "date":
       return new Date(model.value);
-    case "map":
-      return new Map(
-        model.entries.map(([key, value]) => [
-          decodeModelValue(key),
-          decodeModelValue(value),
-        ]),
-      );
+    case "map": {
+      const value = new Map();
+      graph.refs.set(model.id, value);
+      for (const [key, item] of model.entries) {
+        value.set(decodeModelValue(key, graph), decodeModelValue(item, graph));
+      }
+      return value;
+    }
     case "number":
       return decodePayloadNumber(model.value);
     case "object":
-      return decodePayloadPlainObject(model.value);
-    case "set":
-      return new Set(model.values.map((value) => decodeModelValue(value)));
+      return decodePayloadPlainObject(model, graph);
+    case "ref":
+      return readGraphRef(graph, model.id);
+    case "set": {
+      const value = new Set();
+      graph.refs.set(model.id, value);
+      for (const item of model.values) {
+        value.add(decodeModelValue(item, graph));
+      }
+      return value;
+    }
     case "symbol":
       return Symbol.for(model.key);
     case "undefined":
@@ -1443,21 +1660,16 @@ function decodePayloadSpecialValue(model: PayloadValueSpecialModel): unknown {
   }
 }
 
-function decodeModelRecord(
-  response: PayloadResponseImpl,
-  model: Record<string, PayloadModel>,
+function decodePayloadPlainObject(
+  model: Extract<PayloadValueSpecialModel, { $fig: "object" }>,
+  graph: PayloadGraphDecodeContext,
 ): Record<string, unknown> {
   const decoded: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(model)) {
-    decoded[name] = decodeModel(response, value);
+  if (model.id !== undefined) graph.refs.set(model.id, decoded);
+  for (const [name, value] of Object.entries(model.value)) {
+    definePayloadProperty(decoded, name, decodeModelValue(value, graph));
   }
   return decoded;
-}
-
-function decodePayloadPlainObject(
-  value: Record<string, PayloadModel>,
-): Record<string, unknown> {
-  return decodePayloadRecord(value, decodeModelValue);
 }
 
 function decodePayloadRecord(
@@ -1466,9 +1678,29 @@ function decodePayloadRecord(
 ): Record<string, unknown> {
   const decoded: Record<string, unknown> = {};
   for (const [name, child] of Object.entries(value)) {
-    decoded[name] = decodeChild(child);
+    definePayloadProperty(decoded, name, decodeChild(child));
   }
   return decoded;
+}
+
+function definePayloadProperty(
+  target: Record<string, unknown>,
+  name: string,
+  value: unknown,
+): void {
+  Object.defineProperty(target, name, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+}
+
+function readGraphRef(graph: PayloadGraphDecodeContext, id: number): unknown {
+  if (!graph.refs.has(id)) {
+    throw new Error(`Payload referenced unknown object id ${id}.`);
+  }
+  return graph.refs.get(id);
 }
 
 function decodePayloadNumber(
@@ -1489,22 +1721,34 @@ function decodePayloadNumber(
 export function encodePayloadDataEntries(
   entries: readonly FigDataHydrationEntry[],
 ): PayloadDataHydrationEntry[] {
-  return entries.map(encodePayloadDataEntry);
+  const graph = createPayloadGraphEncodeContext();
+  return entries.map((entry) => encodePayloadDataEntryWithGraph(entry, graph));
 }
 
 export function decodePayloadDataEntries(
   entries: readonly PayloadDataHydrationEntry[],
 ): FigDataHydrationEntry[] {
-  return entries.map(decodePayloadDataEntry);
+  const graph = createPayloadGraphDecodeContext();
+  return entries.map((entry) => decodePayloadDataEntryWithGraph(entry, graph));
 }
 
 /** Encode one Fig data hydration entry for transport in payload/data streams. */
 export function encodePayloadDataEntry(
   entry: FigDataHydrationEntry,
 ): PayloadDataHydrationEntry {
+  return encodePayloadDataEntryWithGraph(
+    entry,
+    createPayloadGraphEncodeContext(),
+  );
+}
+
+function encodePayloadDataEntryWithGraph(
+  entry: FigDataHydrationEntry,
+  graph: PayloadGraphEncodeContext,
+): PayloadDataHydrationEntry {
   return {
     ...entry,
-    value: encodePayloadValue(entry.value),
+    value: encodePayloadValueInternal(entry.value, graph),
   };
 }
 
@@ -1512,9 +1756,19 @@ export function encodePayloadDataEntry(
 export function decodePayloadDataEntry(
   entry: PayloadDataHydrationEntry,
 ): FigDataHydrationEntry {
+  return decodePayloadDataEntryWithGraph(
+    entry,
+    createPayloadGraphDecodeContext(),
+  );
+}
+
+function decodePayloadDataEntryWithGraph(
+  entry: PayloadDataHydrationEntry,
+  graph: PayloadGraphDecodeContext,
+): FigDataHydrationEntry {
   return {
     ...entry,
-    value: decodePayloadValue(entry.value),
+    value: decodeModelValue(entry.value, graph),
   };
 }
 
@@ -1918,6 +2172,10 @@ function resolveDecodedRow(
   }
 
   chunk.model = row.tag === "model" ? row.value : null;
+  if (row.tag === "model") {
+    chunk.decoded = value;
+    chunk.hasDecoded = true;
+  }
   chunk.status = "fulfilled";
   chunk.value = value;
   chunk.resolve(value);
@@ -1933,52 +2191,207 @@ function errorFromPayload(value: ServerErrorPayload): Error & {
   return error;
 }
 
-function shiftRowIds(row: PayloadRow, offset: number): void {
+function shiftRowIds(
+  row: PayloadRow,
+  rowOffset: number,
+  objectOffset: number,
+): void {
   if (row.tag === "client" || row.tag === "error" || row.tag === "model") {
     // The row's own chunk id. A client row's value.id is a string module id and
     // must not be shifted.
-    row.id += offset;
+    row.id += rowOffset;
   }
   if (row.tag === "model" || row.tag === "refresh") {
-    shiftModelIds(row.value, offset);
+    shiftModelIds(row.value, rowOffset, objectOffset);
+  }
+  if (row.tag === "data") {
+    for (const entry of row.value) {
+      shiftModelIds(entry.value, rowOffset, objectOffset);
+    }
   }
 }
 
-function shiftModelIds(model: PayloadModel, offset: number): void {
+function shiftModelIds(
+  model: PayloadModel,
+  rowOffset: number,
+  objectOffset: number,
+): void {
   if (model === null || typeof model !== "object") return;
 
   if (Array.isArray(model)) {
-    for (const item of model) shiftModelIds(item, offset);
+    for (const item of model) shiftModelIds(item, rowOffset, objectOffset);
     return;
   }
 
   if (isPayloadSpecialModel(model)) {
     const special = model;
     switch (special.$fig) {
+      case "array":
+        special.id += objectOffset;
+        for (const value of special.value) {
+          shiftModelIds(value, rowOffset, objectOffset);
+        }
+        return;
       case "client":
       case "lazy":
       case "promise":
-        special.id += offset;
+        special.id += rowOffset;
         return;
       case "element":
-        shiftModelIds(special.type, offset);
-        shiftModelIds(special.props, offset);
+        if (special.id !== undefined) special.id += objectOffset;
+        shiftModelIds(special.type, rowOffset, objectOffset);
+        shiftModelIds(special.props, rowOffset, objectOffset);
         return;
       case "object":
+        if (special.id !== undefined) special.id += objectOffset;
         for (const value of Object.values(special.value)) {
-          shiftModelIds(value, offset);
+          shiftModelIds(value, rowOffset, objectOffset);
         }
         return;
       case "boundary":
         // boundary.id is a string boundary name, not a numeric chunk id.
-        shiftModelIds(special.child, offset);
+        shiftModelIds(special.child, rowOffset, objectOffset);
+        return;
+      case "map":
+        special.id += objectOffset;
+        for (const [key, value] of special.entries) {
+          shiftModelIds(key, rowOffset, objectOffset);
+          shiftModelIds(value, rowOffset, objectOffset);
+        }
+        return;
+      case "ref":
+        special.id += objectOffset;
+        return;
+      case "set":
+        special.id += objectOffset;
+        for (const value of special.values) {
+          shiftModelIds(value, rowOffset, objectOffset);
+        }
         return;
       default:
         return;
     }
   }
 
-  for (const value of Object.values(model)) shiftModelIds(value, offset);
+  for (const value of Object.values(model)) {
+    shiftModelIds(value, rowOffset, objectOffset);
+  }
+}
+
+function updateMaxObjectIdFromRow(
+  response: PayloadResponseImpl,
+  row: PayloadRow,
+): void {
+  if (row.tag === "model" || row.tag === "refresh") {
+    noteMaxObjectIds(response, row.value);
+    return;
+  }
+  if (row.tag === "data") {
+    for (const entry of row.value) noteMaxObjectIds(response, entry.value);
+  }
+}
+
+function noteMaxObjectIds(
+  response: PayloadResponseImpl,
+  model: PayloadModel,
+): void {
+  if (model === null || typeof model !== "object") return;
+
+  if (Array.isArray(model)) {
+    for (const item of model) noteMaxObjectIds(response, item);
+    return;
+  }
+
+  if (isPayloadSpecialModel(model)) {
+    switch (model.$fig) {
+      case "array":
+        response.noteObjectId(model.id);
+        for (const value of model.value) noteMaxObjectIds(response, value);
+        return;
+      case "element":
+        if (model.id !== undefined) response.noteObjectId(model.id);
+        noteMaxObjectIds(response, model.type);
+        noteMaxObjectIds(response, model.props);
+        return;
+      case "map":
+        response.noteObjectId(model.id);
+        for (const [key, value] of model.entries) {
+          noteMaxObjectIds(response, key);
+          noteMaxObjectIds(response, value);
+        }
+        return;
+      case "object":
+        if (model.id !== undefined) response.noteObjectId(model.id);
+        for (const value of Object.values(model.value)) {
+          noteMaxObjectIds(response, value);
+        }
+        return;
+      case "ref":
+      case "set":
+        response.noteObjectId(model.id);
+        if (model.$fig === "set") {
+          for (const value of model.values) noteMaxObjectIds(response, value);
+        }
+        return;
+      case "boundary":
+        noteMaxObjectIds(response, model.child);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const value of Object.values(model)) noteMaxObjectIds(response, value);
+}
+
+function collectObjectIds(model: PayloadModel, ids: Set<number>): void {
+  if (model === null || typeof model !== "object") return;
+
+  if (Array.isArray(model)) {
+    for (const item of model) collectObjectIds(item, ids);
+    return;
+  }
+
+  if (isPayloadSpecialModel(model)) {
+    switch (model.$fig) {
+      case "array":
+        ids.add(model.id);
+        for (const value of model.value) collectObjectIds(value, ids);
+        return;
+      case "element":
+        if (model.id !== undefined) ids.add(model.id);
+        collectObjectIds(model.type, ids);
+        collectObjectIds(model.props, ids);
+        return;
+      case "map":
+        ids.add(model.id);
+        for (const [key, value] of model.entries) {
+          collectObjectIds(key, ids);
+          collectObjectIds(value, ids);
+        }
+        return;
+      case "object":
+        if (model.id !== undefined) ids.add(model.id);
+        for (const value of Object.values(model.value)) {
+          collectObjectIds(value, ids);
+        }
+        return;
+      case "ref":
+        ids.add(model.id);
+        return;
+      case "set":
+        ids.add(model.id);
+        for (const value of model.values) collectObjectIds(value, ids);
+        return;
+      case "boundary":
+        collectObjectIds(model.child, ids);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const value of Object.values(model)) collectObjectIds(value, ids);
 }
 
 function referencedChunkIds(model: PayloadModel): Set<number> {
@@ -2000,6 +2413,9 @@ function collectReferencedChunkIds(
 
   if (isPayloadSpecialModel(model)) {
     switch (model.$fig) {
+      case "array":
+        for (const value of model.value) collectReferencedChunkIds(value, ids);
+        return;
       case "client":
       case "lazy":
       case "promise":
@@ -2013,6 +2429,8 @@ function collectReferencedChunkIds(
         for (const value of Object.values(model.value)) {
           collectReferencedChunkIds(value, ids);
         }
+        return;
+      case "ref":
         return;
       case "boundary":
         collectReferencedChunkIds(model.child, ids);
@@ -2046,6 +2464,7 @@ function isPayloadSpecialModel(
   if (!("$fig" in model)) return false;
 
   switch ((model as { $fig: unknown }).$fig) {
+    case "array":
     case "bigint":
     case "boundary":
     case "client":
@@ -2057,6 +2476,7 @@ function isPayloadSpecialModel(
     case "number":
     case "object":
     case "promise":
+    case "ref":
     case "set":
     case "suspense":
     case "symbol":
@@ -2083,7 +2503,7 @@ function decodeModel(
 
   const decoded: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(model)) {
-    decoded[name] = decodeModel(response, value);
+    definePayloadProperty(decoded, name, decodeModel(response, value));
   }
   return decoded;
 }
@@ -2093,23 +2513,97 @@ function decodeSpecialModel(
   model: PayloadElementModel | PayloadSpecialModel,
 ): unknown {
   switch (model.$fig) {
+    case "array": {
+      return response.defineObjectRef(
+        model.id,
+        () => [] as unknown[],
+        (value) => {
+          value.push(...model.value.map((item) => decodeModel(response, item)));
+        },
+      );
+    }
     case "bigint":
+      return BigInt(model.value);
     case "date":
-    case "map":
+      return new Date(model.value);
+    case "map": {
+      return response.defineObjectRef(
+        model.id,
+        () => new Map(),
+        (value) => {
+          for (const [key, item] of model.entries) {
+            value.set(decodeModel(response, key), decodeModel(response, item));
+          }
+        },
+      );
+    }
     case "number":
-    case "set":
+      return decodePayloadNumber(model.value);
+    case "object": {
+      if (model.id === undefined) {
+        const value: Record<string, unknown> = {};
+        for (const [name, child] of Object.entries(model.value)) {
+          definePayloadProperty(value, name, decodeModel(response, child));
+        }
+        return value;
+      }
+      return response.defineObjectRef(
+        model.id,
+        () => ({}) as Record<string, unknown>,
+        (value) => {
+          for (const [name, child] of Object.entries(model.value)) {
+            definePayloadProperty(value, name, decodeModel(response, child));
+          }
+        },
+      );
+    }
+    case "ref":
+      return response.readObjectRef(model.id);
+    case "set": {
+      return response.defineObjectRef(
+        model.id,
+        () => new Set(),
+        (value) => {
+          for (const item of model.values) {
+            value.add(decodeModel(response, item));
+          }
+        },
+      );
+    }
     case "symbol":
+      return Symbol.for(model.key);
     case "undefined":
-      return decodePayloadSpecialValue(model);
-    case "object":
-      return decodeModelRecord(response, model.value);
+      return undefined;
     case "boundary":
+      response.prepareBoundaryInitial(model.id, model.child);
       return createElement(PayloadBoundarySlot, {
         id: model.id,
         initial: model.child,
         response,
       });
     case "element": {
+      if (model.id !== undefined) {
+        return response.defineObjectRef(
+          model.id,
+          () =>
+            ({
+              $$typeof: FigElementSymbol,
+              key: model.key,
+              props: {},
+              type: Fragment,
+            }) as FigElement,
+          (element) => {
+            (element as { type: ElementType<any> }).type = decodeElementType(
+              response,
+              model.type,
+            );
+            (element as { props: Props }).props = decodeModel(
+              response,
+              model.props,
+            ) as Props;
+          },
+        );
+      }
       const type = decodeElementType(response, model.type);
       const props = decodeModel(response, model.props) as Props & {
         key?: Key | null;

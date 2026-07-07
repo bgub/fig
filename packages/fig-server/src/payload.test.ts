@@ -25,6 +25,10 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   createPayloadResponse,
+  decodePayloadDataEntries,
+  decodePayloadValue,
+  encodePayloadDataEntries,
+  encodePayloadValue,
   fetchPayload,
   isPayloadRequestCancelled,
   jsonPayloadCodec,
@@ -52,8 +56,9 @@ type TestPayloadModel =
   | boolean
   | number
   | string
+  | TestPayloadElementModel
   | TestPayloadModel[]
-  | { [key: string]: TestPayloadModel };
+  | { [key: string]: unknown };
 
 type TestPayloadRow =
   | {
@@ -72,9 +77,45 @@ type TestPayloadRow =
 
 interface TestPayloadElementModel {
   $fig: "element";
+  id?: number;
   key: string | number | null;
-  props: Record<string, TestPayloadModel>;
+  props: TestPayloadModel;
   type: TestPayloadModel;
+}
+
+function graphElement(
+  _id: number,
+  type: TestPayloadModel,
+  props: Record<string, TestPayloadModel>,
+): TestPayloadElementModel {
+  return {
+    $fig: "element",
+    key: null,
+    props: { $fig: "object", value: props },
+    type,
+  };
+}
+
+function graphElementWithId(
+  id: number,
+  type: TestPayloadModel,
+  props: Record<string, TestPayloadModel>,
+): TestPayloadElementModel {
+  return {
+    ...graphElement(id, type, props),
+    id,
+  };
+}
+
+function graphProps(model: TestPayloadElementModel): Record<string, unknown> {
+  const props = model.props as {
+    $fig?: string;
+    value?: Record<string, unknown>;
+  };
+  if (props.$fig !== "object" || props.value === undefined) {
+    throw new Error("Expected graph object props.");
+  }
+  return props.value;
 }
 
 function requireHeaders(headers: Headers | null): Headers {
@@ -197,12 +238,14 @@ describe("payload rendering", () => {
       {
         id: 0,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { initialCount: 12, tone: "primary" },
-          type: { $fig: "client", id: 1 },
-        },
+        value: graphElement(
+          1,
+          { $fig: "client", id: 1 },
+          {
+            initialCount: 12,
+            tone: "primary",
+          },
+        ),
       },
     ]);
   });
@@ -529,18 +572,13 @@ describe("payload rendering", () => {
       value: TestPayloadElementModel;
     };
 
-    expect(root.value.props.header).toEqual({
-      $fig: "element",
-      key: null,
-      props: { children: "Server header" },
-      type: "h2",
-    });
-    expect(root.value.props.children).toEqual({
-      $fig: "element",
-      key: null,
-      props: { children: "Server child" },
-      type: "p",
-    });
+    const props = graphProps(root.value);
+    expect(props.header).toEqual(
+      graphElement(3, "h2", { children: "Server header" }),
+    );
+    expect(props.children).toEqual(
+      graphElementWithId(1, "p", { children: "Server child" }),
+    );
   });
 
   it("streams suspended server subtrees as lazy rows", async () => {
@@ -563,24 +601,14 @@ describe("payload rendering", () => {
       {
         id: 0,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: {
-            children: ["Before ", { $fig: "lazy", id: 1 }],
-          },
-          type: "div",
-        },
+        value: graphElement(1, "div", {
+          children: ["Before ", { $fig: "lazy", id: 1 }],
+        }),
       },
       {
         id: 1,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { children: "Ready" },
-          type: "span",
-        },
+        value: graphElement(4, "span", { children: "Ready" }),
       },
     ]);
   });
@@ -605,22 +633,12 @@ describe("payload rendering", () => {
       {
         id: 0,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { children: { $fig: "lazy", id: 1 } },
-          type: "div",
-        },
+        value: graphElement(1, "div", { children: { $fig: "lazy", id: 1 } }),
       },
       {
         id: 1,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { children: "Lazy ready" },
-          type: "span",
-        },
+        value: graphElement(3, "span", { children: "Lazy ready" }),
       },
     ]);
   });
@@ -648,12 +666,13 @@ describe("payload rendering", () => {
       {
         id: 0,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { value: { $fig: "promise", id: 2 } },
-          type: { $fig: "client", id: 1 },
-        },
+        value: graphElement(
+          1,
+          { $fig: "client", id: 1 },
+          {
+            value: { $fig: "promise", id: 2 },
+          },
+        ),
       },
       { id: 2, tag: "model", value: "Ready" },
     ]);
@@ -703,6 +722,454 @@ describe("payload rendering", () => {
     expect(Object.is(value.numbers[1], -0)).toBe(true);
     expect(value.numbers[2]).toBe(Infinity);
     expect(value.numbers[3]).toBe(-Infinity);
+  });
+
+  it("round-trips cyclic and shared payload values", () => {
+    const shared = { label: "shared" };
+    const value: Record<string, unknown> = {
+      alias: shared,
+      shared,
+    };
+    const list: unknown[] = [value, shared];
+    const map = new Map<unknown, unknown>([
+      ["root", value],
+      [value, shared],
+    ]);
+    const set = new Set<unknown>([value, shared]);
+    value.self = value;
+    value.list = list;
+    value.map = map;
+    value.set = set;
+    list.push(list);
+
+    const decoded = decodePayloadValue(encodePayloadValue(value)) as Record<
+      string,
+      unknown
+    >;
+    const decodedShared = decoded.shared;
+
+    expect(decoded.self).toBe(decoded);
+    expect(decoded.alias).toBe(decodedShared);
+    expect((decoded.list as unknown[])[0]).toBe(decoded);
+    expect((decoded.list as unknown[])[1]).toBe(decodedShared);
+    expect((decoded.list as unknown[])[2]).toBe(decoded.list);
+    expect((decoded.map as Map<unknown, unknown>).get("root")).toBe(decoded);
+    expect((decoded.map as Map<unknown, unknown>).get(decoded)).toBe(
+      decodedShared,
+    );
+    expect((decoded.set as Set<unknown>).has(decoded)).toBe(true);
+    expect((decoded.set as Set<unknown>).has(decodedShared)).toBe(true);
+  });
+
+  it("round-trips shared objects across payload data entries", () => {
+    const shared = { label: "shared-data" };
+    const encoded = encodePayloadDataEntries([
+      { key: ["first"], value: shared },
+      { key: ["second"], value: shared },
+    ]);
+
+    const decoded = decodePayloadDataEntries(encoded);
+
+    expect(decoded[0]?.value).toBe(decoded[1]?.value);
+  });
+
+  it("preserves shared object identity across async payload rows", async () => {
+    const Viewer = clientReference<{
+      later: Promise<unknown>;
+      value: unknown;
+    }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const shared = { label: "shared" };
+    const pending = deferred<typeof shared>();
+
+    const result = renderToPayloadStream(
+      createElement(Viewer, { later: pending.promise, value: shared }),
+    );
+    pending.resolve(shared);
+    await result.allReady;
+    const rows = parseTestPayloadRows(await readStream(result.stream));
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(response, rows);
+
+    const decoded = readPayloadRoot(response);
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    await expect(decoded.props.later).resolves.toBe(decoded.props.value);
+  });
+
+  it("resolves lazy refs to objects first defined inside boundary children", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const shared = { label: "shared" };
+    const pending = deferred<typeof shared>();
+
+    function SuspendedViewer() {
+      return createElement(Viewer, { value: readPromise(pending.promise) });
+    }
+
+    const result = renderToPayloadStream(
+      createElement(
+        "div",
+        null,
+        createElement(
+          PayloadBoundary,
+          { id: "slot" },
+          createElement(Viewer, { value: shared }),
+        ),
+        createElement(SuspendedViewer, null),
+      ),
+    );
+    pending.resolve(shared);
+    await result.allReady;
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      parseTestPayloadRows(await readStream(result.stream)),
+    );
+
+    const root = readPayloadRoot(response);
+    if (!isValidElement(root) || !Array.isArray(root.props.children)) {
+      throw new Error("Expected decoded root children.");
+    }
+    const boundaryChild = unwrapFunctionComponent(root.props.children[0]);
+    const lazyChild = unwrapFunctionComponent(root.props.children[1]);
+    if (!isValidElement(boundaryChild) || !isValidElement(lazyChild)) {
+      throw new Error("Expected decoded client elements.");
+    }
+
+    expect(lazyChild.props.value).toBe(boundaryChild.props.value);
+  });
+
+  it("resolves refresh lazy refs to objects first defined in refresh content", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const shared = { label: "refresh-shared" };
+    const pending = deferred<typeof shared>();
+
+    function SuspendedViewer() {
+      return createElement(Viewer, { value: readPromise(pending.promise) });
+    }
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(PayloadBoundary, { id: "slot" }, "initial"),
+      ),
+    );
+
+    const result = renderToPayloadStream(
+      createElement(
+        "div",
+        null,
+        createElement(Viewer, { value: shared }),
+        createElement(SuspendedViewer, null),
+      ),
+      { refreshBoundary: "slot" },
+    );
+    pending.resolve(shared);
+    await result.allReady;
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      parseTestPayloadRows(await readStream(result.stream)),
+    );
+
+    const refreshed = unwrapFunctionComponent(readPayloadRoot(response));
+    if (
+      !isValidElement(refreshed) ||
+      !Array.isArray(refreshed.props.children)
+    ) {
+      throw new Error("Expected refreshed children.");
+    }
+    const first = refreshed.props.children[0];
+    const second = unwrapFunctionComponent(refreshed.props.children[1]);
+    if (!isValidElement(first) || !isValidElement(second)) {
+      throw new Error("Expected decoded refresh client elements.");
+    }
+
+    expect(second.props.value).toBe(first.props.value);
+  });
+
+  it("keeps async shared identity stable after unrelated refreshes", async () => {
+    const Viewer = clientReference<{
+      later: Promise<unknown>;
+      value: unknown;
+    }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const shared = { label: "stable" };
+    const pending = deferred<typeof shared>();
+
+    const result = renderToPayloadStream(
+      createElement(
+        "main",
+        null,
+        createElement(Viewer, { later: pending.promise, value: shared }),
+        createElement(PayloadBoundary, { id: "slot" }, "initial"),
+      ),
+    );
+    pending.resolve(shared);
+    await result.allReady;
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      parseTestPayloadRows(await readStream(result.stream)),
+    );
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows("refreshed", { refreshBoundary: "slot" }),
+    );
+
+    const root = readPayloadRoot(response);
+    if (!isValidElement(root) || !Array.isArray(root.props.children)) {
+      throw new Error("Expected decoded root children.");
+    }
+    const viewer = root.props.children[0];
+    if (!isValidElement(viewer)) throw new Error("Expected viewer element.");
+
+    await expect(viewer.props.later).resolves.toBe(viewer.props.value);
+  });
+
+  it("keeps object refs from transitive lazy chunks after unrelated refreshes", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "main", {
+          children: [
+            { $fig: "lazy", id: 1 },
+            { $fig: "boundary", child: "initial", id: "slot" },
+          ],
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(2, "section", {
+          children: [
+            { $fig: "lazy", id: 3 },
+            { $fig: "lazy", id: 2 },
+          ],
+        }),
+      },
+      {
+        id: 2,
+        tag: "model",
+        value: graphElement(3, "span", {
+          value: { $fig: "object", id: 1, value: { label: "shared" } },
+        }),
+      },
+      {
+        id: 3,
+        tag: "model",
+        value: graphElement(4, "span", {
+          value: { $fig: "ref", id: 1 },
+        }),
+      },
+    ]);
+
+    const initial = evaluatePayloadNode(response.getRoot());
+    expect(initial).toMatchObject({
+      props: {
+        children: [
+          {
+            props: {
+              children: [
+                { props: { value: { label: "shared" } }, type: "span" },
+                { props: { value: { label: "shared" } }, type: "span" },
+              ],
+            },
+            type: "section",
+          },
+          "initial",
+        ],
+      },
+      type: "main",
+    });
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    const refreshed = evaluatePayloadNode(response.getRoot());
+    expect(refreshed).toMatchObject({
+      props: {
+        children: [
+          {
+            props: {
+              children: [
+                { props: { value: { label: "shared" } }, type: "span" },
+                { props: { value: { label: "shared" } }, type: "span" },
+              ],
+            },
+            type: "section",
+          },
+          "refreshed",
+        ],
+      },
+      type: "main",
+    });
+    if (
+      !isValidElement(refreshed) ||
+      !Array.isArray(refreshed.props.children)
+    ) {
+      throw new Error("Expected refreshed lazy subtree.");
+    }
+    const section = refreshed.props.children[0];
+    if (!isValidElement(section) || !Array.isArray(section.props.children)) {
+      throw new Error("Expected refreshed nested lazy children.");
+    }
+    const refFirst = section.props.children[0];
+    const defSecond = section.props.children[1];
+    if (!isValidElement(refFirst) || !isValidElement(defSecond)) {
+      throw new Error("Expected refreshed lazy host elements.");
+    }
+    expect(refFirst.props.value).toBe(defSecond.props.value);
+  });
+
+  it("preserves cyclic objects in rendered client props", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const value: Record<string, unknown> = { label: "cycle" };
+    value.self = value;
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(createElement(Viewer, { value })),
+    );
+
+    const decoded = readPayloadRoot(response);
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    expect(decoded.props.value.self).toBe(decoded.props.value);
+  });
+
+  it("serializes client children and fallback props as values", async () => {
+    const Viewer = clientReference<{
+      children?: unknown;
+      fallback?: unknown;
+      mirror?: unknown;
+    }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const child = createElement("span", null, "shared child");
+    const fallback = new Map<unknown, unknown>([["state", "ready"]]);
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(Viewer, {
+          children: child,
+          fallback,
+          mirror: child,
+        }),
+      ),
+    );
+
+    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    expect(decoded.props.children).toBe(decoded.props.mirror);
+    expect(decoded.props.children).toMatchObject({
+      props: { children: "shared child" },
+      type: "span",
+    });
+    expect(decoded.props.fallback).toBeInstanceOf(Map);
+    expect(decoded.props.fallback.get("state")).toBe("ready");
+  });
+
+  it("serializes object children on client references as values", async () => {
+    const Viewer = clientReference<{ children?: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(Viewer, { children: { custom: "data" } }),
+      ),
+    );
+
+    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    expect(decoded.props.children).toEqual({ custom: "data" });
+  });
+
+  it("keeps refresh payload object refs isolated from previous payloads", async () => {
+    const Viewer = clientReference<{ value: unknown }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+
+    const first: Record<string, unknown> = { label: "first" };
+    first.self = first;
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          PayloadBoundary,
+          { id: "slot" },
+          createElement(Viewer, { value: first }),
+        ),
+      ),
+    );
+
+    const second: Record<string, unknown> = { label: "second" };
+    second.self = second;
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(createElement(Viewer, { value: second }), {
+        refreshBoundary: "slot",
+      }),
+    );
+
+    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    expect(decoded.props.value.label).toBe("second");
+    expect(decoded.props.value.self).toBe(decoded.props.value);
   });
 
   it("reports invalid Date payload values as root errors", async () => {
@@ -821,20 +1288,14 @@ describe("payload rendering", () => {
     expect(rows[0]).toEqual({
       id: 0,
       tag: "model",
-      value: {
-        $fig: "element",
-        key: null,
-        props: {
+      value: graphElement(
+        1,
+        { $fig: "suspense" },
+        {
           children: { $fig: "lazy", id: 1 },
-          fallback: {
-            $fig: "element",
-            key: null,
-            props: { children: "Loading" },
-            type: "em",
-          },
+          fallback: graphElement(3, "em", { children: "Loading" }),
         },
-        type: { $fig: "suspense" },
-      },
+      ),
     });
   });
 
@@ -1016,23 +1477,13 @@ describe("payload rendering", () => {
       {
         id: 0,
         tag: "model",
-        value: {
-          $fig: "element",
-          key: null,
-          props: {
-            children: {
-              $fig: "boundary",
-              child: {
-                $fig: "element",
-                key: null,
-                props: { children: "Initial" },
-                type: "p",
-              },
-              id: "post",
-            },
+        value: graphElement(1, "section", {
+          children: {
+            $fig: "boundary",
+            child: graphElement(3, "p", { children: "Initial" }),
+            id: "post",
           },
-          type: "section",
-        },
+        }),
       },
     ]);
   });
@@ -1063,12 +1514,7 @@ describe("payload rendering", () => {
       {
         boundary: "post",
         tag: "refresh",
-        value: {
-          $fig: "element",
-          key: null,
-          props: { children: "Updated" },
-          type: "p",
-        },
+        value: graphElement(1, "p", { children: "Updated" }),
       },
     ]);
   });
@@ -1129,6 +1575,7 @@ describe("payload rendering", () => {
         ),
       ),
     );
+    response.beginRefreshPayload();
     processTestPayloadRows(
       response,
       await renderToPayloadRows(createElement("p", null, "Updated"), {

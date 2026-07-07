@@ -16,7 +16,6 @@ import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
 import {
   createPayloadResponse,
   decodePayloadDataEntries,
-  decodePayloadDataEntry,
   decodePayloadValue,
   encodePayloadValue,
   fetchPayload,
@@ -1032,11 +1031,31 @@ function createDataStream(
 ): DataStream {
   let listeners: Array<(entries: readonly FigDataHydrationEntry[]) => void> =
     [];
+  const seenEntries = new Set<string>();
+
+  function decodeNewEntries(
+    entries: readonly PayloadDataHydrationEntry[],
+  ): FigDataHydrationEntry[] {
+    // Dedup is per entry because Fig Start's server emits each data entry once
+    // per stream, and re-read document frames are re-fed as whole encoded
+    // frames. If data frames ever allow a new entry to ref a repeated entry
+    // from another frame, this must move to frame-level dedupe before decode.
+    const next: PayloadDataHydrationEntry[] = [];
+    for (const entry of entries) {
+      const key = JSON.stringify(entry);
+      if (seenEntries.has(key)) continue;
+      seenEntries.add(key);
+      next.push(entry);
+    }
+    return decodePayloadDataEntries(next);
+  }
+
   const stream: DataStream = {
     decoded: true,
-    q: initialEntries.map(decodePayloadDataEntry),
+    q: decodeNewEntries(initialEntries),
     p(entries) {
-      const next = entries.map(decodePayloadDataEntry);
+      const next = decodeNewEntries(entries);
+      if (next.length === 0) return;
       stream.q.push(...next);
       for (const listener of listeners) listener(next);
     },
@@ -1096,15 +1115,7 @@ function appendMissingDataEntries(
   stream: DataStream,
   entries: readonly PayloadDataHydrationEntry[],
 ): void {
-  const seen = new Set(stream.q.map((entry) => JSON.stringify(entry)));
-  const next = entries.filter((entry) => {
-    const decoded = decodePayloadDataEntry(entry);
-    const key = JSON.stringify(decoded);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  if (next.length > 0) stream.p(next);
+  if (entries.length > 0) stream.p(entries);
 }
 
 function appendMissingPayloadFrames(

@@ -52,6 +52,8 @@ round-trips:
 
 - JSON scalars and arrays
 - plain objects, including objects with a user-authored `$fig` key
+- shared references and cyclic graphs across arrays, plain objects, `Map`,
+  `Set`, and rendered Fig elements inside one payload request
 - `undefined`
 - `Date`
 - `Map`
@@ -60,10 +62,16 @@ round-trips:
 - `NaN`, `Infinity`, `-Infinity`, and `-0`
 - global symbols created with `Symbol.for`
 
-It rejects functions, cyclic object graphs, class instances/non-plain objects,
-and non-global symbols. Server component values can additionally contain Fig
-elements, client references, and promises; those are serialized by the payload
-renderer into row references before the value codec handles ordinary data.
+It rejects functions, class instances/non-plain objects, and non-global symbols.
+Server component values can additionally contain Fig elements, client
+references, and promises; those are serialized by the payload renderer into row
+references before the value codec handles ordinary data.
+
+The model format carries request-wide object ids. The first occurrence of a
+supported graph object defines it inline; later occurrences in the same payload
+request use a graph reference. Refresh payloads use a fresh id range on the
+client so their graph ids cannot collide with earlier payloads decoded by the
+same `PayloadResponse`.
 
 The same helpers back payload data rows and Fig Start's remote data transport:
 `encodePayloadValue` / `decodePayloadValue` for values and
@@ -98,6 +106,6 @@ streamed data into `root.data`, `preloadClientReferences()` awaits in-flight
 module loads, and `fetchPayload(response, input, { refreshBoundary? })`
 fetches and ingests (sending the response codec in `Accept`, checking the
 response codec id, and namespacing refresh row ids past mounted chunks).
-Decoded chunks are memoized so unchanged subtrees bail out of re-renders;
-refresh rows drop the decode caches so refreshed boundaries get fresh
-identities.
+Decoded chunks are memoized so unchanged subtrees bail out of re-renders.
+Refresh rows clear decoded tree caches so refreshed boundaries get fresh
+structure, while retained graph references keep shared decoded values stable.

@@ -262,8 +262,9 @@ renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" });
 `encodePayloadValue` / `decodePayloadValue` are low-level helpers for payload
 integrations that need the same data-value fidelity as payload data rows:
 `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and
-global `Symbol.for` symbols round-trip; functions, cycles, class instances, and
-non-global symbols are rejected.
+global `Symbol.for` symbols round-trip. Shared references and cycles across
+arrays, plain objects, `Map`, and `Set` also round-trip; functions, class
+instances, and non-global symbols are rejected.
 
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useExternalStore` server snapshots, no-op server

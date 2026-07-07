@@ -520,6 +520,79 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     expect(loadCalls).toBe(1);
   });
 
+  it("hydrates streamed document data frames with shared graph entries", async () => {
+    let resolveShared: (value: { label: string }) => void = () => undefined;
+    const pending = new Promise<{ label: string }>((resolve) => {
+      resolveShared = resolve;
+    });
+    const first = serverDataResource<[], { label: string }>({
+      key: () => ["client-shared-frame", "first"],
+      load: () => pending,
+    });
+    const second = serverDataResource<[], { label: string }>({
+      key: () => ["client-shared-frame", "second"],
+      load: () => pending,
+    });
+
+    function FirstData(): FigNode {
+      readData(first);
+      return null;
+    }
+    function SecondData(): FigNode {
+      readData(second);
+      return null;
+    }
+    function SharedData(): FigNode {
+      return createElement(
+        "span",
+        { class: "shared-data" },
+        readData(first) === readData(second) ? "same" : "split",
+      );
+    }
+
+    const dataRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/shared-data")({
+        component: () =>
+          createElement(
+            Suspense,
+            { fallback: createElement("p", null, "Loading") },
+            [
+              createElement(FirstData, null),
+              createElement(SecondData, null),
+              createElement(SharedData, null),
+            ],
+          ),
+      }),
+    ];
+    const handler = createRequestHandler({
+      clientEntry: "/client.js",
+      routes: dataRoutes,
+    });
+    const response = await handler(new Request("http://localhost/shared-data"));
+    const text = response.text();
+    await flush();
+    resolveShared({ label: "shared" });
+    const html = await text;
+
+    document.documentElement.innerHTML = html
+      .replace(/^<!doctype[^>]*>/i, "")
+      .replace(/^\s*<html[^>]*>/i, "")
+      .replace(/<\/html>\s*$/i, "")
+      .replace(
+        /<script(?:\s+nonce="[^"]*")?>import\("\/client\.js"\);<\/script>/gi,
+        "",
+      );
+
+    hydrateStart({ routes: dataRoutes });
+    await flush();
+
+    expect(document.querySelector(".shared-data")?.textContent).toBe("same");
+  });
+
   it("fetches remote data resources for client route cache misses", async () => {
     let loadCalls = 0;
     // Mirrors the browser stub the Fig Start transform emits for a
