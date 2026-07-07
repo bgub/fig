@@ -1,4 +1,14 @@
-import type { FigContext, StateSetter } from "@bgub/fig";
+import type {
+  ActionStateAction,
+  ActionStateRunner,
+  DependencyList,
+  EffectCallback,
+  ExternalStoreSubscribe,
+  FigContext,
+  StableEventArgs,
+  StateSetter,
+  StartTransition,
+} from "@bgub/fig";
 import type { DataResource, RenderDispatcher } from "@bgub/fig/internal";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
@@ -86,67 +96,84 @@ function resolveInitialState<S>(initialState: S | (() => S)): S {
     : initialState;
 }
 
-function noopEffect(): void {}
-
 export function createStaticDispatcher(
   options: StaticDispatcherOptions,
 ): RenderDispatcher {
   return {
-    useState(initialState) {
+    useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
       const value = resolveInitialState(initialState);
       const setState: StateSetter<typeof value> = () => {
         throw new Error(options.updateError);
       };
       return [value, setState];
     },
-    useActionState(_action, initialState) {
-      return [
-        initialState,
-        () => {
-          throw new Error(options.updateError);
-        },
-        false,
-      ];
+    useActionState<S, Args extends unknown[]>(
+      _action: ActionStateAction<S, Args>,
+      initialState: S,
+    ): [S, ActionStateRunner<Args>, boolean] {
+      const runner: ActionStateRunner<Args> = () => {
+        throw new Error(options.updateError);
+      };
+      return [initialState, runner, false];
     },
-    useId() {
+    useId(): string {
       return options.useId();
     },
-    useLaggedValue(value) {
+    useLaggedValue<T>(
+      value: T,
+      _initialValue: T | undefined,
+      _hasInitialValue: boolean,
+    ): T {
       return value;
     },
-    useMemo(calculate) {
+    useMemo<T>(calculate: () => T, _deps: DependencyList): T {
       return calculate();
     },
-    useTransition() {
+    useTransition(): [boolean, StartTransition] {
       // Server transitions run synchronously to completion; the signal never
       // aborts (there is no supersede/unmount lifecycle during a request).
-      return [false, (callback) => void callback(new AbortController().signal)];
+      const startTransition: StartTransition = (
+        callback: (signal: AbortSignal) => void | PromiseLike<void>,
+      ) => void callback(new AbortController().signal);
+      return [false, startTransition];
     },
-    useReactive: noopEffect,
-    useBeforePaint: noopEffect,
-    useBeforeLayout: noopEffect,
-    useExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
+    useReactive(_effect: EffectCallback, _deps?: DependencyList): void {},
+    useBeforePaint(_effect: EffectCallback, _deps?: DependencyList): void {},
+    useBeforeLayout(_effect: EffectCallback, _deps?: DependencyList): void {},
+    useExternalStore<T>(
+      _subscribe: ExternalStoreSubscribe,
+      _getSnapshot: () => T,
+      getServerSnapshot?: () => T,
+    ): T {
       if (getServerSnapshot === undefined) {
         throw new Error(options.externalStoreError);
       }
 
       return getServerSnapshot();
     },
-    useStableEvent() {
-      return () => {
+    useStableEvent<Args extends unknown[], Result>(
+      _handler: (...args: Args) => Result,
+    ): (...args: StableEventArgs<Args>) => Result {
+      return (() => {
         throw new Error("Stable events cannot be called during server render.");
-      };
+      }) as (...args: StableEventArgs<Args>) => Result;
     },
-    readContext(context) {
+    readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
     },
-    readData(resource, args) {
+    readData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      args: TArgs,
+    ): TValue {
       return options.readData(resource, args);
     },
-    preloadData(resource, args) {
+    preloadData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      args: TArgs,
+    ): void {
       options.preloadData(resource, args);
     },
-    readPromise(promise) {
+    readPromise<T>(promise: PromiseLike<T>): T {
       return options.readPromise(promise);
     },
   };

@@ -29,6 +29,7 @@ import {
   clientReferenceAssets,
   createDataStore,
   type DataStore,
+  type DataStoreEntrySnapshot,
   describeInvalidChild,
   isActivity,
   isAssets,
@@ -56,7 +57,7 @@ import {
   deferred,
   withContextValue,
 } from "./shared.ts";
-import type { ServerErrorPayload } from "./types.ts";
+import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -76,7 +77,10 @@ export interface PayloadRenderOptions {
    * a handler, development includes the error message and production sends
    * an empty payload.
    */
-  onError?: (error: unknown) => ServerErrorPayload | undefined;
+  onError?: (
+    error: unknown,
+    info: ServerErrorInfo,
+  ) => ServerErrorPayload | undefined;
   refreshBoundary?: string;
 }
 
@@ -85,33 +89,51 @@ export interface PayloadRootLike {
   render(node: FigNode): void;
 }
 
-// Stream-safe asset resources only (no head-only title/meta). These are the
-// FigAssetResource subtypes whose fields are already JSON scalars, so they travel as
-// plain data with no implementation detail exposed. The per-kind field lists
-// are the single source of truth: the wire type derives from them, and
-// serializeAssetResource picks exactly these fields.
+// Stream-safe asset resources only (no head-only title/meta). Optional fields
+// stay optional on the wire; omitted `undefined` values are part of the payload
+// contract, not a serializer implementation detail.
 export type SerializedAssetResource =
-  | Pick<
-      StylesheetResource,
-      "crossOrigin" | "href" | "kind" | "media" | "precedence"
-    >
-  | Pick<
-      PreloadResource,
-      "as" | "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
-    >
-  | Pick<
-      ModulePreloadResource,
-      "crossOrigin" | "fetchPriority" | "href" | "kind"
-    >
-  | Pick<
-      ScriptResource,
-      "async" | "crossOrigin" | "defer" | "kind" | "module" | "src"
-    >
-  | Pick<
-      FontResource,
-      "crossOrigin" | "fetchPriority" | "href" | "kind" | "type"
-    >
-  | Pick<PreconnectResource, "crossOrigin" | "href" | "kind">;
+  | {
+      crossOrigin?: StylesheetResource["crossOrigin"];
+      href: string;
+      kind: "stylesheet";
+      media?: string;
+      precedence?: string;
+    }
+  | {
+      as: string;
+      crossOrigin?: PreloadResource["crossOrigin"];
+      fetchPriority?: PreloadResource["fetchPriority"];
+      href: string;
+      kind: "preload";
+      type?: string;
+    }
+  | {
+      crossOrigin?: ModulePreloadResource["crossOrigin"];
+      fetchPriority?: ModulePreloadResource["fetchPriority"];
+      href: string;
+      kind: "modulepreload";
+    }
+  | {
+      async?: boolean;
+      crossOrigin?: ScriptResource["crossOrigin"];
+      defer?: boolean;
+      kind: "script";
+      module?: boolean;
+      src: string;
+    }
+  | {
+      crossOrigin?: FontResource["crossOrigin"];
+      fetchPriority?: FontResource["fetchPriority"];
+      href: string;
+      kind: "font";
+      type: string;
+    }
+  | {
+      crossOrigin?: PreconnectResource["crossOrigin"];
+      href: string;
+      kind: "preconnect";
+    };
 
 /**
  * Semantic payload row before a PayloadCodec turns it into bytes. This row
@@ -283,6 +305,7 @@ type PayloadRequest = {
   nextRowId: number;
   nextUseId: number;
   onError: PayloadRenderOptions["onError"];
+  pendingDataSnapshots: Map<string, DataStoreEntrySnapshot>;
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: Uint8Array[];
@@ -296,6 +319,7 @@ type Task = {
   contextValues: ContextValues;
   id: number;
   kind: "node" | "promise";
+  stack: StackFrame | null;
   value: unknown;
 };
 
@@ -307,7 +331,13 @@ type RenderFrame = {
   // (the dispatcher reads context through the frame, so it stays current).
   dispatcher: RenderDispatcher | null;
   request: PayloadRequest;
+  stack: StackFrame | null;
 };
+
+interface StackFrame {
+  name: string;
+  parent: StackFrame | null;
+}
 
 type DecodedChunk = {
   decoded: unknown;
@@ -322,6 +352,7 @@ type DecodedChunk = {
 
 const textEncoder = new TextEncoder();
 const PayloadBoundarySymbol = Symbol.for("fig.payload-boundary");
+const errorStacks = new WeakMap<object, StackFrame>();
 
 /**
  * Readable development-oriented codec: one JSON payload row per newline.
@@ -491,6 +522,7 @@ function createPayloadRequest(
   node: FigNode,
   options: PayloadRenderOptions,
 ): PayloadRequest {
+  const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
     allReady: deferred<void>(),
     boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
@@ -500,6 +532,9 @@ function createPayloadRequest(
     controller: null,
     dataStore: createDataStore<object, null>({
       getLane: () => null,
+      onEntryChange: (entry: DataStoreEntrySnapshot) => {
+        pendingDataSnapshots.set(entry.canonicalKey, entry);
+      },
       partition: options.dataPartition,
       schedule: () => undefined,
     }),
@@ -508,6 +543,7 @@ function createPayloadRequest(
     nextRowId: 1,
     nextUseId: 0,
     onError: options.onError,
+    pendingDataSnapshots,
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
@@ -532,7 +568,9 @@ function createPayloadRequest(
     },
   });
   request.stream = stream;
-  request.pingedTasks.push(createTask(request, 0, "node", node, new Map()));
+  request.pingedTasks.push(
+    createTask(request, 0, "node", node, new Map(), null),
+  );
 
   request.workScheduled = true;
   queueMicrotask(() => {
@@ -551,6 +589,7 @@ interface PayloadClientReferenceEntry {
 class PayloadResponseImpl implements PayloadResponse {
   private readonly assetResources = new Map<string, FigAssetResource>();
   private readonly boundaries = new Map<string, PayloadModel>();
+  private readonly boundaryChunkIds = new Map<string, Set<number>>();
   private readonly decodedBoundaries = new Map<string, FigNode>();
   private readonly clientReferences = new Map<
     string,
@@ -576,7 +615,9 @@ class PayloadResponseImpl implements PayloadResponse {
   });
   private maxRowId = 0;
   private pendingData: FigDataHydrationEntry[] = [];
+  private readonly retainedChunkRefs = new Map<number, number>();
   private rootData: FigDataStoreHandle | null = null;
+  private rootChunkIds: Set<number> | null = null;
   private rowIdBase = 0;
   private readonly decoder: PayloadDecoder;
   readonly codec: PayloadCodec;
@@ -676,6 +717,7 @@ class PayloadResponseImpl implements PayloadResponse {
     }
 
     if (row.tag === "refresh") {
+      this.retainBoundaryChunks(row.boundary, row.value);
       this.boundaries.set(row.boundary, row.value);
       // Refreshed content must reach its slot through fresh element
       // identities (slots read the boundaries map without subscribing), so
@@ -693,6 +735,7 @@ class PayloadResponseImpl implements PayloadResponse {
 
     resolveDecodedRow(this, row);
     if (row.id === 0) {
+      if (row.tag === "model") this.retainRootChunks(row.value);
       this.resolveRootReady();
       this.notify();
     }
@@ -828,6 +871,34 @@ class PayloadResponseImpl implements PayloadResponse {
     return entry;
   }
 
+  private retainRootChunks(model: PayloadModel): void {
+    const next = referencedChunkIds(model);
+    retainChunks(this.retainedChunkRefs, next);
+    if (this.rootChunkIds !== null) this.releaseChunks(this.rootChunkIds);
+    this.rootChunkIds = next;
+  }
+
+  private retainBoundaryChunks(boundary: string, model: PayloadModel): void {
+    const next = referencedChunkIds(model);
+    retainChunks(this.retainedChunkRefs, next);
+    const previous = this.boundaryChunkIds.get(boundary);
+    if (previous !== undefined) this.releaseChunks(previous);
+    this.boundaryChunkIds.set(boundary, next);
+  }
+
+  private releaseChunks(ids: Set<number>): void {
+    for (const id of ids) {
+      const count = this.retainedChunkRefs.get(id);
+      if (count === undefined) continue;
+      if (count > 1) {
+        this.retainedChunkRefs.set(id, count - 1);
+        continue;
+      }
+      this.retainedChunkRefs.delete(id);
+      if (id !== 0) this.chunks.delete(id);
+    }
+  }
+
   getChunk(id: number): DecodedChunk {
     if (id > this.maxRowId) this.maxRowId = id;
     return getOrCreateChunk(this.chunks, id);
@@ -852,9 +923,10 @@ function createTask(
   kind: Task["kind"],
   value: unknown,
   contextValues: ContextValues,
+  stack: StackFrame | null,
 ): Task {
   request.pendingTasks += 1;
-  return { contextValues, id, kind, value };
+  return { contextValues, id, kind, stack, value };
 }
 
 function performWork(request: PayloadRequest): void {
@@ -873,6 +945,7 @@ function retryTask(request: PayloadRequest, task: Task): void {
   const frame = createRenderFrame(
     request,
     cloneContextValues(task.contextValues),
+    task.stack,
   );
 
   try {
@@ -904,13 +977,13 @@ function retryTask(request: PayloadRequest, task: Task): void {
       emitRow(request, {
         boundary: request.refreshBoundary,
         tag: "refresh-error",
-        value: errorRowPayload(request, error),
+        value: errorRowPayload(request, error, task.stack),
       });
     } else {
       emitRow(request, {
         id: task.id,
         tag: "error",
-        value: errorRowPayload(request, error),
+        value: errorRowPayload(request, error, task.stack),
       });
     }
     finishTask(request);
@@ -925,7 +998,7 @@ function finishTask(request: PayloadRequest): void {
 function emitDataRows(request: PayloadRequest): void {
   const entries: FigDataHydrationEntry[] = [];
 
-  for (const snapshot of request.dataStore.inspectDataEntries()) {
+  for (const snapshot of request.pendingDataSnapshots.values()) {
     // Stream only settled values. A "refreshing" entry exposes a transient stale
     // value while its background refresh is in flight; emitting it would mark the
     // key emitted forever and permanently suppress the fresh value. Skipping it
@@ -933,9 +1006,13 @@ function emitDataRows(request: PayloadRequest): void {
     if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
 
     const key = normalizeDataResourceKey(snapshot.key);
-    if (request.emittedDataKeys.has(key)) continue;
+    if (request.emittedDataKeys.has(key)) {
+      request.pendingDataSnapshots.delete(snapshot.canonicalKey);
+      continue;
+    }
 
     request.emittedDataKeys.add(key);
+    request.pendingDataSnapshots.delete(snapshot.canonicalKey);
     entries.push({ key: snapshot.key, value: snapshot.value });
   }
 
@@ -947,8 +1024,9 @@ function emitDataRows(request: PayloadRequest): void {
 function createRenderFrame(
   request: PayloadRequest,
   contextValues: ContextValues,
+  stack: StackFrame | null,
 ): RenderFrame {
-  return { contextValues, dispatcher: null, request };
+  return { contextValues, dispatcher: null, request, stack };
 }
 
 function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
@@ -1000,7 +1078,7 @@ function serializeNodeOrLazy(node: FigNode, frame: RenderFrame): PayloadModel {
     if (isThenable(error)) {
       return outlineTask(frame, "node", node, "lazy", error);
     }
-    return outlineError(frame.request, error, "lazy");
+    return outlineError(frame, error, "lazy");
   }
 }
 
@@ -1094,12 +1172,18 @@ function serializeFunctionComponent(
   frame.dispatcher ??= createPayloadDispatcher(frame);
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
+  const previousStack = frame.stack;
+  frame.stack = { name: type.name || "Anonymous", parent: previousStack };
 
   try {
     const result = type(props);
     const node = isThenable(result) ? readThenable(result) : result;
     return serializeNode(node as FigNode, frame);
+  } catch (error) {
+    recordErrorStack(error, frame.stack);
+    throw error;
   } finally {
+    frame.stack = previousStack;
     setCurrentDataStore(previousDataStore);
     setCurrentDispatcher(previousDispatcher);
   }
@@ -1449,6 +1533,7 @@ function outlineTask(
     kind,
     value,
     cloneContextValues(frame.contextValues),
+    stackForError(wakeable, frame.stack),
   );
 
   wakeable.then(
@@ -1460,15 +1545,16 @@ function outlineTask(
 }
 
 function outlineError(
-  request: PayloadRequest,
+  frame: RenderFrame,
   error: unknown,
   referenceKind: "lazy" | "promise",
 ): PayloadSpecialModel {
+  const request = frame.request;
   const id = request.nextRowId++;
   emitRow(request, {
     id,
     tag: "error",
-    value: errorRowPayload(request, error),
+    value: errorRowPayload(request, error, frame.stack),
   });
   return { $fig: referenceKind, id };
 }
@@ -1481,7 +1567,11 @@ function outlineError(
 function errorRowPayload(
   request: PayloadRequest,
   error: unknown,
+  stack: StackFrame | null,
 ): ServerErrorPayload {
+  const info = {
+    componentStack: componentStack(stackForError(error, stack)),
+  };
   if (request.onError === undefined) {
     return process.env.NODE_ENV !== "production"
       ? { message: errorMessage(error) }
@@ -1489,10 +1579,32 @@ function errorRowPayload(
   }
 
   try {
-    return request.onError(error) ?? {};
+    return request.onError(error, info) ?? {};
   } catch {
     return {};
   }
+}
+
+function recordErrorStack(error: unknown, stack: StackFrame | null): void {
+  if (stack === null) return;
+  if (typeof error !== "object" || error === null) return;
+  if (!errorStacks.has(error)) errorStacks.set(error, stack);
+}
+
+function stackForError(
+  error: unknown,
+  fallback: StackFrame | null,
+): StackFrame | null {
+  if (typeof error !== "object" || error === null) return fallback;
+  return errorStacks.get(error) ?? fallback;
+}
+
+function componentStack(stack: StackFrame | null): string {
+  const frames: string[] = [];
+  for (let frame = stack; frame !== null; frame = frame.parent) {
+    frames.push(`    at ${frame.name}`);
+  }
+  return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
 }
 
 // The metadata shape hooks receive: the wire row minus assets (those are
@@ -1673,6 +1785,12 @@ function serializeAssetResource(
         "Head-only resources cannot be serialized into the payload.",
       );
   }
+
+  return unsupportedSerializedAssetResource(resource);
+}
+
+function unsupportedSerializedAssetResource(resource: FigAssetResource): never {
+  throw new Error(`Unsupported asset resource kind: ${resource.kind}`);
 }
 
 function emitRow(request: PayloadRequest, row: PayloadRow): void {
@@ -1861,6 +1979,65 @@ function shiftModelIds(model: PayloadModel, offset: number): void {
   }
 
   for (const value of Object.values(model)) shiftModelIds(value, offset);
+}
+
+function referencedChunkIds(model: PayloadModel): Set<number> {
+  const ids = new Set<number>();
+  collectReferencedChunkIds(model, ids);
+  return ids;
+}
+
+function collectReferencedChunkIds(
+  model: PayloadModel,
+  ids: Set<number>,
+): void {
+  if (model === null || typeof model !== "object") return;
+
+  if (Array.isArray(model)) {
+    for (const item of model) collectReferencedChunkIds(item, ids);
+    return;
+  }
+
+  if (isPayloadSpecialModel(model)) {
+    switch (model.$fig) {
+      case "client":
+      case "lazy":
+      case "promise":
+        ids.add(model.id);
+        return;
+      case "element":
+        collectReferencedChunkIds(model.type, ids);
+        collectReferencedChunkIds(model.props, ids);
+        return;
+      case "object":
+        for (const value of Object.values(model.value)) {
+          collectReferencedChunkIds(value, ids);
+        }
+        return;
+      case "boundary":
+        collectReferencedChunkIds(model.child, ids);
+        return;
+      case "map":
+        for (const [key, value] of model.entries) {
+          collectReferencedChunkIds(key, ids);
+          collectReferencedChunkIds(value, ids);
+        }
+        return;
+      case "set":
+        for (const value of model.values) collectReferencedChunkIds(value, ids);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const value of Object.values(model)) {
+    collectReferencedChunkIds(value, ids);
+  }
+}
+
+function retainChunks(refs: Map<number, number>, ids: Set<number>): void {
+  for (const id of ids) refs.set(id, (refs.get(id) ?? 0) + 1);
 }
 
 function isPayloadSpecialModel(

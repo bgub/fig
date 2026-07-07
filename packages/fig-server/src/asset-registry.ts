@@ -221,6 +221,12 @@ function assetSignature(resource: FigAssetResource): string {
         resource.content ?? "",
       );
   }
+
+  return unsupportedAssetResource(resource);
+}
+
+function unsupportedAssetResource(resource: FigAssetResource): never {
+  throw new Error(`Unsupported asset resource kind: ${resource.kind}`);
 }
 
 function signature(...values: Array<string | boolean>): string {

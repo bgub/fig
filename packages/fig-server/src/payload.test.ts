@@ -945,10 +945,12 @@ describe("payload rendering", () => {
       throw new Error("db credentials leaked in message");
     };
     const seen: string[] = [];
+    const stacks: string[] = [];
 
     const rows = await renderToPayloadRows(createElement(Failing, null), {
-      onError(error) {
+      onError(error, info) {
         seen.push(error instanceof Error ? error.message : String(error));
+        stacks.push(info.componentStack);
         return { digest: "digest-7" };
       },
     });
@@ -957,6 +959,7 @@ describe("payload rendering", () => {
       { id: 0, tag: "error", value: { digest: "digest-7" } },
     ]);
     expect(seen).toEqual(["db credentials leaked in message"]);
+    expect(stacks).toEqual(["\n    at Failing"]);
   });
 
   it("sends an empty error payload when onError returns nothing or throws", async () => {
@@ -1277,6 +1280,43 @@ describe("payload rendering", () => {
       props: { children: ["first", "second"] },
       type: "section",
     });
+  });
+
+  it("releases chunks from superseded boundary refresh payloads", async () => {
+    const response = createPayloadResponse({
+      resolveClientReference: ({ id }) =>
+        function Resolved() {
+          return id;
+        },
+    });
+    response.bindRoot({ render: () => undefined });
+
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(PayloadBoundary, { id: "slot" }, "before"),
+      ),
+    );
+
+    for (const id of ["first", "second", "third"]) {
+      const Client = clientReference({
+        id,
+        load: () => Promise.resolve({}),
+      });
+
+      response.beginRefreshPayload();
+      processTestPayloadRows(
+        response,
+        await renderToPayloadRows(createElement(Client, {}), {
+          refreshBoundary: "slot",
+        }),
+      );
+    }
+
+    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+      .chunks;
+    expect(chunks.size).toBe(2);
+    expect(evaluatePayloadNode(response.getRoot())).toBe("third");
   });
 
   it("pipes readable streams into a payload response", async () => {
