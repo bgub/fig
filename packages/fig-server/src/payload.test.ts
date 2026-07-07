@@ -63,6 +63,11 @@ type TestPayloadRow =
     }
   | { id: number; tag: "error"; value: { digest?: string; message?: string } }
   | { id: number; tag: "model"; value: TestPayloadModel }
+  | {
+      boundary: string;
+      tag: "refresh-error";
+      value: { digest?: string; message?: string };
+    }
   | { boundary: string; tag: "refresh"; value: TestPayloadModel };
 
 interface TestPayloadElementModel {
@@ -700,6 +705,40 @@ describe("payload rendering", () => {
     expect(value.numbers[3]).toBe(-Infinity);
   });
 
+  it("decodes escaped $fig props with nested payload models", async () => {
+    const Viewer = clientReference<{
+      $fig: string;
+      child: FigNode;
+      promise: Promise<string>;
+    }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const value = Promise.resolve("Loaded");
+
+    const rows = await renderToPayloadRows(
+      createElement(Viewer, {
+        $fig: "literal",
+        child: createElement("span", null, "Child"),
+        promise: value,
+      }),
+    );
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+    processTestPayloadRows(response, rows);
+
+    const decoded = readPayloadRoot(response);
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+
+    expect(decoded.props.$fig).toBe("literal");
+    expect(decoded.props.child).toMatchObject({
+      props: { children: "Child" },
+      type: "span",
+    });
+    expect(decoded.props.promise).toBeInstanceOf(Promise);
+  });
+
   it("rejects payload codec mismatches during fetch", async () => {
     const response = createPayloadResponse({
       codec: {
@@ -1007,6 +1046,24 @@ describe("payload rendering", () => {
     ]);
   });
 
+  it("renders refresh root errors as boundary refresh errors", async () => {
+    function Broken(): never {
+      throw new Error("refresh failed");
+    }
+
+    await expect(
+      renderToPayloadRows(createElement(Broken, null), {
+        refreshBoundary: "post",
+      }),
+    ).resolves.toEqual([
+      {
+        boundary: "post",
+        tag: "refresh-error",
+        value: { message: "refresh failed" },
+      },
+    ]);
+  });
+
   it("processes streamed rows incrementally", async () => {
     const response = createPayloadResponse();
     let notifications = 0;
@@ -1066,6 +1123,79 @@ describe("payload rendering", () => {
     });
 
     unsubscribe();
+  });
+
+  it("rejects failed boundary refresh streams without replacing existing content", async () => {
+    const response = createPayloadResponse();
+    const rendered: FigNode[] = [];
+    response.bindRoot({
+      render(node) {
+        rendered.push(node);
+      },
+    });
+
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          "section",
+          null,
+          createElement(
+            PayloadBoundary,
+            { id: "post" },
+            createElement("p", null, "Initial"),
+          ),
+        ),
+      ),
+    );
+
+    await expect(
+      fetchPayload(response, "/payload", {
+        fetch: async () =>
+          new Response(
+            await renderToPayloadText(createElement(BrokenRefresh, null), {
+              refreshBoundary: "post",
+            }),
+            { headers: { "content-type": jsonPayloadCodec.contentType } },
+          ),
+        refreshBoundary: "post",
+      }),
+    ).rejects.toThrow("refresh failed");
+
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
+      props: {
+        children: {
+          props: { children: "Initial" },
+          type: "p",
+        },
+      },
+      type: "section",
+    });
+
+    await fetchPayload(response, "/payload", {
+      fetch: async () =>
+        new Response(
+          await renderToPayloadText(createElement("p", null, "Recovered"), {
+            refreshBoundary: "post",
+          }),
+          { headers: { "content-type": jsonPayloadCodec.contentType } },
+        ),
+      refreshBoundary: "post",
+    });
+
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
+      props: {
+        children: {
+          props: { children: "Recovered" },
+          type: "p",
+        },
+      },
+      type: "section",
+    });
+
+    function BrokenRefresh(): never {
+      throw new Error("refresh failed");
+    }
   });
 
   it("namespaces refresh-payload row ids so they cannot clobber initial chunks", async () => {

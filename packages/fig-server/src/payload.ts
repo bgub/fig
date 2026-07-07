@@ -132,6 +132,7 @@ export type PayloadRow =
   | { tag: "data"; value: PayloadDataHydrationEntry[] }
   | { id: number; tag: "error"; value: ServerErrorPayload }
   | { id: number; tag: "model"; value: PayloadModel }
+  | { boundary: string; tag: "refresh-error"; value: ServerErrorPayload }
   | { boundary: string; tag: "refresh"; value: PayloadModel };
 
 /**
@@ -152,7 +153,7 @@ export type PayloadModel =
 type PayloadElementModel = {
   $fig: "element";
   key: Key | null;
-  props: Record<string, PayloadModel>;
+  props: PayloadModel;
   type: string | PayloadSpecialModel;
 };
 
@@ -344,15 +345,26 @@ function createJsonPayloadDecoder(
 
   function processBufferedLines(): void {
     let start = 0;
+    let firstError: unknown;
 
     for (;;) {
       const newlineIndex = buffer.indexOf("\n", start);
       if (newlineIndex === -1) break;
-      processPayloadLine(buffer.slice(start, newlineIndex), onRow);
+      try {
+        processPayloadLine(buffer.slice(start, newlineIndex), onRow);
+      } catch (error) {
+        firstError ??= error;
+      }
       start = newlineIndex + 1;
     }
 
-    buffer = start === 0 ? buffer : buffer.slice(start);
+    buffer =
+      firstError === undefined
+        ? start === 0
+          ? buffer
+          : buffer.slice(start)
+        : "";
+    if (firstError !== undefined) throw firstError;
   }
 
   return {
@@ -363,8 +375,9 @@ function createJsonPayloadDecoder(
     flush() {
       buffer += decoder.decode();
       if (buffer.length > 0) {
-        processPayloadLine(buffer, onRow);
+        const line = buffer;
         buffer = "";
+        processPayloadLine(line, onRow);
       }
     },
   };
@@ -673,6 +686,11 @@ class PayloadResponseImpl implements PayloadResponse {
       return;
     }
 
+    if (row.tag === "refresh-error") {
+      this.notify();
+      throw errorFromPayload(row.value);
+    }
+
     resolveDecodedRow(this, row);
     if (row.id === 0) {
       this.resolveRootReady();
@@ -882,11 +900,19 @@ function retryTask(request: PayloadRequest, task: Task): void {
       return;
     }
 
-    emitRow(request, {
-      id: task.id,
-      tag: "error",
-      value: errorRowPayload(request, error),
-    });
+    if (request.refreshBoundary !== null && task.id === 0) {
+      emitRow(request, {
+        boundary: request.refreshBoundary,
+        tag: "refresh-error",
+        value: errorRowPayload(request, error),
+      });
+    } else {
+      emitRow(request, {
+        id: task.id,
+        tag: "error",
+        value: errorRowPayload(request, error),
+      });
+    }
     finishTask(request);
   }
 }
@@ -1097,17 +1123,16 @@ function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   return serializeNode(props.children, frame);
 }
 
-function serializeProps(
-  props: Props,
-  frame: RenderFrame,
-): { [key: string]: PayloadModel } {
-  const serialized: { [key: string]: PayloadModel } = {};
+function serializeProps(props: Props, frame: RenderFrame): PayloadModel {
+  const serialized: Record<string, PayloadModel> = {};
 
   for (const [name, value] of Object.entries(props)) {
     serialized[name] = serializeValue(value, frame);
   }
 
-  return serialized;
+  return "$fig" in serialized
+    ? { $fig: "object", value: serialized }
+    : serialized;
 }
 
 function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
@@ -1328,6 +1353,17 @@ function decodePayloadSpecialValue(model: PayloadValueSpecialModel): unknown {
     case "undefined":
       return undefined;
   }
+}
+
+function decodeModelRecord(
+  response: PayloadResponseImpl,
+  model: Record<string, PayloadModel>,
+): Record<string, unknown> {
+  const decoded: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(model)) {
+    decoded[name] = decodeModel(response, value);
+  }
+  return decoded;
 }
 
 function decodePayloadPlainObject(
@@ -1741,10 +1777,7 @@ function resolveDecodedRow(
   const chunk = response.getChunk(row.id);
 
   if (row.tag === "error") {
-    const error = new Error(
-      row.value.message ?? "The server render failed.",
-    ) as Error & { digest?: string };
-    if (row.value.digest !== undefined) error.digest = row.value.digest;
+    const error = errorFromPayload(row.value);
     chunk.model = null;
     chunk.status = "rejected";
     chunk.value = error;
@@ -1768,6 +1801,16 @@ function resolveDecodedRow(
   chunk.resolve(value);
 }
 
+function errorFromPayload(value: ServerErrorPayload): Error & {
+  digest?: string;
+} {
+  const error = new Error(
+    value.message ?? "The server render failed.",
+  ) as Error & { digest?: string };
+  if (value.digest !== undefined) error.digest = value.digest;
+  return error;
+}
+
 function shiftRowIds(row: PayloadRow, offset: number): void {
   if (row.tag === "client" || row.tag === "error" || row.tag === "model") {
     // The row's own chunk id. A client row's value.id is a string module id and
@@ -1787,8 +1830,8 @@ function shiftModelIds(model: PayloadModel, offset: number): void {
     return;
   }
 
-  if ("$fig" in model) {
-    const special = model as PayloadElementModel | PayloadSpecialModel;
+  if (isPayloadSpecialModel(model)) {
+    const special = model;
     switch (special.$fig) {
       case "client":
       case "lazy":
@@ -1798,6 +1841,11 @@ function shiftModelIds(model: PayloadModel, offset: number): void {
       case "element":
         shiftModelIds(special.type, offset);
         shiftModelIds(special.props, offset);
+        return;
+      case "object":
+        for (const value of Object.values(special.value)) {
+          shiftModelIds(value, offset);
+        }
         return;
       case "boundary":
         // boundary.id is a string boundary name, not a numeric chunk id.
@@ -1811,6 +1859,33 @@ function shiftModelIds(model: PayloadModel, offset: number): void {
   for (const value of Object.values(model)) shiftModelIds(value, offset);
 }
 
+function isPayloadSpecialModel(
+  model: object,
+): model is PayloadElementModel | PayloadSpecialModel {
+  if (!("$fig" in model)) return false;
+
+  switch ((model as { $fig: unknown }).$fig) {
+    case "bigint":
+    case "boundary":
+    case "client":
+    case "date":
+    case "element":
+    case "fragment":
+    case "lazy":
+    case "map":
+    case "number":
+    case "object":
+    case "promise":
+    case "set":
+    case "suspense":
+    case "symbol":
+    case "undefined":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function decodeModel(
   response: PayloadResponseImpl,
   model: PayloadModel,
@@ -1821,11 +1896,8 @@ function decodeModel(
 
   if (typeof model !== "object") return model;
 
-  if ("$fig" in model) {
-    return decodeSpecialModel(
-      response,
-      model as PayloadElementModel | PayloadSpecialModel,
-    );
+  if (isPayloadSpecialModel(model)) {
+    return decodeSpecialModel(response, model);
   }
 
   const decoded: Record<string, unknown> = {};
@@ -1844,11 +1916,12 @@ function decodeSpecialModel(
     case "date":
     case "map":
     case "number":
-    case "object":
     case "set":
     case "symbol":
     case "undefined":
       return decodePayloadSpecialValue(model);
+    case "object":
+      return decodeModelRecord(response, model.value);
     case "boundary":
       return createElement(PayloadBoundarySlot, {
         id: model.id,
