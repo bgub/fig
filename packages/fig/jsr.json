@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./internal": "./src/internal.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-runtime.ts",
     "./server": "./src/server.ts"
   },
   "publish": {

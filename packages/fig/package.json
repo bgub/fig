@@ -52,5 +52,8 @@
     "url": "https://github.com/bgub/fig/issues"
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {}
 }

@@ -179,28 +179,31 @@ importers:
         version: link:../fig-reconciler
 
   packages/fig-dom:
-    dependencies:
+    devDependencies:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../fig-server
 
   packages/fig-reconciler:
-    dependencies:
+    devDependencies:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
 
   packages/fig-refresh:
-    dependencies:
+    devDependencies:
       '@bgub/fig-reconciler':
         specifier: workspace:*
         version: link:../fig-reconciler
 
   packages/fig-server:
-    dependencies:
+    devDependencies:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig

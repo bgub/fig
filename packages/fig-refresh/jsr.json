@@ -1,11 +1,8 @@
 {
-  "name": "@bgub/fig-server",
+  "name": "@bgub/fig-refresh",
   "version": "0.0.1",
   "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts",
-    "./payload": "./src/payload.ts"
-  },
+  "exports": "./src/index.ts",
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],
     "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]

@@ -18,13 +18,13 @@
       "extra-files": ["jsr.json"],
       "prerelease-type": "alpha"
     },
-    "packages/fig-devtools": {
-      "package-name": "@bgub/fig-devtools",
+    "packages/fig-dom": {
+      "package-name": "@bgub/fig-dom",
       "extra-files": ["jsr.json"],
       "prerelease-type": "alpha"
     },
-    "packages/fig-dom": {
-      "package-name": "@bgub/fig-dom",
+    "packages/fig-refresh": {
+      "package-name": "@bgub/fig-refresh",
       "extra-files": ["jsr.json"],
       "prerelease-type": "alpha"
     }

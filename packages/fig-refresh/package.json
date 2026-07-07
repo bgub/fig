@@ -32,8 +32,13 @@
     "url": "https://github.com/bgub/fig/issues"
   },
   "license": "MIT",
-  "dependencies": {
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
     "@bgub/fig-reconciler": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@bgub/fig-reconciler": "workspace:*"
+  }
 }
