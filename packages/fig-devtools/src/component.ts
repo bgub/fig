@@ -240,7 +240,7 @@ function useInspectMode(
   setHover: (hover: InspectHover | null) => void,
 ): void {
   useReactive(
-    (signal) => {
+    (signal: AbortSignal) => {
       if (!selectMode) {
         setHover(null);
         return;
