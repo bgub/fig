@@ -430,6 +430,56 @@ describe("@bgub/fig", () => {
     expect(loads).toBe(3);
   });
 
+  it("reloads when invalidated while an initial load is in flight", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const loads = [first, second];
+    const owner = {};
+    const scheduled: object[] = [];
+    const valueResource = dataResource({
+      key: (id: string) => ["invalidate-pending", id],
+      load: () => {
+        const next = loads.shift();
+        if (next === undefined) throw new Error("Unexpected load.");
+        return next.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: (subscriber) => scheduled.push(subscriber),
+    });
+
+    expect(() => store.readData(valueResource, ["one"], owner)).toThrow();
+    store.commitDataDependencies(owner, null);
+
+    store.invalidateData(valueResource, "one");
+    expect(scheduled).toEqual([owner]);
+
+    first.resolve("stale");
+    await delay();
+
+    expect(store.readData(valueResource, ["one"], owner)).toBe("stale");
+    expect(store.inspectDataEntries()).toMatchObject([
+      {
+        stale: true,
+        status: "refreshing",
+        value: "stale",
+      },
+    ]);
+
+    second.resolve("fresh");
+    await delay();
+
+    expect(store.readData(valueResource, ["one"], owner)).toBe("fresh");
+    expect(store.inspectDataEntries()).toMatchObject([
+      {
+        stale: false,
+        status: "fulfilled",
+        value: "fresh",
+      },
+    ]);
+  });
+
   it("aborts an in-flight load when its last subscriber is released", () => {
     const signals: AbortSignal[] = [];
     const owner = {};

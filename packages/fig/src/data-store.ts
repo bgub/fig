@@ -49,6 +49,7 @@ interface Entry<Owner extends object, Lane> {
   error: unknown;
   fingerprint: string | null;
   generation: number;
+  invalidationVersion: number;
   inactiveTimer: TimerHandle | null;
   key: DataResourceKey;
   lane: Lane | null;
@@ -580,6 +581,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       error: undefined,
       fingerprint,
       generation: 0,
+      invalidationVersion: 0,
       inactiveTimer: null,
       key: normalized.key,
       lane: null,
@@ -604,6 +606,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.abortActiveLoad(entry, "superseded");
     entry.error = undefined;
     entry.generation += 1;
+    entry.invalidationVersion = 0;
     entry.key = key;
     entry.refreshError = undefined;
     entry.stale = false;
@@ -644,6 +647,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.abortActiveLoad(entry, "superseded");
     const controller = new AbortController();
     const generation = entry.generation + 1;
+    const invalidationVersion = entry.invalidationVersion;
     const pending = createPendingResult<TValue>();
 
     entry.controller = controller;
@@ -677,7 +681,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
-      entry.stale = false;
+      entry.stale = entry.invalidationVersion !== invalidationVersion;
       entry.status = "fulfilled";
       entry.value = value;
       this.publish(entry);
@@ -858,6 +862,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private invalidateEntry(entry: Entry<Owner, Lane>, lane: Lane): void {
+    entry.invalidationVersion += 1;
     entry.stale = true;
     // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
