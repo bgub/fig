@@ -56,6 +56,21 @@ Recoverable boundary errors become client-render markers carrying the digest;
 fatal shell errors reject the readiness promises. `escapeAttribute`/
 `escapeText` are exported for frameworks writing companion inline scripts.
 
+## Text Separators
+
+Adjacent text that comes from different fibers — `<div>{"Hi "}<Name/></div>`,
+text around a component that renders nothing, a resumed suspended segment
+whose seams touch text — is emitted with a `<!--,-->` comment between the two
+text writes: the browser's parser would otherwise merge them into a single
+DOM text node while the client tree keeps one text fiber per normalized child
+(`collectChildren` merges adjacent strings only within one children array).
+Separators are emitted only where two text writes would actually touch
+(element tags and Suspense/Activity markers already break adjacency), plus a
+trailing separator when a resumed segment ends in text — it cannot know what
+follows its splice point. fig-dom's hydration cursor skips comments whose
+data is exactly `,` when advancing (and only those; suspense markers are
+never skipped). Browsers ignore leftover separators at runtime.
+
 ## Streaming Mechanics
 
 Suspense streams fallbacks first; completed content and partial segments

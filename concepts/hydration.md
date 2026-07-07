@@ -11,7 +11,9 @@ Hydration is Suspense-boundary selective: server markers can stay dehydrated
 until background work or interaction hydrates that boundary.
 `hydrateRoot` requires the hydration host hooks at creation (fig-dom parses
 the streaming markers into `DehydratedSuspenseBoundary` objects — see
-suspense-streaming.md). A dehydrated boundary whose hydration attempt
+suspense-streaming.md). The hydration cursor steps over the server's
+`<!--,-->` text-separator comments when advancing (see the text-separators
+section of server-rendering.md); suspense marker comments are never skipped. A dehydrated boundary whose hydration attempt
 suspends **stays dehydrated**: the server DOM is preserved and the attached
 thenable ping retries hydration; no fallback is ever rendered over server
 content. Suspense retries after a committed fallback schedule on retry

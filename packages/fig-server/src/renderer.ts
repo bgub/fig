@@ -143,6 +143,11 @@ interface RenderScope {
 }
 
 interface Task extends RenderScope {
+  // Index of the task's first child within its original normalized children
+  // sequence. Suspended tasks carry the rest of a sequence sliced from the
+  // suspension point; resuming id-path numbering here keeps useId paths
+  // identical to the never-suspending render (and to client fiber indices).
+  childIndexBase: number;
   node: FigNode;
   segment: Segment;
 }
@@ -153,9 +158,18 @@ interface Segment {
   chunks: string[];
   id: number | null;
   index: number;
+  // True when the trailing edge of everything written so far — including the
+  // inherited parent position for spawned segments — is document text. The
+  // next text write must lead with TEXT_SEPARATOR so the browser's parser
+  // does not merge the two into one DOM text node.
+  lastPushedText: boolean;
   parentFlushed: boolean;
   assetResources: FigAssetResource[];
   status: SegmentStatus;
+  // Spawned suspended segments splice between their parent's chunks, so text
+  // may directly follow their end; when such a segment completes ending in
+  // text, it closes with a trailing TEXT_SEPARATOR.
+  textEmbedded: boolean;
   write(chunk: string): void;
 }
 
@@ -203,6 +217,15 @@ const errorStacks = new WeakMap<object, StackFrame>();
 const textEncoder = new TextEncoder();
 const documentHeadMarker = "\u0000fig:head\u0000";
 const RUNTIME_REF = "__figSSR";
+// Emitted between two adjacent text writes that come from different
+// normalized text children (component seams, resumed suspended segments).
+// The HTML parser merges back-to-back character data into ONE DOM text node,
+// while the client tree keeps one text fiber per normalized child (see
+// collectChildren in @bgub/fig) — the comment keeps the nodes apart so each
+// fiber can claim its own during hydration. fig-dom's hydration cursor skips
+// comments whose data is exactly "," (and only those; suspense markers use
+// the fig:suspense prefixes).
+const TEXT_SEPARATOR = "<!--,-->";
 let nextRuntimeId = 0;
 
 export function createServerRenderRequest(
@@ -326,6 +349,7 @@ function createTask(
   node: FigNode,
   segment: Segment,
   scope: RenderScope,
+  childIndexBase = 0,
 ): Task {
   request.pendingTasks += 1;
   if (scope.boundary === null) {
@@ -334,7 +358,7 @@ function createTask(
     scope.boundary.pendingTasks += 1;
   }
 
-  const task: Task = { ...scope, node, segment };
+  const task: Task = { ...scope, childIndexBase, node, segment };
   request.abortableTasks.add(task);
   scope.abortSet.add(task);
   return task;
@@ -358,6 +382,10 @@ function forkScope(scope: RenderScope): RenderScope {
 function createSegment(
   index: number,
   boundary: SuspenseBoundary | null,
+  textSeams: { lastPushedText: boolean; textEmbedded: boolean } = {
+    lastPushedText: false,
+    textEmbedded: false,
+  },
 ): Segment {
   return {
     boundary,
@@ -365,10 +393,15 @@ function createSegment(
     chunks: [],
     id: null,
     index,
+    lastPushedText: textSeams.lastPushedText,
     parentFlushed: false,
     assetResources: [],
     status: "pending",
+    textEmbedded: textSeams.textEmbedded,
     write(chunk) {
+      // Every non-text write (tags, comments, scripts) breaks text adjacency;
+      // renderNode's text path re-marks the flag after writing text.
+      this.lastPushedText = false;
       this.chunks.push(chunk);
     },
   };
@@ -410,7 +443,8 @@ function retryTask(request: Request, task: Task): void {
   const frame = createRenderFrame(request, task.segment, forkScope(task));
 
   try {
-    renderChildren(task.node, frame);
+    renderChildSequence(collectChildren(task.node), frame, task.childIndexBase);
+    completeSegmentText(task.segment);
     task.segment.status = "completed";
     detachTask(request, task);
     finishedTask(request, task, task.segment);
@@ -474,13 +508,20 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
   }
 
   if (typeof node === "string" || typeof node === "number") {
+    const text = String(node);
     if (frame.request.document !== null && !frame.request.document.hasHead) {
-      if (String(node).trim() !== "") throw invalidDocumentShellError();
+      if (text.trim() !== "") throw invalidDocumentShellError();
     }
     if (process.env.NODE_ENV !== "production") {
-      validateTextNesting(String(node), frame.hostAncestors);
+      validateTextNesting(text, frame.hostAncestors);
     }
-    writeText(String(node), frame.segment);
+    if (text !== "") {
+      // Directly adjacent text from a different fiber: separate it so the
+      // browser's parser yields one DOM text node per client text fiber.
+      if (frame.segment.lastPushedText) frame.segment.write(TEXT_SEPARATOR);
+      writeText(text, frame.segment);
+      frame.segment.lastPushedText = true;
+    }
     return;
   }
 
@@ -498,18 +539,38 @@ function renderChildren(node: FigNode, frame: RenderFrame): void {
 function renderChildSequence(
   children: NormalizedChild[],
   frame: RenderFrame,
+  // Non-zero when resuming a suspended task: `children` is a slice of the
+  // original sequence, so id-path segments continue from the slice point.
+  indexBase = 0,
 ): void {
   for (let index = 0; index < children.length; index += 1) {
     try {
-      withIdSegment(frame, index, () => renderNode(children[index], frame));
+      withIdSegment(frame, indexBase + index, () =>
+        renderNode(children[index], frame),
+      );
     } catch (error) {
       if (isThenable(error) && frame.boundary !== null) {
-        spawnSuspendedTask(frame, children.slice(index), error);
+        spawnSuspendedTask(
+          frame,
+          children.slice(index),
+          error,
+          indexBase + index,
+        );
         return;
       }
 
       throw error;
     }
+  }
+}
+
+// A spawned segment cannot know what follows its splice point once its
+// parent resumes (or what a sibling spawned segment will start with), so a
+// segment ending in text conservatively closes with a separator; hydration
+// skips any it did not need.
+function completeSegmentText(segment: Segment): void {
+  if (segment.textEmbedded && segment.lastPushedText) {
+    segment.write(TEXT_SEPARATOR);
   }
 }
 
@@ -712,6 +773,9 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   const parentSegment = frame.segment;
   const boundarySegment = createSegment(parentSegment.chunks.length, boundary);
   parentSegment.children.push(boundarySegment);
+  // The boundary always flushes comment markers around its content, so text
+  // on either side of it never merges; no separators needed at this seam.
+  parentSegment.lastPushedText = false;
 
   contentSegment.parentFlushed = true;
   const contentFrame = createRenderFrame(frame.request, contentSegment, {
@@ -868,12 +932,29 @@ function spawnSuspendedTask(
   frame: RenderFrame,
   node: FigNode,
   thenable: Thenable,
+  childIndexBase: number,
 ): void {
   const request = frame.request;
-  const segment = createSegment(frame.segment.chunks.length, null);
+  // The spawned segment splices between the parent's text chunks: it adopts
+  // the parent's trailing-text state (so its own leading text writes a
+  // separator against the text before the splice point) and marks itself
+  // text-embedded (so completeSegmentText appends a trailing separator when
+  // it ends in text). The parent's cursor resets — the seam is now owned by
+  // the spawned segment.
+  const segment = createSegment(frame.segment.chunks.length, null, {
+    lastPushedText: frame.segment.lastPushedText,
+    textEmbedded: true,
+  });
+  frame.segment.lastPushedText = false;
   frame.segment.children.push(segment);
 
-  const task = createTask(request, node, segment, forkScope(frame));
+  const task = createTask(
+    request,
+    node,
+    segment,
+    forkScope(frame),
+    childIndexBase,
+  );
   thenable.then(
     () => pingTask(request, task),
     () => pingTask(request, task),

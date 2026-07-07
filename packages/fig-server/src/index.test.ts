@@ -414,6 +414,238 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("separates adjacent text from different fibers with a comment", async () => {
+    function Name() {
+      return "Ben";
+    }
+
+    // "Hi " and Name's "Ben" are separate text fibers on the client, but the
+    // browser parses back-to-back text into ONE text node; the separator
+    // keeps them distinct so hydration can claim one node per fiber.
+    await expect(
+      renderToHtml(
+        createElement("div", null, "Hi ", createElement(Name, null)),
+      ),
+    ).resolves.toBe("<div>Hi <!--,-->Ben</div>");
+  });
+
+  it("separates text around a component that renders nothing", async () => {
+    function Nothing() {
+      return null;
+    }
+
+    await expect(
+      renderToHtml(
+        createElement("div", null, "a", createElement(Nothing, null), "b"),
+      ),
+    ).resolves.toBe("<div>a<!--,-->b</div>");
+  });
+
+  it("does not separate text merged within one children array", async () => {
+    // Adjacent strings in the same normalized children array merge into one
+    // text node on both sides (collectChildren), so no separator is needed.
+    await expect(
+      renderToHtml(createElement("div", null, "a", "b", 3)),
+    ).resolves.toBe("<div>ab3</div>");
+    await expect(
+      renderToHtml(createElement("div", null, "only")),
+    ).resolves.toBe("<div>only</div>");
+  });
+
+  it("relies on suspense markers instead of separators at boundary seams", async () => {
+    const html = await renderToHtml(
+      createElement(
+        "div",
+        null,
+        "a",
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement("p", null, "Content"),
+        ),
+        "b",
+      ),
+    );
+
+    // The boundary's comment markers already keep the surrounding text nodes
+    // apart; emitting separators here would only add bytes.
+    expect(html).toBe(
+      "<div>a<!--fig:suspense:completed--><p>Content</p><!--/fig:suspense-->b</div>",
+    );
+  });
+
+  it("separates text across suspended segment seams", async () => {
+    const pending = deferred<string>();
+
+    function Name() {
+      return readPromise(pending.promise);
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement("div", null, "Hi ", createElement(Name, null)),
+      ),
+    );
+
+    await result.shellReady;
+    pending.resolve("Ben");
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    // The resumed segment starts with text that will sit directly after the
+    // shell's "Hi " once the runtime moves it into place, so the segment
+    // carries its own leading separator.
+    expect(html).toContain("<!--,-->Ben");
+  });
+
+  it("prerenders text separators across suspended segment seams", async () => {
+    const pending = deferred<string>();
+
+    function Name() {
+      return readPromise(pending.promise);
+    }
+
+    const resultPromise = prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement("div", null, "Hi ", createElement(Name, null), "!"),
+      ),
+    );
+
+    await waitForMicrotasks();
+    pending.resolve("Ben");
+    const result = await resultPromise;
+
+    // The resumed segment cannot know what follows its splice point when it
+    // completes, so a segment ending in text always closes with a separator
+    // (the trailing <!--,--> before </div>); hydration skips it.
+    expect(result.html).toBe(
+      "<!--fig:suspense:completed--><div>Hi <!--,-->Ben<!--,-->!<!--,--></div><!--/fig:suspense-->",
+    );
+  });
+
+  it("keeps useId paths stable across suspended sibling retries", async () => {
+    const pending = deferred<string>();
+
+    function Field({ wait }: { wait?: Promise<string> }) {
+      const id = useId();
+      if (wait !== undefined) readPromise(wait);
+      return createElement(
+        "label",
+        { for: id },
+        createElement("input", { id }),
+      );
+    }
+
+    const shape = (wait?: Promise<string>) =>
+      createElement(
+        "div",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(Field, null),
+          createElement(Field, { wait }),
+          createElement(Field, null),
+        ),
+      );
+
+    const resultPromise = prerender(shape(pending.promise));
+    await waitForMicrotasks();
+    pending.resolve("ready");
+    const result = await resultPromise;
+
+    // Retried siblings must resume id-path numbering at their original
+    // indices: the suspended render's output is byte-identical to the
+    // never-suspending render of the same tree.
+    const baseline = await prerender(shape());
+    expect(result.html).toBe(baseline.html);
+    expect(result.html).toContain('id="fig-0-0-0-0"');
+    expect(result.html).toContain('id="fig-0-0-1-0"');
+    expect(result.html).toContain('id="fig-0-0-2-0"');
+  });
+
+  it("keeps useId paths stable for nested and repeated suspensions", async () => {
+    const inner = deferred<string>();
+    const outer = deferred<string>();
+
+    function Field({ wait }: { wait?: Promise<string> }) {
+      const id = useId();
+      if (wait !== undefined) readPromise(wait);
+      return createElement(
+        "label",
+        { for: id },
+        createElement("input", { id }),
+      );
+    }
+
+    const shape = (first?: Promise<string>, second?: Promise<string>) =>
+      createElement(
+        "div",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(
+            "section",
+            null,
+            createElement(Field, null),
+            createElement(Field, { wait: first }),
+          ),
+          createElement(Field, { wait: second }),
+          createElement(Field, null),
+        ),
+      );
+
+    const resultPromise = prerender(shape(inner.promise, outer.promise));
+    await waitForMicrotasks();
+    inner.resolve("ready");
+    outer.resolve("ready");
+    const result = await resultPromise;
+
+    const baseline = await prerender(shape());
+    expect(result.html).toBe(baseline.html);
+  });
+
+  it("streams stable useId paths for suspended sibling retries", async () => {
+    const pending = deferred<string>();
+
+    function Field({ wait }: { wait?: Promise<string> }) {
+      const id = useId();
+      if (wait !== undefined) readPromise(wait);
+      return createElement(
+        "label",
+        { for: id },
+        createElement("input", { id }),
+      );
+    }
+
+    const result = renderToStream(
+      createElement(
+        "div",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(Field, null),
+          createElement(Field, { wait: pending.promise }),
+          createElement(Field, null),
+        ),
+      ),
+    );
+
+    await result.shellReady;
+    pending.resolve("ready");
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    const ids = [...new Set(html.match(/fig-[0-9a-v-]+/g))].sort();
+    expect(ids).toEqual(["fig-0-0-0-0", "fig-0-0-1-0", "fig-0-0-2-0"]);
+  });
+
   it("runs server transition callbacks without pending state", async () => {
     function App() {
       const [isPending, startTransition] = useTransition();
@@ -1067,7 +1299,9 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain(
       '<div hidden id="test-s-0"><div><template id="test-p-1"></template></div></div>',
     );
-    expect(html).toContain('<div hidden id="test-s-1">Ready</div>');
+    // A resumed segment ending in text closes with a text separator (it
+    // cannot know what follows its splice point); hydration skips it.
+    expect(html).toContain('<div hidden id="test-s-1">Ready<!--,--></div>');
   });
 
   it("recovers Suspense boundaries from server errors with client render markers", async () => {

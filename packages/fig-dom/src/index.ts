@@ -115,7 +115,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   getFirstHydratableChild: (parent, props) =>
     hydratableFirstChild(parent, props),
   getNextHydratableSibling: (node) =>
-    node.nextSibling as Element | TextLike | null,
+    skipTextSeparators(node.nextSibling as Element | TextLike | null),
   canHydrateInstance: (node, type, props) =>
     isHydratableElement(node, type, props),
   canHydrateTextInstance: (node) => isHydratableText(node),
@@ -167,10 +167,12 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   getActivityBoundary: (node) =>
     isActivityTemplate(node) ? (node as Element) : null,
   getFirstActivityHydratable: (boundary) =>
-    (activityTemplateContent(boundary).firstChild ?? null) as
-      | Element
-      | TextLike
-      | null,
+    skipTextSeparators(
+      (activityTemplateContent(boundary).firstChild ?? null) as
+        | Element
+        | TextLike
+        | null,
+    ),
   commitHydratedActivityBoundary: (boundary) => {
     const parent = boundary.parentNode;
     if (parent === null) return;
@@ -354,7 +356,33 @@ function hydratableFirstChild(
     return null;
   }
 
-  return parent.firstChild as Element | TextLike | null;
+  return skipTextSeparators(parent.firstChild as Element | TextLike | null);
+}
+
+// The server writes a `<!--,-->` comment between adjacent text nodes that
+// come from different fibers (browser parsing would otherwise merge them
+// into a single DOM text node while the client keeps one text fiber each —
+// see TEXT_SEPARATOR in @bgub/fig-server). The hydration cursor steps over
+// separators when advancing; only comments with exactly this data are
+// skipped, so the fig:suspense marker comments are never affected.
+const TEXT_SEPARATOR_DATA = ",";
+
+function skipTextSeparators(
+  node: Element | TextLike | null,
+): Element | TextLike | null {
+  let current = node;
+  while (current !== null && isTextSeparator(current)) {
+    current = current.nextSibling as Element | TextLike | null;
+  }
+  return current;
+}
+
+function isTextSeparator(node: Element | TextLike): boolean {
+  return (
+    "nodeType" in node &&
+    node.nodeType === 8 &&
+    (node as Comment).data === TEXT_SEPARATOR_DATA
+  );
 }
 
 function hasManagedTextareaContent(props: Props): boolean {

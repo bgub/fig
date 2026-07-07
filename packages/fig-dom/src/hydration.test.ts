@@ -6,6 +6,7 @@ import {
   useId,
   useState,
 } from "@bgub/fig";
+import { prerender, renderToHtml } from "@bgub/fig-server";
 import { describe, expect, it } from "vite-plus/test";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
@@ -425,6 +426,110 @@ describe("@bgub/fig-dom hydration", () => {
     expect(calls[0][1].aborted).toBe(true);
     expect(calls[1][0]).toBe(input);
     expect(calls[1][1].aborted).toBe(false);
+  });
+
+  // These cases build the container by PARSING real server output, so the
+  // browser's text-node merging is exercised: adjacent text from different
+  // fibers reads back as one DOM text node unless the server separates it.
+
+  it("hydrates parsed server output where text meets component text", async () => {
+    function Name() {
+      return "Ben";
+    }
+
+    const app = createElement("div", null, "Hi ", createElement(Name, null));
+    const container = containerFromHtml(await renderToHtml(app));
+    const server = container.childNodes[0];
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    // The server DOM was claimed, not wiped and client re-rendered.
+    expect(container.childNodes[0]).toBe(server);
+    expect(container.textContent).toBe("Hi Ben");
+  });
+
+  it("hydrates parsed server output around a component that renders nothing", async () => {
+    function Nothing() {
+      return null;
+    }
+
+    const app = createElement(
+      "div",
+      null,
+      "a",
+      createElement(Nothing, null),
+      "b",
+    );
+    const container = containerFromHtml(await renderToHtml(app));
+    const server = container.childNodes[0];
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.childNodes[0]).toBe(server);
+    expect(container.textContent).toBe("ab");
+  });
+
+  it("hydrates parsed server output with text seams beside Suspense", async () => {
+    function Name() {
+      return "Ben";
+    }
+
+    const app = [
+      "Hi ",
+      createElement(Name, null),
+      createElement(
+        Suspense,
+        { fallback: "Loading" },
+        createElement("p", null, "Content"),
+      ),
+      "After",
+    ];
+    const { html } = await prerender(app);
+    const container = containerFromHtml(html);
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+    // Cursor skipping must not swallow the boundary's own marker comments.
+    await delay();
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.textContent).toBe("Hi BenContentAfter");
+  });
+
+  it("hydrates parsed single-text content without separators", async () => {
+    const app = createElement("div", null, "only");
+    const html = await renderToHtml(app);
+    expect(html).toBe("<div>only</div>");
+
+    const container = containerFromHtml(html);
+    const server = container.childNodes[0];
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.childNodes[0]).toBe(server);
+    expect(container.textContent).toBe("only");
   });
 
   it("hydrates component children followed by host siblings", () => {
@@ -1752,6 +1857,86 @@ function suspenseDom(
   container.appendChild(end);
 
   return { container, content, end, placeholder, start };
+}
+
+const voidTags = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+
+// Minimal HTML-to-fake-DOM parser for hydration round trips. Like a browser,
+// contiguous character data becomes a single text node — which is exactly the
+// merge behavior these tests exercise — while comments split text nodes.
+function containerFromHtml(html: string): FakeElement {
+  const container = new FakeElement("root");
+  const stack: FakeElement[] = [container];
+  let index = 0;
+
+  while (index < html.length) {
+    const parent = stack[stack.length - 1];
+
+    if (html.startsWith("<!--", index)) {
+      const end = html.indexOf("-->", index + 4);
+      parent.appendChild(new FakeComment(html.slice(index + 4, end)));
+      index = end + 3;
+      continue;
+    }
+
+    if (html.startsWith("</", index)) {
+      index = html.indexOf(">", index) + 1;
+      stack.pop();
+      continue;
+    }
+
+    if (html[index] === "<") {
+      const end = html.indexOf(">", index);
+      const parsed = parseTag(html.slice(index + 1, end));
+      parent.appendChild(parsed);
+      if (!voidTags.has(parsed.tagName)) stack.push(parsed);
+      index = end + 1;
+      continue;
+    }
+
+    const next = html.indexOf("<", index);
+    const stop = next === -1 ? html.length : next;
+    parent.appendChild(new FakeText(unescapeHtml(html.slice(index, stop))));
+    index = stop;
+  }
+
+  return container;
+}
+
+function parseTag(raw: string): FakeElement {
+  const match = /^([a-zA-Z][^\s/>]*)\s*(.*)$/s.exec(raw);
+  const parsed = new FakeElement(match?.[1] ?? raw);
+
+  for (const attribute of (match?.[2] ?? "").matchAll(
+    /([^\s=]+)(?:="([^"]*)")?/g,
+  )) {
+    parsed.setAttribute(attribute[1], unescapeHtml(attribute[2] ?? ""));
+  }
+
+  return parsed;
+}
+
+function unescapeHtml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&");
 }
 
 function element(tagName: string, text: string): FakeElement {
