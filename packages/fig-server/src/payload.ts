@@ -662,13 +662,13 @@ class PayloadResponseImpl implements PayloadResponse {
   private rootData: FigDataStoreHandle | null = null;
   private rowIdBase = 0;
   private currentDecodeRevision = 0;
-  private readonly decoder: PayloadDecoder;
+  private stringDecoder: PayloadDecoder;
   private nextModelRevision = 1;
   readonly codec: PayloadCodec;
 
   constructor(private readonly options: PayloadResponseOptions) {
     this.codec = options.codec ?? jsonPayloadCodec;
-    this.decoder = this.codec.createDecoder((row) => this.processRow(row));
+    this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
   }
 
   beginRefreshPayload(): void {
@@ -679,6 +679,7 @@ class PayloadResponseImpl implements PayloadResponse {
     // (or an earlier refresh) payload.
     this.rowIdBase = this.maxRowId;
     this.objectIdBase = this.maxObjectId;
+    this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
   }
 
   getAssetResources(): readonly FigAssetResource[] {
@@ -746,9 +747,22 @@ class PayloadResponseImpl implements PayloadResponse {
     });
   }
 
-  private processRow(row: PayloadRow): void {
-    if (this.rowIdBase > 0 || this.objectIdBase > 0) {
-      shiftRowIds(row, this.rowIdBase, this.objectIdBase);
+  private createDecoder(
+    rowIdBase: number,
+    objectIdBase: number,
+  ): PayloadDecoder {
+    return this.codec.createDecoder((row) =>
+      this.processRow(row, rowIdBase, objectIdBase),
+    );
+  }
+
+  private processRow(
+    row: PayloadRow,
+    rowIdBase: number,
+    objectIdBase: number,
+  ): void {
+    if (rowIdBase > 0 || objectIdBase > 0) {
+      shiftRowIds(row, rowIdBase, objectIdBase);
     }
     updateMaxObjectIdFromRow(this, row);
 
@@ -799,16 +813,13 @@ class PayloadResponseImpl implements PayloadResponse {
     stream: ReadableStream<Uint8Array>,
     signal?: AbortSignal | null,
   ): Promise<void> {
-    await readByteStream(
-      stream,
-      (chunk) => this.processBytesChunk(chunk),
-      signal,
-    );
-    this.decoder.flush();
+    const decoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
+    await readByteStream(stream, (chunk) => decoder.decode(chunk), signal);
+    decoder.flush();
   }
 
   processBytesChunk(chunk: Uint8Array): void {
-    this.decoder.decode(chunk);
+    this.stringDecoder.decode(chunk);
   }
 
   processStringChunk(chunk: string): void {
@@ -867,6 +878,14 @@ class PayloadResponseImpl implements PayloadResponse {
   }
 
   pruneObjectRefs(): void {
+    if (
+      [...this.chunks.entries()].some(
+        ([id, chunk]) => id !== 0 && chunk.status === "pending",
+      )
+    ) {
+      return;
+    }
+
     const retained = new Set<number>();
     // Chunks are the graph-object lifetime boundary: refreshRetainedChunks
     // removes dead chunks from this map, so scanning remaining models preserves
@@ -990,8 +1009,13 @@ class PayloadResponseImpl implements PayloadResponse {
       );
     }
 
-    for (const id of this.chunks.keys()) {
-      if (id !== 0 && !nextRetained.has(id)) this.chunks.delete(id);
+    const hasPendingChunks = [...this.chunks.entries()].some(
+      ([id, chunk]) => id !== 0 && chunk.status === "pending",
+    );
+    if (!hasPendingChunks) {
+      for (const id of this.chunks.keys()) {
+        if (id !== 0 && !nextRetained.has(id)) this.chunks.delete(id);
+      }
     }
 
     const activeSources = new Map(
@@ -1307,6 +1331,11 @@ function serializeElement(
     const id = element.props.id;
     if (typeof id !== "string" || id.length === 0) {
       throw new Error("Payload boundaries require a non-empty string id.");
+    }
+    if (frame.request.refreshBoundary === id) {
+      throw new Error(
+        `Refresh payload for boundary "${id}" must render that boundary's replacement content, not a nested PayloadBoundary with the same id.`,
+      );
     }
     if (frame.request.boundaryIds !== null) {
       if (frame.request.boundaryIds.has(id)) {

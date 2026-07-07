@@ -195,20 +195,30 @@ export function lazy<P extends Props>(
   load: LazyLoader<P>,
 ): (props: P & { children?: FigNode }) => FigNode {
   let promise: PromiseLike<ElementType<P>> | null = null;
+  let rejected = false;
 
   return function Lazy(props: P & { children?: FigNode }) {
     if (promise === null) {
+      rejected = false;
       const next = Promise.resolve(load()).then(
         (value) => value,
         (error) => {
-          if (promise === next) promise = null;
+          if (promise === next) rejected = true;
           throw error;
         },
       );
       promise = next;
     }
 
-    return createElement(readPromise(promise), props);
+    try {
+      return createElement(readPromise(promise), props);
+    } catch (error) {
+      if (rejected) {
+        promise = null;
+        rejected = false;
+      }
+      throw error;
+    }
   };
 }
 

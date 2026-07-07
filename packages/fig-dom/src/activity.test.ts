@@ -116,6 +116,45 @@ describe("@bgub/fig-dom activity", () => {
     expect(calls).toEqual(["run", "abort", "run"]);
   });
 
+  it("runs deferred effects under adopted children on reveal", async () => {
+    const calls: string[] = [];
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Leaf() {
+      useReactive((signal) => {
+        calls.push("run");
+        signal.addEventListener("abort", () => calls.push("abort"), {
+          once: true,
+        });
+      }, []);
+      return createElement("span", null, "leaf");
+    }
+
+    function StableWrapper() {
+      return createElement(Leaf, null);
+    }
+
+    const stableChild = createElement(StableWrapper, null);
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(Activity, { mode }, stableChild);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    root.render(createElement(App, null));
+    await delay();
+
+    expect(calls).toEqual([]);
+
+    flushSync(() => setMode?.("visible"));
+    await delay();
+
+    expect(calls).toEqual(["run", "abort", "run"]);
+  });
+
   it("aborts binds on hide and re-attaches them on reveal", () => {
     const signals: AbortSignal[] = [];
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;

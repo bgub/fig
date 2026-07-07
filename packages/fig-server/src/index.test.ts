@@ -1183,6 +1183,29 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('__figSSR.x("test-b-0","","")');
   });
 
+  it("waits for root suspensions outside Suspense before flushing the shell", async () => {
+    const pending = deferred<string>();
+    let shellResolved = false;
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const result = renderToStream(createElement(Message, null));
+    void result.shellReady.then(() => {
+      shellResolved = true;
+    });
+
+    await waitForMicrotasks();
+    expect(shellResolved).toBe(false);
+
+    pending.resolve("Ready");
+
+    await result.shellReady;
+    await result.allReady;
+    expect(await readStream(result.stream)).toBe("<span>Ready</span>");
+  });
+
   it("streams lazy components through Suspense", async () => {
     function Message() {
       return createElement("span", null, "Loaded");

@@ -250,8 +250,11 @@ encoding. Codec ids are implementation ids, not stable public wire formats.
 Pass `refreshBoundary` to render a targeted boundary refresh:
 
 ```tsx
-renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" });
+renderToPayloadStream(<FeedItems />, { refreshBoundary: "feed" });
 ```
+
+The rendered node must be the replacement content for that boundary. Do not
+include a nested `<PayloadBoundary id="feed">` wrapper in the refresh payload.
 
 `createPayloadResponse()` decodes streamed rows on the client, and
 `fetchPayload(response, input, options?)` fetches and processes a payload. Pass

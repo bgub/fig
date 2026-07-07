@@ -556,7 +556,7 @@ function renderChildSequence(
         renderNode(children[index], frame),
       );
     } catch (error) {
-      if (isThenable(error) && frame.boundary !== null) {
+      if (isThenable(error)) {
         spawnSuspendedTask(
           frame,
           children.slice(index),
@@ -1006,7 +1006,12 @@ function finishedTask(request: Request, task: Task, segment: Segment): void {
   const boundary = task.boundary;
   if (boundary === null) {
     request.pendingRootTasks -= 1;
-    request.completedRootSegment = segment;
+    if (
+      segment === request.rootSegment ||
+      request.completedRootSegment === null
+    ) {
+      request.completedRootSegment = request.rootSegment;
+    }
     if (request.pendingRootTasks === 0) finishRootShell(request);
   } else {
     boundary.pendingTasks -= 1;

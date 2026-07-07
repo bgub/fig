@@ -125,8 +125,9 @@ describe("@bgub/fig-dom suspense", () => {
     expect(loads).toBe(1);
   });
 
-  it("retries lazy loaders after rejection", async () => {
+  it("surfaces lazy loader rejections until an explicit retry", async () => {
     let loads = 0;
+    let setAttempt: ((attempt: number) => void) | null = null;
 
     function Message({ label }: { label: string }) {
       return createElement("span", null, label);
@@ -139,7 +140,7 @@ describe("@bgub/fig-dom suspense", () => {
       return loads === 1 ? first.promise : second.promise;
     });
 
-    function App({ attempt }: { attempt: number }) {
+    function Content({ attempt }: { attempt: number }) {
       return createElement(
         ErrorBoundary,
         {
@@ -154,15 +155,25 @@ describe("@bgub/fig-dom suspense", () => {
       );
     }
 
+    function App() {
+      const [attempt, set] = useState(0);
+      setAttempt = set;
+      return createElement(Content, { attempt });
+    }
+
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
 
-    flushSync(() => root.render(createElement(App, { attempt: 0 })));
+    flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Loading");
     expect(loads).toBe(1);
 
     first.reject(new Error("chunk failed"));
     await delay();
+    expect(container.textContent).toBe("Crashed");
+    expect(loads).toBe(1);
+
+    flushSync(() => setAttempt?.(1));
     expect(container.textContent).toBe("Loading");
     expect(loads).toBe(2);
 

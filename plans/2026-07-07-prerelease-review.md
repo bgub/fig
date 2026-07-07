@@ -4,14 +4,14 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 18 major, 44 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 11 major, 44 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
 ## Contents
 
 - [Confirmed critical (0)](#confirmed-critical)
-- [Confirmed major (18)](#confirmed-major)
+- [Confirmed major (11)](#confirmed-major)
 - [Confirmed minor (44)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
@@ -150,23 +150,7 @@ Verified all three legs of the claim. (1) README line 51-52 says Fig "intentiona
 
 ---
 
-### 9. A refresh render whose content contains the target PayloadBoundary id produces infinite render recursion on the client, and the README teaches exactly this misuse
-
-- **Location:** `packages/fig-server/src/payload.ts:1291`
-- **Severity:** major
-- **Reviewer:** fig-server:api-design
-
-renderToPayloadStream({ refreshBoundary }) does not scope or validate serialization against the named boundary — it just tags the root model as the refresh row (payload.ts:1121-1127); the isPayloadBoundary branch (payload.ts:1291-1308) never checks request.refreshBoundary even though the dev-only duplicate-id set is right there. If the rendered tree still contains <PayloadBoundary id=X> while refreshBoundary is X, the refresh model embeds boundary X inside its own replacement content; on the client, readBoundary(X) decodes to a tree containing another PayloadBoundarySlot for X, which resolves to the same cached decoded node — verified: rendering recurses without bound (stack overflow / hang in a real root). The correct usage (render ONLY the boundary's children, wrapper stripped) is only discernible from fig-start's internals (packages/fig-start/src/server.ts:510-532); packages/fig-server/README.md:253 shows `renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" })`, which reads as "render the page, target feed" and triggers the recursion. A dev-mode throw when a serialized boundary id equals options.refreshBoundary would catch this.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code on disk and by live reproduction. (1) Server side: payload.ts:1121-1127 only tags task id 0's model as a `refresh` row; the isPayloadBoundary branch (payload.ts:1291-1308) validates id shape and dev duplicate ids per-request but never compares against request.refreshBoundary, so a refresh render whose tree contains <PayloadBoundary id=X> while refreshBoundary=X serializes without complaint (the dev boundaryIds set only catches duplicates within the same render). (2) Client side: the refresh row handler (payload.ts:766-778) caches the decoded refresh model in decodedBoundaries; decoding the embedded same-id boundary yields a PayloadBoundarySlot (payload.ts:2705-2711, 2769-2775) whose render calls readBoundary(X), which returns the cached decoded refresh tree containing that same slot — self-referential with no termination. prepareBoundaryInitial's revision tiebreak (payload.ts:1036-1048, initial wins only if revision is strictly greater) keeps the refresh entry authoritative, so nothing breaks the cycle. (3) I reproduced it: a scratch test rendering an initial payload with boundary "feed", then a whole-page refresh render with refreshBoundary:"feed", produced a decoded tree that hit a 10,000-level render-depth cap in a reconciler-emulating walker — unbounded recursion, i.e. a hang/stack overflow in a real root (repro file deleted after). (4) README.md:253 does show `renderToPayloadStream(<Dashboard />, { refreshBoundary: "feed" })` with no statement that the node must be the boundary's replacement content only; concepts/payload.md likewise says refresh "replaces one PayloadBoundary's content by id" without stating the exclusion constraint. The correct pattern (render routeContent without the wrapper when refreshing) exists only in fig-start internals (packages/fig-start/src/server.ts:509-532). (5) No existing test pins this: payload.test.ts covers refresh content containing a _different_ boundary id (nested inner/outer cases around lines 1602-1658) but never the same id. Severity major is fair: it is API misuse rather than a broken happy path (fig-start avoids it), but the failure mode is a silent unbounded client render loop with no error, the README example plausibly teaches the misuse, and a cheap dev-mode check (serialized boundary id === options.refreshBoundary → throw) would catch it.
-
-</details>
-
----
-
-### 10. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
+### 9. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
 
 - **Location:** `packages/fig-server/src/payload.ts:1450`
 - **Severity:** major
@@ -182,23 +166,7 @@ Read serializeValue (payload.ts:1432-1469) and encodePayloadValueInternal (1492-
 
 ---
 
-### 11. Concurrent ingestion into one PayloadResponse silently corrupts state: beginRefreshPayload's id offsets apply to still-in-flight rows of the previous stream and a single shared decoder interleaves byte buffers
-
-- **Location:** `packages/fig-server/src/payload.ts:673`
-- **Severity:** major
-- **Reviewer:** fig-server:api-design
-
-PayloadResponseImpl has one decoder (payload.ts:670) whose text buffer is shared by every processStream/processBytesChunk call, and beginRefreshPayload sets response-global rowIdBase/objectIdBase (payload.ts:673-681) that processRow applies to EVERY subsequent row regardless of which stream produced it (payload.ts:749-751). Nothing in fetchPayload or PayloadResponse detects or documents concurrent ingestion. Concrete failure: a user triggers fetchPayload(response, url, { refreshBoundary }) while the initial payload is still streaming (slow connection) — beginRefreshPayload fires mid-stream, so the initial payload's late outlined rows get shifted to ids the already-decoded root model does not reference (their chunks never resolve; Suspense hangs forever) or that collide with refresh ids (clobbered content), and interleaved decoder.decode calls tear JSON lines across the two streams. There is no in-flight guard, no error, no queueing — misuse is silent. Either serialize ingestion internally, throw on overlapping processStream, or document the single-stream invariant on the interface.
-
-<details><summary>Verification</summary>
-
-Verified every claim against the code as it exists on disk (post the recent refresh-hardening commits). (1) PayloadResponseImpl has exactly one decoder created in the constructor (payload.ts:664, 670); processStream, processBytesChunk, and processStringChunk (797-815) all feed it, and the JSON decoder (410-454) keeps a shared text buffer, so interleaved chunks from two concurrent streams tear lines (a partial line from stream A gets stream B's bytes appended). (2) beginRefreshPayload (673-681) sets response-global rowIdBase/objectIdBase, and processRow (748-751) applies shiftRowIds to EVERY subsequent row with no notion of which stream produced it — late outlined rows of a still-in-flight initial stream get shifted to ids the already-decoded root model never references (chunks never fill → Suspense hangs) or that collide with refresh ids. (3) There is no in-flight guard anywhere: fetchPayload (521-558) and processStream have no serialization, no throw-on-overlap, and neither the PayloadResponse interface docs (247-266) nor concepts/payload.md document a single-stream invariant (the spec only describes id namespacing, not serialization). (4) The scenario is reachable through Fig's own wiring, not just user misuse: in fig-start client.ts, control(entry).refresh (528-549) aborts only entry.activeRefresh — it does NOT abort the initial fetch started by startEntryFetch (that controller aborts only on route teardown via dispose) nor the hydration document-stream subscription from receiveSegment (which keeps calling processStringChunk on the same response). A same-route URL change (e.g., search-param navigation) or a dev-server update while the initial payload is still streaming fires fetchPayload with refreshBoundary on the same entry.response concurrently. Additionally, an aborted refresh leaves a partial line in the shared decoder buffer that corrupts the next refresh's first row (abort never resets decoder state). (5) No existing test pins concurrent ingestion — all beginRefreshPayload tests in payload.test.ts run streams sequentially. Severity stays major: silent hang/corruption in reachable flows, but it needs a slow-stream timing window and is not a security/data-loss issue.
-
-</details>
-
----
-
-### 12. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
+### 10. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
 
 - **Location:** `packages/fig-dom/src/props.ts:339`
 - **Severity:** major
@@ -214,7 +182,7 @@ Verified every anchor in props.ts as it exists on disk: formProp (line 629) matc
 
 ---
 
-### 13. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
+### 11. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
 
 - **Location:** `packages/fig-dom/src/props.ts:377`
 - **Severity:** major
@@ -229,85 +197,6 @@ Verified against props.ts as it exists: updateElement iterates the union of prev
 </details>
 
 ---
-
-### 14. refreshRetainedChunks prunes already-arrived chunks whose only reference lives in a still-pending chunk model, crashing decode or hanging the subtree
-
-- **Location:** `packages/fig-server/src/payload.ts:993`
-- **Severity:** major
-- **Reviewer:** fig-server:correctness
-
-referencedChunkClosure treats pending chunks (chunk.model === null — which includes every not-yet-arrived model row and all client rows referenced from them) as leaves, so a chunk k that has already arrived but is referenced only from a pending chunk j's future model is absent from nextRetained and gets deleted at line 993. Trigger: an initial payload is still streaming a suspended subtree (its client row k arrived, its model row j has not) when a refresh row for any visible boundary is processed on the same PayloadResponse (fig-start's control().refresh does not abort the in-flight initial fetch, so this interleaving is reachable in production). When model row j later arrives referencing `{$fig:"client",id:k}`, its eager decode in resolveDecodedRow calls readChunk(k) on a freshly recreated pending chunk and throws `readPromise can only be called while rendering a component` out of processRow, rejecting processStream and killing the rest of the payload stream (confirmed by repro test). Even if decode were lazy, the client row is never re-sent, so the subtree would suspend forever.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code and by executed repro. referencedChunkClosure (payload.ts:2511) treats chunks with model===null (pending rows and all client rows) as leaves, so a chunk referenced only from a still-pending model row is missing from nextRetained and deleted at payload.ts:993 when refreshRetainedChunks runs on a refresh row (line 774). Repro test (written, run, deleted) reproduced both claimed facts: chunk pruned after the refresh row, then the late model row's eager decode (resolveDecodedRow line 2243 → decodeSpecialModel "client" → readChunk → readPromise on a recreated pending chunk) threw "readPromise can only be called while rendering a component" out of processRow, which would reject processStream and kill remaining rows; a lazy-referenced pruned model chunk would instead suspend forever since its row is never re-sent. Trigger reachability verified: fig-start's control().refresh (client.ts:528) aborts only a prior refresh, never the in-flight initial fetch, so refresh rows interleave on the same PayloadResponse; the server enqueues each row separately (emitRow/flushRows), so the client row and its referencing model row can arrive in separate reads with a refresh row in between. No existing test pins this. One framing correction: in the real fetchPayload path, beginRefreshPayload's global rowIdBase shifting independently corrupts the still-streaming initial payload's late rows (verified in repro variant B), so the interleaving breaks even without the pruning — fixing line 993 alone does not make the scenario safe; the retention closure defect is nonetheless real on its own for direct processStringChunk/refresh-row embedders. Severity stays major, not critical: requires a refresh racing an in-flight streaming payload; sequential flows are unaffected.
-
-</details>
-
----
-
-### 15. PayloadResponse cannot safely ingest overlapping or aborted streams: one shared decoder buffer and response-global rowIdBase/objectIdBase corrupt whichever rows decode next
-
-- **Location:** `packages/fig-server/src/payload.ts:679`
-- **Severity:** major
-- **Reviewer:** fig-server:correctness
-
-Three related mechanisms: (1) beginRefreshPayload sets this.rowIdBase/objectIdBase, and processRow (line 749) shifts EVERY subsequently decoded row by those offsets regardless of which stream it came from — a refresh started while the initial payload (or an earlier refresh) is still streaming shifts the in-flight stream's remaining row ids (e.g. model row 1 becomes row 3), orphaning them so chunks referenced by the mounted tree stay pending forever; two overlapping refreshes additionally collide because the second beginRefreshPayload rebases while the first is mid-stream. (2) All streams feed the single `this.decoder` (line 670): concurrent processStream calls interleave byte chunks into one line buffer, splicing partial JSON lines from different streams together. (3) When a refresh is aborted mid-chunk (fig-start's `entry.activeRefresh?.abort()` on every superseding refresh), readByteStream throws before decoder.flush(), leaving a partial line in the shared buffer; the NEXT stream's first bytes are appended to that leftover, so its first row fails JSON.parse and the new fetch rejects. Nothing in fetchPayload or PayloadResponse serializes ingestion, and fig-start triggers both the overlap (refresh does not abort the initial payload fetch) and the abort-mid-line case (rapid dev-server-update refreshes).
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-server/src/payload.ts and packages/fig-start/src/client.ts as they exist on disk. (1) beginRefreshPayload (payload.ts:673-681) sets response-global rowIdBase/objectIdBase and processRow (748-751) shifts every subsequent row with no per-stream attribution; fig-start's refresh (client.ts:528-549) aborts only entry.activeRefresh, never the initial document-stream subscription (receiveSegment, 638-657) or startEntryFetch's controller, and dev-server-update fires forced refreshes (835-863) — so a refresh during a still-streaming initial payload rebases the initial stream's remaining row ids, permanently orphaning chunks the mounted tree awaits. (2) One decoder/one line buffer per response (constructor line 670, buffer closure line 414), no serialization in processStream — initial-stream and refresh chunks interleave mid-line. Correction: the 'two overlapping refreshes' sub-claim is overstated since abort() is synchronous and readByteStream re-checks the signal after each read. (3) Abort skips decoder.flush() (processStream 801-806), leaving a partial line that corrupts the next stream's first row; test payload.test.ts:2051 pins the non-flush but no test ingests a subsequent stream, and the decoder's error-path buffer reset bounds damage to one failed refresh. No spec text in concepts/payload.md limits ingestion to one stream, and no upstream guard exists. Failure is timing-dependent (in-flight stream + refresh, most likely dev HMR with streaming SSR, but reachable in prod via same-route URL changes) and recoverable by reload, so major rather than critical.
-
-</details>
-
----
-
-### 16. Suspending at the root outside any Suspense boundary fatally errors the HTML render with the raw thenable instead of waiting for the shell as documented
-
-- **Location:** `packages/fig-server/src/renderer.ts:559`
-- **Severity:** major
-- **Reviewer:** fig-server:correctness
-
-renderChildSequence only converts a thrown thenable into a suspended task when `frame.boundary !== null`; at the root (boundary null) the thenable propagates to retryTask's catch, which calls erroredTask → fatalError(request, thenable). The stream errors and shellReady/allReady reject with the promise object itself as the "error" (surfaces as "Unknown Error: Promise"). docs/4-async-streaming-hydration.md line 41 documents the opposite contract: "If there's no boundary above the suspension, the thenable propagates up and the shell waits — a slow read outside any Suspense delays time-to-first-byte." Reproduced: `renderToStream(<App/>)` where App calls readPromise on a pending promise rejects the whole render instead of waiting; any app doing a root-level readData/readPromise without a top-level Suspense gets a fatal 500-shaped failure with a nonsense error value.
-
-<details><summary>Verification</summary>
-
-Confirmed against code and by live reproduction. In /Users/bgub/code/fig/packages/fig-server/src/renderer.ts line 559, renderChildSequence only converts a thrown thenable into a suspended task when `frame.boundary !== null`; the root task is created with `boundary: null` (line 315), so a root-level suspension rethrows into retryTask's catch (line 454-457), which calls erroredTask; erroredTask with boundary null (line 1030-1033) calls fatalError, which rejects headReady/shellReady/allReady and errors the stream controller with the raw thenable (lines 1144-1154). This is the ONLY isThenable suspension catch in the file (grep shows just lines 559 and an unrelated 1524), so nothing upstream/downstream handles it. I wrote and ran a vitest reproduction: renderToStream of a component calling readPromise on a pending promise with no Suspense — shellReady rejected immediately with the pending Promise object itself (`isPromise=true`), rather than waiting; resolving the promise did not recover. No existing test pins this path (all suspension tests wrap in Suspense). docs/4-async-streaming-hydration.md line 41 explicitly documents the opposite: "If there's no boundary above the suspension, the thenable propagates up and the shell waits — a slow read outside any Suspense delays time-to-first-byte." The concepts/ spec does not declare root suspension an error, and the plumbing (createTask/finishedTask/abortTask all handle boundary===null root tasks, spawnSuspendedTask would work with a null boundary) suggests the gate is an oversight, not a design stance. Severity: major is honest — any app doing readPromise/readData above its first Suspense gets a fatal, nonsense-valued failure, but there is a trivial workaround (top-level Suspense) and the common tested patterns are unaffected, so it is not critical.
-
-</details>
-
----
-
-### 17. Activity reveal silently drops deferred effects on fibers beneath a bailed-out (AdoptedFlag) child — they never run
-
-- **Location:** `packages/fig-reconciler/src/index.ts:4815`
-- **Severity:** major
-- **Reviewer:** fig-reconciler:correctness
-
-Effects mounted under a hidden Activity are deferred (controller null, kept in fiber.effects). On reveal, armRevealedHiddenBoundaries/armDeferredEffects re-push them via visitFiberHooks (which traverses adopted subtrees) onto the committed-generation owner fibers. But commitEffects uses visitEffects, and collectReactiveEffects both refuse to descend past nodes with AdoptedFlag ((cursor.flags & AdoptedFlag) === 0). When the Activity's child element is identity-stable across the reveal render (module-constant element or useMemo'd children — canBailout passes and childLanes are clean, unlike the Suspense reveal path which forces lanes via markSubtreeLanes), the child adopts and every deferred effect on fibers strictly below it becomes unreachable: it never runs at reveal, is never re-armed (VisibilityFlag is gone next commit), and only fires if that component happens to re-render later for another reason. VERIFIED by test: <Activity mode="hidden">{PANEL}</Activity> where PANEL=<Panel/> (module constant) rendering <Leaf/> with useReactive(...,[]) — after setMode('visible'), the effect never ran (calls stayed []). External-store subscriptions and stable events are unaffected because their commit walks deliberately traverse adopted subtrees; only effects have this gap.
-
-<details><summary>Verification</summary>
-
-Confirmed all three legs of the claim against the code on disk: (1) visitEffects at packages/fig-reconciler/src/index.ts:4815 refuses to descend past AdoptedFlag fibers while armDeferredEffects (line 4612) pushes deferred effects onto committed-generation fibers below the adoption point via visitFiberHooks, which does traverse adopted subtrees; (2) the Activity reveal path (beginHiddenBoundary, lines 1446-1483) lacks the markSubtreeLanes forcing the Suspense reveal path has (line 1852), so an identity-stable child with clean childLanes bails out and adopts (begin, lines 1307-1313); (3) reproduced with a fresh test in fig-dom: module-constant child element under a hidden Activity, useReactive(...,[]) in a leaf — after reveal the effect never ran (calls stayed []). collectReactiveEffects also stops at adopted nodes, so the effect stays armed but unreachable and VisibilityFlag is cleared, matching the never-re-armed claim. The existing activity.test.ts coverage uses inline createElement children (fresh identity each render), so it never exercises the adopted path. concepts/activity.md:13-16 requires deferred effects to run on reveal, so this is a spec violation, not intentional. Repro file removed after verification.
-
-</details>
-
----
-
-### 18. lazy() with a persistently failing loader enters an unbounded suspend→reject→reload loop and never surfaces the error to an ErrorBoundary
-
-- **Location:** `packages/fig/src/element.ts:204`
-- **Severity:** major
-- **Reviewer:** fig:performance
-- **Status note:** Verified after the main workflow run by a dedicated follow-up agent.
-
-The rejection handler resets `promise = null` (line 204) before the thrown thenable settles, and the reconciler pings/retries on rejection as well as fulfillment (fig-reconciler/src/index.ts:3947-3948 attaches ping to both callbacks). Retry sequence: render suspends on `next`; loader rejects; handler nulls `promise`; ping schedules a retry render; the retry sees `promise === null` and calls `load()` again, suspending on a fresh promise — repeat forever. Because the rejected thenable is replaced rather than re-read, `readThenable` never rethrows the error during render, so the ErrorBoundary is unreachable. Realistic trigger: a chunk 404 after a deploy or offline network makes every `lazy` component hammer the failing URL indefinitely (confirmed by fig-dom/src/suspense.test.ts:128, where each rejection increments `loads` and the boundary stays on the fallback, never 'Crashed'). This contradicts the anti-storm stance data-store.ts takes for the analogous case (data-store.ts:437-440 deliberately records refreshError to avoid a 'render/fetch storm'). At minimum the rejection should be cached and rethrown until an explicit retry (boundary remount), or retries should be bounded.
-
-<details><summary>Verification</summary>
-
-Confirmed post-workflow by a follow-up verifier that reproduced it empirically: a lazy() whose loader always rejects was invoked 14,872 times in ~400ms with the UI stuck on the Suspense fallback and the ErrorBoundary never rendering. Mechanism: the rejection handler at element.ts:204 nulls the cached promise one microtask before the reconciler retry ping fires; attachPing/attachSuspensePing (fig-reconciler/src/index.ts:3939-3950, 4108-4132) attach the identical retry callback to both fulfillment and rejection, so the retry render always sees promise === null, calls load() fresh, and suspends on a new pending thenable. The rejected record is orphaned and its reason never reaches readThenable/captureErrorBoundary. Introduced by 7a13fd8; the existing suspense.test.ts retry test only blesses reject-then-succeed. Fix direction: keep the rejected thenable cached until the retry render re-reads it (throwing the reason into the boundary), and only reset the cache after that.
-
-</details>
 
 ## Confirmed minor
 

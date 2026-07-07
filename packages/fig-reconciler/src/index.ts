@@ -1482,6 +1482,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     // revealed subtree commits already up to date. Offscreen work skipped by
     // earlier bailouts is re-marked pending after commit.
     if (!hidden && previousHidden) {
+      // Deferred effects can live below otherwise unchanged wrapper components.
+      // Mark the committed hidden subtree so reveal traversal does not adopt
+      // those wrappers and skip the newly armed effects underneath them.
+      markSubtreeLanes(node.alternate?.child ?? null, root.renderLanes);
       if (
         includesSomeLane(node.childLanes, OffscreenLane) &&
         !includesSomeLane(root.renderLanes, OffscreenLane)

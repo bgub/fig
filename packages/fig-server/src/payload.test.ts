@@ -1586,6 +1586,26 @@ describe("payload rendering", () => {
     ]);
   });
 
+  it("rejects refresh payloads that include the target boundary wrapper", async () => {
+    await expect(
+      renderToPayloadRows(
+        createElement(PayloadBoundary, { id: "post" }, "Updated"),
+        {
+          refreshBoundary: "post",
+        },
+      ),
+    ).resolves.toEqual([
+      {
+        boundary: "post",
+        tag: "refresh-error",
+        value: {
+          message:
+            'Refresh payload for boundary "post" must render that boundary\'s replacement content, not a nested PayloadBoundary with the same id.',
+        },
+      },
+    ]);
+  });
+
   it("renders refresh root errors as boundary refresh errors", async () => {
     function Broken(): never {
       throw new Error("refresh failed");
@@ -1855,6 +1875,40 @@ describe("payload rendering", () => {
     });
   });
 
+  it("does not rebase late rows from an overlapping initial stream", async () => {
+    const response = createPayloadResponse();
+    const initial = controlledTextStream();
+    const initialDone = processStreamInto(response, initial.stream);
+
+    initial.write('{"id":5,"tag":"model","value":"unreferenced"}\n');
+    initial.write('{"id":0,"tag":"model","value":{"$fig":"lazy","id":1}}\n');
+    await response.rootReady;
+    try {
+      evaluatePayloadNode(response.getRoot());
+    } catch {
+      // The lazy root is intentionally pending while a refresh starts.
+    }
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "ignored" },
+    ]);
+
+    initial.write('{"id":1,"tag":"model","value":"late"}\n');
+    initial.close();
+    await initialDone;
+
+    const chunks = (
+      response as unknown as {
+        chunks: Map<number, { status: string; value: unknown }>;
+      }
+    ).chunks;
+    expect(chunks.get(1)?.status).toBe("fulfilled");
+    expect(chunks.get(1)?.value).toBe("late");
+    expect(chunks.has(6)).toBe(false);
+    expect(evaluatePayloadNode(response.getRoot())).toBe("late");
+  });
+
   it("retains transitive chunks referenced from live lazy chunks", () => {
     const response = createPayloadResponse();
     processTestPayloadRows(response, [
@@ -1893,6 +1947,62 @@ describe("payload rendering", () => {
         },
       },
       type: "section",
+    });
+  });
+
+  it("retains chunks while a pending lazy chunk may still reference them", async () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "main", {
+          children: [
+            { $fig: "lazy", id: 1 },
+            { $fig: "boundary", child: "initial", id: "slot" },
+          ],
+        }),
+      },
+    ]);
+
+    try {
+      evaluatePayloadNode(response.getRoot());
+    } catch {
+      // The lazy child is intentionally still pending.
+    }
+
+    processTestPayloadRows(response, [
+      {
+        id: 5,
+        tag: "model",
+        value: graphElement(5, "span", { children: "Retained" }),
+      },
+    ]);
+
+    const initial = controlledTextStream();
+    const initialDone = processStreamInto(response, initial.stream);
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+      .chunks;
+    expect(chunks.has(5)).toBe(true);
+
+    initial.write('{"id":1,"tag":"model","value":{"$fig":"lazy","id":5}}\n');
+    initial.close();
+    await initialDone;
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: [
+          { props: { children: "Retained" }, type: "span" },
+          "refreshed",
+        ],
+      },
+      type: "main",
     });
   });
 
@@ -2277,6 +2387,27 @@ describe("payload rendering", () => {
       props: {
         children: {
           props: { children: "Initial" },
+          type: "p",
+        },
+      },
+      type: "section",
+    });
+
+    await fetchPayload(response, "/payload/post", {
+      fetch: async () =>
+        new Response(
+          await renderToPayloadText(createElement("p", null, "Recovered"), {
+            refreshBoundary: "post",
+          }),
+          { headers: { "content-type": jsonPayloadCodec.contentType } },
+        ),
+      refreshBoundary: "post",
+    });
+
+    expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
+      props: {
+        children: {
+          props: { children: "Recovered" },
           type: "p",
         },
       },
