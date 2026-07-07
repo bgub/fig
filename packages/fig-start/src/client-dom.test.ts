@@ -298,6 +298,50 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     }
   });
 
+  it("keeps the previous route visible until navigated client references load", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+    const islandModule = deferred<{ Island: typeof RealIsland }>();
+    const slowLoadClientReference = ({
+      id,
+    }: {
+      id: string;
+    }): Promise<unknown> =>
+      id === islandId ? islandModule.promise : loadClientReference({ id });
+
+    try {
+      const router = hydrateStart({
+        loadClientReference: slowLoadClientReference,
+        routes,
+      });
+      await flush();
+      expect(document.body.textContent).toContain("Home");
+
+      let settled = false;
+      const navigation = router.navigate("/dash").then(() => {
+        settled = true;
+      });
+      await flush();
+
+      expect(settled).toBe(false);
+      expect(document.body.textContent).toContain("Home");
+      expect(
+        document.querySelector('[data-fig-payload-slot="/dash"]'),
+      ).toBeNull();
+
+      islandModule.resolve({ Island: RealIsland });
+      await navigation;
+      await flush();
+
+      const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
+      expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
+      expect(slot?.querySelector(".island")?.textContent).toBe("island!");
+      expect(document.body.textContent).not.toContain("Home");
+    } finally {
+      restoreFetch();
+    }
+  });
+
   it("refreshes an existing server route segment when navigating between its child routes", async () => {
     const nestedRoutes = [
       createRootRoute({

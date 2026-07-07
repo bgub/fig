@@ -89,6 +89,39 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(settled).toBe(true);
   });
 
+  it("gates on an existing stylesheet that is still loading", async () => {
+    const existing = new FakeElement("link") as FakeElement & {
+      sheet: StyleSheet | null;
+    };
+    existing.setAttribute("rel", "stylesheet");
+    existing.setAttribute("href", "/a.css");
+    Object.defineProperty(existing, "sheet", {
+      configurable: true,
+      value: null,
+    });
+    head.appendChild(existing);
+
+    let settled = false;
+    const ready = insertAssetResources([stylesheet("/a.css")]);
+    void ready.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+
+    expect(links()).toHaveLength(1);
+    expect(settled).toBe(false);
+
+    Object.defineProperty(existing, "sheet", {
+      configurable: true,
+      value: {},
+    });
+    existing.dispatch("load");
+    await ready;
+
+    expect(settled).toBe(true);
+  });
+
   it("dedupes keyed assets against server-rendered head elements", () => {
     const ssr = new FakeElement("link");
     ssr.setAttribute("rel", "stylesheet");

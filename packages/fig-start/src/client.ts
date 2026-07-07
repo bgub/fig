@@ -192,7 +192,7 @@ function createServerRouteResponse(
   return createPayloadResponse({
     loadClientReference: options.loadClientReference,
     resolveClientReference: (metadata) =>
-      resolveStableClientReference(options, metadata, clientReferenceTypes),
+      resolveStableSyncClientReference(options, metadata, clientReferenceTypes),
   });
 }
 
@@ -287,6 +287,28 @@ function resolveStableClientReference(
       metadata.id,
     );
     return createElement(loadedType, props);
+  };
+  clientReferenceTypes.types.set(metadata.id, type);
+  return type;
+}
+
+function resolveStableSyncClientReference(
+  options: StartClientOptions,
+  metadata: PayloadClientReferenceMetadata,
+  clientReferenceTypes: ClientReferenceTypeCache,
+): ElementType | undefined {
+  const cached = clientReferenceTypes.types.get(metadata.id);
+  if (cached !== undefined) return cached;
+
+  const resolved =
+    resolvePreloadedClientReference(metadata) ??
+    options.resolveClientReference?.(metadata);
+  if (resolved === undefined) return undefined;
+
+  const type = function StartStableSyncClientReference(
+    props: Props & { children?: FigNode },
+  ): FigNode {
+    return createElement(resolved, props);
   };
   clientReferenceTypes.types.set(metadata.id, type);
   return type;
@@ -766,7 +788,7 @@ function settleEntryGate(
 }
 
 function revealEntryClientReferences(entry: ServerRouteEntry): void {
-  if (entry.assetGate !== null) return;
+  if (entry.assetGate !== null && !entry.hydrateWithPendingAssets) return;
   entry.clientReferenceHydrationGate?.reveal();
 }
 

@@ -268,15 +268,19 @@ export function insertAssetResources(
     if (existing !== null) {
       // Already present (SSR, a host-rendered element, or a prior call):
       // adopt it into the registry for O(1) future lookups. If Fig inserted it
-      // and it is still loading, dependents join that pending gate.
+      // and it is still loading, dependents join that pending gate. In dev,
+      // Vite may insert a CSS link first; claim that still-loading element too
+      // so route reveal waits for the stylesheet instead of committing a blank
+      // payload slot.
       let entry = registry.get(key);
       if (entry?.element !== existing) {
         entry = { count: 1, element: existing, ready: null };
         registry.set(key, entry);
         documentResourceMeta.set(existing, { key, kind: asset.kind });
       }
-      if (isCriticalStylesheet(asset) && entry.ready !== null) {
-        gates.push(entry.ready);
+      const existingGate = gateExistingStylesheet(asset, entry, key, registry);
+      if (existingGate !== null) {
+        gates.push(existingGate);
       }
       continue;
     }
@@ -331,6 +335,32 @@ function isCriticalStylesheet(resource: FigAssetResource): boolean {
   // Outside browsers there is no reliable media evaluation, so keep media
   // stylesheets conservative and gate them as potentially critical.
   return typeof matchMedia !== "function" || matchMedia(resource.media).matches;
+}
+
+function gateExistingStylesheet(
+  resource: FigAssetResource,
+  entry: DocumentResourceEntry,
+  key: string,
+  registry: Map<string, DocumentResourceEntry>,
+): Promise<void> | null {
+  if (!isCriticalStylesheet(resource)) return null;
+  if (entry.ready !== null) return entry.ready;
+  if (!isPendingStylesheetElement(entry.element)) return null;
+
+  const gate = whenResourceSettled(entry.element).then(() => {
+    if (registry.get(key) === entry) entry.ready = null;
+  });
+  entry.ready = gate;
+  return gate;
+}
+
+function isPendingStylesheetElement(element: Element): boolean {
+  return (
+    element.localName === "link" &&
+    element.getAttribute("rel") === "stylesheet" &&
+    "sheet" in element &&
+    (element as { sheet: StyleSheet | null }).sheet === null
+  );
 }
 
 function whenResourceSettled(element: Element): Promise<void> {
