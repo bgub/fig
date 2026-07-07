@@ -35,6 +35,12 @@ importers:
       portless:
         specifier: ^0.14.0
         version: 0.14.0
+      react:
+        specifier: 19.2.5
+        version: 19.2.5
+      react-reconciler:
+        specifier: 0.33.0
+        version: 0.33.0(react@19.2.5)
       size-limit:
         specifier: ^8.2.4
         version: 8.2.6
@@ -2247,6 +2253,12 @@ packages:
     peerDependencies:
       react: ^19.2.5
 
+  react-reconciler@0.33.0:
+    resolution: {integrity: sha512-KetWRytFv1epdpJc3J4G75I4WrplZE5jOL7Yq0p34+OVOKF4Se7WrdIdVC45XsSSmUTlht2FM/fM1FZb1mfQeA==}
+    engines: {node: '>=0.10.0'}
+    peerDependencies:
+      react: ^19.2.0
+
   react@19.2.5:
     resolution: {integrity: sha512-llUJLzz1zTUBrskt2pwZgLq59AemifIftw4aB7JxOqf1HY2FDaGDxgwpAPVzHU1kdWabH7FauP4i1oEeer2WCA==}
     engines: {node: '>=0.10.0'}
@@ -4191,6 +4203,11 @@ snapshots:
   queue-microtask@1.2.3: {}
 
   react-dom@19.2.5(react@19.2.5):
+    dependencies:
+      react: 19.2.5
+      scheduler: 0.27.0
+
+  react-reconciler@0.33.0(react@19.2.5):
     dependencies:
       react: 19.2.5
       scheduler: 0.27.0
