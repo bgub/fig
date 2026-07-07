@@ -171,7 +171,10 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
 
                 hookNames.push(callee.name);
                 const hookRecord = functions.get(callee.name);
-                if (hookRecord?.isCustomHook !== true) return;
+                if (hookRecord?.isCustomHook !== true) {
+                  if (!isBuiltinFigHookName(callee.name)) forceReset = true;
+                  return;
+                }
 
                 if (stack.includes(callee.name)) {
                   forceReset = true;
@@ -294,6 +297,23 @@ function isComponentName(name: string): boolean {
 
 function isCustomHookName(name: string): boolean {
   return /^use[A-Z]/.test(name);
+}
+
+function isBuiltinFigHookName(name: string): boolean {
+  return (
+    name === "useActionState" ||
+    name === "useBeforeLayout" ||
+    name === "useBeforePaint" ||
+    name === "useCallback" ||
+    name === "useExternalStore" ||
+    name === "useId" ||
+    name === "useLaggedValue" ||
+    name === "useMemo" ||
+    name === "useReactive" ||
+    name === "useStableEvent" ||
+    name === "useState" ||
+    name === "useTransition"
+  );
 }
 
 // Transform a single module. Returns null when it has no components (so the

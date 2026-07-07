@@ -4,14 +4,14 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 10 major, 44 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 5 major, 44 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
 ## Contents
 
 - [Confirmed critical (0)](#confirmed-critical)
-- [Confirmed major (10)](#confirmed-major)
+- [Confirmed major (5)](#confirmed-major)
 - [Confirmed minor (44)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
@@ -22,87 +22,7 @@ No open confirmed critical findings remain.
 
 ## Confirmed major
 
-### 1. commitLiveHookInstances walks the entire fiber tree (including adopted/bailed-out subtrees) and every hook chain on every commit
-
-- **Location:** `packages/fig-reconciler/src/index.ts:3096`
-- **Severity:** major
-- **Reviewer:** fig-reconciler:performance
-
-commitRoot's first step calls commitLiveHookInstances(finishedWork.child), which uses visitFiberHooks (line 4821, deliberately not gated on AdoptedFlag) to visit every fiber in the whole tree and iterate its full hook linked list, on every commit. For each stable-event hook it additionally calls isInsideHiddenBoundary(owner) (line 4641), an O(depth) return-chain walk per hook. So a one-fiber keystroke update in a 10k-fiber app pays O(total fibers x hooks) + O(stable-event hooks x depth) per commit, defeating the AdoptedFlag design that rendering.md promises ('commit ... walks all skip the subtree'). Bailed-out fibers' hook state is unchanged since their last commit, so republishing could be limited to fibers that actually rendered (a per-render list like fiber.effects already is) plus hidden-visibility flips, which are already tracked via VisibilityFlag/hiddenStates.
-
-<details><summary>Verification</summary>
-
-Verified every claim against packages/fig-reconciler/src/index.ts as it exists: commitRoot (line 3096) unconditionally calls commitLiveHookInstances on every commit; visitFiberHooks (4821) walks the entire fiber forest with no AdoptedFlag gate (void visitor return means walkFiberTree always descends, line 3193) and iterates each fiber's full hook chain; isInsideHiddenBoundary (4641) does an O(depth) return-chain walk per stable-event hook with no hasHiddenBoundaries short-circuit, even though that flag gates two adjacent steps in the same commitRoot. The adopt tier (lines 1307-1313) means a one-fiber update leaves almost the whole tree adopted, and the sibling commit walks (commitMutationEffects, visitEffects, collectReactiveEffects) all do skip adopted subtrees, so this walk is a genuine ungated O(total fibers x hooks) + O(stable-event hooks x depth) cost per commit on the production hot path; no test pins commit cost. Two qualifications: (1) the spec framing overreaches — rendering.md line 36-37 only promises the mutation/deletion/effect walks skip adopted subtrees, and commitExternalStores (4653) already deliberately does an ungated full hook walk each commit, so commits were never O(update-size); (2) the full walk is currently load-bearing for reveal correctness (stable-event instance.live under a revealed hidden boundary is only restored here, since armDeferredEffects handles effects only and abortFiberEffects sets live=false on hide), so the fix must handle visibility flips as the reviewer proposed. Neither refutes the cost. The finding stands as a real per-commit tree-size-proportional cost in production, with a trivially missing hasHiddenBoundaries short-circuit for the worst term.
-
-</details>
-
----
-
-### 2. commitExternalStores re-scans every fiber's hook chain in the whole tree and calls getSnapshot per store on every commit
-
-- **Location:** `packages/fig-reconciler/src/index.ts:4653`
-- **Severity:** major
-- **Reviewer:** fig-reconciler:performance
-
-commitExternalStores(finishedWork.child) (called at line 3144 on every commit) uses walkFiberForest with no AdoptedFlag check, so it visits every fiber in the tree, walks each memoizedState hook list, and for every external-store hook runs commitExternalStore -> scheduleExternalStoreIfChanged -> instance.getSnapshot() (line 4693). User-supplied getSnapshot functions of arbitrary cost run for every mounted store on every commit, even for stores in fully bailed-out subtrees whose live subscription (instance.unsubscribe is set) already schedules on change. A per-root registry (Set of live ExternalStoreInstance) maintained at subscribe/unsubscribe time would give identical between-render-and-commit consistency coverage in O(#stores) with no tree walk.
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig-reconciler/src/index.ts as it exists on disk. (1) Line 3144: commitExternalStores runs unconditionally in commitRoot on every commit — no gate, unlike commitDataDependencies which is gated by root.needsDataDependencyCommit. (2) Lines 4653–4662: it uses walkFiberForest with no AdoptedFlag check, descending into bailed-out (adopted) subtrees; every other commit walk (commitMutationEffects line 3374, commitDataDependencies 3686, collectReactiveEffects 4733/4752, visitEffects 4815) prunes on AdoptedFlag, so this single function makes commit O(whole tree) instead of O(dirty subtree). (3) Lines 4684/4693: every mounted external-store instance gets a user-supplied getSnapshot() call per commit, even in clean subtrees whose live subscription (instance.unsubscribe set at 4680) already calls scheduleExternalStoreIfChanged on notify — so a per-root live-instance registry would give identical consistency coverage without the tree walk. Spec (concepts/hooks.md line 88) does not require this behavior, no test pins getSnapshot call counts, and git history (ae17c2a) shows only a recursion-to-iteration refactor, not a fix. It is a pure performance issue (no correctness failure), but as an unconditional hot-path O(n) walk plus arbitrary user code per store per commit in the framework core, major is the honest severity.
-
-</details>
-
----
-
-### 3. readContext is an O(provider-depth) return-chain walk per call instead of an O(1) render-time provider stack
-
-- **Location:** `packages/fig-reconciler/src/index.ts:2767`
-- **Severity:** major
-- **Reviewer:** fig-reconciler:performance
-
-readContextValue walks renderingFiber.return up the fiber tree comparing parent.tag/parent.type until it finds the matching ContextProviderTag, falling all the way to the root (and returning defaultValue) when no provider exists. Every readContext call in every component render pays O(distance-to-provider); for common ambient contexts (theme, router) provided near the root of a deep tree, a render of n context-reading components costs O(n x depth) pointer hops with type comparisons, versus React's O(1) push/pop value stack maintained by the work loop. This is the hottest hook path in context-heavy apps and the begin/complete traversal already brackets providers, so a stack (or per-context current-value with save/restore at provider begin/complete) fits the existing structure.
-
-<details><summary>Verification</summary>
-
-Verified against the code on disk. `readContextValue` (packages/fig-reconciler/src/index.ts:2758-2781) does exactly what the finding claims: on every call it walks `renderingFiber.return` up the fiber tree comparing `parent.tag === ContextProviderTag && parent.type === context` until it hits the matching provider, and walks all the way to the root before returning `context.defaultValue` when no provider exists. I checked all refutation angles: (1) Not dev-only — the walk has no NODE_ENV gate and runs in production; in fact the dev strict shadow pass (line 1789) calls the component twice, doubling the walks in dev. (2) Not handled elsewhere — `contextDependencies` (2783-2789) tracks only which contexts a fiber read, used by `propagateContextChange`/`markContextConsumers` (4162-4199) to mark consumers on provider updates; there is no per-fiber cache of the resolved provider or value, and nothing memoizes across calls (a component reading 3 contexts pays 3 full walks per render). (3) Not intentional/documented — concepts/hooks.md specifies readContext semantics (nearest provider, tracked reads, propagation stopping at nested same-context providers) but says nothing endorsing a tree walk; a value stack would preserve the same observable semantics. (4) The reviewer's proposed fix fits: the reconciler already uses a begin (line 1304) / completeUnit (1294) / complete (2821) traversal that brackets ContextProviderTag fibers, so a push/pop current-value stack matching React's design is structurally straightforward. (5) The failure scenario is real: any render of consumers deep under a near-root provider (theme/router) pays O(depth) pointer hops per read; a broad context-change re-render of k consumers at depth d costs k×d hops, which for deep trees can rival or exceed the consumers' own render cost. Mitigating factors that keep this from being overstated: it is a pure inefficiency (no correctness impact), the per-hop cost is cheap pointer chasing, and bailout machinery means only actually-rendering fibers pay. Since this is a production hot path in framework core (every readContext in every downstream app), the asymptotic gap vs React's O(1) stack, with an idiomatic fix available, justifies keeping it at major rather than downgrading — though it is at the low end of major, closer to a scalability tax than a user-visible bug in typical shallow trees.
-
-</details>
-
----
-
-### 4. Build-time hook signatures record imported custom hooks by name only, so editing a shared hook's internals takes the state-preserving in-place refresh path and crashes with a hook-order error instead of remounting consumers
-
-- **Location:** `packages/fig-vite/src/transform.ts:173`
-- **Severity:** major
-- **Reviewer:** fig-refresh:correctness
-
-signatureFor() only expands a custom hook's nested signature when the hook is defined in the same module (`functions.get(callee.name)` at line 173; imported hooks fail `hookRecord?.isCustomHook !== true` at line 174 and contribute just their name). Concrete flow: Counter.tsx has `function Counter() { useThing(); }` with useThing imported from hooks.ts (a component-less module the plugin leaves untransformed). Dev edits useThing from one `useState` to `useState` + `useReactive`. hooks.ts has no `import.meta.hot.accept`, so Vite bubbles to the self-accepting Counter.tsx, which re-evaluates and calls `register(CounterV2, ...)` + `setSignature(CounterV2, "useThing")` — the identical key CounterV1 had. `isSignatureStale` in packages/fig-refresh/src/index.ts:125 therefore returns false, `performRefresh()` buckets the family as updated (re-render in place, hook state preserved), and the reconciler's flushSync re-render calls the new useThing which consumes 2 slots against a 1-slot fiber — throwing `hookOrderError("more")` (fig-reconciler/src/index.ts:2795) inside the refresh flush. The app red-screens/breaks mid-refresh in the single most common HMR flow signatures exist to protect (editing a shared hooks file); react-refresh handles this case via runtime-computed full keys that resolve cross-module hook signatures. A conservative fix is to treat calls to custom hooks not found in the module-local `functions` map as forceReset (or fold the imported module id into the key).
-
-<details><summary>Verification</summary>
-
-Traced the full claimed failure path against the code on disk and every link holds. (1) packages/fig-vite/src/transform.ts:172-174: signatureFor pushes the callee name, then `functions.get(callee.name)` consults only the module-local functions map; imported custom hooks fail the `isCustomHook !== true` check and contribute name-only, so editing an imported hook's body cannot change the consumer's signature key. (2) Hook-only modules are left untransformed (components.length === 0 early return → transformModule returns null; the plugin in src/index.ts adds nothing else), so hooks.ts has no accept handler and Vite bubbles to the self-accepting component module, re-executing it. (3) fig-refresh/src/index.ts:114-126 isSignatureStale compares only forceReset and key equality; identical "useThing" keys → false → family lands in updatedFamilies. (4) fig-reconciler/src/index.ts:4407-4433 re-renders in place inside flushSync with hook state preserved; renderFunction runs family.current (new component closing over new hook), and the extra hook slot hits updateHook with currentHook === null and didRenderBefore true → throw hookOrderError("more") at line 2795, with no recovery/remount fallback. (5) No mitigation elsewhere: transform.test.ts only covers same-module custom hooks, fig-dom refresh tests assume correct signatures, and nothing in concepts/ or plans/ documents cross-module hooks as an accepted limitation. The scenario (shared hooks in a separate file) is the common project layout, so signatures fail to protect the primary flow they exist for. Severity stays major, not critical: dev-only (entire path is behind NODE_ENV !== "production"), recoverable via manual reload, production unaffected.
-
-</details>
-
----
-
-### 5. Suspending siblings under one Suspense boundary render serially (server-side data waterfall): a suspension parks all following siblings behind the suspended child's promise.
-
-- **Location:** `packages/fig-server/src/renderer.ts:560`
-- **Severity:** major
-- **Reviewer:** fig-server:performance
-
-renderChildSequence catches a thenable and calls spawnSuspendedTask(frame, children.slice(index), error, ...) — the spawned task's node is the suspended child PLUS every later sibling, and the task is only pinged when that one thenable settles (renderer.ts:984-987). So for `<Suspense><A/><B/></Suspense>` where A and B each readData/readPromise independent sources, B's fetch does not start until A's resolves: total shell/boundary latency is sum(latencies) instead of max(latencies). Verified empirically: rendering two sibling components that each throw a deferred promise, the second component's function is never invoked in the first work pass; it first runs only after the first sibling's promise resolves. React Fizz spawns a task per suspended node and keeps rendering later siblings, so real apps migrating a `<Card/><Card/><Card/>` list inside one boundary will see N sequential round-trips. docs/4-async-streaming-hydration.md documents the slice mechanism ('a task is spawned holding the unrendered children from the suspension point onward') but only advertises that older siblings aren't redone — the serialization of later siblings' async work is unacknowledged, and the payload renderer does NOT share this behavior (serializeNodeOrLazy outlines each child individually, so payload siblings run in parallel). Since useId-path continuity is the stated reason for the slice, an alternative is spawning the suspended child as its own task and continuing the loop with correct indexBase.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code as it exists on disk. (1) packages/fig-server/src/renderer.ts:558-567: when a child throws a thenable, renderChildSequence calls spawnSuspendedTask(frame, children.slice(index), error, ...) — the spawned task's node is the suspended child plus every later sibling, and spawnSuspendedTask (lines 957-988) attaches exactly one ping to that one thenable (thenable.then(() => pingTask(...)) at 984-987). Nothing resumes the task earlier, and no other code path renders the later siblings in the meantime. (2) Empirically reproduced with a temp vitest probe (since deleted): for <Suspense><A/><B/></Suspense> where each component reads its own deferred promise, the first work pass invoked only A; B's function first ran only after A's promise resolved (call order ["A"] → ["A","A","B"] → ["A","A","B","B"]). So any fetch initiated inside B starts only after A settles — boundary latency is sum, not max, and N suspending siblings means N sequential round-trips. (3) Not an intentional documented divergence: docs/4-async-streaming-hydration.md:38 describes the slice only as "already-rendered older siblings aren't redone"; nothing in concepts/server-rendering.md, concepts/suspense-streaming references, or concepts/intentional-differences-from-react.md acknowledges serializing later siblings' async work. (4) No existing test pins either behavior — the sibling-suspension tests in packages/fig-server/src/index.test.ts (lines 555, 638) pin useId path stability across retries, not timing/parallelism. (5) The claimed payload-renderer asymmetry is also real: packages/fig-server/src/payload.ts serializeNode maps each array child through serializeNodeOrLazy (1217-1252), which catches the thenable per child and outlines just that child as a lazy task, so payload siblings do run in parallel. Mitigations (preloadData, hoisting fetches above the children, one boundary per sibling) are opt-in workarounds, not refutations. Severity stays major: output is correct, so not critical, but the default behavior turns the very common multiple-async-siblings-under-one-boundary pattern into a server-side waterfall, diverging silently from React Fizz semantics migrants will expect.
-
-</details>
-
----
-
-### 6. Falsy events entries are compacted out before index matching, so conditional listeners shift the documented positional identity of every later listener
+### 1. Falsy events entries are compacted out before index matching, so conditional listeners shift the documented positional identity of every later listener
 
 - **Location:** `packages/fig-dom/src/events.ts:736`
 - **Severity:** major
@@ -118,7 +38,7 @@ Verified against events.ts on disk: eventDescriptors (line 736) skips falsy entr
 
 ---
 
-### 7. The published README states Fig does not implement resource/metadata behavior for title/meta/link/script, but fig-dom ships exactly that behavior
+### 2. The published README states Fig does not implement resource/metadata behavior for title/meta/link/script, but fig-dom ships exactly that behavior
 
 - **Location:** `packages/fig-dom/README.md:51`
 - **Severity:** major
@@ -134,7 +54,7 @@ Verified all three legs of the claim. (1) README line 51-52 says Fig "intentiona
 
 ---
 
-### 8. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
+### 3. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
 
 - **Location:** `packages/fig-server/src/payload.ts:1450`
 - **Severity:** major
@@ -150,7 +70,7 @@ Read serializeValue (payload.ts:1432-1469) and encodePayloadValueInternal (1492-
 
 ---
 
-### 9. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
+### 4. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
 
 - **Location:** `packages/fig-dom/src/props.ts:339`
 - **Severity:** major
@@ -166,7 +86,7 @@ Verified every anchor in props.ts as it exists on disk: formProp (line 629) matc
 
 ---
 
-### 10. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
+### 5. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
 
 - **Location:** `packages/fig-dom/src/props.ts:377`
 - **Severity:** major

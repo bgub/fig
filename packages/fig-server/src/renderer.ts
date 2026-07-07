@@ -145,10 +145,9 @@ interface RenderScope {
 }
 
 interface Task extends RenderScope {
-  // Index of the task's first child within its original normalized children
-  // sequence. Suspended tasks carry the rest of a sequence sliced from the
-  // suspension point; resuming id-path numbering here keeps useId paths
-  // identical to the never-suspending render (and to client fiber indices).
+  // Index of the suspended child within its original normalized children
+  // sequence. Resuming id-path numbering here keeps useId paths identical to
+  // the never-suspending render (and to client fiber indices).
   childIndexBase: number;
   node: FigNode;
   segment: Segment;
@@ -546,8 +545,8 @@ function renderChildren(node: FigNode, frame: RenderFrame): void {
 function renderChildSequence(
   children: NormalizedChild[],
   frame: RenderFrame,
-  // Non-zero when resuming a suspended task: `children` is a slice of the
-  // original sequence, so id-path segments continue from the slice point.
+  // Non-zero when resuming a suspended task: `children` starts at the
+  // suspended child's original index, so id-path segments stay stable.
   indexBase = 0,
 ): void {
   for (let index = 0; index < children.length; index += 1) {
@@ -557,13 +556,8 @@ function renderChildSequence(
       );
     } catch (error) {
       if (isThenable(error)) {
-        spawnSuspendedTask(
-          frame,
-          children.slice(index),
-          error,
-          indexBase + index,
-        );
-        return;
+        spawnSuspendedTask(frame, children[index], error, indexBase + index);
+        continue;
       }
 
       throw error;
@@ -799,7 +793,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   } catch (error) {
     // Suspensions never reach here: renderChildSequence is the single
     // suspend seam and contentFrame always has a boundary, so it spawns a
-    // suspended task and returns instead of throwing.
+    // suspended task and continues instead of throwing.
     contentSegment.status = "completed";
     markBoundaryClientRendered(frame.request, boundary, error, frame.stack);
   }

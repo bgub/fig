@@ -669,6 +669,11 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
   dataStore: FigDataStore;
+  contextValues: Map<FigContext<unknown>, unknown>;
+  contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
+  externalStores: Set<
+    ExternalStoreInstance<unknown, Fiber<Container, Instance, TextInstance>>
+  >;
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
@@ -694,6 +699,13 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   nextHydratableInstance: HostNode<Instance, TextInstance> | null;
   clearContainerBeforeCommit: boolean;
   hydrationInitialElement: FigNode | typeof NoHydrationInitialElement;
+}
+
+interface ContextStackEntry<Container, Instance, TextInstance> {
+  context: FigContext<unknown>;
+  hadPrevious: boolean;
+  previous: unknown;
+  provider: Fiber<Container, Instance, TextInstance>;
 }
 
 interface ConsumedPendingQueue {
@@ -876,6 +888,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       finishedWork: null,
       renderLanes: NoLanes,
       dataStore,
+      contextValues: new Map(),
+      contextStack: [],
+      externalStores: new Set(),
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
@@ -1215,6 +1230,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (root.wip === null) {
       root.renderLanes = nextLanes;
       root.consumedPendingQueues = [];
+      resetContextStack(root);
       root.finishedWork = createWorkInProgress(root.current, {
         children: root.element,
       });
@@ -1266,6 +1282,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callback = null;
     root.callbackPriority = NoLane;
     resetHydrationPointers(root);
+    resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
     root.uncaughtErrorInfo = null;
   }
@@ -1304,16 +1321,27 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (isThenable(error)) {
       const boundary = findSuspenseBoundary(node);
-      if (boundary !== null) return captureSuspenseBoundary(boundary, error);
+      if (boundary !== null) {
+        unwindContextTo(root, boundary);
+        return captureSuspenseBoundary(boundary, error);
+      }
 
+      unwindContextTo(root, null);
       throw error;
     }
 
-    if (error instanceof HydrationMismatchError) throw error;
+    if (error instanceof HydrationMismatchError) {
+      unwindContextTo(root, null);
+      throw error;
+    }
 
     const boundary = findErrorBoundary(node);
-    if (boundary !== null) return captureErrorBoundary(boundary, error, node);
+    if (boundary !== null) {
+      unwindContextTo(root, boundary);
+      return captureErrorBoundary(boundary, error, node);
+    }
 
+    unwindContextTo(root, null);
     rootOf(node).uncaughtErrorInfo = errorInfoFor(node, error);
     throw error;
   }
@@ -1348,6 +1376,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return;
       }
     }
+
+    if (node.tag === ContextProviderTag) pushContextProvider(node);
 
     const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
     node.lanes &= ~root.renderLanes;
@@ -2799,21 +2829,70 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     addContextDependency(renderingFiber, context as FigContext<unknown>);
+    const root = rootOf(renderingFiber);
+    const values = root.contextValues;
 
-    for (
-      let parent = renderingFiber.return;
-      parent !== null;
-      parent = parent.return
-    ) {
-      if (
-        parent.tag === ContextProviderTag &&
-        parent.type === (context as unknown as ElementType | null)
-      ) {
-        return parent.props.value as T;
-      }
+    return values.has(context as FigContext<unknown>)
+      ? (values.get(context as FigContext<unknown>) as T)
+      : context.defaultValue;
+  }
+
+  function pushContextProvider(node: F): void {
+    const root = rootOf(node);
+    const context = node.type as unknown as FigContext<unknown>;
+    const values = root.contextValues;
+    const hadPrevious = values.has(context);
+    const previous = values.get(context);
+    values.set(context, node.props.value);
+    root.contextStack.push({ context, hadPrevious, previous, provider: node });
+  }
+
+  function popContextProvider(node: F): void {
+    const root = rootOf(node);
+    const entry = root.contextStack.pop();
+    if (entry === undefined || entry.provider !== node) {
+      resetContextStack(root);
+      return;
     }
+    restoreContextEntry(root, entry);
+  }
 
-    return context.defaultValue;
+  function unwindContextTo(root: R, node: F | null): void {
+    while (root.contextStack.length > 0) {
+      const entry = root.contextStack[root.contextStack.length - 1];
+      if (node !== null && isAncestorOf(entry.provider, node)) return;
+      restoreContextEntry(
+        root,
+        root.contextStack.pop() as ContextStackEntry<
+          Container,
+          Instance,
+          TextInstance
+        >,
+      );
+    }
+  }
+
+  function restoreContextEntry(
+    root: R,
+    entry: ContextStackEntry<Container, Instance, TextInstance>,
+  ): void {
+    if (entry.hadPrevious) {
+      root.contextValues.set(entry.context, entry.previous);
+    } else {
+      root.contextValues.delete(entry.context);
+    }
+  }
+
+  function resetContextStack(root: R): void {
+    root.contextValues = new Map();
+    root.contextStack = [];
+  }
+
+  function isAncestorOf(ancestor: F, node: F): boolean {
+    for (let parent: F | null = node; parent !== null; parent = parent.return) {
+      if (parent === ancestor) return true;
+    }
+    return false;
   }
 
   function addContextDependency(node: F, context: FigContext<unknown>): void {
@@ -2883,6 +2962,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.childLanes = childLanes;
     node.memoizedProps = node.props;
+    if (node.tag === ContextProviderTag && (node.flags & AdoptedFlag) === 0) {
+      popContextProvider(node);
+    }
   }
 
   function isNewHostInstance(node: F): boolean {
@@ -3177,7 +3259,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.suspendedLanes &= ~OffscreenLane;
       }
       try {
-        commitExternalStores(finishedWork.child);
+        commitExternalStores(root, finishedWork.child);
         scheduleDehydratedSuspenseRetries(root);
         commitEffects(root, finishedWork.child, BeforePaintEffect);
         if (root.needsCaughtBoundaryErrorFlush) {
@@ -4662,6 +4744,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   // regular commit phases run them in order during the reveal commit.
   function armDeferredEffects(node: F): void {
     visitFiberHooks(node, (owner, hook) => {
+      if (hook.kind === StableEventHook) {
+        const state = hook.memoizedState as StableEventState;
+        const instance = state.instance;
+        instance.handler = state.next;
+        instance.live = true;
+        return;
+      }
+
       if (!isEffectHook(hook.kind)) return;
 
       const effect = hook.memoizedState as Effect;
@@ -4674,11 +4764,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitLiveHookInstances(node: F | null): void {
-    visitFiberHooks(node, (owner, hook) => {
+    visitRenderedFiberHooks(node, (owner, hook) => {
       if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
         instance.handler = hook.memoizedState.next;
-        instance.live = !isInsideHiddenBoundary(owner);
+        instance.live = !hasHiddenBoundaries || !isInsideHiddenBoundary(owner);
       }
 
       if (hook.kind === ActionStateHook) {
@@ -4701,19 +4791,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hook.kind === StableEventHook;
   }
 
-  function commitExternalStores(node: F | null): void {
+  function commitExternalStores(root: R, node: F | null): void {
     walkFiberForest(node, (cursor) => {
+      if ((cursor.flags & AdoptedFlag) !== 0) return false;
+
       for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
         if (isExternalStoreHook(hook))
-          commitExternalStore(cursor, hook.memoizedState);
+          commitExternalStore(root, cursor, hook.memoizedState);
       }
 
       // Subscriptions under hidden boundaries are deferred until reveal.
       return !isHiddenBoundary(cursor);
     });
+
+    for (const instance of root.externalStores) {
+      scheduleExternalStoreIfChanged(instance.owner, instance);
+    }
   }
 
   function commitExternalStore(
+    root: R,
     owner: F,
     state: ExternalStoreState<unknown, F>,
   ): void {
@@ -4728,11 +4825,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     instance.getSnapshot = state.getSnapshot;
     instance.owner = owner;
     instance.value = state.value;
+    root.externalStores.add(instance);
     instance.unsubscribe ??= state.subscribe(() => {
       scheduleExternalStoreIfChanged(instance.owner, instance);
     });
-
-    scheduleExternalStoreIfChanged(owner, instance);
   }
 
   function scheduleExternalStoreIfChanged(
@@ -4880,6 +4976,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
+  function visitRenderedFiberHooks(
+    node: F | null,
+    visitor: (owner: F, hook: Hook) => void,
+  ): void {
+    walkFiberForest(node, (cursor) => {
+      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
+        visitor(cursor, hook);
+      }
+
+      return (cursor.flags & AdoptedFlag) === 0;
+    });
+  }
+
   function isExternalStoreHook(
     hook: Hook,
   ): hook is Hook<ExternalStoreState<unknown, F>> {
@@ -4987,6 +5096,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   function unsubscribeExternalStore(
     state: ExternalStoreState<unknown, F>,
   ): void {
+    if (state.instance.owner !== null) {
+      rootOf(state.instance.owner).externalStores.delete(state.instance);
+    }
     state.instance.unsubscribe?.();
     state.instance.unsubscribe = null;
     state.instance.committedSubscribe = null;

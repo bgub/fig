@@ -35,7 +35,7 @@ The server has no fibers, no lanes, no commit — none of it is needed, because 
 Same trick, different machinery: `readPromise` and `readData` throw the pending thenable, and the renderer catches it at the child list. If there's an enclosing `Suspense` boundary:
 
 - a placeholder segment is created at the current output position
-- a task is spawned holding the unrendered children from the suspension point onward (already-rendered older siblings aren't redone)
+- a task is spawned for the suspended child at its original index, and later siblings keep rendering so their data starts in the same pass
 - `.then(ping)` is attached to the thenable, and rendering moves on with the rest of the tree
 
 When the promise settles, the ping queues the task; a microtask drains all pinged tasks in one pass. A `pendingTasks` counter ticks down to zero, and `allReady` resolves. If there's no boundary above the suspension, the thenable propagates up and the shell waits — a slow read outside any `Suspense` delays time-to-first-byte, which is the lever `Suspense` placement gives you.

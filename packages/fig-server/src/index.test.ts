@@ -544,11 +544,10 @@ describe("@bgub/fig-server", () => {
     pending.resolve("Ben");
     const result = await resultPromise;
 
-    // The resumed segment cannot know what follows its splice point when it
-    // completes, so a segment ending in text always closes with a separator
-    // (the trailing <!--,--> before </div>); hydration skips it.
+    // The resumed segment starts after the shell's "Hi " and before the
+    // parent continues with "!"; separators preserve both text-fiber seams.
     expect(result.html).toBe(
-      "<!--fig:suspense:completed--><div>Hi <!--,-->Ben<!--,-->!<!--,--></div><!--/fig:suspense-->",
+      "<!--fig:suspense:completed--><div>Hi <!--,-->Ben<!--,-->!</div><!--/fig:suspense-->",
     );
   });
 
@@ -1271,6 +1270,43 @@ describe("@bgub/fig-server", () => {
     );
     expect(html).toContain('__figSSR.s("test-p-1","test-s-1")');
     expect(html).toContain('__figSSR.c("test-b-0","test-s-0")');
+  });
+
+  it("starts later Suspense siblings before earlier siblings resolve", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const calls: string[] = [];
+
+    function First() {
+      calls.push("first");
+      return createElement("span", null, readPromise(first.promise));
+    }
+
+    function Second() {
+      calls.push("second");
+      return createElement("span", null, readPromise(second.promise));
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(First, null),
+        createElement(Second, null),
+      ),
+      { identifierPrefix: "test" },
+    );
+
+    await result.shellReady;
+    expect(calls).toEqual(["first", "second"]);
+
+    second.resolve("Second");
+    first.resolve("First");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain("<span>First</span>");
+    expect(html).toContain("<span>Second</span>");
   });
 
   it("emits inline scripts without top-level lexical declarations", async () => {

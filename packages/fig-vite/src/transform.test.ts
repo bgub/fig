@@ -57,6 +57,18 @@ export function Counter() {
     );
   });
 
+  it("force-resets components that call imported custom hooks", async () => {
+    const source = `import { useThing } from "./hooks";
+export function Counter() {
+  useThing();
+  return <button />;
+}`;
+
+    const out = await transformModule(source, "/app/Counter.tsx");
+    expect(out).not.toBeNull();
+    expect(out!.code).toContain('__figSig(Counter, "useThing", true)');
+  });
+
   it("does not self-accept modules that export non-component values", async () => {
     const source = `export const answer = 42;
 export function Counter() {

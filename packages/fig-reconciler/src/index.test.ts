@@ -1,9 +1,12 @@
 import {
+  Activity,
   assets,
+  createContext,
   createElement,
   dataResource,
   ErrorBoundary,
   meta,
+  readContext,
   readData,
   readPromise,
   Suspense,
@@ -12,6 +15,7 @@ import {
   title,
   useBeforeLayout,
   useBeforePaint,
+  useExternalStore,
   useLaggedValue,
   useMemo,
   useReactive,
@@ -1267,6 +1271,146 @@ describe("reconciler", () => {
 
     expect(container.textContent).toBe("cleanupdated");
     expect(requireReadValue()()).toBe("updated");
+  });
+
+  it("keeps stable events disabled while hidden and re-enables them on reveal", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let readSignal: (() => boolean) | null = null;
+
+    function EventOwner() {
+      readSignal = useStableEvent((signal: AbortSignal) => signal.aborted);
+      return createElement("span", null, "owner");
+    }
+
+    function App({ mode }: { mode: "hidden" | "visible" }) {
+      return createElement(
+        Activity,
+        { mode },
+        createElement("section", null, createElement(EventOwner, null)),
+      );
+    }
+
+    function requireReadSignal(): () => boolean {
+      if (readSignal === null) {
+        throw new Error("Expected stable event handler to be captured.");
+      }
+      return readSignal;
+    }
+
+    flushSync(() => root.render(createElement(App, { mode: "hidden" })));
+    expect(requireReadSignal()()).toBe(true);
+
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    expect(container.textContent).toBe("owner");
+    expect(requireReadSignal()()).toBe(false);
+  });
+
+  it("defers external store subscriptions while hidden and subscribes on reveal", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let subscribeCalls = 0;
+    let unsubscribeCalls = 0;
+    let value = "initial";
+    let notify: () => void = () => {
+      throw new Error("Expected store subscription.");
+    };
+    const subscribe = (callback: () => void) => {
+      subscribeCalls += 1;
+      notify = callback;
+      return () => {
+        unsubscribeCalls += 1;
+        notify = () => {
+          throw new Error("Expected store subscription.");
+        };
+      };
+    };
+
+    function StoreReader() {
+      const snapshot = useExternalStore(subscribe, () => value);
+      return createElement("span", null, snapshot);
+    }
+
+    function App({ mode, tick }: { mode: "hidden" | "visible"; tick: number }) {
+      return createElement(
+        "main",
+        null,
+        createElement(Activity, { mode }, createElement(StoreReader, null)),
+        createElement("span", null, tick),
+      );
+    }
+
+    flushSync(() =>
+      root.render(createElement(App, { mode: "hidden", tick: 0 })),
+    );
+    expect(subscribeCalls).toBe(0);
+
+    flushSync(() =>
+      root.render(createElement(App, { mode: "visible", tick: 0 })),
+    );
+    expect(container.textContent).toBe("initial0");
+    expect(subscribeCalls).toBe(1);
+
+    flushSync(() =>
+      root.render(createElement(App, { mode: "visible", tick: 1 })),
+    );
+    expect(subscribeCalls).toBe(1);
+    expect(unsubscribeCalls).toBe(0);
+
+    value = "updated";
+    notify();
+    flushSync(() => undefined);
+    expect(container.textContent).toBe("updated1");
+  });
+
+  it("unwinds context providers from suspended branches before rendering later siblings", () => {
+    const Theme = createContext("default");
+    const pending = deferred<string>();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const reads: string[] = [];
+
+    function InnerProvider() {
+      return createElement(
+        Theme,
+        { value: "inner" },
+        createElement(SuspendingReader, null),
+      );
+    }
+
+    function SuspendingReader() {
+      reads.push(readContext(Theme));
+      readPromise(pending.promise);
+      return createElement("span", null, "inner");
+    }
+
+    function SiblingReader() {
+      const value = readContext(Theme);
+      reads.push(value);
+      return createElement("span", null, value);
+    }
+
+    function App() {
+      return createElement(
+        Theme,
+        { value: "outer" },
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(InnerProvider, null),
+        ),
+        createElement(SiblingReader, null),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+
+    expect(reads[0]).toBe("inner");
+    expect(reads.slice(1)).toEqual(reads.slice(1).map(() => "outer"));
+    expect(container.textContent).toBe("Loadingouter");
   });
 
   it("throws a diagnostic for state updates scheduled from useBeforeLayout effects", () => {
