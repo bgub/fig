@@ -65,6 +65,22 @@ function typeChecks(): FigNode[] {
       />,
     ),
 
+    // Form-state props are Fig policy: value/checked control the live DOM
+    // state, defaultValue/defaultChecked own the HTML representation.
+    expectNode(<input defaultValue="draft" />),
+    expectNode(<input defaultChecked />),
+    expectNode(<input type="checkbox" checked={true} defaultChecked={false} />),
+    expectNode(<input value="controlled" defaultValue="initial" />),
+    expectNode(<input value={42} />),
+    expectNode(<textarea value="controlled" />),
+    expectNode(<textarea defaultValue="draft" rows={4} />),
+    expectNode(<select value="b" />),
+    expectNode(<select defaultValue="b" />),
+    expectNode(<select multiple value={["a", "b"]} />),
+    expectNode(<select value={2} defaultValue={1} />),
+    // Form-state props accept Fig's empty values like any other prop.
+    expectNode(<input checked={undefined} value={null} defaultValue={false} />),
+
     // React-habit props are rejected.
     // @ts-expect-error className is not a Fig prop — use class.
     expectNode(<div className="x" />),
@@ -90,6 +106,14 @@ function typeChecks(): FigNode[] {
     expectNode(<path strokeWidth="2" />),
     // @ts-expect-error arbitrary object values are not host attributes.
     expectNode(<button type={{ kind: "button" }} />),
+    // @ts-expect-error checked is a boolean, not the string attribute form.
+    expectNode(<input checked="checked" />),
+    // @ts-expect-error defaultChecked is a boolean.
+    expectNode(<input defaultChecked="true" />),
+    // @ts-expect-error form-state props exist only on form controls.
+    expectNode(<div defaultValue="x" />),
+    // @ts-expect-error only select values may be arrays.
+    expectNode(<input value={["a"]} />),
 
     // Fig props are shape-checked.
     // @ts-expect-error events takes an array of on() descriptors, not a handler.

@@ -44,6 +44,45 @@ interface ReactHabitTraps {
 
 type FigOwnedPropName = keyof FigHostProps<Element> | keyof ReactHabitTraps;
 
+// Form state is Fig policy, not generated vocabulary: `value`/`checked`
+// control the live DOM state while `defaultValue`/`defaultChecked` own the
+// default value and HTML representation (props.ts;
+// concepts/intentional-differences-from-react.md). The generated snapshot
+// only knows content attributes — it lacks the default* props entirely and
+// `value` on textarea/select — so these per-tag extensions supply the form
+// props and take their names over from the snapshot.
+type FormValue = string | number | EmptyPropValue;
+
+// A multiple select matches every option in the array (runtime stringifies
+// each entry).
+type SelectValue = string | number | ReadonlyArray<string | number>;
+
+interface FormStatePropsByTag {
+  input: {
+    // boolean subsumes EmptyPropValue's `false`; null/undefined complete it.
+    checked?: boolean | null | undefined;
+    defaultChecked?: boolean | null | undefined;
+    defaultValue?: FormValue;
+    value?: FormValue;
+  };
+  select: {
+    defaultValue?: SelectValue | EmptyPropValue;
+    value?: SelectValue | EmptyPropValue;
+  };
+  textarea: {
+    defaultValue?: FormValue;
+    value?: FormValue;
+  };
+}
+
+type FormStateProps<Tag extends string> = Tag extends keyof FormStatePropsByTag
+  ? FormStatePropsByTag[Tag]
+  : unknown;
+
+type FormStatePropName<Tag> = Tag extends keyof FormStatePropsByTag
+  ? keyof FormStatePropsByTag[Tag]
+  : never;
+
 type FigGlobalAttributeName = `aria-${string}` | `data-${string}` | "role";
 
 type SvgLegacyAttributeName = "xlink:href" | "xml:space" | "xmlns:xlink";
@@ -53,7 +92,7 @@ type HostAttributeProps<AttributeName extends string> = {
 };
 
 type HtmlAttributes<Tag extends keyof HtmlAttributeNameByTag> =
-  | HtmlAttributeNameByTag[Tag]
+  | Exclude<HtmlAttributeNameByTag[Tag], FormStatePropName<Tag>>
   | FigGlobalAttributeName;
 
 type SvgAttributes<Tag extends keyof SvgAttributeNameByTag> =
@@ -71,7 +110,8 @@ export type HtmlHostProps<Tag extends string, E extends Element> = HostProps<
   Tag extends keyof HtmlAttributeNameByTag
     ? HtmlAttributes<Tag>
     : HtmlGlobalAttributeName | FigGlobalAttributeName
->;
+> &
+  FormStateProps<Tag>;
 
 export type SvgHostProps<Tag extends string, E extends Element> = HostProps<
   E,
