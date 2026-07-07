@@ -4,14 +4,14 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 5 major, 44 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 44 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
 ## Contents
 
 - [Confirmed critical (0)](#confirmed-critical)
-- [Confirmed major (5)](#confirmed-major)
+- [Confirmed major (0)](#confirmed-major)
 - [Confirmed minor (44)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
@@ -22,85 +22,7 @@ No open confirmed critical findings remain.
 
 ## Confirmed major
 
-### 1. Falsy events entries are compacted out before index matching, so conditional listeners shift the documented positional identity of every later listener
-
-- **Location:** `packages/fig-dom/src/events.ts:736`
-- **Severity:** major
-- **Reviewer:** fig-dom:api-design
-
-concepts/events.md specifies 'Array entries may be false | null | undefined (conditional listeners), and array position is a listener's identity: slots match by index', and the test at events.test.ts:73 is even titled 'ignores falsy event entries without shifting listener slots'. But eventDescriptors() (events.ts:736 `if (isEmptyPropValue(item)) continue;`) filters empty entries into a compacted array before updateEvents() matches slots by index, so identity is position-among-truthy-entries, not authored position. Concrete failure: `events={[isDragging && on("pointermove", track), on("click", select)]}` — when isDragging flips, the click descriptor moves from filtered index 0 to 1; slot 0's key mismatches (`click:` vs `pointermove:`), so removeEventSlot aborts the click slot's in-flight AbortSignal (cancelling any signal-gated async the unchanged click handler had pending, violating the abort-on-removal contract which promises aborts only on listener removal) and churns the delegated root listener. The existing test only passes because both entries share the `click:false:false` key. Whichever semantics you pick (hole-preserving slots vs compaction) is observable behavior that is breaking to change after release, so it must be decided and aligned with the spec now.
-
-<details><summary>Verification</summary>
-
-Verified against events.ts on disk: eventDescriptors (line 736) skips falsy entries into a compacted array, and updateEvents (line 305) matches slots strictly by index of that compacted array, so slot identity is position-among-truthy-entries. concepts/events.md:17-19 specifies falsy entries are allowed AND array position is a listener's identity, and the test at events.test.ts:73 is explicitly named 'without shifting listener slots' — but that test only uses same-key (click) descriptors, so the shift is masked by the key-match callback-swap path and the spec'd behavior is not pinned. Reproduced the failure path in code: with [cond && on('pointermove', ...), on('click', ...)], toggling the condition shifts the click descriptor's compacted index, slot 0's key mismatches, and removeEventSlot (line 491) detaches and aborts the unchanged click listener's in-flight AbortSignal — a spurious abort violating the documented aborts-only-on-reentry-or-removal contract, plus delegated-listener churn. No upstream guard exists; updateEvents receives the raw prop array. The finding stands: code and spec disagree on observable, hard-to-change-post-release semantics.
-
-</details>
-
----
-
-### 2. The published README states Fig does not implement resource/metadata behavior for title/meta/link/script, but fig-dom ships exactly that behavior
-
-- **Location:** `packages/fig-dom/README.md:51`
-- **Severity:** major
-- **Reviewer:** fig-dom:api-design
-
-README line 51: 'Fig intentionally does not implement React's resource and metadata behavior for `title`, `meta`, `link`, `script`, or `style`.' This contradicts both the spec (concepts/assets.md: host `<link>`/`<script>`/`<title>`/`<meta>` tags are lowered into the asset-resource registry via assetResourceFromHostProps) and the shipped code: index.ts:154 `isHoistedInstance: (type, props) => assetResourceFromHostProps(type, props) !== null` plus asset-resources.ts hoist matching host tags into document.head with key-based dedupe, refcounting, and (for stylesheets/scripts) persist-after-unmount semantics. A user who reads the npm README and renders `<title>` or `<link rel="stylesheet">` in a component expecting inert in-place DOM gets their element silently relocated to <head>, deduped against SSR output, and (for stylesheets) never removed on unmount — the exact opposite of what the package's front-page doc promises on release day.
-
-<details><summary>Verification</summary>
-
-Verified all three legs of the claim. (1) README line 51-52 says Fig "intentionally does not implement React's resource and metadata behavior for title, meta, link, script, or style" — verbatim on disk, last edited 2026-05-08. (2) The code does the opposite for 4/5 tags: fig/src/resource.ts resourceFromHost matches title (always), meta (unless itemProp), link (stylesheet/preload/modulepreload/preconnect), script[src]; fig-dom/src/index.ts:154 wires isHoistedInstance/commit/remove/updateHoistedInstance to asset-resources.ts, which appends to document.head, dedupes by assetResourceKey against SSR output, refcounts, and via removableResourceKind keeps stylesheets/scripts/hints in the head forever after unmount (only title/meta are removable). Only the "style" tag mention remains accurate (no case in resourceFromHost). (3) It is not an intentional divergence: concepts/assets.md line 18 specifies host tags are lowered into the asset-resource registry, and tests pin the hoisting (hydration.test.ts:66/95, diagnostics.test.ts:224, resources.test.ts:38). The hoisting landed 2026-07-01/02 (f877450), after the README's last edit — the README is stale, and a user following it gets silent relocation to head, title dedupe, and persist-after-unmount stylesheets. Doc-only, but it is the package's front-page npm doc contradicting spec'd core semantics at release; major stands.
-
-</details>
-
----
-
-### 3. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
-
-- **Location:** `packages/fig-server/src/payload.ts:1450`
-- **Severity:** major
-- **Reviewer:** fig-server:api-design
-
-serializeValue routes Map/Set/Date straight into encodePayloadValueInternal (payload.ts:1450-1452), which handles only ordinary data — it never re-enters serializeValue, so elements/promises/client references nested inside a Map or Set are not outlined into row references. concepts/payload.md:57-70 promises the opposite: shared refs work "across arrays, plain objects, Map, Set, and rendered Fig elements", and "Server component values can additionally contain Fig elements, client references, and promises; those are serialized by the payload renderer into row references before the value codec handles ordinary data." Verified: <Client lookup={new Map([["a", <Foo/>]])}/> emits an error row "Functions cannot be serialized into the payload" (the user passed an element, not a function) and a Map containing Promise.resolve(1) emits "Cannot serialize Promise into the payload" — both blame the wrong thing and neither hints that the same value works inside an array or plain object. This is a wire-semantics gap that will be painful to change post-release.
-
-<details><summary>Verification</summary>
-
-Read serializeValue (payload.ts:1432-1469) and encodePayloadValueInternal (1492-1563): Map/Set/Date are routed at line 1450-1451 into the ordinary-data codec, whose Map/Set branches recurse only into encodePayloadValueInternal, never back into serializeValue — so elements (objects whose component `type` is a function), promises (non-plain prototype), and client references (functions) inside Map/Set values all throw instead of being outlined, while arrays and plain objects at lines 1454-1465 correctly re-enter serializeValue. Empirically reproduced with a temporary test (deleted after): <Client lookup={new Map([["a", <Foo/>]])} /> errors the whole root row with onError message "Functions cannot be serialized into the payload.", a Map containing Promise.resolve(1) errors with "Cannot serialize Promise into the payload.", and the identical element inside an array prop serializes fine — matching the reviewer's claimed verification exactly. concepts/payload.md's Value Serialization section promises server component values "can additionally contain Fig elements, client references, and promises; those are serialized by the payload renderer into row references before the value codec handles ordinary data" with no Map/Set exclusion, and lists Map/Set alongside rendered Fig elements for shared refs. No existing test pins the broken case (the only Map prop test uses plain data). The client decoder's map/set branches (payload.ts:1705-1726) also only handle ordinary data, so fixing later needs coordinated wire changes, supporting the pre-release urgency. Severity major stands: whole-row error, misleading message, spec contradiction — though limited to the less-common Map/Set nesting pattern.
-
-</details>
-
----
-
-### 4. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
-
-- **Location:** `packages/fig-dom/src/props.ts:339`
-- **Severity:** major
-- **Reviewer:** fig-dom:correctness
-
-formProp() (line 629) intercepts "value"/"checked" for EVERY element type, not just form controls. For `value`, setFormProperty routes to setFormValue with live:true only, and the live branch (line 377) is gated on `"value" in element`; the attribute is written only on the defaultValue path (line 368). setChecked (line 407) is gated on `"checked" in element` the same way. Concrete failure: `<my-slider value="5">` — a prop the type system explicitly allows via OpenHostProps ('Custom elements ... deliberately keep an open attribute index', jsx-attribute-policy.ts:135) — renders with neither a `value` property nor a `value` attribute whenever the custom element class has not upgraded yet (its definition script loads later) or exposes value only via attributes; when the element later upgrades and reads getAttribute("value") it gets null. Inconsistently, `defaultValue` on the same element DOES write the attribute (line 372), so `defaultValue` works where `value` vanishes. React 19 falls back to setAttribute when the property is absent; Fig needs the same fallback for non-form-control tags.
-
-<details><summary>Verification</summary>
-
-Verified every anchor in props.ts as it exists on disk: formProp (line 629) matches value/checked by name for all element types; updateElement line 80 routes them to setFormProperty unconditionally; the live value write (lines 376-382) is gated on `"value" in element` and setChecked (line 407) on `"checked" in element`, with the attribute write (line 372) only on the defaultValue path. A pre-upgrade custom element is a bare HTMLElement lacking these IDL properties, so value/checked silently no-op with neither property nor attribute written, and no dev warning fires (despite the file's own comment that silent prop drops are 'the worst failure mode'). Checked for refutations: no custom-element special case anywhere in fig-dom (grep), no test pins the behavior (props.test.ts covers only input/select/option/textarea), and concepts/jsx.md explicitly endorses the open attribute vocabulary for custom elements — so this is not a documented intentional divergence. The SSR serializer (fig-server/src/html.ts valueAttribute, lines 142-146) DOES emit value as an attribute for any tag, creating an SSR/client-render divergence that hydration masks (the server attribute is preserved and counted as expected). The defaultValue inconsistency claimed in the finding is also real. Failure scenario is concrete and reachable: client-rendered <my-slider value="5"> whose definition loads later upgrades reading getAttribute("value") === null, with no guaranteed re-render to repair it.
-
-</details>
-
----
-
-### 5. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
-
-- **Location:** `packages/fig-dom/src/props.ts:377`
-- **Severity:** major
-- **Reviewer:** fig-dom:correctness
-
-updateElement iterates the union of previous/next prop names, so a `value` that exists only in previousProps still reaches setFormProperty with next === undefined. formValue(undefined) → null, and the live branch executes `element.value = next ?? ""` whenever the current DOM value differs — i.e. it clears whatever the user typed. Concrete scenario: `<input value={query} events={...} />` where `query` becomes undefined (optional prop, conditional spread, reset to undefined instead of "") — the very next commit erases the field, and even a sibling `defaultValue` is not restored (its live write is gated on options.initial). Same mechanism at line 407-409: dropping `checked` from props calls setChecked(undefined, {live:true}) → `element.checked = false`, force-unchecking a box the user checked. React keeps the last DOM value on this transition (it warns instead); nothing in concepts/intentional-differences-from-react.md (the 'Form value props are authoritative at commit time' section, line 101) documents wiping on prop removal, and no test covers the transition. Silent user-data loss in a very common app-bug pattern.
-
-<details><summary>Verification</summary>
-
-Verified against props.ts as it exists: updateElement iterates the union of prev/next keys and form props bypass the previous===next skip (formProp branch at line 80 precedes the line-98 continue), so a value that exists only in previousProps calls setFormValue(element, undefined, type, {live:true}); formValue(undefined) is null (isEmptyPropValue treats undefined as empty) and the live branch at lines 376-382 writes element.value = "" whenever the DOM value differs, wiping user-typed text. Dropping checked hits setChecked(undefined,{live:true}) at lines 407-409 → element.checked = false. commitUpdate (fig-dom/src/index.ts:191) never passes options.initial, so a sibling defaultValue cannot restore the value (its live write is gated on initial at line 344). Reconciler's hostUpdateFlags confirms the removed-key commit reaches updateElement. No upstream guard, no controlled→uncontrolled dev warning anywhere in fig-dom, no test covers the transition (props.test.ts tests re-assertion of a present value and default-only preservation, and the select removal test early-returns at line 327), and concepts/intentional-differences-from-react.md:101 documents commit-time authoritativeness of a present value, not wipe-on-removal. The code itself contradicts an "intentional" reading: the defaultValue live gate (line 344, nextProps.value === undefined) treats undefined value as uncontrolled, while the value branch treats the same undefined as controlled-empty — e.g. mount with {defaultValue:"x", value:undefined} writes "x" then wipes it to "". Severity major stands: silent user-data loss on a common pattern, but no crash and requires the app to drop the prop.
-
-</details>
-
----
+No open confirmed major findings remain.
 
 ## Confirmed minor
 

@@ -48,9 +48,12 @@ Use `unsafeHTML="<p>trusted html</p>"` to write raw `innerHTML`. Fig does not
 sanitize this string, so only pass trusted or sanitized markup. `unsafeHTML`
 manages the element contents directly and cannot be combined with children.
 
-Fig intentionally does not implement React's resource and metadata behavior for
-`title`, `meta`, `link`, `script`, or `style`. It also does not warn for
-`contentEditable`; native DOM behavior applies.
+Fig lowers render-discovered `title`, `meta`, stylesheet/preload `link`, and
+external `script` elements into the asset-resource registry. Matching assets
+are hoisted to `document.head`, deduped against server output, and reference
+counted; persistent assets such as stylesheets and scripts may remain after
+unmount. Plain `style` elements are ordinary host elements. Fig does not warn
+for `contentEditable`; native DOM behavior applies.
 
 ## License
 

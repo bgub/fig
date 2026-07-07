@@ -79,7 +79,8 @@ describe("@bgub/fig-dom events", () => {
       createElement("button", {
         events: [
           false,
-          enabled && on("click", () => calls.push(`conditional:${label}`)),
+          enabled &&
+            on("pointermove", () => calls.push(`conditional:${label}`)),
           null,
           on("click", (_event, signal) => {
             calls.push(`stable:${label}`);
@@ -100,7 +101,10 @@ describe("@bgub/fig-dom events", () => {
     button.dispatch("click");
     expect(calls).toEqual(["stable:one", "stable:two"]);
 
+    const abortCount = aborts.length;
     flushSync(() => root.render(app(true, "three")));
+    expect(aborts).toHaveLength(abortCount);
+    button.dispatch("pointermove");
     button.dispatch("click");
     expect(calls).toEqual([
       "stable:one",

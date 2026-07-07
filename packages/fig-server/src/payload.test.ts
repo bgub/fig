@@ -724,6 +724,56 @@ describe("payload rendering", () => {
     expect(value.numbers[3]).toBe(-Infinity);
   });
 
+  it("serializes rich server values inside Map and Set props", async () => {
+    const Viewer = clientReference<{ value: Map<string, unknown> }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const Nested = clientReference<{ label: string }>({
+      id: "app/Nested.client.tsx#Nested",
+      load: () => Promise.resolve({}),
+    });
+    const payload = new Map<string, unknown>([
+      ["element", createElement("span", null, "Nested")],
+      ["promise", Promise.resolve("Ready")],
+      ["client", Nested],
+      ["set", new Set([createElement("em", null, "Set child")])],
+    ]);
+
+    const response = createPayloadResponse({
+      resolveClientReference: ({ id }) =>
+        id.includes("Viewer") ? "fig-viewer" : "fig-nested",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(createElement(Viewer, { value: payload })),
+    );
+
+    const decoded = readPayloadRoot(response);
+    if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
+    const value = decoded.props.value as Map<string, unknown>;
+
+    expect(value.get("element")).toMatchObject({
+      props: { children: "Nested" },
+      type: "span",
+    });
+    await expect(value.get("promise")).resolves.toBe("Ready");
+
+    const Client = value.get("client") as ElementType;
+    expect(
+      unwrapFunctionComponent(createElement(Client, { label: "ok" })),
+    ).toMatchObject({
+      props: { label: "ok" },
+      type: "fig-nested",
+    });
+
+    const setValues = [...(value.get("set") as Set<unknown>)];
+    expect(setValues[0]).toMatchObject({
+      props: { children: "Set child" },
+      type: "em",
+    });
+  });
+
   it("round-trips cyclic and shared payload values", () => {
     const shared = { label: "shared" };
     const value: Record<string, unknown> = {

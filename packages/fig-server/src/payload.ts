@@ -1491,8 +1491,19 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
   if (isPortal(value)) return null;
 
   if (typeof value === "object" && value !== null) {
-    if (value instanceof Map || value instanceof Set || value instanceof Date) {
+    if (value instanceof Date) {
       return encodePayloadValueInternal(value, frame.request.graph);
+    }
+    if (value instanceof Map) {
+      return serializeMap(value, frame.request.graph, ([key, item]) => [
+        serializeValue(key, frame),
+        serializeValue(item, frame),
+      ]);
+    }
+    if (value instanceof Set) {
+      return serializeSet(value, frame.request.graph, (item) =>
+        serializeValue(item, frame),
+      );
     }
 
     if (Array.isArray(value)) {
@@ -1572,29 +1583,15 @@ function encodePayloadValueInternal(
     return { $fig: "date", value: json };
   }
   if (value instanceof Map) {
-    const existing = graphReference(graph, value);
-    if (existing !== null) return existing;
-    const id = defineGraphObject(graph, value);
-    return {
-      $fig: "map",
-      id,
-      entries: [...value.entries()].map(([key, item]) => [
-        encodePayloadValueInternal(key, graph),
-        encodePayloadValueInternal(item, graph),
-      ]),
-    };
+    return serializeMap(value, graph, ([key, item]) => [
+      encodePayloadValueInternal(key, graph),
+      encodePayloadValueInternal(item, graph),
+    ]);
   }
   if (value instanceof Set) {
-    const existing = graphReference(graph, value);
-    if (existing !== null) return existing;
-    const id = defineGraphObject(graph, value);
-    return {
-      $fig: "set",
-      id,
-      values: [...value.values()].map((item) =>
-        encodePayloadValueInternal(item, graph),
-      ),
-    };
+    return serializeSet(value, graph, (item) =>
+      encodePayloadValueInternal(item, graph),
+    );
   }
 
   if (typeof value === "object" && value !== null) {
@@ -1604,6 +1601,36 @@ function encodePayloadValueInternal(
   }
 
   throw new Error(`Cannot serialize ${typeof value} into the payload.`);
+}
+
+function serializeMap(
+  value: Map<unknown, unknown>,
+  graph: PayloadGraphEncodeContext,
+  encodeEntry: (entry: [unknown, unknown]) => [PayloadModel, PayloadModel],
+): PayloadModel {
+  const existing = graphReference(graph, value);
+  if (existing !== null) return existing;
+  const id = defineGraphObject(graph, value);
+  return {
+    $fig: "map",
+    id,
+    entries: [...value.entries()].map(encodeEntry),
+  };
+}
+
+function serializeSet(
+  value: Set<unknown>,
+  graph: PayloadGraphEncodeContext,
+  encodeItem: (value: unknown) => PayloadModel,
+): PayloadModel {
+  const existing = graphReference(graph, value);
+  if (existing !== null) return existing;
+  const id = defineGraphObject(graph, value);
+  return {
+    $fig: "set",
+    id,
+    values: [...value.values()].map(encodeItem),
+  };
 }
 
 function graphReference(

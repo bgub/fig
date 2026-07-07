@@ -32,6 +32,7 @@ interface EventSlot {
   listenerTarget: Container | null;
   root: Container | null;
 }
+type EventSlotList = Array<EventSlot | undefined>;
 
 // Snapshot of one handler invocation, extracted before any handler runs: a
 // re-entrant commit inside a handler may detach slots or swap callbacks
@@ -100,7 +101,7 @@ interface ContainerRecord {
 }
 
 const EventDescriptorSymbol = Symbol.for("fig.event");
-const eventSlots = new WeakMap<Element, EventSlot[]>();
+const eventSlots = new WeakMap<Element, EventSlotList>();
 const containerRecords = new WeakMap<Container, ContainerRecord>();
 // Keyed per (event, root): each root resolves selective hydration against
 // its own tree, so an outer root's "none" must not shadow a nested root's
@@ -319,6 +320,15 @@ export function updateEvents(element: Element, value: unknown): void {
 
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
+    if (descriptor === undefined) {
+      const slot = slots[index];
+      if (slot !== undefined) {
+        removeEventSlot(slot);
+        slots[index] = undefined;
+      }
+      continue;
+    }
+
     const options = normalizedOptions(descriptor.options);
     const key = eventKey(descriptor.type, options);
     const slot = slots[index];
@@ -348,7 +358,8 @@ export function updateEvents(element: Element, value: unknown): void {
   }
 
   for (let index = slots.length - 1; index >= descriptors.length; index -= 1) {
-    removeEventSlot(slots[index]);
+    const slot = slots[index];
+    if (slot !== undefined) removeEventSlot(slot);
   }
 
   slots.length = descriptors.length;
@@ -359,12 +370,15 @@ export function attachElementEvents(element: Element): void {
   const listenerTarget = listenerTargetFor(element);
 
   for (const slot of eventSlots.get(element) ?? []) {
+    if (slot === undefined) continue;
     attachEventSlot(element, root, listenerTarget, slot);
   }
 }
 
 export function detachElementEvents(element: Element): void {
-  for (const slot of eventSlots.get(element) ?? []) removeEventSlot(slot);
+  for (const slot of eventSlots.get(element) ?? []) {
+    if (slot !== undefined) removeEventSlot(slot);
+  }
   eventSlots.delete(element);
 }
 
@@ -656,6 +670,7 @@ function extractDispatches(
     const element = path[index];
 
     for (const slot of eventSlots.get(element) ?? []) {
+      if (slot === undefined) continue;
       if (
         slot.root !== root ||
         slot.type !== type ||
@@ -737,12 +752,15 @@ function abortEventSlot(slot: EventSlot): void {
   slot.controller = null;
 }
 
-function eventDescriptors(value: unknown): EventDescriptor[] {
+function eventDescriptors(value: unknown): Array<EventDescriptor | undefined> {
   if (isEmptyPropValue(value)) return [];
   if (Array.isArray(value)) {
-    const descriptors: EventDescriptor[] = [];
+    const descriptors: Array<EventDescriptor | undefined> = [];
     for (const item of value) {
-      if (isEmptyPropValue(item)) continue;
+      if (isEmptyPropValue(item)) {
+        descriptors.push(undefined);
+        continue;
+      }
       if (!isEventDescriptor(item)) {
         throw new Error(
           "The events prop must be an array of event descriptors.",
@@ -763,7 +781,7 @@ function isEventDescriptor(value: unknown): value is EventDescriptor {
   );
 }
 
-function eventSlotsFor(element: Element): EventSlot[] {
+function eventSlotsFor(element: Element): EventSlotList {
   let slots = eventSlots.get(element);
   if (slots === undefined) {
     slots = [];

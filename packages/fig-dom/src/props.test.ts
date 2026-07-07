@@ -220,6 +220,35 @@ describe("@bgub/fig-dom props", () => {
     expect(input.value).toBe("First");
   });
 
+  it("keeps user input when value props are removed", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("input", { value: "First" })));
+
+    const input = container.childNodes[0] as FakeElement;
+    input.value = "Typed";
+
+    flushSync(() => root.render(createElement("input", null)));
+
+    expect(input.value).toBe("Typed");
+  });
+
+  it("falls back to value attributes for elements without value properties", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("my-slider", null)));
+
+    const slider = container.childNodes[0] as FakeElement;
+    delete (slider as unknown as { value?: string }).value;
+
+    flushSync(() => root.render(createElement("my-slider", { value: "5" })));
+
+    expect(slider.attributes.value).toBe("5");
+    expect("value" in slider).toBe(false);
+  });
+
   it("applies default input values only while uncontrolled", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
@@ -509,6 +538,35 @@ describe("@bgub/fig-dom props", () => {
     expect(input.checked).toBe(false);
     expect(input.defaultChecked).toBe(false);
     expect(input.attributes.checked).toBeUndefined();
+  });
+
+  it("keeps user checked state when checked props are removed", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("input", { checked: false })));
+
+    const input = container.childNodes[0] as FakeElement;
+    input.checked = true;
+
+    flushSync(() => root.render(createElement("input", null)));
+
+    expect(input.checked).toBe(true);
+  });
+
+  it("falls back to checked attributes for elements without checked properties", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() => root.render(createElement("my-toggle", null)));
+
+    const toggle = container.childNodes[0] as FakeElement;
+    delete (toggle as unknown as { checked?: boolean }).checked;
+
+    flushSync(() => root.render(createElement("my-toggle", { checked: true })));
+
+    expect(toggle.attributes.checked).toBe("true");
+    expect("checked" in toggle).toBe(false);
   });
 
   it("updates textarea content through value and defaultValue", () => {

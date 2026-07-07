@@ -337,6 +337,7 @@ function setFormProperty(
   const initial = options.initial === true && options.hydrating !== true;
 
   if (name === "value") {
+    if (isEmptyPropValue(next)) return;
     setFormValue(element, next, type, { live: true });
   } else if (name === "defaultValue") {
     setFormValue(element, next, type, {
@@ -344,6 +345,7 @@ function setFormProperty(
       live: initial && nextProps.value === undefined,
     });
   } else if (name === "checked") {
+    if (next === undefined) return;
     setChecked(element, next, { live: true });
   } else if (name === "defaultChecked") {
     setChecked(element, next, {
@@ -373,12 +375,12 @@ function setFormValue(
     }
   }
 
-  if (
-    options.live === true &&
-    "value" in element &&
-    (element as unknown as { value: string }).value !== (next ?? "")
-  ) {
-    (element as unknown as { value: string }).value = next ?? "";
+  if (options.live === true && "value" in element) {
+    if ((element as unknown as { value: string }).value !== (next ?? "")) {
+      (element as unknown as { value: string }).value = next ?? "";
+    }
+  } else if (options.live === true && next !== null) {
+    setAttribute(element, "value", next);
   }
 }
 
@@ -406,6 +408,8 @@ function setChecked(
 
   if (options.live === true && "checked" in element) {
     (element as unknown as { checked: boolean }).checked = checked;
+  } else if (options.live === true) {
+    setAttribute(element, "checked", checked);
   }
 }
 
