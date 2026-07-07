@@ -1,6 +1,7 @@
 {
   "name": "@bgub/fig-start",
   "version": "0.0.1",
+  "private": true,
   "description": "Fig full-stack framework runtime",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",

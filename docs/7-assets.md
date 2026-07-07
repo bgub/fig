@@ -30,7 +30,7 @@ Raw tags still work. Host `<link>`, `<script>`, `<title>`, and `<meta>` elements
 
 Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion. A stylesheet discovered three ways — an `assets(...)` wrapper, a client reference, a raw `<link>` — renders once. Fonts and equivalent `preload`-as-font entries share a key space, so those dedupe against each other too. `title` collapses to a single head slot, last writer wins.
 
-Same-key entries with different definitions throw (`AssetResourceConflictError`): a shared key is a claim that two descriptors are the same asset, so disagreement is an error, not a merge.
+Same-key entries with different definitions throw (`AssetResourceConflictError`): a shared key is a claim that two descriptors are the same asset, so disagreement is an error, not a merge. The exception is `title`, where the single document title slot is intentionally replaced by the latest value.
 
 ## Destinations
 

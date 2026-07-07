@@ -66,15 +66,21 @@ describe("AssetResourceRegistry", () => {
     );
   });
 
-  it("rejects conflicting title and meta resources", () => {
+  it("lets later title resources replace the singleton slot", () => {
+    const registry = new AssetResourceRegistry("");
+
+    registry.register(title("Dashboard"));
+    registry.register(title("Settings"));
+
+    expect(registry.headHtml()).toBe("<title>Settings</title>");
+  });
+
+  it("rejects conflicting meta resources", () => {
     const registry = new AssetResourceRegistry("");
 
     registry.register(title("Dashboard"));
     registry.register(meta({ name: "description", content: "One" }));
 
-    expect(() => registry.register(title("Settings"))).toThrow(
-      'Conflicting Fig resource for key "title". Existing: {"kind":"title","value":"Dashboard"}. Incoming: {"kind":"title","value":"Settings"}.',
-    );
     expect(() =>
       registry.register(meta({ name: "description", content: "Two" })),
     ).toThrow('Conflicting Fig resource for key "meta:name:description".');
@@ -99,15 +105,13 @@ describe("AssetResourceRegistry", () => {
     ).toBe("");
   });
 
-  it("keeps the title singleton even when a title carries an explicit key", () => {
+  it("keeps the title singleton with explicit keys by replacing it", () => {
     const registry = new AssetResourceRegistry("");
 
     registry.register(title("Dashboard", "primary"));
+    registry.register(title("Settings", "secondary"));
 
-    // An explicit key must not let a second title escape the one-<title> model.
-    expect(() => registry.register(title("Settings", "secondary"))).toThrow(
-      'Conflicting Fig resource for key "title".',
-    );
+    expect(registry.headHtml()).toBe("<title>Settings</title>");
   });
 
   it("dedupes identical preloads and keeps different preload targets distinct", () => {

@@ -1110,6 +1110,36 @@ describe("payload rendering", () => {
     expect(decoded.props.value.self).toBe(decoded.props.value);
   });
 
+  it("rolls back graph refs from client elements discarded into lazy errors", async () => {
+    const Viewer = clientReference<{
+      bad?: () => void;
+      shared: unknown;
+    }>({
+      id: "app/Viewer.client.tsx#Viewer",
+      load: () => Promise.resolve({}),
+    });
+    const shared = { label: "shared" };
+    const rows = await renderToPayloadRows([
+      createElement(Viewer, {
+        bad: () => undefined,
+        shared,
+      }),
+      createElement(Viewer, { shared }),
+    ]);
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-viewer",
+    });
+
+    expect(() => processTestPayloadRows(response, rows)).not.toThrow();
+
+    const decoded = readPayloadRoot(response);
+    if (!Array.isArray(decoded) || !isValidElement(decoded[1])) {
+      throw new Error("Expected decoded sibling client element.");
+    }
+
+    expect(decoded[1].props.shared).toEqual({ label: "shared" });
+  });
+
   it("serializes client children and fallback props as values", async () => {
     const Viewer = clientReference<{
       children?: unknown;

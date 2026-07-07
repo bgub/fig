@@ -48,6 +48,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
     "./src/server.ts",
+    "./src/server.browser.ts",
   ],
   "packages/fig-devtools": ["./src/index.ts"],
   "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts"],

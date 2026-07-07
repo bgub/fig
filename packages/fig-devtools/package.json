@@ -1,6 +1,7 @@
 {
   "name": "@bgub/fig-devtools",
   "version": "0.0.1",
+  "private": true,
   "description": "In-page DevTools for Fig",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",

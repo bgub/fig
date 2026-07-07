@@ -344,6 +344,7 @@ type RenderFrame = {
 interface PayloadGraphEncodeContext {
   ids: WeakMap<object, number>;
   nextId: number;
+  objects: Map<number, object>;
 }
 
 interface PayloadGraphDecodeContext {
@@ -386,7 +387,7 @@ const emptyTreeProps = new Set<string>();
 const suspenseTreeProps = new Set(["children", "fallback"]);
 
 function createPayloadGraphEncodeContext(): PayloadGraphEncodeContext {
-  return { ids: new WeakMap(), nextId: 1 };
+  return { ids: new WeakMap(), nextId: 1, objects: new Map() };
 }
 
 function createPayloadGraphDecodeContext(): PayloadGraphDecodeContext {
@@ -1252,10 +1253,12 @@ function serializeNodeOrLazy(
   frame: RenderFrame,
   preserveElementIdentity = false,
 ): PayloadModel {
+  const graphCheckpoint = checkpointGraph(frame.request.graph);
   try {
     if (!isValidElement(node)) return serializeNode(node, frame);
     return serializeElement(node, frame, preserveElementIdentity);
   } catch (error) {
+    rollbackGraph(frame.request.graph, graphCheckpoint);
     if (isThenable(error)) {
       return outlineTask(frame, "node", node, "lazy", error);
     }
@@ -1589,7 +1592,24 @@ function defineGraphObject(
   const id = graph.nextId;
   graph.nextId += 1;
   graph.ids.set(value, id);
+  graph.objects.set(id, value);
   return id;
+}
+
+function checkpointGraph(graph: PayloadGraphEncodeContext): number {
+  return graph.nextId;
+}
+
+function rollbackGraph(
+  graph: PayloadGraphEncodeContext,
+  checkpoint: number,
+): void {
+  for (let id = graph.nextId - 1; id >= checkpoint; id -= 1) {
+    const value = graph.objects.get(id);
+    if (value !== undefined) graph.ids.delete(value);
+    graph.objects.delete(id);
+  }
+  graph.nextId = checkpoint;
 }
 
 function defineGraphElement(

@@ -1246,12 +1246,17 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function resetRootWork(root: R): void {
+    const wasHydratingCompletedBoundary =
+      root.hydrationInitialElement === NoHydrationInitialElement &&
+      (root.hydratingSuspenseBoundary !== null ||
+        root.hydratingActivityBoundary !== null);
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
     resetHydrationPointers(root);
+    if (wasHydratingCompletedBoundary) root.isHydrating = false;
     root.uncaughtErrorInfo = null;
   }
 

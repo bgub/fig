@@ -17,6 +17,7 @@ import {
   FakeText,
   installFakeDocument,
 } from "./test-utils.ts";
+import { requestPaint } from "../../fig-reconciler/src/scheduler.ts";
 
 installFakeDocument();
 
@@ -621,6 +622,71 @@ describe("@bgub/fig-dom hydration", () => {
 
     button.dispatch("click");
     expect(calls).toEqual(["click"]);
+  });
+
+  it("restarts interrupted completed Suspense hydration without root DOM loss", async () => {
+    const shell = element("span", "Shell 0");
+    const {
+      content: button,
+      end,
+      start,
+    } = suspenseDom("completed", "button", "Client");
+    const container = new FakeElement("root");
+    const recoverable = captureRecoverableErrors();
+    let setShell: ((updater: (count: number) => number) => void) | null = null;
+    let shouldYield = false;
+    let resolveFlushed: () => void = () => undefined;
+    const flushed = new Promise<void>((resolve) => {
+      resolveFlushed = resolve;
+    });
+
+    container.appendChild(shell);
+    container.appendChild(start);
+    container.appendChild(button);
+    container.appendChild(end);
+
+    function Yielding() {
+      if (shouldYield) {
+        shouldYield = false;
+        requestPaint();
+        queueMicrotask(() => {
+          flushSync(() => setShell?.((count) => count + 1));
+          resolveFlushed();
+        });
+      }
+      return null;
+    }
+
+    function App() {
+      const [count, setCount] = useState(0);
+      setShell = setCount;
+      return [
+        createElement("span", null, `Shell ${count}`),
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(
+            "button",
+            null,
+            createElement(Yielding, null),
+            "Client",
+          ),
+        ),
+      ];
+    }
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null), {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    shouldYield = true;
+    await flushed;
+    await delay();
+
+    expect(container.textContent).toBe("Shell 1Client");
+    expect(recoverable.messages()).toEqual([]);
   });
 
   it("preserves hydrated Suspense primary content across re-suspension", async () => {

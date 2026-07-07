@@ -2,18 +2,18 @@
 
 Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fig-server` ahead of the planned release (`fig-start`, `fig-devtools`, `fig-vite` excluded as experimental, though a few findings landed in `fig-vite` where it implements fig-refresh's contract).
 
-**Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; one verifier remained in progress at time of writing, and four findings remain unverified.
+**Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 22 major, 44 minor confirmed · 5 unverified · 3 refuted.**
+**Tally: 0 critical, 18 major, 44 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
 ## Contents
 
 - [Confirmed critical (0)](#confirmed-critical)
-- [Confirmed major (22)](#confirmed-major)
+- [Confirmed major (18)](#confirmed-major)
 - [Confirmed minor (44)](#confirmed-minor)
-- [Unverified (5)](#unverified)
+- [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
 ## Confirmed critical
@@ -150,71 +150,7 @@ Verified all three legs of the claim. (1) README line 51-52 says Fig "intentiona
 
 ---
 
-### 9. fig-vite, fig-devtools, and fig-start are not marked private, so the planned manual `pnpm publish -r` will try to publish all three unreleased packages
-
-- **Location:** `packages/fig-vite/package.json:2`
-- **Severity:** major
-- **Reviewer:** release-readiness
-
-None of packages/fig-vite/package.json, packages/fig-devtools/package.json, or packages/fig-start/package.json has "private": true or any publishConfig (verified by reading all three manifests; all are version 0.0.1 and live under the `packages/*` workspace glob in pnpm-workspace.yaml). The documented publish plan (plans/2026-07-06 review + prior session notes: no CI publish job, first publish is manual `pnpm publish -r`) selects every non-private workspace package. Best case: npm rejects them with 402 (scoped, default-restricted, no access:public), aborting the recursive publish mid-run and leaving a partial release; worst case they publish, irreversibly shipping unvetted packages — fig-start's `"@bgub/fig-vite": "workspace:*"` dependency would be pinned to a version that may not exist. Fix before tomorrow: add "private": true to all three, or publish with an explicit filter (`pnpm publish -r --filter @bgub/fig --filter @bgub/fig-dom ...`). release-please config excluding them does not protect the publish command.
-
-<details><summary>Verification</summary>
-
-Verified all three manifests on disk: packages/fig-vite/package.json, packages/fig-devtools/package.json, and packages/fig-start/package.json have neither "private": true nor publishConfig, while the five packages intended for the first release (fig, fig-dom, fig-reconciler, fig-refresh, fig-server) all have publishConfig.access=public added during the prerelease fixes — showing the three were overlooked, not handled. The documented plan (memory notes + plans/2026-07-06-prerelease-review.md context) is a manual `pnpm publish -r` today, with fig-start/fig-vite/fig-devtools explicitly deferred; release-please-config.json excludes them but only governs version PRs, and .github/workflows/release-please.yml has no publish step. No root .npmrc, no publish script, no --filter guard exists anywhere, so `pnpm publish -r` (which skips only private packages) would select all eight. Scoped packages without access:public default to restricted, so a free npm account gets E402 mid-run (partial release), and if publish succeeds, three unvetted 0.0.1 packages ship with fig-start's @bgub/fig-vite workspace:\* dep pinned at pack time. Only overstatement: npm allows unpublish within 72h, so "irreversible" is too strong, but that doesn't change the substance. Major severity stands for a release planned for today.
-
-</details>
-
----
-
-### 10. The documented `title` contract ('single head slot, last writer wins') does not match runtime behavior: a second different title() throws on the server and is ignored on the client
-
-- **Location:** `packages/fig/src/resource.ts:205`
-- **Severity:** major
-- **Reviewer:** fig:api-design
-
-assetResourceKey collapses every title resource to the single key "title" (resource.ts:203-206), but the server registry's canonical() (packages/fig-server/src/asset-registry.ts:60-61) throws AssetResourceConflictError whenever a same-key resource arrives with a different signature — and a title's signature includes its value (asset-registry.ts:212-213). So the pattern both concepts/assets.md:28 and docs/7-assets.md:31 explicitly advertise ('title collapses to a single head slot (last writer wins)') — e.g. a layout rendering title("App") and a page rendering title("App — Settings") — crashes the server render in production (the throw is not NODE_ENV-gated; renderer.ts:734-739 rethrows it). This is pinned by tests (asset-registry.test.ts:75, 108), so code and the authoritative spec directly contradict each other. On the client, host-rendered titles are first-writer-wins too (updateHoistedResource in fig-dom/src/asset-resources.ts:203 leaves an already-claimed element's attributes untouched), so 'last writer wins' is implemented nowhere. Either the spec or the runtime must change before release; after release either fix is a behavior break.
-
-<details><summary>Verification</summary>
-
-Verified every claim against the code on disk. (1) assetResourceKey (packages/fig/src/resource.ts:203-206) collapses all titles to the single key "title", even with explicit keys. (2) AssetResourceRegistry.canonical() (packages/fig-server/src/asset-registry.ts:60-62) throws AssetResourceConflictError when a same-key resource has a different signature, and a title's signature is signature("title", value) (asset-registry.ts:212-213), so two different title values always conflict. The throw has no NODE_ENV gate, and renderAssetValue (packages/fig-server/src/renderer.ts:726-744) rethrows it into the render; onAssetError only receives late-head diagnostics, not conflicts. So layout title("App") + page title("App — Settings") throws in a production server render. (3) The behavior is pinned by tests: asset-registry.test.ts "rejects conflicting title and meta resources" and "keeps the title singleton even when a title carries an explicit key". (4) The authoritative spec contradicts the code and itself: concepts/assets.md:28 says "title collapses to a single head slot (last writer wins)" while concepts/assets.md:57 says conflicting same-key definitions throw — for title (constant key, value-bearing signature) both cannot hold; docs/7-assets.md:31 vs :33 has the same contradiction. (5) Client side: fig-dom/src/asset-resources.ts shares one element per key and updateHoistedResource explicitly leaves an already-committed owner's element untouched ("identity is key-authoritative"), so last-writer-wins is implemented nowhere. No refutation applies: not dev-only, not handled upstream, not fixed since; the failure is loud (a throw) but breaks the most common documented title pattern, and either the spec or the runtime must change before release. Major (not critical) because the failure is an immediate explicit error rather than silent corruption, and the fix can be a one-line spec correction or a registry special case.
-
-</details>
-
----
-
-### 11. serverDataResource has no client-bundle failure path outside fig-vite — server loaders (and their secrets) silently ship to the browser for any non-Vite consumer
-
-- **Location:** `packages/fig/src/server.ts:20`
-- **Severity:** major
-- **Reviewer:** fig:api-design
-
-concepts/data.md states 'Server-file modules imported without that transform must fail before server code enters the client bundle', but the only enforcement lives in @bgub/fig-vite's figData transform (fig-vite/src/data/transform.ts:99 generates the throwing browser stub). The @bgub/fig package itself does nothing: the "./server" entry in packages/fig/package.json has plain types/import/default conditions (no browser/worker condition mapping to a throwing stub, no react-server-style condition), and serverDataResource is just `dataResource(options)` with no dev-time environment guard. Any user on webpack/esbuild/Rspack — or a Vite user who forgets the plugin — gets a working import that bundles server-only loader code (DB clients, API keys in closures) into the client with zero diagnostics, the exact failure mode the spec says must be impossible. A cheap package-level backstop (dev-gated `typeof document` throw in serverDataResource, or an export-condition stub) is easy pre-release; post-release the silent variant is a shipped security hazard.
-
-<details><summary>Verification</summary>
-
-Confirmed against code on disk. packages/fig/src/server.ts:20-24 shows serverDataResource is a bare passthrough to dataResource with no environment guard; packages/fig/package.json's "./server" export has only types/import/default conditions (no browser/worker throwing stub). All enforcement (client stub generation, throwing stub for stub-less server modules, assertNoServerDataResourceImport guard) lives solely inside the figData Vite plugin (packages/fig-vite/src/data/index.ts, transform.ts) and only runs when that plugin is installed — and figData is a separately-composed plugin, so omission is plausible even on Vite. concepts/data.md:40-41 states verbatim that "Server-file modules imported without that transform must fail before server code enters the client bundle," which is exactly the unenforced case: a webpack/esbuild/Rspack consumer or plugin-less Vite user bundles server loader closures (secrets, DB clients) into the client with zero diagnostics. No test pins any failure path outside the plugin, and concepts/open-questions.md does not record this as a known accepted gap. Not critical because the documented/supported toolchain (fig-vite/fig-start) does enforce correctly, so the leak requires an out-of-toolchain bundler or misconfiguration — but it violates an explicit spec invariant with a silent secret-leak failure mode, so major stands.
-
-</details>
-
----
-
-### 12. Graph-reference encode context is not rolled back when a partially serialized element's model is discarded, emitting dangling $fig:ref rows that poison the whole payload
-
-- **Location:** `packages/fig-server/src/payload.ts:1250`
-- **Severity:** major
-- **Reviewer:** fig-server:api-design
-
-serializeValue/serializePlainObject register objects in the request-wide graph (request.graph.ids, payload.ts:1573-1590) as a side effect of building a model. When serialization of that element later throws an ordinary error, serializeNodeOrLazy's catch (payload.ts:1246-1251) discards the partial model via outlineError — but the graph registrations survive. Any later occurrence of the same object then serializes as {"$fig":"ref","id":N} with no definition ever emitted. Verified empirically: [<Client shared={obj} bad={fn}/>, <Client shared={obj}/>] emits a scoped error row for the first element (as designed) but the root model row carries a dangling ref; client-side processRow throws "Payload referenced unknown object id 1" while decoding the ROOT model, so chunk 0 never resolves, rootReady never settles, and processStream/fetchPayload reject — one function-prop mistake (a classic React habit) escalates from a scoped error row to a dead payload, and only when a shared object happened to be serialized earlier in the same element, making it order-dependent and hard to debug. Introduced by the graph-references commit (8361d0c).
-
-<details><summary>Verification</summary>
-
-Read the encode path (serializeValue/serializePlainObject registering objects in the request-wide graph at payload.ts:1573-1581 with no rollback; serializeNodeOrLazy catch at :1246-1251 discarding the partial model via outlineError) and the decode path (eager decodeModelAtRevision in resolveDecodedRow at :2243; readObjectRef throws at :848-854; processRow only calls resolveRootReady after decoding row 0). Then reproduced empirically with the exact claimed scenario [<Client shared={obj} bad={fn}/>, <Client shared={obj}/>]: the emitted payload contains an error row for the first element and a root model row whose second element serializes shared as {"$fig":"ref","id":1} with no id-1 definition anywhere; processStringChunk threw "Payload referenced unknown object id 1." and rootReady never settled, so processStream/fetchPayload would reject and the whole payload is dead. Checked that commit 06e65a5 (graph-chunk retention) is unrelated client-side pruning and no existing test pins this combination. Severity stays major: it converts a designed scoped error row into total payload failure and is order-dependent/hard to debug, but requires a user serialization mistake to trigger and does not corrupt correct payloads, so not critical.
-
-</details>
-
----
-
-### 13. A refresh render whose content contains the target PayloadBoundary id produces infinite render recursion on the client, and the README teaches exactly this misuse
+### 9. A refresh render whose content contains the target PayloadBoundary id produces infinite render recursion on the client, and the README teaches exactly this misuse
 
 - **Location:** `packages/fig-server/src/payload.ts:1291`
 - **Severity:** major
@@ -230,7 +166,7 @@ Confirmed against the code on disk and by live reproduction. (1) Server side: pa
 
 ---
 
-### 14. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
+### 10. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
 
 - **Location:** `packages/fig-server/src/payload.ts:1450`
 - **Severity:** major
@@ -246,7 +182,7 @@ Read serializeValue (payload.ts:1432-1469) and encodePayloadValueInternal (1492-
 
 ---
 
-### 15. Concurrent ingestion into one PayloadResponse silently corrupts state: beginRefreshPayload's id offsets apply to still-in-flight rows of the previous stream and a single shared decoder interleaves byte buffers
+### 11. Concurrent ingestion into one PayloadResponse silently corrupts state: beginRefreshPayload's id offsets apply to still-in-flight rows of the previous stream and a single shared decoder interleaves byte buffers
 
 - **Location:** `packages/fig-server/src/payload.ts:673`
 - **Severity:** major
@@ -262,7 +198,7 @@ Verified every claim against the code as it exists on disk (post the recent refr
 
 ---
 
-### 16. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
+### 12. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
 
 - **Location:** `packages/fig-dom/src/props.ts:339`
 - **Severity:** major
@@ -278,7 +214,7 @@ Verified every anchor in props.ts as it exists on disk: formProp (line 629) matc
 
 ---
 
-### 17. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
+### 13. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
 
 - **Location:** `packages/fig-dom/src/props.ts:377`
 - **Severity:** major
@@ -294,7 +230,7 @@ Verified against props.ts as it exists: updateElement iterates the union of prev
 
 ---
 
-### 18. refreshRetainedChunks prunes already-arrived chunks whose only reference lives in a still-pending chunk model, crashing decode or hanging the subtree
+### 14. refreshRetainedChunks prunes already-arrived chunks whose only reference lives in a still-pending chunk model, crashing decode or hanging the subtree
 
 - **Location:** `packages/fig-server/src/payload.ts:993`
 - **Severity:** major
@@ -310,7 +246,7 @@ Confirmed against the code and by executed repro. referencedChunkClosure (payloa
 
 ---
 
-### 19. PayloadResponse cannot safely ingest overlapping or aborted streams: one shared decoder buffer and response-global rowIdBase/objectIdBase corrupt whichever rows decode next
+### 15. PayloadResponse cannot safely ingest overlapping or aborted streams: one shared decoder buffer and response-global rowIdBase/objectIdBase corrupt whichever rows decode next
 
 - **Location:** `packages/fig-server/src/payload.ts:679`
 - **Severity:** major
@@ -326,7 +262,7 @@ Verified against packages/fig-server/src/payload.ts and packages/fig-start/src/c
 
 ---
 
-### 20. Suspending at the root outside any Suspense boundary fatally errors the HTML render with the raw thenable instead of waiting for the shell as documented
+### 16. Suspending at the root outside any Suspense boundary fatally errors the HTML render with the raw thenable instead of waiting for the shell as documented
 
 - **Location:** `packages/fig-server/src/renderer.ts:559`
 - **Severity:** major
@@ -342,7 +278,7 @@ Confirmed against code and by live reproduction. In /Users/bgub/code/fig/package
 
 ---
 
-### 21. Activity reveal silently drops deferred effects on fibers beneath a bailed-out (AdoptedFlag) child — they never run
+### 17. Activity reveal silently drops deferred effects on fibers beneath a bailed-out (AdoptedFlag) child — they never run
 
 - **Location:** `packages/fig-reconciler/src/index.ts:4815`
 - **Severity:** major
@@ -358,7 +294,7 @@ Confirmed all three legs of the claim against the code on disk: (1) visitEffects
 
 ---
 
-### 22. lazy() with a persistently failing loader enters an unbounded suspend→reject→reload loop and never surfaces the error to an ErrorBoundary
+### 18. lazy() with a persistently failing loader enters an unbounded suspend→reject→reload loop and never surfaces the error to an ErrorBoundary
 
 - **Location:** `packages/fig/src/element.ts:204`
 - **Severity:** major
@@ -1081,18 +1017,7 @@ Verified against packages/fig-reconciler/src/index.ts as it exists: clearRootAft
 
 These findings were reported by reviewers but their verification agents never completed. Treat as plausible, not confirmed.
 
-### 1. Restarting an interrupted dehydrated-Suspense (or Activity) hydration render strands root.isHydrating=true, leading to a guaranteed spurious hydration mismatch and a permanently blank app
-
-- **Location:** `packages/fig-reconciler/src/index.ts:1233`
-- **Severity:** critical
-- **Reviewer:** fig-reconciler:correctness
-- **Status note:** Partially verified. A follow-up verifier's repro confirmed the spurious hydration mismatch fires on restart; the verifier was stopped before judging the end state (permanently blank app → critical, vs. recovered client render → downgrade to major). Treat the mismatch mechanism as confirmed and the severity as unresolved.
-
-enterSuspenseHydration (line 2127) sets root.isHydrating=true mid-render, but restartRootWork/resetRootWork only reset the hydration POINTERS (resetHydrationPointers), never isHydrating — that is intentional for initial hydration but wrong for boundary hydration. If the time-sliced retry render of a completed dehydrated Suspense boundary yields and a higher-priority update arrives (e.g. flushSync from a click), performRootWork restarts, prepareToHydrateRoot re-seeds nextHydratableInstance from the container's first child (live committed DOM), no existing fiber consumes it (alternate !== null skips hydration), and completeHydration on the root fiber throws 'Hydration mismatch: found an extra DOM node'. recoverFromHydrationMismatch then takes the root path (hydratingSuspenseBoundary was nulled by the restart): forceClientRender clears the container at commit while the mostly-adopted work-in-progress tree re-inserts nothing (no PlacementFlags). VERIFIED by test: a queueMicrotask flushSync(setState) fired between the yield and resume of the boundary-hydration render left container.textContent === '' permanently and reported the spurious mismatch via onRecoverableError. Whole-app DOM loss from an ordinary input-during-hydration race.
-
----
-
-### 2. isWithinSuspenseBoundary tests boundary membership with an O(subtree) recursive walk that allocates an array per DOM node, on a path that runs per dehydrated boundary per event during the hydration window.
+### 1. isWithinSuspenseBoundary tests boundary membership with an O(subtree) recursive walk that allocates an array per DOM node, on a path that runs per dehydrated boundary per event during the hydration window.
 
 - **Location:** `packages/fig-dom/src/suspense-markers.ts:124`
 - **Severity:** major
@@ -1103,7 +1028,7 @@ containsNode (suspense-markers.ts:124-132) recurses through every descendant, ca
 
 ---
 
-### 3. Fig elements inside Map/Set prop values are silently serialized as plain objects, corrupting the decoded value
+### 2. Fig elements inside Map/Set prop values are silently serialized as plain objects, corrupting the decoded value
 
 - **Location:** `packages/fig-server/src/payload.ts:1450`
 - **Severity:** major
@@ -1114,7 +1039,7 @@ serializeValue delegates `value instanceof Map || value instanceof Set || value 
 
 ---
 
-### 4. isLikelyComponentType is an orphan export with no consumer, and its acceptance criteria contradict the runtime's own registration policy
+### 3. isLikelyComponentType is an orphan export with no consumer, and its acceptance criteria contradict the runtime's own registration policy
 
 - **Location:** `packages/fig-refresh/src/index.ts:108`
 - **Severity:** minor
@@ -1125,7 +1050,7 @@ Nothing in the repo consumes it except this package's own test: fig-vite's trans
 
 ---
 
-### 5. scheduleDehydratedSuspenseRetries walks the entire committed tree on every commit, even for pure client roots that can never have dehydrated boundaries
+### 4. scheduleDehydratedSuspenseRetries walks the entire committed tree on every commit, even for pure client roots that can never have dehydrated boundaries
 
 - **Location:** `packages/fig-reconciler/src/index.ts:3207`
 - **Severity:** minor

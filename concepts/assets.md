@@ -54,4 +54,6 @@ preconnects) never gate.
 Dev builds warn when a head-destined asset is discovered after the head was
 sealed in streaming mode (`onAssetError` reports late assets and conflicts);
 prerender mode avoids the class entirely by sealing late. Conflicting
-same-key definitions throw (`AssetResourceConflictError`).
+same-key definitions throw (`AssetResourceConflictError`), except `title`:
+there is only one document title slot, so the latest title replaces the
+previous value.

@@ -58,6 +58,10 @@ export class AssetResourceRegistry {
 
     if (current !== undefined) {
       if (assetSignature(current) !== assetSignature(resource)) {
+        if (resource.kind === "title") {
+          this.resources.set(key, resource);
+          return { added: false, key, resource };
+        }
         throw new AssetResourceConflictError(key, current, resource);
       }
 

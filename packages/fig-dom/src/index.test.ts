@@ -182,6 +182,24 @@ describe("@bgub/fig-dom", () => {
     });
   });
 
+  it("updates the singleton title head slot in place", () => {
+    const { head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement("main", null, createElement("title", null, "One")),
+      ),
+    );
+    flushSync(() =>
+      root.render(
+        createElement("main", null, createElement("title", null, "Two")),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+    expect(head.textContent).toBe("Two");
+  });
+
   it("inserts keyed siblings before hoisted asset fibers", () => {
     const { container, head, root } = documentResourceRoot();
 
