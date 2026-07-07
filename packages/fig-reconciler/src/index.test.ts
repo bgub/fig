@@ -162,6 +162,12 @@ afterEach(() => {
 });
 
 describe("reconciler", () => {
+  it("returns the flushSync callback result", () => {
+    const { flushSync } = createRenderer(host);
+
+    expect(flushSync(() => "result")).toBe("result");
+  });
+
   it("commits Suspense fallback and retries the boundary", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

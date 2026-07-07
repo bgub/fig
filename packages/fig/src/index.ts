@@ -105,4 +105,4 @@ export {
   type TitleResource,
   title,
 } from "./resource.ts";
-export { type TransitionHandler, transition } from "./transition.ts";
+export { transition } from "./transition.ts";

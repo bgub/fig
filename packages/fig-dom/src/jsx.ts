@@ -1,5 +1,3 @@
-// Augmenting a module requires importing it, even just for types.
-import type {} from "@bgub/fig/jsx-runtime";
 import type {
   HtmlHostProps,
   OpenHostProps,
@@ -52,12 +50,3 @@ export type HostIntrinsicElements = HtmlHostPropsByTag<HTMLElementTagNameMap> &
     // name shape and infer the baseline HTMLElement contract.
     [customElement: `${string}-${string}`]: OpenHostProps<HTMLElement>;
   };
-
-// Renderer packages own host-prop vocabulary: this augmentation fills core's
-// deliberately empty JSX.IntrinsicElements. It is global once any fig-dom
-// import is in the program.
-declare module "@bgub/fig/jsx-runtime" {
-  namespace JSX {
-    interface IntrinsicElements extends HostIntrinsicElements {}
-  }
-}

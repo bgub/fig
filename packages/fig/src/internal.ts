@@ -94,4 +94,4 @@ export {
   type Thenable,
   trackThenable,
 } from "./thenables.ts";
-export { setTransitionHandler } from "./transition.ts";
+export { setTransitionHandler, type TransitionHandler } from "./transition.ts";

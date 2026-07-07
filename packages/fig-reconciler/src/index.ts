@@ -1,7 +1,9 @@
 import {
   type ActionStateAction,
   type ActionStateRunner,
+  type DataRefreshResult,
   type DataResource,
+  type DataResourceKey,
   type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
@@ -363,6 +365,7 @@ export interface FigRootOptions {
 export interface RecoverableErrorInfo extends ErrorInfo {
   actual?: string;
   boundaryId?: string;
+  componentStack: string;
   digest?: string;
   expected?: string;
   recovery: "root" | "suspense";
@@ -370,6 +373,29 @@ export interface RecoverableErrorInfo extends ErrorInfo {
 }
 
 export type HydrationTargetResult = "none" | "hydrated" | "blocked";
+
+export interface FigRenderer<Container> {
+  batchedUpdates<T>(this: void, callback: () => T): T;
+  createRoot(
+    this: void,
+    container: Container,
+    options?: FigRootOptions,
+  ): FigRoot;
+  hydrateRoot(
+    this: void,
+    container: Container,
+    children: FigNode,
+    options?: FigRootOptions,
+  ): FigRoot;
+  hydrateTarget(
+    this: void,
+    container: Container,
+    target: unknown,
+    priority?: EventPriority,
+  ): HydrationTargetResult;
+  flushSync<T>(this: void, callback: () => T): T;
+  scheduleRefresh(this: void, update: RefreshUpdate): void;
+}
 
 type RequiredHydrationHostConfig<Container, Instance, TextInstance> =
   HostHydrationConfig<Container, Instance, TextInstance>;
@@ -685,7 +711,7 @@ class HydrationMismatchError extends Error {}
 
 export function createRenderer<Container, Instance, TextInstance>(
   host: HostConfig<Container, Instance, TextInstance>,
-) {
+): FigRenderer<Container> {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
   type ActivityHydrationHostConfig = HostConfig<
@@ -744,27 +770,33 @@ export function createRenderer<Container, Instance, TextInstance>(
     useLaggedValue: updateLaggedValueHook,
     useMemo: updateMemoHook,
     useTransition: updateTransitionHook,
-    useReactive(effect, deps) {
+    useReactive(effect: EffectCallback, deps?: DependencyList): void {
       updateEffectHook(ReactiveEffect, effect, deps);
     },
-    useBeforePaint(effect, deps) {
+    useBeforePaint(effect: EffectCallback, deps?: DependencyList): void {
       updateEffectHook(BeforePaintEffect, effect, deps);
     },
-    useBeforeLayout(effect, deps) {
+    useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void {
       updateEffectHook(BeforeLayoutEffect, effect, deps);
     },
     useExternalStore: updateExternalStoreHook,
     useStableEvent: updateStableEventHook,
     readContext: readContextValue,
-    readData(resource, args) {
+    readData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      args: TArgs,
+    ): TValue {
       const fiber = requireRenderingFiber();
       return rootOf(fiber).dataStore.readData(resource, args, fiber);
     },
-    preloadData(resource, args) {
+    preloadData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      args: TArgs,
+    ): void {
       const fiber = requireRenderingFiber();
       rootOf(fiber).dataStore.preloadData(resource, ...args);
     },
-    readPromise(promise) {
+    readPromise<T>(promise: PromiseLike<T>): T {
       return readThenable(promise);
     },
   };
@@ -814,7 +846,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const dataStore = createRootDataStore({
       getLane: requestUpdateLane,
       partition: options.dataPartition,
-      schedule(owner, lane) {
+      schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
     });
@@ -2361,7 +2393,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
 
       const instance = hook.memoizedState.instance;
-      hook.memoizedState.start = (callback) => {
+      hook.memoizedState.start = (
+        callback: (signal: AbortSignal) => void | PromiseLike<void>,
+      ) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Transitions cannot be started while rendering a component.",
@@ -5064,14 +5098,14 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   }
 
   const store: FigDataStore = {
-    hydrate(entries) {
+    hydrate(entries: readonly FigDataHydrationEntry[]): void {
       if (inner !== null) {
         inner.hydrate(entries);
         return;
       }
       (buffered ??= []).push(...entries);
     },
-    run(callback) {
+    run<T>(callback: () => T): T {
       if (inner !== null) return inner.run(callback);
 
       const previousStore = setCurrentDataStore(store);
@@ -5081,37 +5115,50 @@ function createRootDataStore(host: FigDataStoreHost): FigDataStore {
         setCurrentDataStore(previousStore);
       }
     },
-    readData(resource, args, owner) {
+    readData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      args: TArgs,
+      owner: object,
+    ): TValue {
       return installStore(resource).readData(resource, args, owner);
     },
-    preloadData(resource, ...args) {
+    preloadData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      ...args: TArgs
+    ): void {
       installStore(resource).preloadData(resource, ...args);
     },
-    invalidateData(resource, ...args) {
+    invalidateData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      ...args: TArgs
+    ): void {
       installStore(resource).invalidateData(resource, ...args);
     },
-    invalidateDataError(error) {
+    invalidateDataError(error: unknown): boolean {
       return inner?.invalidateDataError(error) ?? false;
     },
-    invalidateDataKey(key) {
+    invalidateDataKey(key: DataResourceKey): void {
       inner?.invalidateDataKey(key);
     },
-    invalidateDataPrefix(prefix) {
+    invalidateDataPrefix(prefix: DataResourceKey): void {
       inner?.invalidateDataPrefix(prefix);
     },
-    refreshData(resource, ...args) {
+    refreshData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      ...args: TArgs
+    ): Promise<DataRefreshResult<TValue>> {
       return installStore(resource).refreshData(resource, ...args);
     },
-    commitDataDependencies(owner, previousOwner) {
+    commitDataDependencies(owner: object, previousOwner: object | null): void {
       inner?.commitDataDependencies(owner, previousOwner);
     },
-    deleteDataOwner(owner) {
+    deleteDataOwner(owner: object): void {
       inner?.deleteDataOwner(owner);
     },
-    releaseDataOwner(owner) {
+    releaseDataOwner(owner: object): void {
       inner?.releaseDataOwner(owner);
     },
-    resetDataDependencies(owner) {
+    resetDataDependencies(owner: object): void {
       inner?.resetDataDependencies(owner);
     },
     dispose() {

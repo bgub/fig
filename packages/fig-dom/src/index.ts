@@ -1,9 +1,11 @@
 import {
   createPortalNode,
   type FigNode,
+  type FigPortal,
   type Key,
   type Props,
 } from "@bgub/fig";
+import "./jsx-augmentation.ts";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   assetResourceFromHostProps,
@@ -15,6 +17,7 @@ import {
   type FigRoot,
   type FigRootOptions,
   type HostConfig,
+  type RecoverableErrorInfo,
 } from "@bgub/fig-reconciler";
 import {
   acquireDocumentResource,
@@ -34,7 +37,7 @@ import {
   unregisterRoot,
 } from "./events.ts";
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
-import { configureDomRefreshScheduler } from "./refresh.ts";
+import { configureDomRefreshScheduler, type RefreshUpdate } from "./refresh.ts";
 import {
   isWithinSuspenseBoundary,
   removeNode,
@@ -52,6 +55,29 @@ import {
 
 type TextLike = Text | Comment;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
+
+interface DomRenderer {
+  batchedUpdates<T>(this: void, callback: () => T): T;
+  createRoot(
+    this: void,
+    container: Container,
+    options?: FigRootOptions,
+  ): FigRoot;
+  hydrateRoot(
+    this: void,
+    container: Container,
+    children: FigNode,
+    options?: FigRootOptions,
+  ): FigRoot;
+  hydrateTarget(
+    this: void,
+    container: Container,
+    target: unknown,
+    priority?: "default" | "continuous" | "discrete",
+  ): "none" | "hydrated" | "blocked";
+  flushSync<T>(this: void, callback: () => T): T;
+  scheduleRefresh(this: void, update: RefreshUpdate): void;
+}
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -240,13 +266,13 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
 };
 
-const renderer = createRenderer(hostConfig);
+const renderer: DomRenderer = createRenderer(hostConfig);
 setEventBatching(renderer.batchedUpdates);
 configureDomRefreshScheduler(renderer.scheduleRefresh);
 
 export const flushSync = renderer.flushSync;
 
-export type { FigRootOptions };
+export type { FigRoot, FigRootOptions, RecoverableErrorInfo };
 
 export function createRoot(
   container: Container,
@@ -290,7 +316,7 @@ export function createPortal(
   children: FigNode,
   container: Container,
   key: Key | null = null,
-) {
+): FigPortal {
   return createPortalNode(children, container, key);
 }
 

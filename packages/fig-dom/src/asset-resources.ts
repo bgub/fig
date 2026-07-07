@@ -72,7 +72,7 @@ export function acquireDocumentResource(element: Element): Element {
   if (meta === undefined) {
     const resource = assetResourceFromHostAttributes(
       elementName(element),
-      (name) => element.getAttribute(name),
+      (name: string) => element.getAttribute(name),
     );
     if (resource === null) return element;
     meta = { key: assetResourceKey(resource), kind: resource.kind };
@@ -214,8 +214,9 @@ function findDocumentResource(head: Element, key: string): Element | null {
   for (const child of Array.from(head.childNodes)) {
     if (!isElementNode(child)) continue;
 
-    const resource = assetResourceFromHostAttributes(child.localName, (name) =>
-      child.getAttribute(name),
+    const resource = assetResourceFromHostAttributes(
+      child.localName,
+      (name: string) => child.getAttribute(name),
     );
     if (resource !== null && assetResourceKey(resource) === key) {
       return child;
