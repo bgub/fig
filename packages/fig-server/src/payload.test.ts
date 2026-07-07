@@ -1599,6 +1599,65 @@ describe("payload rendering", () => {
     unsubscribe();
   });
 
+  it("uses the latest initial model for boundaries nested inside refreshed content", async () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          PayloadBoundary,
+          { id: "outer" },
+          createElement(PayloadBoundary, { id: "inner" }, "old inner"),
+        ),
+      ),
+    );
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(PayloadBoundary, { id: "inner" }, "new inner"),
+        { refreshBoundary: "outer" },
+      ),
+    );
+
+    expect(evaluatePayloadNode(response.getRoot())).toBe("new inner");
+  });
+
+  it("lets a newer parent refresh supersede an older targeted child refresh", async () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          PayloadBoundary,
+          { id: "outer" },
+          createElement(PayloadBoundary, { id: "inner" }, "old inner"),
+        ),
+      ),
+    );
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows("targeted inner", {
+        refreshBoundary: "inner",
+      }),
+    );
+    expect(evaluatePayloadNode(response.getRoot())).toBe("targeted inner");
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(PayloadBoundary, { id: "inner" }, "new parent inner"),
+        { refreshBoundary: "outer" },
+      ),
+    );
+
+    expect(evaluatePayloadNode(response.getRoot())).toBe("new parent inner");
+  });
+
   it("rejects failed boundary refresh streams without replacing existing content", async () => {
     const response = createPayloadResponse();
     const rendered: FigNode[] = [];
@@ -1727,6 +1786,144 @@ describe("payload rendering", () => {
       props: { children: ["first", "second"] },
       type: "section",
     });
+  });
+
+  it("retains transitive chunks referenced from live lazy chunks", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: {
+          $fig: "boundary",
+          child: { $fig: "lazy", id: 1 },
+          id: "slot",
+        },
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(1, "section", {
+          children: { $fig: "lazy", id: 2 },
+        }),
+      },
+      {
+        id: 2,
+        tag: "model",
+        value: graphElement(2, "span", { children: "Nested" }),
+      },
+    ]);
+
+    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+      .chunks;
+    expect(chunks.has(1)).toBe(true);
+    expect(chunks.has(2)).toBe(true);
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: {
+          props: { children: "Nested" },
+          type: "span",
+        },
+      },
+      type: "section",
+    });
+  });
+
+  it("releases transitive chunks from superseded boundary refresh payloads", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: {
+          $fig: "boundary",
+          child: { $fig: "lazy", id: 1 },
+          id: "slot",
+        },
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(1, "section", {
+          children: { $fig: "lazy", id: 2 },
+        }),
+      },
+      {
+        id: 2,
+        tag: "model",
+        value: graphElement(2, "span", {
+          value: { $fig: "object", id: 1, value: { label: "old" } },
+        }),
+      },
+    ]);
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    const state = response as unknown as {
+      chunks: Map<number, unknown>;
+      objectRefs: Map<number, unknown>;
+    };
+    expect(state.chunks.has(1)).toBe(false);
+    expect(state.chunks.has(2)).toBe(false);
+    expect(state.objectRefs.has(1)).toBe(false);
+    expect(evaluatePayloadNode(response.getRoot())).toBe("refreshed");
+  });
+
+  it("releases chunks from refreshed boundaries dropped by parent refreshes", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: {
+          $fig: "boundary",
+          child: {
+            $fig: "boundary",
+            child: "initial inner",
+            id: "inner",
+          },
+          id: "outer",
+        },
+      },
+    ]);
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "inner", tag: "refresh", value: { $fig: "lazy", id: 1 } },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(1, "span", {
+          value: { $fig: "object", id: 1, value: { label: "inner" } },
+        }),
+      },
+    ]);
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: { value: { label: "inner" } },
+      type: "span",
+    });
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "outer", tag: "refresh", value: "outer only" },
+    ]);
+
+    const state = response as unknown as {
+      boundaries: Map<string, unknown>;
+      chunks: Map<number, unknown>;
+      decodedBoundaries: Map<string, unknown>;
+      initialBoundaries: Map<string, unknown>;
+      objectRefs: Map<number, unknown>;
+    };
+    expect(state.chunks.has(1)).toBe(false);
+    expect(state.objectRefs.has(1)).toBe(false);
+    expect(state.boundaries.has("inner")).toBe(false);
+    expect(state.initialBoundaries.has("inner")).toBe(false);
+    expect(state.decodedBoundaries.has("inner")).toBe(false);
+    expect(evaluatePayloadNode(response.getRoot())).toBe("outer only");
   });
 
   it("releases chunks from superseded boundary refresh payloads", async () => {

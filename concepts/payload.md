@@ -39,7 +39,9 @@ Payload refreshes use the `x-fig-payload-boundary` header. Ids minted by
   decoded chunk rejects with a digest-carrying error.
 - `refresh` — a boundary refresh: replaces one `PayloadBoundary`'s content
   by id without replacing the app shell (no React equivalent — React
-  refetches whole trees).
+  refetches whole trees). A targeted refresh wins until a newer parent payload
+  model sends that boundary id again; the newer parent-sent initial then
+  becomes authoritative.
 
 Deliberately absent from the row model: server actions and temporary
 references. Binary byte encodings are allowed as codecs, but no binary codec is

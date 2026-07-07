@@ -354,6 +354,13 @@ interface PayloadObjectRef {
   value: unknown;
 }
 
+interface BoundaryModelEntry {
+  id?: string;
+  model: PayloadModel;
+  revision: number;
+  source?: "initial" | "refresh";
+}
+
 interface StackFrame {
   name: string;
   parent: StackFrame | null;
@@ -366,6 +373,7 @@ type DecodedChunk = {
   promise: Promise<unknown>;
   reject(reason: unknown): void;
   resolve(value: unknown): void;
+  revision: number;
   status: "pending" | "fulfilled" | "rejected";
   value: unknown;
 };
@@ -620,9 +628,9 @@ interface PayloadClientReferenceEntry {
 
 class PayloadResponseImpl implements PayloadResponse {
   private readonly assetResources = new Map<string, FigAssetResource>();
-  private readonly boundaries = new Map<string, PayloadModel>();
-  private readonly boundaryChunkIds = new Map<string, Set<number>>();
+  private readonly boundaries = new Map<string, BoundaryModelEntry>();
   private readonly decodedBoundaries = new Map<string, FigNode>();
+  private readonly initialBoundaries = new Map<string, BoundaryModelEntry>();
   private readonly clientReferences = new Map<
     string,
     PayloadClientReferenceRecord
@@ -650,11 +658,11 @@ class PayloadResponseImpl implements PayloadResponse {
   private objectIdBase = 0;
   private readonly objectRefs = new Map<number, PayloadObjectRef>();
   private pendingData: FigDataHydrationEntry[] = [];
-  private readonly retainedChunkRefs = new Map<number, number>();
   private rootData: FigDataStoreHandle | null = null;
-  private rootChunkIds: Set<number> | null = null;
   private rowIdBase = 0;
+  private currentDecodeRevision = 0;
   private readonly decoder: PayloadDecoder;
+  private nextModelRevision = 1;
   readonly codec: PayloadCodec;
 
   constructor(private readonly options: PayloadResponseOptions) {
@@ -756,13 +764,14 @@ class PayloadResponseImpl implements PayloadResponse {
     }
 
     if (row.tag === "refresh") {
-      this.retainBoundaryChunks(row.boundary, row.value);
-      this.boundaries.set(row.boundary, row.value);
+      const revision = this.claimModelRevision();
+      this.boundaries.set(row.boundary, { model: row.value, revision });
       this.invalidateDecodeCaches();
       this.decodedBoundaries.set(
         row.boundary,
-        decodeModel(this, row.value) as FigNode,
+        this.decodeModelAtRevision(row.value, revision) as FigNode,
       );
+      this.refreshRetainedChunks();
       this.pruneObjectRefs();
       this.notify();
       return;
@@ -773,10 +782,11 @@ class PayloadResponseImpl implements PayloadResponse {
       throw errorFromPayload(row.value);
     }
 
-    resolveDecodedRow(this, row);
+    const revision = row.tag === "model" ? this.claimModelRevision() : 0;
+    resolveDecodedRow(this, row, revision);
     if (row.id === 0) {
       if (row.tag === "model") {
-        this.retainRootChunks(row.value);
+        this.refreshRetainedChunks();
         this.pruneObjectRefs();
       }
       this.resolveRootReady();
@@ -848,21 +858,23 @@ class PayloadResponseImpl implements PayloadResponse {
   }
 
   prepareBoundaryInitial(id: string, initial: PayloadModel): void {
-    if (this.boundaries.has(id) || this.decodedBoundaries.has(id)) return;
-    this.decodedBoundaries.set(id, decodeModel(this, initial) as FigNode);
+    const revision = this.currentDecodeRevision;
+    this.initialBoundaries.set(id, { model: initial, revision });
+    if (this.currentBoundaryEntry(id)?.model !== initial) return;
+    const decoded = this.decodeModelAtRevision(initial, revision) as FigNode;
+    this.decodedBoundaries.set(id, decoded);
   }
 
   pruneObjectRefs(): void {
     const retained = new Set<number>();
-    // Chunks are the graph-object lifetime boundary: releaseChunks removes
-    // dead chunks from this map, so scanning every remaining model keeps refs
-    // alive for transitive lazy chunks until chunk retention learns to release
-    // them transitively too.
+    // Chunks are the graph-object lifetime boundary: refreshRetainedChunks
+    // removes dead chunks from this map, so scanning remaining models preserves
+    // exactly the graph ids reachable from live payload content.
     for (const chunk of this.chunks.values()) {
       if (chunk.model !== null) collectObjectIds(chunk.model, retained);
     }
-    for (const model of this.boundaries.values()) {
-      collectObjectIds(model, retained);
+    for (const entry of this.activeBoundaryEntries()) {
+      collectObjectIds(entry.model, retained);
     }
     for (const id of this.objectRefs.keys()) {
       if (!retained.has(id)) this.objectRefs.delete(id);
@@ -872,10 +884,10 @@ class PayloadResponseImpl implements PayloadResponse {
   readBoundary(id: string, initial: PayloadModel): FigNode {
     let decoded = this.decodedBoundaries.get(id);
     if (decoded === undefined) {
-      decoded = decodeModel(
-        this,
-        this.boundaries.get(id) ?? initial,
-      ) as FigNode;
+      const entry = this.currentBoundaryEntry(id);
+      const model = entry?.model ?? initial;
+      const revision = entry?.revision ?? this.currentDecodeRevision;
+      decoded = this.decodeModelAtRevision(model, revision) as FigNode;
       this.decodedBoundaries.set(id, decoded);
     }
     return decoded;
@@ -891,7 +903,7 @@ class PayloadResponseImpl implements PayloadResponse {
     // unchanged subtrees instead of re-rendering the whole payload on every
     // notify.
     if (!chunk.hasDecoded) {
-      chunk.decoded = decodeModel(this, chunk.model);
+      chunk.decoded = this.decodeModelAtRevision(chunk.model, chunk.revision);
       chunk.hasDecoded = true;
     }
     return chunk.decoded as FigNode;
@@ -964,31 +976,90 @@ class PayloadResponseImpl implements PayloadResponse {
     return entry;
   }
 
-  private retainRootChunks(model: PayloadModel): void {
-    const next = referencedChunkIds(model);
-    retainChunks(this.retainedChunkRefs, next);
-    if (this.rootChunkIds !== null) this.releaseChunks(this.rootChunkIds);
-    this.rootChunkIds = next;
-  }
+  private refreshRetainedChunks(): void {
+    const rootModel = this.chunks.get(0)?.model;
+    if (rootModel === undefined || rootModel === null) return;
 
-  private retainBoundaryChunks(boundary: string, model: PayloadModel): void {
-    const next = referencedChunkIds(model);
-    retainChunks(this.retainedChunkRefs, next);
-    const previous = this.boundaryChunkIds.get(boundary);
-    if (previous !== undefined) this.releaseChunks(previous);
-    this.boundaryChunkIds.set(boundary, next);
-  }
+    const nextRetained = referencedChunkClosure(rootModel, this.chunks);
+    const activeBoundaries = this.activeBoundaryEntries();
+    for (const entry of activeBoundaries) {
+      addChunkRefs(
+        nextRetained,
+        referencedChunkClosure(entry.model, this.chunks),
+      );
+    }
 
-  private releaseChunks(ids: Set<number>): void {
-    for (const id of ids) {
-      const count = this.retainedChunkRefs.get(id);
-      if (count === undefined) continue;
-      if (count > 1) {
-        this.retainedChunkRefs.set(id, count - 1);
-        continue;
+    for (const id of this.chunks.keys()) {
+      if (id !== 0 && !nextRetained.has(id)) this.chunks.delete(id);
+    }
+
+    const activeSources = new Map(
+      activeBoundaries.map((entry) => [entry.id, entry.source]),
+    );
+    for (const id of this.boundaries.keys()) {
+      if (activeSources.get(id) !== "refresh") this.boundaries.delete(id);
+    }
+    for (const id of this.initialBoundaries.keys()) {
+      if (activeSources.get(id) !== "initial") {
+        this.initialBoundaries.delete(id);
       }
-      this.retainedChunkRefs.delete(id);
-      if (id !== 0) this.chunks.delete(id);
+    }
+    for (const id of this.decodedBoundaries.keys()) {
+      if (!activeSources.has(id)) this.decodedBoundaries.delete(id);
+    }
+  }
+
+  private activeBoundaryEntries(): BoundaryModelEntry[] {
+    const rootModel = this.chunks.get(0)?.model;
+    if (rootModel === undefined || rootModel === null) return [];
+
+    const active = new Set<string>();
+    const models: PayloadModel[] = [rootModel];
+    const entries: BoundaryModelEntry[] = [];
+
+    for (let index = 0; index < models.length; index += 1) {
+      const ids = new Set<string>();
+      collectBoundaryIds(models[index] as PayloadModel, ids);
+      for (const id of ids) {
+        if (active.has(id)) continue;
+        active.add(id);
+        const entry = this.currentBoundaryEntry(id);
+        if (entry === undefined) continue;
+        entries.push({ ...entry, id });
+        models.push(entry.model);
+      }
+    }
+
+    return entries;
+  }
+
+  private currentBoundaryEntry(id: string): BoundaryModelEntry | undefined {
+    const refreshed = this.boundaries.get(id);
+    const initial = this.initialBoundaries.get(id);
+    if (refreshed === undefined) {
+      return initial === undefined
+        ? undefined
+        : { ...initial, source: "initial" };
+    }
+    if (initial === undefined) return { ...refreshed, source: "refresh" };
+    return initial.revision > refreshed.revision
+      ? { ...initial, source: "initial" }
+      : { ...refreshed, source: "refresh" };
+  }
+
+  private claimModelRevision(): number {
+    const revision = this.nextModelRevision;
+    this.nextModelRevision += 1;
+    return revision;
+  }
+
+  decodeModelAtRevision(model: PayloadModel, revision: number): unknown {
+    const previous = this.currentDecodeRevision;
+    this.currentDecodeRevision = revision;
+    try {
+      return decodeModel(this, model);
+    } finally {
+      this.currentDecodeRevision = previous;
     }
   }
 
@@ -2149,6 +2220,7 @@ function throwIfAborted(signal?: AbortSignal | null): void {
 function resolveDecodedRow(
   response: PayloadResponseImpl,
   row: Extract<PayloadRow, { id: number }>,
+  revision: number,
 ): void {
   const chunk = response.getChunk(row.id);
 
@@ -2168,10 +2240,11 @@ function resolveDecodedRow(
     response.recordAssetResources(row.value.assets);
     value = response.decodeClientReference(clientRowMetadata(row.value));
   } else {
-    value = decodeModel(response, row.value);
+    value = response.decodeModelAtRevision(row.value, revision);
   }
 
   chunk.model = row.tag === "model" ? row.value : null;
+  chunk.revision = revision;
   if (row.tag === "model") {
     chunk.decoded = value;
     chunk.hasDecoded = true;
@@ -2384,7 +2457,6 @@ function collectObjectIds(model: PayloadModel, ids: Set<number>): void {
         for (const value of model.values) collectObjectIds(value, ids);
         return;
       case "boundary":
-        collectObjectIds(model.child, ids);
         return;
       default:
         return;
@@ -2394,9 +2466,66 @@ function collectObjectIds(model: PayloadModel, ids: Set<number>): void {
   for (const value of Object.values(model)) collectObjectIds(value, ids);
 }
 
-function referencedChunkIds(model: PayloadModel): Set<number> {
+function collectBoundaryIds(model: PayloadModel, ids: Set<string>): void {
+  if (model === null || typeof model !== "object") return;
+
+  if (Array.isArray(model)) {
+    for (const item of model) collectBoundaryIds(item, ids);
+    return;
+  }
+
+  if (isPayloadSpecialModel(model)) {
+    switch (model.$fig) {
+      case "array":
+        for (const value of model.value) collectBoundaryIds(value, ids);
+        return;
+      case "element":
+        collectBoundaryIds(model.type, ids);
+        collectBoundaryIds(model.props, ids);
+        return;
+      case "object":
+        for (const value of Object.values(model.value)) {
+          collectBoundaryIds(value, ids);
+        }
+        return;
+      case "boundary":
+        ids.add(model.id);
+        return;
+      case "map":
+        for (const [key, value] of model.entries) {
+          collectBoundaryIds(key, ids);
+          collectBoundaryIds(value, ids);
+        }
+        return;
+      case "set":
+        for (const value of model.values) collectBoundaryIds(value, ids);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const value of Object.values(model)) collectBoundaryIds(value, ids);
+}
+
+function referencedChunkClosure(
+  model: PayloadModel,
+  chunks: ReadonlyMap<number, DecodedChunk>,
+): Set<number> {
   const ids = new Set<number>();
-  collectReferencedChunkIds(model, ids);
+  const pending = [model];
+  for (let index = 0; index < pending.length; index += 1) {
+    const next = new Set<number>();
+    collectReferencedChunkIds(pending[index] as PayloadModel, next);
+    for (const id of next) {
+      if (ids.has(id)) continue;
+      ids.add(id);
+      const chunk = chunks.get(id);
+      if (chunk?.model !== null && chunk?.model !== undefined) {
+        pending.push(chunk.model);
+      }
+    }
+  }
   return ids;
 }
 
@@ -2433,7 +2562,6 @@ function collectReferencedChunkIds(
       case "ref":
         return;
       case "boundary":
-        collectReferencedChunkIds(model.child, ids);
         return;
       case "map":
         for (const [key, value] of model.entries) {
@@ -2454,8 +2582,8 @@ function collectReferencedChunkIds(
   }
 }
 
-function retainChunks(refs: Map<number, number>, ids: Set<number>): void {
-  for (const id of ids) refs.set(id, (refs.get(id) ?? 0) + 1);
+function addChunkRefs(target: Set<number>, ids: Set<number>): void {
+  for (const id of ids) target.add(id);
 }
 
 function isPayloadSpecialModel(
@@ -2713,6 +2841,7 @@ function getOrCreateChunk(
     promise: settled.promise,
     reject: settled.reject,
     resolve: settled.resolve,
+    revision: 0,
     status: "pending",
     value: undefined,
   };
