@@ -2902,12 +2902,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     forcePlacement: boolean,
   ): void {
     const nextChildren = collectChildren(children);
-    const nextKeys: string[] = [];
-    const seenKeys = new Set<string>();
-
-    for (let index = 0; index < nextChildren.length; index += 1) {
-      nextKeys.push(childKey(nextChildren[index], index, seenKeys));
-    }
+    const seenKeys =
+      process.env.NODE_ENV !== "production" ? new Set<string>() : null;
 
     parent.child = null;
     parent.deletions = null;
@@ -2923,9 +2919,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (; old !== null && index < nextChildren.length; index += 1) {
       const child = nextChildren[index];
-      if (fiberChildKey(old) !== nextKeys[index] || !sameType(old, child)) {
+      if (!sameChildKey(old, child, index) || !sameType(old, child)) {
         break;
       }
+      validateChildKey(child, seenKeys);
 
       const next = createWorkInProgress(old, propsFor(child));
       next.index = index;
@@ -2949,6 +2946,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (old === null) {
       for (; index < nextChildren.length; index += 1) {
+        validateChildKey(nextChildren[index], seenKeys);
         const next = fiberFrom(nextChildren[index]);
         if (next === null) continue;
 
@@ -2960,15 +2958,22 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    const existing = new Map<string, F>();
+    let existingByKey: Map<string, F> | null = null;
+    let existingByIndex: Map<number, F> | null = null;
     for (; old !== null; old = old.sibling) {
-      existing.set(fiberChildKey(old), old);
+      if (old.key === null) {
+        (existingByIndex ??= new Map()).set(old.index, old);
+      } else {
+        (existingByKey ??= new Map()).set(String(old.key), old);
+      }
     }
 
     for (; index < nextChildren.length; index += 1) {
       const child = nextChildren[index];
-      const key = nextKeys[index];
-      const matched = existing.get(key);
+      validateChildKey(child, seenKeys);
+      const key = childExplicitKey(child);
+      const matched =
+        key === null ? existingByIndex?.get(index) : existingByKey?.get(key);
       const canReuse = matched !== undefined && sameType(matched, child);
       const next = canReuse
         ? createWorkInProgress(matched, propsFor(child))
@@ -2980,7 +2985,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.return = parent;
 
       if (canReuse) {
-        existing.delete(key);
+        if (key === null) {
+          existingByIndex?.delete(index);
+        } else {
+          existingByKey?.delete(key);
+        }
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag | hostUpdateFlags(matched, next.props);
         } else {
@@ -2994,8 +3003,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       previous = appendChild(parent, previous, next);
     }
 
-    for (const child of existing.values()) {
-      appendDeletion(parent, child);
+    if (existingByKey !== null) {
+      for (const child of existingByKey.values()) appendDeletion(parent, child);
+    }
+    if (existingByIndex !== null) {
+      for (const child of existingByIndex.values()) {
+        appendDeletion(parent, child);
+      }
     }
   }
 
@@ -5210,35 +5224,34 @@ function portalProps(child: FigPortal): Props {
   return { children: child.children, target: child.target };
 }
 
-function childKey(
+function validateChildKey(
+  child: NormalizedChild,
+  seenKeys: Set<string> | null,
+): void {
+  if (seenKeys === null) return;
+
+  const key = childExplicitKey(child);
+  if (key === null) return;
+
+  if (seenKeys.has(key)) throw duplicateKeyError(key);
+  seenKeys.add(key);
+}
+
+function sameChildKey<Container, Instance, TextInstance>(
+  fiber: Fiber<Container, Instance, TextInstance>,
   child: NormalizedChild,
   index: number,
-  seenKeys: Set<string>,
-): string {
-  if ((!isValidElement(child) && !isPortal(child)) || child.key === null) {
-    return implicitKey(index);
-  }
-
-  const key = explicitKey(child.key);
-  if (process.env.NODE_ENV !== "production" && seenKeys.has(key)) {
-    throw duplicateKeyError(child.key);
-  }
-  seenKeys.add(key);
-  return key;
+): boolean {
+  const key = childExplicitKey(child);
+  return key === null
+    ? fiber.key === null && fiber.index === index
+    : fiber.key !== null && String(fiber.key) === key;
 }
 
-function fiberChildKey<Container, Instance, TextInstance>(
-  fiber: Fiber<Container, Instance, TextInstance>,
-): string {
-  return fiber.key === null ? implicitKey(fiber.index) : explicitKey(fiber.key);
-}
-
-function explicitKey(key: string | number): string {
-  return `$${String(key)}`;
-}
-
-function implicitKey(index: number): string {
-  return `.${index}`;
+function childExplicitKey(child: NormalizedChild): string | null {
+  return (isValidElement(child) || isPortal(child)) && child.key !== null
+    ? String(child.key)
+    : null;
 }
 
 const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
