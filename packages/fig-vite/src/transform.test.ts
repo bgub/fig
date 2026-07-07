@@ -35,6 +35,41 @@ export const Panel = () => {
     expect(out?.code).toContain('__figSig(Panel, "useState")');
   });
 
+  it("includes top-level custom hook internals in component signatures", async () => {
+    const source = `import { useMemo, useState } from "@bgub/fig";
+function useCounter() {
+  useState(0);
+  useMemo(() => 1, []);
+}
+export function Counter() {
+  useCounter();
+  return <button />;
+}`;
+
+    const out = await transformModule(source, "/app/Counter.tsx");
+    expect(out).not.toBeNull();
+    const code = out!.code;
+
+    expect(code).toContain("__figReg(Counter,");
+    expect(code).not.toContain("__figReg(useCounter,");
+    expect(code).toContain(
+      '__figSig(Counter, "useCounter\\n>useState\\n>useMemo")',
+    );
+  });
+
+  it("does not self-accept modules that export non-component values", async () => {
+    const source = `export const answer = 42;
+export function Counter() {
+  return <div />;
+}`;
+
+    const out = await transformModule(source, "/app/mixed.tsx");
+    expect(out).not.toBeNull();
+    expect(out?.code).toContain("__figReg(Counter,");
+    expect(out?.code).not.toContain("import.meta.hot.accept()");
+    expect(out?.code).not.toContain("__figRefresh()");
+  });
+
   it("strips TypeScript types while preserving JSX", async () => {
     const source = `type Props = { label: string };
 export function Badge(props: Props) {
