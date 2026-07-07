@@ -227,9 +227,7 @@ export function unregisterRoot(container: Container): void {
   const record = containerRecords.get(container);
   if (record === undefined) return;
 
-  for (const [type, listener] of record.hydrationListeners ?? []) {
-    container.removeEventListener(type, listener, { capture: true });
-  }
+  disableRootHydration(container);
 
   // Slot teardown normally empties this map before unmount finishes; sweep
   // whatever remains so no delegated listener outlives the root.
@@ -250,6 +248,17 @@ export function unregisterRoot(container: Container): void {
       queuedReplayableEvents.splice(index, 1);
     }
   }
+}
+
+export function disableRootHydration(container: Container): void {
+  const record = containerRecords.get(container);
+  if (record === undefined) return;
+
+  record.hydrate = null;
+  for (const [type, listener] of record.hydrationListeners ?? []) {
+    container.removeEventListener(type, listener, { capture: true });
+  }
+  record.hydrationListeners = null;
 }
 
 function sweepPortals(target: Container): void {

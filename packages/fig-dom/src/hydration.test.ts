@@ -26,6 +26,22 @@ function display(node: FakeElement): string {
 }
 
 describe("@bgub/fig-dom hydration", () => {
+  it("removes hydration listeners when the root has no dehydrated Suspense boundaries", () => {
+    const container = new FakeElement("root");
+    const span = new FakeElement("span");
+    span.appendChild(new FakeText("Client"));
+    container.appendChild(span);
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement("span", null, "Client"),
+      ),
+    );
+
+    expect(Object.keys(container.listenerSets)).toEqual([]);
+  });
+
   it("hydrates existing host elements without duplicating nodes", () => {
     const container = new FakeElement("root");
     const button = new FakeElement("button");
@@ -615,8 +631,11 @@ describe("@bgub/fig-dom hydration", () => {
       ),
     );
 
+    expect(container.listenerSets.mousemove).toHaveLength(1);
+
     await delay();
 
+    expect(container.listenerSets.mousemove).toBeUndefined();
     expect(container.childNodes).toEqual([button]);
     expect(button.textContent).toBe("Client");
 
@@ -839,6 +858,7 @@ describe("@bgub/fig-dom hydration", () => {
     fallback.dispatch("mousemove");
     await delay();
 
+    expect(container.listenerSets.mousemove).toHaveLength(1);
     expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
     expect(container.textContent).toBe("Loading");
   });

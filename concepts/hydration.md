@@ -27,7 +27,9 @@ boundary are queued and replayed after that boundary hydrates — a synthetic
 two-phase dispatch through the logical tree (see events.md). Hydration
 listeners are separate capture-phase listeners per root, covering the
 discrete/continuous sets plus focus and enter/leave events, so interacting
-with dehydrated content triggers its hydration at input priority.
+with dehydrated content triggers its hydration at input priority. Once a root
+has no remaining dehydrated Suspense boundaries, the host tears down those
+capture listeners and clears the selective-hydration callback.
 
 ## Mismatch Policy
 

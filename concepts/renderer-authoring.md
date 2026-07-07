@@ -16,9 +16,11 @@ assets). There are no mode flags (`supportsMutation`/`supportsPersistence`),
 no host-context push/pop — `createInstance(type, props, parent)` receives the
 parent directly (how fig-dom resolves SVG/MathML namespaces) — and no
 `prepareForCommit`/`getPublicInstance`/microtask hooks. Hydration is five
-optional methods around a host-owned `DehydratedSuspenseBoundary` type, which
-keeps marker parsing in the renderer package where the markup knowledge
-lives.
+optional boundary methods around a host-owned `DehydratedSuspenseBoundary`
+type, plus an optional `completeRootHydration(container)` lifecycle callback
+for tearing down host-side hydration state once no dehydrated Suspense
+boundaries remain. Marker parsing stays in the renderer package where the
+markup knowledge lives.
 
 ## Root API
 

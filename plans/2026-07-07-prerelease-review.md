@@ -4,14 +4,14 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 11 major, 44 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 10 major, 44 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
 ## Contents
 
 - [Confirmed critical (0)](#confirmed-critical)
-- [Confirmed major (11)](#confirmed-major)
+- [Confirmed major (10)](#confirmed-major)
 - [Confirmed minor (44)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
@@ -22,23 +22,7 @@ No open confirmed critical findings remain.
 
 ## Confirmed major
 
-### 1. Hydrated roots pay a full fiber-tree walk plus a WeakMap allocation on every DOM event forever, because the hydrate callback and ~30 capture hydration listeners are never removed after hydration completes.
-
-- **Location:** `packages/fig-dom/src/events.ts:547`
-- **Severity:** major
-- **Reviewer:** fig-dom:performance
-
-registerRoot (events.ts:222) stores record.hydrate and ensureHydrationListeners (events.ts:530) adds a permanent capture listener for every type in hydrationEvents (~30 types, including continuous mousemove/pointermove/scroll/wheel that fire at 60-120Hz). Nothing ever clears record.hydrate or removes these listeners except unregisterRoot at unmount. So after hydration is fully complete, every native event still enters hydrateForEvent (events.ts:547): the per-event cache always misses on a fresh event, so it calls hydrate(event.target, priority), which is the reconciler's hydrateTarget (fig-reconciler/src/index.ts:925) -> findDehydratedSuspenseBoundaryForTarget(root.current.child, target) (index.ts:4458), a recursive walk over EVERY fiber in the tree with no short-circuit when zero dehydrated boundaries remain (no boundary counter exists). It then allocates a new WeakMap per event (events.ts:563-566) to cache the useless 'none'. On a large app (thousands of fibers), moving the mouse across the page triggers a full O(fiber-count) tree traversal per pointermove event for the lifetime of the app -- pure waste that scales with app size exactly on the highest-frequency input path. Delegated dispatch also re-enters this guard (events.ts:513) for every handled event type. Fix direction: clear record.hydrate and tear down hydration listeners once the root reports no remaining dehydrated boundaries (or short-circuit hydrateTarget on a dehydrated-boundary count).
-
-<details><summary>Verification</summary>
-
-Verified every claim against the code on disk. events.ts: record.hydrate is set only in registerRoot (line 222) and removed only via unregisterRoot at unmount (line 246); ensureHydrationListeners (line 530) attaches 28 permanent capture listeners (hydrationEvents = 19 discrete + mousemove/pointermove/scroll/wheel/touchmove/drag/dragover + mouseenter/mouseleave). hydrateForEvent (line 547) misses its per-Event WeakMap cache on every fresh event, calls hydrate(), and allocates a new inner WeakMap per event (lines 563-566). The hydrate callback is reconciler hydrateTarget (index.ts:925) -> findDehydratedSuspenseBoundaryForTarget (index.ts:4457), a recursive child+sibling walk over the entire fiber tree with no dehydrated-boundary counter or short-circuit; the DOM host defines isTargetWithinSuspenseBoundary (fig-dom index.ts:236) so the early bail does not fire. No NODE_ENV gate, no teardown mechanism, no test pinning teardown, and concepts/hydration.md documents the listeners without any post-hydration lifecycle — so it is not handled elsewhere or an intentional documented tradeoff. Only hydrated roots are affected (createRoot passes no hydrate callback), but that is the primary SSR mode. Per-fiber work is a cheap property check and the delegated-dispatch re-entry hits the cache, so it will not jank small apps — but an O(fiber-count) walk plus a per-event allocation on 60-120Hz continuous events for the app's lifetime, unbounded in tree size, is a genuine systemic hot-path regression versus React's O(depth) upward walk. Major stands.
-
-</details>
-
----
-
-### 2. commitLiveHookInstances walks the entire fiber tree (including adopted/bailed-out subtrees) and every hook chain on every commit
+### 1. commitLiveHookInstances walks the entire fiber tree (including adopted/bailed-out subtrees) and every hook chain on every commit
 
 - **Location:** `packages/fig-reconciler/src/index.ts:3096`
 - **Severity:** major
@@ -54,7 +38,7 @@ Verified every claim against packages/fig-reconciler/src/index.ts as it exists: 
 
 ---
 
-### 3. commitExternalStores re-scans every fiber's hook chain in the whole tree and calls getSnapshot per store on every commit
+### 2. commitExternalStores re-scans every fiber's hook chain in the whole tree and calls getSnapshot per store on every commit
 
 - **Location:** `packages/fig-reconciler/src/index.ts:4653`
 - **Severity:** major
@@ -70,7 +54,7 @@ Confirmed against packages/fig-reconciler/src/index.ts as it exists on disk. (1)
 
 ---
 
-### 4. readContext is an O(provider-depth) return-chain walk per call instead of an O(1) render-time provider stack
+### 3. readContext is an O(provider-depth) return-chain walk per call instead of an O(1) render-time provider stack
 
 - **Location:** `packages/fig-reconciler/src/index.ts:2767`
 - **Severity:** major
@@ -86,7 +70,7 @@ Verified against the code on disk. `readContextValue` (packages/fig-reconciler/s
 
 ---
 
-### 5. Build-time hook signatures record imported custom hooks by name only, so editing a shared hook's internals takes the state-preserving in-place refresh path and crashes with a hook-order error instead of remounting consumers
+### 4. Build-time hook signatures record imported custom hooks by name only, so editing a shared hook's internals takes the state-preserving in-place refresh path and crashes with a hook-order error instead of remounting consumers
 
 - **Location:** `packages/fig-vite/src/transform.ts:173`
 - **Severity:** major
@@ -102,7 +86,7 @@ Traced the full claimed failure path against the code on disk and every link hol
 
 ---
 
-### 6. Suspending siblings under one Suspense boundary render serially (server-side data waterfall): a suspension parks all following siblings behind the suspended child's promise.
+### 5. Suspending siblings under one Suspense boundary render serially (server-side data waterfall): a suspension parks all following siblings behind the suspended child's promise.
 
 - **Location:** `packages/fig-server/src/renderer.ts:560`
 - **Severity:** major
@@ -118,7 +102,7 @@ Confirmed against the code as it exists on disk. (1) packages/fig-server/src/ren
 
 ---
 
-### 7. Falsy events entries are compacted out before index matching, so conditional listeners shift the documented positional identity of every later listener
+### 6. Falsy events entries are compacted out before index matching, so conditional listeners shift the documented positional identity of every later listener
 
 - **Location:** `packages/fig-dom/src/events.ts:736`
 - **Severity:** major
@@ -134,7 +118,7 @@ Verified against events.ts on disk: eventDescriptors (line 736) skips falsy entr
 
 ---
 
-### 8. The published README states Fig does not implement resource/metadata behavior for title/meta/link/script, but fig-dom ships exactly that behavior
+### 7. The published README states Fig does not implement resource/metadata behavior for title/meta/link/script, but fig-dom ships exactly that behavior
 
 - **Location:** `packages/fig-dom/README.md:51`
 - **Severity:** major
@@ -150,7 +134,7 @@ Verified all three legs of the claim. (1) README line 51-52 says Fig "intentiona
 
 ---
 
-### 9. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
+### 8. Fig elements, promises, and client references inside Map/Set prop values error the whole row, contradicting concepts/payload.md, with misleading messages
 
 - **Location:** `packages/fig-server/src/payload.ts:1450`
 - **Severity:** major
@@ -166,7 +150,7 @@ Read serializeValue (payload.ts:1432-1469) and encodePayloadValueInternal (1492-
 
 ---
 
-### 10. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
+### 9. value/checked props are silently dropped on elements without the matching IDL property (custom elements pre-upgrade, attribute-only components) — no attribute fallback.
 
 - **Location:** `packages/fig-dom/src/props.ts:339`
 - **Severity:** major
@@ -182,7 +166,7 @@ Verified every anchor in props.ts as it exists on disk: formProp (line 629) matc
 
 ---
 
-### 11. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
+### 10. Removing the value prop (controlled → uncontrolled transition) live-writes "" and wipes the user's typed input; removing checked force-unchecks the box.
 
 - **Location:** `packages/fig-dom/src/props.ts:377`
 - **Severity:** major

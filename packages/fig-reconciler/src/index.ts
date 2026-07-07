@@ -269,6 +269,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitHydratedSuspenseBoundary?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
+  completeRootHydration?(container: Container): void;
   removeDehydratedSuspenseBoundary?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
@@ -331,6 +332,7 @@ export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
     | "isTargetWithinSuspenseBoundary"
     | "registerSuspenseBoundaryRetry"
     | "commitHydratedSuspenseBoundary"
+    | "completeRootHydration"
     | "removeDehydratedSuspenseBoundary"
   >;
 
@@ -687,6 +689,8 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
   hydratingSuspenseBoundary: Fiber<Container, Instance, TextInstance> | null;
   hydratingActivityBoundary: Fiber<Container, Instance, TextInstance> | null;
+  dehydratedSuspenseCount: number;
+  needsRootHydrationCompletion: boolean;
   nextHydratableInstance: HostNode<Instance, TextInstance> | null;
   clearContainerBeforeCommit: boolean;
   hydrationInitialElement: FigNode | typeof NoHydrationInitialElement;
@@ -836,7 +840,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     roots.set(container as object, root);
     if (hasRefreshHandler()) mountedRoots.add(root);
 
-    if (request.kind === "hydration") root.isHydrating = true;
+    if (request.kind === "hydration") {
+      root.isHydrating = true;
+      root.needsRootHydrationCompletion = true;
+    }
 
     return root;
   }
@@ -886,6 +893,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       hydrationParent: null,
       hydratingSuspenseBoundary: null,
       hydratingActivityBoundary: null,
+      dehydratedSuspenseCount: 0,
+      needsRootHydrationCompletion: false,
       nextHydratableInstance: null,
       clearContainerBeforeCommit: false,
       hydrationInitialElement: NoHydrationInitialElement,
@@ -941,6 +950,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const root = roots.get(container as object);
     if (root === undefined || host.isTargetWithinSuspenseBoundary === undefined)
       return "none";
+    if (root.dehydratedSuspenseCount === 0) return "none";
 
     const boundary = findDehydratedSuspenseBoundaryForTarget(
       root.current.child,
@@ -3232,7 +3242,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
     const boundaries: F[] = [];
-    collectRetriableDehydratedSuspense(root.current.child, boundaries);
+    const dehydratedSuspenseCount = collectDehydratedSuspense(
+      root.current.child,
+      boundaries,
+    );
+    updateDehydratedSuspenseCount(root, dehydratedSuspenseCount);
     if (boundaries.length === 0) return;
 
     queueMicrotask(() => {
@@ -3246,12 +3260,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function collectRetriableDehydratedSuspense(
-    node: F | null,
-    boundaries: F[],
-  ): void {
+  function collectDehydratedSuspense(node: F | null, boundaries: F[]): number {
+    let count = 0;
     walkFiberForest(node, (cursor) => {
       if (cursor.suspenseState?.kind === "dehydrated") {
+        count += 1;
         // A dehydrated boundary has no live children to descend into, but its
         // siblings may be retriable too (e.g. several boundaries inside one
         // revealed Activity), so keep walking the sibling chain.
@@ -3265,6 +3278,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       return true;
     });
+    return count;
+  }
+
+  function updateDehydratedSuspenseCount(root: R, count: number): void {
+    const previous = root.dehydratedSuspenseCount;
+    root.dehydratedSuspenseCount = count;
+    if ((previous > 0 || root.needsRootHydrationCompletion) && count === 0) {
+      root.needsRootHydrationCompletion = false;
+      host.completeRootHydration?.(root.container);
+    }
   }
 
   function dehydratedSuspenseRetryLane(

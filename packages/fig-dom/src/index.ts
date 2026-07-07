@@ -29,6 +29,7 @@ import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { composeBind, resumeBind, suspendBind } from "./bind.ts";
 import {
   type Container,
+  disableRootHydration,
   registerPortalContainer,
   registerRoot,
   removePortalContainer,
@@ -253,6 +254,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     // the boundary.
     removeSuspenseBoundaryRange(boundary);
     queueMicrotask(replayQueuedEvents);
+  },
+  completeRootHydration: (container) => {
+    disableRootHydration(container as Container);
   },
   preparePortalContainer: (container, root, logicalParent) => {
     registerPortalContainer(
