@@ -762,17 +762,29 @@ function attachEventSlot(
   slot: EventSlot,
 ): void {
   if (direct(slot.type)) {
-    attachDirectEventSlot(element, slot);
+    attachDirectEventSlot(element, root, slot);
   } else {
     attachDelegatedEventSlot(root, listenerTarget, slot);
   }
 }
 
-function attachDirectEventSlot(element: Element, slot: EventSlot): void {
-  if (slot.element === element) return;
+function attachDirectEventSlot(
+  element: Element,
+  root: Container | null,
+  slot: EventSlot,
+): void {
+  // The root scopes dispatch (root.data.run and friends), same as the
+  // delegated path. The first attach can run before insertion, when
+  // rootFor() is still null, so a re-attach on the same element refreshes
+  // the root without re-adding the DOM listener.
+  if (slot.element === element) {
+    if (root !== null) slot.root = root;
+    return;
+  }
 
   detachEventSlot(slot);
   slot.element = element;
+  slot.root = root;
   slot.listener = (event) => {
     try {
       dispatchEventSlot(
@@ -889,6 +901,7 @@ function detachDirectEventSlot(slot: EventSlot): void {
   });
   slot.element = null;
   slot.listener = null;
+  slot.root = null;
 }
 
 function detachDelegatedEventSlot(slot: EventSlot): void {

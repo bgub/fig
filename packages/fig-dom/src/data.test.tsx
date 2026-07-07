@@ -127,6 +127,55 @@ describe("@bgub/fig-dom data resources", () => {
     expect(container.textContent).toBe("Grace");
   });
 
+  it("refreshes from direct (non-delegated) event handlers too", async () => {
+    const values = ["Ada", "Grace"];
+    const userResource = dataResource({
+      key: (id: string) => ["focused-user", id],
+      load: () => values.shift() ?? "Unknown",
+    });
+
+    function Profile() {
+      const user = readData(userResource, "one");
+      return createElement(
+        "input",
+        {
+          // focus is non-bubbling, so its listener attaches directly to the
+          // element instead of the delegation root; dispatch must still run
+          // inside the root's data scope for the ambient store to resolve.
+          events: [
+            on("focus", () => {
+              void readDataStore().refreshData(userResource, "one");
+            }),
+          ],
+          value: user,
+        },
+        null,
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Profile, null),
+        ),
+      ),
+    );
+    await delay();
+
+    const input = container.firstChild as FakeElement;
+    expect(input.value).toBe("Ada");
+
+    input.dispatch("focus");
+    await delay();
+
+    expect(input.value).toBe("Grace");
+  });
+
   it("invalidates visible data without replacing it with a fallback", async () => {
     const next = deferred<string>();
     let loads = 0;
