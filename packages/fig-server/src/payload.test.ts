@@ -1051,6 +1051,43 @@ describe("payload rendering", () => {
     expect(refFirst.props.value).toBe(defSecond.props.value);
   });
 
+  it("refreshes boundaries discovered inside retained lazy chunks", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "main", {
+          children: { $fig: "lazy", id: 1 },
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: {
+          $fig: "boundary",
+          child: "initial",
+          id: "slot",
+        },
+      },
+    ]);
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: { children: "initial" },
+      type: "main",
+    });
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: { children: "refreshed" },
+      type: "main",
+    });
+  });
+
   it("preserves cyclic objects in rendered client props", async () => {
     const Viewer = clientReference<{ value: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",

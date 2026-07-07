@@ -41,6 +41,7 @@ import {
   isSuspense,
   isValidElement,
 } from "./internal.ts";
+import { jsx } from "./jsx-runtime.ts";
 
 describe("@bgub/fig", () => {
   it("creates elements with keys and normalized children", () => {
@@ -50,6 +51,16 @@ describe("@bgub/fig", () => {
     expect(element.type).toBe("div");
     expect(element.key).toBe("a");
     expect(element.props).toEqual({ id: "root", children: ["hello", 1] });
+  });
+
+  it("extracts keys from automatic-runtime props", () => {
+    const element = jsx("div", { id: "root", key: "spread-key" });
+    const explicit = jsx("div", { key: "spread-key" }, "explicit-key");
+
+    expect(element.key).toBe("spread-key");
+    expect(element.props).toEqual({ id: "root" });
+    expect(explicit.key).toBe("explicit-key");
+    expect(explicit.props).toEqual({});
   });
 
   it("supports fragments as element types", () => {

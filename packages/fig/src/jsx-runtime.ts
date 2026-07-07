@@ -14,6 +14,16 @@ export function jsx(
   props: JSXProps | null,
   key?: string | number,
 ): FigElement {
+  if (props !== null && "key" in props) {
+    const { key: propsKey, ...rest } = props;
+    return {
+      $$typeof: FigElementSymbol,
+      type,
+      key: key ?? (propsKey as Key | null | undefined) ?? null,
+      props: rest,
+    };
+  }
+
   return {
     $$typeof: FigElementSymbol,
     type,

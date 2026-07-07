@@ -463,6 +463,47 @@ describe("@bgub/fig-dom activity", () => {
     expect(container.textContent).toBe("tab");
   });
 
+  it("client-renders after a mismatch inside a dehydrated Activity", async () => {
+    const recovered: string[] = [];
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        Activity,
+        { mode },
+        createElement("div", null, "client text"),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const template = new FakeElement("template");
+    template.setAttribute("data-fig-activity", "");
+    const span = new FakeElement("span");
+    span.appendChild(new FakeText("server text"));
+    template.appendChild(span);
+    container.appendChild(template);
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, createElement(App, null), {
+        onRecoverableError: (error) =>
+          recovered.push(
+            error instanceof Error ? error.message : String(error),
+          ),
+      }),
+    );
+    await delay();
+
+    expect(() => flushSync(() => setMode?.("visible"))).not.toThrow();
+    await delay();
+
+    expect(container.textContent).toBe("client text");
+    expect(
+      recovered.some((message) => message.includes("Hydration mismatch")),
+    ).toBe(true);
+  });
+
   it("unpacks real template content before binding hydrated children", async () => {
     let childRenders = 0;
     let clicks = 0;

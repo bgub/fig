@@ -1014,10 +1014,22 @@ class PayloadResponseImpl implements PayloadResponse {
     if (rootModel === undefined || rootModel === null) return [];
 
     const active = new Set<string>();
+    const visitedChunks = new Set<number>();
     const models: PayloadModel[] = [rootModel];
     const entries: BoundaryModelEntry[] = [];
 
     for (let index = 0; index < models.length; index += 1) {
+      const chunkIds = new Set<number>();
+      collectReferencedChunkIds(models[index] as PayloadModel, chunkIds);
+      for (const id of chunkIds) {
+        if (visitedChunks.has(id)) continue;
+        visitedChunks.add(id);
+        const chunk = this.chunks.get(id);
+        if (chunk?.model !== null && chunk?.model !== undefined) {
+          models.push(chunk.model);
+        }
+      }
+
       const ids = new Set<string>();
       collectBoundaryIds(models[index] as PayloadModel, ids);
       for (const id of ids) {

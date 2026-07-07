@@ -48,6 +48,28 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("rejects render after unmount without unregistering a newer root", () => {
+    const container = new FakeElement("root");
+    const first = createRoot(container as unknown as Element);
+
+    flushSync(() => first.render(createElement("main", null, "first")));
+    first.unmount();
+
+    expect(() => first.render(createElement("main", null, "stale"))).toThrow(
+      "Cannot update an unmounted root.",
+    );
+
+    const second = createRoot(container as unknown as Element);
+    flushSync(() => second.render(createElement("main", null, "second")));
+
+    first.unmount();
+
+    expect(() => createRoot(container as unknown as Element)).toThrow(
+      "Cannot call createRoot on a container that already has a Fig root.",
+    );
+    expect(container.textContent).toBe("second");
+  });
+
   it("flushes sync work before returning", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
@@ -158,6 +180,47 @@ describe("@bgub/fig-dom", () => {
       href: "/app.css",
       rel: "stylesheet",
     });
+  });
+
+  it("inserts keyed siblings before hoisted asset fibers", () => {
+    const { container, head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "div",
+          null,
+          createElement("link", {
+            href: "/app.css",
+            key: "asset",
+            rel: "stylesheet",
+          }),
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+
+    expect(() =>
+      flushSync(() =>
+        root.render(
+          createElement(
+            "div",
+            null,
+            createElement("p", { key: "content" }, "hi"),
+            createElement("link", {
+              href: "/app.css",
+              key: "asset",
+              rel: "stylesheet",
+            }),
+          ),
+        ),
+      ),
+    ).not.toThrow();
+
+    const div = container.childNodes[0] as FakeElement;
+    expect(div.textContent).toBe("hi");
+    expect(head.childNodes).toHaveLength(1);
   });
 
   it("removes document metadata from the head with its last owner", () => {

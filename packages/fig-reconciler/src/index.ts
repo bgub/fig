@@ -906,17 +906,27 @@ export function createRenderer<Container, Instance, TextInstance>(
   function noop(): void {}
 
   function rootHandle(root: R): FigRoot {
+    let unmounted = false;
     return {
       data: root.dataStore,
-      render: (children) => updateRoot(root, children),
+      render: (children) => {
+        if (unmounted) {
+          throw new Error("Cannot update an unmounted root.");
+        }
+        updateRoot(root, children);
+      },
       unmount: () => {
+        if (unmounted) return;
+        unmounted = true;
         // Tear the tree down synchronously so per-fiber data cleanup runs while
         // the store is still live; dispose is then the final teardown step.
         flushSync(() => updateRoot(root, null));
         root.dataStore.dispose();
         // Free the container so a later createRoot/render starts a fresh root
         // instead of reusing this one's now-disposed store.
-        roots.delete(root.container as object);
+        if (roots.get(root.container as object) === root) {
+          roots.delete(root.container as object);
+        }
         mountedRoots.delete(root);
       },
     };
@@ -1273,7 +1283,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function handleThrownValue(node: F, error: unknown): F | null {
     const root = rootOf(node);
-    if (root.hydratingActivityBoundary !== null) abandonActivityHydration(root);
+    if (root.hydratingActivityBoundary !== null) {
+      abandonActivityHydration(root, error instanceof HydrationMismatchError);
+    }
 
     if (isThenable(error)) {
       const boundary = findSuspenseBoundary(node);
@@ -2113,9 +2125,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.isHydrating = false;
   }
 
-  // Any throw while hydrating a dehydrated Activity abandons the attempt:
-  // the boundary stays dehydrated and a later render retries cleanly.
-  function abandonActivityHydration(root: R): void {
+  // Any throw while hydrating a dehydrated Activity abandons the attempt. For
+  // mismatches, clear the dehydrated template before root recovery so the
+  // forced client render cannot recurse into the same failed hydration.
+  function abandonActivityHydration(root: R, forceClientRender = false): void {
+    if (forceClientRender) {
+      const state = root.hydratingActivityBoundary?.activityState;
+      if (state !== undefined && state !== null) state.dehydrated = null;
+    }
     deactivateHydration(root);
   }
 
@@ -3865,7 +3882,9 @@ export function createRenderer<Container, Instance, TextInstance>(
         cursor = cursor.child;
       }
 
-      if ((cursor.flags & PlacementFlag) === 0) return hostNode(cursor);
+      if ((cursor.flags & PlacementFlag) === 0 && !isHoistedFiber(cursor)) {
+        return hostNode(cursor);
+      }
     }
   }
 
