@@ -222,9 +222,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     const display = style.display;
     (instance as HTMLElement).style.setProperty(
       "display",
-      typeof display === "string" || typeof display === "number"
-        ? String(display)
-        : "",
+      typeof display === "string" ? display : "",
     );
     resumeBind(instance);
   },

@@ -3,7 +3,12 @@ import {
   type HydrationTargetResult,
   runWithEventPriority,
 } from "@bgub/fig-reconciler";
-import { isElementNode, isEmptyPropValue, parentOf } from "./tree.ts";
+import {
+  elementName,
+  isElementNode,
+  isEmptyPropValue,
+  parentOf,
+} from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
 export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
@@ -314,7 +319,7 @@ export function on(
 
 export function updateEvents(element: Element, value: unknown): void {
   const slots = eventSlotsFor(element);
-  const descriptors = eventDescriptors(value);
+  const descriptors = eventDescriptors(value, elementName(element));
   let location: EventLocation | null = null;
 
   for (let index = 0; index < descriptors.length; index += 1) {
@@ -769,7 +774,10 @@ function abortEventSlot(slot: EventSlot): void {
   slot.controller = null;
 }
 
-function eventDescriptors(value: unknown): Array<EventDescriptor | undefined> {
+function eventDescriptors(
+  value: unknown,
+  elementType: string,
+): Array<EventDescriptor | undefined> {
   if (isEmptyPropValue(value)) return [];
   if (Array.isArray(value)) {
     const descriptors: Array<EventDescriptor | undefined> = [];
@@ -779,15 +787,20 @@ function eventDescriptors(value: unknown): Array<EventDescriptor | undefined> {
         continue;
       }
       if (!isEventDescriptor(item)) {
-        throw new Error(
-          "The events prop must be an array of event descriptors.",
-        );
+        throwInvalidEventsProp(elementType);
       }
       descriptors.push(item);
     }
     return descriptors;
   }
-  throw new Error("The events prop must be an array of event descriptors.");
+  throwInvalidEventsProp(elementType);
+}
+
+function throwInvalidEventsProp(elementType: string): never {
+  const target = elementType === "" ? "an element" : `<${elementType}>`;
+  throw new Error(
+    `The events prop on ${target} must be an array of event descriptors created with on(type, callback).`,
+  );
 }
 
 function isEventDescriptor(value: unknown): value is EventDescriptor {

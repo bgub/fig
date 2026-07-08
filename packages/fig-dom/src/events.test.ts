@@ -318,6 +318,34 @@ describe("@bgub/fig-dom events", () => {
     ]);
   });
 
+  it("explains invalid event descriptor props with element context", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const props: Record<string, unknown> = {
+      events: [() => undefined],
+    };
+
+    expect(() =>
+      flushSync(() => root.render(createElement("button", props))),
+    ).toThrow(
+      "The events prop on <button> must be an array of event descriptors created with on(type, callback).",
+    );
+  });
+
+  it("explains non-array event props with element context", () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const props: Record<string, unknown> = {
+      events: () => undefined,
+    };
+
+    expect(() =>
+      flushSync(() => root.render(createElement("section", props))),
+    ).toThrow(
+      "The events prop on <section> must be an array of event descriptors created with on(type, callback).",
+    );
+  });
+
   it("dispatches capture and bubble events in order", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");

@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 14 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 9 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (14)](#confirmed-minor)
+- [Confirmed minor (9)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -25,86 +25,6 @@ No open confirmed critical findings remain.
 No open confirmed major findings remain.
 
 ## Confirmed minor
-
-### 14. Every refresh row wipes the decoded cache of ALL chunks, forcing a full re-decode and full client re-render of the entire payload tree per refresh.
-
-- **Location:** `packages/fig-server/src/payload.ts:769`
-- **Severity:** minor
-- **Reviewer:** fig-server:performance
-
-processRow's refresh branch calls this.invalidateDecodeCaches(), which clears decodedBoundaries and sets hasDecoded=false/decoded=undefined on every chunk in this.chunks (lines 824-830). The next render after notify() re-decodes every model row via readChunk (line 905-908), allocating a fresh element tree with new identities for the whole app, so the reconciler bailout that the readChunk comment and concepts/payload.md line 111 promise ('Decoded chunks are memoized so unchanged subtrees bail out of re-renders') is defeated on exactly the hot path refreshes create: a polling PayloadBoundary refreshing every second re-decodes and re-renders the entire payload-rendered app each tick, with cost proportional to total app size rather than the refreshed boundary's size. Only chunks/boundaries reachable from the refreshed boundary's old and new models need invalidation; graph objectRefs already keep shared values stable, so scoped invalidation preserves the documented 'fresh structure for refreshed boundaries' rationale at O(boundary) cost.
-
-<details><summary>Verification</summary>
-
-Confirmed the mechanics against disk: payload.ts:769 refresh branch calls invalidateDecodeCaches() which wipes decodedBoundaries and every chunk's decoded cache (824-830); the next render re-decodes all chunks (readChunk 905-908) with fresh element identities (tree children are serialized with preserveIdentity=false, so only prop-value elements keep graph-id identity), producing an O(app) re-decode + full render-phase pass per refresh. However, the finding is heavily overclaimed: (1) it is documented spec behavior — concepts/payload.md lines 112-113 (the sentence right after the line the reviewer quotes) explicitly say refresh rows clear decoded tree caches, and concepts/ is the repo's authoritative spec, with the mechanism deliberately reworked in the branch's two most recent commits and pinned by tests (payload.test.ts:909, :1330); (2) the wipe is correctness-load-bearing: Fig's reconciler bails on element-identity equality (fig-reconciler/src/index.ts:1737 canBailout props === alternate.memoizedProps, with begin() adopting whole clean subtrees), and PayloadBoundarySlot has no own subscription, so keeping ancestor chunk caches would make the refresh never render — the reviewer's proposed fix (invalidate only chunks reachable FROM the refreshed boundary's models) is downward reachability and would break refresh entirely; a real O(boundary) refresh needs a design change (per-slot lane subscription or reverse chunk-contains-boundary tracking). The residual truth is a documented, intentional per-refresh cost ceiling (render-phase only, no DOM mutations for unchanged content, graph refs keep shared values stable), worth noting as a known tradeoff but not a defect. Severity downgraded from major to minor.
-
-</details>
-
----
-
-### 17. The JSON payload decoder rescans the entire accumulated buffer from offset 0 on every incoming network chunk while a row spans chunks, giving O(rowSize²/chunkSize) scanning for large rows.
-
-- **Location:** `packages/fig-server/src/payload.ts:421`
-- **Severity:** minor
-- **Reviewer:** fig-server:performance
-
-createJsonPayloadDecoder.decode does `buffer += decoder.decode(chunk)` then processBufferedLines(), whose local `start` resets to 0 each call; when the buffer contains no newline yet (a single large model/data row split across many transport chunks), `buffer.indexOf('\n', start)` re-scans all previously-scanned bytes on every chunk. A multi-megabyte data-hydration row arriving in 64KB chunks scans hundreds of megabytes of characters in total. This is the default codec in production (options.codec ?? jsonPayloadCodec on both ends). Persisting the scanned offset across decode() calls (e.g., a `searchStart` field reset when the buffer is sliced) makes it linear.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-server/src/payload.ts as it exists: createJsonPayloadDecoder (lines 410-454) appends each chunk to `buffer` and calls processBufferedLines, whose scan offset `start` is a local reset to 0 on every call; when the buffer holds no newline yet, `buffer.indexOf("\n", 0)` at line 421 rescans all previously scanned bytes on every subsequent chunk, giving O(rowSize²/chunkSize) scanning for a single row spanning many transport chunks. No mitigations exist: jsonPayloadCodec is the production default on both ends (`options.codec ?? jsonPayloadCodec` at lines 570 and 669), there is no NODE_ENV gate, concepts/payload.md confirms no other built-in codec ships, processPayloadStream feeds raw transport chunks directly into decode, no persisted-offset field exists in the current code, and no test pins linear scanning. Cost is real but bounded: indexOf is a memchr-speed scan, so even a 10MB row in 64KB chunks rescans ~800MB of characters (tens to low hundreds of ms, once per oversized row), with no correctness impact — so the claimed minor severity is accurate.
-
-</details>
-
----
-
-### 19. unhideInstance stringifies numeric style.display, contradicting the string-only style policy and leaving Activity content permanently hidden
-
-- **Location:** `packages/fig-dom/src/index.ts:218`
-- **Severity:** minor
-- **Reviewer:** fig-dom:api-design
-
-The style contract (concepts/jsx.md: 'numeric values are compile errors, matching the runtime's no-px-suffix stance') is enforced by HostStyle typing and by props.ts setStyleProperty (props.ts:571-581 drops numbers with a dev warning). But unhideInstance (index.ts:218-227) special-cases `typeof display === "number"` and writes `String(display)` via style.setProperty. Concrete failure: an element inside an Activity with `style={{display: 5}}` (JS user, or suppressed TS error) — the number is dropped at apply time, hideInstance sets `display: none !important`, and on unhide setProperty("display", "5") is a CSSOM no-op for the invalid value, so `display: none !important` survives and the revealed Activity content stays invisible with no warning. Removing the number branch (fall through to "") would restore the element's stylesheet display and match the rest of the system.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code on disk. (1) packages/fig-dom/src/index.ts:218-227: unhideInstance does have the claimed `typeof display === "string" || typeof display === "number" ? String(display) : ""` branch, and hideInstance (line 214-216) sets `display: none !important`. (2) The string-only style policy is real: HostStyle is `Readonly<Record<string, string | EmptyPropValue>>` (jsx-attribute-policy.ts:19), setStyleProperty (props.ts:571-581) drops numbers/bigints with a dev-only warning, and concepts/jsx.md:31 states numeric style values are compile errors — so the number branch in unhideInstance contradicts the rest of the system and can never legally fire under TS. (3) The failure scenario reproduces: I ran happy-dom (the project's DOM test env) — after `setProperty('display','none','important')`, calling `setProperty('display','5')` is a CSSOM no-op (invalid value, per spec 'do nothing'), leaving `display: none !important` intact, while `setProperty('display','')` removes it. So a JS user (or suppressed TS error) with `style={{display: 5}}` inside an Activity gets the number silently dropped at mount, then permanently-hidden content after hide/unhide; falling through to "" (the fix the reviewer proposes) would restore visibility consistently with the drop-at-apply behavior. (4) No existing test pins this: grepped fig-dom src/tests for unhideInstance and numeric display — nothing covers it. Mitigations keep severity at minor: it requires bypassing the type system, a dev warning does fire at mount time about the dropped numeric style (reviewer's 'no warning' is only true in production or at unhide time), and the branch's mere existence is otherwise just a policy inconsistency.
-
-</details>
-
----
-
-### 20. The invalid-events-prop error does not tell users that descriptors come from on(), and throws during commit with no element context
-
-- **Location:** `packages/fig-dom/src/events.ts:738`
-- **Severity:** minor
-- **Reviewer:** fig-dom:api-design
-
-eventDescriptors() throws 'The events prop must be an array of event descriptors.' for both a non-array (`events={handler}`) and a raw function inside the array (`events={[handler]}` — the most likely React-migrant mistake). In the second case the user's value IS an array, so the message reads as satisfied while still throwing; it never mentions that descriptors are created with `on(type, callback)` from @bgub/fig-dom, nor which element/tag carried the bad prop. Because the throw happens in commitUpdate/finalizeInitialInstance (a host commit failure, which per concepts/errors.md ErrorBoundary does not catch), a JS user gets an app-level crash pointing at internal commit frames with no self-serve path. Naming on() (matching the excellent onClick dev warning at props.ts:145-147) and including the element type would fix this cheaply before release.
-
-<details><summary>Verification</summary>
-
-Verified against events.ts:731-747: the identical vague message is thrown for both non-array values and raw functions inside an array (the events={[handler]} migrant mistake), with no mention of on() and no element context; no dev-gated enhancement and no test pins it. Traced the throw paths in fig-reconciler/src/index.ts: the update path (commitUpdate -> commitHostMutation:3451) is a host commit failure that errors.md:19 says ErrorBoundary does not catch, and the mount path (finalizeInitialInstance in complete(), called from completeUnit OUTSIDE performUnit's try/catch at lines 1260-1272) also bypasses boundary capture and lands in performRoot's uncaught path — so the crash-with-no-self-serve-path scenario is real in both mount and update cases. Partial mitigation: onUncaughtError receives ErrorInfo with componentStack, but the default root rethrows from setTimeout with only the bare error. The contrasting high-quality onClick warning at props.ts:145-147 confirms the inconsistency. It is a DX/error-message issue, not a functional bug, so minor is the correct severity.
-
-</details>
-
----
-
-### 22. All subpath entries fail to resolve under legacy TS moduleResolution "node" (node10) — including ./jsx-runtime and ./jsx-dev-runtime
-
-- **Location:** `packages/fig/package.json:24`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-attw against the real pnpm-packed tarballs: node10 resolution is a hard fail (💀) for @bgub/fig/internal, /server, /jsx-runtime, /jsx-dev-runtime, @bgub/fig-dom/refresh, @bgub/fig-reconciler/devtools and /refresh, and @bgub/fig-server/payload, because there is no typesVersions fallback and no physical ./jsx-runtime.js shim. A consumer with "jsx": "react-jsx", "jsxImportSource": "@bgub/fig" but an older tsconfig using moduleResolution "node" gets 'Cannot find module @bgub/fig/jsx-runtime' on their first TSX file. node16/nodenext/bundler are all green, so this only affects legacy configs; acceptable as a deliberate modern-only stance, but worth a line in the README/docs stating moduleResolution bundler|node16 is required.
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig/package.json as it exists: subpaths (./jsx-runtime, ./jsx-dev-runtime, ./internal, ./server) are defined only via the exports map into dist/, files is ["dist"], and there is no typesVersions field in any package and no physical root shims. Reproduced the exact failure with tsc 5.9.3 against the publishable file set (package.json + dist copied into a temp node_modules): with moduleResolution "node", jsx "react-jsx", jsxImportSource "@bgub/fig", compilation fails with TS2875 ("module path '@bgub/fig/jsx-runtime' ... none could be found"), with TS explicitly noting the types exist at dist/jsx-runtime.d.ts but are unreachable under that setting. Switching the same project to moduleResolution "bundler" resolves the module (remaining errors are only missing host-element typings, which live in @bgub/fig-dom by design). No mitigation found: grep shows no moduleResolution guidance in README/docs/concepts. Severity minor is honest: the package is ESM-only (type: module, import-only export conditions, no main), so node10/CJS runtime consumers are already out of scope by design; the affected audience is bundler users with legacy tsconfigs, and the fix is a one-line docs note or typesVersions fallback.
-
-</details>
-
----
 
 ### 23. dist is gitignored but no prepack/prepublishOnly guard exists, so publishing from a stale or missing dist ships silently broken tarballs
 

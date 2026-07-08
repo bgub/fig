@@ -80,6 +80,37 @@ describe("@bgub/fig-dom activity", () => {
     expect(calls).toEqual(["run:0", "abort:0", "run:0", "abort:0", "run:1"]);
   });
 
+  it("removes Activity display override when original display style is invalid", async () => {
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function Child() {
+      const props: Record<string, unknown> = {
+        style: { display: 5 },
+      };
+      return createElement("span", props, "child");
+    }
+
+    function App() {
+      const [mode, set] = useState<"visible" | "hidden">("visible");
+      setMode = set;
+      return createElement(Activity, { mode }, createElement(Child, null));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    root.render(createElement(App, null));
+    await delay();
+
+    const span = container.childNodes[0] as FakeElement;
+    expect(display(span)).toBe("");
+
+    flushSync(() => setMode?.("hidden"));
+    expect(display(span)).toBe("none");
+
+    flushSync(() => setMode?.("visible"));
+    expect(display(span)).toBe("");
+  });
+
   it("defers effects for trees that mount hidden until reveal", async () => {
     const calls: string[] = [];
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;

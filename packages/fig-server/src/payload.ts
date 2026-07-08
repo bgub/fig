@@ -431,29 +431,36 @@ function createJsonPayloadDecoder(
 ): PayloadDecoder {
   const decoder = new TextDecoder();
   let buffer = "";
+  let searchStart = 0;
 
   function processBufferedLines(): void {
-    let start = 0;
+    let lineStart = 0;
     let firstError: unknown;
 
     for (;;) {
-      const newlineIndex = buffer.indexOf("\n", start);
-      if (newlineIndex === -1) break;
+      const newlineIndex = buffer.indexOf("\n", searchStart);
+      if (newlineIndex === -1) {
+        searchStart = buffer.length;
+        break;
+      }
       try {
-        processPayloadLine(buffer.slice(start, newlineIndex), onRow);
+        processPayloadLine(buffer.slice(lineStart, newlineIndex), onRow);
       } catch (error) {
         firstError ??= error;
       }
-      start = newlineIndex + 1;
+      lineStart = newlineIndex + 1;
+      searchStart = lineStart;
     }
 
-    buffer =
-      firstError === undefined
-        ? start === 0
-          ? buffer
-          : buffer.slice(start)
-        : "";
-    if (firstError !== undefined) throw firstError;
+    if (firstError !== undefined) {
+      buffer = "";
+      searchStart = 0;
+      throw firstError;
+    }
+    if (lineStart > 0) {
+      buffer = buffer.slice(lineStart);
+      searchStart -= lineStart;
+    }
   }
 
   return {
@@ -466,6 +473,7 @@ function createJsonPayloadDecoder(
       if (buffer.length > 0) {
         const line = buffer;
         buffer = "";
+        searchStart = 0;
         processPayloadLine(line, onRow);
       }
     },
@@ -816,7 +824,7 @@ class PayloadResponseImpl implements PayloadResponse {
     if (row.tag === "refresh") {
       const revision = this.claimModelRevision();
       this.boundaries.set(row.boundary, { model: row.value, revision });
-      this.invalidateDecodeCaches();
+      this.invalidateDecodeCachesForBoundary(row.boundary);
       this.decodedBoundaries.set(
         row.boundary,
         this.decodeModelAtRevision(row.value, revision) as FigNode,
@@ -868,11 +876,22 @@ class PayloadResponseImpl implements PayloadResponse {
     };
   }
 
-  private invalidateDecodeCaches(): void {
-    this.decodedBoundaries.clear();
+  private invalidateDecodeCachesForBoundary(id: string): void {
+    for (const boundaryId of this.decodedBoundaries.keys()) {
+      const entry = this.currentBoundaryEntry(boundaryId);
+      if (
+        boundaryId === id ||
+        (entry !== undefined && this.modelCanReachBoundary(entry.model, id))
+      ) {
+        this.decodedBoundaries.delete(boundaryId);
+      }
+    }
+
     for (const chunk of this.chunks.values()) {
-      chunk.decoded = undefined;
-      chunk.hasDecoded = false;
+      if (chunk.model !== null && this.modelCanReachBoundary(chunk.model, id)) {
+        chunk.decoded = undefined;
+        chunk.hasDecoded = false;
+      }
     }
   }
 
@@ -1097,6 +1116,41 @@ class PayloadResponseImpl implements PayloadResponse {
     for (const entry of this.initialBoundaries.values()) {
       noteMaxObjectIds(this, entry.model);
     }
+  }
+
+  private modelCanReachBoundary(model: PayloadModel, id: string): boolean {
+    const models: PayloadModel[] = [model];
+    const visitedBoundaries = new Set<string>();
+    const visitedChunks = new Set<number>();
+
+    for (let index = 0; index < models.length; index += 1) {
+      const current = models[index];
+      if (current === undefined) continue;
+
+      const boundaryIds = new Set<string>();
+      collectBoundaryIds(current, boundaryIds);
+      if (boundaryIds.has(id)) return true;
+
+      for (const boundaryId of boundaryIds) {
+        if (visitedBoundaries.has(boundaryId)) continue;
+        visitedBoundaries.add(boundaryId);
+        const entry = this.currentBoundaryEntry(boundaryId);
+        if (entry !== undefined) models.push(entry.model);
+      }
+
+      const chunkIds = new Set<number>();
+      collectReferencedChunkIds(current, chunkIds);
+      for (const chunkId of chunkIds) {
+        if (visitedChunks.has(chunkId)) continue;
+        visitedChunks.add(chunkId);
+        const chunk = this.chunks.get(chunkId);
+        if (chunk?.model !== null && chunk?.model !== undefined) {
+          models.push(chunk.model);
+        }
+      }
+    }
+
+    return false;
   }
 
   private activeBoundaryEntries(): BoundaryModelEntry[] {

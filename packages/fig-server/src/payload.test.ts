@@ -35,6 +35,7 @@ import {
   PAYLOAD_BOUNDARY_HEADER,
   PayloadBoundary,
   PayloadFetchError,
+  type PayloadRow,
   type PayloadClientReferenceMetadata,
   type PayloadFetch,
   renderToPayloadStream,
@@ -1117,6 +1118,92 @@ describe("payload rendering", () => {
     expect(refFirst.props.value).toBe(defSecond.props.value);
   });
 
+  it("keeps decoded unrelated lazy chunks cached after boundary refreshes", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "main", {
+          children: [
+            { $fig: "lazy", id: 1 },
+            { $fig: "boundary", child: "initial", id: "slot" },
+          ],
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(2, "aside", { children: "Unrelated" }),
+      },
+    ]);
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: [
+          { props: { children: "Unrelated" }, type: "aside" },
+          "initial",
+        ],
+      },
+      type: "main",
+    });
+
+    const chunks = (
+      response as unknown as {
+        chunks: Map<number, { hasDecoded: boolean }>;
+      }
+    ).chunks;
+    expect(chunks.get(1)?.hasDecoded).toBe(true);
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    expect(chunks.get(1)?.hasDecoded).toBe(true);
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: [
+          { props: { children: "Unrelated" }, type: "aside" },
+          "refreshed",
+        ],
+      },
+      type: "main",
+    });
+  });
+
+  it("invalidates decoded ancestor boundaries when a nested boundary refreshes", () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, [
+      {
+        id: 0,
+        tag: "model",
+        value: {
+          $fig: "boundary",
+          child: graphElement(1, "main", {
+            children: { $fig: "boundary", child: "initial", id: "slot" },
+          }),
+          id: "outer",
+        },
+      },
+    ]);
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: { children: "initial" },
+      type: "main",
+    });
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(response, [
+      { boundary: "slot", tag: "refresh", value: "refreshed" },
+    ]);
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: { children: "refreshed" },
+      type: "main",
+    });
+  });
+
   it("refreshes boundaries discovered inside retained lazy chunks", () => {
     const response = createPayloadResponse();
     processTestPayloadRows(response, [
@@ -1383,6 +1470,27 @@ describe("payload rendering", () => {
     ).rejects.toThrow(
       'Payload codec mismatch: response used "json" but this client expects "custom".',
     );
+  });
+
+  it("decodes JSON payload rows split across many chunks", () => {
+    const rows: PayloadRow[] = [];
+    const decoder = jsonPayloadCodec.createDecoder((row) => {
+      rows.push(row);
+    });
+    const row: PayloadRow = {
+      id: 0,
+      tag: "model",
+      value: "x".repeat(2000),
+    };
+    const encoded = JSON.stringify(row) + "\n";
+    const encoder = new TextEncoder();
+
+    for (let index = 0; index < encoded.length; index += 17) {
+      decoder.decode(encoder.encode(encoded.slice(index, index + 17)));
+    }
+    decoder.flush();
+
+    expect(rows).toEqual([row]);
   });
 
   it("keeps Fig context available while rendering server components", async () => {
