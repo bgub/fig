@@ -13,11 +13,11 @@ signatures — that is what gives consumers semver protection).
 
 - `@bgub/fig` — the component model: elements and the JSX runtime, components
   (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`), hooks, the
-  read verbs (`readContext`, `readPromise`, `readData`), `transition`, `lazy`,
-  `clientReference`, asset-resource creators, and the data layer —
-  `dataResource`, the freshness verbs, and the store implementation (which
-  stays out of data-free bundles; see the lazy store installation protocol
-  below). The `./server` subpath is the server-file authoring entry
+  read verbs (`readContext`, `readPromise`, `readData`), `transition`,
+  `isValidElement`, `lazy`, `clientReference`, asset-resource creators, and
+  the data layer — `dataResource`, the freshness verbs, and the store
+  implementation (which stays out of data-free bundles; see the lazy store
+  installation protocol below). The `./server` subpath is the server-file authoring entry
   (`serverDataResource`); its packaging transform ships as `figData` in
   `@bgub/fig-vite` (version-synced — build-time skew is benign, runtime
   symbol skew is not).

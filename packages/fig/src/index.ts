@@ -42,6 +42,7 @@ export {
   type FigPortal,
   type FigText,
   Fragment,
+  isValidElement,
   type Key,
   type LazyLoader,
   lazy,

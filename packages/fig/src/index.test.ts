@@ -9,6 +9,7 @@ import {
   ErrorBoundary,
   Fragment,
   font,
+  isValidElement,
   lazy,
   meta,
   modulepreload,
@@ -39,7 +40,6 @@ import {
   isErrorBoundary,
   isPortal,
   isSuspense,
-  isValidElement,
 } from "./internal.ts";
 import { jsx } from "./jsx-runtime.ts";
 
@@ -48,6 +48,7 @@ describe("@bgub/fig", () => {
     const element = createElement("div", { key: "a", id: "root" }, "hello", 1);
 
     expect(isValidElement(element)).toBe(true);
+    expect(isValidElement({})).toBe(false);
     expect(element.type).toBe("div");
     expect(element.key).toBe("a");
     expect(element.props).toEqual({ id: "root", children: ["hello", 1] });
