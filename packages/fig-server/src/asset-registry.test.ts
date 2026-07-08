@@ -105,6 +105,26 @@ describe("AssetResourceRegistry", () => {
     ).toBe("");
   });
 
+  it("dedupes explicitly keyed fonts against equivalent keyed preloads", () => {
+    const registry = new AssetResourceRegistry("");
+
+    expect(
+      write(registry, font("/brand.woff2", "font/woff2", { key: "brand" })),
+    ).toBe(
+      '<link rel="preload" href="/brand.woff2" as="font" data-fig-resource-key="brand" type="font/woff2" crossorigin="anonymous">',
+    );
+    expect(
+      write(
+        registry,
+        preload("/brand.woff2", "font", {
+          crossOrigin: "anonymous",
+          key: "brand",
+          type: "font/woff2",
+        }),
+      ),
+    ).toBe("");
+  });
+
   it("keeps the title singleton with explicit keys by replacing it", () => {
     const registry = new AssetResourceRegistry("");
 

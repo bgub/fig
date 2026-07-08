@@ -205,6 +205,11 @@ export function assetResourceKey(resource: FigAssetResource): string {
   // be bypassed into emitting multiple <title> elements (invalid HTML).
   if (resource.kind === "title") return "title";
 
+  // A font is serialized and inserted as <link rel="preload" as="font">, so an
+  // explicit key must also live in the preload key space.
+  if (resource.kind === "font" && resource.key !== undefined)
+    return `preload:${resource.key}`;
+
   if (resource.key !== undefined) return `${resource.kind}:${resource.key}`;
 
   switch (resource.kind) {

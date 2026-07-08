@@ -327,6 +327,33 @@ describe("@bgub/fig", () => {
     ).toBe(true);
   });
 
+  it("schedules hydrated subscribers on the current lane", async () => {
+    const owner = {};
+    const scheduled: Array<[object, string]> = [];
+    let lane = "initial";
+    const resource = dataResource<[string], string>({
+      key: (id) => ["hydrate-lane", id],
+      load: (id) => `loaded-${id}`,
+    });
+    const store = createDataStore<object, string>({
+      getLane: () => lane,
+      schedule: (subscriber, scheduledLane) =>
+        scheduled.push([subscriber, scheduledLane]),
+    });
+
+    expect(store.readData(resource, ["one"], owner)).toBe("loaded-one");
+    store.commitDataDependencies(owner, null);
+
+    lane = "refresh";
+    await store.refreshData(resource, "one");
+    scheduled.length = 0;
+
+    lane = "hydrate";
+    store.hydrate([{ key: ["hydrate-lane", "one"], value: "hydrated" }]);
+
+    expect(scheduled).toEqual([[owner, "hydrate"]]);
+  });
+
   it("does not create entries for unsupported refreshes with no value", async () => {
     const changes: string[] = [];
     const hydrateOnlyResource = dataResource<[string], string>({

@@ -610,6 +610,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.generation += 1;
     entry.invalidationVersion = 0;
     entry.key = key;
+    entry.lane = null;
     entry.refreshError = undefined;
     entry.stale = false;
     entry.status = "fulfilled";
