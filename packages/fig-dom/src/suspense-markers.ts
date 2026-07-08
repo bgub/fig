@@ -146,25 +146,59 @@ export function isWithinSuspenseBoundary(
 ): boolean {
   if (!isNode(target)) return false;
 
-  for (
-    let node = boundary.start.nextSibling as Element | TextLike | null;
-    node !== null && node !== boundary.end;
-    node = node.nextSibling as Element | TextLike | null
-  ) {
-    if (node === target || containsNode(node, target)) return true;
+  const startParent = boundary.start.parentNode;
+  const endParent = boundary.end.parentNode;
+  if (startParent === null && endParent === null) return false;
+
+  for (let node: Node | null = target; node !== null; node = node.parentNode) {
+    if (node === boundary.start || node === boundary.end) return false;
+
+    if (startParent !== null && node.parentNode === startParent) {
+      return isSiblingAfterStartBeforeEnd(
+        node as Element | TextLike,
+        boundary.start,
+        boundary.end,
+      );
+    }
+    if (
+      endParent !== null &&
+      endParent !== startParent &&
+      node.parentNode === endParent
+    ) {
+      return isSiblingBeforeEnd(node as Element | TextLike, boundary.end);
+    }
   }
 
   return false;
 }
 
-function containsNode(parent: Element | TextLike, target: Node): boolean {
-  // Test hosts lack Node.contains; real DOM nodes get the native check.
-  if (typeof parent.contains === "function") return parent.contains(target);
+function isSiblingAfterStartBeforeEnd(
+  node: Element | TextLike,
+  start: Element | TextLike,
+  end: Element | TextLike,
+): boolean {
+  for (
+    let sibling: Node | null = node;
+    sibling !== null;
+    sibling = sibling.previousSibling
+  ) {
+    if (sibling === start) return true;
+    if (sibling === end) return false;
+  }
 
-  for (const child of Array.from(parent.childNodes ?? [])) {
-    if (child === target || containsNode(child as Element | TextLike, target)) {
-      return true;
-    }
+  return false;
+}
+
+function isSiblingBeforeEnd(
+  node: Element | TextLike,
+  end: Element | TextLike,
+): boolean {
+  for (
+    let sibling: Node | null = node;
+    sibling !== null;
+    sibling = sibling.nextSibling
+  ) {
+    if (sibling === end) return true;
   }
 
   return false;

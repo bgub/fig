@@ -80,7 +80,7 @@ export {
 } from "./hooks.ts";
 export {
   type AssetResourceBlocking,
-  type AssetsOptions,
+  type AssetsProps,
   assets,
   type ClientReferenceAssets,
   type CrossOrigin,

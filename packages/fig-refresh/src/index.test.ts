@@ -2,7 +2,6 @@ import type { RefreshUpdate } from "@bgub/fig-reconciler/refresh";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   injectScheduleRefresh,
-  isLikelyComponentType,
   performRefresh,
   register,
   setSignature,
@@ -15,7 +14,7 @@ injectScheduleRefresh((update) => {
 });
 
 function component(label: string): () => string {
-  // Named "Component" so isLikelyComponentType accepts it; distinct identity.
+  // Named "Component" so tests exercise component-like function identities.
   return { Component: () => label }.Component;
 }
 
@@ -80,12 +79,6 @@ describe("@bgub/fig-refresh runtime", () => {
     const family = [...update!.staleFamilies][0];
     expect(family?.current).toBe(v2);
     expect(update?.staleFamilies.has(family!)).toBe(true);
-  });
-
-  it("classifies likely component types by name", () => {
-    expect(isLikelyComponentType(function App() {})).toBe(true);
-    expect(isLikelyComponentType(function helper() {})).toBe(false);
-    expect(isLikelyComponentType(42)).toBe(false);
   });
 
   it("replays refreshes performed before a scheduler is injected", async () => {

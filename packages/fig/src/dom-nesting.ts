@@ -13,6 +13,9 @@ const pAutoClosingTags =
 const headChildren =
   "|base|basefont|bgsound|link|meta|title|noscript|noframes|script|style|template|";
 
+const specialTags =
+  "|address|applet|area|article|aside|base|basefont|bgsound|blockquote|body|br|button|caption|center|col|colgroup|dd|details|dir|div|dl|dt|embed|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hgroup|hr|html|iframe|img|input|keygen|li|link|listing|main|marquee|menu|meta|nav|noembed|noframes|noscript|object|ol|p|param|plaintext|pre|script|section|select|source|style|summary|table|tbody|td|template|textarea|tfoot|th|thead|title|tr|track|ul|wbr|xmp|mi|mo|mn|ms|mtext|annotation-xml|foreignobject|desc|";
+
 export function validateInstanceNesting(
   type: string,
   ancestors: readonly string[],
@@ -158,8 +161,14 @@ function invalidAncestorFor(
     } else if (ancestor === "button") {
       inButtonScope = false;
     }
-    // li/dd/dt auto-closing sees through address, div, and p only.
-    if (ancestor !== "address" && ancestor !== "div" && ancestor !== "p") {
+    // li/dd/dt auto-closing sees through phrasing/formatting wrappers and
+    // address/div/p; other special elements terminate the parser walk.
+    if (
+      tagIn(specialTags, ancestor) &&
+      ancestor !== "address" &&
+      ancestor !== "div" &&
+      ancestor !== "p"
+    ) {
       inListScope = false;
     }
   }

@@ -284,6 +284,13 @@ export interface PayloadCodec {
    */
   readonly id: string;
   readonly contentType: string;
+  /**
+   * Creates a streaming row decoder. The decoder calls `onRow` for each
+   * complete semantic row. If `onRow` throws, the decoder must propagate that
+   * error; when it can already see more complete sibling rows in the same
+   * input chunk, it should process those siblings before rethrowing so
+   * notifications already implied by earlier rows are not lost.
+   */
   createDecoder(onRow: (row: PayloadRow) => void): PayloadDecoder;
   encodeRow(row: PayloadRow): Uint8Array;
 }

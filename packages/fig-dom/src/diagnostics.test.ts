@@ -163,6 +163,21 @@ describe("@bgub/fig-dom diagnostics", () => {
     );
   });
 
+  it("throws on list items auto-closed through phrasing descendants", () => {
+    expectRenderDiagnostic(
+      createElement(
+        "ul",
+        null,
+        createElement(
+          "li",
+          null,
+          createElement("span", null, createElement("li", null, "Nested")),
+        ),
+      ),
+      "Invalid DOM nesting: <li> cannot appear inside <li>.",
+    );
+  });
+
   it("allows list items in a nested list", () => {
     expectValidRender(
       createElement(

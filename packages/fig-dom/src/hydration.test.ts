@@ -7,9 +7,13 @@ import {
   useState,
 } from "@bgub/fig";
 import { prerender, renderToHtml } from "@bgub/fig-server";
+import type { DehydratedSuspenseBoundary } from "@bgub/fig-reconciler";
 import { describe, expect, it } from "vite-plus/test";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
-import { enclosingSuspenseBoundaryStart } from "./suspense-markers.ts";
+import {
+  enclosingSuspenseBoundaryStart,
+  isWithinSuspenseBoundary,
+} from "./suspense-markers.ts";
 import {
   deferred,
   delay,
@@ -2132,6 +2136,50 @@ describe("enclosingSuspenseBoundaryStart", () => {
 
     expect(enclosingSuspenseBoundaryStart(target)).toBe(null);
     expect(enclosingSuspenseBoundaryStart(null)).toBe(null);
+  });
+});
+
+describe("isWithinSuspenseBoundary", () => {
+  it("checks boundary membership by walking target ancestors", () => {
+    const container = new FakeElement("root");
+    const start = new FakeComment("fig:suspense:pending:0");
+    const wrapper = new FakeElement("div");
+    const target = element("button", "Inside");
+    const end = new FakeComment("/fig:suspense");
+    const after = element("span", "After");
+
+    container.appendChild(start);
+    container.appendChild(wrapper);
+    wrapper.appendChild(target);
+    container.appendChild(end);
+    container.appendChild(after);
+
+    const boundary = {
+      end,
+      forceClientRender: false,
+      id: "0",
+      start,
+      status: "pending" as const,
+    } as unknown as DehydratedSuspenseBoundary<Element, Text | Comment>;
+
+    expect(isWithinSuspenseBoundary(target as unknown as Node, boundary)).toBe(
+      true,
+    );
+    expect(isWithinSuspenseBoundary(wrapper as unknown as Node, boundary)).toBe(
+      true,
+    );
+    expect(isWithinSuspenseBoundary(after as unknown as Node, boundary)).toBe(
+      false,
+    );
+    expect(isWithinSuspenseBoundary(start as unknown as Node, boundary)).toBe(
+      false,
+    );
+
+    const adopted = new FakeElement("adopted");
+    adopted.appendChild(start);
+    expect(isWithinSuspenseBoundary(target as unknown as Node, boundary)).toBe(
+      true,
+    );
   });
 });
 

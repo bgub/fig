@@ -11,8 +11,11 @@ A deliberate cleanup of react-reconciler's config, not a clone. The required
 core is six methods (`createInstance`, `createTextInstance`, `insertBefore`,
 `removeChild`, `commitUpdate`, `commitTextUpdate`); everything else is an
 optional capability group enforced at runtime with clear errors when the
-feature is first used (hydration, Activity visibility, portals, hoisted
-assets). There are no mode flags (`supportsMutation`/`supportsPersistence`),
+feature is first used (hydration, Activity visibility, hoisted assets). Portal
+children use the core mutation methods against the explicit target; the
+optional portal hooks are lifecycle notifications for renderers that need to
+prepare or release portal containers. There are no mode flags
+(`supportsMutation`/`supportsPersistence`),
 no host-context push/pop — `createInstance(type, props, parent)` receives the
 parent directly (how fig-dom resolves SVG/MathML namespaces) — and no
 `prepareForCommit`/`getPublicInstance`/microtask hooks. Hydration is five

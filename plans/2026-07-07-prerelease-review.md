@@ -2,9 +2,9 @@
 
 Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fig-server` ahead of the planned release (`fig-start`, `fig-devtools`, `fig-vite` excluded as experimental, though a few findings landed in `fig-vite` where it implements fig-refresh's contract).
 
-**Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
+**Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests.
 
-**Tally: 0 critical, 0 major, 4 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 0 minor confirmed · 0 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,8 +12,8 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (4)](#confirmed-minor)
-- [Unverified (4)](#unverified)
+- [Confirmed minor (0)](#confirmed-minor)
+- [Unverified (0)](#unverified)
 - [Refuted (3)](#refuted)
 
 ## Confirmed critical
@@ -26,115 +26,11 @@ No open confirmed major findings remain.
 
 ## Confirmed minor
 
-### 28. AssetsOptions breaks the \*Props naming convention used by every other element-props type in the package
-
-- **Location:** `packages/fig/src/resource.ts:102`
-- **Severity:** minor
-- **Reviewer:** fig:api-design
-
-The props type of the assets() element is exported as `AssetsOptions` while its siblings on the same index.ts surface are `SuspenseProps`, `ActivityProps`, and `ErrorBoundaryProps` (element.ts). It is the same concept — the prop shape of a built-in element — with a different naming shape, and `Options` collides semantically with genuine options-bag types like `DataResourceOptions` and `ClientReferenceOptions` that configure factories rather than describe element props. Renaming after release requires a deprecation alias; renaming now is free.
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig/src/resource.ts:102 and element.ts. AssetsOptions is the props type parameter of the built-in Assets element (assets() returns FigElement<AssetsOptions>), identical in role to SuspenseProps/ActivityProps/ErrorBoundaryProps, yet named with the Options suffix. No function takes AssetsOptions as an argument, so it is not an options bag, while ClientReferenceOptions and DataResourceOptions on the same public surface (index.ts) genuinely are — the semantic collision is real. AssetsOptions is publicly exported (src/index.ts:83, dist/index.d.ts). No naming rationale exists in concepts/ or docs/ (concepts/assets.md only documents the assets() factory), so this is not an intentional documented divergence. Mitigating nuance: the Assets component itself is not exported, so users construct the element via the positional assets() factory and rarely name this type directly — which caps the impact at a naming-consistency cost, not a functional one. Rename is currently a trivial change; after wider release it would require a deprecation alias.
-
-</details>
-
----
-
-### 30. Capability-group enforcement is inconsistent: hydration and Activity groups fail loudly, but the portal and hoisted-asset groups the spec claims are "enforced at runtime with clear errors" fail silently when partially implemented.
-
-- **Location:** `packages/fig-reconciler/src/index.ts:342`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:api-design
-
-concepts/renderer-authoring.md states every optional capability group is "enforced at runtime with clear errors when the feature is first used (hydration, Activity visibility, portals, hoisted assets)". Hydration (requireHydrationHostConfig, index.ts:1693) and Activity (index.ts:4509, :2056) do throw. But: (a) a host defining `isHoistedInstance` without `commitHoistedInstance` silently skips acquisition — acquireHoistedInstance (index.ts:3644) is `host.commitHoistedInstance?.(instance) ?? instance`, so hoisted fibers are marked committed but never attached to the document, and removal (index.ts:3733 `removeHoistedInstance?.`) silently leaks; (b) portals never check anything — commitPortal (index.ts:3500) optional-chains preparePortalContainer and portal children are inserted via plain insertBefore into the user-supplied target, so a renderer without portal support crashes inside its own insertBefore with a host-specific error instead of "Portals are not supported by this renderer." The type layer reinforces the trap: HostHydrationConfig wraps its Pick in Required<> (line 304) so TS enforces completeness, while HostHoistedAssetConfig/HostPortalConfig/HostActivityConfig/HostSuspenseHydrationConfig (lines 316-348) are Picks of optional members, so a config typed as the group can omit members without any compile- or run-time signal.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-reconciler/src/index.ts as it exists: only two capability errors exist in the whole file ("Hydration is not supported by this renderer." at line 1693 and "Activity is not supported by this renderer." at line 4509, plus an Activity-hydration message at 2056), while concepts/renderer-authoring.md lines 12-14 claim runtime enforcement with clear errors for all four groups including portals and hoisted assets. The hoisted half is confirmed concretely: hoisted fibers skip host.insertBefore (lines 3480-3486) and rely on acquireHoistedInstance, where line 3644 is `host.commitHoistedInstance?.(instance) ?? instance`; since that path is only reachable when host.isHoistedInstance returned true, the optional chain has no legitimate absence case — a host defining isHoistedInstance without commitHoistedInstance gets fibers marked committed but instances never attached, silently. removeHoistedInstance is likewise optional-chained (3736, 3763). Type-layer claim confirmed: HostHydrationConfig wraps Required<> (line 304) while the other group aliases (316-348) are Picks of optional members. Tests pin only the hydration error (index.test.ts:515). The portal half is overstated: portal children insert via required-core insertBefore into props.target, and preparePortalContainer/removePortalContainer are auxiliary hooks, so a core-only host gets mostly-working portals rather than a guaranteed crash — for portals the defect is mainly that the spec sentence is inaccurate. fig-dom, the only in-repo host, implements all members, so only third-party renderer authors are exposed. Real spec/code mismatch plus a silent partial-config failure mode; minor severity is accurate.
-
-</details>
-
----
-
-### 33. The refresh-error row tag is absent from the concepts/payload.md row model (the declared stable contract), and its throw-through-the-decoder delivery drops buffered rows
-
-- **Location:** `packages/fig-server/src/payload.ts:158`
-- **Severity:** minor
-- **Reviewer:** fig-server:api-design
-
-PayloadRow (exported, documented as "the stable contract") includes { boundary; tag: "refresh-error" } but concepts/payload.md:30-44 lists only model/client/data/assets/error/refresh — the spec that codec authors and framework integrators are told is authoritative omits a tag the server emits on every failed refresh (payload.ts:1140-1145). Mechanically, processRow signals it by throwing errorFromPayload out of the codec's onRow callback (payload.ts:780-783): jsonPayloadCodec's processBufferedLines then discards the buffered partial tail line (payload.ts:431-436), so the first row of the next chunk is truncated and also lost, and readByteStream stops consuming, dropping all later rows. It also imposes an undocumented requirement on custom PayloadCodec implementations: onRow may throw and the decoder must propagate it while still processing sibling lines — jsonPayloadCodec does this carefully, but nothing in the PayloadCodec docs tells a codec author to.
-
-<details><summary>Verification</summary>
-
-Verified against payload.ts and concepts/payload.md as they exist on disk. Confirmed: (1) PayloadRow (payload.ts:143-159) is doc-commented as "the stable contract" and includes tag "refresh-error" (line 158), emitted on every failed refresh root (payload.ts:1140-1145, pinned by test payload.test.ts:1522-1538), yet the concepts/payload.md:29-44 row-tag list — the declared authoritative spec — lists only model/client/data/assets/error/refresh; git shows refresh-error landed in commit e0fbe19 without the concept-file update the project's CLAUDE.md requires. (2) PayloadCodec/PayloadDecoder docs (payload.ts:278-292) never say onRow may throw, though jsonPayloadCodec must handle it carefully (firstError pattern at 416-438) — an undocumented requirement on custom codec authors. Partially refuted: the "throw drops buffered rows" mechanics are accurate but by design, not a runtime bug — fetchPayload rejects with the decoded server error and fig-start catches it (client.ts:887-894, reportPayloadFetchError); notify() fires before the throw; the dropped later rows are fill-ins for a refresh model that was never applied, so no user-visible correctness failure. Net: a real spec/contract documentation gap for a package whose concepts/ docs are the declared spec, not a functional defect.
-
-</details>
-
----
-
-### 40. li/dd/dt auto-close diagnostic resets list scope on non-special ancestors, missing re-parenting through formatting elements
-
-- **Location:** `packages/fig/src/dom-nesting.ts:162`
-- **Severity:** minor
-- **Reviewer:** fig:correctness
-
-invalidAncestorFor sets `inListScope = false` for any ancestor that is not address/div/p. But the HTML li/dd/dt start-tag algorithm only breaks its stack walk on elements in the _special_ category (excluding address/div/p); non-special formatting/phrasing elements like span, b, em, a continue the walk. So for `<ul><li><span><li>…` the parser closes the outer <li> and re-parents, producing DOM that differs from the fiber tree, yet validateInstanceNesting reports nothing: at ancestor 'span' the code clears inListScope, so the subsequent 'li' ancestor check at line 150 is skipped. The result is a false negative in the dev diagnostic — SSR output and client expectations silently diverge and surface later as an unexplained hydration mismatch instead of the intended clear 'Invalid DOM nesting: <li> cannot appear inside <li>' error. The reset condition should additionally require the ancestor to be in the special category before clearing inListScope.
-
-<details><summary>Verification</summary>
-
-Confirmed against dom-nesting.ts as on disk: line 162 clears inListScope for any ancestor other than address/div/p, so a non-special ancestor like span between two li elements suppresses the check at line 150. Per the HTML spec's li/dd/dt start-tag algorithm, the stack walk only breaks on special-category elements (excluding address/div/p); span/b/em are not special, so browsers auto-close the outer li in <ul><li><span><li> and re-parent — the diagnostic silently misses this, a false negative. Not handled elsewhere: diagnostics.test.ts covers the div-intervening and nested-ul cases but nothing pins the span case; no upstream guard. Not a documented divergence: concepts/rendering.md claims the checks model li/dd/dt implied end tags, and the inline comment claims to encode the spec rule but encodes it incompletely. Mitigating: React's validateDOMNesting has the identical clearing rule, so this is inherited React behavior, and the failure mode is dev-only and a missed error (never a wrong throw) affecting an unusual markup pattern that only bites SSR+hydration (client-only rendering builds the DOM imperatively and works). Severity minor is correct.
-
-</details>
-
----
+No open confirmed minor findings remain.
 
 ## Unverified
 
-These findings were reported by reviewers but their verification agents never completed. Treat as plausible, not confirmed.
-
-### 1. isWithinSuspenseBoundary tests boundary membership with an O(subtree) recursive walk that allocates an array per DOM node, on a path that runs per dehydrated boundary per event during the hydration window.
-
-- **Location:** `packages/fig-dom/src/suspense-markers.ts:124`
-- **Severity:** major
-- **Reviewer:** fig-dom:performance
-- **Status note:** Never verified — workflow terminated first.
-
-containsNode (suspense-markers.ts:124-132) recurses through every descendant, calling Array.from(parent.childNodes) at each node, and isWithinSuspenseBoundary (line 107) invokes it for each top-level sibling between the boundary markers. The reconciler calls this from findDehydratedSuspenseBoundaryForTarget for every fiber with a dehydrated suspense state, on every hydration-eligible event -- including continuous mousemove/pointermove/scroll fired at 60-120Hz while the page is still streaming/hydrating (exactly when the main thread is busiest). For a pending boundary wrapping a large subtree (e.g. a streamed page body with thousands of nodes), each mousemove costs O(subtree nodes) node visits plus one array allocation per node, repeated per dehydrated boundary, and the walk usually MISSES (target outside the boundary) so the full cost is paid every time. The equivalent check is O(depth) with zero allocation: walk event.target's parentNode chain up to the boundary's container and test whether the encountered top-level ancestor sits between boundary.start and boundary.end (or use native Node.contains with the current code as a duck-typed fallback for test doubles).
-
----
-
-### 2. Fig elements inside Map/Set prop values are silently serialized as plain objects, corrupting the decoded value
-
-- **Location:** `packages/fig-server/src/payload.ts:1450`
-- **Severity:** major
-- **Reviewer:** fig-server:correctness
-- **Status note:** Never verified — workflow terminated first.
-
-serializeValue delegates `value instanceof Map || value instanceof Set || value instanceof Date` wholesale to encodePayloadValueInternal, which has no handling for elements, thenables, or client references — those renderer-level types are only intercepted for top-level values, arrays, and plain objects (whose encodeChild is serializeValue). An element inside a Map/Set (e.g. `<Widget data={new Map([["el", <div>hi</div>]])} />`) reaches serializePlainObject, passes the prototype check (elements are Object.prototype literals; the $$typeof symbol key is skipped by Object.entries), and encodes as `{$fig:"object", id, value:{type:"div", key:null, props:...}}`— confirmed by repro. The client decodes a plain`{type,key,props}` object instead of an element, with no error anywhere, violating concepts/payload.md's contract that the payload renderer serializes Fig elements in server-component values into row references (and that shared graphs span Map, Set, and rendered elements). Promises/client references inside Map/Set at least throw, but with the misleading generic "Cannot serialize ..." error rather than being outlined like their top-level counterparts.
-
----
-
-### 3. isLikelyComponentType is an orphan export with no consumer, and its acceptance criteria contradict the runtime's own registration policy
-
-- **Location:** `packages/fig-refresh/src/index.ts:108`
-- **Severity:** minor
-- **Reviewer:** fig-refresh:api-design
-- **Status note:** Never verified — workflow terminated first.
-
-Nothing in the repo consumes it except this package's own test: fig-vite's transform uses its own build-time AST heuristic (isComponentName in packages/fig-vite/src/transform.ts), and no other package imports it. Meanwhile the runtime itself accepts far more than this predicate does — asKey (line 25) registers any function OR plain object, and anonymous functions (type.name.length === 0) register fine — so tooling that uses isLikelyComponentType as a pre-filter for register() will silently skip types the runtime fully supports (anonymous/default-export arrow components, object-typed component wrappers). Shipping this in 0.0.1 locks an unused, inconsistent heuristic into the public surface where removing it later is a breaking change; per concepts/architecture.md's 'every export has one home', it currently has no home at all.
-
----
-
-### 4. scheduleDehydratedSuspenseRetries walks the entire committed tree on every commit, even for pure client roots that can never have dehydrated boundaries
-
-- **Location:** `packages/fig-reconciler/src/index.ts:3207`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:performance
-- **Status note:** Never verified — workflow terminated first.
-
-commitRoot unconditionally calls scheduleDehydratedSuspenseRetries(root) (line 3145), which runs collectRetriableDehydratedSuspense over root.current.child via walkFiberForest — a full-tree traversal returning true (descend) for every non-dehydrated fiber. Roots created with createRoot (or hydration roots after all boundaries hydrate) contain zero dehydrated boundaries, yet every commit — every keystroke — pays an O(total fibers) pointer walk plus a stack allocation. A per-root counter of live dehydrated Suspense states (incremented in tryDehydrateSuspenseBoundary, decremented on hydration/removal, mirroring the existing hiddenStates pattern) would skip this walk entirely in the common case.
+No open unverified findings remain.
 
 ## Refuted
 

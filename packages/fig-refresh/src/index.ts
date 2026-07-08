@@ -112,12 +112,6 @@ export function performRefresh(): RefreshUpdate | null {
   return update;
 }
 
-export function isLikelyComponentType(type: unknown): boolean {
-  if (typeof type !== "function" || type.name.length === 0) return false;
-  const first = type.name[0] as string;
-  return first === first.toUpperCase() && first !== first.toLowerCase();
-}
-
 function isSignatureStale(prevType: unknown, nextType: unknown): boolean {
   const prevKey = asKey(prevType);
   const nextKey = asKey(nextType);

@@ -99,7 +99,7 @@ export type ClientReferenceAssets =
   | FigAssetResourceList
   | (() => FigAssetResourceList);
 
-export interface AssetsOptions {
+export interface AssetsProps {
   assets: FigAssetResourceList;
   children?: FigNode;
 }
@@ -107,7 +107,7 @@ export interface AssetsOptions {
 export function assets(
   value: FigAssetResourceList,
   children?: FigNode,
-): FigElement<AssetsOptions> {
+): FigElement<AssetsProps> {
   return createElement(Assets, { assets: value }, children);
 }
 

@@ -318,41 +318,50 @@ export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
 > &
   Pick<HostConfig<Container, Instance, TextInstance>, "commitHydratedInstance">;
 
-export type HostActivityConfig<Container, Instance, TextInstance> = Pick<
-  HostConfig<Container, Instance, TextInstance>,
-  | "getActivityBoundary"
-  | "getFirstActivityHydratable"
-  | "commitHydratedActivityBoundary"
-  | "hideInstance"
-  | "unhideInstance"
-  | "hideTextInstance"
-  | "unhideTextInstance"
+export type HostActivityConfig<Container, Instance, TextInstance> = Required<
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    | "getActivityBoundary"
+    | "getFirstActivityHydratable"
+    | "commitHydratedActivityBoundary"
+    | "hideInstance"
+    | "unhideInstance"
+    | "hideTextInstance"
+    | "unhideTextInstance"
+  >
 >;
 
 export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
-  Pick<
-    HostConfig<Container, Instance, TextInstance>,
-    | "getSuspenseBoundary"
-    | "getEnclosingSuspenseBoundaryStart"
-    | "isTargetWithinSuspenseBoundary"
-    | "registerSuspenseBoundaryRetry"
-    | "commitHydratedSuspenseBoundary"
-    | "completeRootHydration"
-    | "removeDehydratedSuspenseBoundary"
+  Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      | "getSuspenseBoundary"
+      | "getEnclosingSuspenseBoundaryStart"
+      | "isTargetWithinSuspenseBoundary"
+      | "registerSuspenseBoundaryRetry"
+      | "commitHydratedSuspenseBoundary"
+      | "completeRootHydration"
+      | "removeDehydratedSuspenseBoundary"
+    >
   >;
 
-export type HostPortalConfig<Container, Instance, TextInstance> = Pick<
-  HostConfig<Container, Instance, TextInstance>,
-  "preparePortalContainer" | "removePortalContainer"
+export type HostPortalConfig<Container, Instance, TextInstance> = Required<
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    "preparePortalContainer" | "removePortalContainer"
+  >
 >;
 
-export type HostHoistedAssetConfig<Container, Instance, TextInstance> = Pick<
-  HostConfig<Container, Instance, TextInstance>,
-  | "isHoistedInstance"
-  | "commitHoistedInstance"
-  | "removeHoistedInstance"
-  | "updateHoistedInstance"
->;
+export type HostHoistedAssetConfig<Container, Instance, TextInstance> =
+  Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      | "isHoistedInstance"
+      | "commitHoistedInstance"
+      | "removeHoistedInstance"
+      | "updateHoistedInstance"
+    >
+  >;
 
 export interface FigRoot {
   data: FigDataStoreHandle;
@@ -711,6 +720,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   needsDataDependencyCommit: boolean;
   needsCaughtBoundaryErrorFlush: boolean;
   isHydrating: boolean;
+  isHydrationRoot: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
   hydratingSuspenseBoundary: Fiber<Container, Instance, TextInstance> | null;
   hydratingActivityBoundary: Fiber<Container, Instance, TextInstance> | null;
@@ -770,6 +780,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         | "commitHydratedActivityBoundary"
       >
     >;
+  type RequiredHoistedAssetHostConfig = HostConfig<
+    Container,
+    Instance,
+    TextInstance
+  > &
+    HostHoistedAssetConfig<Container, Instance, TextInstance>;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -798,6 +814,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
     null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
+  let hoistedAssetHostConfig: RequiredHoistedAssetHostConfig | null = null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -881,6 +898,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (request.kind === "hydration") {
       root.isHydrating = true;
+      root.isHydrationRoot = true;
       root.needsRootHydrationCompletion = true;
     }
 
@@ -932,6 +950,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       needsDataDependencyCommit: false,
       needsCaughtBoundaryErrorFlush: false,
       isHydrating: false,
+      isHydrationRoot: false,
       hydrationParent: null,
       hydratingSuspenseBoundary: null,
       hydratingActivityBoundary: null,
@@ -1911,10 +1930,28 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isHoistedFiber(node: F): boolean {
-    return (
-      node.tag === HostTag &&
-      host.isHoistedInstance?.(String(node.type), node.props) === true
-    );
+    if (node.tag !== HostTag) return false;
+    if (host.isHoistedInstance?.(String(node.type), node.props) !== true) {
+      return false;
+    }
+    requireHoistedAssetHostConfig();
+    return true;
+  }
+
+  function requireHoistedAssetHostConfig(): RequiredHoistedAssetHostConfig {
+    if (hoistedAssetHostConfig !== null) return hoistedAssetHostConfig;
+
+    if (
+      host.isHoistedInstance === undefined ||
+      host.commitHoistedInstance === undefined ||
+      host.removeHoistedInstance === undefined ||
+      host.updateHoistedInstance === undefined
+    ) {
+      throw new Error("Hoisted assets are not supported by this renderer.");
+    }
+
+    hoistedAssetHostConfig = host as RequiredHoistedAssetHostConfig;
+    return hoistedAssetHostConfig;
   }
 
   function renderFunction(node: F): void {
@@ -3483,6 +3520,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
+    if (
+      !root.isHydrationRoot &&
+      root.dehydratedSuspenseCount === 0 &&
+      !root.needsRootHydrationCompletion
+    ) {
+      root.dehydratedBoundaries = new Map();
+      return;
+    }
+
     const boundaries: F[] = [];
     root.dehydratedBoundaries = new Map();
     const dehydratedSuspenseCount = collectDehydratedSuspense(
@@ -3838,11 +3884,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         node.stateNode as TextInstance,
         String(node.props.nodeValue),
       );
-    } else if (
-      node.tag === HostTag &&
-      host.updateHoistedInstance !== undefined &&
-      isHoistedFiber(node)
-    ) {
+    } else if (node.tag === HostTag && isHoistedFiber(node)) {
       commitHoistedUpdate(node);
     } else if (
       (node.flags & HydrationFlag) !== 0 &&
@@ -3869,10 +3911,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitHoistedUpdate(node: F): void {
+    const hoistedHost = requireHoistedAssetHostConfig();
     const previousProps = previousCommittedProps(node);
     const instance = node.stateNode as Instance;
     const next =
-      host.updateHoistedInstance?.(instance, previousProps, node.props) ??
+      hoistedHost.updateHoistedInstance(instance, previousProps, node.props) ??
       instance;
 
     if (next !== instance) {
@@ -3950,8 +3993,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function acquireHoistedInstance(node: F): void {
+    const hoistedHost = requireHoistedAssetHostConfig();
     const instance = node.stateNode as Instance;
-    const resolved = host.commitHoistedInstance?.(instance) ?? instance;
+    const resolved = hoistedHost.commitHoistedInstance(instance) ?? instance;
     if (resolved === instance) return;
 
     // The identity resolved to a shared live instance (e.g. inserted while
@@ -4052,7 +4096,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (node.tag === HostTag && isHoistedFiber(node)) {
       if (node.committedProps !== null) {
-        host.removeHoistedInstance?.(node.stateNode as Instance);
+        requireHoistedAssetHostConfig().removeHoistedInstance(
+          node.stateNode as Instance,
+        );
       }
       return;
     }
@@ -4079,7 +4125,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (child.tag === HostTag && isHoistedFiber(child)) {
         if (child.committedProps !== null && child.stateNode !== null) {
-          host.removeHoistedInstance?.(child.stateNode as Instance);
+          requireHoistedAssetHostConfig().removeHoistedInstance(
+            child.stateNode as Instance,
+          );
         }
         continue;
       }

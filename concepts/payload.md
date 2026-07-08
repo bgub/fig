@@ -23,7 +23,11 @@ and `createDecoder(onRow)`. Fig checks the `codec=` content-type parameter at
 transport boundaries so a client using one codec does not decode a stream from
 another. Codec ids identify implementations, not stable public formats; a
 future binary codec can change its internal byte layout while retaining the
-same row semantics.
+same row semantics. Decoders call `onRow` for each complete semantic row;
+`onRow` may throw, and decoders must propagate that error. If a decoder has
+already buffered more complete sibling rows in the same input chunk, it should
+deliver those rows before rethrowing so row notifications already implied by
+the chunk are not lost.
 
 Payload refreshes use the `x-fig-payload-boundary` header. Ids minted by
 `useId` during payload render use the `fig-pl-` prefix. Row tags:

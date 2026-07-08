@@ -613,6 +613,19 @@ describe("reconciler", () => {
     );
   });
 
+  it("throws a hoisted asset support diagnostic when the group is incomplete", () => {
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      isHoistedInstance: (type) => type === "asset",
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    expect(() =>
+      flushSync(() => root.render(createElement("asset", null))),
+    ).toThrow("Hoisted assets are not supported by this renderer.");
+  });
+
   it("coalesces adjacent text children into one host text node", () => {
     let createdTexts = 0;
     let textUpdates = 0;
