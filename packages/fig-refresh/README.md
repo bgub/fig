@@ -11,6 +11,15 @@ into transformed modules and drives `performRefresh` on hot updates.
 
 See the repository's `concepts/` directory for the underlying contracts.
 
+## Installation
+
+```bash
+pnpm add @bgub/fig-refresh
+```
+
+Fig packages are ESM-only and require Node `^20.19.0 || >=22.12.0` for Node runtime entry
+points.
+
 ## License
 
 MIT

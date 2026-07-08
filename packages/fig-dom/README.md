@@ -8,6 +8,9 @@ Fig DOM renderer.
 pnpm add @bgub/fig-dom
 ```
 
+Fig packages are ESM-only and require Node `^20.19.0 || >=22.12.0` for Node runtime entry
+points.
+
 ## Usage
 
 ```ts

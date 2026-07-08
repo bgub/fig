@@ -125,11 +125,11 @@ describe("AssetResourceRegistry", () => {
     ).toBe("");
   });
 
-  it("keeps the title singleton with explicit keys by replacing it", () => {
+  it("keeps the title singleton by replacing it", () => {
     const registry = new AssetResourceRegistry("");
 
-    registry.register(title("Dashboard", "primary"));
-    registry.register(title("Settings", "secondary"));
+    registry.register(title("Dashboard"));
+    registry.register(title("Settings"));
 
     expect(registry.headHtml()).toBe("<title>Settings</title>");
   });

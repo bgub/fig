@@ -155,10 +155,8 @@ export function preconnect(
   return { ...options, href, kind: "preconnect" };
 }
 
-export function title(value: string, key?: string): TitleResource {
-  return key === undefined
-    ? { kind: "title", value }
-    : { key, kind: "title", value };
+export function title(value: string): TitleResource {
+  return { kind: "title", value };
 }
 
 export function meta(options: Omit<MetaResource, "kind">): MetaResource {

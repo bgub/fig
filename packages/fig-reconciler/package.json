@@ -29,8 +29,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "vp pack",
+    "build": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
     "dev": "vp pack --watch --no-clean",
+    "prepack": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
     "test": "vp test run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
@@ -51,5 +52,8 @@
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

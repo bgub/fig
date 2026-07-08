@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 9 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 4 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (9)](#confirmed-minor)
+- [Confirmed minor (4)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -25,86 +25,6 @@ No open confirmed critical findings remain.
 No open confirmed major findings remain.
 
 ## Confirmed minor
-
-### 23. dist is gitignored but no prepack/prepublishOnly guard exists, so publishing from a stale or missing dist ships silently broken tarballs
-
-- **Location:** `packages/fig/package.json:41`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-All five packages have files:["dist"] with dist in the repo-root .gitignore, and their scripts blocks (e.g. packages/fig/package.json:40-44) define no prepack/prepare/prepublishOnly hook, so `pnpm publish` packs whatever dist happens to be on disk. If dist were missing the tarball would contain only package.json/README/LICENSE and still publish successfully; if stale, it ships code from an older commit with no error. Not currently firing — I verified every dist was rebuilt after HEAD 06e65a5 (mtimes 14:24-14:26 vs commit 14:18 today) and fig-server/dist/payload.js includes the new payload-graph work — but for tomorrow either add "prepack": "vp pack" per package or make the runbook build immediately before publishing.
-
-<details><summary>Verification</summary>
-
-Confirmed against disk: root .gitignore line 12 ignores dist; all workspace packages have files:["dist"]; grep across every packages/\*/package.json finds no prepack/prepare/prepublishOnly hook; .github/workflows/release-please.yml only runs release-please-action (no build+publish job, matching the project memory note 'no CI publish job'), and no .npmrc or runbook enforces building before publish. So a manual `pnpm publish` packs whatever dist is on disk — missing dist still publishes a tarball with just package.json/README/LICENSE, stale dist publishes silently. The finding actually understates scope: 8 publishable (non-private) packages carry the pattern, not 5. Mitigating factors (dist currently fresh at HEAD, this is a process gap rather than a live bug) were already acknowledged by the reviewer and support minor severity, not refutation.
-
-</details>
-
----
-
-### 24. ESM-only publish: every entry's "default" condition points at ESM, so require() from CJS fails on Node without require(esm)
-
-- **Location:** `packages/fig/package.json:12`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-attw flags CJSResolvesToESM on every entry of all five packages: "import" and "default" both point to the same ESM file and there is no "main"/CJS build, so `require('@bgub/fig')` throws ERR_REQUIRE_ESM on Node < 20.19/22.12 (works via require(esm) on newer Node). This matches the repo's modern-ESM stance and node16-from-ESM/bundler are green, so it is informational — but there is also no "engines" field anywhere declaring the supported Node range, so CJS consumers get a runtime error rather than an install-time warning. Consider adding engines and a README note rather than changing the build.
-
-<details><summary>Verification</summary>
-
-Verified against disk: all published packages (fig, fig-dom, fig-reconciler, fig-server, fig-devtools, fig-refresh, fig-start, fig-vite) are "type": "module" with every exports entry's "import" and "default" pointing at the same ESM file, no "main", and no CJS build (dist/index.js is genuine ESM). No published package has an "engines" field — the only one is in the private workspace root (node >=20, which itself includes 20.0–20.18 where require(esm) is unavailable) and nothing in publishConfig or tooling injects it. No concepts/ file or README documents the ESM-only stance or a supported Node range, so the gap is not handled elsewhere. Concrete cost: a CJS consumer on Node <20.19/<22.12 gets ERR_REQUIRE_ESM at runtime with no install-time warning. ESM-only is clearly intentional, so the finding is informational packaging polish (add engines + README note), correctly scoped as minor.
-
-</details>
-
----
-
-### 25. Published .d.ts files end with sourceMappingURL comments pointing at .d.ts.map files that are never emitted or packed
-
-- **Location:** `packages/fig/dist/jsx-runtime.d.ts:18`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-Every emitted declaration file in fig (dist/jsx-runtime.d.ts, index.d.ts, internal.d.ts, server.d.ts, and the shared chunks like element-DzV328p8.d.ts) ends with e.g. `//# sourceMappingURL=jsx-runtime.d.ts.map`, but no \*.d.ts.map exists in any dist directory (verified: glob matches nothing) and none is in the tarball. TypeScript ignores the missing map, but editors' go-to-source/declaration-map features log resolution failures and fall back to the .d.ts. Cosmetic for the release; fix later by either emitting declaration maps + shipping src, or configuring vp pack/tsdown to strip declarationMap output.
-
-<details><summary>Verification</summary>
-
-Verified on disk: packages/fig/dist/jsx-runtime.d.ts, internal.d.ts, server.d.ts, and every shared .d.ts chunk end with //# sourceMappingURL=<name>.d.ts.map, but find over packages/ (excluding node_modules) matches zero \*.d.ts.map files, while .js.map files are emitted normally. package.json ships "files": ["dist"] wholesale with no src, so the dangling references go into the published tarball. One detail in the report is overclaimed: index.d.ts (and index.js) carry no sourceMappingURL comment, so it is not literally every declaration file. Impact matches the claim — TypeScript ignores missing declaration maps and editors fall back to the .d.ts, so this is purely cosmetic/DX polish with no functional breakage; minor is the right severity.
-
-</details>
-
----
-
-### 26. release-please-managed CHANGELOG.md is excluded from the npm tarball by files:["dist"]
-
-- **Location:** `packages/fig/package.json:37`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-packages/fig and packages/fig-dom have CHANGELOG.md files (release-please writes them), but npm-packlist only force-includes README/LICENSE/package.json — the packed tarballs (verified via tar -tzf on pnpm pack output) contain no CHANGELOG.md. Consumers browsing node_modules or unpkg see no changelog. Many projects consider this intentional (changelog lives on GitHub Releases); if you want it shipped, add "CHANGELOG.md" to the files array in each package. No functional impact on day one.
-
-<details><summary>Verification</summary>
-
-Verified every factual premise against the repo. (1) /Users/bgub/code/fig/packages/fig/package.json line 37 has files:["dist"], and packages/fig-dom/package.json lines 21-23 are identical. (2) Both packages have a CHANGELOG.md on disk, and release-please-config.json confirms release-please manages both packages (so the changelogs will keep being updated each release). (3) I reproduced the pack: `pnpm pack` of @bgub/fig produces a tarball whose only non-dist entries are package/LICENSE, package/package.json, and package/README.md — no CHANGELOG.md, matching npm-packlist's force-include list (README/LICENSE/package.json but not CHANGELOG). (4) No documented decision anywhere in concepts/, docs/, or project memory saying the changelog is intentionally GitHub-Releases-only, so this is an unexamined omission rather than a confirmed intentional one. The concrete cost is exactly as stated and nothing more: consumers inspecting node_modules or unpkg see no changelog; zero functional/runtime impact, and omitting CHANGELOG from tarballs is a common intentional norm (React itself ships only LICENSE/README/package.json). The finding stands as a true but low-stakes packaging observation; "minor" is the correct (floor) severity and the reviewer's own hedging ("many projects consider this intentional... no functional impact") is accurate.
-
-</details>
-
----
-
-### 27. title(value, key?) accepts a `key` parameter that is deliberately and silently ignored
-
-- **Location:** `packages/fig/src/resource.ts:158`
-- **Severity:** minor
-- **Reviewer:** fig:api-design
-
-Every other asset creator's `key` feeds assetResourceKey's `${kind}:${key}` dedupe override (resource.ts:208), but for titles assetResourceKey returns the constant "title" before consulting resource.key (resource.ts:203-206, by design per the singleton comment), and assetResourceHostAttributes emits nothing for titles (resource.ts:335-337), so the parameter has zero runtime effect anywhere. The behavior is even pinned by test (fig-server/src/asset-registry.test.ts:105-108: title("Dashboard","primary") vs title("Settings","secondary") still conflict). A signature that accepts a dedupe key it will never honor invites users to author 'scoped' titles that then throw on the server (see the title-conflict finding) with no hint that the key was inert. Drop the parameter (or make it meaningful) before the signature is frozen by release.
-
-<details><summary>Verification</summary>
-
-Verified every factual claim against the code on disk. packages/fig/src/resource.ts:158-162 shows `title(value: string, key?: string)` attaching `key` to the TitleResource, and it is the only creator whose second positional parameter exists solely for the key. The key is then inert on every path: (1) assetResourceKey returns the constant "title" at resource.ts:206 BEFORE the `resource.key` override at :208, per the deliberate singleton comment; (2) assetResourceHostAttributes emits nothing for title (resource.ts:335-337); (3) the server registry writer emits `<title>` with empty attrs (fig-server/src/asset-registry.ts:120-123); (4) head-only kinds never travel the payload wire (fig-server/src/payload.ts comments confirm title/meta excluded); (5) fig-dom's insertAssetResources explicitly skips title/meta (fig-dom/src/asset-resources.ts:249), and its update path keys via assetResourceKey so the key still collapses to "title". The behavior is pinned by test (fig-server/src/asset-registry.test.ts: title("Dashboard","primary") vs title("Settings","secondary") throws 'Conflicting Fig resource for key "title"'). No doc or concepts file documents a purpose for title's key; git history shows the param shipped in the original commit with no rationale, and concepts/assets.md only documents the singleton collapse. So the failure scenario is concrete: an author who passes a key expecting scoped dedupe (as every other creator honors) gets a server-side conflict throw whose message gives no hint the key was inert. Mitigating factors keep this minor, not major: the singleton collapse is intentional, commented, and tested; misuse fails loudly with a conflict error rather than corrupting output; and TitleResource.key would remain expressible via the object literal/ResourceBase regardless. But an inert, purpose-built positional parameter on a public creator about to be frozen is a genuine API-design defect, not a misread.
-
-</details>
-
----
 
 ### 28. AssetsOptions breaks the \*Props naming convention used by every other element-props type in the package
 

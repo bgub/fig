@@ -20,11 +20,13 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "vp pack",
+    "build": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
     "dev": "vp pack --watch --no-clean",
+    "prepack": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
     "test": "vp test run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
@@ -48,5 +50,8 @@
     "@bgub/fig": "workspace:*",
     "@bgub/fig-reconciler": "workspace:*",
     "@bgub/fig-server": "workspace:*"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

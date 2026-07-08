@@ -9,10 +9,11 @@ component model. Renderers live in `@bgub/fig-dom` and `@bgub/fig-server`.
 pnpm add @bgub/fig
 ```
 
-Fig packages are ESM-only and rely on package `exports`. TypeScript projects
-should use `moduleResolution: "bundler"`, `"node16"`, or `"nodenext"`, not the
-legacy `"node"` resolver, so subpaths such as `@bgub/fig/jsx-runtime` resolve
-with their types.
+Fig packages are ESM-only, require Node `^20.19.0 || >=22.12.0` for Node
+runtime entry points, and rely on package `exports`. TypeScript projects should
+use `moduleResolution: "bundler"`, `"node16"`, or `"nodenext"`, not the legacy
+`"node"` resolver, so subpaths such as `@bgub/fig/jsx-runtime` resolve with
+their types.
 
 ## Usage
 

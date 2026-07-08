@@ -226,9 +226,8 @@ describe("@bgub/fig", () => {
     );
   });
 
-  it("collapses every title to the singleton key, ignoring an explicit key", () => {
+  it("collapses every title to the singleton key", () => {
     expect(assetResourceKey(title("A"))).toBe("title");
-    expect(assetResourceKey(title("B", "explicit"))).toBe("title");
     // Other kinds still honor an explicit key.
     expect(assetResourceKey(meta({ name: "robots", key: "r" }))).toBe("meta:r");
   });
