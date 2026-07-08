@@ -1,7 +1,7 @@
 import {
   createElement,
   type FigNode,
-  useExternalStore,
+  useSyncExternalStore,
   useMemo,
   useReactive,
   useState,
@@ -101,7 +101,7 @@ export function FigDevtools({
   const [commitsOpen, setCommitsOpen] = useState(false);
   const subscribe = useMemo(() => hook.subscribe.bind(hook), [hook]);
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
-  useExternalStore(subscribe, getSnapshot, () => 0);
+  useSyncExternalStore(subscribe, getSnapshot, () => 0);
 
   const isOpen = open ?? uncontrolledOpen;
   const snapshot = currentSnapshot(hook, selection);

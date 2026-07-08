@@ -119,7 +119,7 @@ export function createStaticDispatcher(
     useId(): string {
       return options.useId();
     },
-    useLaggedValue<T>(
+    useDeferredValue<T>(
       value: T,
       _initialValue: T | undefined,
       _hasInitialValue: boolean,
@@ -140,7 +140,7 @@ export function createStaticDispatcher(
     useReactive(_effect: EffectCallback, _deps?: DependencyList): void {},
     useBeforePaint(_effect: EffectCallback, _deps?: DependencyList): void {},
     useBeforeLayout(_effect: EffectCallback, _deps?: DependencyList): void {},
-    useExternalStore<T>(
+    useSyncExternalStore<T>(
       _subscribe: ExternalStoreSubscribe,
       _getSnapshot: () => T,
       getServerSnapshot?: () => T,

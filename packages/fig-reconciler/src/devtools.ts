@@ -24,7 +24,7 @@ export type FigDevtoolsHookKind =
   | "state"
   | "action-state"
   | "id"
-  | "lagged-value"
+  | "deferred-value"
   | "external-store"
   | "memo"
   | "transition"

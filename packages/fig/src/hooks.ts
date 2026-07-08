@@ -40,7 +40,7 @@ export interface RenderDispatcher {
     initialState: S,
   ): [S, ActionStateRunner<Args>, boolean];
   useId(): string;
-  useLaggedValue<T>(
+  useDeferredValue<T>(
     value: T,
     initialValue: T | undefined,
     hasInitialValue: boolean,
@@ -50,7 +50,7 @@ export interface RenderDispatcher {
   useReactive(effect: EffectCallback, deps?: DependencyList): void;
   useBeforePaint(effect: EffectCallback, deps?: DependencyList): void;
   useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void;
-  useExternalStore<T>(
+  useSyncExternalStore<T>(
     subscribe: ExternalStoreSubscribe,
     getSnapshot: () => T,
     getServerSnapshot?: () => T,
@@ -111,8 +111,8 @@ export function useId(): string {
   return resolveDispatcher().useId();
 }
 
-export function useLaggedValue<T>(value: T, initialValue?: T): T {
-  return resolveDispatcher().useLaggedValue(
+export function useDeferredValue<T>(value: T, initialValue?: T): T {
+  return resolveDispatcher().useDeferredValue(
     value,
     initialValue,
     arguments.length > 1,
@@ -155,12 +155,12 @@ export function useBeforeLayout(
   resolveDispatcher().useBeforeLayout(effect, deps);
 }
 
-export function useExternalStore<T>(
+export function useSyncExternalStore<T>(
   subscribe: ExternalStoreSubscribe,
   getSnapshot: () => T,
   getServerSnapshot?: () => T,
 ): T {
-  return resolveDispatcher().useExternalStore(
+  return resolveDispatcher().useSyncExternalStore(
     subscribe,
     getSnapshot,
     getServerSnapshot,

@@ -9,9 +9,9 @@ import {
   Suspense,
   useActionState,
   useCallback,
-  useExternalStore,
+  useSyncExternalStore,
   useId,
-  useLaggedValue,
+  useDeferredValue,
   useMemo,
   useReactive,
   useState,
@@ -797,9 +797,9 @@ describe("@bgub/fig-dom hooks", () => {
 
     function App() {
       const [value, set] = useState("Ready");
-      const lagged = useLaggedValue(value, "Boot");
+      const deferred = useDeferredValue(value, "Boot");
       setValue = set;
-      return createElement("main", null, lagged);
+      return createElement("main", null, deferred);
     }
 
     const container = new FakeElement("root");
@@ -818,14 +818,14 @@ describe("@bgub/fig-dom hooks", () => {
     expect(container.textContent).toBe("Fresh");
   });
 
-  it("uses the latest urgent value when multiple lagged updates are pending", async () => {
+  it("uses the latest urgent value when multiple deferred updates are pending", async () => {
     let setValue: ((value: string) => void) | null = null;
 
     function App() {
       const [value, set] = useState("A");
-      const lagged = useLaggedValue(value);
+      const deferred = useDeferredValue(value);
       setValue = set;
-      return createElement("main", null, lagged);
+      return createElement("main", null, deferred);
     }
 
     const container = new FakeElement("root");
@@ -844,13 +844,13 @@ describe("@bgub/fig-dom hooks", () => {
     expect(container.textContent).toBe("C");
   });
 
-  it("keeps revealed Suspense content visible while lagged work suspends", async () => {
+  it("keeps revealed Suspense content visible while deferred work suspends", async () => {
     const pending = deferred<string>();
     let show: ((value: Promise<string>) => void) | null = null;
 
     function Message({ value }: { value: Promise<string> | null }) {
-      const lagged = useLaggedValue(value);
-      return lagged === null ? "Ready" : readPromise(lagged);
+      const deferred = useDeferredValue(value);
+      return deferred === null ? "Ready" : readPromise(deferred);
     }
 
     function App() {
@@ -892,10 +892,10 @@ describe("@bgub/fig-dom hooks", () => {
     function App() {
       const [value, set] = useState("A");
       const [, startTransition] = useTransition();
-      const lagged = useLaggedValue(value);
+      const deferred = useDeferredValue(value);
       setValue = set;
       start = startTransition;
-      return createElement("main", null, lagged);
+      return createElement("main", null, deferred);
     }
 
     const container = new FakeElement("root");
@@ -925,7 +925,7 @@ describe("@bgub/fig-dom hooks", () => {
     };
 
     function App() {
-      const snapshot = useExternalStore(subscribe, () => value);
+      const snapshot = useSyncExternalStore(subscribe, () => value);
       return createElement("main", null, snapshot);
     }
 
@@ -946,7 +946,7 @@ describe("@bgub/fig-dom hooks", () => {
     let unsubscribeCalls = 0;
 
     function App() {
-      const snapshot = useExternalStore(
+      const snapshot = useSyncExternalStore(
         () => {
           return () => {
             unsubscribeCalls += 1;

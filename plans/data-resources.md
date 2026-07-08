@@ -473,7 +473,7 @@ current pass, per-entry generation tokens and abort controllers, scheduling
 hooks that mark subscribers on value/rejection/status change, the invalidation
 policy hook, and commit hooks that publish WIP dependency sets as active
 subscriptions and clean them up on unmount. This is structurally closer to
-context consumer marking or `useExternalStore(...)` than to the passive thenable
+context consumer marking or `useSyncExternalStore(...)` than to the passive thenable
 cache behind `readPromise(...)`.
 
 Subscription publication follows Fig's commit semantics:

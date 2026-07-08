@@ -157,8 +157,6 @@ Superseded and unmounted runs are aborted and retired — last run wins, with no
 | `useEffect`                 | `useReactive`                        |
 | `useLayoutEffect`           | `useBeforePaint`                     |
 | `useInsertionEffect`        | `useBeforeLayout`                    |
-| `useDeferredValue`          | `useLaggedValue`                     |
-| `useSyncExternalStore`      | `useExternalStore`                   |
 | `useEffectEvent`            | `useStableEvent`                     |
 | `startTransition`           | `transition`                         |
 | `use(ctx)` / `use(promise)` | `readContext` / `readPromise`        |

@@ -9,7 +9,7 @@ import {
   type Props,
   readPromise,
   Suspense,
-  useExternalStore,
+  useSyncExternalStore,
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
 import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
@@ -221,7 +221,7 @@ function createHydratableClientReference(
   return function StartHydratableClientReference(
     props: Props & { children?: FigNode },
   ): FigNode {
-    const hydrated = useExternalStore(
+    const hydrated = useSyncExternalStore(
       (listener) => hydrationGate.subscribe(listener),
       () => hydrationGate.getSnapshot(),
       () => hydrationGate.getServerSnapshot(),

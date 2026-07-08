@@ -69,7 +69,7 @@ environment primitive rather than a mismatch opt-out: the app captures the
 environment values that affect HTML on the server,
 serializes them with the document, and the client's hydration render reads
 that same snapshot; after hydration, browser-backed stores publish live
-values through normal subscription flow (the `useExternalStore`
+values through normal subscription flow (the `useSyncExternalStore`
 server-snapshot pattern, made first-class).
 
 Values the server can already know from the request should stay outside this

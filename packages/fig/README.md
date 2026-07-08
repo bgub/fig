@@ -51,7 +51,7 @@ createRoot(container).render(<App />);
 ## Core API
 
 - Elements: `createElement`, `Fragment`, and the JSX runtime.
-- State and memoization: `useState`, `useLaggedValue`, `useMemo`, and
+- State and memoization: `useState`, `useDeferredValue`, `useMemo`, and
   `useCallback`.
 - Stable identifiers: `useId()` generates IDs that match server render and
   hydration output.
@@ -65,7 +65,7 @@ createRoot(container).render(<App />);
   result) and run first-time effects and renderer `bind` callbacks twice with
   an abort in between, so impure renders and signal-ignoring cleanup surface
   early. Production builds strip these checks.
-- `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` reads external
+- `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` reads external
   stores. Server rendering and hydration require `getServerSnapshot`.
 - `useStableEvent(handler)` returns a stable function for effect-held
   callbacks (subscriptions, sockets, timers). The handler always sees the

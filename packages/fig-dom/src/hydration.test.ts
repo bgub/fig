@@ -2,7 +2,7 @@ import {
   createElement,
   readPromise,
   Suspense,
-  useExternalStore,
+  useSyncExternalStore,
   useId,
   useState,
 } from "@bgub/fig";
@@ -371,7 +371,7 @@ describe("@bgub/fig-dom hydration", () => {
     };
 
     function App() {
-      const snapshot = useExternalStore(
+      const snapshot = useSyncExternalStore(
         subscribe,
         () => value,
         () => "Server",

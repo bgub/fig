@@ -84,7 +84,7 @@ A lane is one bit in a 31-bit bitmask; a lower bit means higher priority. The ta
 | `DefaultLane`         | code running in no special context (timers, network callbacks)                   |
 | `TransitionLane` ×14  | `transition()` updates; overlapping transitions claim distinct lanes round-robin |
 | `RetryLane` ×4        | suspense retries (a thrown promise resolved, re-render the boundary)             |
-| `DeferredLane`        | `useLaggedValue` re-renders                                                      |
+| `DeferredLane`        | `useDeferredValue` re-renders                                                    |
 | `OffscreenLane`       | updates inside hidden Activity subtrees                                          |
 | `IdleLane`            | idle work                                                                        |
 
@@ -202,7 +202,7 @@ The swap:
 
 Post-mutation, still pre-paint (same task — the browser hasn't painted yet):
 
-- `useExternalStore` (React: `useSyncExternalStore`) resubscribes and re-checks snapshots; if a store changed during render (tearing), an immediate sync re-render is scheduled.
+- `useSyncExternalStore` resubscribes and re-checks snapshots; if a store changed during render (tearing), an immediate sync re-render is scheduled.
 - `useBeforePaint` effects run. The DOM is fully mutated, so measuring reads real layout, and anything they write still lands before the user sees a frame.
 - Error callbacks flush: `ErrorBoundary` `onError` for errors caught this render, then the root's `onRecoverableError`.
 

@@ -478,7 +478,7 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
   return createStaticDispatcher({
     contextValues: frame.contextValues,
     externalStoreError:
-      "useExternalStore requires getServerSnapshot during server render.",
+      "useSyncExternalStore requires getServerSnapshot during server render.",
     readPromise(promise) {
       throwIfAborting(frame.request);
       return readThenable(promise);

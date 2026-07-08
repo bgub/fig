@@ -21,9 +21,9 @@ import {
   transition,
   useActionState,
   useCallback,
-  useExternalStore,
+  useSyncExternalStore,
   useId,
-  useLaggedValue,
+  useDeferredValue,
   useMemo,
   useState,
   useTransition,
@@ -313,14 +313,14 @@ describe("@bgub/fig", () => {
     expect(() => useId()).toThrow(
       "Hooks can only be called while rendering a component.",
     );
-    expect(() => useLaggedValue("value")).toThrow(
+    expect(() => useDeferredValue("value")).toThrow(
       "Hooks can only be called while rendering a component.",
     );
     expect(() => useTransition()).toThrow(
       "Hooks can only be called while rendering a component.",
     );
     expect(() =>
-      useExternalStore(
+      useSyncExternalStore(
         () => () => undefined,
         () => "snapshot",
       ),

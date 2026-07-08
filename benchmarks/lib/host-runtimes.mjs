@@ -5,7 +5,7 @@ import {
   createElement as createFigElement,
   readContext as readFigContext,
   readPromise as readFigPromise,
-  useExternalStore as useFigExternalStore,
+  useSyncExternalStore as useFigSyncExternalStore,
   useState as useFigState,
 } from "../../packages/fig/dist/index.js";
 import { createRenderer as createFigRenderer } from "../../packages/fig-reconciler/dist/index.js";
@@ -23,7 +23,7 @@ const {
   createElement: createReactElement,
   use: useReactPromise,
   useContext: useReactContext,
-  useSyncExternalStore: useReactExternalStore,
+  useSyncExternalStore: useReactSyncExternalStore,
   useState: useReactState,
 } = React;
 
@@ -331,7 +331,7 @@ export const clientRuntimes = [
     readContext: readFigContext,
     readPromise: readFigPromise,
     Suspense: FigSuspense,
-    useExternalStore: useFigExternalStore,
+    useSyncExternalStore: useFigSyncExternalStore,
     useState: useFigState,
   },
   {
@@ -344,7 +344,7 @@ export const clientRuntimes = [
     readContext: useReactContext,
     readPromise: useReactPromise,
     Suspense: ReactSuspense,
-    useExternalStore: useReactExternalStore,
+    useSyncExternalStore: useReactSyncExternalStore,
     useState: useReactState,
   },
 ];

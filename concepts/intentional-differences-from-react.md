@@ -124,8 +124,7 @@ spec.
   any pending `useReactive` effects before the nested render. State updates
   from `useBeforeLayout` are a dev error because that phase runs before host
   mutations and is reserved for insertion-style work.
-- `useLaggedValue` (useDeferredValue), `useExternalStore`
-  (useSyncExternalStore), `transition` (startTransition).
+- `transition` (startTransition).
 - `useStableEvent` (useEffectEvent): "stable" names the identity guarantee
   rather than tying the hook to effects — Fig's version is the general
   escape-from-reactivity primitive (usable from handlers, timers, and

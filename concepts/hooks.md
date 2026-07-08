@@ -83,9 +83,8 @@ left to framework layers.
 ## Other Hooks
 
 - `useMemo`/`useCallback` — stable values and callback identities.
-- `useLaggedValue` (useDeferredValue) — "lagged" describes the observable
-  behavior.
-- `useExternalStore(subscribe, getSnapshot, getServerSnapshot?)` — server
+- `useDeferredValue` — deferred render-time values.
+- `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` — server
   render and hydration require `getServerSnapshot`; subscriptions under
   hidden Activity defer until reveal.
 - `useId` — SSR-stable ids with the root's `identifierPrefix`.

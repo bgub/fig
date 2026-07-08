@@ -484,7 +484,7 @@ type EffectPhase =
 const StateHook = 3;
 const ActionStateHook = 4;
 const IdHook = 5;
-const LaggedValueHook = 6;
+const DeferredValueHook = 6;
 const ExternalStoreHook = 7;
 const MemoHook = 8;
 const TransitionHook = 9;
@@ -498,7 +498,7 @@ const hookKindNames: readonly FigDevtoolsHookKind[] = [
   "state",
   "action-state",
   "id",
-  "lagged-value",
+  "deferred-value",
   "external-store",
   "memo",
   "transition",
@@ -830,7 +830,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     useState: updateStateHook,
     useActionState: updateActionStateHook,
     useId: updateIdHook,
-    useLaggedValue: updateLaggedValueHook,
+    useDeferredValue: updateDeferredValueHook,
     useMemo: updateMemoHook,
     useTransition: updateTransitionHook,
     useReactive(effect: EffectCallback, deps?: DependencyList): void {
@@ -842,7 +842,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     useBeforeLayout(effect: EffectCallback, deps?: DependencyList): void {
       updateEffectHook(BeforeLayoutEffect, effect, deps);
     },
-    useExternalStore: updateExternalStoreHook,
+    useSyncExternalStore: updateExternalStoreHook,
     useStableEvent: updateStableEventHook,
     readContext: readContextValue,
     readData<TArgs extends unknown[], TValue>(
@@ -2521,16 +2521,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     return state.value;
   }
 
-  function updateLaggedValueHook<T>(
+  function updateDeferredValueHook<T>(
     value: T,
     initialValue: T | undefined,
     hasInitialValue: boolean,
   ): T {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook(LaggedValueHook) as Hook<T> | null;
+    const oldHook = updateHook(DeferredValueHook) as Hook<T> | null;
     let next =
       oldHook === null
-        ? initialLaggedValue(value, initialValue, hasInitialValue)
+        ? initialDeferredValue(value, initialValue, hasInitialValue)
         : oldHook.memoizedState;
 
     if (!Object.is(next, value)) {
@@ -2541,11 +2541,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    appendHook(createHook(LaggedValueHook, next));
+    appendHook(createHook(DeferredValueHook, next));
     return next;
   }
 
-  function initialLaggedValue<T>(
+  function initialDeferredValue<T>(
     value: T,
     initialValue: T | undefined,
     hasInitialValue: boolean,
@@ -2782,7 +2782,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (getServerSnapshot === undefined) {
       throw new Error(
-        "useExternalStore requires getServerSnapshot during hydration.",
+        "useSyncExternalStore requires getServerSnapshot during hydration.",
       );
     }
 

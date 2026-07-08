@@ -121,7 +121,10 @@ function createBenchmarkComponents(runtime) {
   function ExternalStoreConsumer({ store }) {
     state.metrics.componentRenders += 1;
     state.metrics.externalStoreReads += 1;
-    const value = runtime.useExternalStore(store.subscribe, store.getSnapshot);
+    const value = runtime.useSyncExternalStore(
+      store.subscribe,
+      store.getSnapshot,
+    );
     return runtime.createElement("span", null, value);
   }
 

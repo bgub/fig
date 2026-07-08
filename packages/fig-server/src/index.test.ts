@@ -18,9 +18,9 @@ import {
   script,
   stylesheet,
   title,
-  useExternalStore,
+  useSyncExternalStore,
   useId,
-  useLaggedValue,
+  useDeferredValue,
   useMemo,
   useReactive,
   useStableEvent,
@@ -157,7 +157,7 @@ describe("@bgub/fig-server", () => {
 
   it("reads external store server snapshots", async () => {
     function App() {
-      const snapshot = useExternalStore(
+      const snapshot = useSyncExternalStore(
         () => () => undefined,
         () => "Client",
         () => "Server",
@@ -211,9 +211,9 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("renders current lagged values on the server", async () => {
+  it("renders current deferred values on the server", async () => {
     function App() {
-      const value = useLaggedValue("Server", "Initial");
+      const value = useDeferredValue("Server", "Initial");
       return createElement("span", null, value);
     }
 
@@ -694,7 +694,7 @@ describe("@bgub/fig-server", () => {
 
   it("throws when external stores omit server snapshots", async () => {
     function App() {
-      const snapshot = useExternalStore(
+      const snapshot = useSyncExternalStore(
         () => () => undefined,
         () => "Client",
       );
@@ -702,7 +702,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToHtml(createElement(App, null))).rejects.toThrow(
-      "useExternalStore requires getServerSnapshot during server render.",
+      "useSyncExternalStore requires getServerSnapshot during server render.",
     );
   });
 

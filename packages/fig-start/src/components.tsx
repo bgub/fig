@@ -6,7 +6,7 @@ import {
   Suspense,
   useBeforeLayout,
   useCallback,
-  useExternalStore,
+  useSyncExternalStore,
 } from "@bgub/fig";
 import { PAYLOAD_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
@@ -127,7 +127,7 @@ function ServerRouteContent(props: {
 }): FigNode {
   const store = readContext(ServerRouteContentContext);
   const getSnapshot = () => store?.getSnapshot(props.routeId) ?? 0;
-  const snapshot = useExternalStore(
+  const snapshot = useSyncExternalStore(
     (listener) =>
       store === null
         ? () => undefined

@@ -8,7 +8,7 @@ import {
   readPromise,
   Suspense,
   useBeforePaint,
-  useLaggedValue,
+  useDeferredValue,
   useReactive,
   useState,
   useTransition,
@@ -354,7 +354,7 @@ function StatePage() {
           <p class="hint">{lastAction}</p>
         </section>
 
-        <LaggedCounterCard />
+        <DeferredCounterCard />
 
         <section class="card">
           <div class="card-header">
@@ -390,14 +390,14 @@ function StatePage() {
   );
 }
 
-function LaggedCounterCard() {
+function DeferredCounterCard() {
   const [input, setInput] = useState(0);
-  const lagged = useLaggedValue(input);
+  const deferred = useDeferredValue(input);
 
   return (
     <section class="card">
       <div class="card-header">
-        <h3>Lagged value</h3>
+        <h3>Deferred value</h3>
         <p class="hint">
           Urgent input updates render immediately while derived output catches
           up in deferred work.
@@ -408,7 +408,7 @@ function LaggedCounterCard() {
           Input <strong>{input}</strong>
         </span>
         <span>
-          Lagged <strong>{lagged}</strong>
+          Deferred <strong>{deferred}</strong>
         </span>
       </div>
       <Row>

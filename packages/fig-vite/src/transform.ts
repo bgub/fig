@@ -320,9 +320,9 @@ function isBuiltinFigHookName(name: string): boolean {
     name === "useBeforeLayout" ||
     name === "useBeforePaint" ||
     name === "useCallback" ||
-    name === "useExternalStore" ||
+    name === "useSyncExternalStore" ||
     name === "useId" ||
-    name === "useLaggedValue" ||
+    name === "useDeferredValue" ||
     name === "useMemo" ||
     name === "useReactive" ||
     name === "useStableEvent" ||

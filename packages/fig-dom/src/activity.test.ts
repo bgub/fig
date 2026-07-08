@@ -3,7 +3,7 @@ import {
   createElement,
   readPromise,
   Suspense,
-  useExternalStore,
+  useSyncExternalStore,
   useReactive,
   useState,
 } from "@bgub/fig";
@@ -1166,7 +1166,7 @@ describe("@bgub/fig-dom activity", () => {
     let setMode: ((mode: "visible" | "hidden") => void) | null = null;
 
     function Display() {
-      const snapshot = useExternalStore(store.subscribe, store.getSnapshot);
+      const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
       return createElement("span", null, snapshot);
     }
 

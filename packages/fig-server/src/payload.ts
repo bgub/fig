@@ -1360,7 +1360,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
   return createStaticDispatcher({
     contextValues: frame.contextValues,
     externalStoreError:
-      "useExternalStore requires getServerSnapshot during payload render.",
+      "useSyncExternalStore requires getServerSnapshot during payload render.",
     readPromise: readThenable,
     readData(resource, args) {
       return frame.request.dataStore.readData(resource, args, frame);

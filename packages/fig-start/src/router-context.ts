@@ -1,4 +1,4 @@
-import { createContext, readContext, useExternalStore } from "@bgub/fig";
+import { createContext, readContext, useSyncExternalStore } from "@bgub/fig";
 import type { Router, RouterState } from "./core.ts";
 
 export const RouterContext = createContext<Router | null>(null);
@@ -16,7 +16,7 @@ export function useRouterState(): RouterState {
   // getState works on server and client, so it doubles as the server snapshot
   // for hydration.
   const getState = () => router.getState();
-  return useExternalStore(
+  return useSyncExternalStore(
     (onChange: () => void) => router.subscribe(onChange),
     getState,
     getState,

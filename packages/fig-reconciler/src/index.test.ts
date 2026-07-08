@@ -15,8 +15,8 @@ import {
   title,
   useBeforeLayout,
   useBeforePaint,
-  useExternalStore,
-  useLaggedValue,
+  useSyncExternalStore,
+  useDeferredValue,
   useMemo,
   useReactive,
   useState,
@@ -1175,7 +1175,7 @@ describe("reconciler", () => {
       const [value, set] = useState("A");
       const [promise, setPromise] = useState<Promise<string> | null>(null);
       const [isPending, startTransition] = useTransition();
-      const lagged = useLaggedValue(value);
+      const deferred = useDeferredValue(value);
       controls.setValue = set;
       controls.suspend = setPromise;
       controls.start = startTransition;
@@ -1184,7 +1184,7 @@ describe("reconciler", () => {
         "main",
         null,
         isPending ? "Pending " : "Idle ",
-        lagged,
+        deferred,
         createElement(MaybeSuspend, { value: promise }),
       );
     }
@@ -1230,7 +1230,7 @@ describe("reconciler", () => {
       const [value, set] = useState("A");
       const [promise, setPromise] = useState<Promise<string> | null>(null);
       const [isPending, startTransition] = useTransition();
-      const lagged = useLaggedValue(value);
+      const deferred = useDeferredValue(value);
       controls.setValue = set;
       controls.suspend = setPromise;
       controls.start = startTransition;
@@ -1239,7 +1239,7 @@ describe("reconciler", () => {
         "main",
         null,
         isPending ? "Pending " : "Idle ",
-        lagged,
+        deferred,
         createElement(
           Suspense,
           { fallback: createElement("span", null, "Loading") },
@@ -1489,7 +1489,7 @@ describe("reconciler", () => {
     };
 
     function StoreReader() {
-      const snapshot = useExternalStore(subscribe, () => value);
+      const snapshot = useSyncExternalStore(subscribe, () => value);
       return createElement("span", null, snapshot);
     }
 
@@ -1543,7 +1543,7 @@ describe("reconciler", () => {
     };
 
     function StoreConsumer() {
-      const snapshot = useExternalStore(subscribe, getSnapshot);
+      const snapshot = useSyncExternalStore(subscribe, getSnapshot);
       return createElement("span", null, snapshot);
     }
 

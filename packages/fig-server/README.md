@@ -283,7 +283,7 @@ arrays, plain objects, `Map`, and `Set` also round-trip; functions, class
 instances, and non-global symbols are rejected.
 
 The server renderer supports function components, fragments, context providers,
-`useState` initial values, `useExternalStore` server snapshots, no-op server
+`useState` initial values, `useSyncExternalStore` server snapshots, no-op server
 effects, host prop serialization, streaming Suspense, partial segments inside
 Suspense boundaries, resource hoisting, abort fallback flushing, and
 Suspense-only server error recovery. Host elements may render trusted raw content
