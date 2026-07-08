@@ -15,73 +15,15 @@ iteration.
 
 ## Executive Summary
 
-The largest remaining React patterns worth drawing from are:
+The remaining React patterns worth drawing from are validation-level:
 
-1. React's selective hydration and event replay are target-instance based, not
-   root-search based.
-2. React Fizz's Suspense task/segment model remains useful validation for
+1. React Fizz's Suspense task/segment model remains useful validation for
    Fig's server-rendering shape.
-3. React Flight and Fig payload serialization share the important invariant
+2. React Flight and Fig payload serialization share the important invariant
    that nested containers recurse through the same serializer rather than
    becoming opaque values.
 
-## 1. Hydration And Event Replay
-
-React's hydration event path is target-instance based:
-
-- event dispatch asks which instance blocks the target.
-- if blocked by a dehydrated Suspense/activity instance, React attempts
-  hydration of that specific fiber/boundary.
-- replayable events store `blockedOn`.
-- when a boundary hydrates or is removed, React calls `retryIfBlockedOn` for
-  that exact instance.
-
-Relevant React files:
-
-- `packages/react-dom-bindings/src/events/ReactDOMEventListener.js`
-  - `dispatchEvent`
-  - `findInstanceBlockingEvent`
-  - `attemptSynchronousHydration`
-- `packages/react-dom-bindings/src/events/ReactDOMEventReplaying.js`
-  - `queueIfContinuousEvent`
-  - `attemptExplicitHydrationTarget`
-  - `retryIfBlockedOn`
-- `packages/react-dom-bindings/src/events/DOMPluginEventSystem.js`
-  - `listenToAllSupportedEvents`
-- `packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js`
-  - hydration boundary cleanup/retry hooks
-
-Fig's event system now has explicit hydration listeners, delegated listener
-lifetime management, and replay queues. The remaining structural difference is
-boundary discovery:
-
-- Fig resolves blocked hydration by recursively searching the current tree for a
-  dehydrated Suspense boundary containing the event target.
-- React maps DOM instances back to fibers/boundaries, avoiding a full tree
-  search on event paths.
-
-Relevant Fig files:
-
-- `packages/fig-dom/src/events.ts`
-  - `installHydrationEventListeners`
-  - `hydrateForEvent`
-  - `replayQueuedEvents`
-  - `dispatchReplayedEvent`
-- `packages/fig-reconciler/src/index.ts`
-  - `findDehydratedSuspenseBoundaryForTarget`
-- `packages/fig-dom/src/suspense-markers.ts`
-  - `suspenseBoundaryForMarker`
-  - `isWithinSuspenseBoundary`
-
-Recommended follow-up:
-
-- Introduce a host/reconciler seam that lets DOM nodes resolve directly to the
-  nearest dehydrated boundary or owning fiber.
-- Keep the current recursive search as a fallback while validating the mapping.
-- Add tests for many dehydrated boundaries where an event targets the last
-  boundary, then assert the lookup does not scan unrelated earlier boundaries.
-
-## 2. Suspense And Server Rendering
+## 1. Suspense And Server Rendering
 
 React Fizz treats suspended work as task/segment work:
 
@@ -129,7 +71,7 @@ Recommended follow-up:
 - If streaming behavior grows, consider whether Fig needs a more explicit
   `treeContext`/`keyPath` split instead of one `idPath` scope field.
 
-## 3. Payload / Flight Serialization
+## 2. Payload / Flight Serialization
 
 React Flight serializes Maps and Sets by outlining their entries as normal
 models:
@@ -172,23 +114,17 @@ Recommended follow-up:
 - For every new container/value type, require tests that nest client references,
   promises, server elements, shared objects, and cycles inside that value type.
 
-## 4. Prioritized Candidate Work
-
-Highest priority:
-
-1. Move hydration blocked-boundary lookup toward target-instance mapping.
+## 3. Prioritized Candidate Work
 
 Lower priority:
 
-2. Keep Fizz comparison as validation rather than a direct port.
-3. Keep payload behavior aligned through regression tests when adding new model
+1. Keep Fizz comparison as validation rather than a direct port.
+2. Keep payload behavior aligned through regression tests when adding new model
    types.
 
 ## Suggested Regression Tests
 
 Potential tests before implementation:
 
-- A replayable hydration event targeting the last of many dehydrated Suspense
-  boundaries resolves the boundary directly.
 - Payload nested containers continue to round-trip client references, promises,
   elements, shared values, and cycles.

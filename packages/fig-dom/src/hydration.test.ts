@@ -9,6 +9,7 @@ import {
 import { prerender, renderToHtml } from "@bgub/fig-server";
 import { describe, expect, it } from "vite-plus/test";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
+import { enclosingSuspenseBoundaryStart } from "./suspense-markers.ts";
 import {
   deferred,
   delay,
@@ -914,6 +915,78 @@ describe("@bgub/fig-dom hydration", () => {
     expect(parent.childNodes).toEqual([boundary.content]);
     expect(boundary.content.textContent).toBe("Client");
     expect(calls).toEqual(["child:button"]);
+  });
+
+  it("resolves the targeted boundary without scanning unrelated dehydrated boundaries", async () => {
+    const first = suspenseDom("pending", "span", "First loading");
+    const second = suspenseDom("pending", "button", "Second loading");
+    second.start.data = "fig:suspense:pending:1";
+    const container = new FakeElement("root");
+    const parent = new FakeElement("section");
+    const calls: string[] = [];
+
+    container.appendChild(parent);
+    for (const boundary of [first, second]) {
+      parent.appendChild(boundary.start);
+      if (boundary.placeholder !== null) {
+        parent.appendChild(boundary.placeholder);
+      }
+      parent.appendChild(boundary.content);
+      parent.appendChild(boundary.end);
+    }
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "section",
+          null,
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "First loading") },
+            createElement("span", null, "First done"),
+          ),
+          createElement(
+            Suspense,
+            { fallback: createElement("button", null, "Second loading") },
+            createElement(
+              "button",
+              { events: [on("click", () => calls.push("second"))] },
+              "Second done",
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Blocked-boundary lookup walks the markers around the target; reading
+    // an unrelated boundary's children means it regressed to tree scanning.
+    let firstContentReads = 0;
+    const firstContentChildren = first.content.childNodes;
+    Object.defineProperty(first.content, "childNodes", {
+      configurable: true,
+      get() {
+        firstContentReads += 1;
+        return firstContentChildren;
+      },
+    });
+
+    second.content.dispatch("click");
+    expect(calls).toEqual([]);
+
+    second.content.textContent = "Second done";
+    completePendingBoundary(parent, second);
+
+    await delay();
+
+    expect(calls).toEqual(["second"]);
+    expect(firstContentReads).toBe(0);
+    // The untargeted boundary is untouched and still dehydrated.
+    expect(parent.childNodes.slice(0, 3)).toEqual([
+      first.start,
+      first.placeholder,
+      first.content,
+    ]);
   });
 
   it("replays blocked clicks when a completed pending boundary preserves the fallback target", async () => {
@@ -2006,6 +2079,59 @@ describe("@bgub/fig-dom hydration", () => {
     expect(() => createRoot(hydrationContainer as unknown as Element)).toThrow(
       "Cannot call createRoot on a container that already has a Fig root.",
     );
+  });
+});
+
+describe("enclosingSuspenseBoundaryStart", () => {
+  it("finds the marker pair enclosing a nested target", () => {
+    const container = new FakeElement("root");
+    const start = new FakeComment("fig:suspense:pending:0");
+    const wrapper = new FakeElement("div");
+    const target = element("button", "Inside");
+    container.appendChild(start);
+    container.appendChild(wrapper);
+    wrapper.appendChild(target);
+    container.appendChild(new FakeComment("/fig:suspense"));
+
+    expect(enclosingSuspenseBoundaryStart(target)).toBe(start);
+  });
+
+  it("ignores boundaries closed before the target", () => {
+    const container = new FakeElement("root");
+    container.appendChild(new FakeComment("fig:suspense:completed"));
+    container.appendChild(element("span", "Done"));
+    container.appendChild(new FakeComment("/fig:suspense"));
+    const target = element("button", "After");
+    container.appendChild(target);
+
+    expect(enclosingSuspenseBoundaryStart(target)).toBe(null);
+  });
+
+  it("resumes outward from a start marker across nested boundaries", () => {
+    const container = new FakeElement("root");
+    const outerStart = new FakeComment("fig:suspense:pending:0");
+    const innerStart = new FakeComment("fig:suspense:pending:1");
+    const target = element("span", "Deep");
+    const innerEnd = new FakeComment("/fig:suspense");
+    const outerEnd = new FakeComment("/fig:suspense");
+    for (const node of [outerStart, innerStart, target, innerEnd, outerEnd]) {
+      container.appendChild(node);
+    }
+
+    const inner = enclosingSuspenseBoundaryStart(target);
+    expect(inner).toBe(innerStart);
+    const outer = enclosingSuspenseBoundaryStart(inner);
+    expect(outer).toBe(outerStart);
+    expect(enclosingSuspenseBoundaryStart(outer)).toBe(null);
+  });
+
+  it("returns null for targets outside any boundary", () => {
+    const container = new FakeElement("root");
+    const target = element("span", "Plain");
+    container.appendChild(target);
+
+    expect(enclosingSuspenseBoundaryStart(target)).toBe(null);
+    expect(enclosingSuspenseBoundaryStart(null)).toBe(null);
   });
 });
 

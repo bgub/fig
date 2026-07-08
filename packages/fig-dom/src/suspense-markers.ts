@@ -104,6 +104,42 @@ function suspenseBoundaryError(
   };
 }
 
+// Event-target boundary discovery walks outward from the target instead of
+// searching the tree: at each ancestor level, scanning the preceding siblings
+// right-to-left, an end marker closes over a boundary that sits entirely
+// before the target, so a start marker reached at depth zero is unmatched and
+// its range encloses the target. Passing a returned start marker back in
+// resumes the search at the next enclosing boundary (needed when a marker has
+// no live fiber because it is nested inside an outer dehydrated boundary).
+export function enclosingSuspenseBoundaryStart(
+  target: unknown,
+): TextLike | null {
+  if (!isNode(target)) return null;
+
+  for (let node: Node | null = target; node !== null; node = node.parentNode) {
+    let depth = 0;
+
+    for (
+      let sibling = node.previousSibling;
+      sibling !== null;
+      sibling = sibling.previousSibling
+    ) {
+      if (!isComment(sibling)) continue;
+
+      if (sibling.data === SUSPENSE_END_MARKER) {
+        depth += 1;
+        continue;
+      }
+
+      if (suspenseMarker(sibling) === null) continue;
+      if (depth === 0) return sibling;
+      depth -= 1;
+    }
+  }
+
+  return null;
+}
+
 export function isWithinSuspenseBoundary(
   target: unknown,
   boundary: DehydratedSuspenseBoundary<Element, TextLike>,
@@ -122,6 +158,9 @@ export function isWithinSuspenseBoundary(
 }
 
 function containsNode(parent: Element | TextLike, target: Node): boolean {
+  // Test hosts lack Node.contains; real DOM nodes get the native check.
+  if (typeof parent.contains === "function") return parent.contains(target);
+
   for (const child of Array.from(parent.childNodes ?? [])) {
     if (child === target || containsNode(child as Element | TextLike, target)) {
       return true;

@@ -40,6 +40,7 @@ import {
 import { hydrateElement, updateElement, updateParentSelect } from "./props.ts";
 import { configureDomRefreshScheduler, type RefreshUpdate } from "./refresh.ts";
 import {
+  enclosingSuspenseBoundaryStart,
   isWithinSuspenseBoundary,
   removeNode,
   removeSuspenseBoundaryRange,
@@ -234,6 +235,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     if (text.nodeValue !== value) text.nodeValue = value;
   },
   getSuspenseBoundary: (node) => suspenseBoundaryFor(node),
+  getEnclosingSuspenseBoundaryStart: (target) =>
+    enclosingSuspenseBoundaryStart(target),
   isTargetWithinSuspenseBoundary: (target, boundary) =>
     isWithinSuspenseBoundary(target, boundary),
   registerSuspenseBoundaryRetry: (boundary, retry) => {

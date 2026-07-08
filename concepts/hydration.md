@@ -31,6 +31,19 @@ with dehydrated content triggers its hydration at input priority. Once a root
 has no remaining dehydrated Suspense boundaries, the host tears down those
 capture listeners and clears the selective-hydration callback.
 
+Blocked-boundary lookup is target-instance based, not tree-search based: the
+host walks outward from the event target — at each ancestor level an
+unmatched start marker among the preceding siblings encloses the target
+(`getEnclosingSuspenseBoundaryStart`; passing a start marker back in resumes
+the search at the next enclosing boundary) — and the reconciler resolves that
+marker through a per-root map of live dehydrated boundaries keyed by start
+marker, rebuilt in the same post-commit walk that maintains the dehydrated
+count. A marker with no live fiber is a boundary nested inside an outer
+dehydrated one; the lookup resumes outward. Cost is proportional to the
+target's surroundings, never to app or boundary size. Hosts without the
+lookup hook fall back to searching the fiber tree with per-boundary host
+containment checks.
+
 ## Mismatch Policy
 
 Server-only attributes and styles are preserved (extensions and edge-injected

@@ -10,6 +10,10 @@ export class FakeText {
     return nextSiblingOf(this);
   }
 
+  get previousSibling(): FakeElement | FakeText | FakeComment | null {
+    return previousSiblingOf(this);
+  }
+
   get textContent(): string {
     return this.nodeValue;
   }
@@ -23,6 +27,10 @@ export class FakeComment {
 
   get nextSibling(): FakeElement | FakeText | FakeComment | null {
     return nextSiblingOf(this);
+  }
+
+  get previousSibling(): FakeElement | FakeText | FakeComment | null {
+    return previousSiblingOf(this);
   }
 
   get nodeValue(): string {
@@ -127,6 +135,10 @@ export class FakeElement {
 
   get nextSibling(): FakeElement | FakeText | FakeComment | null {
     return nextSiblingOf(this);
+  }
+
+  get previousSibling(): FakeElement | FakeText | FakeComment | null {
+    return previousSiblingOf(this);
   }
 
   appendChild(
@@ -427,4 +439,13 @@ function nextSiblingOf(
   if (siblings === undefined) return null;
 
   return siblings[siblings.indexOf(node) + 1] ?? null;
+}
+
+function previousSiblingOf(
+  node: FakeElement | FakeText | FakeComment,
+): FakeElement | FakeText | FakeComment | null {
+  const siblings = node.parentNode?.childNodes;
+  if (siblings === undefined) return null;
+
+  return siblings[siblings.indexOf(node) - 1] ?? null;
 }

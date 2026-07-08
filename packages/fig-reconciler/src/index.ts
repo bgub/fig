@@ -258,6 +258,9 @@ export interface HostConfig<Container, Instance, TextInstance> {
   getSuspenseBoundary?(
     node: HostNode<Instance, TextInstance>,
   ): DehydratedSuspenseBoundary<Instance, TextInstance> | null;
+  getEnclosingSuspenseBoundaryStart?(
+    target: unknown,
+  ): HostNode<Instance, TextInstance> | null;
   isTargetWithinSuspenseBoundary?(
     target: unknown,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
@@ -329,6 +332,7 @@ export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
   Pick<
     HostConfig<Container, Instance, TextInstance>,
     | "getSuspenseBoundary"
+    | "getEnclosingSuspenseBoundaryStart"
     | "isTargetWithinSuspenseBoundary"
     | "registerSuspenseBoundaryRetry"
     | "commitHydratedSuspenseBoundary"
@@ -710,6 +714,13 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   hydratingSuspenseBoundary: Fiber<Container, Instance, TextInstance> | null;
   hydratingActivityBoundary: Fiber<Container, Instance, TextInstance> | null;
   dehydratedSuspenseCount: number;
+  // Live dehydrated boundaries keyed by their start marker node, rebuilt in
+  // the same post-commit walk that maintains dehydratedSuspenseCount, so
+  // event-target lookups resolve to a fiber without searching the tree.
+  dehydratedBoundaries: Map<
+    HostNode<Instance, TextInstance>,
+    Fiber<Container, Instance, TextInstance>
+  >;
   needsRootHydrationCompletion: boolean;
   nextHydratableInstance: HostNode<Instance, TextInstance> | null;
   clearContainerBeforeCommit: boolean;
@@ -924,6 +935,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       hydratingSuspenseBoundary: null,
       hydratingActivityBoundary: null,
       dehydratedSuspenseCount: 0,
+      dehydratedBoundaries: new Map(),
       needsRootHydrationCompletion: false,
       nextHydratableInstance: null,
       clearContainerBeforeCommit: false,
@@ -978,24 +990,40 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): HydrationTargetResult {
     const lane = hydrationLaneForPriority(priority);
     const root = roots.get(container as object);
-    if (root === undefined || host.isTargetWithinSuspenseBoundary === undefined)
-      return "none";
+    if (root === undefined) return "none";
     if (root.dehydratedSuspenseCount === 0) return "none";
 
-    const boundary = findDehydratedSuspenseBoundaryForTarget(
-      root.current.child,
-      target,
-    );
+    const boundary = dehydratedBoundaryForTarget(root, target);
     if (boundary === null) return "none";
 
     scheduleFiber(boundary, lane);
     if (isSyncLane(lane)) performRoot(root, true);
-    return findDehydratedSuspenseBoundaryForTarget(
-      root.current.child,
-      target,
-    ) === null
+    return dehydratedBoundaryForTarget(root, target) === null
       ? "hydrated"
       : "blocked";
+  }
+
+  function dehydratedBoundaryForTarget(root: R, target: unknown): F | null {
+    if (host.getEnclosingSuspenseBoundaryStart === undefined) {
+      // Fallback for hosts without target-instance lookup: search the fiber
+      // tree for a dehydrated boundary whose host range contains the target.
+      return findDehydratedSuspenseBoundaryForTarget(
+        root.current.child,
+        target,
+      );
+    }
+
+    // A start marker with no live dehydrated fiber belongs to a boundary
+    // nested inside an outer dehydrated one (its content has no fibers yet),
+    // so resume the marker walk outward from that marker.
+    let start = host.getEnclosingSuspenseBoundaryStart(target);
+    while (start !== null) {
+      const fiber = root.dehydratedBoundaries.get(start) ?? null;
+      if (fiber?.suspenseState?.kind === "dehydrated") return fiber;
+      start = host.getEnclosingSuspenseBoundaryStart(start);
+    }
+
+    return null;
   }
 
   function flushSync<T>(callback: () => T): T {
@@ -3444,9 +3472,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
     const boundaries: F[] = [];
+    root.dehydratedBoundaries = new Map();
     const dehydratedSuspenseCount = collectDehydratedSuspense(
       root.current.child,
       boundaries,
+      root.dehydratedBoundaries,
     );
     updateDehydratedSuspenseCount(root, dehydratedSuspenseCount);
     if (boundaries.length === 0) return;
@@ -3462,11 +3492,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function collectDehydratedSuspense(node: F | null, boundaries: F[]): number {
+  function collectDehydratedSuspense(
+    node: F | null,
+    boundaries: F[],
+    byStartMarker: Map<HostNode<Instance, TextInstance>, F>,
+  ): number {
     let count = 0;
     walkFiberForest(node, (cursor) => {
       if (cursor.suspenseState?.kind === "dehydrated") {
         count += 1;
+        byStartMarker.set(cursor.suspenseState.boundary.start, cursor);
         // A dehydrated boundary has no live children to descend into, but its
         // siblings may be retriable too (e.g. several boundaries inside one
         // revealed Activity), so keep walking the sibling chain.
