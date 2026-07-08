@@ -1403,11 +1403,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     const root = rootOf(node);
 
     if (canBailout(node, root)) {
-      if (!includesSomeLane(node.childLanes, root.renderLanes)) {
-        lazilyPropagateParentContextChanges(node, root);
+      let hasChildWork = includesSomeLane(node.childLanes, root.renderLanes);
+      if (!hasChildWork) {
+        hasChildWork = lazilyPropagateParentContextChanges(node, root);
       }
 
-      if (!includesSomeLane(node.childLanes, root.renderLanes)) {
+      if (!hasChildWork) {
         // The whole subtree is clean: adopt the committed children without
         // cloning and skip them entirely.
         node.flags |= AdoptedFlag;
@@ -1685,7 +1686,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       parent = parent.return
     ) {
       if (parent.tag !== HostTag) continue;
-      return parent.stateNode !== null && (parent.flags & HydrationFlag) === 0;
+      return hydrationBypassedHost(parent);
     }
 
     return false;
@@ -3089,7 +3090,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (isNewHostInstance(node)) {
-      finalizeInitialHostInstance(node);
+      host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
       if (!setInitialHostTextContent(node)) {
         // A reused instance (re-assembled on Suspense reveal) may still hold
         // stale children from before the fallback; clear before re-appending.
@@ -3124,10 +3125,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       node.committedProps === null &&
       (node.flags & HydrationFlag) === 0
     );
-  }
-
-  function finalizeInitialHostInstance(node: F): void {
-    host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
   }
 
   function setInitialHostTextContent(node: F): boolean {
@@ -3864,18 +3861,23 @@ export function createRenderer<Container, Instance, TextInstance>(
       instance;
 
     if (next !== instance) {
-      node.stateNode = next;
-      if (node.alternate !== null) node.alternate.stateNode = next;
-
-      // The swapped-in instance starts fresh; re-apply the fiber's text.
-      const text = hostTextContent(node.props.children);
-      if (text !== null) host.setTextContent?.(next, text);
+      adoptSwappedHoistedInstance(node, next);
       return;
     }
 
     if ((node.flags & TextContentFlag) !== 0) {
       commitHostTextContent(node, previousProps);
     }
+  }
+
+  // The swapped-in instance starts fresh; adopt it on both alternates and
+  // re-apply the fiber's text so updates target the live node.
+  function adoptSwappedHoistedInstance(node: F, next: Instance): void {
+    node.stateNode = next;
+    if (node.alternate !== null) node.alternate.stateNode = next;
+
+    const text = hostTextContent(node.props.children);
+    if (text !== null) host.setTextContent?.(next, text);
   }
 
   function commitHydratedSuspenseBoundary(node: F): void {
@@ -3938,12 +3940,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (resolved === instance) return;
 
     // The identity resolved to a shared live instance (e.g. inserted while
-    // this render was suspended); adopt it and re-apply the fiber's text so
-    // updates target the live node instead of the stale duplicate.
-    node.stateNode = resolved;
-    if (node.alternate !== null) node.alternate.stateNode = resolved;
-    const text = hostTextContent(node.props.children);
-    if (text !== null) host.setTextContent?.(resolved, text);
+    // this render was suspended); drop the stale duplicate.
+    adoptSwappedHoistedInstance(node, resolved);
   }
 
   function commitDeletions(node: F): void {
@@ -4465,7 +4463,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   // consumer could get stranded. Every skip point (clean-childLanes bailout)
   // checks the providers above it and marks the consumers it is about to skip.
   // Consumers that are begun anyway are covered by canBailout's memoized
-  // dependency check, so no eager walk is needed.
+  // dependency check, so no eager walk is needed. Returns whether the node's
+  // childLanes now intersect the render lanes; the early-false paths rely on
+  // the caller only asking when childLanes were already clean.
   function lazilyPropagateParentContextChanges(node: F, root: R): boolean {
     if ((node.flags & ContextPropagationFlag) !== 0) return false;
 
@@ -4611,7 +4611,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     while (current !== null) {
       const next = createWorkInProgress(current, current.props);
-      next.index = current.index;
       next.return = parent;
 
       previous = appendChild(parent, previous, next);
