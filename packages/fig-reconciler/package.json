@@ -48,10 +48,10 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@bgub/fig": "workspace:*"
+    "@bgub/fig": "0.0.1"
   },
   "devDependencies": {
-    "@bgub/fig": "workspace:*"
+    "@bgub/fig": "0.0.1"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

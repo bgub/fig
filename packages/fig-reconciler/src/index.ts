@@ -143,7 +143,10 @@ function hydrationLaneForPriority(priority: EventPriority): Lane {
   return priority === "discrete" ? SyncLane : SelectiveHydrationLane;
 }
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const process: { env?: { NODE_ENV?: string } } | undefined;
+
+const __DEV__ =
+  typeof process === "undefined" || process.env?.NODE_ENV !== "production";
 
 setTransitionHandler(runWithTransition);
 
@@ -1472,7 +1475,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (node.tag === TextTag) {
       if (
-        process.env.NODE_ENV !== "production" &&
+        __DEV__ &&
         (node.alternate === null ||
           node.alternate.props.nodeValue !== node.props.nodeValue)
       ) {
@@ -1490,7 +1493,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       const type = String(node.type);
       const children = hostChildren(node.props);
 
-      if (process.env.NODE_ENV !== "production") {
+      if (__DEV__) {
         let ancestors: string[] | null = null;
 
         if (node.alternate === null && host.validateInstanceNesting) {
@@ -1965,7 +1968,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     const previousDataStore = setCurrentDataStore(rootOf(node).dataStore);
     try {
-      if (process.env.NODE_ENV !== "production") {
+      if (__DEV__) {
         // Strict shadow pass: invoke the component once and discard every
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
@@ -2832,10 +2835,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     action: StateUpdate<S>,
     lane: Lane,
   ): void {
-    if (
-      process.env.NODE_ENV !== "production" &&
-      currentCommitEffectPhase === BeforeLayoutEffect
-    ) {
+    if (__DEV__ && currentCommitEffectPhase === BeforeLayoutEffect) {
       throw new Error(
         "State updates are not allowed from useBeforeLayout effects.",
       );
@@ -2932,9 +2932,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       controller: previousEffect?.controller ?? null,
       deps: nextDeps,
       owner: fiber as Fiber<unknown, unknown, unknown>,
-      strictRan:
-        process.env.NODE_ENV !== "production" &&
-        previousEffect?.strictRan === true,
+      strictRan: __DEV__ && previousEffect?.strictRan === true,
     };
     const hook = createHook(phase, effect);
 
@@ -3214,8 +3212,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     forcePlacement: boolean,
   ): void {
     const nextChildren = collectChildren(children);
-    const seenKeys =
-      process.env.NODE_ENV !== "production" ? new Set<string>() : null;
+    const seenKeys = __DEV__ ? new Set<string>() : null;
 
     parent.child = null;
     parent.deletions = null;
@@ -3469,7 +3466,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         finishedWork.subtreeFlags = NoFlags;
         scheduleReactiveEffects(root);
       }
-      if (process.env.NODE_ENV !== "production" && root.devtools) {
+      if (__DEV__ && root.devtools) {
         emitDevtoolsCommit(host, root);
       }
       flushRecoverableErrors(root);
@@ -4846,7 +4843,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // machinery — via parse-time branch elimination) so production builds ship
   // empty stubs.
   function scheduleRefresh(update: RefreshUpdate): void {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       if (!hasRefreshHandler() || mountedRoots.size === 0) return;
 
       runWithStaleRefreshFamilies(update.staleFamilies, () => {
@@ -4860,7 +4857,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleFamilyRefresh(node: F | null, update: RefreshUpdate): void {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       if (node === null) return;
 
       if (node.tag === FunctionTag && hasRefreshHandler()) {
@@ -4884,7 +4881,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // child reconciles as an incompatible type and remounts; for a top-level
   // component re-render the whole root.
   function remountForRefresh(node: F): void {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       const parent = node.return;
       if (parent === null || parent.tag === RootTag) {
         const root = rootOf(node);
@@ -5329,7 +5326,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function runEffect(effect: Effect): void {
     let runStrict = false;
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       // Marked before create so renders nested inside the effect carry it
       // forward and never re-enter the strict cycle.
       runStrict = !effect.strictRan;
@@ -5343,7 +5340,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const dataStore = rootOf(effect.owner as F).dataStore;
     try {
       dataStore.run(() => effect.create(controller.signal));
-      if (process.env.NODE_ENV !== "production" && runStrict) {
+      if (__DEV__ && runStrict) {
         // Strict re-run: abort and re-invoke first-time effects so work that
         // ignores its AbortSignal surfaces in development.
         abortEffect(effect);
@@ -5478,7 +5475,7 @@ function isEffectHook(kind: HookKind): boolean {
 // Dev-only (inline-gated at call sites): maps a numeric kind back to its
 // public FigDevtoolsHookKind name for readable errors.
 function hookKindName(kind: HookKind): string | number {
-  return process.env.NODE_ENV !== "production" ? hookKindNames[kind] : kind;
+  return __DEV__ ? hookKindNames[kind] : kind;
 }
 
 function createHook<S>(kind: HookKind, state: S): Hook<S> {

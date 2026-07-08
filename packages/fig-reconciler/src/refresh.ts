@@ -1,6 +1,9 @@
 import { setRefreshHandlerState } from "./refresh-state.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const process: { env?: { NODE_ENV?: string } } | undefined;
+
+const __DEV__ =
+  typeof process === "undefined" || process.env?.NODE_ENV !== "production";
 
 // A family groups every version of a component across hot edits; `current` is
 // the latest implementation. The handler is module-global (one refresh runtime
@@ -18,7 +21,7 @@ export interface RefreshUpdate {
 export function setRefreshHandler(
   handler: ((type: unknown) => RefreshFamily | undefined) | null,
 ): void {
-  if (process.env.NODE_ENV !== "production") {
+  if (__DEV__) {
     setRefreshHandlerState(handler);
   }
 }

@@ -25,7 +25,7 @@ import {
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
   FigDevtoolsCommitInspection,
   FigDevtoolsGlobalHook,
@@ -198,6 +198,22 @@ describe("reconciler", () => {
     const { flushSync } = createRenderer(host);
 
     expect(flushSync(() => "result")).toBe("result");
+  });
+
+  it("does not require a process global to render", () => {
+    vi.stubGlobal("process", undefined);
+
+    try {
+      const { createRoot, flushSync } = createRenderer(host);
+      const container = new TestElement("root");
+      const root = createRoot(container);
+
+      flushSync(() => root.render(createElement("span", null, "Hello")));
+
+      expect(container.textContent).toBe("Hello");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("flushes sync updates before rethrowing a flushSync callback error", () => {
