@@ -1161,6 +1161,44 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("1");
   });
 
+  it("runs commit effects for sparse leaf updates under stable siblings", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const effectRuns: number[] = [];
+    let increment: (() => void) | null = null;
+
+    function Leaf() {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      useBeforeLayout(() => {
+        effectRuns.push(count);
+      }, [count]);
+      return createElement("span", null, count);
+    }
+
+    const stableTree = createElement(
+      "main",
+      null,
+      ...Array.from({ length: 50 }, (_, index) =>
+        createElement("span", { key: `before-${index}` }, "stable"),
+      ),
+      createElement("section", null, createElement(Leaf, null)),
+      ...Array.from({ length: 50 }, (_, index) =>
+        createElement("span", { key: `after-${index}` }, "stable"),
+      ),
+    );
+
+    flushSync(() => root.render(stableTree));
+    expect(effectRuns.length).toBeGreaterThan(0);
+    expect(effectRuns.every((value) => value === 0)).toBe(true);
+
+    effectRuns.length = 0;
+    flushSync(() => increment?.());
+
+    expect(effectRuns).toEqual([1]);
+  });
+
   it("throws when post-commit sync updates exceed the nested update limit", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

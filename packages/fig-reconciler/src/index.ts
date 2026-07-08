@@ -442,7 +442,13 @@ const VisibilityFlag = 1 << 5;
 // individually. Recorded at complete-time because commit mutates the underlying
 // signal (committedProps) before the placement walk reads it.
 const AssembledFlag = 1 << 6;
+const DeletionFlag = 1 << 7;
+const DataDependencyFlag = 1 << 8;
+const EffectFlag = 1 << 9;
 type Flag = number;
+
+const MutationMask =
+  PlacementFlag | UpdateFlag | HydrationFlag | TextContentFlag | VisibilityFlag;
 
 const ReactiveEffect = 0;
 const BeforePaintEffect = 1;
@@ -634,6 +640,7 @@ interface Fiber<Container, Instance, TextInstance> {
   index: number;
   alternate: Fiber<Container, Instance, TextInstance> | null;
   flags: Flag;
+  subtreeFlags: Flag;
   deletions: Fiber<Container, Instance, TextInstance>[] | null;
   lanes: Lanes;
   childLanes: Lanes;
@@ -1876,6 +1883,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     node.contextDependencies = null;
     root.dataStore.resetDataDependencies(node);
     node.dataDependenciesDirty = true;
+    node.flags |= DataDependencyFlag;
     root.needsDataDependencyCommit = true;
   }
 
@@ -2818,6 +2826,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (hasChanged) {
       fiber.effects ??= [];
       fiber.effects.push(effect);
+      fiber.flags |= EffectFlag;
       markCommitEffectPhase(rootOf(fiber), phase);
     }
   }
@@ -2939,10 +2948,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let child = node.child;
     let childLanes = NoLanes;
+    let subtreeFlags = NoFlags;
 
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
+      subtreeFlags |= child.flags;
+      subtreeFlags |= child.subtreeFlags;
       child = child.sibling;
     }
 
@@ -2962,6 +2974,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.childLanes = childLanes;
+    node.subtreeFlags = subtreeFlags;
     node.memoizedProps = node.props;
     if (node.tag === ContextProviderTag && (node.flags & AdoptedFlag) === 0) {
       popContextProvider(node);
@@ -3141,6 +3154,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function appendDeletion(parent: F, child: F): void {
     parent.deletions ??= [];
     parent.deletions.push(child);
+    parent.flags |= DeletionFlag;
     rootOf(parent).needsCommitDeletions = true;
   }
 
@@ -3271,6 +3285,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         // Once the tree is current its flags must be cleared even when a
         // commit step throws, or a later render would adopt stale flags.
         collectReactiveEffects(root, finishedWork.child);
+        finishedWork.flags = NoFlags;
+        finishedWork.subtreeFlags = NoFlags;
         scheduleReactiveEffects(root);
       }
       if (process.env.NODE_ENV !== "production" && root.devtools) {
@@ -3480,6 +3496,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     let cursor = node;
 
     while (cursor !== null) {
+      const subtreeMutation = (cursor.subtreeFlags & MutationMask) !== 0;
+
+      if ((cursor.flags & MutationMask) === 0 && !subtreeMutation) {
+        cursor = cursor.sibling;
+        continue;
+      }
+
       if ((cursor.flags & PlacementFlag) !== 0) {
         cursor = commitPlacementRun(cursor, hidden);
         continue;
@@ -3503,7 +3526,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (hidden) hideHostFiber(hostFiber);
       }
 
-      if ((cursor.flags & AdoptedFlag) === 0) {
+      if ((cursor.flags & AdoptedFlag) === 0 && subtreeMutation) {
         commitMutationEffects(cursor.child, hidden || isHiddenBoundary(cursor));
       }
 
@@ -3799,7 +3822,10 @@ export function createRenderer<Container, Instance, TextInstance>(
         cursor.deletions = null;
       }
 
-      return (cursor.flags & AdoptedFlag) === 0;
+      return (
+        (cursor.flags & AdoptedFlag) === 0 &&
+        (cursor.subtreeFlags & DeletionFlag) !== 0
+      );
     });
   }
 
@@ -3815,7 +3841,10 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursor.alternate.dataDependenciesDirty = false;
       }
 
-      return (cursor.flags & AdoptedFlag) === 0;
+      return (
+        (cursor.flags & AdoptedFlag) === 0 &&
+        (cursor.subtreeFlags & DataDependencyFlag) !== 0
+      );
     });
   }
 
@@ -4356,6 +4385,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function markSubtreeFlag(node: F, flag: Flag): void {
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      parent.subtreeFlags |= flag;
+    }
+  }
+
   function createWorkInProgress(current: F, props: Props): F {
     const next =
       current.alternate ??
@@ -4371,6 +4406,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.sibling = null;
     next.index = current.index;
     next.flags = NoFlags;
+    next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;
     next.childLanes = current.childLanes;
@@ -4449,6 +4485,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       index: 0,
       alternate: null,
       flags: NoFlags,
+      subtreeFlags: NoFlags,
       deletions: null,
       lanes: NoLanes,
       childLanes: NoLanes,
@@ -4653,6 +4690,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
+      const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
+
+      if ((cursor.flags & VisibilityFlag) === 0 && !subtreeVisibility) {
+        continue;
+      }
 
       const boundary = isHiddenBoundaryTag(cursor);
       const boundaryHidden = boundary && activityHidden(cursor.props);
@@ -4680,7 +4722,9 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
 
-      commitHiddenBoundaryVisibility(cursor.child, hidden || boundaryHidden);
+      if (subtreeVisibility) {
+        commitHiddenBoundaryVisibility(cursor.child, hidden || boundaryHidden);
+      }
     }
   }
 
@@ -4727,6 +4771,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   function armRevealedHiddenBoundaries(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
+      const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
+
+      if ((cursor.flags & VisibilityFlag) === 0 && !subtreeVisibility) {
+        continue;
+      }
 
       if (
         isHiddenBoundaryTag(cursor) &&
@@ -4737,7 +4786,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         armDeferredEffects(cursor.child);
       }
 
-      armRevealedHiddenBoundaries(cursor.child);
+      if (subtreeVisibility) armRevealedHiddenBoundaries(cursor.child);
     }
   }
 
@@ -4760,6 +4809,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const effects = (owner.effects ??= []);
       if (!effects.includes(effect)) effects.push(effect);
+      owner.flags |= EffectFlag;
+      markSubtreeFlag(owner, EffectFlag);
       markCommitEffectPhase(rootOf(owner), effect.phase);
     });
   }
@@ -4879,15 +4930,17 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       cursor.effects = null;
       const adopted = (cursor.flags & AdoptedFlag) !== 0;
+      const subtreeFlags = cursor.subtreeFlags;
       // The last flag consumer in the commit clears them, so committed trees
       // stay flag-clean and adopted subtrees never expose stale commit state.
       cursor.flags = NoFlags;
+      cursor.subtreeFlags = NoFlags;
       if (adopted) return false;
       if (isHiddenBoundary(cursor)) {
-        clearHiddenSubtreeFlags(cursor.child);
+        if (subtreeFlags !== NoFlags) clearHiddenSubtreeFlags(cursor.child);
         return false;
       }
-      return true;
+      return subtreeFlags !== NoFlags;
     });
   }
 
@@ -4898,8 +4951,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   function clearHiddenSubtreeFlags(node: F | null): void {
     walkFiberForest(node, (cursor) => {
       const adopted = (cursor.flags & AdoptedFlag) !== 0;
+      const subtreeFlags = cursor.subtreeFlags;
       cursor.flags = NoFlags;
-      return !adopted;
+      cursor.subtreeFlags = NoFlags;
+      return !adopted && subtreeFlags !== NoFlags;
     });
   }
 
@@ -4960,7 +5015,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       for (const effect of cursor.effects ?? []) visitor(effect);
 
-      return (cursor.flags & AdoptedFlag) === 0 && !isHiddenBoundary(cursor);
+      return (
+        (cursor.flags & AdoptedFlag) === 0 &&
+        !isHiddenBoundary(cursor) &&
+        (cursor.subtreeFlags & EffectFlag) !== 0
+      );
     });
   }
 
