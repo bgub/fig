@@ -299,11 +299,11 @@ export function on<K extends keyof HTMLElementEventMap>(
   callback: EventCallback<HTMLElementEventMap[K]>,
   options?: EventOptions,
 ): EventDescriptor<HTMLElementEventMap[K]>;
-export function on(
+export function on<E extends Event = Event>(
   type: string,
-  callback: EventCallback,
+  callback: EventCallback<E>,
   options?: EventOptions,
-): EventDescriptor;
+): EventDescriptor<E>;
 export function on(
   type: string,
   callback: EventCallback,

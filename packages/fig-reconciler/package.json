@@ -20,7 +20,8 @@
       "types": "./dist/refresh.d.ts",
       "import": "./dist/refresh.js",
       "default": "./dist/refresh.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
   "sideEffects": false,

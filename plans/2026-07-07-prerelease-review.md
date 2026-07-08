@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 34 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 29 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (44)](#confirmed-minor)
+- [Confirmed minor (29)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -298,22 +298,6 @@ Verified against packages/fig-server/src/payload.ts as it exists: createJsonPayl
 
 ---
 
-### 18. on() has no typed escape hatch for CustomEvent listeners even though custom elements are a first-class part of the JSX surface
-
-- **Location:** `packages/fig-dom/src/events.ts:292`
-- **Severity:** minor
-- **Reviewer:** fig-dom:api-design
-
-The fallback overload (events.ts:292-296) pins the callback to `EventCallback` = `(event: Event, signal: AbortSignal) => void`. Under strictFunctionTypes, a handler typed `(event: CustomEvent<Detail>, signal) => void` is not assignable (contravariant parameter), so `on("value-changed", (e: CustomEvent<number>) => ...)` is a compile error and there is no generic parameter form like `on<CustomEvent<number>>("value-changed", cb)`. Since jsx.ts:51 deliberately supports `${string}-${string}` custom elements, custom-element consumers — the population most likely to use CustomEvents — must widen to `Event` and cast inside every handler. jsx-types.test.tsx has no CustomEvent coverage, confirming the gap. The fix (an extra generic overload) is additive and non-breaking, hence minor, but it is a day-one papercut for the documented custom-element story.
-
-<details><summary>Verification</summary>
-
-Confirmed against disk. events.ts:287-296 has only two on() overloads; the fallback pins the callback to EventCallback<Event> and there is no generic form. Reproduced the exact compile failure with tsc --noEmit under the package tsconfig (strict: true): a handler annotated (event: CustomEvent<number>, signal: AbortSignal) => void fails TS2769 on on("value-changed", ...) due to parameter contravariance. jsx.ts:51 deliberately supports `${string}-${string}` custom elements (documented as intentional in concepts/jsx.md), yet grep finds zero CustomEvent references in packages/, concepts/, or jsx-types.test.tsx — no test pins the behavior and no concept doc declares the limitation intentional. Runtime dispatch works; the cost is purely a typing papercut with a cast workaround, so minor is the honest severity.
-
-</details>
-
----
-
 ### 19. unhideInstance stringifies numeric style.display, contradicting the string-only style policy and leaving Activity content permanently hidden
 
 - **Location:** `packages/fig-dom/src/index.ts:218`
@@ -341,22 +325,6 @@ eventDescriptors() throws 'The events prop must be an array of event descriptors
 <details><summary>Verification</summary>
 
 Verified against events.ts:731-747: the identical vague message is thrown for both non-array values and raw functions inside an array (the events={[handler]} migrant mistake), with no mention of on() and no element context; no dev-gated enhancement and no test pins it. Traced the throw paths in fig-reconciler/src/index.ts: the update path (commitUpdate -> commitHostMutation:3451) is a host commit failure that errors.md:19 says ErrorBoundary does not catch, and the mount path (finalizeInitialInstance in complete(), called from completeUnit OUTSIDE performUnit's try/catch at lines 1260-1272) also bypasses boundary capture and lands in performRoot's uncaught path — so the crash-with-no-self-serve-path scenario is real in both mount and update cases. Partial mitigation: onUncaughtError receives ErrorInfo with componentStack, but the default root rethrows from setTimeout with only the bare error. The contrasting high-quality onClick warning at props.ts:145-147 confirms the inconsistency. It is a DX/error-message issue, not a functional bug, so minor is the correct severity.
-
-</details>
-
----
-
-### 21. No "./package.json" subpath in the exports map of any of the five packages
-
-- **Location:** `packages/fig/package.json:8`
-- **Severity:** minor
-- **Reviewer:** release-readiness
-
-All five exports maps (packages/fig/package.json:8, packages/fig-dom/package.json:8, packages/fig-reconciler/package.json:8, packages/fig-refresh/package.json:8, packages/fig-server/package.json:8) omit "./package.json": "./package.json". Any tool that does require.resolve('@bgub/fig/package.json') or import.meta.resolve of the manifest — version sniffers, lint plugins, older bundler/framework integrations, monorepo tooling — throws ERR_PACKAGE_PATH_NOT_EXPORTED on day one. One-line addition per package; standard practice for packages with exports maps. (Nothing in fig's own released tooling needs it today — fig-vite/fig-start don't resolve it — so minor, but it is the cheapest future-proofing on this list.)
-
-<details><summary>Verification</summary>
-
-Confirmed against disk: none of the exports maps in packages/fig, fig-dom, fig-reconciler, fig-refresh, fig-server (nor fig-vite, fig-start, fig-devtools) includes "./package.json": "./package.json"; each map only lists code entry points. With an exports map present, Node's resolver seals all other subpaths, so require.resolve('@bgub/fig/package.json') or import.meta.resolve of the manifest throws ERR_PACKAGE_PATH_NOT_EXPORTED — I verified the exports blocks directly and grepped the whole packages tree: no fig code or test resolves a manifest subpath, so nothing in-repo is broken and no test pins this either way. The failure is therefore real but purely external/ecosystem-facing (version sniffers, lint plugins, older integrations that resolve manifests through the module resolver rather than reading the file from disk, which is how Vite/webpack do it). The fix is a one-line addition per package and is standard practice. The reviewer's framing and severity are honest and accurate: a confirmed omission with a concrete but hypothetical day-one cost for third-party tooling only. Minor is the correct severity — not major, since no current consumer in the repo or its released tooling hits it.
 
 </details>
 
@@ -490,22 +458,6 @@ Verified against packages/fig-reconciler/src/index.ts as it exists: only two cap
 
 ---
 
-### 31. The published @bgub/fig-reconciler/refresh subpath exports five reconciler-internal helpers (hasRefreshHandler, refreshFamilyFor, resolveLatestType, runWithStaleRefreshFamilies, matchesComponentFamily) that no external consumer uses.
-
-- **Location:** `packages/fig-reconciler/src/refresh.ts:27`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:api-design
-
-refresh.ts doubles as the public `./refresh` entry (package.json exports map) and index.ts's internal module. Its actual external consumers import only `setRefreshHandler` + the `RefreshFamily`/`RefreshUpdate` types (fig-refresh/src/index.ts:1-5, fig-dom/src/refresh.ts:1-4); the other five exports exist solely for index.ts's own imports (index.ts:104-111) and leak reconciler internals — `runWithStaleRefreshFamilies` mutates module-global refresh state and `matchesComponentFamily` is the reconciler's type-identity primitive, both semver liabilities once published tomorrow (removing them later is a breaking change, and a misuse like calling runWithStaleRefreshFamilies outside scheduleRefresh silently changes reconciliation identity). Architecture doctrine says these dev subpaths are seams "with exactly the consumers they were built for"; splitting the internal helpers into a non-exported module (index.ts already imports by relative path, so nothing else changes) closes the leak. Note also that `RefreshUpdate` appears in the main entry's public FigRenderer.scheduleRefresh signature (index.ts:397) but is only importable from the subpath — worth re-exporting from the main entry per the types-follow-signatures rule.
-
-<details><summary>Verification</summary>
-
-Confirmed against disk: package.json exports ./refresh → dist/refresh.js (published, files:["dist"], public access), and dist/refresh.d.ts exports all five internal helpers. Repo-wide grep shows the only external importers of @bgub/fig-reconciler/refresh (fig-refresh/src/index.ts, fig-dom/src/refresh.ts, their tests) use only setRefreshHandler + RefreshFamily/RefreshUpdate types; the five helpers are consumed exclusively by fig-reconciler/src/index.ts:104-111 via a relative import. concepts/renderer-authoring.md:52-57 states the subpath is a dev-only seam "with exactly the consumers they were built for", so the wider surface contradicts the project's own spec. runWithStaleRefreshFamilies mutates module-global state and matchesComponentFamily is the type-identity primitive — real semver liabilities for the imminent 0.0.1 publish. The RefreshUpdate side-note also verifies: dist/index.d.ts:96 references it in the public FigRenderer.scheduleRefresh signature but only imports (not re-exports) it, against architecture.md's types-follow-signatures rule. No test or doc blesses the wider export, and the code is unchanged. It is an API-surface/doctrine hygiene issue with no runtime failure, so minor severity stands.
-
-</details>
-
----
-
 ### 33. The refresh-error row tag is absent from the concepts/payload.md row model (the declared stable contract), and its throw-through-the-decoder delivery drops buffered rows
 
 - **Location:** `packages/fig-server/src/payload.ts:158`
@@ -517,38 +469,6 @@ PayloadRow (exported, documented as "the stable contract") includes { boundary; 
 <details><summary>Verification</summary>
 
 Verified against payload.ts and concepts/payload.md as they exist on disk. Confirmed: (1) PayloadRow (payload.ts:143-159) is doc-commented as "the stable contract" and includes tag "refresh-error" (line 158), emitted on every failed refresh root (payload.ts:1140-1145, pinned by test payload.test.ts:1522-1538), yet the concepts/payload.md:29-44 row-tag list — the declared authoritative spec — lists only model/client/data/assets/error/refresh; git shows refresh-error landed in commit e0fbe19 without the concept-file update the project's CLAUDE.md requires. (2) PayloadCodec/PayloadDecoder docs (payload.ts:278-292) never say onRow may throw, though jsonPayloadCodec must handle it carefully (firstError pattern at 416-438) — an undocumented requirement on custom codec authors. Partially refuted: the "throw drops buffered rows" mechanics are accurate but by design, not a runtime bug — fetchPayload rejects with the decoded server error and fig-start catches it (client.ts:887-894, reportPayloadFetchError); notify() fires before the throw; the dropped later rows are fill-ins for a refresh model that was never applied, so no user-visible correctness failure. Net: a real spec/contract documentation gap for a package whose concepts/ docs are the declared spec, not a functional defect.
-
-</details>
-
----
-
-### 34. renderToPayloadStream has no signal option and its result has no abort(), unlike the HTML entry grid in the same package
-
-- **Location:** `packages/fig-server/src/payload.ts:486`
-- **Severity:** minor
-- **Reviewer:** fig-server:api-design
-
-ServerRenderOptions accepts signal and every HTML stream result exposes abort(reason) (packages/fig-server/src/types.ts:31,61), and server-rendering.md explicitly warns "A hung data source hangs the prerender — pass signal." PayloadRenderOptions (payload.ts:71-86) and PayloadRenderResult (payload.ts:65-69) offer neither: a hung data loader in a server component holds pendingTasks > 0 forever, so allReady never settles and the stream never closes; the only server-side escape is cancelling the ReadableStream from the consumer end (which routes through closeWithError, payload.ts:2155). Same concept, different shape across the two renderers in one package — request-timeout handling that is one line with the HTML entries requires plumbing stream cancellation for payloads.
-
-<details><summary>Verification</summary>
-
-Verified against payload.ts as it exists: PayloadRenderOptions (lines ~71-86) has no signal field and PayloadRenderResult (lines ~65-69) is only {allReady, contentType, stream} with no abort(), while ServerRenderOptions has signal (types.ts:31) and HTML stream results expose abort(reason) (types.ts:60). The hang scenario is real: the stream closes only when pendingTasks === 0, so a hung loader keeps allReady (a deferred) unsettled forever; the sole server-side escape is consumer-end stream.cancel() routing through closeWithError (payload.ts:605-607, 2155). Not handled elsewhere: fig-start's payload path (fig-start/src/server.ts:511-535) does not plumb request.signal into the render, all signal handling inside payload.ts is on the client fetch/decode path, no test pins abort behavior, and neither concepts/payload.md nor open-questions.md documents the omission as intentional — payload.md just mirrors the current signature while server-rendering.md explicitly tells HTML users to pass signal for hung sources. Severity stays minor because a working escape hatch exists (stream cancellation rejects allReady, errors the controller, and disposes the data store, and runtimes cancel response bodies on client disconnect), so this is an API asymmetry/ergonomics gap rather than an unrecoverable defect.
-
-</details>
-
----
-
-### 36. createPayloadResponse without loadClientReference/resolveClientReference silently decodes client rows into a component whose eventual error blames server rendering
-
-- **Location:** `packages/fig-server/src/payload.ts:947`
-- **Severity:** minor
-- **Reviewer:** fig-server:api-design
-
-decodeClientReference's final fallback (payload.ts:947-951) returns clientReference({ id, load: () => Promise.resolve({}) }). The client reconciler has no special handling for client-reference types (isClientReference is only consumed in fig-server), so rendering it invokes the marker function, which throws "Client reference \"X\" cannot be rendered on the server directly." (packages/fig/src/element.ts:180) — on the client, where the actual mistake is a missing loadClientReference option on createPayloadResponse. Nothing fails at decode time and preloadClientReferences() resolves immediately (no entries), so the misconfiguration surfaces late with a message pointing at the wrong layer; fig-start had to add its own requireClientReferenceResolver guard (packages/fig-start/src/client.ts:887) to fail loudly. Decoding a client row with neither option configured should throw or warn with the real cause.
-
-<details><summary>Verification</summary>
-
-Verified every mechanical claim: payload.ts:947-951 does return a clientReference marker with a no-op load when neither resolveClientReference resolves nor loadClientReference is set; decode happens eagerly (resolveDecodedRow, payload.ts:2241) with no warning; preloadClientReferences resolves immediately since the fallback registers no entry; isClientReference is consumed only in fig-server (renderer.ts:634), so the client reconciler renders the marker as a function component, which throws element.ts:180's "Client reference \"X\" cannot be rendered on the server directly." — a server-blaming message for a client-side misconfiguration. fig-start's requireClientReferenceResolver (client.ts:992, with tests) exists precisely to fail loudly for this case, confirming the footgun. Attempted refutations: (a) the fallback IS intentional/load-bearing for server-side decode (fig-start server.ts:412-417 decodes with resolveClientReference returning undefined for non-ssr refs, markers rendered via clientReferenceFallback placeholder at server.ts:257) and for metadata-only decodes (payload.test.ts:424/452/491 pin no-option decode succeeding) — so the finding's "should throw" remedy must be scoped to the neither-option-configured case (or dev-only warn), but this doesn't refute the identified failure; (b) no concepts/payload.md documentation of the no-resolver fallback behavior, so it is not a documented intentional divergence; (c) no test pins the client-side misleading-error behavior as desired. The failure scenario is concrete and reachable for any direct @bgub/fig-server/payload consumer (non-fig-start) that omits loadClientReference. DX-only, framework layer guards it, so minor is the honest severity.
 
 </details>
 

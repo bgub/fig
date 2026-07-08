@@ -63,6 +63,7 @@ import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
 declare const process: { env: { NODE_ENV?: string } };
 
 export interface PayloadRenderResult {
+  abort(reason?: unknown): void;
   allReady: Promise<void>;
   contentType: string;
   stream: ReadableStream<Uint8Array>;
@@ -72,6 +73,7 @@ export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   codec?: PayloadCodec;
   dataPartition?: DataResourceKeyInput;
+  signal?: AbortSignal;
   /**
    * Decides what crosses the wire when a server render throws, mirroring the
    * HTML renderer's contract: the returned payload is authoritative. Without
@@ -313,6 +315,8 @@ export class PayloadFetchError extends Error {
 }
 
 type PayloadRequest = {
+  abortListener: (() => void) | null;
+  abortSignal: AbortSignal | null;
   allReady: Deferred<void>;
   boundaryIds: Set<string> | null;
   clientReferenceRows: Map<string, number>;
@@ -504,6 +508,7 @@ export function renderToPayloadStream(
 ): PayloadRenderResult {
   const request = createPayloadRequest(node, options);
   return {
+    abort: (reason?: unknown) => abortPayloadRequest(request, reason),
     allReady: request.allReady.promise,
     contentType: request.codec.contentType,
     stream: request.stream,
@@ -577,8 +582,12 @@ function createPayloadRequest(
   node: FigNode,
   options: PayloadRenderOptions,
 ): PayloadRequest {
+  throwIfAborted(options.signal);
+
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
+    abortListener: null,
+    abortSignal: null,
     allReady: deferred<void>(),
     boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
     clientReferenceRows: new Map(),
@@ -620,10 +629,19 @@ function createPayloadRequest(
       flushRows(request);
     },
     cancel(reason) {
-      closeWithError(request, reason);
+      abortPayloadRequest(request, reason);
     },
   });
   request.stream = stream;
+
+  if (options.signal !== undefined) {
+    const abortListener = () =>
+      abortPayloadRequest(request, options.signal?.reason);
+    request.abortListener = abortListener;
+    request.abortSignal = options.signal;
+    options.signal.addEventListener("abort", abortListener, { once: true });
+  }
+
   request.pingedTasks.push(
     createTask(request, 0, "node", node, new Map(), null),
   );
@@ -979,10 +997,18 @@ class PayloadResponseImpl implements PayloadResponse {
       return entry.component;
     }
 
-    return clientReference({
-      id: metadata.id,
-      load: () => Promise.resolve({}),
-    });
+    if (this.options.resolveClientReference !== undefined) {
+      return clientReference({
+        id: metadata.id,
+        load: () => Promise.resolve({}),
+      });
+    }
+
+    return function PayloadUnresolvedClientComponent(): never {
+      throw new Error(
+        `Cannot render client reference "${metadata.id}" because createPayloadResponse was not configured with loadClientReference or a matching resolveClientReference.`,
+      );
+    };
   }
 
   // Loads start when reference rows are recorded; awaiting this before
@@ -2250,6 +2276,7 @@ function flushRows(request: PayloadRequest): void {
 
   if (request.pendingTasks === 0) {
     request.status = "closed";
+    cleanupPayloadAbortListener(request);
     request.dataStore.dispose();
     request.controller.close();
   }
@@ -2257,10 +2284,22 @@ function flushRows(request: PayloadRequest): void {
 
 function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.status === "closed") return;
+  cleanupPayloadAbortListener(request);
   request.status = "closed";
   request.dataStore.dispose();
   request.allReady.reject(error);
   request.controller?.error(error);
+}
+
+function abortPayloadRequest(request: PayloadRequest, reason?: unknown): void {
+  closeWithError(request, reason ?? new PayloadRequestCancelledError());
+}
+
+function cleanupPayloadAbortListener(request: PayloadRequest): void {
+  if (request.abortListener === null) return;
+  request.abortSignal?.removeEventListener("abort", request.abortListener);
+  request.abortListener = null;
+  request.abortSignal = null;
 }
 
 // Wire-format flattening only: unlike the shared collectChildren, this keeps

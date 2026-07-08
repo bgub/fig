@@ -15,7 +15,8 @@
       "types": "./dist/payload.d.ts",
       "import": "./dist/payload.js",
       "default": "./dist/payload.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
   "sideEffects": false,

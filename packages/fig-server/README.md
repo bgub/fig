@@ -243,9 +243,11 @@ import {
 ```
 
 `renderToPayloadStream(node, options?)` renders a server-component payload. The
-default `jsonPayloadCodec` writes one readable JSON row per newline and
-identifies itself with `text/x-fig-payload; codec=json; charset=utf-8`. Pass a
-custom `PayloadCodec` to both `renderToPayloadStream(node, { codec })` and
+result exposes `abort(reason?)`, and `options.signal` also cancels the render;
+both paths reject `allReady`. The default `jsonPayloadCodec` writes one
+readable JSON row per newline and identifies itself with
+`text/x-fig-payload; codec=json; charset=utf-8`. Pass a custom `PayloadCodec`
+to both `renderToPayloadStream(node, { codec })` and
 `createPayloadResponse({ codec })` when both ends should use a different byte
 encoding. Codec ids are implementation ids, not stable public wire formats.
 
@@ -266,6 +268,9 @@ include a nested `<PayloadBoundary id="feed">` wrapper in the refresh payload.
 the exported `PAYLOAD_BOUNDARY_HEADER` constant for targeted refresh requests.
 Non-2xx responses reject with `PayloadFetchError`, which exposes `status` and
 `response` and cancels the response body before throwing.
+Decoded client references require `loadClientReference` or a matching
+`resolveClientReference` before render; metadata-only decodes can still inspect
+rows without configuring a loader.
 
 `encodePayloadValue` / `decodePayloadValue` are low-level helpers for payload
 integrations that need the same data-value fidelity as payload data rows:

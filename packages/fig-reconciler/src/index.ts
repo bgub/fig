@@ -104,11 +104,12 @@ import {
 import {
   hasRefreshHandler,
   matchesComponentFamily,
-  type RefreshUpdate,
   refreshFamilyFor,
   resolveLatestType,
   runWithStaleRefreshFamilies,
-} from "./refresh.ts";
+} from "./refresh-internal.ts";
+import type { RefreshUpdate } from "./refresh.ts";
+export type { RefreshUpdate } from "./refresh.ts";
 import {
   NormalPriority,
   now,

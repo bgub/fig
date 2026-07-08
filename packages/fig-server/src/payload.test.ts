@@ -357,6 +357,20 @@ describe("payload rendering", () => {
     ]);
   });
 
+  it("reports missing client reference loaders when decoded references render", async () => {
+    const Widget = clientReference({
+      id: "app/Widget.client.tsx#Widget",
+      load: () => Promise.resolve({}),
+    });
+    const rows = await renderToPayloadRows(createElement(Widget, {}));
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, rows);
+
+    expect(() => evaluatePayloadNode(response.getRoot())).toThrow(
+      'Cannot render client reference "app/Widget.client.tsx#Widget" because createPayloadResponse was not configured with loadClientReference or a matching resolveClientReference.',
+    );
+  });
+
   it("renders preloaded client references synchronously", async () => {
     const Widget = clientReference({
       id: "app/Widget.client.tsx#Widget",
@@ -2337,6 +2351,35 @@ describe("payload rendering", () => {
     expect(unhandled).toEqual([]);
     // Awaiting callers still observe the rejection.
     await expect(result.allReady).rejects.toThrow("client disconnected");
+  });
+
+  it("aborts payload renders through the stream result", async () => {
+    const pending = deferred<string>();
+
+    function Slow() {
+      return createElement("p", null, readPromise(pending.promise));
+    }
+
+    const result = renderToPayloadStream(createElement(Slow, null));
+    result.abort(new Error("payload timed out"));
+
+    await expect(result.allReady).rejects.toThrow("payload timed out");
+  });
+
+  it("aborts payload renders from the render signal", async () => {
+    const pending = deferred<string>();
+    const controller = new AbortController();
+
+    function Slow() {
+      return createElement("p", null, readPromise(pending.promise));
+    }
+
+    const result = renderToPayloadStream(createElement(Slow, null), {
+      signal: controller.signal,
+    });
+    controller.abort(new Error("request closed"));
+
+    await expect(result.allReady).rejects.toThrow("request closed");
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {

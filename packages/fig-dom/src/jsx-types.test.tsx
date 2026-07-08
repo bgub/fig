@@ -64,6 +64,16 @@ function typeChecks(): FigNode[] {
         events={[false, null, undefined, on("click", () => undefined)]}
       />,
     ),
+    expectNode(
+      <my-widget
+        events={[
+          on<CustomEvent<{ value: number }>>("value-changed", (event) => {
+            const value: number = event.detail.value;
+            void value;
+          }),
+        ]}
+      />,
+    ),
 
     // Form-state props are Fig policy: value/checked control the live DOM
     // state, defaultValue/defaultChecked own the HTML representation.

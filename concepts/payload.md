@@ -101,9 +101,10 @@ server-render through their `ssr` component with modules preloaded.
 ## API
 
 Server: `renderToPayloadStream(node, { codec?, onError?, refreshBoundary?,
-clientReferenceAssets?, dataPartition? })` returns
-`{ stream, allReady, contentType }`. `PayloadBoundary` marks refreshable
-subtrees (dev throws on duplicate ids).
+clientReferenceAssets?, dataPartition?, signal? })` returns
+`{ stream, allReady, contentType, abort(reason?) }`. `signal` and `abort()`
+cancel hung payload renders and reject `allReady`. `PayloadBoundary` marks
+refreshable subtrees (dev throws on duplicate ids).
 
 Client: `createPayloadResponse({ codec?, loadClientReference?,
 resolveClientReference? })` decodes rows — `processStream(stream)` is the
@@ -114,6 +115,9 @@ streamed data into `root.data`, `preloadClientReferences()` awaits in-flight
 module loads, and `fetchPayload(response, input, { refreshBoundary? })`
 fetches and ingests (sending the response codec in `Accept`, checking the
 response codec id, and namespacing refresh row ids past mounted chunks).
+Decoded client references need either `loadClientReference` or a matching
+`resolveClientReference` before they render; metadata-only decodes can still
+inspect rows without a loader.
 `PAYLOAD_BOUNDARY_HEADER` is the shared header name used for targeted refresh
 requests. Non-2xx payload responses reject with `PayloadFetchError`, which
 exposes `status` and `response` and cancels the response body before throwing.
