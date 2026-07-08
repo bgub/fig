@@ -23,6 +23,7 @@ function Home(): FigNode {
       <p>
         <ViewTransition
           default="fig-start-route-title"
+          enter="none"
           name="start-vt-page-title"
           share="fig-start-route-title"
         >

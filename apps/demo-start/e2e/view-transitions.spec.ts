@@ -114,6 +114,10 @@ test("turns the home link into the view transitions page title", async ({
   expectPageTitleTransition(snapshots, "home-to-transitions-1");
   expectPageTitleTransition(snapshots, "home-to-transitions-2");
   expectPageTitleTransition(snapshots, "home-to-transitions-after-detour");
+  // Every transition must be attributable to a navigation click. An entry
+  // without an action fired outside one — the first-load hydration retry
+  // used to enter-fade every annotated surface this way.
+  expect(snapshots.filter((snapshot) => snapshot.action === "")).toEqual([]);
   expect(errors()).toEqual([]);
 });
 

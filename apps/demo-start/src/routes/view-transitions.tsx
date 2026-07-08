@@ -57,6 +57,7 @@ function ViewTransitionLab(): FigNode {
         <h1 class="text-3xl font-semibold">
           <ViewTransition
             default="fig-start-route-title"
+            enter="none"
             name="start-vt-page-title"
             share="fig-start-route-title"
           >
@@ -72,7 +73,7 @@ function ViewTransitionLab(): FigNode {
         <article class="space-y-3 rounded-lg border border-slate-300 bg-white p-5">
           <div class="flex flex-wrap gap-2">
             <button
-              class="rounded border border-teal-700 bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+              class="select-none rounded border border-teal-700 bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
               events={[on("click", cycle)]}
               type="button"
             >
@@ -93,6 +94,7 @@ function ViewTransitionLab(): FigNode {
             {ordered.map((surface) => (
               <ViewTransition
                 default="fig-start-vt"
+                enter="none"
                 key={surface.id}
                 name={`start-vt-${surface.id}`}
                 share="fig-start-vt"
@@ -126,6 +128,7 @@ function ViewTransitionLab(): FigNode {
 
         <ViewTransition
           default="fig-start-vt-detail"
+          enter="none"
           name="start-vt-detail"
           share="fig-start-vt-detail"
           update="fig-start-vt-detail"
