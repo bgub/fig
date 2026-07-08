@@ -29,14 +29,25 @@ merges adjacent text (numbers stringify). The normalized member type is
 
 ## Render Bailouts (Two Tiers)
 
-A fiber with identical props and no own work in the render lanes is never
-re-rendered:
+A fiber with identical props, no own work in the render lanes, and no changed
+context reads is never re-rendered:
 
 1. When its `childLanes` are also clean, it **adopts** the committed children
    without cloning (`AdoptedFlag`); render and the commit mutation/deletion/
    effect walks all skip the subtree.
 2. When descendants have work, its children are cloned and traversal
    descends — preserving child props identity so siblings bail too.
+
+Context propagation is lazy: a provider pushes its new value and renders on
+without walking its subtree, so the cost lands only where a subtree would
+otherwise be skipped. Each `readContext` records the value it saw on the
+consuming fiber, and a consumer whose recorded value no longer matches the
+current provider value is refused bailout outright. Before tier 1 adopts a
+subtree, the skip point checks the providers above it for changed values and
+lane-marks the matching consumers it was about to skip — pruned by per-fiber
+context aggregates maintained at complete-time like `subtreeFlags`, stopping
+at nested providers of the same context. A per-render flag records that the
+skip point ran this check so nested skip points end their upward walk early.
 
 Suspense boundaries always run `begin` so hidden-primary retries are handled.
 Commit clears fiber flags and deletions as it consumes them, so adopted

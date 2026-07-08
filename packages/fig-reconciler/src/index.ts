@@ -445,7 +445,8 @@ const AssembledFlag = 1 << 6;
 const DeletionFlag = 1 << 7;
 const DataDependencyFlag = 1 << 8;
 const EffectFlag = 1 << 9;
-const StoreConsistencyFlag = 1 << 10;
+const ContextPropagationFlag = 1 << 10;
+const StoreConsistencyFlag = 1 << 11;
 type Flag = number;
 
 const MutationMask =
@@ -618,6 +619,11 @@ interface ErrorBoundaryState {
   didReport: boolean;
 }
 
+interface ContextDependency {
+  context: FigContext<unknown>;
+  memoizedValue: unknown;
+}
+
 type SuspensePings<Container, Instance, TextInstance> = WeakMap<
   Fiber<Container, Instance, TextInstance>,
   Lanes
@@ -646,7 +652,8 @@ interface Fiber<Container, Instance, TextInstance> {
   lanes: Lanes;
   childLanes: Lanes;
   effects: Effect[] | null;
-  contextDependencies: FigContext<unknown>[] | null;
+  contextDependencies: ContextDependency[] | null;
+  contextSubtreeDependencies: FigContext<unknown>[] | null;
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   suspenseQueueStart?: number;
@@ -1369,6 +1376,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (canBailout(node, root)) {
       if (!includesSomeLane(node.childLanes, root.renderLanes)) {
+        lazilyPropagateParentContextChanges(node, root);
+      }
+
+      if (!includesSomeLane(node.childLanes, root.renderLanes)) {
         // The whole subtree is clean: adopt the committed children without
         // cloning and skip them entirely.
         node.flags |= AdoptedFlag;
@@ -1477,8 +1488,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       beginPortal(node);
       return;
     }
-
-    if (changedContextProvider(node)) propagateContextChange(node);
 
     reconcileCurrentChildren(node, node.props.children);
   }
@@ -1809,8 +1818,33 @@ export function createRenderer<Container, Instance, TextInstance>(
       node.alternate !== null &&
       (node.flags & PlacementFlag) === 0 &&
       node.props === node.alternate.memoizedProps &&
-      !includesSomeLane(node.lanes, root.renderLanes)
+      !includesSomeLane(node.lanes, root.renderLanes) &&
+      !contextDependenciesChanged(node, root)
     );
+  }
+
+  function contextDependenciesChanged(node: F, root: R): boolean {
+    const dependencies = node.contextDependencies;
+    if (dependencies === null) return false;
+
+    for (const dependency of dependencies) {
+      if (
+        !Object.is(
+          currentContextValue(root, dependency.context),
+          dependency.memoizedValue,
+        )
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function currentContextValue(root: R, context: FigContext<unknown>): unknown {
+    return root.contextValues.has(context)
+      ? root.contextValues.get(context)
+      : context.defaultValue;
   }
 
   function shouldUseHostTextContent(node: F): boolean {
@@ -2840,13 +2874,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       );
     }
 
-    addContextDependency(renderingFiber, context as FigContext<unknown>);
     const root = rootOf(renderingFiber);
-    const values = root.contextValues;
+    const contextKey = context as FigContext<unknown>;
+    const value = currentContextValue(root, contextKey);
 
-    return values.has(context as FigContext<unknown>)
-      ? (values.get(context as FigContext<unknown>) as T)
-      : context.defaultValue;
+    addContextDependency(renderingFiber, contextKey, value);
+    return value as T;
   }
 
   function pushContextProvider(node: F): void {
@@ -2907,12 +2940,70 @@ export function createRenderer<Container, Instance, TextInstance>(
     return false;
   }
 
-  function addContextDependency(node: F, context: FigContext<unknown>): void {
+  function addContextDependency(
+    node: F,
+    context: FigContext<unknown>,
+    memoizedValue: unknown,
+  ): void {
     node.contextDependencies ??= [];
+    const dependency = contextDependency(node, context);
 
-    if (!node.contextDependencies.includes(context)) {
-      node.contextDependencies.push(context);
+    if (dependency === null) {
+      node.contextDependencies.push({ context, memoizedValue });
+    } else {
+      dependency.memoizedValue = memoizedValue;
     }
+  }
+
+  function contextDependency(
+    node: F,
+    context: FigContext<unknown>,
+  ): ContextDependency | null {
+    return (
+      node.contextDependencies?.find(
+        (dependency) => dependency.context === context,
+      ) ?? null
+    );
+  }
+
+  function appendContextDependencies(
+    list: FigContext<unknown>[] | null,
+    dependencies: ContextDependency[] | null,
+  ): FigContext<unknown>[] | null {
+    if (dependencies === null) return list;
+
+    let next = list;
+    for (const dependency of dependencies) {
+      next = appendContext(next, dependency.context);
+    }
+    return next;
+  }
+
+  function appendContextList(
+    list: FigContext<unknown>[] | null,
+    contexts: FigContext<unknown>[] | null,
+  ): FigContext<unknown>[] | null {
+    if (contexts === null) return list;
+
+    let next = list;
+    for (const context of contexts) next = appendContext(next, context);
+    return next;
+  }
+
+  function appendContext(
+    list: FigContext<unknown>[] | null,
+    context: FigContext<unknown>,
+  ): FigContext<unknown>[] {
+    if (list === null) return [context];
+    if (!list.includes(context)) list.push(context);
+    return list;
+  }
+
+  function contextListIncludes(
+    list: FigContext<unknown>[] | null,
+    context: FigContext<unknown>,
+  ): boolean {
+    return list?.includes(context) === true;
   }
 
   function updateHook(kind: HookKind): Hook | null {
@@ -2951,12 +3042,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     let child = node.child;
     let childLanes = NoLanes;
     let subtreeFlags = NoFlags;
+    let contextSubtreeDependencies: FigContext<unknown>[] | null = null;
 
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
       subtreeFlags |= child.flags;
       subtreeFlags |= child.subtreeFlags;
+      contextSubtreeDependencies = appendContextDependencies(
+        contextSubtreeDependencies,
+        child.contextDependencies,
+      );
+      contextSubtreeDependencies = appendContextList(
+        contextSubtreeDependencies,
+        child.contextSubtreeDependencies,
+      );
       child = child.sibling;
     }
 
@@ -2977,6 +3077,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.childLanes = childLanes;
     node.subtreeFlags = subtreeFlags;
+    node.contextSubtreeDependencies = contextSubtreeDependencies;
     node.memoizedProps = node.props;
     if (node.tag === ContextProviderTag && (node.flags & AdoptedFlag) === 0) {
       popContextProvider(node);
@@ -4324,25 +4425,60 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function propagateContextChange(provider: F): void {
-    const currentProvider = provider.alternate;
-    if (currentProvider === null) return;
+  // Context propagation is lazy: providers push new values without walking
+  // their subtree, so a subtree about to be skipped is the only place a stale
+  // consumer could get stranded. Every skip point (clean-childLanes bailout)
+  // checks the providers above it and marks the consumers it is about to skip.
+  // Consumers that are begun anyway are covered by canBailout's memoized
+  // dependency check, so no eager walk is needed.
+  function lazilyPropagateParentContextChanges(node: F, root: R): boolean {
+    if ((node.flags & ContextPropagationFlag) !== 0) return false;
 
-    const context = provider.type as unknown as FigContext<unknown>;
-    const lanes = rootOf(provider).renderLanes;
+    const contexts = changedParentContexts(node);
+    node.flags |= ContextPropagationFlag;
+    if (contexts === null) return false;
 
-    for (
-      let child = currentProvider.child;
-      child !== null;
-      child = child.sibling
-    ) {
-      markContextConsumers(child, currentProvider, context, lanes);
+    const current = node.alternate;
+    if (current === null) return false;
+
+    for (const context of contexts) {
+      if (!contextListIncludes(current.contextSubtreeDependencies, context)) {
+        continue;
+      }
+
+      for (let child = current.child; child !== null; child = child.sibling) {
+        markContextConsumers(child, current, context, root.renderLanes);
+      }
     }
+
+    return includesSomeLane(node.childLanes, root.renderLanes);
+  }
+
+  function changedParentContexts(node: F): FigContext<unknown>[] | null {
+    let seen =
+      node.tag === ContextProviderTag
+        ? [node.type as unknown as FigContext<unknown>]
+        : null;
+    let changed: FigContext<unknown>[] | null = null;
+
+    for (let parent = node.return; parent !== null; parent = parent.return) {
+      if ((parent.flags & ContextPropagationFlag) !== 0) break;
+      if (parent.tag !== ContextProviderTag) continue;
+
+      const context = parent.type as unknown as FigContext<unknown>;
+      if (contextListIncludes(seen, context)) continue;
+      seen = appendContext(seen, context);
+      if (changedContextProvider(parent)) {
+        changed = appendContext(changed, context);
+      }
+    }
+
+    return changed;
   }
 
   function markContextConsumers(
     node: F,
-    provider: F,
+    propagationRoot: F,
     context: FigContext<unknown>,
     lanes: Lanes,
   ): void {
@@ -4353,16 +4489,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    if (node.contextDependencies?.includes(context) === true) {
+    if (contextDependency(node, context) !== null) {
       markLanes(node, lanes);
-      markParentPath(node, provider, lanes);
+      markParentPath(node, propagationRoot, lanes);
     }
 
+    if (!contextListIncludes(node.contextSubtreeDependencies, context)) return;
+
     for (let child = node.child; child !== null; child = child.sibling) {
-      markContextConsumers(child, provider, context, lanes);
+      markContextConsumers(child, propagationRoot, context, lanes);
     }
   }
 
+  // Marks childLanes up to and including stopAt: stopAt is the skip point
+  // whose childLanes gate whether its subtree is adopted or descended into.
   function markParentPath(node: F, stopAt: F, lanes: Lanes): void {
     for (
       let parent = node.return;
@@ -4371,6 +4511,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     ) {
       markChildLanes(parent, lanes);
     }
+
+    markChildLanes(stopAt, lanes);
   }
 
   function markLanes(node: F, lane: Lane): void {
@@ -4414,6 +4556,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
+    next.contextSubtreeDependencies = current.contextSubtreeDependencies;
     next.dataDependenciesDirty = false;
     next.suspenseState = current.suspenseState;
     next.hiddenState = null;
@@ -4493,6 +4636,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
+      contextSubtreeDependencies: null,
       dataDependenciesDirty: false,
       suspenseState: null,
       hiddenState: null,
@@ -5863,8 +6007,8 @@ function devtoolsContextDependencies<Container, Instance, TextInstance>(
   node: Fiber<Container, Instance, TextInstance>,
 ): string[] {
   return (
-    node.contextDependencies?.map((context) =>
-      devtoolsTypeName(context, "Context"),
+    node.contextDependencies?.map((dependency) =>
+      devtoolsTypeName(dependency.context, "Context"),
     ) ?? []
   );
 }

@@ -96,7 +96,9 @@ left to framework layers.
 
 React's broad `use(resource)` splits into explicit reads that are render-time
 inputs, not hook slots: `readContext(context)` (context objects are their own
-provider; reads are tracked so provider updates mark matching consumers, and
-propagation stops at nested providers of the same context), `readPromise`
+provider; each read records the value seen so changed providers re-render
+matching consumers even through bailed-out subtrees — propagation is lazy,
+resolved at render bailouts (rendering.md), and stops at nested providers of
+the same context), `readPromise`
 (identity-keyed, not call-position-keyed), and `readData` from
 `@bgub/fig` (cache-keyed — see data.md).

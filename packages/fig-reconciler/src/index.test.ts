@@ -1531,6 +1531,105 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("provided:1");
   });
 
+  it("updates consumers when provider values change", () => {
+    const Theme = createContext("default");
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Consumer() {
+      return createElement("span", null, readContext(Theme));
+    }
+
+    function App({ value }: { value: string }) {
+      return createElement(
+        Theme,
+        { value },
+        createElement("section", null, createElement(Consumer)),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { value: "first" })));
+    expect(container.textContent).toBe("first");
+
+    flushSync(() => root.render(createElement(App, { value: "second" })));
+    expect(container.textContent).toBe("second");
+  });
+
+  it("checks context dependencies before bailing out visited consumers", () => {
+    const Theme = createContext("default");
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let bump: (() => void) | null = null;
+    let consumerRenders = 0;
+
+    function Consumer() {
+      consumerRenders += 1;
+      return createElement("span", null, readContext(Theme));
+    }
+
+    function Ticker() {
+      const [count, setCount] = useState(0);
+      bump = () => setCount((value) => value + 1);
+      return createElement("b", null, count);
+    }
+
+    const tree = createElement(
+      Theme,
+      { value: "first" },
+      createElement(Consumer),
+      createElement(Ticker),
+    );
+
+    flushSync(() => root.render(tree));
+    expect(container.textContent).toBe("first0");
+    expect(consumerRenders).toBe(2);
+
+    // Keep provider props identity stable so only the context dependency check
+    // prevents the visited consumer from taking the early bailout.
+    tree.props.value = "second";
+    flushSync(() => bump?.());
+
+    expect(container.textContent).toBe("second1");
+    expect(consumerRenders).toBe(4);
+  });
+
+  it("lazily propagates provider changes into bailed-out subtrees", () => {
+    const Theme = createContext("default");
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let wrapperRenders = 0;
+
+    function Consumer() {
+      return createElement("span", null, readContext(Theme));
+    }
+
+    function Wrapper() {
+      wrapperRenders += 1;
+      return createElement("div", null, createElement(Consumer));
+    }
+
+    // Hoisted so the wrapper keeps props identity across renders: with no own
+    // work and clean childLanes it is a whole-subtree bailout candidate, and
+    // only lazy propagation at the skip point can reach the consumer inside.
+    const wrapped = createElement(Wrapper);
+
+    function App({ value }: { value: string }) {
+      return createElement(Theme, { value }, wrapped);
+    }
+
+    flushSync(() => root.render(createElement(App, { value: "first" })));
+    expect(container.textContent).toBe("first");
+    expect(wrapperRenders).toBe(2);
+
+    flushSync(() => root.render(createElement(App, { value: "second" })));
+    expect(container.textContent).toBe("second");
+    // The wrapper bailed out; only the consumer below it re-rendered.
+    expect(wrapperRenders).toBe(2);
+  });
+
   it("throws a diagnostic for state updates scheduled from useBeforeLayout effects", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
