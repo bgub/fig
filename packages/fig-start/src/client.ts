@@ -156,6 +156,14 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   installLinkInterceptor(router);
   installPopStateHandler(router);
 
+  // hydrateRoot installed its capture listeners synchronously, so from here
+  // every replayable event (clicks included) is queued and replayed even if
+  // the shell has not committed yet. The attribute is the observable
+  // "interactive" signal for tests and tooling — events that arrive before
+  // this script runs are unrecoverable, so waiting on it is the only
+  // race-free way to script a first interaction.
+  container.setAttribute("data-fig-start-hydrated", "");
+
   return router;
 }
 

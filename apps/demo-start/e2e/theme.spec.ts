@@ -79,6 +79,7 @@ test("hydrates, changes, and persists the shell theme", async ({
   await expectTheme(page, "dark");
   const themeGroup = page.getByRole("group", { name: "Theme" });
 
+  await awaitInteractive(page);
   await themeGroup.getByRole("button", { name: "Light" }).click();
 
   await expectTheme(page, "light");
@@ -109,6 +110,7 @@ test("changes away from system theme on the first click", async ({
     backgroundColor: "rgb(16, 24, 32)",
   });
 
+  await awaitInteractive(page);
   await themeGroup.getByRole("button", { name: "Light" }).click();
 
   await expectTheme(page, "light", {
@@ -117,6 +119,14 @@ test("changes away from system theme on the first click", async ({
   await expect.poll(() => themeCookie(context)).toBe("light");
   expect(errors()).toEqual([]);
 });
+
+// Every expectTheme assertion passes on server-rendered HTML alone, so a
+// click can otherwise race client-bundle execution: events fired before any
+// script ran are unrecoverable (fig-dom's replay only exists once hydration
+// starts). The marker is set the moment replay listeners are installed.
+async function awaitInteractive(page: Page): Promise<void> {
+  await page.locator("[data-fig-start-hydrated]").waitFor();
+}
 
 async function expectTheme(
   page: Page,

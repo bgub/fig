@@ -192,6 +192,20 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     expect(document.querySelector(".island")).toBeNull();
   });
 
+  it("marks the container interactive once replayable events are safe", async () => {
+    await installServerRenderedDocument("/");
+
+    const container = document.querySelector("#fig-root");
+    expect(container?.hasAttribute("data-fig-start-hydrated")).toBe(false);
+
+    hydrateStart({ loadClientReference, routes });
+
+    // Synchronously with hydrateStart returning: from this point clicks are
+    // queued and replayed even before the shell commits, so tests and
+    // tooling can gate first interactions on the attribute.
+    expect(container?.hasAttribute("data-fig-start-hydrated")).toBe(true);
+  });
+
   it("hydrates SSR-rendered client references without replacing them with templates", async () => {
     await installServerRenderedDocument("/ssr");
     (globalThis as Record<string, unknown>)[CLIENT_REFERENCE_MODULES_GLOBAL] = {
