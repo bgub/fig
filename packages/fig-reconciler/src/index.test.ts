@@ -24,6 +24,7 @@ import {
   useTransition,
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
+import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import type {
   FigDevtoolsCommitInspection,
@@ -161,6 +162,22 @@ function collectDevtoolsInspections(): FigDevtoolsCommitInspection[] {
   return inspections;
 }
 
+function dataSubscriberCounts(handle: object): number[] {
+  if (!hasInspectDataEntries(handle)) {
+    throw new Error("Expected test data store to expose entry inspection.");
+  }
+  return handle.inspectDataEntries().map((entry) => entry.subscriberCount);
+}
+
+function hasInspectDataEntries(handle: object): handle is {
+  inspectDataEntries(): readonly DataStoreEntrySnapshot[];
+} {
+  return (
+    "inspectDataEntries" in handle &&
+    typeof handle.inspectDataEntries === "function"
+  );
+}
+
 afterEach(() => {
   delete globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__;
 });
@@ -170,6 +187,70 @@ describe("reconciler", () => {
     const { flushSync } = createRenderer(host);
 
     expect(flushSync(() => "result")).toBe("result");
+  });
+
+  it("flushes sync updates before rethrowing a flushSync callback error", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let setCount: ((count: number) => void) | undefined;
+
+    function Counter() {
+      const [count, nextCount] = useState(0);
+      setCount = nextCount;
+      return createElement("span", null, `Count ${count}`);
+    }
+
+    flushSync(() => root.render(createElement(Counter, null)));
+    expect(container.textContent).toBe("Count 0");
+
+    expect(() =>
+      flushSync(() => {
+        setCount?.(1);
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+
+    expect(container.textContent).toBe("Count 1");
+  });
+
+  it("rejects flushSync calls during render with a clear error", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function Broken() {
+      flushSync(() => undefined);
+      return createElement("span", null, "unreachable");
+    }
+
+    expect(() =>
+      flushSync(() => root.render(createElement(Broken, null))),
+    ).toThrow("flushSync cannot be called while rendering a component.");
+  });
+
+  it("does not flush suspended root work at NoLanes", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const pending = deferred<string>();
+    let renders = 0;
+
+    function SuspendedRoot() {
+      renders += 1;
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    flushSync(() => root.render(createElement(SuspendedRoot, null)));
+    expect(renders).toBe(1);
+
+    flushSync(() => undefined);
+    expect(renders).toBe(1);
+
+    pending.resolve("Ready");
+    await delay();
+
+    expect(container.textContent).toBe("Ready");
   });
 
   it("commits Suspense fallback and retries the boundary", async () => {
@@ -1733,6 +1814,72 @@ describe("reconciler", () => {
     // The scheduler tick must survive the failure: later work still runs.
     flushSync(() => root.render(createElement("span", null, "Recovered")));
     expect(container.textContent).toBe("Recovered");
+  });
+
+  it("releases data owners for every root child after an uncaught error", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const errors: unknown[] = [];
+    const root = createRoot(container, {
+      onUncaughtError(error) {
+        errors.push(error);
+      },
+    });
+    const firstResource = dataResource({
+      key: (id: string) => ["uncaught-root-first", id],
+      load: (id: string) => `first-${id}`,
+    });
+    const secondResource = dataResource({
+      key: (id: string) => ["uncaught-root-second", id],
+      load: (id: string) => `second-${id}`,
+    });
+
+    function Reader({
+      id,
+      resource,
+    }: {
+      id: string;
+      resource: typeof firstResource;
+    }) {
+      return createElement("span", null, readData(resource, id));
+    }
+
+    function Broken(_props: { key?: string }): never {
+      throw new Error("root failed");
+    }
+
+    flushSync(() =>
+      root.render([
+        createElement(Reader, {
+          id: "one",
+          key: "first",
+          resource: firstResource,
+        }),
+        createElement(Reader, {
+          id: "one",
+          key: "second",
+          resource: secondResource,
+        }),
+      ]),
+    );
+    expect(dataSubscriberCounts(root.data)).toEqual([1, 1]);
+
+    expect(() =>
+      flushSync(() =>
+        root.render([
+          createElement(Reader, {
+            id: "one",
+            key: "first",
+            resource: firstResource,
+          }),
+          createElement(Broken, { key: "broken" }),
+        ]),
+      ),
+    ).toThrow("root failed");
+
+    expect(errors).toHaveLength(1);
+    expect(container.textContent).toBe("");
+    expect(dataSubscriberCounts(root.data)).toEqual([0, 0]);
   });
 
   it("routes standalone reactive effect errors to ancestor error boundaries", async () => {

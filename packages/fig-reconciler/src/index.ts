@@ -1027,9 +1027,17 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function flushSync<T>(callback: () => T): T {
-    const result = runWithPriority(SyncLane, callback);
-    flushSyncWork();
-    return result;
+    if (renderingFiber !== null) {
+      throw new Error(
+        "flushSync cannot be called while rendering a component.",
+      );
+    }
+
+    try {
+      return runWithPriority(SyncLane, callback);
+    } finally {
+      flushSyncWork();
+    }
   }
 
   function flushSyncWork(): void {
@@ -1262,6 +1270,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     flushPendingReactiveEffects(root);
 
     const nextLanes = getNextLanes(root, root.renderLanes);
+    if (nextLanes === NoLanes && root.wip === null) {
+      root.callback = null;
+      root.callbackPriority = NoLane;
+      return;
+    }
+
     if (
       root.wip !== null &&
       nextLanes !== NoLanes &&
@@ -3595,7 +3609,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.element = null;
 
     if (root.current.child !== null) {
-      deleteFiberData(root.current.child);
+      deleteFiberDataTree(root.current.child);
       abortFiberEffects(root.current);
     }
 
@@ -3989,15 +4003,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     deleteFiberDataFromStore(node, store);
   }
 
+  function deleteFiberDataTree(node: F): void {
+    const store = rootOf(node).dataStore;
+    walkFiberTree(node, true, (cursor) => {
+      deleteFiberDataOwner(cursor, store);
+    });
+  }
+
   function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
     walkFiberSubtree(node, (cursor) => {
-      store.releaseDataOwner(cursor);
-      if (cursor.alternate !== null) store.releaseDataOwner(cursor.alternate);
-      // A hidden boundary removed from the tree stops counting toward
-      // `hasHiddenBoundaries`; both generations share the one state object.
-      if (cursor.activityState !== null)
-        hiddenStates.delete(cursor.activityState);
+      deleteFiberDataOwner(cursor, store);
     });
+  }
+
+  function deleteFiberDataOwner(node: F, store: R["dataStore"]): void {
+    store.releaseDataOwner(node);
+    if (node.alternate !== null) store.releaseDataOwner(node.alternate);
+    // A hidden boundary removed from the tree stops counting toward
+    // `hasHiddenBoundaries`; both generations share the one state object.
+    if (node.activityState !== null) hiddenStates.delete(node.activityState);
   }
 
   function dehydratedActivityBoundary(node: F): Instance | null {
