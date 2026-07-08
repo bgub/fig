@@ -60,6 +60,7 @@ import {
   activityId,
   boundaryId,
   boundaryPlaceholderMarkup,
+  earlyEventCaptureMarkup,
   jsString,
   placeholderId,
   placeholderMarkup,
@@ -967,6 +968,11 @@ function renderHostElement(
       ? props
       : viewTransitionHostProps(props, viewTransition);
   writeElementStart(type, hostProps, frame.segment, frame.selectProps ?? {});
+  if (document !== null && type === "head") {
+    // First thing in <head>: events must be capturable before any content
+    // can paint, or a user's first interaction races bundle execution.
+    frame.segment.write(earlyEventCaptureMarkup(frame.request));
+  }
   if (isVoid) return;
 
   const previousPendingLeadingNewlineHost = frame.pendingLeadingNewlineHost;

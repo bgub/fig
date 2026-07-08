@@ -1124,6 +1124,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     const lane = hydrationLaneForPriority(priority);
     const root = roots.get(container as object);
     if (root === undefined) return "none";
+    // Before the shell's first hydration commit nothing has handlers, so
+    // every target is blocked — reporting "none" here would let a replayed
+    // event dispatch into a slot-less tree and be consumed silently. A
+    // discrete interaction pulls the whole initial hydration forward
+    // synchronously, exactly like it does for a dehydrated boundary.
+    if (rootShellPendingHydration(root)) {
+      if (isSyncLane(lane)) performRoot(root, true);
+      if (rootShellPendingHydration(root)) return "blocked";
+    }
     if (root.dehydratedSuspenseCount === 0) return "none";
 
     const boundary = dehydratedBoundaryForTarget(root, target);
@@ -1134,6 +1143,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     return dehydratedBoundaryForTarget(root, target) === null
       ? "hydrated"
       : "blocked";
+  }
+
+  // needsRootHydrationCompletion clears when every boundary hydrated, and
+  // current.child fills at the first commit — together they mean "the shell
+  // has not committed yet" (a root rendering null clears the flag at its
+  // first commit, so the conjunction still breaks).
+  function rootShellPendingHydration(root: R): boolean {
+    return root.needsRootHydrationCompletion && root.current.child === null;
   }
 
   function dehydratedBoundaryForTarget(root: R, target: unknown): F | null {

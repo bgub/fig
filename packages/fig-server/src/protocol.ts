@@ -1,4 +1,7 @@
 import {
+  EARLY_EVENT_HANDLER_PROPERTY,
+  EARLY_EVENT_QUEUE_PROPERTY,
+  REPLAYABLE_EVENT_TYPES,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
   SUSPENSE_END_MARKER,
@@ -46,6 +49,27 @@ export function writeScript(
   write(
     `<script${request.nonce === undefined ? "" : ` nonce="${escapeAttribute(request.nonce)}"`}>${code}</script>`,
   );
+}
+
+// Queues replayable events that fire before the client bundle executes so
+// hydration can honor a user's first interaction instead of losing it. Sits
+// first in <head> — capture must be live before any content paints. The
+// first hydration root drains the queue and removes these listeners
+// (fig-dom's adoptEarlyEvents); a document without a client bundle just
+// carries a small inert array.
+export function earlyEventCaptureCode(): string {
+  const types = REPLAYABLE_EVENT_TYPES.map((type) => `'${type}'`).join(",");
+  return `(d=>{if(d.${EARLY_EVENT_QUEUE_PROPERTY})return;let q=d.${EARLY_EVENT_QUEUE_PROPERTY}=[],h=d.${EARLY_EVENT_HANDLER_PROPERTY}=e=>{q.push(e)};for(let t of [${types}])d.addEventListener(t,h,!0)})(document)`;
+}
+
+export function earlyEventCaptureMarkup(
+  request: Pick<ProtocolRequest, "nonce">,
+): string {
+  let markup = "";
+  writeScript(request, earlyEventCaptureCode(), (chunk) => {
+    markup += chunk;
+  });
+  return markup;
 }
 
 export function placeholderMarkup(

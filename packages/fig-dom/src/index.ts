@@ -264,6 +264,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   completeRootHydration: (container) => {
     disableRootHydration(container as Container);
+    // Non-discrete early events blocked on the pre-commit shell have no
+    // boundary hook to re-drain them; root completion is their backstop.
+    queueMicrotask(replayQueuedEvents);
   },
   preparePortalContainer: (container, root, logicalParent) => {
     registerPortalContainer(

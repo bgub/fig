@@ -36,9 +36,12 @@ import {
   renderToHtml,
   renderToStream,
 } from "./index.ts";
-import { jsString } from "./protocol.ts";
+import { earlyEventCaptureMarkup, jsString } from "./protocol.ts";
 import { deferred } from "./shared.ts";
 import { readStream } from "./test-utils.ts";
+
+// Every document render opens <head> with the early-event-capture script.
+const EARLY_EVENTS = earlyEventCaptureMarkup({});
 
 async function waitForMicrotasks(): Promise<void> {
   await Promise.resolve();
@@ -439,7 +442,7 @@ describe("@bgub/fig-server", () => {
 
     expect(result.head).toBe("");
     expect(result.html).toBe(
-      "<!doctype html><html><head><title>Late Ready</title></head><body><!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense--></body></html>",
+      `<!doctype html><html><head>${EARLY_EVENTS}<title>Late Ready</title></head><body><!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense--></body></html>`,
     );
     expect(result.html).not.toContain("Loading");
     expect(result.html).not.toContain("__figSSR");
@@ -456,7 +459,7 @@ describe("@bgub/fig-server", () => {
         ),
       ),
     ).resolves.toBe(
-      "<!doctype html><html><head></head><body> fig:head </body></html>",
+      `<!doctype html><html><head>${EARLY_EVENTS}</head><body> fig:head </body></html>`,
     );
   });
 
@@ -936,7 +939,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>',
+      `<!doctype html><html lang="en"><head>${EARLY_EVENTS}<meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>`,
     );
   });
 
@@ -970,7 +973,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      '<!doctype html><html><head><meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>',
+      `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
     );
   });
 
@@ -1011,7 +1014,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(
-      "<!doctype html><html><head><title>Stream</title></head><body>",
+      `<!doctype html><html><head>${EARLY_EVENTS}<title>Stream</title></head><body>`,
     );
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain(
@@ -1071,7 +1074,7 @@ describe("@bgub/fig-server", () => {
     await result.allReady;
 
     const html = await readStream(result.stream);
-    expect(html).toContain("<head></head>");
+    expect(html).toContain(`<head>${EARLY_EVENTS}</head>`);
     expect(html).not.toContain("<title>Late Title</title>");
     expect(diagnostics).toEqual(["title"]);
   });

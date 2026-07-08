@@ -1,4 +1,9 @@
 import {
+  EARLY_EVENT_HANDLER_PROPERTY,
+  EARLY_EVENT_QUEUE_PROPERTY,
+  REPLAYABLE_EVENT_TYPES,
+} from "@bgub/fig/internal";
+import {
   type EventPriority,
   type HydrationTargetResult,
   runWithEventPriority,
@@ -138,13 +143,9 @@ const discreteEvents = new Set([
   "touchend",
   "touchstart",
 ]);
-const replayableEvents = new Set([
-  "click",
-  "keydown",
-  "keyup",
-  "pointerdown",
-  "pointerup",
-]);
+// Shared with the server's inline early-event-capture script: both sides
+// must agree on which events queue for replay.
+const replayableEvents = new Set<string>(REPLAYABLE_EVENT_TYPES);
 const continuousEvents = new Set([
   "drag",
   "dragover",
@@ -227,6 +228,63 @@ export function registerRoot(
 
   record.hydrate = hydrate;
   ensureHydrationListeners(container, record);
+  adoptEarlyEvents(container);
+}
+
+type EarlyEventCarrier = Document & {
+  [EARLY_EVENT_QUEUE_PROPERTY]?: Event[];
+  [EARLY_EVENT_HANDLER_PROPERTY]?: EventListener;
+};
+
+// Events left over after each root claimed its own, kept per document so
+// later-hydrating roots (multiple containers on one page) still find theirs.
+const unclaimedEarlyEvents = new WeakMap<Document, Event[]>();
+
+// The server's inline capture script queues replayable events that fired
+// before this bundle executed. Adopt them into the standard replay queue:
+// a discrete replay forces synchronous hydration of its target, so a
+// pre-bundle click on server-rendered content is honored as soon as the
+// drain microtask runs instead of being lost.
+function adoptEarlyEvents(root: Container): void {
+  const carrier = (root.ownerDocument ?? root) as EarlyEventCarrier;
+  let unclaimed = unclaimedEarlyEvents.get(carrier);
+
+  if (unclaimed === undefined) {
+    const queue = carrier[EARLY_EVENT_QUEUE_PROPERTY];
+    if (!Array.isArray(queue)) return;
+
+    const handler = carrier[EARLY_EVENT_HANDLER_PROPERTY];
+    if (
+      typeof handler === "function" &&
+      typeof carrier.removeEventListener === "function"
+    ) {
+      for (const type of REPLAYABLE_EVENT_TYPES) {
+        carrier.removeEventListener(type, handler, true);
+      }
+    }
+    delete carrier[EARLY_EVENT_QUEUE_PROPERTY];
+    delete carrier[EARLY_EVENT_HANDLER_PROPERTY];
+
+    unclaimed = queue;
+    unclaimedEarlyEvents.set(carrier, unclaimed);
+  }
+
+  let claimed = false;
+  for (let index = 0; index < unclaimed.length; ) {
+    const event = unclaimed[index];
+    if (
+      replayableEvents.has(event.type) &&
+      targetWithinRoot(root, event.target)
+    ) {
+      unclaimed.splice(index, 1);
+      queueReplayableEvent(root, event.type, event);
+      claimed = true;
+      continue;
+    }
+    index += 1;
+  }
+
+  if (claimed) queueMicrotask(replayQueuedEvents);
 }
 
 export function unregisterRoot(container: Container): void {

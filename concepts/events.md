@@ -44,7 +44,21 @@ Selective hydration queues replayable events (click, key, pointer) that
 target a still-dehydrated Suspense boundary and replays them after the
 boundary hydrates — a synthetic two-phase dispatch through the logical tree,
 with per-dispatch propagation state so a spent native event's stale
-`cancelBubble` cannot drop the replay.
+`cancelBubble` cannot drop the replay. Targets in a shell whose first
+hydration commit hasn't landed are blocked the same way; a discrete
+interaction pulls the whole initial hydration forward synchronously.
+
+## Early Capture (Pre-Bundle Events)
+
+Server-rendered documents open `<head>` with a tiny inline script that
+queues replayable events fired before the client bundle executes (the
+`EARLY_EVENT_*` contract in `@bgub/fig/internal`). The first hydration root
+drains the document's queue, removes the capture listeners, and each root
+claims the events inside its container into the standard replay queue — so a
+user's first click is honored instead of lost, no matter how slowly the
+bundle arrives. Unclaimed events (targets outside any root) are dropped at
+replay time. Documents without a client bundle just carry a small inert
+array.
 
 ## bind
 

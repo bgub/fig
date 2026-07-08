@@ -96,6 +96,47 @@ test("hydrates, changes, and persists the shell theme", async ({
   expect(errors()).toEqual([]);
 });
 
+test("honors a click that landed before the client bundle executed", async ({
+  context,
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  // Hold the client bundle at the network layer: the click below happens
+  // while only the document's inline early-event-capture script exists.
+  let releaseBundle: () => void = () => undefined;
+  const bundleGate = new Promise<void>((resolve) => {
+    releaseBundle = resolve;
+  });
+  await page.route("**/client.js*", async (route) => {
+    await bundleGate;
+    await route.continue();
+  });
+
+  // The held module bundle also holds DOMContentLoaded, so wait for the
+  // streamed markup itself rather than a document lifecycle event.
+  await page.goto("/", { waitUntil: "commit" });
+  const themeGroup = page.getByRole("group", { name: "Theme" });
+  await themeGroup.getByRole("button", { name: "Light" }).waitFor();
+
+  await themeGroup.getByRole("button", { name: "Light" }).click();
+
+  // No framework code has run: the page still shows the server state.
+  await expectTheme(page, "system", {
+    backgroundColor: "rgb(16, 24, 32)",
+  });
+
+  releaseBundle();
+
+  // Hydration adopts the captured click and replays it.
+  await expectTheme(page, "light", {
+    backgroundColor: "rgb(245, 247, 248)",
+  });
+  await expect.poll(() => themeCookie(context)).toBe("light");
+  expect(errors()).toEqual([]);
+});
+
 test("changes away from system theme on the first click", async ({
   context,
   page,
