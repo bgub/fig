@@ -67,7 +67,10 @@ round-trips:
 It rejects functions, class instances/non-plain objects, and non-global symbols.
 Server component values can additionally contain Fig elements, client
 references, and promises; those are serialized by the payload renderer into row
-references before the value codec handles ordinary data.
+references before the value codec handles ordinary data. Nested containers
+recurse through the same serializer rather than becoming opaque values, so any
+new container/value type must ship with tests nesting client references,
+promises, server elements, shared objects, and cycles inside it.
 
 The model format carries request-wide object ids. The first occurrence of a
 supported graph object defines it inline; later occurrences in the same payload

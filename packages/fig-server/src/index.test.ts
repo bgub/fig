@@ -771,6 +771,52 @@ describe("@bgub/fig-server", () => {
     expect(html).toBe("<section><span>light</span><span>dark</span></section>");
   });
 
+  it("resumes suspended tasks with the provider values at their spawn point", async () => {
+    const Theme = createContext("default");
+    const pending = deferred<string>();
+
+    function Badge({ wait }: { wait?: Promise<string> }) {
+      if (wait !== undefined) readPromise(wait);
+      return createElement("span", null, readContext(Theme));
+    }
+
+    // Both suspended reads sit inside provider scopes that close in the main
+    // pass long before the retries run: the resumed tasks must observe their
+    // forked spawn-point values, and the trailing Badge proves the live
+    // provider stack really did unwind to the default in between.
+    const shape = (wait?: Promise<string>) =>
+      createElement(
+        "section",
+        null,
+        createElement(
+          Theme,
+          { value: "inner" },
+          createElement(
+            Suspense,
+            { fallback: createElement("em", null, "Loading") },
+            createElement(Badge, { wait }),
+            createElement(
+              Theme,
+              { value: "nested" },
+              createElement(Badge, { wait }),
+            ),
+          ),
+        ),
+        createElement(Badge, null),
+      );
+
+    const resultPromise = prerender(shape(pending.promise));
+    await waitForMicrotasks();
+    pending.resolve("ready");
+    const result = await resultPromise;
+
+    const baseline = await prerender(shape());
+    expect(result.html).toBe(baseline.html);
+    expect(result.html).toContain("<span>inner</span>");
+    expect(result.html).toContain("<span>nested</span>");
+    expect(result.html).toContain("<span>default</span>");
+  });
+
   it("hoists explicit document assets during server render", async () => {
     const result = renderToStream(
       createElement(
