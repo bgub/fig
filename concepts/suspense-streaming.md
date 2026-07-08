@@ -45,7 +45,10 @@ document's runtime object (written lazily, once, nonce-compatible, named per
   `data-fig-vt-class`) on staged/fallback host surfaces make `s`, `c`, and
   `ac` run their DOM moves inside `document.startViewTransition` when the
   browser supports it. Without annotations or browser support, the ops take
-  the same non-animated path.
+  the same non-animated path. Annotated reveals share the per-document
+  `__figViewTransition` mutex with client commits: a reveal chains on a
+  running transition's `finished` instead of skipping it, and registers its
+  own transition while animating (see view-transitions.md).
 - `ac`/`ax` — the Activity-hidden variants: resolve the boundary inside an
   inert `<template data-fig-activity>` content fragment (unreachable by
   id-based lookup), falling back to the light DOM if the activity already

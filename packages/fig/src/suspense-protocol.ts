@@ -16,3 +16,9 @@ export const ACTIVITY_TEMPLATE_ATTRIBUTE = "data-fig-activity";
 
 export const VIEW_TRANSITION_NAME_ATTRIBUTE = "data-fig-vt-name";
 export const VIEW_TRANSITION_CLASS_ATTRIBUTE = "data-fig-vt-class";
+
+// Per-document mutex holding the currently running view transition. Client
+// commits and inline streaming reveals both check it and chain on the
+// previous transition's finished promise, so concurrent transitions never
+// skip each other's animations or clobber temporarily applied names.
+export const VIEW_TRANSITION_PENDING_PROPERTY = "__figViewTransition";

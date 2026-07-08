@@ -392,7 +392,13 @@ function forkScope(scope: RenderScope): RenderScope {
     idPath: scope.idPath,
     selectProps: scope.selectProps,
     stack: scope.stack,
-    viewTransition: scope.viewTransition,
+    // Forked branches get their own surface-index cursor from the same
+    // snapshot. A Suspense fallback and its streamed content then produce
+    // the SAME name sequence, so the reveal pairs (morphs) them instead of
+    // cross-fading two differently suffixed names — and names stay
+    // deterministic under parallel task completion.
+    viewTransition:
+      scope.viewTransition === null ? null : { ...scope.viewTransition },
   };
 }
 
@@ -818,6 +824,20 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     markBoundaryClientRendered(frame.request, boundary, error, frame.stack);
   }
 
+  // Surfaces after the boundary must not reuse suffixes the branches
+  // already claimed. Suspended content tasks may still allocate past this
+  // watermark; those deep-tail collisions are accepted (the browser skips
+  // pairing for duplicated names rather than breaking the reveal).
+  const advanceSurfaceWatermark = (branch: RenderFrame): void => {
+    if (frame.viewTransition !== null && branch.viewTransition !== null) {
+      frame.viewTransition.index = Math.max(
+        frame.viewTransition.index,
+        branch.viewTransition.index,
+      );
+    }
+  };
+  advanceSurfaceWatermark(contentFrame);
+
   if (boundary.status === "completed") return;
 
   const fallbackFrame = createRenderFrame(frame.request, boundarySegment, {
@@ -835,6 +855,8 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
       }
     }
     throw error;
+  } finally {
+    advanceSurfaceWatermark(fallbackFrame);
   }
 }
 

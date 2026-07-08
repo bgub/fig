@@ -81,6 +81,8 @@ describe("server streaming protocol", () => {
     document.body.replaceChildren();
     delete (document as unknown as { startViewTransition?: unknown })
       .startViewTransition;
+    delete (document as unknown as { __figViewTransition?: unknown })
+      .__figViewTransition;
   });
 
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {
@@ -172,6 +174,85 @@ describe("server streaming protocol", () => {
     await Promise.resolve();
     expect(viewTransitionStyle(fallback).viewTransitionName).toBe("");
     expect(viewTransitionStyle(completed).viewTransitionName).toBe("");
+  });
+
+  it("chains annotated reveals on a pending view transition", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    const { completed, segment } = appendCompletedSegment(root);
+    completed.setAttribute("data-fig-vt-name", "card");
+    let started = 0;
+    let releasePending: () => void = () => undefined;
+    const pendingFinished = new Promise<void>((resolve) => {
+      releasePending = resolve;
+    });
+    const viewTransitionDocument = document as unknown as {
+      __figViewTransition?: unknown;
+      startViewTransition?: (update: () => void) => {
+        finished: Promise<unknown>;
+        ready: Promise<unknown>;
+      };
+    };
+
+    viewTransitionDocument.startViewTransition = (update) => {
+      started += 1;
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+    // A transition is already running (e.g. a client commit): the reveal must
+    // wait for it instead of starting a transition that would skip it. The
+    // owner releases the mutex on finished, like fig-dom's host does.
+    viewTransitionDocument.__figViewTransition = { finished: pendingFinished };
+    void pendingFinished.then(() => {
+      viewTransitionDocument.__figViewTransition = null;
+    });
+
+    installRuntime().c("b", "s");
+
+    expect(started).toBe(0);
+    expect(segment.parentNode).not.toBeNull();
+
+    releasePending();
+    await pendingFinished;
+    await Promise.resolve();
+
+    expect(started).toBe(1);
+    expect(segment.parentNode).toBeNull();
+  });
+
+  it("registers the reveal transition as the document mutex", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    const { completed } = appendCompletedSegment(root);
+    completed.setAttribute("data-fig-vt-name", "card");
+    let releaseFinished: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      releaseFinished = resolve;
+    });
+    const transition = { finished, ready: Promise.resolve() };
+    const viewTransitionDocument = document as unknown as {
+      __figViewTransition?: unknown;
+      startViewTransition?: (update: () => void) => typeof transition;
+    };
+
+    viewTransitionDocument.startViewTransition = (update) => {
+      update();
+      return transition;
+    };
+
+    installRuntime().c("b", "s");
+
+    expect(viewTransitionDocument.__figViewTransition).toBe(transition);
+
+    releaseFinished();
+    await finished;
+    await Promise.resolve();
+
+    expect(viewTransitionDocument.__figViewTransition).toBeNull();
   });
 
   it("retries hydration after async view transition cleanup", async () => {

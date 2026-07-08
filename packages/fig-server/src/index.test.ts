@@ -113,6 +113,40 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("gives a Suspense fallback and its streamed content the same surface names", async () => {
+    const pending = deferred<string>();
+
+    function Hero() {
+      return createElement("article", null, readPromise(pending.promise));
+    }
+
+    const result = renderToStream(
+      createElement(
+        ViewTransition,
+        { name: "hero" },
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "Loading") },
+          createElement(Hero, null),
+        ),
+        createElement("aside", null, "After"),
+      ),
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    // Fallback and content are alternative fills of the same slot: both get
+    // the base name so the reveal pairs (morphs) them...
+    expect(html).toContain('<p data-fig-vt-name="hero">Loading</p>');
+    expect(html).toContain('<article data-fig-vt-name="hero">Ready</article>');
+    // ...while surfaces after the boundary claim later suffixes to avoid
+    // colliding with either branch in the live document.
+    expect(html).toContain('<aside data-fig-vt-name="hero_1">After</aside>');
+  });
+
   it("renders unsafe HTML without escaping it", async () => {
     const html = await renderToHtml(
       createElement("article", {

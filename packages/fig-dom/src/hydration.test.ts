@@ -5,6 +5,7 @@ import {
   useSyncExternalStore,
   useId,
   useState,
+  ViewTransition,
 } from "@bgub/fig";
 import { prerender, renderToHtml } from "@bgub/fig-server";
 import type { DehydratedSuspenseBoundary } from "@bgub/fig-reconciler";
@@ -812,6 +813,58 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes).toEqual([content]);
     expect(content.textContent).toBe("Server");
     expect(errors).toEqual([]);
+  });
+
+  it("does not animate ViewTransition boundaries hydrated by a retry", async () => {
+    const { container, content } = suspenseDom("completed", "button", "Server");
+    let resolve: (value: string) => void = () => undefined;
+    const promise = new Promise<string>((done) => {
+      resolve = done;
+    });
+    let starts = 0;
+    // Retries ride retry lanes, which are view-transition eligible so client
+    // reveals animate — but a retry that finishes HYDRATION adopts pixels
+    // that are already on screen and must not play an enter animation.
+    (
+      document as unknown as {
+        startViewTransition?: (update: () => void) => {
+          finished: Promise<unknown>;
+          ready: Promise<unknown>;
+        };
+      }
+    ).startViewTransition = (update) => {
+      starts += 1;
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function Content() {
+      const value = readPromise(promise);
+      return createElement(
+        ViewTransition,
+        { enter: "reveal", name: "card" },
+        createElement("button", null, value),
+      );
+    }
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Content, null),
+        ),
+      ),
+    );
+
+    await delay();
+    resolve("Server");
+    await delay();
+
+    expect(container.textContent).toBe("Server");
+    expect(content.textContent).toBe("Server");
+    expect(starts).toBe(0);
   });
 
   it("keeps pending Suspense boundaries dehydrated when interaction selects them", () => {
