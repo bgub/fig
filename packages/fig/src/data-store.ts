@@ -74,6 +74,11 @@ interface NormalizedKey {
   key: DataResourceKey;
 }
 
+interface EncodePath {
+  root: string;
+  segments: Array<string | number>;
+}
+
 interface LoadOptions<Lane> {
   lane: Lane;
   refresh: boolean;
@@ -185,25 +190,42 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.partitionKey =
       host.partition === undefined
         ? ""
-        : encodeValue(host.partition, "partition");
+        : encodeValue(host.partition, createEncodePath("partition"));
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
 
   commitDataDependencies(owner: Owner, previousOwner: object | null): void {
     const nextKeys = this.pendingOwnerKeys.get(owner) ?? null;
+    const ownerKeys = this.ownerKeys.get(owner) ?? null;
+    const previousOwnerKeys =
+      previousOwner === null
+        ? null
+        : (this.ownerKeys.get(previousOwner) ?? null);
+    this.pendingOwnerKeys.delete(owner);
+
+    if (
+      (nextKeys === null || nextKeys.size === 0) &&
+      ownerKeys === null &&
+      previousOwnerKeys === null
+    ) {
+      return;
+    }
 
     // Capture the entries this fiber's generations subscribed to before the
     // delete, then abort any that end up with no retainer once the new owner has
     // re-subscribed. Keys the owner still reads keep at least one subscriber, so
     // only genuinely dropped keys are orphaned.
-    const orphanCandidates = new Set<Entry<Owner, Lane>>();
-    this.collectSubscribedEntries(owner, orphanCandidates);
-    if (previousOwner !== null) {
-      this.collectSubscribedEntries(previousOwner, orphanCandidates);
-    }
+    let orphanCandidates: Set<Entry<Owner, Lane>> | null = null;
+    orphanCandidates = this.collectSubscribedEntries(
+      ownerKeys,
+      orphanCandidates,
+    );
+    orphanCandidates = this.collectSubscribedEntries(
+      previousOwnerKeys,
+      orphanCandidates,
+    );
 
-    this.pendingOwnerKeys.delete(owner);
     this.deleteDataOwner(owner, nextKeys);
     if (previousOwner !== null) this.deleteDataOwner(previousOwner, nextKeys);
 
@@ -220,17 +242,23 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       }
     }
 
-    for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+    if (orphanCandidates !== null) {
+      for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+    }
   }
 
   releaseDataOwner(owner: object): void {
     // The genuine-deletion path (fiber unmount). Unlike deleteDataOwner, which
     // is also used for transient commit churn, this aborts in-flight loads left
     // with no retainer so an unmounted subtree does not keep fetching.
-    const orphanCandidates = new Set<Entry<Owner, Lane>>();
-    this.collectSubscribedEntries(owner, orphanCandidates);
+    const orphanCandidates = this.collectSubscribedEntries(
+      this.ownerKeys.get(owner) ?? null,
+      null,
+    );
     this.deleteDataOwner(owner);
-    for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+    if (orphanCandidates !== null) {
+      for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+    }
   }
 
   resetDataDependencies(owner: object): void {
@@ -262,16 +290,20 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private collectSubscribedEntries(
-    owner: object,
-    into: Set<Entry<Owner, Lane>>,
-  ): void {
-    const keys = this.ownerKeys.get(owner);
-    if (keys === undefined) return;
+    keys: ReadonlySet<string> | null,
+    into: Set<Entry<Owner, Lane>> | null,
+  ): Set<Entry<Owner, Lane>> | null {
+    if (keys === null) return into;
 
     for (const key of keys) {
       const entry = this.entries.get(key);
-      if (entry !== undefined) into.add(entry);
+      if (entry !== undefined) {
+        into ??= new Set();
+        into.add(entry);
+      }
     }
+
+    return into;
   }
 
   private abortOrphanedLoad(entry: Entry<Owner, Lane>): void {
@@ -391,10 +423,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   invalidateDataPrefix(prefix: DataResourceKey): void {
     if (this.disposed) return;
 
-    const normalizedPrefix = normalizeKey(prefix).key;
+    const prefixCanonical = normalizeKey(prefix).canonical;
     const entries: Entry<Owner, Lane>[] = [];
     for (const entry of this.entries.values()) {
-      if (dataResourceKeyStartsWith(entry.key, normalizedPrefix)) {
+      if (canonicalKeyStartsWith(entry.canonicalKey, prefixCanonical)) {
         entries.push(entry);
       }
     }
@@ -906,27 +938,16 @@ function normalizeKey(key: DataResourceKey): NormalizedKey {
   }
 
   return {
-    canonical: encodeArray(key, "key"),
+    canonical: encodeArray(key, createEncodePath("key")),
     key,
   };
 }
 
-function dataResourceKeyStartsWith(
-  key: DataResourceKey,
-  prefix: DataResourceKey,
-): boolean {
-  if (prefix.length > key.length) return false;
+function canonicalKeyStartsWith(key: string, prefix: string): boolean {
+  if (key === prefix) return true;
 
-  for (let index = 0; index < prefix.length; index += 1) {
-    if (
-      encodeValue(key[index], `key[${index}]`) !==
-      encodeValue(prefix[index], `prefix[${index}]`)
-    ) {
-      return false;
-    }
-  }
-
-  return true;
+  const arrayPrefix = prefix.slice(0, -1);
+  return key.startsWith(arrayPrefix) && key[arrayPrefix.length] === ",";
 }
 
 function entryHasValue<Owner extends object, Lane>(
@@ -975,11 +996,14 @@ function fingerprintFor<TArgs extends unknown[], TValue>(
   args: TArgs,
 ): string | null {
   if (resource.debugArgs !== undefined) {
-    return encodeValue(resource.debugArgs(...args), "debugArgs");
+    return encodeValue(
+      resource.debugArgs(...args),
+      createEncodePath("debugArgs"),
+    );
   }
 
   try {
-    return encodeArray(args, "args");
+    return encodeArray(args, createEncodePath("args"));
   } catch {
     return null;
   }
@@ -1020,14 +1044,34 @@ function warn(message: string): void {
   console.warn(message);
 }
 
-function encodeArray(values: readonly unknown[], path: string): string {
-  return `[${values.map((value, index) => encodeValue(value, `${path}[${index}]`)).join(",")}]`;
+function createEncodePath(root: string): EncodePath {
+  return { root, segments: [] };
 }
 
-function encodeObject(value: object, path: string): string {
+function formatEncodePath(path: EncodePath): string {
+  let text = path.root;
+  for (const segment of path.segments) {
+    text += typeof segment === "number" ? `[${segment}]` : `.${segment}`;
+  }
+  return text;
+}
+
+function encodeArray(values: readonly unknown[], path: EncodePath): string {
+  const parts: string[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    path.segments.push(index);
+    parts.push(encodeValue(values[index], path));
+    path.segments.pop();
+  }
+  return `[${parts.join(",")}]`;
+}
+
+function encodeObject(value: object, path: EncodePath): string {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error(`Invalid data resource key value at ${path}.`);
+    throw new Error(
+      `Invalid data resource key value at ${formatEncodePath(path)}.`,
+    );
   }
 
   const record = value as Record<string, unknown>;
@@ -1037,17 +1081,19 @@ function encodeObject(value: object, path: string): string {
   for (const key of keys) {
     const child = record[key];
     if (child === undefined) {
-      throw new Error(`Invalid undefined data resource key value at ${path}.`);
+      throw new Error(
+        `Invalid undefined data resource key value at ${formatEncodePath(path)}.`,
+      );
     }
-    parts.push(
-      `${JSON.stringify(key)}:${encodeValue(child, `${path}.${key}`)}`,
-    );
+    path.segments.push(key);
+    parts.push(`${JSON.stringify(key)}:${encodeValue(child, path)}`);
+    path.segments.pop();
   }
 
   return `{${parts.join(",")}}`;
 }
 
-function encodeValue(value: unknown, path: string): string {
+function encodeValue(value: unknown, path: EncodePath): string {
   if (value === null) return "null";
 
   switch (typeof value) {
@@ -1057,14 +1103,18 @@ function encodeValue(value: unknown, path: string): string {
       return value ? "true" : "false";
     case "number":
       if (!Number.isFinite(value)) {
-        throw new Error(`Invalid number in data resource key at ${path}.`);
+        throw new Error(
+          `Invalid number in data resource key at ${formatEncodePath(path)}.`,
+        );
       }
       return Object.is(value, -0) ? "0" : JSON.stringify(value);
     case "object":
       if (Array.isArray(value)) return encodeArray(value, path);
       return encodeObject(value, path);
     default:
-      throw new Error(`Invalid data resource key value at ${path}.`);
+      throw new Error(
+        `Invalid data resource key value at ${formatEncodePath(path)}.`,
+      );
   }
 }
 

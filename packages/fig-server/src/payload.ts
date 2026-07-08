@@ -697,6 +697,7 @@ class PayloadResponseImpl implements PayloadResponse {
   private currentDecodeRevision = 0;
   private stringDecoder: PayloadDecoder;
   private nextModelRevision = 1;
+  private maxObjectIdScanDirty = false;
   readonly codec: PayloadCodec;
 
   constructor(private readonly options: PayloadResponseOptions) {
@@ -710,6 +711,7 @@ class PayloadResponseImpl implements PayloadResponse {
     // ids past every id seen so far so its outlined client/lazy/promise rows
     // cannot collide with — and clobber — still-mounted chunks from the initial
     // (or an earlier refresh) payload.
+    this.ensureMaxObjectIdScanned();
     this.rowIdBase = this.maxRowId;
     this.objectIdBase = this.maxObjectId;
     this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
@@ -797,7 +799,7 @@ class PayloadResponseImpl implements PayloadResponse {
     if (rowIdBase > 0 || objectIdBase > 0) {
       shiftRowIds(row, rowIdBase, objectIdBase);
     }
-    updateMaxObjectIdFromRow(this, row);
+    this.markMaxObjectIdScanDirty(row);
 
     if (row.tag === "data") {
       this.pendingData.push(...decodePayloadDataEntries(row.value));
@@ -819,8 +821,8 @@ class PayloadResponseImpl implements PayloadResponse {
         row.boundary,
         this.decodeModelAtRevision(row.value, revision) as FigNode,
       );
-      this.refreshRetainedChunks();
-      this.pruneObjectRefs();
+      const activeBoundaries = this.refreshRetainedChunks();
+      this.pruneObjectRefs(activeBoundaries);
       this.notify();
       return;
     }
@@ -834,8 +836,8 @@ class PayloadResponseImpl implements PayloadResponse {
     resolveDecodedRow(this, row, revision);
     if (row.id === 0) {
       if (row.tag === "model") {
-        this.refreshRetainedChunks();
-        this.pruneObjectRefs();
+        const activeBoundaries = this.refreshRetainedChunks();
+        this.pruneObjectRefs(activeBoundaries);
       }
       this.resolveRootReady();
       this.notify();
@@ -910,7 +912,7 @@ class PayloadResponseImpl implements PayloadResponse {
     this.decodedBoundaries.set(id, decoded);
   }
 
-  pruneObjectRefs(): void {
+  pruneObjectRefs(activeBoundaries = this.activeBoundaryEntries()): void {
     if (
       [...this.chunks.entries()].some(
         ([id, chunk]) => id !== 0 && chunk.status === "pending",
@@ -926,7 +928,7 @@ class PayloadResponseImpl implements PayloadResponse {
     for (const chunk of this.chunks.values()) {
       if (chunk.model !== null) collectObjectIds(chunk.model, retained);
     }
-    for (const entry of this.activeBoundaryEntries()) {
+    for (const entry of activeBoundaries) {
       collectObjectIds(entry.model, retained);
     }
     for (const id of this.objectRefs.keys()) {
@@ -1037,9 +1039,9 @@ class PayloadResponseImpl implements PayloadResponse {
     return entry;
   }
 
-  private refreshRetainedChunks(): void {
+  private refreshRetainedChunks(): BoundaryModelEntry[] {
     const rootModel = this.chunks.get(0)?.model;
-    if (rootModel === undefined || rootModel === null) return;
+    if (rootModel === undefined || rootModel === null) return [];
 
     const nextRetained = referencedChunkClosure(rootModel, this.chunks);
     const activeBoundaries = this.activeBoundaryEntries();
@@ -1072,6 +1074,28 @@ class PayloadResponseImpl implements PayloadResponse {
     }
     for (const id of this.decodedBoundaries.keys()) {
       if (!activeSources.has(id)) this.decodedBoundaries.delete(id);
+    }
+    return activeBoundaries;
+  }
+
+  private markMaxObjectIdScanDirty(row: PayloadRow): void {
+    if (row.tag === "model" || row.tag === "refresh") {
+      this.maxObjectIdScanDirty = true;
+    }
+  }
+
+  private ensureMaxObjectIdScanned(): void {
+    if (!this.maxObjectIdScanDirty) return;
+    this.maxObjectIdScanDirty = false;
+
+    for (const chunk of this.chunks.values()) {
+      if (chunk.model !== null) noteMaxObjectIds(this, chunk.model);
+    }
+    for (const entry of this.boundaries.values()) {
+      noteMaxObjectIds(this, entry.model);
+    }
+    for (const entry of this.initialBoundaries.values()) {
+      noteMaxObjectIds(this, entry.model);
     }
   }
 
@@ -2496,19 +2520,6 @@ function shiftModelIds(
 
   for (const value of Object.values(model)) {
     shiftModelIds(value, rowOffset, objectOffset);
-  }
-}
-
-function updateMaxObjectIdFromRow(
-  response: PayloadResponseImpl,
-  row: PayloadRow,
-): void {
-  if (row.tag === "model" || row.tag === "refresh") {
-    noteMaxObjectIds(response, row.value);
-    return;
-  }
-  if (row.tag === "data") {
-    for (const entry of row.value) noteMaxObjectIds(response, entry.value);
   }
 }
 

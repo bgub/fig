@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 19 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 14 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (19)](#confirmed-minor)
+- [Confirmed minor (14)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -26,54 +26,6 @@ No open confirmed major findings remain.
 
 ## Confirmed minor
 
-### 11. commitDataDependencies allocates a Set and runs full owner teardown for every rendered function component per commit, including components that never read data
-
-- **Location:** `packages/fig/src/data-store.ts:200`
-- **Severity:** minor
-- **Reviewer:** fig:performance
-
-The reconciler marks every rendered function-component fiber data-dirty unconditionally (fig-reconciler/src/index.ts prepareHookRender sets dataDependenciesDirty and needsDataDependencyCommit on every hook render), so DefaultDataStore.commitDataDependencies runs once per rendered fiber per commit. For the common no-data-reads case it still allocates `new Set()` (line 200) and performs ~6-8 WeakMap operations (pendingOwnerKeys.get/delete, ownerKeys.get for owner and previousOwner via collectSubscribedEntries and two deleteDataOwner calls) before discovering there is nothing to do. An early return when `pendingOwnerKeys.get(owner)` and both `ownerKeys.get(owner)`/`ownerKeys.get(previousOwner)` are absent — and lazy allocation of orphanCandidates only when a subscribed entry is found — would drop this to two WeakMap reads for the majority of fibers in a large commit.
-
-<details><summary>Verification</summary>
-
-Confirmed on disk: prepareHookRender (fig-reconciler/src/index.ts:1816-1817) marks every rendered function component data-dirty unconditionally, and DefaultDataStore.commitDataDependencies (fig/src/data-store.ts, Set allocation at the cited line) has no early return — it always allocates a Set and performs ~7 WeakMap ops (pendingOwnerKeys.get/delete, ownerKeys.get via collectSubscribedEntries for owner+alternate, two deleteDataOwner calls) even when the fiber never read data. The proposed early-out is valid. However, the finding overstates the 'common no-data-reads case': roots use a lazy store wrapper (createRootDataStore, fig-reconciler:846/5088) whose commitDataDependencies is `inner?.commitDataDependencies(...)` — a no-op until the app performs any data operation. So apps with zero data usage pay essentially nothing; the per-fiber cost only applies to apps that use data resources somewhere, where non-data-reading fibers then pay it every commit in production. It is a real constant-factor commit-phase overhead, dominated by render/reconcile cost, with no algorithmic blowup.
-
-</details>
-
----
-
-### 12. invalidateDataPrefix re-encodes the prefix (and rebuilds path strings) for every entry in the store instead of encoding it once
-
-- **Location:** `packages/fig/src/data-store.ts:918`
-- **Severity:** minor
-- **Reviewer:** fig:performance
-
-invalidateDataPrefix (line 388) loops over all entries calling dataResourceKeyStartsWith, which calls `encodeValue(prefix[index], `prefix[${index}]`)` inside the per-entry loop (lines 916-919) — the identical prefix elements are re-serialized (with fresh template-literal path strings) once per stored entry, O(entries × prefix elements) encodings per invalidation. It also re-encodes each entry's own key elements even though `entry.canonicalKey` already holds the canonical encoding (a startsWith comparison against the prefix's canonical form minus the closing bracket, checking the next char is ',' or ']', would need zero per-entry encoding). Invalidation is event-driven rather than per-render, so impact is bounded, but a broad-prefix invalidation over a store with hundreds of entries and object-bearing keys does hundreds of redundant deep encodes.
-
-<details><summary>Verification</summary>
-
-Verified against /Users/bgub/code/fig/packages/fig/src/data-store.ts as it exists on disk. The structure is exactly as claimed: `invalidateDataPrefix` (line 388) normalizes the prefix once via `normalizeKey` — but then discards the canonical string it just computed (`.key` is extracted, `.canonical` is thrown away) and loops over every entry in `this.entries` calling `dataResourceKeyStartsWith(entry.key, normalizedPrefix)`. That helper (lines 910-926) calls `encodeValue(prefix[index], \`prefix[${index}]\`)` inside its per-element loop, so identical prefix elements are re-serialized (with fresh template-literal path strings) once per stored entry — O(entries × prefix length) encodings. It also re-encodes each entry's own key elements (`encodeValue(key[index], ...)`) even though `entry.canonicalKey`(set at line 581 from the same deterministic`encodeArray`encoding, sorted object keys and all) already holds the canonical form, so the reviewer's proposed zero-encode string comparison (prefix canonical minus trailing`]`, next char `,`or`]`) is valid. `encodeValue`on object/array key elements is a deep recursive encode with`Object.keys().sort()` and JSON.stringify, so the redundant cost is real for object-bearing keys. Mitigating factors the reviewer already conceded: the API is event-driven (public mutation-side helper, line 129; not called during render), stores are typically small, behavior is correct (tests at data-store.test.ts:244,293 pin matching semantics, not cost), and nothing is quadratic in key size. So it is a genuine but bounded inefficiency — a correct, honest "minor" perf finding, not overclaimed and not refutable on the facts.
-
-</details>
-
----
-
-### 13. Key canonicalization eagerly builds per-element diagnostic path strings on every readData in production
-
-- **Location:** `packages/fig/src/data-store.ts:1020`
-- **Severity:** minor
-- **Reviewer:** fig:performance
-
-encodeArray (line 1019-1021) constructs a `${path}[${index}]` template string for every key element on every call, and encodeObject does the same per property (line 1039), but these path strings are only ever used inside thrown error messages for invalid keys. normalizeKey runs on the hottest data path — every readData/preloadData in every component render re-canonicalizes the key (the per-read encode itself is the documented contract in concepts/data.md) — so a k-element key pays k string allocations plus a closure and intermediate array per read purely for error-path diagnostics. Passing structural position lazily (e.g., computing the path only inside the throw branches, or a validate-then-encode split) removes the allocations without changing the canonical format.
-
-<details><summary>Verification</summary>
-
-Confirmed against /Users/bgub/code/fig/packages/fig/src/data-store.ts. readData (line 425) and preloadData (line 408) call entryFor, which calls normalizeKey -> encodeArray(key, "key") at line 526 with no NODE_ENV gate; only the fingerprintFor call is dev-gated (lines 529-532, with a comment showing the team already cares about prod encode cost). encodeArray (line 1020) eagerly builds `${path}[${index}]` per element and encodeObject builds `${path}.${key}` per property (line 1039), yet `path` is consumed only inside throw branches (lines 1026, 1036, 1056, 1063) — on the success path every path string is allocated and discarded. concepts/data.md confirms per-read canonical re-encoding is the documented contract, so this runs on every readData in every component render in production. No lazy-path variant or upstream guard exists; no test pins the allocation behavior (only the canonical format). The finding stands, but the cost is a constant-factor micro-allocation on top of an encode that must run anyway (JSON.stringify + join per element), and keys are typically short arrays — so it is a legitimate micro-optimization, correctly rated at the lowest severity.
-
-</details>
-
----
-
 ### 14. Every refresh row wipes the decoded cache of ALL chunks, forcing a full re-decode and full client re-render of the entire payload tree per refresh.
 
 - **Location:** `packages/fig-server/src/payload.ts:769`
@@ -85,38 +37,6 @@ processRow's refresh branch calls this.invalidateDecodeCaches(), which clears de
 <details><summary>Verification</summary>
 
 Confirmed the mechanics against disk: payload.ts:769 refresh branch calls invalidateDecodeCaches() which wipes decodedBoundaries and every chunk's decoded cache (824-830); the next render re-decodes all chunks (readChunk 905-908) with fresh element identities (tree children are serialized with preserveIdentity=false, so only prop-value elements keep graph-id identity), producing an O(app) re-decode + full render-phase pass per refresh. However, the finding is heavily overclaimed: (1) it is documented spec behavior — concepts/payload.md lines 112-113 (the sentence right after the line the reviewer quotes) explicitly say refresh rows clear decoded tree caches, and concepts/ is the repo's authoritative spec, with the mechanism deliberately reworked in the branch's two most recent commits and pinned by tests (payload.test.ts:909, :1330); (2) the wipe is correctness-load-bearing: Fig's reconciler bails on element-identity equality (fig-reconciler/src/index.ts:1737 canBailout props === alternate.memoizedProps, with begin() adopting whole clean subtrees), and PayloadBoundarySlot has no own subscription, so keeping ancestor chunk caches would make the refresh never render — the reviewer's proposed fix (invalidate only chunks reachable FROM the refreshed boundary's models) is downward reachability and would break refresh entirely; a real O(boundary) refresh needs a design change (per-slot lane subscription or reverse chunk-contains-boundary tracking). The residual truth is a documented, intentional per-refresh cost ceiling (render-phase only, no DOM mutations for unchanged content, graph refs keep shared values stable), worth noting as a known tradeoff but not a defect. Severity downgraded from major to minor.
-
-</details>
-
----
-
-### 15. Refresh processing performs four-plus full traversals of every retained model per refresh row, including computing activeBoundaryEntries twice back-to-back.
-
-- **Location:** `packages/fig-server/src/payload.ts:979`
-- **Severity:** minor
-- **Reviewer:** fig-server:performance
-
-For each refresh row (and each root model row), processRow runs refreshRetainedChunks() and then pruneObjectRefs(). refreshRetainedChunks computes referencedChunkClosure(rootModel) plus one closure per active boundary (re-walking shared chunk models per boundary, so O(boundaries × chunks) worst case) and calls activeBoundaryEntries(); pruneObjectRefs then calls activeBoundaryEntries() again (line 876) and re-walks every chunk model with collectObjectIds (line 873-875). Combined with shiftRowIds (full walk of the incoming row, line 750) and noteMaxObjectIds (another full walk, line 752), each small boundary refresh costs several complete scans of the entire retained payload graph — O(total payload size) CPU and Set/array allocations per refresh tick even when the refreshed boundary is tiny. Computing activeBoundaryEntries once and passing it to both consumers, and/or maintaining incremental reference counts, would remove most of this.
-
-<details><summary>Verification</summary>
-
-Verified every mechanical claim against packages/fig-server/src/payload.ts as it exists on disk: refresh rows and root model rows both trigger refreshRetainedChunks()+pruneObjectRefs() (lines 774-775, 789-790); refreshRetainedChunks computes referencedChunkClosure(rootModel) plus one fresh-Set closure per active boundary so shared chunk models are re-walked per boundary (lines 983-989, 2511-2530); activeBoundaryEntries() is computed twice back-to-back with no caching (lines 984 and 876), each full-walking root+boundary models; pruneObjectRefs re-walks every retained chunk model with collectObjectIds (lines 873-878). The code is production runtime (no NODE_ENV gate), and the tests added in commit 06e65a5 pin retention correctness only, not cost — nothing refutes the redundancy. One small inaccuracy: shiftRowIds (gated behind rowIdBase/objectIdBase > 0) and noteMaxObjectIds walk only the incoming row, not the retained graph, but the finding states that correctly in its parenthetical. Severity is correctly minor: the scans run per refresh event (user-action frequency, not per frame), are linear over an in-memory graph that is typically small, and the mark-and-sweep design just landed deliberately as a correctness fix — the avoidable redundancy (hoisting activeBoundaryEntries, memoizing closure walks) is a cheap optimization, not a user-visible problem at typical payload sizes.
-
-</details>
-
----
-
-### 16. updateMaxObjectIdFromRow deep-traverses every model/refresh/data row at ingest solely to track a max id that is only needed if a refresh later occurs.
-
-- **Location:** `packages/fig-server/src/payload.ts:752`
-- **Severity:** minor
-- **Reviewer:** fig-server:performance
-
-processRow calls updateMaxObjectIdFromRow(this, row) unconditionally, and noteMaxObjectIds (lines 2367-2418) walks the entire model tree of every row — a second full traversal on top of the decode traversal, doubling ingest CPU for the common case of a response that is never refreshed. The information is also derivable much more cheaply: encode-side graph ids are allocated monotonically per request (defineGraphObject, line 1573-1581), so the server could emit the final max (or the client could track ids as defineObjectRef/noteObjectId observe them during decode, which already happens at line 838/856 — making the eager pre-scan redundant except for ids inside not-yet-decoded rows, which could be resolved lazily in beginRefreshPayload).
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig-server/src/payload.ts as it exists: processRow (line 752) unconditionally calls updateMaxObjectIdFromRow, and noteMaxObjectIds (2367-2418) fully re-walks every model/refresh/data row at ingest; maxObjectId is read only in beginRefreshPayload (line 680), so the work is pure overhead when no refresh occurs. Decode is eager (resolveDecodedRow line 786) and defineObjectRef (838) already tracks ids during decode, so the scan is largely a duplicate traversal — the core claim holds and it is on the hot, non-dev-gated client ingest path. However, two of the reviewer's framing points are off: (1) "doubling ingest CPU" is overstated, since ingest already includes the codec's JSON parse (dominant) plus the allocating decodeModel walk — this is a third, allocation-free traversal, a fraction of ingest cost; (2) the scan is more load-bearing than "redundant": superseded boundary initials skip decode (prepareBoundaryInitial early-return, line 863) and data rows decode via a separate graph context (line 1802) that never calls noteObjectId, so removing the scan without the proposed lazy fallback would violate the spec's refresh id-collision guarantee (concepts/payload.md). The suggested alternatives (server-emitted max = wire-format change; lazy scan at beginRefreshPayload = the same traversal deferred) are plausible but not free. Net: a real, verifiable perf nit with an honest but inflated cost estimate; minor is the correct severity.
 
 </details>
 
