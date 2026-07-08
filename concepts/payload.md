@@ -42,6 +42,9 @@ Payload refreshes use the `x-fig-payload-boundary` header. Ids minted by
   refetches whole trees). A targeted refresh wins until a newer parent payload
   model sends that boundary id again; the newer parent-sent initial then
   becomes authoritative.
+- `refresh-error` — `{ boundary, value: { digest?, message? } }` for failed
+  targeted refresh renders. The client surfaces the decoded server error and
+  keeps the previous boundary content.
 
 Deliberately absent from the row model: server actions and temporary
 references. Binary byte encodings are allowed as codecs, but no binary codec is
@@ -111,6 +114,9 @@ streamed data into `root.data`, `preloadClientReferences()` awaits in-flight
 module loads, and `fetchPayload(response, input, { refreshBoundary? })`
 fetches and ingests (sending the response codec in `Accept`, checking the
 response codec id, and namespacing refresh row ids past mounted chunks).
+`PAYLOAD_BOUNDARY_HEADER` is the shared header name used for targeted refresh
+requests. Non-2xx payload responses reject with `PayloadFetchError`, which
+exposes `status` and `response` and cancels the response body before throwing.
 Decoded chunks are memoized so unchanged subtrees bail out of re-renders.
 Refresh rows clear decoded tree caches so refreshed boundaries get fresh
 structure, while retained graph references keep shared decoded values stable.

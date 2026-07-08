@@ -1,6 +1,8 @@
 // Shared contract between the server handler (which serializes) and the client
 // bootstrap (which reads) so router + data hydration stay in lockstep.
 
+export { PAYLOAD_BOUNDARY_HEADER } from "@bgub/fig-server/payload";
+
 export const ROUTER_STATE_SCRIPT_ID = "__fig_start_state__";
 export const DATA_SCRIPT_ID = "__fig_start_data__";
 export const DATA_ENDPOINT_PATH = "/__fig/data";
@@ -11,7 +13,6 @@ export const PAYLOAD_FRAME_ATTR = "data-fig-payload-frame";
 export const PAYLOAD_STREAM_GLOBAL = "__figStartPayload";
 export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
 export const DEV_SERVER_UPDATE_EVENT = "fig-start:server-update";
-export const PAYLOAD_BOUNDARY_HEADER = "x-fig-payload-boundary";
 export const PAYLOAD_ROUTE_ID_HEADER = "x-fig-payload-route-id";
 export const PAYLOAD_SEGMENT_ID_HEADER = "x-fig-payload-segment-id";
 export const ROOT_ELEMENT_ID = "fig-root";

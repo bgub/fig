@@ -234,8 +234,10 @@ import {
   encodePayloadValue,
   fetchPayload,
   jsonPayloadCodec,
+  PAYLOAD_BOUNDARY_HEADER,
   renderToPayloadStream,
   PayloadBoundary,
+  PayloadFetchError,
   type PayloadCodec,
 } from "@bgub/fig-server/payload";
 ```
@@ -260,7 +262,10 @@ include a nested `<PayloadBoundary id="feed">` wrapper in the refresh payload.
 `fetchPayload(response, input, options?)` fetches and processes a payload. Pass
 `refreshBoundary` to `fetchPayload` to request and apply a boundary refresh.
 `fetchPayload` sends the response codec in `Accept` and checks the response
-`codec=` content-type parameter before decoding.
+`codec=` content-type parameter before decoding. Server integrations can read
+the exported `PAYLOAD_BOUNDARY_HEADER` constant for targeted refresh requests.
+Non-2xx responses reject with `PayloadFetchError`, which exposes `status` and
+`response` and cancels the response body before throwing.
 
 `encodePayloadValue` / `decodePayloadValue` are low-level helpers for payload
 integrations that need the same data-value fidelity as payload data rows:

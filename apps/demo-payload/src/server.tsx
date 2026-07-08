@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import { renderToHtml } from "@bgub/fig-server";
 import {
+  PAYLOAD_BOUNDARY_HEADER,
   type PayloadRenderResult,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
@@ -81,7 +82,7 @@ async function sendPayload(
   url: URL,
 ): Promise<void> {
   const seed = seedFor(url);
-  const boundary = headerValue(request.headers["x-fig-payload-boundary"]);
+  const boundary = headerValue(request.headers[PAYLOAD_BOUNDARY_HEADER]);
   const data = createDemoData(seed);
   const refreshingFeed = boundary === feedBoundaryId;
   const result = renderToPayloadStream(

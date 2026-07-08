@@ -136,7 +136,9 @@ import { fetchPayload } from "@bgub/fig-server/payload";
 await fetchPayload(response, "/profile/42", { refreshBoundary: "profile" });
 ```
 
-`fetchPayload` sends the boundary id in the `x-fig-payload-boundary` request header; the server passes it to `renderToPayloadStream` as `refreshBoundary` and emits a `refresh` row:
+`fetchPayload` sends the boundary id in the `x-fig-payload-boundary` request
+header (`PAYLOAD_BOUNDARY_HEADER`); the server passes it to
+`renderToPayloadStream` as `refreshBoundary` and emits a `refresh` row:
 
 ```
 {"boundary":"profile","tag":"refresh","value":{...new content...}}

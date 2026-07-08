@@ -291,10 +291,24 @@ export interface PayloadDecoder {
   flush(): void;
 }
 
+export const PAYLOAD_BOUNDARY_HEADER = "x-fig-payload-boundary";
+
 class PayloadRequestCancelledError extends Error {
   constructor() {
     super("Payload request cancelled.");
     this.name = "PayloadRequestCancelledError";
+  }
+}
+
+export class PayloadFetchError extends Error {
+  readonly response: Response;
+  readonly status: number;
+
+  constructor(response: Response) {
+    super(`Payload request failed with status ${response.status}.`);
+    this.name = "PayloadFetchError";
+    this.response = response;
+    this.status = response.status;
   }
 }
 
@@ -543,7 +557,8 @@ export async function fetchPayload(
   });
   throwIfAborted(signal);
   if (!result.ok) {
-    throw new Error(`Payload request failed with status ${result.status}.`);
+    await result.body?.cancel().catch(() => undefined);
+    throw new PayloadFetchError(result);
   }
   if (result.body === null) {
     throw new Error("Payload response did not include a body.");
@@ -2295,8 +2310,14 @@ async function readByteStream(
 
       onChunk(value);
     }
+  } catch (error) {
+    if (!signal?.aborted) {
+      await reader.cancel(error).catch(() => undefined);
+    }
+    throw error;
   } finally {
     signal?.removeEventListener("abort", abort);
+    reader.releaseLock();
     throwIfAborted(signal);
   }
 }
@@ -2898,7 +2919,7 @@ function appendPayloadHeaders(
 ): Headers {
   const next = new Headers(headers);
   if (!next.has("accept")) next.set("accept", codec.contentType);
-  if (boundary !== undefined) next.set("x-fig-payload-boundary", boundary);
+  if (boundary !== undefined) next.set(PAYLOAD_BOUNDARY_HEADER, boundary);
   return next;
 }
 

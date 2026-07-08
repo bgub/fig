@@ -32,7 +32,9 @@ import {
   fetchPayload,
   isPayloadRequestCancelled,
   jsonPayloadCodec,
+  PAYLOAD_BOUNDARY_HEADER,
   PayloadBoundary,
+  PayloadFetchError,
   type PayloadClientReferenceMetadata,
   type PayloadFetch,
   renderToPayloadStream,
@@ -2377,7 +2379,7 @@ describe("payload rendering", () => {
 
     const headers = requireHeaders(requestHeaders);
     expect(headers.get("accept")).toBe("custom/payload");
-    expect(headers.get("x-fig-payload-boundary")).toBe("post");
+    expect(headers.get(PAYLOAD_BOUNDARY_HEADER)).toBe("post");
     expect(evaluatePayloadNode(rendered[rendered.length - 1])).toMatchObject({
       props: {
         children: {
@@ -2467,16 +2469,37 @@ describe("payload rendering", () => {
 
   it("rejects failed payload fetches before mutating the response", async () => {
     const response = createPayloadResponse();
+    let cancelReason: unknown = null;
+    const body = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancelReason = reason;
+      },
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("nope"));
+      },
+    });
     let notifications = 0;
     response.subscribe(() => {
       notifications += 1;
     });
 
-    await expect(
-      fetchPayload(response, "/payload", {
-        fetch: async () => new Response("nope", { status: 500 }),
-      }),
-    ).rejects.toThrow("Payload request failed with status 500.");
+    let error: unknown;
+    try {
+      await fetchPayload(response, "/payload", {
+        fetch: async () => new Response(body, { status: 500 }),
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(PayloadFetchError);
+    if (!(error instanceof PayloadFetchError)) {
+      throw new Error("Expected a PayloadFetchError.");
+    }
+    expect(error.status).toBe(500);
+    expect(error.response.status).toBe(500);
+    expect(error.message).toBe("Payload request failed with status 500.");
+    expect(cancelReason).toBeUndefined();
     expect(notifications).toBe(0);
   });
 
@@ -2488,5 +2511,23 @@ describe("payload rendering", () => {
         fetch: async () => new Response(streamFromString("{not-json}\n")),
       }),
     ).rejects.toThrow(SyntaxError);
+  });
+
+  it("cancels payload streams when row decoding throws", async () => {
+    const response = createPayloadResponse();
+    let cancelReason: unknown;
+    const stream = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancelReason = reason;
+      },
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{not-json}\n"));
+      },
+    });
+
+    await expect(processStreamInto(response, stream)).rejects.toThrow(
+      SyntaxError,
+    );
+    expect(cancelReason).toBeInstanceOf(SyntaxError);
   });
 });
