@@ -19,6 +19,7 @@ const familiesByType = new WeakMap<object, RefreshFamily>();
 const familiesById = new Map<string, RefreshFamily>();
 const signatures = new WeakMap<object, Signature>();
 const scheduleRefreshFns = new Set<(update: RefreshUpdate) => void>();
+const unscheduledRefreshes: RefreshUpdate[] = [];
 let pendingUpdates: Array<[RefreshFamily, object]> = [];
 let installed = false;
 
@@ -34,10 +35,10 @@ function asKey(type: unknown): object | null {
 function ensureInstalled(): void {
   if (installed) return;
   installed = true;
-  setRefreshHandler(getFamilyByType);
+  setRefreshHandler(resolveFamilyByType);
 }
 
-export function getFamilyByType(type: unknown): RefreshFamily | undefined {
+function resolveFamilyByType(type: unknown): RefreshFamily | undefined {
   const key = asKey(type);
   return key === null ? undefined : familiesByType.get(key);
 }
@@ -77,6 +78,8 @@ export function injectScheduleRefresh(
 ): void {
   ensureInstalled();
   scheduleRefreshFns.add(scheduleRefresh);
+  for (const update of unscheduledRefreshes) scheduleRefresh(update);
+  unscheduledRefreshes.length = 0;
 }
 
 // Apply queued registrations: advance each family to its newest version, bucket
@@ -101,6 +104,10 @@ export function performRefresh(): RefreshUpdate | null {
   for (const family of staleFamilies) updatedFamilies.delete(family);
 
   const update: RefreshUpdate = { staleFamilies, updatedFamilies };
+  if (scheduleRefreshFns.size === 0) {
+    unscheduledRefreshes.push(update);
+    return update;
+  }
   for (const scheduleRefresh of scheduleRefreshFns) scheduleRefresh(update);
   return update;
 }

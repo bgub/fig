@@ -315,8 +315,7 @@ export function on(
 export function updateEvents(element: Element, value: unknown): void {
   const slots = eventSlotsFor(element);
   const descriptors = eventDescriptors(value);
-  const root = rootFor(element);
-  const listenerTarget = listenerTargetFor(element);
+  let location: EventLocation | null = null;
 
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
@@ -334,20 +333,22 @@ export function updateEvents(element: Element, value: unknown): void {
     const slot = slots[index];
 
     if (slot === undefined) {
+      location ??= eventLocationFor(element);
       slots[index] = addEventSlot(
         element,
-        root,
-        listenerTarget,
+        location.root,
+        location.listenerTarget,
         descriptor,
         options,
         key,
       );
     } else if (slot.key !== key) {
+      location ??= eventLocationFor(element);
       removeEventSlot(slot);
       slots[index] = addEventSlot(
         element,
-        root,
-        listenerTarget,
+        location.root,
+        location.listenerTarget,
         descriptor,
         options,
         key,
@@ -388,11 +389,27 @@ export function detachElementEvents(element: Element): void {
 export function rootFor(
   node: Element | Text | Comment | Container,
 ): Container | null {
-  const target = listenerTargetFor(node);
-  if (target === null) return null;
+  return eventLocationFor(node).root;
+}
 
-  const record = containerRecords.get(target);
-  return record?.portalOwner?.root ?? (record?.root === true ? target : null);
+interface EventLocation {
+  listenerTarget: Container | null;
+  root: Container | null;
+}
+
+function eventLocationFor(
+  node: Element | Text | Comment | Container,
+): EventLocation {
+  const listenerTarget = listenerTargetFor(node);
+  if (listenerTarget === null) return { listenerTarget: null, root: null };
+
+  const record = containerRecords.get(listenerTarget);
+  return {
+    listenerTarget,
+    root:
+      record?.portalOwner?.root ??
+      (record?.root === true ? listenerTarget : null),
+  };
 }
 
 export function registerPortalContainer(

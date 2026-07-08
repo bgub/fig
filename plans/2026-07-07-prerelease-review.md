@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 29 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 24 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (29)](#confirmed-minor)
+- [Confirmed minor (24)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -25,86 +25,6 @@ No open confirmed critical findings remain.
 No open confirmed major findings remain.
 
 ## Confirmed minor
-
-### 1. updateEvents eagerly performs two full ancestor DOM walks (rootFor + listenerTargetFor) per event-bearing element on every commit, wasted in the common case where only callbacks are swapped.
-
-- **Location:** `packages/fig-dom/src/events.ts:308`
-- **Severity:** minor
-- **Reviewer:** fig-dom:performance
-
-Since events arrays are written inline (events={[on(...)]}) they fail the reconciler's identity diff (hostPropsChanged, fig-reconciler/src/index.ts:3077) on every re-render, so commitUpdate -> updateElement -> updateEvents runs for every event-bearing host element on every render that touches it. updateEvents (events.ts:305-309) computes rootFor(element) -- which internally walks the full parentNode chain via listenerTargetFor -- and then calls listenerTargetFor(element) again, a second full ancestor walk. Both results are only consumed by addEventSlot when a slot is created or its key changes; in the steady state every slot key matches and only slot.callback is reassigned (line 336-338), so both O(depth) walks are pure waste. For a deep tree (depth 30+) re-rendering many event-bearing elements, this adds O(elements x depth) parentNode hops per commit. Computing root/listenerTarget lazily on the first slot add/re-key (and sharing the single walk between the two values, since rootFor is derived from listenerTargetFor anyway) removes the cost from the common path.
-
-<details><summary>Verification</summary>
-
-Verified every link: (1) hostPropsChanged (fig-reconciler/src/index.ts:3071) uses identity comparison, so inline events arrays set UpdateFlag on every re-render; commitUpdate -> updateElement (fig-dom/src/props.ts:50-54) calls updateEvents unconditionally whenever the events prop exists, with no identity bail-out. (2) updateEvents (fig-dom/src/events.ts:305-309) eagerly computes rootFor(element) and listenerTargetFor(element); rootFor internally calls listenerTargetFor (lines 365-373), and listenerTargetFor (lines 999-1015) is an unmemoized parentNode walk to the nearest registered container, so two O(depth) walks per event-bearing element per commit. (3) Both values are consumed only by addEventSlot in the slot-undefined / key-changed branches; in the steady state only slot.callback is reassigned (lines 336-338), so the walks are pure waste. Production path, no NODE_ENV gate, no cache elsewhere. Cost is real but modest (pointer hops, comparable to other per-update work like the Set allocation in updateElement), so it stays a micro-optimization rather than a user-visible regression.
-
-</details>
-
----
-
-### 2. visitElementSubtree allocates Array.from(node.childNodes) at every node, so every insertBefore/removeChild host op allocates one array per DOM node in the moved subtree.
-
-- **Location:** `packages/fig-dom/src/tree.ts:11`
-- **Severity:** minor
-- **Reviewer:** fig-dom:performance
-
-attachSubtree/detachSubtree (attachment.ts) run on every host insertBefore, removeChild, clearContainer, hide/unhide, and asset attach (index.ts:176-187), and visitElementSubtree snapshots childNodes into a fresh array at every level of the recursion -- including for text nodes and elements with no bind/event slots. On initial mount the entire tree is walked once with one array allocation per node; on keyed list reorders each MOVED item is re-inserted and its whole subtree re-walked (the per-element work is two WeakMap gets that early-return, but the allocations remain), so reordering m items of k nodes each costs O(m\*k) array allocations per commit. The visitor never mutates siblings during attach, so iterating via firstChild/nextSibling (capturing next before visiting, as clearContainer already does) eliminates all per-node allocation; live-mutation safety is only needed on the detach path.
-
-<details><summary>Verification</summary>
-
-Verified tree.ts:11 allocates Array.from(node.childNodes ?? []) at every recursion level, and attachSubtree/detachSubtree (attachment.ts) are invoked from the production host-config insertBefore/removeChild/clearContainer (index.ts:167,182,185) and asset attach/detach (asset-resources.ts:103,149) — no NODE_ENV gate, so one short-lived array per DOM node per moved/removed subtree per commit is real, including for text nodes and slot-free elements (bind.ts/events.ts attach helpers are WeakMap-get early-returns). Two detail errors: (1) hide/unhide do not use this walk — index.ts:214-227 call suspendBind/resumeBind per instance; (2) the claim that the attach path never mutates siblings is wrong — attachBindSlot (bind.ts) synchronously runs user bind callbacks that can mutate the DOM, so the snapshot is load-bearing for robustness and the proposed firstChild/nextSibling fix is not trivially safe on attach either. Cost is young-gen array churn only, no correctness impact, no measurable regression demonstrated — minor is the correct severity.
-
-</details>
-
----
-
-### 3. Controlled/defaulted select maintenance is O(n^2): every live option insertion and every option commitUpdate triggers a full recursive rescan of all descendant options.
-
-- **Location:** `packages/fig-dom/src/props.ts:119`
-- **Severity:** minor
-- **Reviewer:** fig-dom:performance
-
-Host insertBefore calls updateParentSelect for each inserted option (index.ts:181), and updateElement calls updateParentSelect after every commitUpdate of an option/optgroup (props.ts:119). Each call runs setSelectValue (props.ts:487), which rebuilds the values Set and re-walks ALL options via descendantOptions (props.ts:511-523) -- a recursive scan using Array.from(childNodes) plus options.push(...spread) per optgroup -- then rewrites `selected` on every option, and currentOptionValue runs a regex-replace on textContent for every implicit-value option. Appending n options to a live controlled select (e.g. an async-loaded 1000-entry country/typeahead list) therefore costs n scans of up to n options = O(n^2) node visits with per-node allocation in one commit; likewise re-rendering a controlled select whose n option labels all change performs n full rescans. Batching to one setSelectValue per select per commit (e.g. a pending-selects set flushed once), or at least skipping the scan when the inserted option's own value does not match state.value for single-selects, collapses this to O(n).
-
-<details><summary>Verification</summary>
-
-Verified all three legs against the code on disk. (1) Reconciler commitPlacement/insertHostSubtree (fig-reconciler/src/index.ts:3488, 3518) call host.insertBefore once per placed host node with no batching, and fig-dom's insertBefore (index.ts:181) calls updateParentSelect for every option-like child. (2) For a controlled select, updateParentSelect (props.ts:463-485) passes both guards and always runs setSelectValue, which recursively collects ALL descendant options (descendantOptions, props.ts:511-523, with Array.from + spread allocation), rewrites selected on each, and regex-processes textContent for implicit-value options — so inserting n options into a live controlled select is n full scans = O(n²). (3) props.ts:119 calls updateParentSelect after every commitUpdate of an option/optgroup, so n option value-prop updates in one commit also rescan n times. Not dev-gated, no test pins batching, no pending-selects flush exists. Mitigations confirmed: uncontrolled selects early-return after appliedDefault, and initial mount is O(n) because select state is unset during render-phase assembly (appendInitialChild returns early; finalize applies once). One sub-example is overstated: pure label (text-child) changes go through commitTextUpdate, not option commitUpdate, but the insertion and value-prop cases fully stand. Perf-only, scoped to controlled selects with large dynamic option lists, final state correct — minor is the honest severity.
-
-</details>
-
----
-
-### 4. getFamilyByType duplicates @bgub/fig-reconciler/refresh's refreshFamilyFor, publishing two homes for the same lookup
-
-- **Location:** `packages/fig-refresh/src/index.ts:40`
-- **Severity:** minor
-- **Reviewer:** fig-refresh:api-design
-
-The reconciler's dev seam already exports refreshFamilyFor(type) (packages/fig-reconciler/src/refresh.ts:31), which routes through the installed handler and is the documented way for renderers/devtools to resolve a family. getFamilyByType is exported from fig-refresh only because it doubles as the handler passed to setRefreshHandler (line 37) — no consumer outside fig-refresh's own tests imports it. Post-release this gives users two subtly different entry points for the same concept (one works only when the fig-refresh runtime specifically is installed; the other works with any handler), violating the repo's 'every export has one home' stance; it could be a non-exported function with tests exercising it via register/performRefresh.
-
-<details><summary>Verification</summary>
-
-Verified every factual claim: getFamilyByType is exported at fig-refresh/src/index.ts:40 solely because it doubles as the setRefreshHandler argument (line 37); repo-wide grep shows no importer outside fig-refresh's own index.test.ts (fig-vite's virtual module imports only injectScheduleRefresh/performRefresh/register/setSignature; fig-devtools does not use it). refreshFamilyFor exists at fig-reconciler/src/refresh.ts:31 as the handler-routed lookup seam, documented in concepts/renderer-authoring.md as the dev-only seam. concepts/architecture.md:9 states the one-home stance, and fig-refresh's README explicitly says the package is 'wiring, not an API you call from application code', naming only register/setSignature/performRefresh — so the extra public export contradicts the package's own documented surface. Tests could pin the behavior via register + performRefresh's returned RefreshUpdate instead. The only counterpoint is that the two functions live at different layers (delegating seam vs. concrete map lookup), so it is not a literal symbol-mirroring violation and has zero runtime cost — which caps this at an API-hygiene nit, not a bug. Concrete cost: shipping gratuitous semver-bound public API with duplicate, subtly divergent entry points for family lookup at first publish.
-
-</details>
-
----
-
-### 5. performRefresh silently discards the update when called before any scheduler is injected, unlike fig-dom's seam which buffers exactly this race
-
-- **Location:** `packages/fig-refresh/src/index.ts:84`
-- **Severity:** minor
-- **Reviewer:** fig-refresh:api-design
-
-performRefresh drains pendingUpdates, advances family.current for every queued version, and dispatches to whatever is in scheduleRefreshFns — if injectScheduleRefresh has not run yet, the update is computed and permanently lost (queue drained, families advanced, zero renderers notified, no warning). The mounted tree keeps rendering stale components with no way to replay. fig-dom's counterpart explicitly buffers pre-configuration updates for this reason (packages/fig-dom/src/refresh.ts:8-11: 'dropping those updates would silently skip a refresh'), so the two packages disagree on how the same ordering hazard is handled. The shipped fig-vite virtual module happens to inject at import time before any register call, but a non-Vite tooling author following the top-of-file comment ('calls performRefresh() from an import.meta.hot.accept handler') hits a silent-failure ordering contract that nothing enforces or reports.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-refresh/src/index.ts:84-106: performRefresh drains pendingUpdates and advances family.current before dispatching to scheduleRefreshFns, with no buffering or warning when the Set is empty — confirmed no guard exists. Confirmed the asymmetry: packages/fig-dom/src/refresh.ts:27-34 buffers pre-configuration updates with an explicit comment that dropping them 'would silently skip a refresh'. Confirmed no test pins the empty-scheduler case (index.test.ts injects at module top) and no concepts/ file documents a refresh ordering contract. Also confirmed the shipped fig-vite virtual module (fig-vite/src/index.ts:63) always injects before performRefresh can run, so only non-Vite tooling authors are exposed. The finding overstates impact in one respect: the update is not 'permanently lost with no way to replay' — the reconciler swaps node.type via resolveLatestType on every render (fig-reconciler/src/index.ts:1776), so subsequent renders pick up new code; what is lost is the proactive re-render for that edit and the staleFamilies remount decision (the latter can cause a dev hook-order throw on a later in-place re-render). The failure is real but transient and only reachable via a mis-ordered custom integration, matching the claimed minor severity.
-
-</details>
-
----
 
 ### 6. commitDataDependencies calls rootOf(cursor) — an O(depth) walk to the root — once per dirty fiber, and every rendered function component is dirty every commit
 

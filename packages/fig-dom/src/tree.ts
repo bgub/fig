@@ -7,8 +7,9 @@ export function visitElementSubtree(
   visitor: (element: Element) => void,
 ): void {
   if (isElementNode(node)) visitor(node);
+  if (!("childNodes" in node) || node.firstChild === null) return;
 
-  for (const child of Array.from(node.childNodes ?? [])) {
+  for (const child of Array.from(node.childNodes)) {
     visitElementSubtree(child as Element | Text, visitor);
   }
 }

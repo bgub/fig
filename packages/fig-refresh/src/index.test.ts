@@ -1,7 +1,6 @@
 import type { RefreshUpdate } from "@bgub/fig-reconciler/refresh";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
-  getFamilyByType,
   injectScheduleRefresh,
   isLikelyComponentType,
   performRefresh,
@@ -27,8 +26,9 @@ describe("@bgub/fig-refresh runtime", () => {
     register(v1, "mod#A");
     register(v2, "mod#A");
 
-    expect(getFamilyByType(v1)).toBe(getFamilyByType(v2));
-    expect(getFamilyByType(v1)).toBeDefined();
+    const update = performRefresh();
+    expect(update?.updatedFamilies.size).toBe(1);
+    expect([...update!.updatedFamilies][0]?.current).toBe(v2);
   });
 
   it("returns null and calls no renderer when nothing is pending", () => {
@@ -47,7 +47,7 @@ describe("@bgub/fig-refresh runtime", () => {
     setSignature(v2, "useState");
 
     const update = performRefresh();
-    const family = getFamilyByType(v1);
+    const family = [...update!.updatedFamilies][0];
     expect(family?.current).toBe(v2);
     expect(update?.updatedFamilies.has(family!)).toBe(true);
     expect(update?.staleFamilies.size).toBe(0);
@@ -62,7 +62,8 @@ describe("@bgub/fig-refresh runtime", () => {
     setSignature(v2, "useState\nuseRef");
 
     const update = performRefresh();
-    const family = getFamilyByType(v1);
+    const family = [...update!.staleFamilies][0];
+    expect(family?.current).toBe(v2);
     expect(update?.staleFamilies.has(family!)).toBe(true);
     expect(update?.updatedFamilies.size).toBe(0);
   });
@@ -76,12 +77,37 @@ describe("@bgub/fig-refresh runtime", () => {
     setSignature(v2, "useState", true);
 
     const update = performRefresh();
-    expect(update?.staleFamilies.has(getFamilyByType(v1)!)).toBe(true);
+    const family = [...update!.staleFamilies][0];
+    expect(family?.current).toBe(v2);
+    expect(update?.staleFamilies.has(family!)).toBe(true);
   });
 
   it("classifies likely component types by name", () => {
     expect(isLikelyComponentType(function App() {})).toBe(true);
     expect(isLikelyComponentType(function helper() {})).toBe(false);
     expect(isLikelyComponentType(42)).toBe(false);
+  });
+
+  it("replays refreshes performed before a scheduler is injected", async () => {
+    vi.resetModules();
+    const runtime = await import("./index.ts");
+    let delivered: RefreshUpdate | null = null;
+    const v1 = component("e1");
+    const v2 = component("e2");
+
+    runtime.register(v1, "mod#E");
+    runtime.setSignature(v1, "useState");
+    runtime.register(v2, "mod#E");
+    runtime.setSignature(v2, "useState");
+
+    const update = runtime.performRefresh();
+    expect(update?.updatedFamilies.size).toBe(1);
+    expect(delivered).toBeNull();
+
+    runtime.injectScheduleRefresh((nextUpdate) => {
+      delivered = nextUpdate;
+    });
+
+    expect(delivered).toBe(update);
   });
 });

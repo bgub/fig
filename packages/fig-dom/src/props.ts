@@ -14,6 +14,7 @@ interface SelectState {
   appliedDefault: boolean;
   applyDefaultToInsertedOptions: boolean;
   controlled: boolean;
+  selectedValues: ReadonlySet<string>;
   value: unknown;
 }
 
@@ -452,16 +453,18 @@ function updateSelectOptions(
   const shouldApply =
     !hydratingDefault &&
     (controlled || (!controlled && options.initial === true));
-  selectState.set(element, {
+  const nextState = {
     appliedDefault: state?.appliedDefault === true || !controlled,
     applyDefaultToInsertedOptions:
       !hydratingDefault && !controlled && options.initial === true,
     controlled,
+    selectedValues: selectValues(value),
     value,
-  });
+  };
+  selectState.set(element, nextState);
   if (!shouldApply) return;
 
-  setSelectValue(element, value);
+  setSelectValue(element, nextState.selectedValues);
 }
 
 export function updateParentSelect(
@@ -482,22 +485,31 @@ export function updateParentSelect(
     return;
   }
 
-  setSelectValue(select, state.value);
+  setSelectValue(element, state.selectedValues);
   if (!state.controlled) {
     state.appliedDefault = true;
   }
 }
 
-function setSelectValue(element: Element, value: unknown): void {
-  const values = new Set(
-    Array.isArray(value) ? value.map(String) : [String(value)],
-  );
+function selectValues(value: unknown): ReadonlySet<string> {
+  return new Set(Array.isArray(value) ? value.map(String) : [String(value)]);
+}
 
-  for (const option of descendantOptions(element)) {
-    const optionValue = currentOptionValue(option);
-    (option as unknown as { selected: boolean }).selected =
-      values.has(optionValue);
+function setSelectValue(element: Element, values: ReadonlySet<string>): void {
+  if (elementName(element) === "option") {
+    setOptionSelected(element, values);
+    return;
   }
+
+  forEachDescendantOption(element, (option) => {
+    setOptionSelected(option, values);
+  });
+}
+
+function setOptionSelected(option: Element, values: ReadonlySet<string>): void {
+  (option as unknown as { selected: boolean }).selected = values.has(
+    currentOptionValue(option),
+  );
 }
 
 function closestParentSelect(element: Element): Element | null {
@@ -512,18 +524,21 @@ function closestParentSelect(element: Element): Element | null {
   return null;
 }
 
-function descendantOptions(element: Element): Element[] {
-  const options: Element[] = [];
-  for (const child of Array.from(element.childNodes)) {
-    if (!isElementNode(child)) continue;
-
-    if (elementName(child) === "option") {
-      options.push(child);
-    } else {
-      options.push(...descendantOptions(child));
+function forEachDescendantOption(
+  element: Element,
+  visitor: (option: Element) => void,
+): void {
+  for (let child = element.firstChild; child !== null; ) {
+    const next = child.nextSibling;
+    if (isElementNode(child)) {
+      if (elementName(child) === "option") {
+        visitor(child);
+      } else {
+        forEachDescendantOption(child, visitor);
+      }
     }
+    child = next;
   }
-  return options;
 }
 
 function currentOptionValue(option: Element): string {
