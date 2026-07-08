@@ -16,6 +16,11 @@
       "import": "./dist/refresh.js",
       "default": "./dist/refresh.js"
     },
+    "./test-utils": {
+      "types": "./dist/act.d.ts",
+      "import": "./dist/act.js",
+      "default": "./dist/act.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",

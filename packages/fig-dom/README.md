@@ -33,6 +33,9 @@ server-recovered boundaries schedule client rendering for that boundary.
 container while keeping context, effects, and delegated events attached to the
 logical Fig tree.
 
+Testing utilities live under `@bgub/fig-dom/test-utils`; `act(callback)` runs
+the callback and drains scheduled Fig DOM work before resolving.
+
 ## DOM Compatibility
 
 Fig DOM treats ordinary host props as attributes instead of maintaining a large

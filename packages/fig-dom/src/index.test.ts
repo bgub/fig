@@ -1,5 +1,13 @@
-import { createElement, readPromise, Suspense, stylesheet } from "@bgub/fig";
+import {
+  createElement,
+  readPromise,
+  type StateSetter,
+  Suspense,
+  stylesheet,
+  useState,
+} from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
+import { act } from "./act.ts";
 import { createRoot, flushSync, insertAssetResources } from "./index.ts";
 import {
   deferred,
@@ -77,6 +85,62 @@ describe("@bgub/fig-dom", () => {
     flushSync(() => root.render(createElement("main", null, "Now")));
 
     expect(container.textContent).toBe("Now");
+  });
+
+  it("acts over sync work", async () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    await act(() => root.render(createElement("main", null, "Acted")));
+
+    expect(container.textContent).toBe("Acted");
+  });
+
+  it("acts over async callback updates", async () => {
+    let setLabel: StateSetter<string> | null = null;
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement("main", null, label);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    await act(() => root.render(createElement(App, null)));
+
+    await act(async () => {
+      await Promise.resolve();
+      setLabel?.("Second");
+    });
+
+    expect(container.textContent).toBe("Second");
+  });
+
+  it("acts over suspense retries", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    await act(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Message, null),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+
+    await act(() => pending.resolve("Ready"));
+
+    expect(container.textContent).toBe("Ready");
   });
 
   it("coalesces same-tick root renders into one async commit", async () => {

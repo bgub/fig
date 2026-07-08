@@ -23,10 +23,12 @@ signatures — that is what gives consumers semver protection).
   symbol skew is not).
 - `@bgub/fig-dom` — the browser boundary: `createRoot`/`hydrateRoot`/
   `createPortal`, `flushSync`, `on()`/`events`, `bind`/`composeBind`,
-  `insertAssetResources`, host-prop JSX types, and the `./refresh` HMR subpath.
+  `insertAssetResources`, host-prop JSX types, the `./refresh` HMR subpath,
+  and `./test-utils` (`act`).
 - `@bgub/fig-reconciler` — renderer authoring: `createRenderer`/`HostConfig`,
-  `EventPriority`/`runWithEventPriority`, the internal cooperative scheduler,
-  and the `./devtools` + `./refresh` subpaths.
+  `EventPriority`/`runWithEventPriority`, the scheduler-backed `act` testing
+  primitive used by renderer test utilities, the internal cooperative
+  scheduler, and the `./devtools` + `./refresh` subpaths.
 - `@bgub/fig-server` — server rendering (`renderToStream` grid, `prerender`)
   and the `./payload` server-component layer. `escapeAttribute`/`escapeText`
   are exported because their contract is "consistent with fig-server's own
@@ -79,9 +81,10 @@ runtime footprint.
 - Lanes and fibers never cross a public boundary; priority crosses as
   `EventPriority = "default" | "continuous" | "discrete"` strings.
 - The cooperative scheduler is an internal fig-reconciler module (not a
-  published package) exposing no `unstable_` APIs. Its work loop prefers
-  `setImmediate` and creates its `MessageChannel` lazily, so importing a
-  renderer can never keep a Node process alive.
+  published package) exposing no `unstable_` APIs; `act` is the public testing
+  surface that temporarily routes scheduled callbacks into a test queue. Its
+  work loop prefers `setImmediate` and creates its `MessageChannel` lazily, so
+  importing a renderer can never keep a Node process alive.
 - Dev-only behavior (strict double render, diagnostics, DevTools emission)
   uses inline `process.env.NODE_ENV !== "production"` checks that app bundlers
   strip; there are no separate dev builds.

@@ -118,6 +118,7 @@ import {
   scheduleCallback,
   shouldYieldToHost,
 } from "./scheduler.ts";
+export { act } from "./scheduler.ts";
 
 export type EventPriority = "default" | "continuous" | "discrete";
 

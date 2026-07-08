@@ -88,3 +88,14 @@ loop yields before further scheduled work runs. Uncaught render errors
 rethrow to `flushSync` callers; outside `flushSync` they go to the root's
 `onUncaughtError`, or rethrow from a detached task when no handler exists —
 scheduler ticks never die silently.
+
+## Testing Flushes
+
+`act(callback)` is a scheduler-backed test helper. While an act scope is open,
+Fig scheduler callbacks are queued instead of posted to host APIs. The
+outermost scope waits for the callback, drains queued work by scheduler
+priority, runs continuation callbacks, and repeats after microtask/macrotask
+turns until no Fig work is scheduled. This covers root renders, state updates
+after awaited code inside the callback, effect work scheduled by commits, and
+Suspense retries that ping before `act` resolves. It does not advance arbitrary
+application timers; tests that depend on timers still own those timers.

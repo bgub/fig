@@ -115,6 +115,11 @@ let taskId = 1;
 let messageLoopRunning = false;
 let needsPaint = false;
 let startTime = -1;
+let actQueue: Task[] | null = null;
+let actScopeDepth = 0;
+let flushingActQueue = false;
+
+const actFlushLimit = 1_000;
 
 export function now(): number {
   return globalThis.performance?.now?.() ?? Date.now();
@@ -141,6 +146,15 @@ export function scheduleCallback(
     expirationTime: now() + priorityTimeouts[priority],
   };
 
+  if (actQueue !== null) {
+    actQueue.push(task);
+    return {
+      cancel() {
+        task.callback = null;
+      },
+    };
+  }
+
   taskQueue.push(task);
   requestHostCallback();
 
@@ -149,6 +163,116 @@ export function scheduleCallback(
       task.callback = null;
     },
   };
+}
+
+export async function act<T>(
+  callback: () => T | PromiseLike<T>,
+): Promise<Awaited<T>> {
+  const previousActQueue = actQueue;
+  const previousActScopeDepth = actScopeDepth;
+  const queue = previousActQueue ?? [];
+
+  actQueue = queue;
+  actScopeDepth = previousActScopeDepth + 1;
+
+  try {
+    const result = await callback();
+
+    actScopeDepth = previousActScopeDepth;
+    if (previousActScopeDepth === 0) {
+      try {
+        await flushActQueueUntilSettled(queue);
+      } finally {
+        actQueue = previousActQueue;
+      }
+    } else {
+      actQueue = previousActQueue;
+    }
+
+    return result;
+  } catch (error) {
+    actScopeDepth = previousActScopeDepth;
+    actQueue = previousActQueue;
+    throw error;
+  }
+}
+
+async function flushActQueueUntilSettled(queue: Task[]): Promise<void> {
+  for (let flushes = 0; flushes < actFlushLimit; flushes += 1) {
+    flushActQueue(queue);
+    await Promise.resolve();
+
+    if (hasActWork(queue)) continue;
+
+    await waitForActMacrotask();
+    if (!hasActWork(queue)) {
+      queue.length = 0;
+      return;
+    }
+  }
+
+  throw new Error("act() exceeded the scheduled work flush limit.");
+}
+
+function flushActQueue(queue: Task[]): void {
+  if (flushingActQueue) return;
+
+  flushingActQueue = true;
+  try {
+    let task = takeNextActTask(queue);
+    while (task !== null) {
+      const callback = task.callback;
+
+      if (callback !== null) {
+        task.callback = null;
+        needsPaint = false;
+        startTime = now();
+        const continuation = callback();
+        if (typeof continuation === "function") {
+          task.callback = continuation;
+          queue.push(task);
+        }
+      }
+
+      task = takeNextActTask(queue);
+    }
+  } finally {
+    flushingActQueue = false;
+  }
+}
+
+function hasActWork(queue: Task[]): boolean {
+  return queue.some((task) => task.callback !== null);
+}
+
+function takeNextActTask(queue: Task[]): Task | null {
+  let nextIndex = -1;
+  for (let index = 0; index < queue.length; index += 1) {
+    const task = queue[index];
+    if (task.callback === null) continue;
+
+    if (nextIndex === -1 || compare(task, queue[nextIndex]) < 0) {
+      nextIndex = index;
+    }
+  }
+
+  if (nextIndex === -1) {
+    queue.length = 0;
+    return null;
+  }
+
+  const [task] = queue.splice(nextIndex, 1);
+  return task;
+}
+
+function waitForActMacrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof setImmediate === "function") {
+      void setImmediate(resolve);
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
 }
 
 function requestHostCallback(): void {

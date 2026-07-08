@@ -4,7 +4,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./refresh": "./src/refresh.ts"
+    "./refresh": "./src/refresh.ts",
+    "./test-utils": "./src/act.ts"
   },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],

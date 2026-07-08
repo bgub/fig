@@ -15,6 +15,7 @@ const figSourceAliasEntries = [
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig/server", "packages/fig/src/server.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
+  ["@bgub/fig-dom/test-utils", "packages/fig-dom/src/act.ts"],
   ["@bgub/fig-dom/refresh", "packages/fig-dom/src/refresh.ts"],
   ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
   ["@bgub/fig-reconciler/devtools", "packages/fig-reconciler/src/devtools.ts"],
@@ -51,7 +52,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/server.browser.ts",
   ],
   "packages/fig-devtools": ["./src/index.ts"],
-  "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts"],
+  "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts", "./src/act.ts"],
   "packages/fig-reconciler": [
     "./src/index.ts",
     "./src/devtools.ts",

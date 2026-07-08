@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  act,
   ImmediatePriority,
   LowPriority,
   NormalPriority,
@@ -65,6 +66,51 @@ describe("scheduler", () => {
 
     await delay();
     expect(calls).toEqual(["first:false", "yield:true", "second"]);
+  });
+
+  it("captures scheduled work during an act scope", async () => {
+    const calls: string[] = [];
+
+    await act(async () => {
+      scheduleCallback(NormalPriority, () => {
+        calls.push("normal");
+      });
+      const cancelled = scheduleCallback(ImmediatePriority, () => {
+        calls.push("cancelled");
+      });
+
+      cancelled.cancel();
+      await Promise.resolve();
+
+      scheduleCallback(ImmediatePriority, () => {
+        calls.push("immediate");
+      });
+
+      expect(calls).toEqual([]);
+    });
+
+    expect(calls).toEqual(["immediate", "normal"]);
+  });
+
+  it("drains act continuations and microtask-scheduled work", async () => {
+    const calls: string[] = [];
+
+    await act(() => {
+      scheduleCallback(NormalPriority, () => {
+        calls.push("first");
+        void Promise.resolve().then(() => {
+          scheduleCallback(NormalPriority, () => {
+            calls.push("third");
+          });
+        });
+
+        return () => {
+          calls.push("second");
+        };
+      });
+    });
+
+    expect(calls).toEqual(["first", "second", "third"]);
   });
 
   it("does not construct a MessageChannel at import time", async () => {
