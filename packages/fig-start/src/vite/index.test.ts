@@ -1,6 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import {
   CLIENT_ENTRY_ID,
@@ -10,6 +18,8 @@ import {
 } from "./ids.ts";
 import { figStart } from "./index.ts";
 import { staticAssetHref } from "./static-assets.ts";
+
+const nodeRequire = createRequire(import.meta.url);
 
 describe("@bgub/fig-start/vite plugin", () => {
   it("serves generated client and server entries", async () => {
@@ -299,6 +309,7 @@ export const user = serverDataResource({
   it("transforms Tailwind CSS before the CSS bundler sees imports", async () => {
     const root = await mkdtemp(join(tmpdir(), "fig-start-vite-"));
     await mkdir(join(root, "src"), { recursive: true });
+    await linkTailwindPackage(root);
     await writeFile(
       join(root, "src", "index.tsx"),
       `export function App() {
@@ -547,3 +558,12 @@ export function Other() {
     }
   });
 });
+
+async function linkTailwindPackage(root: string): Promise<void> {
+  await mkdir(join(root, "node_modules"), { recursive: true });
+  await symlink(
+    dirname(nodeRequire.resolve("tailwindcss/package.json")),
+    join(root, "node_modules", "tailwindcss"),
+    "dir",
+  );
+}

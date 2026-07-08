@@ -205,7 +205,7 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
   ): Promise<void> {
     const version = ++navigationVersion;
     await transition(async () => {
-      setState({ ...state, status: "pending" }, false);
+      setState({ ...state, status: "pending" });
       const result = await load(location);
       if (version !== navigationVersion) return;
 

@@ -168,6 +168,141 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("keeps unrelated explicit names that share a prefix", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const snapshots: string[] = [];
+    let setShowFirst: StateSetter<boolean> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const prefixSurface = container.querySelector(
+        "#prefix",
+      ) as HTMLElement | null;
+      const oldSurface = container.querySelector(
+        "#old-card",
+      ) as HTMLElement | null;
+      snapshots.push(prefixSurface?.style.viewTransitionName ?? "");
+      snapshots.push(prefixSurface?.style.viewTransitionClass ?? "");
+      snapshots.push(oldSurface?.style.viewTransitionName ?? "");
+      snapshots.push(oldSurface?.style.viewTransitionClass ?? "");
+      update();
+      const newSurface = container.querySelector(
+        "#new-card",
+      ) as HTMLElement | null;
+      snapshots.push(newSurface?.style.viewTransitionName ?? "");
+      snapshots.push(newSurface?.style.viewTransitionClass ?? "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [showFirst, set] = useState(true);
+      setShowFirst = set;
+      return showFirst
+        ? createElement(
+            "main",
+            null,
+            createElement(
+              ViewTransition,
+              { exit: "fade", key: "prefix", name: "card_1" },
+              createElement("section", { id: "prefix" }, "Prefix"),
+            ),
+            createElement(
+              ViewTransition,
+              {
+                key: "old-card",
+                name: "card",
+                share: "shared",
+              },
+              createElement("section", { id: "old-card" }, "Old"),
+            ),
+          )
+        : createElement(
+            "main",
+            null,
+            createElement(
+              ViewTransition,
+              {
+                key: "new-card",
+                name: "card",
+                share: "shared",
+              },
+              createElement("section", { id: "new-card" }, "New"),
+            ),
+          );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setShowFirst?.(false)));
+
+      expect(snapshots).toEqual([
+        "card_1",
+        "fade",
+        "card",
+        "shared",
+        "card",
+        "shared",
+      ]);
+      expect(container.textContent).toBe("New");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("restores updated author styles after transition cleanup", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setVariant: StateSetter<"first" | "second"> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [variant, set] = useState<"first" | "second">("first");
+      setVariant = set;
+      return createElement(
+        ViewTransition,
+        { name: "card", update: "fade" },
+        createElement(
+          "section",
+          {
+            style: {
+              viewTransitionClass:
+                variant === "first" ? "author-a" : "author-b",
+              viewTransitionName: variant === "first" ? "author-a" : "author-b",
+            },
+          },
+          variant,
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      expect(surfaceStyle(container).viewTransitionName).toBe("author-a");
+      expect(surfaceStyle(container).viewTransitionClass).toBe("author-a");
+
+      await act(() => transition(() => setVariant?.("second")));
+      await Promise.resolve();
+
+      expect(surfaceStyle(container).viewTransitionName).toBe("author-b");
+      expect(surfaceStyle(container).viewTransitionClass).toBe("author-b");
+      expect(container.textContent).toBe("second");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
   it("preserves transition priority for external store updates", async () => {
     const container = document.createElement("div");
     document.body.append(container);

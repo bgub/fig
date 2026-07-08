@@ -75,7 +75,8 @@
   },
   "peerDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
-    "postcss": "^8.5.0"
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.3.0"
   },
   "peerDependenciesMeta": {
     "@tailwindcss/postcss": {
@@ -83,12 +84,16 @@
     },
     "postcss": {
       "optional": true
+    },
+    "tailwindcss": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.2",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^20.19.0",
-    "postcss": "^8.5.16"
+    "postcss": "^8.5.16",
+    "tailwindcss": "^4.3.2"
   }
 }

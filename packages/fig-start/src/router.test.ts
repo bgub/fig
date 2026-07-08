@@ -26,6 +26,14 @@ function makeRouter(isAdmin: boolean) {
   return createRouter({ context: { isAdmin }, routes });
 }
 
+function deferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => {};
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 describe("@bgub/fig-start router", () => {
   it("redirects from a guarded route when beforeLoad throws", async () => {
     const router = makeRouter(false);
@@ -93,5 +101,33 @@ describe("@bgub/fig-start router", () => {
     expect(transitionCalls).toBe(1);
     expect(router.getState().params).toEqual({ postId: "7" });
     expect(router.getState().status).toBe("idle");
+  });
+
+  it("notifies subscribers when navigation enters pending state", async () => {
+    const release = deferred<void>();
+    const router = createRouter({
+      routes: [
+        createRootRoute(),
+        createFileRoute("/")(),
+        createFileRoute("/slow")({
+          loader: () => release.promise,
+        }),
+      ],
+    });
+    const statuses: string[] = [];
+    const unsubscribe = router.subscribe(() => {
+      statuses.push(router.getState().status);
+    });
+
+    try {
+      const navigation = router.navigate("/slow");
+      expect(router.getState().status).toBe("pending");
+      expect(statuses).toContain("pending");
+      release.resolve();
+      await navigation;
+      expect(statuses).toEqual(["pending", "idle"]);
+    } finally {
+      unsubscribe();
+    }
   });
 });

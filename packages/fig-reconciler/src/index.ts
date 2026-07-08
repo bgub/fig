@@ -718,6 +718,7 @@ interface ViewTransitionState {
 }
 
 interface ViewTransitionSurface<Instance> {
+  boundary: object;
   className: string | null;
   instance: Instance;
   name: string;
@@ -3536,7 +3537,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (explicitViewTransitionName(cursor) !== null) {
           exitsByName.set(viewTransitionName(cursor), cursor);
         }
-        collectViewTransitionSurfaces(cursor, "exit", plan.oldSurfaces);
+        collectViewTransitionSurfaces(
+          cursor,
+          "exit",
+          plan.oldSurfaces,
+          "committed",
+        );
         continue;
       }
 
@@ -3568,11 +3574,22 @@ export function createRenderer<Container, Instance, TextInstance>(
               pairedExit,
               "share",
               plan.oldSurfaces,
+              "committed",
             );
-            collectViewTransitionSurfaces(cursor, "share", plan.newSurfaces);
+            collectViewTransitionSurfaces(
+              cursor,
+              "share",
+              plan.newSurfaces,
+              "finished",
+            );
             exitsByName.delete(viewTransitionName(cursor));
           } else {
-            collectViewTransitionSurfaces(cursor, "enter", plan.newSurfaces);
+            collectViewTransitionSurfaces(
+              cursor,
+              "enter",
+              plan.newSurfaces,
+              "finished",
+            );
           }
           continue;
         }
@@ -3580,9 +3597,19 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (viewTransitionChanged(cursor)) {
           const current = cursor.alternate;
           if (current !== null) {
-            collectViewTransitionSurfaces(current, "update", plan.oldSurfaces);
+            collectViewTransitionSurfaces(
+              current,
+              "update",
+              plan.oldSurfaces,
+              "committed",
+            );
           }
-          collectViewTransitionSurfaces(cursor, "update", plan.newSurfaces);
+          collectViewTransitionSurfaces(
+            cursor,
+            "update",
+            plan.newSurfaces,
+            "finished",
+          );
           continue;
         }
       }
@@ -3609,13 +3636,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     surfaces: ViewTransitionSurface<Instance>[],
     boundary: F,
   ): void {
-    const name = viewTransitionName(boundary);
-
     for (let index = surfaces.length - 1; index >= 0; index -= 1) {
       const surface = surfaces[index];
-      if (surface.name === name || surface.name.startsWith(`${name}_`)) {
-        surfaces.splice(index, 1);
-      }
+      if (surface.boundary === boundary) surfaces.splice(index, 1);
     }
   }
 
@@ -3623,6 +3646,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     boundary: F,
     phase: "enter" | "exit" | "share" | "update",
     surfaces: ViewTransitionSurface<Instance>[],
+    propsSource: "committed" | "finished",
   ): void {
     const className = viewTransitionClass(boundary.props, phase);
     if (className === "none") return;
@@ -3637,11 +3661,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (cursor.tag === HostTag) {
           if (!isHoistedFiber(cursor)) {
             surfaces.push({
+              boundary,
               className,
               instance: cursor.stateNode as Instance,
               name: index === 0 ? name : `${name}_${index}`,
-              props:
-                cursor.committedProps ?? cursor.memoizedProps ?? cursor.props,
+              props: viewTransitionSurfaceProps(cursor, propsSource),
             });
             index += 1;
           }
@@ -3652,6 +3676,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     };
 
     collect(boundary.child);
+  }
+
+  function viewTransitionSurfaceProps(
+    node: F,
+    source: "committed" | "finished",
+  ): Props {
+    if (source === "committed") {
+      return node.committedProps ?? node.memoizedProps ?? node.props;
+    }
+    return node.memoizedProps ?? node.props;
   }
 
   function viewTransitionName(node: F): string {
