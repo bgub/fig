@@ -57,6 +57,19 @@ export function Counter() {
     );
   });
 
+  it("includes namespace hook calls in component signatures", async () => {
+    const source = `import * as Fig from "@bgub/fig";
+export function Counter() {
+  const [n, setN] = Fig.useState(0);
+  Fig.useMemo(() => n, [n]);
+  return <button>{n}</button>;
+}`;
+
+    const out = await transformModule(source, "/app/Counter.tsx");
+    expect(out).not.toBeNull();
+    expect(out!.code).toContain('__figSig(Counter, "useState\\nuseMemo")');
+  });
+
   it("force-resets components that call imported custom hooks", async () => {
     const source = `import { useThing } from "./hooks";
 export function Counter() {

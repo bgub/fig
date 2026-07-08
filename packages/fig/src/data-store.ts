@@ -204,8 +204,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
 
     this.pendingOwnerKeys.delete(owner);
-    this.deleteDataOwner(owner);
-    if (previousOwner !== null) this.deleteDataOwner(previousOwner);
+    this.deleteDataOwner(owner, nextKeys);
+    if (previousOwner !== null) this.deleteDataOwner(previousOwner, nextKeys);
 
     if (nextKeys !== null && nextKeys.size > 0) {
       this.ownerKeys.set(owner, nextKeys);
@@ -242,7 +242,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.pendingOwnerKeys.delete(owner);
   }
 
-  deleteDataOwner(owner: object): void {
+  deleteDataOwner(
+    owner: object,
+    retainedKeys: ReadonlySet<string> | null = null,
+  ): void {
     this.pendingOwnerKeys.delete(owner);
     const keys = this.ownerKeys.get(owner);
     if (keys === undefined) return;
@@ -254,7 +257,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       entry.subscribers.delete(owner as Owner);
       this.notifyEntryChange(entry);
-      this.scheduleInactiveCleanup(entry);
+      if (retainedKeys?.has(key) !== true) this.scheduleInactiveCleanup(entry);
     }
   }
 

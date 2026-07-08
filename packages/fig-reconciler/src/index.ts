@@ -629,10 +629,10 @@ interface ContextDependency {
   memoizedValue: unknown;
 }
 
-type SuspensePings<Container, Instance, TextInstance> = WeakMap<
-  Fiber<Container, Instance, TextInstance>,
-  Lanes
->;
+interface SuspensePings<Container, Instance, TextInstance> {
+  boundaries: Set<Fiber<Container, Instance, TextInstance>>;
+  lanes: WeakMap<Fiber<Container, Instance, TextInstance>, Lanes>;
+}
 
 interface Fiber<Container, Instance, TextInstance> {
   tag: Tag;
@@ -3381,7 +3381,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.needsCommitDeletions = false;
       }
       if (root.needsDataDependencyCommit) {
-        commitDataDependencies(finishedWork.child);
+        commitDataDependencies(root, finishedWork.child);
         root.needsDataDependencyCommit = false;
       }
       commitMutationEffects(finishedWork.child);
@@ -3980,13 +3980,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function commitDataDependencies(node: F | null): void {
+  function commitDataDependencies(root: R, node: F | null): void {
     walkFiberForest(node, (cursor) => {
       if (cursor.dataDependenciesDirty) {
-        rootOf(cursor).dataStore.commitDataDependencies(
-          cursor,
-          cursor.alternate,
-        );
+        root.dataStore.commitDataDependencies(cursor, cursor.alternate);
         cursor.dataDependenciesDirty = false;
         if (cursor.alternate !== null)
           cursor.alternate.dataDependenciesDirty = false;
@@ -4441,11 +4438,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     const shouldAttach = pings === undefined;
 
     if (pings === undefined) {
-      pings = new WeakMap();
+      pings = { boundaries: new Set(), lanes: new WeakMap() };
       root.suspendedBoundaries.set(thenable, pings);
     }
 
-    pings.set(boundary, mergeLanes(pings.get(boundary) ?? NoLanes, lanes));
+    pings.boundaries.add(boundary);
+    pings.lanes.set(
+      boundary,
+      mergeLanes(pings.lanes.get(boundary) ?? NoLanes, lanes),
+    );
 
     if (!shouldAttach) return;
 
@@ -4460,27 +4461,43 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (pings === undefined) return;
 
     root.suspendedBoundaries.delete(thenable);
-    pingCurrentSuspenseBoundaries(root.current, pings);
+    pingCurrentSuspenseBoundaries(root, pings);
   }
 
   function pingCurrentSuspenseBoundaries(
-    node: F,
+    root: R,
     pings: SuspensePings<Container, Instance, TextInstance>,
   ): void {
-    const lanes = mergeLanes(
-      pings.get(node) ?? NoLanes,
-      node.alternate === null
-        ? NoLanes
-        : (pings.get(node.alternate) ?? NoLanes),
-    );
+    for (const boundary of pings.boundaries) {
+      const current = currentFiberForPing(root, boundary);
+      if (current === null) continue;
 
-    if (lanes !== NoLanes) {
-      scheduleFiber(node, suspenseRetryLane(lanes));
+      const lanes = mergeLanes(
+        pings.lanes.get(current) ?? NoLanes,
+        current.alternate === null
+          ? NoLanes
+          : (pings.lanes.get(current.alternate) ?? NoLanes),
+      );
+      if (lanes !== NoLanes) {
+        scheduleFiber(current, suspenseRetryLane(lanes));
+      }
     }
+  }
 
-    for (let child = node.child; child !== null; child = child.sibling) {
-      pingCurrentSuspenseBoundaries(child, pings);
+  function currentFiberForPing(root: R, boundary: F): F | null {
+    if (isInCurrentTree(root, boundary)) return boundary;
+    const alternate = boundary.alternate;
+    return alternate !== null && isInCurrentTree(root, alternate)
+      ? alternate
+      : null;
+  }
+
+  function isInCurrentTree(root: R, node: F): boolean {
+    let cursor: F | null = node;
+    while (cursor !== null && cursor.return !== null) {
+      cursor = cursor.return;
     }
+    return cursor === root.current;
   }
 
   // Context propagation is lazy: providers push new values without walking
@@ -6093,18 +6110,9 @@ function devtoolsHost<Container, Instance, TextInstance>(
   if (node.tag !== HostTag) return undefined;
 
   const instance = node.stateNode as {
-    getAttribute?(name: string): string | null;
-    getAttributeNames?(): string[];
     localName?: unknown;
     tagName?: unknown;
   } | null;
-  const attributes: Record<string, string> = {};
-  const getAttribute = instance?.getAttribute?.bind(instance);
-
-  for (const name of instance?.getAttributeNames?.() ?? []) {
-    const value = getAttribute?.(name);
-    attributes[name] = value === null || value === undefined ? "" : value;
-  }
 
   return {
     kind: "element",
@@ -6114,7 +6122,7 @@ function devtoolsHost<Container, Instance, TextInstance>(
         : typeof instance?.tagName === "string"
           ? instance.tagName.toLowerCase()
           : String(node.type),
-    attributes,
+    attributes: {},
   };
 }
 

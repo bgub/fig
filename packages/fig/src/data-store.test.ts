@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   dataResource,
   invalidateData,
@@ -125,6 +125,47 @@ describe("@bgub/fig", () => {
 
     store.invalidateData(resource, "b");
     expect(scheduled).toEqual([owner]);
+  });
+
+  it("does not arm inactive cleanup timers for retained dependencies", () => {
+    const timers: Array<() => void> = [];
+    let clearedTimers = 0;
+    vi.stubGlobal("setTimeout", ((callback: () => void) => {
+      timers.push(callback);
+      return { unref: () => undefined };
+    }) as unknown as typeof setTimeout);
+    vi.stubGlobal("clearTimeout", (() => {
+      clearedTimers += 1;
+    }) as unknown as typeof clearTimeout);
+
+    try {
+      const previousOwner = {};
+      const owner = {};
+      const resource = dataResource({
+        key: (id: string) => ["retained", id],
+        load: (id: string) => id,
+      });
+      const store = createDataStore<object, null>({
+        getLane: () => null,
+        schedule: () => undefined,
+      });
+
+      expect(store.readData(resource, ["one"], previousOwner)).toBe("one");
+      store.commitDataDependencies(previousOwner, null);
+      const timerCount = timers.length;
+      const clearedTimerCount = clearedTimers;
+
+      expect(store.readData(resource, ["one"], owner)).toBe("one");
+      store.commitDataDependencies(owner, previousOwner);
+
+      expect(timers).toHaveLength(timerCount);
+      expect(clearedTimers).toBe(clearedTimerCount);
+
+      store.releaseDataOwner(owner);
+      expect(timers).toHaveLength(timerCount + 1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("aborts abandoned preloads after their grace window", async () => {

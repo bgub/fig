@@ -165,26 +165,24 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
                 }
 
                 const callee = call.node.callee;
-                if (!t.isIdentifier(callee) || !isCustomHookName(callee.name)) {
+                const hookName = hookCallName(callee);
+                if (hookName === null) {
                   return;
                 }
 
-                hookNames.push(callee.name);
-                const hookRecord = functions.get(callee.name);
+                hookNames.push(hookName);
+                const hookRecord = functions.get(hookName);
                 if (hookRecord?.isCustomHook !== true) {
-                  if (!isBuiltinFigHookName(callee.name)) forceReset = true;
+                  if (!isBuiltinFigHookName(hookName)) forceReset = true;
                   return;
                 }
 
-                if (stack.includes(callee.name)) {
+                if (stack.includes(hookName)) {
                   forceReset = true;
                   return;
                 }
 
-                const nested = signatureFor(hookRecord, [
-                  ...stack,
-                  callee.name,
-                ]);
+                const nested = signatureFor(hookRecord, [...stack, hookName]);
                 forceReset = forceReset || nested.forceReset;
                 if (nested.signature !== "") {
                   hookNames.push(
@@ -195,6 +193,23 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
             });
 
             return { forceReset, signature: hookNames.join("\n") };
+          }
+
+          function hookCallName(
+            callee: babel.types.Expression | babel.types.V8IntrinsicIdentifier,
+          ): string | null {
+            if (t.isIdentifier(callee)) {
+              return isCustomHookName(callee.name) ? callee.name : null;
+            }
+            if (
+              t.isMemberExpression(callee) &&
+              !callee.computed &&
+              t.isIdentifier(callee.property) &&
+              isCustomHookName(callee.property.name)
+            ) {
+              return callee.property.name;
+            }
+            return null;
           }
 
           function exportsOnlyComponents(

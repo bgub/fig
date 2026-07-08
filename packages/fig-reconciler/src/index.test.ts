@@ -48,9 +48,20 @@ class TestText {
 class TestElement {
   childNodes: Array<TestElement | TestText> = [];
   parentNode: TestElement | null = null;
+  attributeReads = 0;
   hidden = false;
 
   constructor(public type: string) {}
+
+  getAttribute(_name: string): string | null {
+    this.attributeReads += 1;
+    return "test-value";
+  }
+
+  getAttributeNames(): string[] {
+    this.attributeReads += 1;
+    return ["data-test"];
+  }
 
   insertBefore(
     node: TestElement | TestText,
@@ -361,6 +372,7 @@ describe("reconciler", () => {
       tagName: "span",
       attributes: {},
     });
+    expect((container.childNodes[0] as TestElement).attributeReads).toBe(0);
     expect(span?.props).toEqual({ id: "count" });
     expect(span?.children.map((child) => child.props.nodeValue)).toEqual([
       "Count 3",

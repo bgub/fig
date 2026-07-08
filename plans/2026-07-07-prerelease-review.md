@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 24 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 19 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -12,7 +12,7 @@ Severity scale: **critical** = corrupts state / crashes / silently breaks a head
 
 - [Confirmed critical (0)](#confirmed-critical)
 - [Confirmed major (0)](#confirmed-major)
-- [Confirmed minor (24)](#confirmed-minor)
+- [Confirmed minor (19)](#confirmed-minor)
 - [Unverified (4)](#unverified)
 - [Refuted (3)](#refuted)
 
@@ -25,86 +25,6 @@ No open confirmed critical findings remain.
 No open confirmed major findings remain.
 
 ## Confirmed minor
-
-### 6. commitDataDependencies calls rootOf(cursor) — an O(depth) walk to the root — once per dirty fiber, and every rendered function component is dirty every commit
-
-- **Location:** `packages/fig-reconciler/src/index.ts:3677`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:performance
-
-prepareHookRender (lines 1816-1817) sets node.dataDependenciesDirty = true and root.needsDataDependencyCommit = true for every function component render, even ones that use no data resources. commitDataDependencies then visits each dirty fiber and calls rootOf(cursor).dataStore.commitDataDependencies(...) — rootOf walks the return chain to the RootTag for every dirty fiber, so a commit that rendered n function components at average depth d does O(n x d) extra pointer hops. The root is invariant for the whole walk and is already in hand at the call site (commitRoot line 3108 has root); it should be threaded in as a parameter. Skipping the dirty-marking when a component registered no data dependencies would also shrink the walk's work.
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig-reconciler/src/index.ts as it exists: prepareHookRender (1816-1817) unconditionally sets dataDependenciesDirty on every function-component render via renderFunction (1778, production path), commitDataDependencies (3674-3688) calls rootOf(cursor) — an O(depth) return-chain loop (4331-4337) — once per dirty fiber during the commit-phase forest walk, and commitRoot (3107-3108) already holds the invariant root and could thread it in (sibling helpers like commitEffects already take root as a parameter). The cost is real and on the per-commit hot path, not dev-gated. It stays minor: it is pointer-chasing layered on an already O(n) walk, rootOf calls are pervasive elsewhere (render path itself calls rootOf 2-3x per component), and absolute cost is small except for very deep/large trees. The secondary suggestion (skip marking when no deps registered) is plausible but needs care around releasing the alternate's stale deps.
-
-</details>
-
----
-
-### 7. Each resolved suspense thenable triggers a full recursive walk of the committed tree to find its pinged boundaries
-
-- **Location:** `packages/fig-reconciler/src/index.ts:4142`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:performance
-
-attachSuspensePing stores pings in a WeakMap keyed by boundary fiber (root.suspendedBoundaries), so on settlement pingSuspenseBoundaries cannot enumerate it and instead pingCurrentSuspenseBoundaries recursively visits every fiber of root.current probing pings.get(node) and pings.get(node.alternate). With k thenables resolving (typical for streaming payload/data-heavy pages with many boundaries), this is O(k x total fibers) even though each thenable usually pings one or two boundaries. Keeping a small Set of boundary fibers alongside the WeakMap entry (validated against the current tree via alternate/return checks at ping time, as React's retryQueue does) would make each ping O(#pinged boundaries).
-
-<details><summary>Verification</summary>
-
-Confirmed against packages/fig-reconciler/src/index.ts: root.suspendedBoundaries is WeakMap<thenable, WeakMap<Fiber, Lanes>> (lines 612, 673-676), so on settlement pingSuspenseBoundaries (4134) cannot enumerate pinged boundaries and pingCurrentSuspenseBoundaries (4142-4160) recursively visits every fiber of root.current with two WeakMap probes each, no early exit, no batching across thenables, no NODE_ENV gate. The attach site is captureSuspenseBoundary (3988), the main thrown-thenable path, so k settling thenables cost k full-tree walks — the claimed O(k x total fibers) is accurate. Refutation attempts failed: not dev-only, no upstream guard, not recently changed (shape dates to commit 9f1e557), and concepts/ documents no intentional trade-off. The WeakMap-for-GC rationale doesn't hold strongly since entries are deleted at settlement; the suggested Set-plus-alternate-check fix is feasible. Severity stays minor: cheap pointer-chasing per fiber, settlements spread over time, no correctness impact — a scalability cost on large streaming/data-heavy pages, not measured jank.
-
-</details>
-
----
-
-### 8. Devtools emits a full deep snapshot of the entire tree — including per-host DOM attribute enumeration — on every commit (dev-only)
-
-- **Location:** `packages/fig-reconciler/src/index.ts:5437`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:performance
-
-emitDevtoolsCommit (correctly NODE_ENV-gated and hook-gated, so no production cost) rebuilds a complete FigDevtoolsFiberSnapshot tree per commit: one object per fiber, one object per hook (devtoolsHooks), a props copy per fiber (devtoolsProps), plus devtoolsHost calling getAttributeNames()/getAttribute() on every host DOM node, and root.dataStore.inspectDataEntries(). With a devtools hook installed, a keystroke in a large dev app allocates O(total fibers + hooks + DOM attributes) per commit, which will make first-release dev-with-devtools feel sluggish on big trees. Incremental snapshots scoped to non-adopted subtrees (the AdoptedFlag information is available at snapshot time before flags are cleared) or lazy host/hook detail on inspection would bound this.
-
-<details><summary>Verification</summary>
-
-Confirmed at packages/fig-reconciler/src/index.ts. emitDevtoolsCommit is invoked on every commit (line 3157-3159, gated by NODE_ENV !== 'production' && root.devtools, default true) and runs synchronously in the commit path before requestPaint. With a global hook installed it eagerly builds a full deep snapshot: snapshotDevtoolsFiber (line 5437) walks the entire current tree with no incremental/AdoptedFlag scoping, allocating per fiber a props copy (devtoolsProps, Object.entries copy), a per-hook snapshot array (devtoolsHooks walks the whole hook list), and devtoolsHost calls getAttributeNames()+getAttribute() on every host DOM node; the root snapshot also calls root.dataStore.inspectDataEntries(). Refutation attempts failed: no throttling/sampling anywhere, only inspection is lazy, the fig-devtools hook (packages/fig-devtools/src/hook.ts onCommitRoot) additionally retains up to 100 full deep snapshots (the finding slightly understates memory cost), no test bounds this, and no concepts doc documents full-snapshot-per-commit as an accepted trade-off. Cost only exists in dev with a devtools hook installed, which the finding already acknowledged; 'minor' is the correct severity.
-
-</details>
-
----
-
-### 9. Hook calls via member expressions (namespace imports) are invisible to the signature, so adding or removing such a hook re-renders in place with shifted hook slots
-
-- **Location:** `packages/fig-vite/src/transform.ts:168`
-- **Severity:** minor
-- **Reviewer:** fig-refresh:correctness
-
-The signature visitor requires `t.isIdentifier(callee)` (line 168), so `import * as Fig from "@bgub/fig"; Fig.useState(...)` inside a component contributes nothing to the signature key. If an edit adds or removes a `Fig.useState`/`Fig.useReactive` call while the identifier-called hooks stay the same, both versions produce identical keys, `isSignatureStale` (packages/fig-refresh/src/index.ts:125) returns false, and the in-place refresh renders with a different hook-slot count — throwing the reconciler's hookOrderError (or silently mis-aligning state) instead of remounting. react-refresh records `callee.property.name` for member-expression hook calls for exactly this reason. Low frequency because Fig examples use named imports, hence minor.
-
-<details><summary>Verification</summary>
-
-Verified against disk: transform.ts:168 requires t.isIdentifier(callee) in signatureFor, so member-expression hook calls (Fig.useState via namespace import) are excluded from the signature key; no MemberExpression handling exists anywhere in fig-vite/fig-refresh. Downstream, fig-refresh/src/index.ts isSignatureStale (lines 114-126) compares only key strings, so two versions differing solely by a namespace-called hook get identical keys and land in updatedFamilies (performRefresh line 96-98), causing an in-place re-render. The reconciler (fig-reconciler/src/index.ts lines 1790/1796/2795) throws hookOrderError on count mismatch with no catch-and-remount fallback in scheduleRefresh (index.ts:4407-4428). No test pins member-expression hook calls (transform.test.ts has none) and no concepts/ doc declares namespace-imported hooks unsupported — renderer-authoring.md:55 states hook-signature changes must remount. Failure is dev-only (HMR), requires an uncommon import style, and is recoverable by full reload, so minor is the correct severity.
-
-</details>
-
----
-
-### 10. Every commit of a data-reading fiber schedules and immediately cancels an unref'd 5-minute setTimeout per retained data key (delete-then-resubscribe ordering)
-
-- **Location:** `packages/fig/src/data-store.ts:257`
-- **Severity:** minor
-- **Reviewer:** fig:performance
-
-commitDataDependencies (line 193) first runs deleteDataOwner(previousOwner) (line 208), which for each committed key removes the sole subscriber and calls scheduleInactiveCleanup (line 257); with subscribers now 0, no pending load, and no preload timer, scheduleInactiveCleanup allocates a setTimeout(…, 300000) plus an unref probe (scheduleStoreTimer, line 1087). The resubscribe loop that runs immediately after (line 216) calls clearInactiveTimer, destroying the timer it just created. Net effect: one setTimeout + clearTimeout + unref-lookup pair per data key per commit for keys the component still reads — pure churn on the commit hot path (this fires on every re-render commit because the previous generation always holds the live subscription). Reordering to resubscribe the new owner before tearing down the previous owner, or deferring scheduleInactiveCleanup until after resubscription, eliminates it.
-
-<details><summary>Verification</summary>
-
-Verified the full chain against the code on disk. (1) fig-reconciler/src/index.ts:1816 sets dataDependenciesDirty=true in prepareHookRender on every hook-component render, and the commit walk (line 3677) calls dataStore.commitDataDependencies(cursor, cursor.alternate) — so this runs on every re-render commit of a data-reading fiber. (2) Subscriptions are established only in commitDataDependencies (data-store.ts:211/217), so on a re-render the alternate (previousOwner) always holds the live subscription. (3) deleteDataOwner(previousOwner) at line 208 removes the sole subscriber per key and calls scheduleInactiveCleanup (line 257); for the common settled-entry case (pending===null, no preload timer, subscribers now 0, default inactiveRetentionMs=300000 finite per line 89) the guard passes and scheduleStoreTimer (line 1087) allocates setTimeout(cb, 300000) plus an unref probe. (4) The resubscribe loop immediately after (line 216) calls clearInactiveTimer, clearTimeout-ing the just-created timer in the same synchronous commit. No batching/deferral exists in scheduleStoreTimer, the code is not NODE_ENV-gated, and no test pins this as intended. It is pure wasted allocation/syscall churn per still-read key per re-render commit with zero correctness impact (timer always cleared before firing); entries with in-flight loads or multiple subscribers skip it, which bounds the cost. Minor severity is honest.
-
-</details>
-
----
 
 ### 11. commitDataDependencies allocates a Set and runs full owner teardown for every rendered function component per commit, including components that never read data
 
