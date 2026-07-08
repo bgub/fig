@@ -7,10 +7,10 @@
     "./internal": "./src/internal.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
     "./jsx-dev-runtime": "./src/jsx-runtime.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.browser.ts"
   },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],
-    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]
+    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts", "src/server.ts"]
   }
 }

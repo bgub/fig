@@ -16,7 +16,7 @@ import {
   setCurrentDataStore,
 } from "./data.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const process: { env?: { NODE_ENV?: string } } | undefined;
 
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
@@ -93,6 +93,8 @@ const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
+const __DEV__ =
+  typeof process === "undefined" || process.env?.NODE_ENV !== "production";
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -561,15 +563,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const normalized = normalizeKey(resource.key(...args));
     // The fingerprint feeds only the dev drift diagnostics below, so
     // production never pays for encoding the args on every read.
-    const fingerprint =
-      process.env.NODE_ENV !== "production"
-        ? fingerprintFor(resource, args)
-        : null;
+    const fingerprint = __DEV__ ? fingerprintFor(resource, args) : null;
     const key = this.storeKey(normalized.canonical);
     const current = this.entries.get(key);
 
     if (current !== undefined) {
-      if (process.env.NODE_ENV !== "production") {
+      if (__DEV__) {
         diagnoseEntryDrift(
           current,
           resource,
@@ -1020,7 +1019,7 @@ function diagnoseEntryDrift<
   key: string,
   fingerprint: string | null,
 ): void {
-  if (process.env.NODE_ENV === "production") return;
+  if (!__DEV__) return;
 
   if (entry.resource === null) {
     entry.resource = resource as DataResource<unknown[], unknown>;

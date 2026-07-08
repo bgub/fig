@@ -72,6 +72,26 @@ describe("@bgub/fig", () => {
     expect(signals[0]?.aborted).toBe(false);
   });
 
+  it("does not require a process global for data reads", () => {
+    vi.stubGlobal("process", undefined);
+
+    try {
+      const owner = {};
+      const resource = dataResource({
+        key: (id: string) => ["processless", id],
+        load: (id: string) => `value-${id}`,
+      });
+      const store = createDataStore<object, null>({
+        getLane: () => null,
+        schedule: () => undefined,
+      });
+
+      expect(store.readData(resource, ["one"], owner)).toBe("value-one");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("evicts inactive fulfilled entries after their retention window", async () => {
     const evicted: string[] = [];
     const owner = {};

@@ -4,7 +4,16 @@ import type {
   DataResourceKeyInput,
   DataResourceLoadContext,
 } from "./data.ts";
-import type { ServerDataResourceOptions } from "./server.ts";
+import type { DataResourceOptions } from "./data-store.ts";
+
+interface ServerDataResourceOptions<
+  TArgs extends unknown[],
+  TValue,
+> extends DataResourceOptions<TArgs, TValue> {
+  load: (
+    ...argsAndContext: [...TArgs, DataResourceLoadContext]
+  ) => TValue | PromiseLike<TValue>;
+}
 
 export function serverDataResource<TArgs extends unknown[], TValue>(
   _options: ServerDataResourceOptions<TArgs, TValue>,
