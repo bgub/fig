@@ -1878,4 +1878,34 @@ describe("@bgub/fig-server", () => {
       '<form><input value="Draft"><input checked type="checkbox"><textarea>Hello &lt;Fig&gt;</textarea><select><option value="a">A</option><option value="b" selected>B</option></select><select multiple><option value="a" selected>A</option><option value="b">B</option><option value="c" selected>C</option></select><select><option value="true" selected>True</option></select></form>',
     );
   });
+
+  it("lets form defaults own HTML when live values are also present", async () => {
+    const defaultFirst = { defaultValue: "Draft", value: "Live" };
+    const valueFirst = { value: "Live", defaultValue: "Draft" };
+
+    await expect(
+      renderToHtml(createElement("input", defaultFirst)),
+    ).resolves.toBe('<input value="Draft">');
+    await expect(
+      renderToHtml(createElement("input", valueFirst)),
+    ).resolves.toBe('<input value="Draft">');
+    await expect(
+      renderToHtml(
+        createElement("input", {
+          defaultChecked: true,
+          checked: false,
+          type: "checkbox",
+        }),
+      ),
+    ).resolves.toBe('<input checked type="checkbox">');
+    await expect(
+      renderToHtml(
+        createElement("input", {
+          checked: true,
+          defaultChecked: false,
+          type: "checkbox",
+        }),
+      ),
+    ).resolves.toBe('<input type="checkbox">');
+  });
 });

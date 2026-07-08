@@ -4,7 +4,7 @@ Multi-agent review of `fig`, `fig-dom`, `fig-reconciler`, `fig-refresh`, and `fi
 
 **Method.** 16 reviewer agents (each package × correctness / performance / API design, plus one release-readiness pass over packaging and exports) produced 80 raw findings. Every finding was then handed to an independent adversarial verifier instructed to refute it against the code on disk — several verifiers wrote and executed repro tests. The workflow was terminated before the last 7 verifiers finished; four findings remain unverified.
 
-**Tally: 0 critical, 0 major, 44 minor confirmed · 4 unverified · 3 refuted.**
+**Tally: 0 critical, 0 major, 34 minor confirmed · 4 unverified · 3 refuted.**
 
 Severity scale: **critical** = corrupts state / crashes / silently breaks a headline feature in normal use; **major** = wrong behavior or serious cost in realistic use, or painful to fix post-release; **minor** = real but low-impact.
 
@@ -474,22 +474,6 @@ Confirmed against packages/fig/src/resource.ts:102 and element.ts. AssetsOptions
 
 ---
 
-### 29. flushSync has no render-phase guard, unlike every other render-phase misuse (setState, transitions, stable events), so calling it from a component body re-enters the in-progress render and corrupts hook globals or recurses infinitely.
-
-- **Location:** `packages/fig-reconciler/src/index.ts:951`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:api-design
-
-flushSync() only routes through runWithPriority + flushSyncWork; flushSyncWork's sole re-entrancy check is `commitDepth > 0` (commit-phase deferral). During a render, the root is still in `pendingRoots` with `pendingLanes !== NoLanes` and `root.wip` points at the fiber currently inside performUnit, so a component calling flushSync (even with an empty callback) makes flushSyncWork call performRoot(root, true) re-entrantly: performRootWork resumes `performUnit(root.wip)` on the very fiber mid-render — unconditional flushSync recurses to stack overflow; conditional flushSync completes and commits the nested render, then the outer render resumes with renderingFiber/currentHook clobbered (renderFunction's finally nulled them) and the next hook call throws the misleading "Hooks can only be called while rendering a component." The codebase consistently throws clear errors for render-phase misuse (index.ts:2280 "State updates are not allowed while rendering a component.", :2401 transitions, :2560 stable events); flushSync is the one seam that silently corrupts instead. A `renderingFiber !== null` throw matches the existing pattern.
-
-<details><summary>Verification</summary>
-
-Verified against code on disk and reproduced empirically. flushSync (packages/fig-reconciler/src/index.ts:951) routes through runWithPriority (lanes.ts:373, no guard) into flushSyncWork (index.ts:957), whose only re-entrancy check is `commitDepth > 0`; there is no `renderingFiber !== null` check anywhere on this path, and performRoot/performRootWork (index.ts:1074/1178) have no render-phase re-entrancy guard either — during a render the root remains in pendingRoots with pendingLanes set and root.wip pointing at the in-flight fiber, so flushSyncWork re-enters performUnit on the fiber currently rendering. I wrote a throwaway test against the real test host (same harness as index.test.ts) and confirmed both predicted outcomes: (1) an unconditional `flushSync(() => {})` in a component body recursed 765 times and died with "RangeError: Maximum call stack size exceeded"; (2) a conditional one-shot flushSync completed the nested render, then the outer component's next hook call threw the misleading "Hooks can only be called while rendering a component." (renderingFiber/currentHook were nulled by the nested renderFunction's finally), leaving the container empty. No existing test pins this behavior (grepped all flushSync usages in tests), no guard exists elsewhere (checked lanes.ts and all renderingFiber guards at index.ts:2183/2241/2399/2558 — setState, transitions, stable events all throw clear errors; flushSync is the one gap), and no concepts/ doc sanctions calling flushSync during render (rendering.md, errors.md only cover error routing to flushSync callers). Severity: downgraded to minor. The failure only fires on API misuse (calling flushSync from a component body), never in correct programs; the cost is a bad diagnostic (stack overflow or misleading hook error) rather than corruption of supported usage. React treats the same misuse as a dev warning, not a crash, and Fig's own stance is strict dev diagnostics, so a one-line `renderingFiber !== null` throw is warranted — but this is a missing-guard/diagnostics gap, not a major correctness bug.
-
-</details>
-
----
-
 ### 30. Capability-group enforcement is inconsistent: hydration and Activity groups fail loudly, but the portal and hoisted-asset groups the spec claims are "enforced at runtime with clear errors" fail silently when partially implemented.
 
 - **Location:** `packages/fig-reconciler/src/index.ts:342`
@@ -517,22 +501,6 @@ refresh.ts doubles as the public `./refresh` entry (package.json exports map) an
 <details><summary>Verification</summary>
 
 Confirmed against disk: package.json exports ./refresh → dist/refresh.js (published, files:["dist"], public access), and dist/refresh.d.ts exports all five internal helpers. Repo-wide grep shows the only external importers of @bgub/fig-reconciler/refresh (fig-refresh/src/index.ts, fig-dom/src/refresh.ts, their tests) use only setRefreshHandler + RefreshFamily/RefreshUpdate types; the five helpers are consumed exclusively by fig-reconciler/src/index.ts:104-111 via a relative import. concepts/renderer-authoring.md:52-57 states the subpath is a dev-only seam "with exactly the consumers they were built for", so the wider surface contradicts the project's own spec. runWithStaleRefreshFamilies mutates module-global state and matchesComponentFamily is the type-identity primitive — real semver liabilities for the imminent 0.0.1 publish. The RefreshUpdate side-note also verifies: dist/index.d.ts:96 references it in the public FigRenderer.scheduleRefresh signature but only imports (not re-exports) it, against architecture.md's types-follow-signatures rule. No test or doc blesses the wider export, and the code is unchanged. It is an API-surface/doctrine hygiene issue with no runtime failure, so minor severity stands.
-
-</details>
-
----
-
-### 32. flushSync does not flush in a finally block, so a throwing callback silently downgrades all updates queued before the throw to asynchronous scheduling.
-
-- **Location:** `packages/fig-reconciler/src/index.ts:952`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:api-design
-
-flushSync runs `runWithPriority(SyncLane, callback)` then `flushSyncWork()` sequentially; if the callback throws after scheduling updates (e.g. a setState followed by a throwing branch, common in event handlers wrapped in try/catch by the caller), flushSyncWork never runs. The updates were marked at SyncLane and remain in pendingRoots, so they still commit — but on the next scheduler macrotask instead of before flushSync returns, violating the API's core guarantee exactly in the error path. Callers that catch the error and immediately read the host tree (tests, imperative measurement code) observe stale DOM with no signal anything was skipped. React's flushSync flushes in finally for precisely this case; wrapping the existing two lines in try/finally preserves the current error propagation while keeping the synchronous-commit guarantee.
-
-<details><summary>Verification</summary>
-
-Confirmed against code and empirically. flushSync at packages/fig-reconciler/src/index.ts:951-955 runs `runWithPriority(SyncLane, callback)` then `flushSyncWork()` with no try/finally; runWithPriority (lanes.ts:373) only swaps the current lane and does not flush. An update scheduled inside the callback goes through scheduleFiber → scheduleRoot → scheduleCallback (a deferred scheduler task via setImmediate/MessageChannel/setTimeout), so nothing commits until flushSyncWork runs. I wrote and ran a throwaway vitest against the real test-renderer harness: setState(1) followed by a throw inside flushSync left the host tree at "Count 0" immediately after flushSync threw, and it became "Count 1" only after a 20ms delay — exactly the claimed failure. No existing test pins the throwing-callback path (searched all flushSync usages in tests), and the spec (concepts/rendering.md, errors.md) only covers uncaught render errors rethrowing to flushSync callers, not callback-thrown errors skipping the flush — so this is not a documented intentional divergence; React does flush in finally here. Severity stays minor: it only affects the error path, updates still commit on the next scheduler task (no lost state, no corruption), and the fix is wrapping the two lines in try/finally.
 
 </details>
 
@@ -570,22 +538,6 @@ Verified against payload.ts as it exists: PayloadRenderOptions (lines ~71-86) ha
 
 ---
 
-### 35. The x-fig-payload-boundary header name is a magic string with no exported constant, already duplicated by fig-start
-
-- **Location:** `packages/fig-server/src/payload.ts:2813`
-- **Severity:** minor
-- **Reviewer:** fig-server:api-design
-
-fetchPayload writes the header inline in appendPayloadHeaders (payload.ts:2813) and concepts/payload.md:28 documents the name in prose, but @bgub/fig-server/payload exports no constant for it — every server framework that routes refresh requests must hardcode the string, and fig-start already re-declares it as PAYLOAD_BOUNDARY_HEADER in packages/fig-start/src/bootstrap.ts:14 instead of importing it. A rename or casing change after release breaks third-party servers silently (refreshes would degrade to full-payload responses rather than erroring). Export the constant from the payload subpath so both halves of the protocol share one definition.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code on disk. (1) packages/fig-server/src/payload.ts:2813 writes the header inline: `next.set("x-fig-payload-boundary", boundary)` inside appendPayloadHeaders, called from fetchPayload (line 540). (2) Grepping every `export` in payload.ts and the whole fig-server src shows no exported constant for the header name; the `./payload` subpath (package.json exports) ships nothing for it. (3) The duplication is real and already happening twice: packages/fig-start/src/bootstrap.ts:14 re-declares `PAYLOAD_BOUNDARY_HEADER = "x-fig-payload-boundary"` (consumed at fig-start/src/server.ts:606 to route refreshes) and apps/demo-payload/src/server.tsx:84 hardcodes the string a third time. (4) The name is a documented cross-package protocol contract (concepts/payload.md:28, concepts/intentional-differences-from-react.md:182), so both halves of the wire protocol are intended to agree on it, yet only prose ties them together. (5) The failure mode is plausible as described: a server that reads a stale name gets no boundary, passes refreshBoundary=undefined to renderToPayloadStream, and emits a full payload instead of a refresh row — no error is raised on either side. No test protects third parties: payload.test.ts:2153 pins the literal only within fig-server, and fig-start's tests use its own duplicate constant, so an in-repo rename could update both copies in lockstep while silently breaking external servers post-release. Nothing refutes the finding — it is not fixed, not dev-only, and not an intentional divergence (fig-server already exports comparable protocol surface like jsonPayloadCodec). Severity minor is honest: it is an API-hygiene/coupling gap with no current runtime bug, appropriate to fix pre-release since it is the first-publish window for the protocol surface.
-
-</details>
-
----
-
 ### 36. createPayloadResponse without loadClientReference/resolveClientReference silently decodes client rows into a component whose eventual error blames server rendering
 
 - **Location:** `packages/fig-server/src/payload.ts:947`
@@ -597,54 +549,6 @@ decodeClientReference's final fallback (payload.ts:947-951) returns clientRefere
 <details><summary>Verification</summary>
 
 Verified every mechanical claim: payload.ts:947-951 does return a clientReference marker with a no-op load when neither resolveClientReference resolves nor loadClientReference is set; decode happens eagerly (resolveDecodedRow, payload.ts:2241) with no warning; preloadClientReferences resolves immediately since the fallback registers no entry; isClientReference is consumed only in fig-server (renderer.ts:634), so the client reconciler renders the marker as a function component, which throws element.ts:180's "Client reference \"X\" cannot be rendered on the server directly." — a server-blaming message for a client-side misconfiguration. fig-start's requireClientReferenceResolver (client.ts:992, with tests) exists precisely to fail loudly for this case, confirming the footgun. Attempted refutations: (a) the fallback IS intentional/load-bearing for server-side decode (fig-start server.ts:412-417 decodes with resolveClientReference returning undefined for non-ssr refs, markers rendered via clientReferenceFallback placeholder at server.ts:257) and for metadata-only decodes (payload.test.ts:424/452/491 pin no-option decode succeeding) — so the finding's "should throw" remedy must be scoped to the neither-option-configured case (or dev-only warn), but this doesn't refute the identified failure; (b) no concepts/payload.md documentation of the no-resolver fallback behavior, so it is not a documented intentional divergence; (c) no test pins the client-side misleading-error behavior as desired. The failure scenario is concrete and reachable for any direct @bgub/fig-server/payload consumer (non-fig-start) that omits loadClientReference. DX-only, framework layer guards it, so minor is the honest severity.
-
-</details>
-
----
-
-### 37. fetchPayload's non-ok failure is an unstructured Error with the status only in the message, and the response body is left unconsumed
-
-- **Location:** `packages/fig-server/src/payload.ts:544`
-- **Severity:** minor
-- **Reviewer:** fig-server:api-design
-
-On !result.ok, fetchPayload throws new Error(`Payload request failed with status ${result.status}.`) (payload.ts:544-546) — no status field, no reference to the Response, so callers implementing auth redirects (401/403) or retry-after handling must regex the message; the Response body is also never cancelled, keeping the connection/stream alive in some runtimes. The function otherwise returns the Response on success, so callers clearly need response metadata — attach the status (and ideally the Response) to a typed error, mirroring how isPayloadRequestCancelled already gives cancellation a structured test.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-server/src/payload.ts:544-546 as it exists on disk. Both sub-claims hold. (1) Unstructured error: on !result.ok, fetchPayload throws a bare `new Error("Payload request failed with status ${result.status}.")` — no status property, no Response attached, and no typed error class exists for HTTP failures anywhere in payload.ts (the only typed error is PayloadRequestCancelledError, exposed via isPayloadRequestCancelled). The real caller in packages/fig-start/src/client.ts (~line 890) only branches on isPayloadRequestCancelled; any framework wanting 401/403 redirect or retry-after handling would indeed have to parse the message string. The existing test (payload.test.ts:2231) asserts via .rejects.toThrow(message-string), which pins the current message but does not refute the design concern — it demonstrates callers can only match on text. (2) Unconsumed body: on the !ok path the function throws without `result.body.cancel()`; grep confirms no cancel anywhere in the file. In real fetch runtimes (undici/browsers) an unconsumed error body holds the connection/stream until GC — a real but small resource cost, and the fetch path is not hot (navigations/refreshes). The concepts spec (concepts/payload.md API section) is silent on fetchPayload error shape, so this is not a documented intentional divergence, and concepts/errors-adjacent design already favors structured tests (isPayloadRequestCancelled), which the reviewer correctly cites as the in-repo precedent. The failure scenario is trivially reachable (any non-2xx server response). Severity minor is honest: it is API-design friction plus a small resource leak, not a correctness bug — the error is still thrown and surfaced.
-
-</details>
-
----
-
-### 38. Explicit-key font resources escape the shared preload-font key space, breaking the documented dedupe invariant
-
-- **Location:** `packages/fig/src/resource.ts:208`
-- **Severity:** minor
-- **Reviewer:** fig:correctness
-
-assetResourceKey checks `resource.key !== undefined` and returns `${resource.kind}:${resource.key}` before the switch that maps fonts into the preload key space (line 224 comment: fonts 'must share the preload-font key space across every package'). So font('/f.woff2', 'font/woff2', { key: 'brand' }) keys as `font:brand`, while (a) the equivalent preload('/f.woff2', 'font', { key: 'brand' }) keys as `preload:brand`, and (b) the SSR-emitted element `<link rel="preload" as="font" data-fig-resource-key="brand">` parses back through assetResourceFromHostAttributes/linkResourceFromHost as a preload resource keying `preload:brand`. Consequences: fig-server's asset registry (asset-registry.ts canonical()) fails to dedupe or conflict-check a keyed font() against an equivalent keyed preload — duplicate <link rel=preload as=font> tags are emitted — even though assetSignature() deliberately mirrors the two shapes so they should collapse; and any consumer that compares a descriptor-derived key (`font:brand`) against a DOM-parse-back key (`preload:brand`) never matches (fig-dom only avoids this because insertAssetResources normalizes font→preload via asInsertableResource before keying). The fix is ordering (handle kind 'font' before the explicit-key branch), but because the key string is a cross-package wire/DOM protocol (data-fig-resource-key), changing it after release creates server/client skew — worth fixing before first publish.
-
-<details><summary>Verification</summary>
-
-Confirmed against the code. (1) packages/fig/src/resource.ts:208: the explicit-key branch `if (resource.key !== undefined) return `${resource.kind}:${resource.key}``runs before the switch whose`font`case (line 224) aliases fonts into`preload:font:<href>`, so `font(href, type, { key: 'brand' })`keys as`font:brand`while the equivalent`preload(href, 'font', { key: 'brand' })`keys as`preload:brand`. (2) The SSR serialization of a font (assetResourceHostAttributes, line 300-309) emits `rel=preload as=font data-fig-resource-key=brand`, and linkResourceFromHost (line 436) parses that back as kind 'preload', so descriptor-derived and DOM-parse-back keys diverge for keyed fonts. (3) This violates the written spec: concepts/assets.md 'Keys And Dedupe' says the key is 'shared across the SSR registry, the payload wire, and client insertion' and 'Fonts and equivalent preload-as-font entries share a key space'; the inline comments at resource.ts:220-224 and asset-registry.ts:186-188 state the same invariant, and assetSignature deliberately mirrors font/preload-as-font shapes specifically so they dedupe rather than conflict — which only works if they hit the same map key. (4) Concrete failure: fig-server's renderer registers raw descriptors (renderer.ts:734), so a keyed font and an equivalent keyed preload occupy two AssetResourceRegistry slots → two identical <link rel=preload as=font> tags emitted, and the AssetResourceConflictError check is bypassed for same-key-different-content pairs. Same split exists in fig-start's dedupeAssetResources (server.ts:550). (5) The reviewer's caveats also check out: fig-dom is unaffected only because asInsertableResource (asset-resources.ts:312-326) normalizes font→preload before keying, and host paths never produce kind 'font'. (6) No test pins keyed-font behavior — asset-registry.test.ts:83 covers only the unkeyed font/preload dedupe; the keyed-title test (line 102) shows the title case was deliberately hardened against exactly this class of explicit-key escape while font was not. Severity stays minor: the failure needs an author to use the same explicit key on a font() and an equivalent preload() (or compare keys across representations); the cost is a duplicated preload link or a silently missed conflict error, not broken rendering. The pre-publish urgency argument is legitimate since data-fig-resource-key is a cross-package DOM protocol.
-
-</details>
-
----
-
-### 39. publish() after hydrate() schedules subscribers on a stale lane captured by a long-settled previous load
-
-- **Location:** `packages/fig/src/data-store.ts:739`
-- **Severity:** minor
-- **Reviewer:** fig:correctness
-
-publish() uses `entry.lane ?? this.host.getLane()`, and entry.lane is only ever assigned in startLoad (line 657) and never cleared when a load settles. That is correct for the fulfill/reject paths (the settling load's own lane), but hydrate() → hydrateEntry() → publish(current) (lines 316-317) reuses whatever lane the entry's last client-side load ran on — potentially a transition lane requested minutes earlier — instead of the current requestUpdateLane(). Concrete scenario: an entry is loaded/refreshed inside a transition (entry.lane = that transition lane); later a payload navigation/refresh pushes fresh data via root.data.hydrate() into the live store; subscribers of that entry are scheduled via host.schedule(subscriber, staleTransitionLane) in fig-reconciler (index.ts:849), mis-prioritizing the update and potentially entangling it with an unrelated in-flight transition on the recycled lane slot. hydrateEntry should reset entry.lane to null (or hydrate should pass host.getLane() explicitly) so hydration pushes schedule at the current priority, the way invalidateEntry already does.
-
-<details><summary>Verification</summary>
-
-Verified each link of the chain in the current code. (1) packages/fig/src/data-store.ts:735-740 — publish() schedules subscribers with `entry.lane ?? this.host.getLane()`. (2) `entry.lane` is assigned only in startLoad (line 657, from options.lane = host.getLane() at load start; lines 415/442/449/487) and is never cleared when a load settles: fulfill/reject (677-723) null out controller/pending but not lane, and hydrateEntry (602-617) resets error/generation/invalidationVersion/stale/status/value but not lane. (3) hydrate() on an existing entry (lines 315-317) calls hydrateEntry then publish, so it reuses whatever lane the entry's last client-side load started on. (4) The path is live at runtime, not just initial mount: fig-server/src/payload.ts hydratePendingData() → this.rootData.hydrate(entries) (line 1080, part of the just-landed payload-graph-references work on this branch) and fig-start/src/client.ts:152 stream entries into root.data.hydrate on a mounted root; the reconciler host (fig-reconciler/src/index.ts:846-851) maps schedule(owner, lane) directly to scheduleFiber with that lane. (5) Transition lanes are recycled round-robin (lanes.ts claimNextTransitionLane, 275-284), so a lane captured by a long-settled transition refresh can be the slot of an unrelated in-flight transition when hydration later publishes — the subscriber update joins/entangles with that transition or otherwise runs at stale priority (could also be a stale SyncLane from an event-driven refresh). (6) The asymmetry the finding cites is real: invalidateEntries (lines 889-894) explicitly captures this.host.getLane() at invalidation time, confirming the intended design for externally-pushed changes. (7) No existing test pins hydrate's scheduling lane (data-store.test.ts only touches hydrate for missing-loader and post-dispose cases), and concepts/data.md says nothing about hydration scheduling priority, so this is not documented intentional behavior. Impact is bounded: the update still renders (scheduleFiber marks the lane pending), so it's mis-prioritization/entanglement rather than a hang or data loss — minor is the honest severity.
 
 </details>
 
@@ -665,68 +569,6 @@ Confirmed against dom-nesting.ts as on disk: line 162 clears inListScope for any
 </details>
 
 ---
-
-### 41. readByteStream leaks the response body when row decoding throws: the reader is neither cancelled nor released
-
-- **Location:** `packages/fig-server/src/payload.ts:2210`
-- **Severity:** minor
-- **Reviewer:** fig-server:correctness
-
-The abort path calls reader.cancel(), but when onChunk throws (malformed row, codec mismatch mid-stream, or the intentional throw processRow performs for every `refresh-error` row), the error propagates through the finally block without cancelling the reader or releasing its lock. The underlying fetch body stays locked and open until the server closes it — and after a refresh-error the server keeps streaming its remaining outlined task rows, so every failed boundary refresh leaves its HTTP response body dangling and unconsumable. The stream also cannot be re-read or cancelled by the caller because the lock is held by the abandoned reader.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-server/src/payload.ts as it exists. readByteStream (lines 2187-2214) only cancels the reader via the abort listener; the finally block just removes the listener and re-checks the signal, so when onChunk throws the reader is neither cancelled nor released. The throw path is reachable in production: processStream passes processBytesChunk as onChunk; the JSON decoder synchronously rethrows row errors (lines 423-437); processRow intentionally throws for every refresh-error row (line 782), which the server emits whenever a boundary-refresh root render fails (lines 1140-1145, behavior pinned by an existing test). The real consumer, fig-start/src/client.ts loadServerRoutePayload → fetchPayload, only reports the error and cannot cancel result.body because the abandoned reader holds the lock. No test pins reader cleanup on this path (existing cancellation tests cover only abort/cancel). Cost is bounded: the connection stays open until the server finishes streaming and closes, and stream backpressure caps buffered memory; the error itself is still surfaced correctly. So it is a real resource-hygiene leak per failed boundary refresh (or malformed row), not a correctness or availability break — minor is the honest severity.
-
-</details>
-
----
-
-### 42. Passing both value and defaultValue (or checked and defaultChecked) emits the same HTML attribute twice with prop-order-dependent results
-
-- **Location:** `packages/fig-server/src/html.ts:121`
-- **Severity:** minor
-- **Reviewer:** fig-server:correctness
-
-formAttribute maps both `value` and `defaultValue` to the `value` attribute (and both `defaultChecked`/`checked` to `checked`) for non-textarea/select elements, and writeAttributes writes each occurrence independently, producing e.g. `<input value="a" value="b">`. HTML parsers keep the FIRST duplicate attribute, so the SSR result depends on props object key order; when `defaultValue` happens to precede `value`, the server-rendered control shows the defaultValue while the client renderer would use `value`, creating a hydration mismatch. React resolves this deterministically (value wins) and warns; Fig silently emits invalid duplicate-attribute HTML.
-
-<details><summary>Verification</summary>
-
-Verified directly against packages/fig-server/src/html.ts: valueProp (line 250) matches both `value` and `defaultValue`, both map to the `value` attribute via valueAttribute (lines 121-123), and writeAttributes writes each props entry independently with no dedupe. Reproduced empirically via the package's renderToHtml: {value:"v", defaultValue:"d"} yields <input value="v" value="d"> and reversed prop order yields <input value="d" value="v">; {checked:true, defaultChecked:true} yields <input checked checked>. Since HTML parsers keep the first duplicate attribute, the pre-hydration display is prop-order-dependent; fig-dom hydration (props.ts: `value` live-writes the property, `defaultValue` owns the attribute) later asserts the controlled value, so a defaultValue-first order shows the wrong value until hydration (and a pre-hydration form submit would carry it). Checked for mitigations: no dev diagnostic anywhere for both-set, no test pins the both-set case (index.test.ts tests each prop only in isolation), and no concepts/ text covers SSR of both-set. The spec (intentional-differences-from-react.md lines 101-106) actually endorses using value and defaultValue together (live value vs reset default), so this is a supported pattern the SSR path mishandles, not an intentional divergence. The checked/checked duplicate is value-identical (both only emit when true) so it is only cosmetic; the value case is the functional defect. Severity stays minor: output is invalid and order-dependent, but the wrong display is transient (corrected at hydration), requires both props with differing values, and browsers resolve duplicates deterministically.
-
-</details>
-
----
-
-### 43. flushSync while a root-level suspension is pending starts and commits a render at renderLanes=NoLanes, discarding suspension bookkeeping and re-rendering suspended work
-
-- **Location:** `packages/fig-reconciler/src/index.ts:1196`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:correctness
-
-When a render suspends with no Suspense boundary (thenable reaches performRoot's catch), markRootSuspended leaves the lanes pending-but-suspended and the root stays in pendingRoots (scheduleRoot only deletes when pendingLanes===NoLanes). A later flushSync then iterates pendingRoots and calls performRoot(root, true); performRootWork passes the top guard (pendingLanes !== NoLanes), getNextLanes returns NoLanes (all suspended, none pinged), and root.renderLanes is set to NoLanes with no guard — a full adopted/no-op render is built and COMMITTED. The commit's markRootFinished zeroes suspendedLanes/pingedLanes, so finishRootWork immediately reschedules the suspended lane, which re-renders and re-suspends. VERIFIED by test: a component suspended at the root via readPromise re-rendered synchronously inside an unrelated flushSync(() => {}) (render count 1 -> 2). Every flushSync during a root-level suspension costs a no-op commit (with commit-phase machinery, requestPaint, devtools emit) plus one wasted re-render of the suspended tree; behavior self-heals afterward, so impact is wasted work rather than corruption.
-
-<details><summary>Verification</summary>
-
-Traced the full code path in /Users/bgub/code/fig/packages/fig-reconciler/src/index.ts and lanes.ts, then reproduced the behavior with a live test. (1) Root-level suspension: performRoot's catch (line 1089-1095) calls restartRootWork + markRootSuspended + scheduleRoot; markRootSuspended (lanes.ts:220) leaves pendingLanes set while suspending the lane, and scheduleRoot (index.ts:1055-1057) only removes the root from pendingRoots when pendingLanes === NoLanes, so the root stays in pendingRoots pending-but-suspended. (2) flushSyncWork (index.ts:969-977) gates only on root.pendingLanes !== NoLanes and calls performRoot(root, true). (3) performRootWork's top guard (line 1179) passes because pendingLanes !== NoLanes; getNextLanes (lanes.ts:142-163) returns NoLanes (unblocked = pending & ~suspendedLanes = 0, pingedLanes = 0), and line 1195-1196 assigns root.renderLanes = nextLanes with no NoLanes guard, builds a work-in-progress, renders (forceSync=true), and commits via commitRoot (line 1221). (4) The commit's markRootFinished call (index.ts:3131-3136 → lanes.ts:202-206) unconditionally zeroes suspendedLanes and pingedLanes while remainingLanes retains the suspended lane (pendingLanes & ~NoLanes preserves it), so finishRootWork → scheduleRoot now sees the lane unblocked and re-renders the suspended tree, which re-suspends and re-registers its ping. Confirmed empirically: a component suspended via readPromise with no Suspense boundary rendered exactly once, then an unrelated empty flushSync(() => {}) bumped the render count to 2; the tree still committed the resolved content afterward (self-healing, no corruption). No existing test pins this, and nothing in concepts/ documents a NoLanes commit as intentional. Cost per flushSync during a root-level suspension: one no-op commit (mutation-effects walk, markRootFinished, requestPaint, dev-mode devtools emit) plus one wasted full re-render of the suspended tree. Severity minor is honest: the scenario requires suspension with no Suspense boundary anywhere above (an edge configuration), the waste is bounded and self-healing, and there is no user-visible misbehavior.
-
-</details>
-
----
-
-### 44. clearRootAfterUncaughtError releases data owners and hiddenStates only for the first root child's subtree, leaking siblings when the root renders an array
-
-- **Location:** `packages/fig-reconciler/src/index.ts:3315`
-- **Severity:** minor
-- **Reviewer:** fig-reconciler:correctness
-
-clearRootAfterUncaughtError calls deleteFiberData(root.current.child), and deleteFiberData uses walkFiberSubtree, whose traversal (walkFiberTree with includeRootSiblings=false) deliberately excludes the starting node's siblings. When root.render was given an array (root.current.child has siblings), the sibling subtrees' dataStore.releaseDataOwner calls are skipped — their data-store owner entries stay retained until dispose() — and any hidden Activity boundaries in those siblings stay in hiddenStates, keeping hasHiddenBoundaries=true so every future update on any root pays the hiddenSubtreeLane parent-walk. abortFiberEffects(root.current) in the same function correctly covers all children (it walks from the root fiber), highlighting the asymmetry. Fix shape: iterate the sibling chain like the host-removal loop just below (lines 3323-3328) already does.
-
-<details><summary>Verification</summary>
-
-Verified against packages/fig-reconciler/src/index.ts as it exists: clearRootAfterUncaughtError (line 3308) calls deleteFiberData(root.current.child) (line 3315), which walks via walkFiberSubtree/walkFiberTree with includeRootSiblings=false (line 3195 skips the start node's siblings), while abortFiberEffects(root.current) starts at the root fiber and covers all children — the asymmetry is real. Root children with siblings genuinely occur: RootTag reconciles props.children via reconcileCurrentChildren (line 1417) and collectChildren flattens arrays into a sibling chain with no fragment wrapper, so root.render([...]) produces siblings under root.current.child. The skipped work matters: releaseDataOwner (data-store.ts line 226) is the genuine-deletion path that drops entry subscribers and aborts orphaned in-flight loads, and hiddenStates.delete (line 3702) is what lets hasHiddenBoundaries recompute to false at the next commit (line 3117); skipping both leaves data entries retained until dispose, orphaned loads un-aborted, and the hiddenSubtreeLane parent-walk (line 2665) permanently armed. Both callers (performRoot line 1100, performReactiveEffects line 4783) immediately replace root.current with a fresh fiber, so nothing later releases the leaked owners. No test pins this case (the one uncaught-error test at index.test.ts:1344 uses a single child and does not check owner release). Severity stays minor: it needs an array root plus a fully uncaught error that already tears down the root, and the cost is a memory/fetch leak plus a per-update perf tax, not wrong rendering.
-
-</details>
 
 ## Unverified
 

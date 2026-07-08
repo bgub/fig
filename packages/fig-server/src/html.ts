@@ -74,6 +74,8 @@ function writeAttributes(
 ): void {
   for (const [name, value] of Object.entries(props)) {
     if (reservedProp(name)) continue;
+    if (name === "value" && props.defaultValue !== undefined) continue;
+    if (name === "checked" && props.defaultChecked !== undefined) continue;
 
     if (name === "style") {
       const style = serializeStyle(value);
