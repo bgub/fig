@@ -445,6 +445,7 @@ const AssembledFlag = 1 << 6;
 const DeletionFlag = 1 << 7;
 const DataDependencyFlag = 1 << 8;
 const EffectFlag = 1 << 9;
+const StoreConsistencyFlag = 1 << 10;
 type Flag = number;
 
 const MutationMask =
@@ -2601,6 +2602,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       value,
     };
 
+    fiber.flags |= StoreConsistencyFlag;
     appendHook(createHook(ExternalStoreHook, state));
     return value;
   }
@@ -4847,18 +4849,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       if ((cursor.flags & AdoptedFlag) !== 0) return false;
 
-      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
-        if (isExternalStoreHook(hook))
-          commitExternalStore(root, cursor, hook.memoizedState);
+      if ((cursor.flags & StoreConsistencyFlag) !== 0) {
+        for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
+          if (isExternalStoreHook(hook))
+            commitExternalStore(root, cursor, hook.memoizedState);
+        }
       }
 
       // Subscriptions under hidden boundaries are deferred until reveal.
-      return !isHiddenBoundary(cursor);
+      return (
+        !isHiddenBoundary(cursor) &&
+        (cursor.subtreeFlags & StoreConsistencyFlag) !== 0
+      );
     });
-
-    for (const instance of root.externalStores) {
-      scheduleExternalStoreIfChanged(instance.owner, instance);
-    }
   }
 
   function commitExternalStore(
@@ -4881,6 +4884,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     instance.unsubscribe ??= state.subscribe(() => {
       scheduleExternalStoreIfChanged(instance.owner, instance);
     });
+    scheduleExternalStoreIfChanged(instance.owner, instance);
   }
 
   function scheduleExternalStoreIfChanged(

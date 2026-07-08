@@ -1403,6 +1403,62 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("updated1");
   });
 
+  it("does not poll external stores in adopted subtrees during unrelated commits", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const listeners = new Set<() => void>();
+    let snapshotReads = 0;
+    let update: (() => void) | null = null;
+
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    const getSnapshot = () => {
+      snapshotReads += 1;
+      return "store";
+    };
+
+    function StoreConsumer() {
+      const snapshot = useExternalStore(subscribe, getSnapshot);
+      return createElement("span", null, snapshot);
+    }
+
+    function Ticker() {
+      const [count, setCount] = useState(0);
+      update = () => setCount((value) => value + 1);
+      return createElement("b", null, count);
+    }
+
+    const stableStoreSubtree = createElement(
+      "section",
+      null,
+      Array.from({ length: 5 }, (_, index) =>
+        createElement(StoreConsumer, { key: index }),
+      ),
+    );
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        stableStoreSubtree,
+        createElement(Ticker),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(listeners.size).toBe(5);
+    expect(container.textContent).toBe("storestorestorestorestore0");
+
+    snapshotReads = 0;
+    flushSync(() => update?.());
+
+    expect(container.textContent).toBe("storestorestorestorestore1");
+    expect(snapshotReads).toBe(0);
+  });
+
   it("unwinds context providers from suspended branches before rendering later siblings", () => {
     const Theme = createContext("default");
     const pending = deferred<string>();

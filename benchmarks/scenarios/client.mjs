@@ -19,6 +19,7 @@ function createBenchmarkComponents(runtime) {
   const ThemeContext = runtime.createContext("default");
   const state = {
     deepLeafSetters: [],
+    externalStoreLeafSetters: [],
     metrics: createScenarioMetrics(),
     providerLeafSetters: [],
   };
@@ -136,6 +137,28 @@ function createBenchmarkComponents(runtime) {
     );
   }
 
+  function ExternalStoreStateLeaf() {
+    state.metrics.componentRenders += 1;
+    const [version, setVersion] = runtime.useState(0);
+    state.externalStoreLeafSetters.push(setVersion);
+    return runtime.createElement("strong", null, `leaf ${version}`);
+  }
+
+  function ExternalStoreUnrelatedUpdateTree({ store, width }) {
+    return runtime.createElement(
+      "section",
+      null,
+      runtime.createElement(
+        "div",
+        null,
+        Array.from({ length: width }, (_, index) =>
+          runtime.createElement(ExternalStoreConsumer, { key: index, store }),
+        ),
+      ),
+      runtime.createElement(ExternalStoreStateLeaf, null),
+    );
+  }
+
   function SparseLeaf() {
     state.metrics.componentRenders += 1;
     const [version, setVersion] = runtime.useState(0);
@@ -183,6 +206,7 @@ function createBenchmarkComponents(runtime) {
 
   return {
     DeepTree,
+    ExternalStoreUnrelatedUpdateTree,
     ExternalStoreTree,
     ProviderTree,
     Rows,
@@ -258,7 +282,11 @@ function cleanup(renderer, roots) {
   });
 }
 
-function measureWithRoots(runtime, iterations, { setup, run, validate }) {
+function measureWithRoots(
+  runtime,
+  iterations,
+  { beforeMeasure, setup, run, validate },
+) {
   const renderer = runtime.createRenderer();
   const roots = Array.from({ length: iterations }, () => createRoot(renderer));
   resetMetrics(runtime.components.state.metrics);
@@ -269,6 +297,7 @@ function measureWithRoots(runtime, iterations, { setup, run, validate }) {
     });
   }
 
+  beforeMeasure?.();
   resetOperations(renderer.operations);
   resetMetrics(runtime.components.state.metrics);
   const elapsed = measureSync(() => {
@@ -306,7 +335,10 @@ function createExternalStore(initialValue) {
     get metrics() {
       return metrics;
     },
-    getSnapshot: () => value,
+    getSnapshot: () => {
+      metrics.externalStoreSnapshotReads += 1;
+      return value;
+    },
     set: (nextValue) => {
       value = nextValue;
       metrics.storeNotifications += listeners.size;
@@ -398,9 +430,36 @@ function measureExternalStoreUpdate(runtime, rows, iterations) {
         width: Math.max(20, rows),
       }),
     run: () => store.set(1),
+    beforeMeasure: () => resetMetrics(store.metrics),
   });
 
   result.metrics.storeNotifications = store.metrics.storeNotifications;
+  result.metrics.externalStoreSnapshotReads =
+    store.metrics.externalStoreSnapshotReads;
+  return result;
+}
+
+function measureExternalStoreUnrelatedUpdate(runtime, rows, iterations) {
+  runtime.components.state.externalStoreLeafSetters = [];
+  const store = createExternalStore(0);
+
+  const result = measureWithRoots(runtime, iterations, {
+    setup: (roots) =>
+      renderAll(
+        runtime,
+        roots,
+        runtime.components.ExternalStoreUnrelatedUpdateTree,
+        {
+          store,
+          width: Math.max(20, rows),
+        },
+      ),
+    run: () => incrementAll(runtime.components.state.externalStoreLeafSetters),
+    beforeMeasure: () => resetMetrics(store.metrics),
+  });
+
+  result.metrics.externalStoreSnapshotReads =
+    store.metrics.externalStoreSnapshotReads;
   return result;
 }
 
@@ -550,6 +609,14 @@ export function clientScenariosForRows(rows) {
       rows,
       measure: (runtime, iterations) =>
         measureExternalStoreUpdate(runtime, rows, iterations),
+      runtimes,
+    },
+    {
+      group: "external-store",
+      name: "external-store.dense-subscribers-unrelated-update",
+      rows,
+      measure: (runtime, iterations) =>
+        measureExternalStoreUnrelatedUpdate(runtime, rows, iterations),
       runtimes,
     },
     {

@@ -33,6 +33,7 @@ export function createScenarioMetrics() {
     componentRenders: 0,
     contextReads: 0,
     externalStoreReads: 0,
+    externalStoreSnapshotReads: 0,
     payloadNodes: 0,
     serverSuspenseBoundaries: 0,
     storeNotifications: 0,
