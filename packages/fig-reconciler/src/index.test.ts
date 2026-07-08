@@ -1413,6 +1413,30 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Loadingouter");
   });
 
+  it("keeps stable provider context available while rendering child updates", () => {
+    const Theme = createContext("default");
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let increment: (() => void) | null = null;
+
+    function Consumer() {
+      const theme = readContext(Theme);
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("span", null, `${theme}:${count}`);
+    }
+
+    const stableChild = createElement("section", null, createElement(Consumer));
+    const tree = createElement(Theme, { value: "provided" }, stableChild);
+
+    flushSync(() => root.render(tree));
+    expect(container.textContent).toBe("provided:0");
+
+    flushSync(() => increment?.());
+    expect(container.textContent).toBe("provided:1");
+  });
+
   it("throws a diagnostic for state updates scheduled from useBeforeLayout effects", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

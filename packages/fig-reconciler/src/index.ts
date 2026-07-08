@@ -1372,6 +1372,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       // descend without re-rendering, preserving child props identity.
       // Suspense always runs begin so hidden-primary retries are handled.
       if (node.tag !== SuspenseTag) {
+        if (node.tag === ContextProviderTag) pushContextProvider(node);
         cloneChildFibers(node);
         return;
       }
