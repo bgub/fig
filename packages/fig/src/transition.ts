@@ -11,6 +11,10 @@ export function transition<T>(callback: () => T): T {
   return transitionHandler(callback);
 }
 
-export function setTransitionHandler(handler: TransitionHandler): void {
+export function setTransitionHandler(
+  handler: TransitionHandler,
+): TransitionHandler {
+  const previous = transitionHandler;
   transitionHandler = handler;
+  return previous;
 }

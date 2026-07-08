@@ -12,6 +12,7 @@ export type ElementType<P = Props> =
   | FigErrorBoundary
   | FigSuspense
   | FigActivity
+  | FigViewTransition
   | ((props: P & { children?: FigNode }) => FigNode);
 export type FigText = string | number;
 export type FigNode =
@@ -77,6 +78,23 @@ export interface FigActivity {
   readonly $$typeof: symbol;
 }
 
+export type ViewTransitionClass = "auto" | "none" | (string & {});
+
+export interface ViewTransitionProps {
+  name?: string;
+  children?: FigNode;
+  default?: ViewTransitionClass;
+  enter?: ViewTransitionClass;
+  exit?: ViewTransitionClass;
+  share?: ViewTransitionClass;
+  update?: ViewTransitionClass;
+}
+
+export interface FigViewTransition {
+  (props: ViewTransitionProps): FigNode;
+  readonly $$typeof: symbol;
+}
+
 export interface ErrorBoundaryProps {
   // A function fallback receives the caught error so error UIs can render
   // it (message, retry affordance) without smuggling state above the
@@ -110,6 +128,7 @@ export const FigErrorBoundarySymbol = Symbol.for("fig.error-boundary");
 export const FigPortalSymbol = Symbol.for("fig.portal");
 export const FigAssetsSymbol = Symbol.for("fig.assets");
 export const FigSuspenseSymbol = Symbol.for("fig.suspense");
+export const FigViewTransitionSymbol = Symbol.for("fig.view-transition");
 
 export const Assets: FigAssets = Object.assign(
   (props: Props & { children?: FigNode }) => props.children,
@@ -129,6 +148,11 @@ export const Suspense: FigSuspense = Object.assign(
 export const Activity: FigActivity = Object.assign(
   (props: ActivityProps) => props.children,
   { $$typeof: FigActivitySymbol },
+);
+
+export const ViewTransition: FigViewTransition = Object.assign(
+  (props: ViewTransitionProps) => props.children,
+  { $$typeof: FigViewTransitionSymbol },
 );
 
 export function createElement<P extends Props>(
@@ -247,6 +271,13 @@ export function isErrorBoundary(value: unknown): value is FigErrorBoundary {
   return (
     typeof value === "function" &&
     (value as FigErrorBoundary).$$typeof === FigErrorBoundarySymbol
+  );
+}
+
+export function isViewTransition(value: unknown): value is FigViewTransition {
+  return (
+    typeof value === "function" &&
+    (value as FigViewTransition).$$typeof === FigViewTransitionSymbol
   );
 }
 

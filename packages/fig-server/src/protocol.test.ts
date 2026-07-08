@@ -79,6 +79,8 @@ function appendCompletedSegment(root: HTMLElement): {
 describe("server streaming protocol", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    delete (document as unknown as { startViewTransition?: unknown })
+      .startViewTransition;
   });
 
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {
@@ -135,6 +137,141 @@ describe("server streaming protocol", () => {
     expect(boundaryPlaceholder.dataset.dgst).toBe("digest-1");
     expect(boundaryPlaceholder.dataset.msg).toBe("Server failed");
     expect(calls).toEqual(["retry"]);
+  });
+
+  it("wraps annotated boundary completions in a view transition", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    fallback.setAttribute("data-fig-vt-class", "fade");
+    const { completed, segment } = appendCompletedSegment(root);
+    completed.setAttribute("data-fig-vt-name", "card");
+    completed.setAttribute("data-fig-vt-class", "fade");
+    const snapshots: string[] = [];
+    const viewTransitionDocument = document as unknown as {
+      startViewTransition?: (update: () => void) => {
+        finished: Promise<unknown>;
+        ready: Promise<unknown>;
+      };
+    };
+
+    viewTransitionDocument.startViewTransition = (update) => {
+      snapshots.push(viewTransitionStyle(fallback).viewTransitionName ?? "");
+      snapshots.push(viewTransitionStyle(fallback).viewTransitionClass ?? "");
+      update();
+      snapshots.push(viewTransitionStyle(completed).viewTransitionName ?? "");
+      snapshots.push(viewTransitionStyle(completed).viewTransitionClass ?? "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    installRuntime().c("b", "s");
+
+    expect(segment.parentNode).toBeNull();
+    expect(snapshots).toEqual(["card", "fade", "card", "fade"]);
+    await Promise.resolve();
+    expect(viewTransitionStyle(fallback).viewTransitionName).toBe("");
+    expect(viewTransitionStyle(completed).viewTransitionName).toBe("");
+  });
+
+  it("retries hydration after async view transition cleanup", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { calls, fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    fallback.setAttribute("data-fig-vt-class", "fade");
+    const { completed } = appendCompletedSegment(root);
+    completed.setAttribute("data-fig-vt-name", "card");
+    completed.setAttribute("data-fig-vt-class", "fade");
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const viewTransitionDocument = document as unknown as {
+      startViewTransition?: (update: () => void) => {
+        finished: Promise<unknown>;
+        ready: Promise<unknown>;
+      };
+    };
+
+    calls.length = 0;
+    (root.firstChild as RetriableComment).__figRetry = () => {
+      queueMicrotask(() => {
+        calls.push(viewTransitionStyle(completed).viewTransitionName ?? "");
+      });
+    };
+
+    viewTransitionDocument.startViewTransition = (update) => {
+      queueMicrotask(update);
+      return { finished: ready, ready };
+    };
+
+    installRuntime().c("b", "s");
+    expect(calls).toEqual([]);
+
+    await Promise.resolve();
+    expect(viewTransitionStyle(completed).viewTransitionName).toBe("card");
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+
+    resolveReady();
+    await ready;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(viewTransitionStyle(completed).viewTransitionName).toBe("");
+    expect(completed.hasAttribute("style")).toBe(false);
+    expect(calls).toEqual([""]);
+  });
+
+  it("waits for finished when ready rejects before the update callback", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { calls, fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    fallback.setAttribute("data-fig-vt-class", "fade");
+    const { completed } = appendCompletedSegment(root);
+    completed.setAttribute("data-fig-vt-name", "card");
+    completed.setAttribute("data-fig-vt-class", "fade");
+    let resolveFinished!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      resolveFinished = resolve;
+    });
+    const viewTransitionDocument = document as unknown as {
+      startViewTransition?: (update: () => void) => {
+        finished: Promise<unknown>;
+        ready: Promise<unknown>;
+      };
+    };
+
+    calls.length = 0;
+    (root.firstChild as RetriableComment).__figRetry = () => {
+      queueMicrotask(() => {
+        calls.push(viewTransitionStyle(completed).viewTransitionName ?? "");
+      });
+    };
+
+    viewTransitionDocument.startViewTransition = (update) => {
+      setTimeout(update, 0);
+      return {
+        finished,
+        ready: Promise.reject(new Error("Transition was skipped")),
+      };
+    };
+
+    installRuntime().c("b", "s");
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(viewTransitionStyle(completed).viewTransitionName).toBe("card");
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+
+    resolveFinished();
+    await finished;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(viewTransitionStyle(completed).viewTransitionName).toBe("");
+    expect(completed.hasAttribute("style")).toBe(false);
+    expect(calls).toEqual([""]);
   });
 
   it("completes Activity-hidden boundaries inside real template content", () => {
@@ -201,3 +338,10 @@ describe("server streaming protocol", () => {
     expect(calls).toEqual(["retry"]);
   });
 });
+
+function viewTransitionStyle(element: HTMLElement): CSSStyleDeclaration & {
+  viewTransitionClass?: string;
+  viewTransitionName?: string;
+} {
+  return element.style;
+}

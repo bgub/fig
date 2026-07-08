@@ -21,6 +21,8 @@ import {
   type StableEventArgs,
   type StartTransition,
   type StateSetter,
+  type ViewTransitionClass,
+  type ViewTransitionProps,
 } from "@bgub/fig";
 import {
   collectChildren,
@@ -37,6 +39,7 @@ import {
   isSuspense,
   isThenable,
   isValidElement,
+  isViewTransition,
   type NormalizedChild,
   type RenderDispatcher,
   readThenable,
@@ -172,6 +175,8 @@ export interface DehydratedSuspenseBoundary<
   forceClientRender: boolean;
 }
 
+export type ViewTransitionCommitResult = false | "committed" | "deferred";
+
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
     type: string,
@@ -287,6 +292,18 @@ export interface HostConfig<Container, Instance, TextInstance> {
     logicalParent: Parent<Container, Instance>,
   ): void;
   removePortalContainer?(container: Parent<Container, Instance>): void;
+  commitViewTransition?(
+    container: Container,
+    prepareSnapshot: () => void,
+    mutate: () => void,
+    cleanup: () => void,
+  ): ViewTransitionCommitResult;
+  applyViewTransitionName?(
+    instance: Instance,
+    name: string,
+    className: string | null,
+  ): void;
+  restoreViewTransitionName?(instance: Instance, props: Props): void;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -431,6 +448,7 @@ const ErrorBoundaryTag = 7;
 const PortalTag = 8;
 const AssetsTag = 9;
 const ActivityTag = 10;
+const ViewTransitionTag = 11;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -442,7 +460,8 @@ type Tag =
   | typeof ErrorBoundaryTag
   | typeof PortalTag
   | typeof AssetsTag
-  | typeof ActivityTag;
+  | typeof ActivityTag
+  | typeof ViewTransitionTag;
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -465,10 +484,13 @@ const DataDependencyFlag = 1 << 8;
 const EffectFlag = 1 << 9;
 const ContextPropagationFlag = 1 << 10;
 const StoreConsistencyFlag = 1 << 11;
+const ViewTransitionStaticFlag = 1 << 12;
 type Flag = number;
 
 const MutationMask =
   PlacementFlag | UpdateFlag | HydrationFlag | TextContentFlag | VisibilityFlag;
+const ViewTransitionLaneMask =
+  AllTransitionLanes | TransitionHydrationLane | DeferredLane;
 
 const ReactiveEffect = 0;
 const BeforePaintEffect = 1;
@@ -658,6 +680,7 @@ interface Fiber<Container, Instance, TextInstance> {
   stateNode:
     | HostNode<Instance, TextInstance>
     | FiberRoot<Container, Instance, TextInstance>
+    | ViewTransitionState
     | null;
   return: Fiber<Container, Instance, TextInstance> | null;
   child: Fiber<Container, Instance, TextInstance> | null;
@@ -690,6 +713,22 @@ interface ActivityState<Instance> {
   dehydrated: Instance | null;
 }
 
+interface ViewTransitionState {
+  autoName: string | null;
+}
+
+interface ViewTransitionSurface<Instance> {
+  className: string | null;
+  instance: Instance;
+  name: string;
+  props: Props;
+}
+
+interface ViewTransitionPlan<Instance> {
+  newSurfaces: ViewTransitionSurface<Instance>[];
+  oldSurfaces: ViewTransitionSurface<Instance>[];
+}
+
 interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   container: Container;
   current: Fiber<Container, Instance, TextInstance>;
@@ -701,6 +740,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
+  pendingViewTransitionCommit: boolean;
   dataStore: FigDataStore;
   contextValues: Map<FigContext<unknown>, unknown>;
   contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
@@ -790,6 +830,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     TextInstance
   > &
     HostHoistedAssetConfig<Container, Instance, TextInstance>;
+  type RequiredViewTransitionHostConfig = Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      | "commitViewTransition"
+      | "applyViewTransitionName"
+      | "restoreViewTransitionName"
+    >
+  >;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -819,10 +867,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
   let hoistedAssetHostConfig: RequiredHoistedAssetHostConfig | null = null;
+  let viewTransitionHostConfig: RequiredViewTransitionHostConfig | null = null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
   let localIdCounter = 0;
+  let viewTransitionAutoNameCounter = 0;
 
   // Argument-identical delegations are direct references (the function
   // declarations below are hoisted); only the effect hooks, which bind their
@@ -936,6 +986,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       wip: null,
       finishedWork: null,
       renderLanes: NoLanes,
+      pendingViewTransitionCommit: false,
       dataStore,
       contextValues: new Map(),
       contextStack: [],
@@ -1159,6 +1210,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
+    if (root.pendingViewTransitionCommit) return;
+
     markStarvedLanesAsExpired(root, now());
 
     const nextLanes = getNextLanes(root, root.renderLanes);
@@ -1286,6 +1339,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
+    if (root.pendingViewTransitionCommit) return;
+
     if (root.pendingLanes === NoLanes && root.wip === null) {
       pendingRoots.delete(root);
       return;
@@ -1335,7 +1390,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    if (root.finishedWork !== null) commitRoot(root, root.finishedWork);
+    if (root.finishedWork !== null && commitRoot(root, root.finishedWork)) {
+      return;
+    }
     finishRootWork(root);
     flushPostCommitSyncWork();
   }
@@ -1551,11 +1608,21 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === ViewTransitionTag) {
+      beginViewTransition(node);
+      return;
+    }
+
     if (node.tag === PortalTag) {
       beginPortal(node);
       return;
     }
 
+    reconcileCurrentChildren(node, node.props.children);
+  }
+
+  function beginViewTransition(node: F): void {
+    node.stateNode ??= { autoName: null };
     reconcileCurrentChildren(node, node.props.children);
   }
 
@@ -3155,6 +3222,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;
     }
 
+    if (node.tag === ViewTransitionTag) node.flags |= ViewTransitionStaticFlag;
+
     node.childLanes = childLanes;
     node.subtreeFlags = subtreeFlags;
     node.contextSubtreeDependencies = contextSubtreeDependencies;
@@ -3401,80 +3470,372 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
-  function commitRoot(root: R, finishedWork: F): void {
+  function prepareViewTransitionPlan(
+    root: R,
+    finishedWork: F,
+  ): ViewTransitionPlan<Instance> | null {
+    if (root.clearContainerBeforeCommit) return null;
+    if (!includesSomeLane(root.renderLanes, ViewTransitionLaneMask))
+      return null;
+    if (optionalViewTransitionHostConfig() === null) return null;
+    if (
+      (finishedWork.subtreeFlags & ViewTransitionStaticFlag) === 0 &&
+      !root.needsCommitDeletions
+    ) {
+      return null;
+    }
+
+    const plan: ViewTransitionPlan<Instance> = {
+      newSurfaces: [],
+      oldSurfaces: [],
+    };
+    const exitsByName = new Map<string, F>();
+
+    if (root.needsCommitDeletions) {
+      collectDeletedViewTransitions(finishedWork, plan, exitsByName);
+    }
+    collectFinishedViewTransitions(
+      finishedWork.child,
+      false,
+      plan,
+      exitsByName,
+    );
+
+    return plan.oldSurfaces.length === 0 && plan.newSurfaces.length === 0
+      ? null
+      : plan;
+  }
+
+  function collectDeletedViewTransitions(
+    node: F,
+    plan: ViewTransitionPlan<Instance>,
+    exitsByName: Map<string, F>,
+  ): void {
+    walkFiberSubtree(node, (cursor) => {
+      if (cursor.deletions !== null) {
+        for (const deletion of cursor.deletions) {
+          collectDeletedViewTransitionTree(deletion, plan, exitsByName);
+        }
+      }
+
+      return (cursor.subtreeFlags & DeletionFlag) !== 0;
+    });
+  }
+
+  function collectDeletedViewTransitionTree(
+    node: F | null,
+    plan: ViewTransitionPlan<Instance>,
+    exitsByName: Map<string, F>,
+  ): void {
+    for (
+      let cursor: F | null = node;
+      cursor !== null;
+      cursor = cursor.sibling
+    ) {
+      if (cursor.tag === ViewTransitionTag) {
+        if (explicitViewTransitionName(cursor) !== null) {
+          exitsByName.set(viewTransitionName(cursor), cursor);
+        }
+        collectViewTransitionSurfaces(cursor, "exit", plan.oldSurfaces);
+        continue;
+      }
+
+      if (cursor.tag === PortalTag) continue;
+      collectDeletedViewTransitionTree(cursor.child, plan, exitsByName);
+    }
+  }
+
+  function collectFinishedViewTransitions(
+    node: F | null,
+    placed: boolean,
+    plan: ViewTransitionPlan<Instance>,
+    exitsByName: Map<string, F>,
+  ): void {
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      const cursorPlaced = placed || (cursor.flags & PlacementFlag) !== 0;
+      const containsViewTransition =
+        cursor.tag === ViewTransitionTag ||
+        (cursor.subtreeFlags & ViewTransitionStaticFlag) !== 0;
+
+      if (!containsViewTransition) continue;
+
+      if (cursor.tag === ViewTransitionTag) {
+        if (cursorPlaced || cursor.alternate === null) {
+          const pairedExit = exitsByName.get(viewTransitionName(cursor));
+          if (pairedExit !== undefined) {
+            removeViewTransitionSurfaces(plan.oldSurfaces, pairedExit);
+            collectViewTransitionSurfaces(
+              pairedExit,
+              "share",
+              plan.oldSurfaces,
+            );
+            collectViewTransitionSurfaces(cursor, "share", plan.newSurfaces);
+            exitsByName.delete(viewTransitionName(cursor));
+          } else {
+            collectViewTransitionSurfaces(cursor, "enter", plan.newSurfaces);
+          }
+          continue;
+        }
+
+        if (viewTransitionChanged(cursor)) {
+          const current = cursor.alternate;
+          if (current !== null) {
+            collectViewTransitionSurfaces(current, "update", plan.oldSurfaces);
+          }
+          collectViewTransitionSurfaces(cursor, "update", plan.newSurfaces);
+          continue;
+        }
+      }
+
+      if (cursor.tag !== PortalTag) {
+        collectFinishedViewTransitions(
+          cursor.child,
+          cursorPlaced,
+          plan,
+          exitsByName,
+        );
+      }
+    }
+  }
+
+  function viewTransitionChanged(node: F): boolean {
+    return (
+      (node.flags & (MutationMask | DeletionFlag)) !== 0 ||
+      (node.subtreeFlags & (MutationMask | DeletionFlag)) !== 0
+    );
+  }
+
+  function removeViewTransitionSurfaces(
+    surfaces: ViewTransitionSurface<Instance>[],
+    boundary: F,
+  ): void {
+    const name = viewTransitionName(boundary);
+
+    for (let index = surfaces.length - 1; index >= 0; index -= 1) {
+      const surface = surfaces[index];
+      if (surface.name === name || surface.name.startsWith(`${name}_`)) {
+        surfaces.splice(index, 1);
+      }
+    }
+  }
+
+  function collectViewTransitionSurfaces(
+    boundary: F,
+    phase: "enter" | "exit" | "share" | "update",
+    surfaces: ViewTransitionSurface<Instance>[],
+  ): void {
+    const className = viewTransitionClass(boundary.props, phase);
+    if (className === "none") return;
+
+    const name = viewTransitionName(boundary);
+    let index = 0;
+
+    const collect = (node: F | null): void => {
+      for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+        if (cursor.tag === PortalTag) continue;
+        if (cursor.tag === ViewTransitionTag) continue;
+        if (cursor.tag === HostTag) {
+          if (!isHoistedFiber(cursor)) {
+            surfaces.push({
+              className,
+              instance: cursor.stateNode as Instance,
+              name: index === 0 ? name : `${name}_${index}`,
+              props:
+                cursor.committedProps ?? cursor.memoizedProps ?? cursor.props,
+            });
+            index += 1;
+          }
+          continue;
+        }
+        collect(cursor.child);
+      }
+    };
+
+    collect(boundary.child);
+  }
+
+  function viewTransitionName(node: F): string {
+    const props = node.props as ViewTransitionProps;
+    if (props.name !== undefined && props.name !== "auto") return props.name;
+
+    const state = node.stateNode as ViewTransitionState;
+    state.autoName ??= `fig-vt-${viewTransitionAutoNameCounter++}`;
+    return state.autoName;
+  }
+
+  function explicitViewTransitionName(node: F): string | null {
+    const name = (node.props as ViewTransitionProps).name;
+    return name === undefined || name === "auto" ? null : name;
+  }
+
+  function viewTransitionClass(
+    props: Props,
+    phase: "enter" | "exit" | "share" | "update",
+  ): ViewTransitionClass | null {
+    const viewTransitionProps = props as ViewTransitionProps;
+    const phaseClass = viewTransitionProps[phase];
+    const className =
+      phaseClass === undefined ? viewTransitionProps.default : phaseClass;
+
+    if (className === undefined || className === "auto") return null;
+    if (className === "none") return "none";
+    return className;
+  }
+
+  function applyViewTransitionSurfaces(
+    surfaces: ViewTransitionSurface<Instance>[],
+  ): void {
+    const viewTransitionHost = optionalViewTransitionHostConfig();
+    if (viewTransitionHost === null) return;
+
+    for (const surface of surfaces) {
+      viewTransitionHost.applyViewTransitionName(
+        surface.instance,
+        surface.name,
+        surface.className,
+      );
+    }
+  }
+
+  function restoreViewTransitionSurfaces(
+    plan: ViewTransitionPlan<Instance>,
+  ): void {
+    const viewTransitionHost = optionalViewTransitionHostConfig();
+    if (viewTransitionHost === null) return;
+
+    const propsByInstance = new Map<Instance, Props>();
+    for (const surface of plan.oldSurfaces) {
+      propsByInstance.set(surface.instance, surface.props);
+    }
+    for (const surface of plan.newSurfaces) {
+      propsByInstance.set(surface.instance, surface.props);
+    }
+
+    for (const [instance, props] of propsByInstance) {
+      viewTransitionHost.restoreViewTransitionName(instance, props);
+    }
+  }
+
+  function commitRoot(root: R, finishedWork: F): boolean {
     commitDepth += 1;
     try {
       commitLiveHookInstances(finishedWork.child);
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
-      if (root.clearContainerBeforeCommit) {
-        requireHydrationHostConfig().clearContainer(root.container);
-        root.clearContainerBeforeCommit = false;
-      }
-      if (root.needsCommitDeletions) {
-        commitDeletions(finishedWork);
-        root.needsCommitDeletions = false;
-      }
-      if (root.needsDataDependencyCommit) {
-        commitDataDependencies(root, finishedWork.child);
-        root.needsDataDependencyCommit = false;
-      }
-      commitMutationEffects(finishedWork.child);
-      if (hasHiddenBoundaries)
-        commitHiddenBoundaryVisibility(finishedWork.child);
-      // Recompute from committed reality: the eager render-time set is sticky, so
-      // once the last hidden boundary reveals or unmounts this clears the flag and
-      // the per-update parent-walk is skipped again.
-      hasHiddenBoundaries = hiddenStates.size > 0;
-      root.current = finishedWork;
-      deactivateHydration(root);
-      root.hydrationInitialElement = NoHydrationInitialElement;
-      root.consumedPendingQueues = [];
-      // Remaining work is read from the committed tree, not just from
-      // pendingLanes minus renderLanes: an update dispatched after its fiber
-      // rendered but before this line (setState in a commit-phase effect, or a
-      // same-lane update while a time-sliced render of that lane was yielded)
-      // lands on a lane inside renderLanes, and stripping it here would park it
-      // in its hook queue forever. markLanes/markChildLanes recorded such
-      // updates on the finishedWork fibers (begin cleared the lanes that
-      // actually rendered), so merging finishedWork.lanes | childLanes revives
-      // exactly the work still owed without resurrecting completed lanes.
-      markRootFinished(
-        root,
-        (root.pendingLanes & ~root.renderLanes) |
-          finishedWork.lanes |
-          finishedWork.childLanes,
-      );
-      if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
-        markRootPending(root, OffscreenLane);
-        // A suspension after reveal lane expansion may have marked offscreen
-        // work suspended alongside the visible lanes; let idle retries proceed.
-        root.suspendedLanes &= ~OffscreenLane;
-      }
-      try {
-        commitExternalStores(root, finishedWork.child);
-        scheduleDehydratedSuspenseRetries(root);
-        commitEffects(root, finishedWork.child, BeforePaintEffect);
-        if (root.needsCaughtBoundaryErrorFlush) {
-          flushCaughtBoundaryErrors(root, finishedWork.child);
-          root.needsCaughtBoundaryErrorFlush = false;
+      const viewTransitionPlan = prepareViewTransitionPlan(root, finishedWork);
+      const commitHostChanges = () => {
+        if (root.clearContainerBeforeCommit) {
+          requireHydrationHostConfig().clearContainer(root.container);
+          root.clearContainerBeforeCommit = false;
         }
-      } finally {
-        // Once the tree is current its flags must be cleared even when a
-        // commit step throws, or a later render would adopt stale flags.
-        collectReactiveEffects(root, finishedWork.child);
-        finishedWork.flags = NoFlags;
-        finishedWork.subtreeFlags = NoFlags;
-        scheduleReactiveEffects(root);
+        if (root.needsCommitDeletions) {
+          commitDeletions(finishedWork);
+          root.needsCommitDeletions = false;
+        }
+        if (root.needsDataDependencyCommit) {
+          commitDataDependencies(root, finishedWork.child);
+          root.needsDataDependencyCommit = false;
+        }
+        commitMutationEffects(finishedWork.child);
+        if (hasHiddenBoundaries)
+          commitHiddenBoundaryVisibility(finishedWork.child);
+      };
+      const completeCommit = () => {
+        // Recompute from committed reality: the eager render-time set is sticky, so
+        // once the last hidden boundary reveals or unmounts this clears the flag and
+        // the per-update parent-walk is skipped again.
+        hasHiddenBoundaries = hiddenStates.size > 0;
+        root.current = finishedWork;
+        deactivateHydration(root);
+        root.hydrationInitialElement = NoHydrationInitialElement;
+        root.consumedPendingQueues = [];
+        // Remaining work is read from the committed tree, not just from
+        // pendingLanes minus renderLanes: an update dispatched after its fiber
+        // rendered but before this line (setState in a commit-phase effect, or a
+        // same-lane update while a time-sliced render of that lane was yielded)
+        // lands on a lane inside renderLanes, and stripping it here would park it
+        // in its hook queue forever. markLanes/markChildLanes recorded such
+        // updates on the finishedWork fibers (begin cleared the lanes that
+        // actually rendered), so merging finishedWork.lanes | childLanes revives
+        // exactly the work still owed without resurrecting completed lanes.
+        markRootFinished(
+          root,
+          (root.pendingLanes & ~root.renderLanes) |
+            finishedWork.lanes |
+            finishedWork.childLanes,
+        );
+        if (includesSomeLane(finishedWork.childLanes, OffscreenLane)) {
+          markRootPending(root, OffscreenLane);
+          // A suspension after reveal lane expansion may have marked offscreen
+          // work suspended alongside the visible lanes; let idle retries proceed.
+          root.suspendedLanes &= ~OffscreenLane;
+        }
+        try {
+          commitExternalStores(root, finishedWork.child);
+          scheduleDehydratedSuspenseRetries(root);
+          commitEffects(root, finishedWork.child, BeforePaintEffect);
+          if (root.needsCaughtBoundaryErrorFlush) {
+            flushCaughtBoundaryErrors(root, finishedWork.child);
+            root.needsCaughtBoundaryErrorFlush = false;
+          }
+        } finally {
+          // Once the tree is current its flags must be cleared even when a
+          // commit step throws, or a later render would adopt stale flags.
+          collectReactiveEffects(root, finishedWork.child);
+          finishedWork.flags = NoFlags;
+          finishedWork.subtreeFlags = NoFlags;
+          scheduleReactiveEffects(root);
+        }
+        if (__DEV__ && root.devtools) {
+          emitDevtoolsCommit(host, root);
+        }
+        flushRecoverableErrors(root);
+        // Host mutations just landed: make the work loop yield at its next check
+        // so the host paints before further scheduled work (React does the same
+        // from commitRoot).
+        requestPaint();
+      };
+      const commitWithoutViewTransition = () => {
+        commitHostChanges();
+        completeCommit();
+      };
+      const commitWithViewTransition = () => {
+        const isDeferredCommit = root.pendingViewTransitionCommit;
+        if (isDeferredCommit) commitDepth += 1;
+        try {
+          commitHostChanges();
+          applyViewTransitionSurfaces(viewTransitionPlan?.newSurfaces ?? []);
+          completeCommit();
+        } finally {
+          if (isDeferredCommit) {
+            root.pendingViewTransitionCommit = false;
+            commitDepth -= 1;
+            finishRootWork(root);
+            flushPostCommitSyncWork();
+          }
+        }
+      };
+      const viewTransitionHost = optionalViewTransitionHostConfig();
+      if (viewTransitionPlan !== null && viewTransitionHost !== null) {
+        const viewTransitionResult = viewTransitionHost.commitViewTransition(
+          root.container,
+          () => applyViewTransitionSurfaces(viewTransitionPlan.oldSurfaces),
+          commitWithViewTransition,
+          () => restoreViewTransitionSurfaces(viewTransitionPlan),
+        );
+
+        if (viewTransitionResult === "deferred") {
+          root.pendingViewTransitionCommit = true;
+          root.callback = null;
+          root.callbackPriority = NoLane;
+          return true;
+        }
+
+        if (viewTransitionResult === "committed") return false;
       }
-      if (__DEV__ && root.devtools) {
-        emitDevtoolsCommit(host, root);
-      }
-      flushRecoverableErrors(root);
-      // Host mutations just landed: make the work loop yield at its next check
-      // so the host paints before further scheduled work (React does the same
-      // from commitRoot).
-      requestPaint();
+
+      commitWithoutViewTransition();
+      return false;
     } finally {
       commitDepth -= 1;
     }
@@ -4817,6 +5178,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         return "Suspense";
       case ErrorBoundaryTag:
         return "ErrorBoundary";
+      case ViewTransitionTag:
+        return "ViewTransition";
       case PortalTag:
         return "Portal";
       case AssetsTag:
@@ -4950,6 +5313,21 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     activityHostConfig = host as ReturnType<typeof requireActivityHostConfig>;
     return activityHostConfig;
+  }
+
+  function optionalViewTransitionHostConfig(): RequiredViewTransitionHostConfig | null {
+    if (viewTransitionHostConfig !== null) return viewTransitionHostConfig;
+
+    if (
+      host.commitViewTransition === undefined ||
+      host.applyViewTransitionName === undefined ||
+      host.restoreViewTransitionName === undefined
+    ) {
+      return null;
+    }
+
+    viewTransitionHostConfig = host as RequiredViewTransitionHostConfig;
+    return viewTransitionHostConfig;
   }
 
   function commitHiddenBoundaryVisibility(
@@ -5148,19 +5526,29 @@ export function createRenderer<Container, Instance, TextInstance>(
     instance.value = state.value;
     root.externalStores.add(instance);
     instance.unsubscribe ??= state.subscribe(() => {
-      scheduleExternalStoreIfChanged(instance.owner, instance);
+      scheduleExternalStoreIfChanged(
+        instance.owner,
+        instance,
+        requestExternalStoreUpdateLane(),
+      );
     });
-    scheduleExternalStoreIfChanged(instance.owner, instance);
+    scheduleExternalStoreIfChanged(instance.owner, instance, SyncLane);
   }
 
   function scheduleExternalStoreIfChanged(
     owner: F | null,
     instance: ExternalStoreInstance<unknown, F>,
+    lane: Lane,
   ): void {
     if (owner === null) return;
 
     const latestValue = instance.getSnapshot();
-    if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, SyncLane);
+    if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, lane);
+  }
+
+  function requestExternalStoreUpdateLane(): Lane {
+    const lane = requestUpdateLane();
+    return lane === DefaultLane ? SyncLane : lane;
   }
 
   function commitEffects(root: R, node: F | null, phase: EffectPhase): void {
@@ -5569,6 +5957,7 @@ function tagFor(element: FigElement): Tag {
   if (isSuspense(element.type)) return SuspenseTag;
   if (isActivity(element.type)) return ActivityTag;
   if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
+  if (isViewTransition(element.type)) return ViewTransitionTag;
   return FunctionTag;
 }
 
@@ -6203,6 +6592,8 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "error-boundary", name: "ErrorBoundary" };
     case ActivityTag:
       return { kind: "activity", name: "Activity" };
+    case ViewTransitionTag:
+      return { kind: "view-transition", name: "ViewTransition" };
     case PortalTag:
       return { kind: "portal", name: "Portal" };
     case AssetsTag:

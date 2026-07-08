@@ -8,6 +8,7 @@ import {
   type FigNode,
   Fragment,
   type Props,
+  type ViewTransitionProps,
 } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
@@ -28,6 +29,7 @@ import {
   isSuspense,
   isThenable,
   isValidElement,
+  isViewTransition,
   type NormalizedChild,
   type RenderDispatcher,
   readThenable,
@@ -40,6 +42,8 @@ import {
   type Thenable,
   validateInstanceNesting,
   validateTextNesting,
+  VIEW_TRANSITION_CLASS_ATTRIBUTE,
+  VIEW_TRANSITION_NAME_ATTRIBUTE,
 } from "@bgub/fig/internal";
 import { AssetResourceRegistry } from "./asset-registry.ts";
 import {
@@ -94,6 +98,7 @@ interface Request {
   nextBoundaryId: number;
   nextSegmentId: number;
   nextActivityId: number;
+  nextViewTransitionId: number;
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
   onAssetError?: ServerRenderOptions["onAssetError"];
@@ -142,6 +147,7 @@ interface RenderScope {
   idPath: string;
   selectProps: Props | null;
   stack: StackFrame | null;
+  viewTransition: ServerViewTransitionContext | null;
 }
 
 interface Task extends RenderScope {
@@ -210,6 +216,12 @@ interface DocumentState {
   hasHead: boolean;
 }
 
+interface ServerViewTransitionContext {
+  className: string | null;
+  index: number;
+  name: string;
+}
+
 interface AssetSink {
   nonce?: string;
   write(chunk: string): void;
@@ -266,6 +278,7 @@ export function createServerRenderRequest(
     nextBoundaryId: 0,
     nextSegmentId: 0,
     nextActivityId: 0,
+    nextViewTransitionId: 0,
     nonce: options.nonce,
     onError: options.onError,
     onAssetError: options.onAssetError,
@@ -318,6 +331,7 @@ export function createServerRenderRequest(
     idPath: "",
     selectProps: null,
     stack: null,
+    viewTransition: null,
   });
   request.pingedTasks.push(rootTask);
 
@@ -378,6 +392,7 @@ function forkScope(scope: RenderScope): RenderScope {
     idPath: scope.idPath,
     selectProps: scope.selectProps,
     stack: scope.stack,
+    viewTransition: scope.viewTransition,
   };
 }
 
@@ -635,6 +650,11 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
     return;
   }
 
+  if (isViewTransition(type)) {
+    renderViewTransition(element.props, frame);
+    return;
+  }
+
   if (typeof type === "function") {
     renderFunctionComponent(type as Component, element.props, frame);
     return;
@@ -818,6 +838,43 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   }
 }
 
+function renderViewTransition(props: Props, frame: RenderFrame): void {
+  const previousViewTransition = frame.viewTransition;
+  frame.viewTransition = createServerViewTransition(
+    props as ViewTransitionProps,
+    frame.request,
+  );
+
+  try {
+    renderChildren(props.children, frame);
+  } finally {
+    frame.viewTransition = previousViewTransition;
+  }
+}
+
+function createServerViewTransition(
+  props: ViewTransitionProps,
+  request: Request,
+): ServerViewTransitionContext {
+  return {
+    className: serverViewTransitionClass(props),
+    index: 0,
+    name:
+      props.name === undefined || props.name === "auto"
+        ? `fig-vt-${request.nextViewTransitionId++}`
+        : props.name,
+  };
+}
+
+function serverViewTransitionClass(props: ViewTransitionProps): string | null {
+  const className = props.default;
+  if (className === undefined || className === "auto" || className === "none") {
+    return null;
+  }
+
+  return className;
+}
+
 function renderActivity(props: Props, frame: RenderFrame): void {
   if (props.mode !== "hidden") {
     renderChildren(props.children, frame);
@@ -882,7 +939,12 @@ function renderHostElement(
   }
 
   consumePendingLeadingNewline(frame);
-  writeElementStart(type, props, frame.segment, frame.selectProps ?? {});
+  const viewTransition = frame.viewTransition;
+  const hostProps =
+    viewTransition === null
+      ? props
+      : viewTransitionHostProps(props, viewTransition);
+  writeElementStart(type, hostProps, frame.segment, frame.selectProps ?? {});
   if (isVoid) return;
 
   const previousPendingLeadingNewlineHost = frame.pendingLeadingNewlineHost;
@@ -917,6 +979,8 @@ function renderHostElement(
   const previousSelectProps = frame.selectProps;
   if (type === "select") frame.selectProps = props;
   const previousHostAncestors = frame.hostAncestors;
+  const previousViewTransition = frame.viewTransition;
+  if (viewTransition !== null) frame.viewTransition = null;
   if (process.env.NODE_ENV !== "production") {
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
@@ -928,6 +992,7 @@ function renderHostElement(
   } finally {
     frame.selectProps = previousSelectProps;
     frame.hostAncestors = previousHostAncestors;
+    frame.viewTransition = previousViewTransition;
     frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
   }
   if (document !== null && type === "head") {
@@ -946,6 +1011,25 @@ function renderHostAsset(
 
   renderAssetValue(resource, frame);
   return true;
+}
+
+function viewTransitionHostProps(
+  props: Props,
+  viewTransition: ServerViewTransitionContext,
+): Props {
+  const index = viewTransition.index++;
+  const name =
+    index === 0 ? viewTransition.name : `${viewTransition.name}_${index}`;
+  const nextProps: Props = {
+    ...props,
+    [VIEW_TRANSITION_NAME_ATTRIBUTE]: name,
+  };
+
+  if (viewTransition.className !== null) {
+    nextProps[VIEW_TRANSITION_CLASS_ATTRIBUTE] = viewTransition.className;
+  }
+
+  return nextProps;
 }
 
 function spawnSuspendedTask(

@@ -28,6 +28,7 @@ import {
   useMemo,
   useState,
   useTransition,
+  ViewTransition,
 } from "./index.ts";
 import {
   Assets,
@@ -40,6 +41,7 @@ import {
   isErrorBoundary,
   isPortal,
   isSuspense,
+  isViewTransition,
 } from "./internal.ts";
 import { jsx } from "./jsx-runtime.ts";
 
@@ -94,6 +96,23 @@ describe("@bgub/fig", () => {
       children: "Loaded",
     });
     expect(emptyFallback.props).toEqual({ children: "Loaded" });
+  });
+
+  it("supports ViewTransition as a special element type", () => {
+    const element = createElement(
+      ViewTransition,
+      { default: "fade", name: "card" },
+      "Loaded",
+    );
+
+    expect(isViewTransition(ViewTransition)).toBe(true);
+    expect(isValidElement(element)).toBe(true);
+    expect(element.type).toBe(ViewTransition);
+    expect(element.props).toEqual({
+      default: "fade",
+      name: "card",
+      children: "Loaded",
+    });
   });
 
   it("supports ErrorBoundary as a special element type", () => {

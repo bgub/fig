@@ -6,8 +6,19 @@ import {
   fetchPayload,
   isPayloadRequestCancelled,
 } from "@bgub/fig-server/payload";
-import { RefreshButton, setRefreshHandler } from "./client-components.tsx";
-import { appRootId, refreshButtonReferenceId } from "./shared.ts";
+import {
+  AppRefreshButton,
+  RefreshButton,
+  setAppRefreshHandler,
+  setRefreshHandler,
+} from "./client-components.tsx";
+import {
+  appRefreshButtonReferenceId,
+  appRootId,
+  feedBoundaryId,
+  noteBoundaryId,
+  refreshButtonReferenceId,
+} from "./shared.ts";
 import { ErrorShell } from "./shell.tsx";
 
 const rootElement = document.getElementById(appRootId);
@@ -24,6 +35,7 @@ createRoot(devtoolsContainer, { devtools: false }).render(
 
 const response = createPayloadResponse({
   resolveClientReference(metadata) {
+    if (metadata.id === appRefreshButtonReferenceId) return AppRefreshButton;
     if (metadata.id === refreshButtonReferenceId) return RefreshButton;
     throw new Error(`Unknown client reference "${metadata.id}".`);
   },
@@ -48,11 +60,19 @@ function render(node = response.getRoot()): void {
   root.render(node);
 }
 
-setRefreshHandler((boundary, seed) =>
-  fetchPayload(response, `/payload?seed=${seed}`, {
+function refreshBoundary(boundary: string, seed: number): Promise<void> {
+  return fetchPayload(response, `/payload?seed=${seed}`, {
     refreshBoundary: boundary,
-  }).then(() => undefined),
-);
+  }).then(() => undefined);
+}
+
+setRefreshHandler(refreshBoundary);
+
+setAppRefreshHandler(async (seed) => {
+  for (const boundary of [feedBoundaryId, noteBoundaryId]) {
+    await refreshBoundary(boundary, seed);
+  }
+});
 
 response.subscribe(() => render());
 

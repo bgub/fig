@@ -289,6 +289,44 @@ h1, h2, h3, p {
   color: var(--warn);
 }
 
+::view-transition-group(payload-dashboard),
+::view-transition-group(payload-note),
+::view-transition-group(payload-app-refresh-button),
+::view-transition-group(payload-refresh-button-demo-payload-feed),
+::view-transition-group(payload-refresh-button-demo-payload-note) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(payload-dashboard),
+::view-transition-old(payload-note) {
+  animation: fig-payload-vt-fade-out 150ms ease both;
+}
+
+::view-transition-new(payload-dashboard),
+::view-transition-new(payload-note) {
+  animation: fig-payload-vt-fade-in 220ms ease both;
+}
+
+@keyframes fig-payload-vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes fig-payload-vt-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 @media (max-width: 780px) {
   .fig-demo-devtools-layout {
     grid-template-columns: 1fr;

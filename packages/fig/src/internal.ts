@@ -54,6 +54,8 @@ export {
   FigPortalSymbol,
   type FigSuspense,
   FigSuspenseSymbol,
+  type FigViewTransition,
+  FigViewTransitionSymbol,
   type FigText,
   isActivity,
   isAssets,
@@ -61,11 +63,14 @@ export {
   isErrorBoundary,
   isPortal,
   isSuspense,
+  isViewTransition,
   isValidElement,
   type Key,
   type LazyLoader,
   type Props,
   type SuspenseProps,
+  type ViewTransitionClass,
+  type ViewTransitionProps,
 } from "./element.ts";
 export { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
 export {
@@ -87,6 +92,8 @@ export {
   SUSPENSE_END_MARKER,
   SUSPENSE_MARKER_PREFIX,
   SUSPENSE_PENDING_PREFIX,
+  VIEW_TRANSITION_CLASS_ATTRIBUTE,
+  VIEW_TRANSITION_NAME_ATTRIBUTE,
 } from "./suspense-protocol.ts";
 export {
   isThenable,

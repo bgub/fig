@@ -279,6 +279,42 @@ button[data-demo-control="transition"] {
   color: var(--danger);
 }
 
+::view-transition-group(ssr-suspense),
+::view-transition-group(ssr-error-recovery),
+::view-transition-group(ssr-lazy-panel),
+::view-transition-group(ssr-client-transition),
+::view-transition-group(ssr-hidden-activity),
+::view-transition-group(ssr-hidden-error) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(ssr-suspense),
+::view-transition-old(ssr-error-recovery),
+::view-transition-old(ssr-lazy-panel) {
+  animation: fig-ssr-vt-fade-out 160ms ease both;
+}
+
+::view-transition-new(ssr-suspense),
+::view-transition-new(ssr-error-recovery),
+::view-transition-new(ssr-lazy-panel) {
+  animation: fig-ssr-vt-fade-in 240ms ease both;
+}
+
+@keyframes fig-ssr-vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes fig-ssr-vt-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 @media (max-width: 780px) {
   .fig-demo-devtools-layout {
     grid-template-columns: 1fr;

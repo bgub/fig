@@ -1,4 +1,4 @@
-import type { FigNode } from "@bgub/fig";
+import { type FigNode, ViewTransition } from "@bgub/fig";
 import { createFileRoute, Link } from "@bgub/fig-start";
 
 export const Route = createFileRoute("/")({
@@ -19,6 +19,20 @@ function Home(): FigNode {
         <Link class="font-medium text-teal-700" to="/data">
           Explore data resources →
         </Link>
+      </p>
+      <p>
+        <ViewTransition
+          default="fig-start-route-title"
+          name="start-vt-page-title"
+          share="fig-start-route-title"
+        >
+          <Link
+            class="inline-block font-medium text-teal-700"
+            to="/view-transitions"
+          >
+            View transitions
+          </Link>
+        </ViewTransition>
       </p>
     </section>
   );

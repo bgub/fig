@@ -13,3 +13,6 @@ export const SUSPENSE_END_MARKER = "/fig:suspense";
 // Hidden Activity content streams inside an inert template carrying this
 // attribute; the client treats such templates as dehydrated boundaries.
 export const ACTIVITY_TEMPLATE_ATTRIBUTE = "data-fig-activity";
+
+export const VIEW_TRANSITION_NAME_ATTRIBUTE = "data-fig-vt-name";
+export const VIEW_TRANSITION_CLASS_ATTRIBUTE = "data-fig-vt-class";

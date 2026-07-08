@@ -41,6 +41,7 @@ export {
   type FigNode,
   type FigPortal,
   type FigText,
+  type FigViewTransition,
   Fragment,
   isValidElement,
   type Key,
@@ -49,6 +50,9 @@ export {
   type Props,
   Suspense,
   type SuspenseProps,
+  ViewTransition,
+  type ViewTransitionClass,
+  type ViewTransitionProps,
 } from "./element.ts";
 // The data layer: definitions and freshness verbs. The store implementation
 // travels with dataResource itself (a factory slot on each resource), so

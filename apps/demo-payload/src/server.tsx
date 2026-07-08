@@ -10,13 +10,19 @@ import {
   type PayloadRenderResult,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
-import { createDemoData, Dashboard, PayloadApp } from "./app.tsx";
+import {
+  createDemoData,
+  Dashboard,
+  type DemoData,
+  OperationsNote,
+  PayloadApp,
+} from "./app.tsx";
 import {
   devReloadScript,
   handleDevReloadRequest,
   watchDevReloadFile,
 } from "../../dev-reload.ts";
-import { appRootId, feedBoundaryId } from "./shared.ts";
+import { appRootId, feedBoundaryId, noteBoundaryId } from "./shared.ts";
 import { LoadingShell } from "./shell.tsx";
 import { styles } from "./styles.ts";
 
@@ -84,11 +90,13 @@ async function sendPayload(
   const seed = seedFor(url);
   const boundary = headerValue(request.headers[PAYLOAD_BOUNDARY_HEADER]);
   const data = createDemoData(seed);
-  const refreshingFeed = boundary === feedBoundaryId;
+  const boundaryRefresh = boundaryReplacement(boundary, data);
+  const refreshBoundary =
+    boundaryRefresh === null || boundary === null ? undefined : boundary;
   const result = renderToPayloadStream(
-    refreshingFeed ? <Dashboard data={data} /> : <PayloadApp data={data} />,
+    boundaryRefresh ?? <PayloadApp data={data} />,
     {
-      refreshBoundary: refreshingFeed ? boundary : undefined,
+      refreshBoundary,
     },
   );
 
@@ -98,6 +106,17 @@ async function sendPayload(
     "x-accel-buffering": "no",
   });
   await pipePayload(result, response);
+}
+
+function boundaryReplacement(boundary: string | null, data: DemoData) {
+  switch (boundary) {
+    case feedBoundaryId:
+      return <Dashboard data={data} />;
+    case noteBoundaryId:
+      return <OperationsNote data={data} />;
+    default:
+      return null;
+  }
 }
 
 async function documentHtml(): Promise<string> {

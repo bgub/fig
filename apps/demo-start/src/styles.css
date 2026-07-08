@@ -104,6 +104,42 @@
     background: var(--fig-start-selected-bg);
   }
 
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+
+  ::view-transition-group(start-vt-page-title),
+  ::view-transition-group(start-vt-router),
+  ::view-transition-group(start-vt-stream),
+  ::view-transition-group(start-vt-hydration),
+  ::view-transition-group(start-vt-detail) {
+    animation-duration: 280ms;
+    animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  ::view-transition-old(start-vt-detail) {
+    animation: fig-start-vt-fade-out 150ms ease both;
+  }
+
+  ::view-transition-new(start-vt-detail) {
+    animation: fig-start-vt-fade-in 220ms ease both;
+  }
+
+  @keyframes fig-start-vt-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+
+  @keyframes fig-start-vt-fade-out {
+    to {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
   @media (prefers-color-scheme: light) {
     html.system {
       color-scheme: light;

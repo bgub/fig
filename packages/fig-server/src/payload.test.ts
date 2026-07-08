@@ -16,6 +16,7 @@ import {
   Suspense,
   stylesheet,
   title,
+  ViewTransition,
 } from "@bgub/fig";
 import {
   isValidElement,
@@ -1540,6 +1541,39 @@ describe("payload rendering", () => {
     });
   });
 
+  it("preserves ViewTransition as a client-visible structural element", async () => {
+    const rows = await renderToPayloadRows(
+      createElement(
+        ViewTransition,
+        { default: "payload-vt", name: "payload-card" },
+        createElement("section", null, "Card"),
+      ),
+    );
+
+    expect(rows[0]).toEqual({
+      id: 0,
+      tag: "model",
+      value: graphElement(
+        1,
+        { $fig: "view-transition" },
+        {
+          children: graphElement(2, "section", { children: "Card" }),
+          default: "payload-vt",
+          name: "payload-card",
+        },
+      ),
+    });
+
+    const response = createPayloadResponse();
+    processTestPayloadRows(response, rows);
+    const decoded = readPayloadRoot(response);
+
+    expect(isValidElement(decoded)).toBe(true);
+    if (!isValidElement(decoded)) return;
+    expect(decoded.type).toBe(ViewTransition);
+    expect(decoded.props.name).toBe("payload-card");
+  });
+
   it("decodes completed rows back into Fig nodes", async () => {
     const LikeButton = clientReference<{ initialCount: number }>({
       id: "app/LikeButton.client.tsx#LikeButton",
@@ -1917,6 +1951,64 @@ describe("payload rendering", () => {
     );
 
     expect(evaluatePayloadNode(response.getRoot())).toBe("new parent inner");
+  });
+
+  it("preserves decoded unrelated boundary initials after targeted refreshes", async () => {
+    const response = createPayloadResponse();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(
+        createElement(
+          "section",
+          null,
+          createElement(
+            PayloadBoundary,
+            { id: "feed" },
+            createElement("p", null, "feed 0"),
+          ),
+          createElement(
+            PayloadBoundary,
+            { id: "note" },
+            createElement("p", null, "note 0"),
+          ),
+        ),
+      ),
+    );
+
+    const initialRoot = readPayloadRoot(response);
+    if (
+      !isValidElement(initialRoot) ||
+      !Array.isArray(initialRoot.props.children)
+    ) {
+      throw new Error("Expected boundary children.");
+    }
+    const initialFeed = unwrapFunctionComponent(initialRoot.props.children[0]);
+    const initialNote = unwrapFunctionComponent(initialRoot.props.children[1]);
+
+    response.beginRefreshPayload();
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(createElement("p", null, "feed 1"), {
+        refreshBoundary: "feed",
+      }),
+    );
+
+    const refreshedRoot = readPayloadRoot(response);
+    if (
+      !isValidElement(refreshedRoot) ||
+      !Array.isArray(refreshedRoot.props.children)
+    ) {
+      throw new Error("Expected refreshed boundary children.");
+    }
+    const refreshedFeed = unwrapFunctionComponent(
+      refreshedRoot.props.children[0],
+    );
+    const refreshedNote = unwrapFunctionComponent(
+      refreshedRoot.props.children[1],
+    );
+
+    expect(refreshedFeed).not.toBe(initialFeed);
+    expect(refreshedNote).toBe(initialNote);
   });
 
   it("rejects failed boundary refresh streams without replacing existing content", async () => {
@@ -2537,6 +2629,82 @@ describe("payload rendering", () => {
           props: { children: "Fetched refresh" },
           type: "p",
         },
+      },
+      type: "section",
+    });
+  });
+
+  it("lets full payload fetches supersede prior boundary refreshes", async () => {
+    const Button = clientReference<{ label: string }>({
+      id: "app/Button.client.tsx#Button",
+      load: () => Promise.resolve({}),
+    });
+
+    function App({ seed }: { seed: number }) {
+      return createElement(
+        "section",
+        null,
+        createElement(Button, { label: `button ${seed}` }),
+        createElement(
+          PayloadBoundary,
+          { id: "feed" },
+          createElement("p", null, `feed ${seed}`),
+        ),
+        createElement(
+          PayloadBoundary,
+          { id: "note" },
+          createElement("p", null, `note ${seed}`),
+        ),
+      );
+    }
+
+    const response = createPayloadResponse({
+      resolveClientReference: () => "fig-button",
+    });
+    processTestPayloadRows(
+      response,
+      await renderToPayloadRows(createElement(App, { seed: 0 })),
+    );
+
+    await fetchPayload(response, "/payload/feed", {
+      fetch: async () =>
+        new Response(
+          await renderToPayloadText(createElement("p", null, "feed 1"), {
+            refreshBoundary: "feed",
+          }),
+          { headers: { "content-type": jsonPayloadCodec.contentType } },
+        ),
+      refreshBoundary: "feed",
+    });
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: [
+          { props: { label: "button 0" }, type: "fig-button" },
+          { props: { children: "feed 1" }, type: "p" },
+          { props: { children: "note 0" }, type: "p" },
+        ],
+      },
+      type: "section",
+    });
+
+    await fetchPayload(response, "/payload", {
+      fetch: async () =>
+        new Response(
+          await renderToPayloadText(createElement(App, { seed: 2 })),
+          {
+            headers: { "content-type": jsonPayloadCodec.contentType },
+          },
+        ),
+    });
+
+    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+      props: {
+        children: [
+          { props: { label: "button 2" }, type: "fig-button" },
+          { props: { children: "feed 2" }, type: "p" },
+          { props: { children: "note 2" }, type: "p" },
+        ],
       },
       type: "section",
     });

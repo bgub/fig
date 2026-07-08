@@ -12,10 +12,10 @@ values, the JSON-injection defense). `FigNode` is the one public children
 type — elements, portals, text, booleans, `null`/`undefined`, and arrays;
 there is no `FigChild`/`ReactChild`-style duplicate. Components are plain
 functions; `Fragment` is a symbol; `Suspense`/`Activity`/`ErrorBoundary`/
-`Assets` are callable-with-brand objects so they typecheck as ordinary
-components. `lazy(load)` expects the loader to return the component itself —
-no `{ default }` unwrapping, no special element type; it is a plain component
-over `readPromise`.
+`Assets`/`ViewTransition` are callable-with-brand objects so they typecheck as
+ordinary components. `lazy(load)` expects the loader to return the component
+itself — no `{ default }` unwrapping, no special element type; it is a plain
+component over `readPromise`.
 
 Portals (`createPortal(children, target, key?)`) render into explicit DOM
 targets while remaining logical children: context, effects ordering, error

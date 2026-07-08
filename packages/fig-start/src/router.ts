@@ -1,3 +1,4 @@
+import { transition } from "@bgub/fig";
 import type {
   NavigateOptions,
   RouteMatch,
@@ -60,8 +61,9 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
 
   const getState = (): RouterState => state;
 
-  function setState(next: RouterState): void {
+  function setState(next: RouterState, notify = true): void {
     state = next;
+    if (!notify) return;
     for (const listener of listeners) listener();
   }
 
@@ -202,23 +204,25 @@ export function createRouter(options: CreateRouterOptions): FigRouter {
     options: { replace?: boolean; updateHistory: boolean },
   ): Promise<void> {
     const version = ++navigationVersion;
-    setState({ ...state, status: "pending" });
-    const result = await load(location);
-    if (version !== navigationVersion) return;
+    await transition(async () => {
+      setState({ ...state, status: "pending" }, false);
+      const result = await load(location);
+      if (version !== navigationVersion) return;
 
-    if (result.status === "redirect") {
-      await navigate({ replace: options.replace, to: result.redirect.to });
-      return;
-    }
+      if (result.status === "redirect") {
+        await navigate({ replace: options.replace, to: result.redirect.to });
+        return;
+      }
 
-    await beforeCommit?.(location, result);
-    if (version !== navigationVersion) return;
+      await beforeCommit?.(location, result);
+      if (version !== navigationVersion) return;
 
-    if (options.updateHistory && history !== null) {
-      if (options.replace === true) history.replace(location.href);
-      else history.push(location.href);
-    }
-    commit(location, result);
+      if (options.updateHistory && history !== null) {
+        if (options.replace === true) history.replace(location.href);
+        else history.push(location.href);
+      }
+      commit(location, result);
+    });
   }
 
   function navigate(to: NavigateOptions | string): Promise<void> {

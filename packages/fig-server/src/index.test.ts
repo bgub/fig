@@ -26,6 +26,7 @@ import {
   useStableEvent,
   useState,
   useTransition,
+  ViewTransition,
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -96,6 +97,19 @@ describe("@bgub/fig-server", () => {
 
     expect(html).toBe(
       '<button aria-label="Save" class="primary" data-id="save" disabled tabindex="0" value="&lt;&amp;&quot;" style="background-color:red;--gap:1rem;opacity:0">Save &amp; &lt;</button>',
+    );
+  });
+
+  it("annotates nearest server-rendered ViewTransition surfaces", async () => {
+    const html = await renderToHtml(
+      createElement(ViewTransition, { default: "fade", name: "card" }, [
+        createElement("section", { key: "a" }, "A"),
+        createElement("section", { key: "b" }, "B"),
+      ]),
+    );
+
+    expect(html).toBe(
+      '<section data-fig-vt-name="card" data-fig-vt-class="fade">A</section><section data-fig-vt-name="card_1" data-fig-vt-class="fade">B</section>',
     );
   });
 
@@ -666,7 +680,7 @@ describe("@bgub/fig-server", () => {
     await result.allReady;
     const html = await readStream(result.stream);
 
-    const ids = [...new Set(html.match(/fig-[0-9a-v-]+/g))].sort();
+    const ids = [...new Set(html.match(/fig-\d+(?:-\d+)*/g))].sort();
     expect(ids).toEqual(["fig-0-0-0-0", "fig-0-0-1-0", "fig-0-0-2-0"]);
   });
 

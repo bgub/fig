@@ -54,6 +54,11 @@ import {
   mathNamespace,
   svgNamespace,
 } from "./tree.ts";
+import {
+  applyViewTransitionName,
+  commitViewTransition,
+  restoreViewTransitionName,
+} from "./view-transition.ts";
 
 type TextLike = Text | Comment;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
@@ -269,6 +274,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   removePortalContainer: (container) => {
     removePortalContainer(container as Container);
   },
+  commitViewTransition,
+  applyViewTransitionName,
+  restoreViewTransitionName,
 };
 
 const renderer: DomRenderer = createRenderer(hostConfig);

@@ -1,3 +1,4 @@
+import { setTransitionHandler } from "@bgub/fig/internal";
 import { describe, expect, it } from "vite-plus/test";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
@@ -72,6 +73,24 @@ describe("@bgub/fig-start router", () => {
     const location = router.buildLocation("/posts/7");
     const result = await router.load(location);
     router.commit(location, result);
+    expect(router.getState().params).toEqual({ postId: "7" });
+    expect(router.getState().status).toBe("idle");
+  });
+
+  it("commits navigations inside a Fig transition", async () => {
+    const router = makeRouter(true);
+    let transitionCalls = 0;
+    const previousTransitionHandler = setTransitionHandler((callback) => {
+      transitionCalls += 1;
+      return callback();
+    });
+    try {
+      await router.navigate("/posts/7");
+    } finally {
+      setTransitionHandler(previousTransitionHandler);
+    }
+
+    expect(transitionCalls).toBe(1);
     expect(router.getState().params).toEqual({ postId: "7" });
     expect(router.getState().status).toBe("idle");
   });

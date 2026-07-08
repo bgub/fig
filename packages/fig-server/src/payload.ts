@@ -22,6 +22,7 @@ import {
   type ScriptResource,
   type StylesheetResource,
   Suspense,
+  ViewTransition,
 } from "@bgub/fig";
 import {
   assetResourceDestination,
@@ -42,6 +43,7 @@ import {
   isSuspense,
   isThenable,
   isValidElement,
+  isViewTransition,
   normalizeDataResourceKey,
   type RenderDispatcher,
   readThenable,
@@ -199,7 +201,8 @@ type PayloadSpecialModel =
   | { $fig: "set"; id: number; values: PayloadModel[] }
   | { $fig: "symbol"; key: string }
   | { $fig: "suspense" }
-  | { $fig: "undefined" };
+  | { $fig: "undefined" }
+  | { $fig: "view-transition" };
 
 type PayloadValueSpecialModel = Extract<
   PayloadSpecialModel,
@@ -732,6 +735,12 @@ class PayloadResponseImpl implements PayloadResponse {
     this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
   }
 
+  private resetPayloadDecoder(): void {
+    this.rowIdBase = 0;
+    this.objectIdBase = 0;
+    this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
+  }
+
   getAssetResources(): readonly FigAssetResource[] {
     return [...this.assetResources.values()];
   }
@@ -864,8 +873,12 @@ class PayloadResponseImpl implements PayloadResponse {
     signal?: AbortSignal | null,
   ): Promise<void> {
     const decoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
-    await readByteStream(stream, (chunk) => decoder.decode(chunk), signal);
-    decoder.flush();
+    try {
+      await readByteStream(stream, (chunk) => decoder.decode(chunk), signal);
+      decoder.flush();
+    } finally {
+      this.resetPayloadDecoder();
+    }
   }
 
   processBytesChunk(chunk: Uint8Array): void {
@@ -932,8 +945,17 @@ class PayloadResponseImpl implements PayloadResponse {
 
   prepareBoundaryInitial(id: string, initial: PayloadModel): void {
     const revision = this.currentDecodeRevision;
+    const previous = this.initialBoundaries.get(id);
     this.initialBoundaries.set(id, { model: initial, revision });
     if (this.currentBoundaryEntry(id)?.model !== initial) return;
+    if (
+      previous?.model === initial &&
+      previous.revision === revision &&
+      this.decodedBoundaries.has(id)
+    ) {
+      return;
+    }
+
     const decoded = this.decodeModelAtRevision(initial, revision) as FigNode;
     this.decodedBoundaries.set(id, decoded);
   }
@@ -1501,6 +1523,16 @@ function serializeElement(
 
   if (isActivity(type)) {
     return serializeNode(element.props.children, frame);
+  }
+
+  if (isViewTransition(type)) {
+    return serializeElementModel(
+      element,
+      { $fig: "view-transition" },
+      frame,
+      preserveIdentity,
+      childrenTreeProps,
+    );
   }
 
   if (typeof type === "function") {
@@ -2829,6 +2861,7 @@ function isPayloadSpecialModel(
     case "suspense":
     case "symbol":
     case "undefined":
+    case "view-transition":
       return true;
     default:
       return false;
@@ -2969,6 +3002,8 @@ function decodeSpecialModel(
       return response.getChunk(model.id).promise;
     case "suspense":
       return Suspense;
+    case "view-transition":
+      return ViewTransition;
   }
 }
 

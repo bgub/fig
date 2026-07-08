@@ -44,6 +44,8 @@ Questions → Provisional Stance).
   inline runtime ops.
 - [activity.md](./activity.md) — visibility model, offscreen scheduling,
   hidden-template SSR and hydration.
+- [view-transitions.md](./view-transitions.md) — `ViewTransition`, commit
+  transactions, streamed reveal annotations.
 - [hydration.md](./hydration.md) — selective hydration, event replay,
   mismatch policy, the hydration-environment exploration.
 - [payload.md](./payload.md) — the server-component wire format, client

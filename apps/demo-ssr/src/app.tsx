@@ -6,8 +6,9 @@ import {
   Suspense,
   useState,
   useTransition,
+  ViewTransition,
 } from "@bgub/fig";
-import { on } from "@bgub/fig-dom";
+import { flushSync, on } from "@bgub/fig-dom";
 import {
   dataResource,
   readData,
@@ -163,42 +164,78 @@ export function App({
             <ServerOnlyInfoPanel resource={serverOnlyInfoResource} />
             <Suspense
               fallback={
-                <Panel
-                  class="suspense-panel"
-                  description="Pending fallback for 5 seconds."
-                  tag="pending"
-                  title="Suspense"
-                  tone="warn"
-                />
+                <ViewTransition
+                  default="ssr-stream-vt"
+                  name="ssr-suspense"
+                  share="ssr-stream-vt"
+                >
+                  <Panel
+                    class="suspense-panel"
+                    description="Pending fallback for 5 seconds."
+                    tag="pending"
+                    title="Suspense"
+                    tone="warn"
+                  />
+                </ViewTransition>
               }
             >
-              <SuspenseContent resource={request.resources.suspense} />
+              <ViewTransition
+                default="ssr-stream-vt"
+                name="ssr-suspense"
+                share="ssr-stream-vt"
+              >
+                <SuspenseContent resource={request.resources.suspense} />
+              </ViewTransition>
             </Suspense>
             <Suspense
               fallback={
-                <Panel
-                  class="error-panel"
-                  description="Server render failed; waiting for client recovery."
-                  tag="error"
-                  title="Error recovery"
-                  tone="danger"
-                />
+                <ViewTransition
+                  default="ssr-stream-vt"
+                  name="ssr-error-recovery"
+                  share="ssr-stream-vt"
+                >
+                  <Panel
+                    class="error-panel"
+                    description="Server render failed; waiting for client recovery."
+                    tag="error"
+                    title="Error recovery"
+                    tone="danger"
+                  />
+                </ViewTransition>
               }
             >
-              <ErrorRecoveryContent resource={request.resources.broken} />
+              <ViewTransition
+                default="ssr-stream-vt"
+                name="ssr-error-recovery"
+                share="ssr-stream-vt"
+              >
+                <ErrorRecoveryContent resource={request.resources.broken} />
+              </ViewTransition>
             </Suspense>
             <Suspense
               fallback={
-                <Panel
-                  class="lazy-panel"
-                  description="Loading an async component module."
-                  tag="lazy"
-                  title="Lazy component"
-                  tone="warn"
-                />
+                <ViewTransition
+                  default="ssr-stream-vt"
+                  name="ssr-lazy-panel"
+                  share="ssr-stream-vt"
+                >
+                  <Panel
+                    class="lazy-panel"
+                    description="Loading an async component module."
+                    tag="lazy"
+                    title="Lazy component"
+                    tone="warn"
+                  />
+                </ViewTransition>
               }
             >
-              <LazyStreamPanel />
+              <ViewTransition
+                default="ssr-stream-vt"
+                name="ssr-lazy-panel"
+                share="ssr-stream-vt"
+              >
+                <LazyStreamPanel />
+              </ViewTransition>
             </Suspense>
             <ClientTransitionPanel />
             <HiddenActivityPanel
@@ -438,40 +475,42 @@ function ClientTransitionPanel() {
   );
 
   return (
-    <Panel
-      class="transition-panel"
-      description={
-        <Suspense fallback="Loading transition content...">
-          <TransitionMessage message={message} />
-        </Suspense>
-      }
-      tag={isPending ? "pending" : "idle"}
-      title="Client transition"
-      tone={isPending ? "warn" : "ok"}
-    >
-      <div class="panel-actions">
-        <button
-          class="button primary"
-          data-demo-control="transition"
-          events={[
-            on("click", () => {
-              startTransition(async () => {
-                await delay(undefined, 250);
-                setMessage(
-                  delay(
-                    `Transition committed at ${new Date().toLocaleTimeString()}.`,
-                    1200,
-                  ),
-                );
-              });
-            }),
-          ]}
-          type="button"
-        >
-          {isPending ? "Transition pending" : "Start transition"}
-        </button>
-      </div>
-    </Panel>
+    <ViewTransition name="ssr-client-transition" update="ssr-client-vt">
+      <Panel
+        class="transition-panel"
+        description={
+          <Suspense fallback="Loading transition content...">
+            <TransitionMessage message={message} />
+          </Suspense>
+        }
+        tag={isPending ? "pending" : "idle"}
+        title="Client transition"
+        tone={isPending ? "warn" : "ok"}
+      >
+        <div class="panel-actions">
+          <button
+            class="button primary"
+            data-demo-control="transition"
+            events={[
+              on("click", () => {
+                startTransition(async () => {
+                  await delay(undefined, 250);
+                  setMessage(
+                    delay(
+                      `Transition committed at ${new Date().toLocaleTimeString()}.`,
+                      1200,
+                    ),
+                  );
+                });
+              }),
+            ]}
+            type="button"
+          >
+            {isPending ? "Transition pending" : "Start transition"}
+          </button>
+        </div>
+      </Panel>
+    </ViewTransition>
   );
 }
 
@@ -506,7 +545,7 @@ function HiddenActivityPanel({
         <button
           class="button primary"
           data-demo-control="reveal-hidden"
-          events={[on("click", () => setRevealed(true))]}
+          events={[on("click", () => flushSync(() => setRevealed(true)))]}
           type="button"
         >
           {revealed ? "Hidden activity revealed" : "Reveal hidden activity"}
@@ -514,14 +553,42 @@ function HiddenActivityPanel({
       </div>
       <Activity mode={revealed ? "visible" : "hidden"}>
         <Suspense
-          fallback={<p data-hidden-fallback="">Hidden activity fallback.</p>}
+          fallback={
+            <ViewTransition
+              default="ssr-stream-vt"
+              name="ssr-hidden-activity"
+              share="ssr-stream-vt"
+            >
+              <p data-hidden-fallback="">Hidden activity fallback.</p>
+            </ViewTransition>
+          }
         >
-          <HiddenActivityContent resource={resource} />
+          <ViewTransition
+            default="ssr-stream-vt"
+            name="ssr-hidden-activity"
+            share="ssr-stream-vt"
+          >
+            <HiddenActivityContent resource={resource} />
+          </ViewTransition>
         </Suspense>
         <Suspense
-          fallback={<p data-hidden-error-fallback="">Hidden error fallback.</p>}
+          fallback={
+            <ViewTransition
+              default="ssr-stream-vt"
+              name="ssr-hidden-error"
+              share="ssr-stream-vt"
+            >
+              <p data-hidden-error-fallback="">Hidden error fallback.</p>
+            </ViewTransition>
+          }
         >
-          <HiddenErrorContent resource={errorResource} />
+          <ViewTransition
+            default="ssr-stream-vt"
+            name="ssr-hidden-error"
+            share="ssr-stream-vt"
+          >
+            <HiddenErrorContent resource={errorResource} />
+          </ViewTransition>
         </Suspense>
       </Activity>
     </Panel>

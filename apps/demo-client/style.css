@@ -521,6 +521,94 @@ button.button {
   font-size: 13px;
 }
 
+.vt-board {
+  display: grid;
+  gap: 8px;
+}
+
+.vt-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 66px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 10px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.vt-card.selected {
+  border-color: var(--accent);
+  background: #e6f5f1;
+}
+
+.vt-card strong,
+.vt-detail-body strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.vt-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.vt-board.compact .vt-card {
+  min-height: 46px;
+  padding: 7px 9px;
+}
+
+.vt-detail {
+  min-height: 220px;
+  align-content: start;
+}
+
+.vt-detail-body {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfc;
+  padding: 14px;
+}
+
+::view-transition-group(client-vt-render),
+::view-transition-group(client-vt-stream),
+::view-transition-group(client-vt-hydrate),
+::view-transition-group(client-vt-detail) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(client-vt-detail) {
+  animation: fig-demo-vt-fade-out 150ms ease both;
+}
+
+::view-transition-new(client-vt-detail) {
+  animation: fig-demo-vt-fade-in 220ms ease both;
+}
+
+@keyframes fig-demo-vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes fig-demo-vt-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 .hydration-output h4 {
   margin: 0 0 6px;
   font-size: 13px;

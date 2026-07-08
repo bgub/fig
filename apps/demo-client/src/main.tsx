@@ -7,11 +7,13 @@ import {
   readContext,
   readPromise,
   Suspense,
+  transition,
   useBeforePaint,
   useDeferredValue,
   useReactive,
   useState,
   useTransition,
+  ViewTransition,
 } from "@bgub/fig";
 import {
   type Bind,
@@ -43,6 +45,7 @@ type Page =
   | "effects"
   | "async"
   | "resources"
+  | "view-transitions"
   | "hydration"
   | "benchmarks";
 
@@ -99,6 +102,11 @@ const pages: Array<{ id: Page; label: string; shortLabel: string }> = [
   { id: "effects", label: "Effects + bind", shortLabel: "Effects" },
   { id: "async", label: "Async event signals", shortLabel: "Async" },
   { id: "resources", label: "Context + lazy", shortLabel: "Lazy" },
+  {
+    id: "view-transitions",
+    label: "View transitions",
+    shortLabel: "Views",
+  },
   { id: "hydration", label: "Hydration", shortLabel: "Hydration" },
   { id: "benchmarks", label: "Benchmarks", shortLabel: "Benchmarks" },
 ];
@@ -150,6 +158,36 @@ const profileResource = dataResource<[string], Profile>({
 });
 
 const profileHandles = Object.keys(profiles);
+
+const viewTransitionCards = [
+  {
+    id: "render",
+    label: "Render queue",
+    metric: "18ms",
+    status: "Transition lane",
+  },
+  {
+    id: "stream",
+    label: "Stream reveal",
+    metric: "5s",
+    status: "Suspense boundary",
+  },
+  {
+    id: "hydrate",
+    label: "Hydration claim",
+    metric: "0 errors",
+    status: "DOM reuse",
+  },
+] as const;
+
+function nextViewTransitionCardId(current: string): string {
+  const index = viewTransitionCards.findIndex((card) => card.id === current);
+  const next =
+    viewTransitionCards[
+      ((index === -1 ? 0 : index) + 1) % viewTransitionCards.length
+    ];
+  return next.id;
+}
 
 type HydrationWrapper = "section" | "article";
 type ReplaySuspenseMarker = Comment & { __figRetry?: () => void };
@@ -294,6 +332,8 @@ function pageView(page: Page) {
       return <AsyncPage />;
     case "resources":
       return <ResourcesPage />;
+    case "view-transitions":
+      return <ViewTransitionsPage />;
     case "hydration":
       return <HydrationPage />;
     case "benchmarks":
@@ -725,6 +765,105 @@ function LazyFeatureFallback() {
         <span>Suspense is showing this fallback.</span>
       </div>
     </section>
+  );
+}
+
+function ViewTransitionsPage() {
+  const [targetId, setTargetId] = useState("render");
+  const [compact, setCompact] = useState(false);
+  const selectedId = targetId;
+  const selectedIndex = viewTransitionCards.findIndex(
+    (card) => card.id === selectedId,
+  );
+  const selected =
+    viewTransitionCards[selectedIndex === -1 ? 0 : selectedIndex] ??
+    viewTransitionCards[0];
+  const orderedCards = [
+    ...viewTransitionCards.slice(selectedIndex === -1 ? 0 : selectedIndex),
+    ...viewTransitionCards.slice(0, selectedIndex === -1 ? 0 : selectedIndex),
+  ];
+
+  const selectCard = (id: string) => {
+    transition(() => setTargetId(id));
+  };
+
+  const cycle = () => {
+    transition(() => setTargetId(nextViewTransitionCardId));
+  };
+
+  return (
+    <PageFrame
+      title="View transitions"
+      lede="Annotated surfaces receive temporary names during transition commits."
+    >
+      <div class="columns">
+        <section class="card">
+          <div class="card-header">
+            <h3>Shared surfaces</h3>
+            <p class="hint">
+              Reordering these keyed surfaces runs through the native browser
+              View Transitions API when the browser supports it.
+            </p>
+          </div>
+          <Row>
+            <Command primary run={cycle}>
+              Cycle selection
+            </Command>
+            <Command run={() => setCompact((value) => !value)}>
+              Toggle density
+            </Command>
+            <span class="tag ok">transition commit</span>
+          </Row>
+          <div class={compact ? "vt-board compact" : "vt-board"}>
+            {orderedCards.map((card) => (
+              <ViewTransition
+                default="fig-demo-vt"
+                key={card.id}
+                name={`client-vt-${card.id}`}
+                share="fig-demo-vt"
+                update="fig-demo-vt"
+              >
+                <button
+                  class={
+                    card.id === selected.id ? "vt-card selected" : "vt-card"
+                  }
+                  events={[on("click", () => selectCard(card.id))]}
+                  type="button"
+                >
+                  <span>
+                    <strong>{card.label}</strong>
+                    <small>{card.status}</small>
+                  </span>
+                  <span class="metric">{card.metric}</span>
+                </button>
+              </ViewTransition>
+            ))}
+          </div>
+        </section>
+
+        <ViewTransition
+          default="fig-demo-vt-detail"
+          name="client-vt-detail"
+          share="fig-demo-vt-detail"
+          update="fig-demo-vt-detail"
+        >
+          <section class="card vt-detail">
+            <div class="card-header">
+              <h3>Selected surface</h3>
+              <p class="hint">
+                This detail panel keeps one stable name while its content
+                changes inside transition work.
+              </p>
+            </div>
+            <div class="vt-detail-body">
+              <span class="tag ok">{selected.status}</span>
+              <strong>{selected.label}</strong>
+              <span class="metric">{selected.metric}</span>
+            </div>
+          </section>
+        </ViewTransition>
+      </div>
+    </PageFrame>
   );
 }
 
