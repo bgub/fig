@@ -177,6 +177,25 @@ export interface DehydratedSuspenseBoundary<
 
 export type ViewTransitionCommitResult = false | "committed" | "deferred";
 
+export interface ViewTransitionSurfaceMeasurement {
+  // Width/height changes of statically positioned surfaces relayout their
+  // parent (React's AffectedParentLayout); absolutely positioned ones don't.
+  absolutelyPositioned: boolean;
+  height: number;
+  inViewport: boolean;
+  width: number;
+  x: number;
+  y: number;
+}
+
+// Computed inside the host's update callback, after mutations and new-side
+// measurement: which already-captured groups turned out not to move (hide
+// them at ready) and whether the whole-page snapshot can be dropped.
+export interface ViewTransitionMutationResult {
+  canceledNames: string[];
+  cancelRootSnapshot: boolean;
+}
+
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
     type: string,
@@ -295,9 +314,8 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitViewTransition?(
     container: Container,
     prepareSnapshot: () => void,
-    mutate: () => void,
+    mutate: () => ViewTransitionMutationResult,
     cleanup: () => void,
-    cancelRootSnapshot?: boolean,
   ): ViewTransitionCommitResult;
   applyViewTransitionName?(
     instance: Instance,
@@ -305,6 +323,9 @@ export interface HostConfig<Container, Instance, TextInstance> {
     className: string | null,
   ): void;
   restoreViewTransitionName?(instance: Instance, props: Props): void;
+  measureViewTransitionSurface?(
+    instance: Instance,
+  ): ViewTransitionSurfaceMeasurement | null;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -731,12 +752,23 @@ interface ViewTransitionState {
   autoName: string | null;
 }
 
+type ViewTransitionPhase = "enter" | "exit" | "share" | "update";
+
 interface ViewTransitionSurface<Instance> {
   boundary: object;
   className: string | null;
   instance: Instance;
+  // Old-side geometry, captured while applying names before the old
+  // snapshot; the post-mutation pass compares against fresh measurements.
+  measurement: ViewTransitionSurfaceMeasurement | null;
+  // Content-driven updates and share pairs animate regardless of geometry;
+  // layout-driven updates and moves let measurement decide.
+  mustAnimate: boolean;
   name: string;
+  phase: ViewTransitionPhase;
   props: Props;
+  // Gated out (viewport, unchanged geometry): no name applied on this side.
+  skipped: boolean;
 }
 
 interface ViewTransitionPlan<Instance> {
@@ -857,7 +889,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       | "applyViewTransitionName"
       | "restoreViewTransitionName"
     >
-  >;
+  > &
+    // Measurement stays optional: hosts without it keep every candidate
+    // surface (no cancellation) instead of losing view transitions entirely.
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      "measureViewTransitionSurface"
+    >;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -3534,6 +3572,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       finishedWork.child,
       false,
       false,
+      false,
       plan,
       exitsByName,
     );
@@ -3646,6 +3685,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     node: F | null,
     placed: boolean,
     insideBoundary: boolean,
+    // A fiber whose own props or child list changed re-lays-out its
+    // descendants, so boundaries below it may move without any mutation of
+    // their own (a container's gap/class change is the classic case). React
+    // measures such "nested" boundaries and cancels the still ones; without
+    // measurement Fig collects them as updates and lets identical-geometry
+    // morphs be visual no-ops. Sibling-insertion shifts are still missed:
+    // placement flags live on the inserted fiber, not its parent.
+    ancestorLayoutChanged: boolean,
     plan: ViewTransitionPlan<Instance>,
     exitsByName: Map<string, F>,
   ): void {
@@ -3686,11 +3733,10 @@ export function createRenderer<Container, Instance, TextInstance>(
           ) {
             continue;
           }
-          // Entering and moving boundaries change layout at their slot; only
-          // pure in-place updates leave the rest of the page untouched.
-          if (!insideBoundary) plan.rootAffected = true;
           const pairedExit = exitsByName.get(viewTransitionName(cursor));
           if (pairedExit !== undefined) {
+            // A pair vacates one slot and fills another: both relayout.
+            if (!insideBoundary) plan.rootAffected = true;
             removeViewTransitionSurfaces(plan.oldSurfaces, pairedExit);
             collectViewTransitionSurfaces(
               pairedExit,
@@ -3708,20 +3754,27 @@ export function createRenderer<Container, Instance, TextInstance>(
           } else if (cursor.alternate !== null) {
             // A moved boundary keeps its identity: naming both the committed
             // and finished instances lets the browser morph position instead
-            // of treating the move as an enter-only cross-fade.
+            // of treating the move as an enter-only cross-fade. Measurement
+            // decides whether it actually moved, and reorder companions are
+            // themselves flagged, so the root snapshot is not forced here.
             collectViewTransitionSurfaces(
               cursor.alternate,
               "update",
               plan.oldSurfaces,
               "committed",
+              false,
             );
             collectViewTransitionSurfaces(
               cursor,
               "update",
               plan.newSurfaces,
               "finished",
+              false,
             );
           } else {
+            // An insertion changes the sibling count at its slot: the
+            // surrounding layout shifts, so the root cross-fade must stay.
+            if (!insideBoundary) plan.rootAffected = true;
             collectViewTransitionSurfaces(
               cursor,
               "enter",
@@ -3736,28 +3789,33 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
 
         // The innermost boundary owns an update: this boundary only animates
-        // when something changed outside its nested boundaries, and the walk
-        // always descends so nested boundaries classify their own changes
-        // (an outer update="none" must not disable them).
+        // when something changed outside its nested boundaries (or an
+        // ancestor's layout change moved it), and the walk always descends
+        // so nested boundaries classify their own changes (an outer
+        // update="none" must not disable them).
         const current = cursor.alternate;
-        if (current !== null && viewTransitionChangedOutsideNested(cursor)) {
+        const contentChanged = viewTransitionChangedOutsideNested(cursor);
+        if (current !== null && (contentChanged || ancestorLayoutChanged)) {
           collectViewTransitionSurfaces(
             current,
             "update",
             plan.oldSurfaces,
             "committed",
+            contentChanged,
           );
           collectViewTransitionSurfaces(
             cursor,
             "update",
             plan.newSurfaces,
             "finished",
+            contentChanged,
           );
         }
         collectFinishedViewTransitions(
           cursor.child,
           cursorPlaced,
           true,
+          contentChanged || ancestorLayoutChanged,
           plan,
           exitsByName,
         );
@@ -3777,6 +3835,8 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursor.child,
           cursorPlaced,
           insideBoundary,
+          ancestorLayoutChanged ||
+            (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
           plan,
           exitsByName,
         );
@@ -3859,9 +3919,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function collectViewTransitionSurfaces(
     boundary: F,
-    phase: "enter" | "exit" | "share" | "update",
+    phase: ViewTransitionPhase,
     surfaces: ViewTransitionSurface<Instance>[],
     propsSource: "committed" | "finished",
+    mustAnimate = true,
   ): void {
     const className = viewTransitionClass(boundary.props, phase);
     if (className === "none") return;
@@ -3879,8 +3940,12 @@ export function createRenderer<Container, Instance, TextInstance>(
               boundary,
               className,
               instance: cursor.stateNode as Instance,
+              measurement: null,
+              mustAnimate,
               name: index === 0 ? name : `${name}_${index}`,
+              phase,
               props: viewTransitionSurfaceProps(cursor, propsSource),
+              skipped: false,
             });
             index += 1;
           }
@@ -3931,19 +3996,135 @@ export function createRenderer<Container, Instance, TextInstance>(
     return className;
   }
 
-  function applyViewTransitionSurfaces(
-    surfaces: ViewTransitionSurface<Instance>[],
+  // The prepare pass, before the browser captures the old state: measure and
+  // name the old-side surfaces. Exits gate on the old viewport alone — the
+  // element is leaving, so offscreen exits never participate (React reverts
+  // these the same way before its old capture).
+  function applyOldViewTransitionSurfaces(
+    plan: ViewTransitionPlan<Instance>,
   ): void {
     const viewTransitionHost = optionalViewTransitionHostConfig();
     if (viewTransitionHost === null) return;
+    const measure = viewTransitionHost.measureViewTransitionSurface;
 
-    for (const surface of surfaces) {
+    for (const surface of plan.oldSurfaces) {
+      surface.measurement = measure?.(surface.instance) ?? null;
+      if (
+        surface.phase === "exit" &&
+        surface.measurement !== null &&
+        !surface.measurement.inViewport
+      ) {
+        surface.skipped = true;
+        continue;
+      }
       viewTransitionHost.applyViewTransitionName(
         surface.instance,
         surface.name,
         surface.className,
       );
     }
+  }
+
+  // The resolve pass, inside the update callback after mutations landed and
+  // before the browser captures the new state. Fresh measurements decide who
+  // really animates, mirroring React's after-mutation pass:
+  // - enters gate on the new viewport;
+  // - layout-driven updates whose geometry did not change are canceled (the
+  //   new name is withheld and the already-captured old group is hidden at
+  //   ready), while content-driven updates and share pairs always animate;
+  // - a resize of a statically positioned surface relayouts its parent, and
+  //   a shrunken surface list relayouts its slot, so either keeps the root
+  //   snapshot alive.
+  function resolveViewTransitionPlan(
+    plan: ViewTransitionPlan<Instance> | null,
+  ): ViewTransitionMutationResult {
+    const result: ViewTransitionMutationResult = {
+      canceledNames: [],
+      cancelRootSnapshot: false,
+    };
+    const viewTransitionHost = optionalViewTransitionHostConfig();
+    if (viewTransitionHost === null || plan === null) return result;
+    const measure = viewTransitionHost.measureViewTransitionSurface;
+
+    const oldByName = new Map<string, ViewTransitionSurface<Instance>>();
+    for (const surface of plan.oldSurfaces) {
+      if (!surface.skipped) oldByName.set(surface.name, surface);
+    }
+
+    let rootAffected = plan.rootAffected;
+    const newNames = new Set<string>();
+
+    for (const surface of plan.newSurfaces) {
+      newNames.add(surface.name);
+      const measurement = measure?.(surface.instance) ?? null;
+
+      if (surface.phase === "enter") {
+        if (measurement !== null && !measurement.inViewport) {
+          surface.skipped = true;
+          continue;
+        }
+        applyViewTransitionSurface(viewTransitionHost, surface);
+        continue;
+      }
+
+      if (surface.phase === "update") {
+        const before = oldByName.get(surface.name)?.measurement ?? null;
+        if (before !== null && measurement !== null) {
+          const moved =
+            before.x !== measurement.x ||
+            before.y !== measurement.y ||
+            before.width !== measurement.width ||
+            before.height !== measurement.height;
+          const offscreen = !before.inViewport && !measurement.inViewport;
+
+          if (offscreen || (!surface.mustAnimate && !moved)) {
+            // The prepare pass already named this instance (update surfaces
+            // share it between sides); take the name back off so the new
+            // capture skips it, and hide the old capture at ready.
+            surface.skipped = true;
+            viewTransitionHost.restoreViewTransitionName(
+              surface.instance,
+              surface.props,
+            );
+            if (oldByName.has(surface.name)) {
+              result.canceledNames.push(surface.name);
+            }
+            continue;
+          }
+          if (
+            (before.width !== measurement.width ||
+              before.height !== measurement.height) &&
+            !measurement.absolutelyPositioned
+          ) {
+            rootAffected = true;
+          }
+        }
+      }
+
+      applyViewTransitionSurface(viewTransitionHost, surface);
+    }
+
+    // Update names with no new counterpart mean the surface list shrank:
+    // that slot relayouts, and the dangling old capture exits.
+    for (const [name, surface] of oldByName) {
+      if (surface.phase === "update" && !newNames.has(name)) {
+        rootAffected = true;
+      }
+    }
+
+    result.cancelRootSnapshot = !rootAffected;
+    return result;
+  }
+
+  function applyViewTransitionSurface(
+    viewTransitionHost: RequiredViewTransitionHostConfig,
+    surface: ViewTransitionSurface<Instance>,
+  ): void {
+    viewTransitionHost.applyViewTransitionName(
+      surface.instance,
+      surface.name,
+      surface.className,
+    );
   }
 
   function restoreViewTransitionSurfaces(
@@ -4048,13 +4229,14 @@ export function createRenderer<Container, Instance, TextInstance>(
         commitHostChanges();
         completeCommit();
       };
-      const commitWithViewTransition = () => {
+      const commitWithViewTransition = (): ViewTransitionMutationResult => {
         const isDeferredCommit = root.pendingViewTransitionCommit;
         if (isDeferredCommit) commitDepth += 1;
         try {
           commitHostChanges();
-          applyViewTransitionSurfaces(viewTransitionPlan?.newSurfaces ?? []);
+          const resolution = resolveViewTransitionPlan(viewTransitionPlan);
           completeCommit();
+          return resolution;
         } catch (error) {
           // A deferred commit runs inside the browser's startViewTransition
           // update callback, outside any performRoot frame. Rethrowing there
@@ -4072,6 +4254,7 @@ export function createRenderer<Container, Instance, TextInstance>(
               throw error;
             });
           }
+          return { canceledNames: [], cancelRootSnapshot: false };
         } finally {
           if (isDeferredCommit) {
             root.pendingViewTransitionCommit = false;
@@ -4085,10 +4268,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (viewTransitionPlan !== null && viewTransitionHost !== null) {
         const viewTransitionResult = viewTransitionHost.commitViewTransition(
           root.container,
-          () => applyViewTransitionSurfaces(viewTransitionPlan.oldSurfaces),
+          () => applyOldViewTransitionSurfaces(viewTransitionPlan),
           commitWithViewTransition,
           () => restoreViewTransitionSurfaces(viewTransitionPlan),
-          !viewTransitionPlan.rootAffected,
         );
 
         if (viewTransitionResult === "deferred") {

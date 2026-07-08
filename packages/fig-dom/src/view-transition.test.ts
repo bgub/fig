@@ -21,6 +21,31 @@ interface MockViewTransitionDocument {
   };
 }
 
+// happy-dom has no layout: getBoundingClientRect returns zeros, so the
+// measurement pass would cancel every move. Give elements document-order
+// positions (recomputed per call) so reorders read as real moves.
+function stubDomOrderRects(container: HTMLElement, selector: string): void {
+  for (const element of Array.from(
+    container.querySelectorAll<HTMLElement>(selector),
+  )) {
+    element.getBoundingClientRect = () => {
+      const ordered = Array.from(container.querySelectorAll(selector));
+      const y = ordered.indexOf(element) * 100;
+      return {
+        bottom: y + 50,
+        height: 50,
+        left: 0,
+        right: 100,
+        top: y,
+        width: 100,
+        x: 0,
+        y,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+  }
+}
+
 describe("ViewTransition", () => {
   it("wraps transition commits and restores temporary names", async () => {
     const container = document.createElement("div");
@@ -239,9 +264,11 @@ describe("ViewTransition", () => {
 
       // enter="none" must not opt out of share pairing: a mount matching an
       // exiting explicit name goes through the share phase on both sides.
+      // The solo sibling is optimistically named in the old capture (the
+      // swap may shift it) and canceled by measurement before the new one.
       await act(() => transition(() => setStep?.("paired")));
       expect(starts).toEqual([
-        ["hero-old:hero:hero-share"],
+        ["hero-old:hero:hero-share", "solo:solo-card:"],
         ["hero-new:hero:hero-share"],
       ]);
       expect(container.textContent).toBe("HeroSolo");
@@ -351,6 +378,291 @@ describe("ViewTransition", () => {
       // The inner boundary owns the change; the outer one stays silent both
       // because update is "none" and because nothing changed outside inner.
       expect(snapshots).toEqual(["", "inner", "inner-update"]);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("updates boundaries whose ancestor layout changed around them", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const snapshots: string[] = [];
+    let setDense: StateSetter<boolean> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const card = container.querySelector("#card") as HTMLElement;
+      snapshots.push(card.style.viewTransitionName || "");
+      update();
+      snapshots.push(card.style.viewTransitionName || "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [dense, set] = useState(false);
+      setDense = set;
+      // The card's own subtree never changes; only the container's class
+      // does. The layout change moves the card, so it must still be named
+      // in both captures (an update morph), like React's nested-boundary
+      // measurement pass.
+      return createElement(
+        "main",
+        { class: dense ? "gap-2" : "gap-3" },
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("section", { id: "card" }, "Card"),
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      // Layout follows the container's gap class: the card sits higher when
+      // dense. Measurement must see the ancestor-driven move.
+      const card = container.querySelector("#card") as HTMLElement;
+      const main = container.querySelector("main") as HTMLElement;
+      card.getBoundingClientRect = () => {
+        const y = main.className === "gap-2" ? 8 : 12;
+        return {
+          bottom: y + 50,
+          height: 50,
+          left: 0,
+          right: 100,
+          top: y,
+          width: 100,
+          x: 0,
+          y,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+      await act(() => transition(() => setDense?.(true)));
+
+      expect(snapshots).toEqual(["card", "card"]);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("hides canceled groups at ready and keeps moved ones", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const snapshots: string[][] = [];
+    const pseudoAnimations: string[] = [];
+    let setShifted: StateSetter<boolean> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+    const documentElement = document.documentElement as HTMLElement & {
+      animate?: unknown;
+    };
+    const previousAnimate = documentElement.animate;
+
+    documentElement.animate = ((
+      _keyframes: unknown,
+      options: { pseudoElement?: string },
+    ) => {
+      pseudoAnimations.push(options.pseudoElement ?? "");
+    }) as typeof documentElement.animate;
+
+    const namedSurfaces = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>("section"))
+        .filter((element) => Boolean(element.style.viewTransitionName))
+        .map((element) => element.id)
+        .sort();
+
+    ownerDocument.startViewTransition = (update) => {
+      const before = namedSurfaces();
+      update();
+      snapshots.push(before, namedSurfaces());
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [shifted, set] = useState(false);
+      setShifted = set;
+      return createElement(
+        "main",
+        { class: shifted ? "shifted" : "" },
+        createElement(
+          ViewTransition,
+          { name: "mover" },
+          createElement("section", { id: "mover" }, "Mover"),
+        ),
+        createElement(
+          ViewTransition,
+          { name: "still" },
+          createElement("section", { id: "still" }, "Still"),
+        ),
+      );
+    }
+
+    const rectAt = (y: number): DOMRect =>
+      ({
+        bottom: y + 50,
+        height: 50,
+        left: 0,
+        right: 100,
+        top: y,
+        width: 100,
+        x: 0,
+        y,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      const main = container.querySelector("main") as HTMLElement;
+      const mover = container.querySelector("#mover") as HTMLElement;
+      const still = container.querySelector("#still") as HTMLElement;
+      mover.getBoundingClientRect = () =>
+        rectAt(main.className === "shifted" ? 100 : 0);
+      still.getBoundingClientRect = () => rectAt(200);
+
+      await act(() => transition(() => setShifted?.(true)));
+
+      // Both were optimistically named in the old capture; only the mover
+      // survived measurement into the new one.
+      expect(snapshots).toEqual([["mover", "still"], ["mover"]]);
+      await Promise.resolve();
+      // The still boundary's already-captured old group is hidden at ready
+      // (its old snapshot cannot be un-captured). The root snapshot stays:
+      // the class change on <main> is a mutation outside any boundary.
+      expect(pseudoAnimations).toEqual(["::view-transition-group(still)"]);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      documentElement.animate = previousAnimate;
+      container.remove();
+    }
+  });
+
+  it("skips enters outside the viewport", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const snapshots: string[] = [];
+    let setShowCard: StateSetter<boolean> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      const card = container.querySelector("#card") as HTMLElement;
+      snapshots.push(card.style.viewTransitionName || "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    // The entering instance only exists mid-mutation, so its measurement
+    // stub must sit on the prototype to be visible when the reconciler
+    // measures it inside the update callback.
+    const elementPrototype = Element.prototype as {
+      getBoundingClientRect: () => DOMRect;
+    };
+    const originalGetRect = elementPrototype.getBoundingClientRect;
+    elementPrototype.getBoundingClientRect = function (this: Element) {
+      if ((this as HTMLElement).id !== "card") {
+        return originalGetRect.call(this);
+      }
+      return {
+        bottom: 5050,
+        height: 50,
+        left: 0,
+        right: 100,
+        top: 5000,
+        width: 100,
+        x: 0,
+        y: 5000,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    function App() {
+      const [showCard, set] = useState(false);
+      setShowCard = set;
+      return createElement(
+        "main",
+        null,
+        createElement("p", null, showCard ? "with card" : "without card"),
+        showCard
+          ? createElement(
+              ViewTransition,
+              { enter: "reveal", name: "card" },
+              createElement("section", { id: "card" }, "Card"),
+            )
+          : null,
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setShowCard?.(true)));
+
+      // The transition ran (outside content changed too), but the offscreen
+      // enter never received a name.
+      expect(snapshots).toEqual([""]);
+      expect(container.textContent).toBe("with cardCard");
+    } finally {
+      elementPrototype.getBoundingClientRect = originalGetRect;
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("keeps the root snapshot when a contained update resizes its surface", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const rootNames: string[] = [];
+    let setTall: StateSetter<boolean> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+    const documentElement = document.documentElement as HTMLElement;
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      rootNames.push(documentElement.style.viewTransitionName || "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [tall, set] = useState(false);
+      setTall = set;
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", { id: "card" }, tall ? "Tall" : "Short"),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      const card = container.querySelector("#card") as HTMLElement;
+      card.getBoundingClientRect = () => {
+        const height = card.textContent === "Tall" ? 100 : 50;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+      await act(() => transition(() => setTall?.(true)));
+
+      // The change is contained, but the boundary grew: statically
+      // positioned surfaces relayout their parent, so unannotated siblings
+      // shift and the root cross-fade must stay (React's
+      // AffectedParentLayout).
+      expect(rootNames).toEqual([""]);
     } finally {
       ownerDocument.startViewTransition = previousStart;
       container.remove();
@@ -771,8 +1083,13 @@ describe("ViewTransition", () => {
       const gone = container.querySelector("#gone") as HTMLElement;
       const stays = container.querySelector("#stays") as HTMLElement;
       snapshots.push(gone.style.viewTransitionName || "");
-      snapshots.push(stays.style.viewTransitionName || "");
+      snapshots.push(
+        `${stays.style.viewTransitionName || ""}:${
+          stays.style.viewTransitionClass || ""
+        }`,
+      );
       update();
+      snapshots.push(stays.style.viewTransitionName || "");
       return { finished: Promise.resolve(), ready: Promise.resolve() };
     };
 
@@ -802,9 +1119,12 @@ describe("ViewTransition", () => {
       await act(() => root.render(createElement(App, null)));
       await act(() => transition(() => setShowGone?.(false)));
 
-      // The deleted boundary exits; its kept sibling must not be dragged
-      // into the old capture through stale sibling pointers.
-      expect(snapshots).toEqual(["vt-gone", ""]);
+      // The deleted boundary exits with its own class. The kept sibling is
+      // a layout-driven update candidate (the deletion may shift it), never
+      // an exit dragged in through stale sibling pointers — and since
+      // measurement shows it did not move, its name is withdrawn before the
+      // new capture.
+      expect(snapshots).toEqual(["vt-gone", "vt-stays:", ""]);
       expect(container.textContent).toBe("Stays");
     } finally {
       ownerDocument.startViewTransition = previousStart;
@@ -854,6 +1174,7 @@ describe("ViewTransition", () => {
     try {
       const root = createRoot(container);
       await act(() => root.render(createElement(App, null)));
+      stubDomOrderRects(container, "section");
       await act(() => transition(() => setOrder?.("ba")));
 
       expect(snapshots).toHaveLength(2);
@@ -1006,6 +1327,7 @@ describe("ViewTransition", () => {
     try {
       const root = createRoot(container);
       await act(() => root.render(createElement(App, null)));
+      stubDomOrderRects(container, "section");
       await act(() => transition(() => setOrder?.("ba")));
 
       expect(snapshots).toEqual(["vt-card-a", "vt-card-b"]);

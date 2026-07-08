@@ -1,6 +1,10 @@
 import type { Props } from "@bgub/fig";
 import { VIEW_TRANSITION_PENDING_PROPERTY } from "@bgub/fig/internal";
-import type { ViewTransitionCommitResult } from "@bgub/fig-reconciler";
+import type {
+  ViewTransitionCommitResult,
+  ViewTransitionMutationResult,
+  ViewTransitionSurfaceMeasurement,
+} from "@bgub/fig-reconciler";
 import type { Container } from "./events.ts";
 
 interface RunningViewTransition {
@@ -24,9 +28,8 @@ interface CssGlobal {
 export function commitViewTransition(
   container: Container,
   prepareSnapshot: () => void,
-  mutate: () => void,
+  mutate: () => ViewTransitionMutationResult,
   cleanup: () => void,
-  cancelRootSnapshot = false,
 ): ViewTransitionCommitResult {
   const owner = ownerDocument(container) as ViewTransitionDocument;
   const start = owner.startViewTransition;
@@ -36,23 +39,25 @@ export function commitViewTransition(
   let chained = false;
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
+  let mutationResult: ViewTransitionMutationResult | null = null;
 
   const run = (): void => {
     prepareSnapshot();
     try {
       const transition = start.call(owner, () => {
         didMutate = true;
-        mutate();
-        // Before the new capture: when every change is contained in a named
-        // boundary, drop the root's own snapshot so the page-wide overlay
-        // does not swallow pointer events for the animation's duration.
-        if (cancelRootSnapshot) {
+        mutationResult = mutate();
+        // Before the new capture: when measurement shows every change is
+        // contained in a named boundary, drop the root's own snapshot so the
+        // page-wide overlay does not swallow pointer events for the
+        // animation's duration.
+        if (mutationResult.cancelRootSnapshot) {
           restoreRootName = cancelRootViewTransitionName(owner);
         }
       });
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
-        if (cancelRootSnapshot) hideCapturedRootSnapshot(owner, transition);
+        hideCanceledSnapshots(owner, transition, () => mutationResult);
       }
       const cleanupAfterSnapshot = transition?.ready ?? transition?.finished;
       const finalize = (): void => {
@@ -125,16 +130,25 @@ function cancelRootViewTransitionName(
   };
 }
 
-// The old root snapshot was captured before the update callback ran and
-// cannot be un-captured; once the pseudo tree exists (ready), hide its group
-// with a filling zero-duration animation and zero-size the ::view-transition
-// overlay so untouched regions stay interactive while named groups animate.
-// Mirrors React's cancelRootViewTransitionName.
-function hideCapturedRootSnapshot(
+// Old snapshots were captured before the update callback ran and cannot be
+// un-captured; once the pseudo tree exists (ready), hide the groups of
+// measurement-canceled boundaries — and the root group plus the
+// ::view-transition overlay when the whole-page snapshot was dropped — with
+// filling zero-duration animations so untouched regions stay interactive
+// while the remaining groups animate. Mirrors React's
+// cancelViewTransitionName / cancelRootViewTransitionName.
+function hideCanceledSnapshots(
   owner: ViewTransitionDocument,
   transition: RunningViewTransition,
+  getResult: () => ViewTransitionMutationResult | null,
 ): void {
   const hide = (): void => {
+    const result = getResult();
+    if (result === null) return;
+    if (result.canceledNames.length === 0 && !result.cancelRootSnapshot) {
+      return;
+    }
+
     const element = owner.documentElement as
       | (HTMLElement & {
           animate?: (
@@ -145,22 +159,31 @@ function hideCapturedRootSnapshot(
       | null;
     if (element === null || typeof element.animate !== "function") return;
 
-    try {
-      element.animate(
+    const hideGroup = (name: string): void => {
+      element.animate?.(
         { opacity: [0, 0], pointerEvents: ["none", "none"] },
         {
           duration: 0,
           fill: "forwards",
-          pseudoElement: "::view-transition-group(root)",
+          pseudoElement: `::view-transition-group(${name})`,
         },
       );
-      element.animate(
-        { height: [0, 0], width: [0, 0] },
-        { duration: 0, fill: "forwards", pseudoElement: "::view-transition" },
-      );
+    };
+
+    try {
+      for (const name of result.canceledNames) {
+        hideGroup(escapeViewTransitionName(name));
+      }
+      if (result.cancelRootSnapshot) {
+        hideGroup("root");
+        element.animate(
+          { height: [0, 0], width: [0, 0] },
+          { duration: 0, fill: "forwards", pseudoElement: "::view-transition" },
+        );
+      }
     } catch {
       // Pseudo-element animation is best-effort: without it the canceled
-      // root snapshot falls back to the browser's default cross-fade.
+      // snapshots fall back to the browser's default cross-fade.
     }
   };
 
@@ -182,6 +205,39 @@ function registerPendingTransition(
   const settled = transition.finished ?? transition.ready;
   if (settled === undefined) release();
   else settled.then(release, release);
+}
+
+export function measureViewTransitionSurface(
+  element: Element,
+): ViewTransitionSurfaceMeasurement | null {
+  if (typeof element.getBoundingClientRect !== "function") return null;
+
+  const rect = element.getBoundingClientRect();
+  const view = element.ownerDocument?.defaultView ?? null;
+  const inViewport =
+    view === null
+      ? true
+      : rect.bottom >= 0 &&
+        rect.right >= 0 &&
+        rect.top <= view.innerHeight &&
+        rect.left <= view.innerWidth;
+  let absolutelyPositioned = false;
+  try {
+    absolutelyPositioned =
+      view?.getComputedStyle(element).position === "absolute";
+  } catch {
+    // Detached elements or minimal test environments: assume static
+    // positioning, the conservative choice (resizes keep the root snapshot).
+  }
+
+  return {
+    absolutelyPositioned,
+    height: rect.height,
+    inViewport,
+    width: rect.width,
+    x: rect.left,
+    y: rect.top,
+  };
 }
 
 export function applyViewTransitionName(

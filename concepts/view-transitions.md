@@ -48,8 +48,9 @@ boundaries inside adopted (bailed-out, e.g. memoized-element) subtrees stay
 reachable and deleted subtrees are prunable without a full walk.
 
 During eligible commits, commit builds a surface plan from the existing
-mutation/deletion flags — no layout measurement, no viewport probing; work is
-proportional to affected annotated surfaces. Classification:
+mutation/deletion flags, then a measurement pass decides who really animates
+(React's before/after-mutation measurement, adapted to Fig's single host
+transaction). Candidate classification:
 
 - **enter** — mounted with no prior identity (`alternate === null`), unpaired.
   Hydration is excluded: a non-placed boundary whose content carries
@@ -57,9 +58,11 @@ proportional to affected annotated surfaces. Classification:
   commits that finish a dehydrated Suspense boundary — e.g. a lazy route
   module resolving after first load — land here) and must not animate. React
   reaches the same outcome by keying enter off Placement flags.
-- **update (morph)** — moved boundaries (placed with a prior identity) name
-  both the committed and finished instances, so the browser morphs position
-  instead of enter-fading. In-place content changes also classify as update.
+- **update (morph)** — in-place content changes, moved boundaries (placed
+  with a prior identity), and boundaries whose **ancestor layout changed**
+  around them (a container's own props/child list changed, so descendants
+  may have shifted — React's nested-boundary pass). Both sides carry the
+  same name so the browser morphs position.
 - **exit** — the outermost boundary of a deleted subtree. Deletion entries
   are walked as single detached subtrees (never their stale siblings).
 - **share** — an exiting explicit name matching an appearing explicit name
@@ -74,11 +77,26 @@ boundary. The **outermost** boundary owns enter/exit. Stably hidden Activity
 content is skipped (never captured by the browser); a boundary hiding this
 commit still animates its old side away.
 
-Commit sequence: the plan's old surfaces get temporary inline
-`viewTransitionName`/`viewTransitionClass` before the old snapshot, the host
-runs one view-transition transaction around the existing deletion/mutation/
-visibility work, new surfaces are named before the new snapshot, and author
-style values are restored once the transition is `ready`.
+Commit sequence and measurement: the prepare pass measures old surfaces
+(host `measureViewTransitionSurface`, `getBoundingClientRect`-based) and
+applies temporary inline names before the old snapshot — exits whose old
+geometry is outside the viewport are reverted here. The host runs one
+view-transition transaction around the existing deletion/mutation/visibility
+work. Inside the update callback, after mutations land and before the new
+capture, the resolve pass measures new surfaces and decides:
+
+- enters outside the new viewport never receive a name;
+- content-driven updates and share pairs always animate; layout-driven
+  updates (ancestor-shift and move candidates) animate only when geometry
+  actually changed — otherwise the name is taken back off the instance and
+  the already-captured old group is hidden at `ready` with a filling
+  zero-duration animation (React's `cancelViewTransitionName`);
+- a width/height change of a statically positioned surface relayouts its
+  parent, and a shrunken surface list relayouts its slot: either keeps the
+  root snapshot alive (React's `AffectedParentLayout`).
+
+Author style values are restored once the transition is `ready`. Hosts
+without a measurement hook keep every candidate (no cancellation).
 
 Dev diagnostics: reserved names (`"none"`, `""`) throw at render; two live
 boundaries resolving to one name in a commit (which makes the browser
@@ -87,15 +105,16 @@ silently skip the whole transition) warn at plan time.
 ## Root Snapshot Cancellation
 
 The plan tracks whether the commit mutates layout outside annotated
-boundaries (insertions, deletions, moves, or plain mutations not contained in
-a collected boundary). When everything is contained, the host cancels the
-page-wide snapshot: `view-transition-name: none` on the root element before
-the new capture, then at `ready` the captured old root group is hidden with a
+boundaries (insertions, pair swaps, deletions, or plain mutations not
+contained in a collected boundary), and the resolve pass adds
+measurement-driven signals (a parent-affecting resize, a shrunken surface
+list). When nothing affected the root, the host cancels the page-wide
+snapshot: `view-transition-name: none` on the root element before the new
+capture, then at `ready` the captured old root group is hidden with a
 filling zero-duration animation and `::view-transition` is zero-sized — so
 untouched regions stay interactive while named groups animate (React's
-`cancelRootViewTransitionName`). Without measurement this is conservative: a
-contained boundary that changes size will shift unannotated siblings without
-a cross-fade.
+`cancelRootViewTransitionName`). Pure moves (reorders) leave the root
+canceled: their companions are themselves flagged and morph on their own.
 
 ## Serialization
 
@@ -132,10 +151,13 @@ browser API is absent, reveals use the existing non-animated path.
 
 ## Known Gaps (vs React)
 
-- No layout measurement: any DOM mutation inside a boundary classifies as an
-  update even when nothing visually moved, and there is no viewport gating
-  (offscreen boundaries still snapshot).
 - No transition types, no `onEnter`-style events, no gesture path, no
   pseudo-element refs.
-- Reorders morph only the DOM-moved boundary; its swap partner (which did not
-  move in DOM terms) does not animate without measurement.
+- Ancestor-layout candidates come from a parent's _own_ flags: a sibling
+  insertion shifts later siblings without flagging their shared parent, so
+  boundaries shifted only by an inserted sibling are not collected
+  (placement flags live on the inserted fiber). React's measurement-only
+  nested pass has the same reach through updated parents.
+- Content-driven updates always animate, without React's keyframe
+  optimization that strips width/height animation from unchanged-size
+  groups at `ready`.

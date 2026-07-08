@@ -57,6 +57,7 @@ import {
 import {
   applyViewTransitionName,
   commitViewTransition,
+  measureViewTransitionSurface,
   restoreViewTransitionName,
 } from "./view-transition.ts";
 
@@ -277,6 +278,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   commitViewTransition,
   applyViewTransitionName,
   restoreViewTransitionName,
+  measureViewTransitionSurface,
 };
 
 const renderer: DomRenderer = createRenderer(hostConfig);
