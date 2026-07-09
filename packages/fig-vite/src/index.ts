@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { transformTemplates } from "./templates.ts";
 import { type TransformResult, transformModule } from "./transform.ts";
 
 const VIRTUAL_ID = "virtual:fig-refresh";
@@ -27,6 +28,41 @@ export interface FigVitePlugin {
     id: string,
     options?: { ssr?: boolean },
   ): Promise<TransformResult | null>;
+}
+
+export interface FigTemplatesOptions {
+  // Files to consider for the template transform. Defaults to JSX/TSX.
+  include?: RegExp;
+}
+
+// Minimal plugin shape for build+serve transforms (no apply restriction).
+export interface FigTemplatesPlugin {
+  enforce: "pre";
+  name: string;
+  transform(
+    code: string,
+    id: string,
+    options?: { ssr?: boolean },
+  ): Promise<TransformResult | null>;
+}
+
+// Experimental (bet-2 template project): compiles eligible static JSX
+// subtrees into hoisted template descriptors. Runs before JSX lowering and
+// before fig:refresh in the plugin array.
+export function figTemplates(
+  options: FigTemplatesOptions = {},
+): FigTemplatesPlugin {
+  const include = options.include ?? /\.[jt]sx$/;
+
+  return {
+    enforce: "pre",
+    name: "fig:templates",
+    async transform(code, id) {
+      const clean = id.split("?")[0] ?? id;
+      if (clean.includes("/node_modules/") || !include.test(clean)) return null;
+      return transformTemplates(code, clean);
+    },
+  };
 }
 
 export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
