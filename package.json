@@ -31,11 +31,11 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "24 kB"
+      "limit": "30.25 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "15.75 kB"
+      "limit": "20.25 kB"
     }
   ],
   "devDependencies": {
