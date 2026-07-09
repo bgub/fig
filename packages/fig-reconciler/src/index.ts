@@ -522,6 +522,10 @@ const EffectFlag = 1 << 9;
 const ContextPropagationFlag = 1 << 10;
 const StoreConsistencyFlag = 1 << 11;
 const ViewTransitionStaticFlag = 1 << 12;
+// Several paths ask whether a host fiber is hoisted during one render/commit.
+// Cache the overwhelmingly common negative result in the existing flags word
+// rather than growing every fiber object.
+const NotHoistedFlag = 1 << 13;
 type Flag = number;
 
 const MutationMask =
@@ -532,7 +536,7 @@ const HostUpdateMask = UpdateFlag | TextContentFlag;
 // view-transition change detection gets them via commit-queue attribution
 // (attributeQueuedHostUpdates) instead of subtree bits. Own-fiber flags
 // still carry them until the host-update pass commits and clears them.
-const SubtreeMaskedFlags = CommitQueuedFlag | HostUpdateMask;
+const SubtreeMaskedFlags = CommitQueuedFlag | HostUpdateMask | NotHoistedFlag;
 // Static flags record unchanging facts about a subtree (a ViewTransition
 // exists below here), not pending commit work. They must survive commits and
 // bailouts: cleared bits would make boundaries inside adopted subtrees
@@ -1652,19 +1656,19 @@ export function createRenderer<Container, Instance, TextInstance>(
       // descend without re-rendering, preserving child props identity.
       // Suspense always runs begin so hidden-primary retries are handled.
       if (node.tag !== SuspenseTag) {
-        if (node.tag === ContextProviderTag) pushContextProvider(node);
+        if (node.tag === ContextProviderTag) pushContextProvider(node, root);
         cloneChildFibers(node);
         return;
       }
     }
 
-    if (node.tag === ContextProviderTag) pushContextProvider(node);
+    if (node.tag === ContextProviderTag) pushContextProvider(node, root);
 
     const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
     node.lanes &= ~root.renderLanes;
 
     if (node.tag === FunctionTag) {
-      renderFunction(node);
+      renderFunction(node, root);
       return;
     }
 
@@ -1679,7 +1683,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           hostAncestorTypes(node),
         );
       }
-      if (tryHydrateText(node)) return;
+      if (tryHydrateText(node, root)) return;
       node.stateNode ??= host.createTextInstance(String(node.props.nodeValue));
       return;
     }
@@ -1697,7 +1701,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
 
         // Text that becomes Text fibers is validated by the TextTag branch.
-        if (host.validateTextNesting && shouldUseHostTextContent(node)) {
+        if (host.validateTextNesting && shouldUseHostTextContent(node, root)) {
           const textContent = hostTextContent(children);
           if (textContent !== null) {
             ancestors ??= hostAncestorTypes(node);
@@ -1707,8 +1711,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
 
-      if (tryHydrateInstance(node)) {
-        reconcileCurrentChildren(node, children);
+      if (tryHydrateInstance(node, root)) {
+        reconcileCurrentChildren(node, children, root);
         return;
       }
 
@@ -1720,7 +1724,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       reconcileCurrentChildren(
         node,
-        children === null || shouldUseHostTextContent(node) ? null : children,
+        children === null || shouldUseHostTextContent(node, root)
+          ? null
+          : children,
+        root,
       );
       return;
     }
@@ -1755,7 +1762,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    reconcileCurrentChildren(node, node.props.children);
+    reconcileCurrentChildren(node, node.props.children, root);
   }
 
   function beginViewTransition(node: F): void {
@@ -1853,8 +1860,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function tryHydrateInstance(node: F): boolean {
-    const root = rootOf(node);
+  function tryHydrateInstance(node: F, root: R): boolean {
     if (!shouldHydrateFiber(root, node)) return false;
 
     const hydrationHost = requireHydrationHostConfig();
@@ -1888,8 +1894,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return true;
   }
 
-  function tryHydrateText(node: F): boolean {
-    const root = rootOf(node);
+  function tryHydrateText(node: F, root: R): boolean {
     if (!shouldHydrateFiber(root, node)) return false;
 
     const hydrationHost = requireHydrationHostConfig();
@@ -2131,13 +2136,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       : context.defaultValue;
   }
 
-  function shouldUseHostTextContent(node: F): boolean {
+  function shouldUseHostTextContent(node: F, root = rootOf(node)): boolean {
     return (
       host.setTextContent !== undefined &&
       // A host created out-of-band during hydration (hoisted instance)
       // renders fresh: its text must replace any server content wholesale
       // rather than match against it.
-      (!rootOf(node).isHydrating || hydrationBypassedHost(node)) &&
+      (!root.isHydrating || hydrationBypassedHost(node)) &&
       // Hydration adopted the text as a child fiber (it had to match the
       // server's text node); keep that shape on re-renders. Collapsing to
       // textContent would delete the adopted fiber and rewrite identical
@@ -2162,8 +2167,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isHoistedFiber(node: F): boolean {
-    if (node.tag !== HostTag) return false;
-    if (host.isHoistedInstance?.(String(node.type), node.props) !== true) {
+    if (node.tag !== HostTag || host.isHoistedInstance === undefined) {
+      return false;
+    }
+    if ((node.flags & NotHoistedFlag) !== 0) return false;
+    if (!host.isHoistedInstance(String(node.type), node.props)) {
+      node.flags |= NotHoistedFlag;
       return false;
     }
     requireHoistedAssetHostConfig();
@@ -2186,7 +2195,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hoistedAssetHostConfig;
   }
 
-  function renderFunction(node: F): void {
+  function renderFunction(node: F, root: R): void {
     // Hot reload: run the latest version of this component's family. In
     // production the whole block strips out.
     if (__DEV__) {
@@ -2194,24 +2203,27 @@ export function createRenderer<Container, Instance, TextInstance>(
         node.type = resolveLatestType(node.type) as F["type"];
       }
     }
-    prepareHookRender(node);
+    prepareHookRender(node, root);
 
     const previousDispatcher = setCurrentDispatcher(dispatcher);
-    const previousDataStore = setCurrentDataStore(rootOf(node).dataStore);
+    const previousDataStore = setCurrentDataStore(root.dataStore);
     try {
       if (__DEV__) {
         // Strict shadow pass: invoke the component once and discard every
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
-        const root = rootOf(node);
         const consumedBefore = root.consumedPendingQueues.length;
         (node.type as Component)(node.props);
         if (currentHook !== null) throw hookOrderError("fewer");
         restoreConsumedPendingQueues(root, consumedBefore);
-        prepareHookRender(node);
+        prepareHookRender(node, root);
         node.effects = null;
       }
-      reconcileCurrentChildren(node, (node.type as Component)(node.props));
+      reconcileCurrentChildren(
+        node,
+        (node.type as Component)(node.props),
+        root,
+      );
       if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
       setCurrentDataStore(previousDataStore);
@@ -2223,8 +2235,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function prepareHookRender(node: F): void {
-    const root = rootOf(node);
+  function prepareHookRender(node: F, root: R): void {
     renderingFiber = node;
     currentHook = node.alternate?.memoizedState ?? null;
     workInProgressHook = null;
@@ -3191,8 +3202,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return value as T;
   }
 
-  function pushContextProvider(node: F): void {
-    const root = rootOf(node);
+  function pushContextProvider(node: F, root = rootOf(node)): void {
     const context = node.type as unknown as FigContext<unknown>;
     const values = root.contextValues;
     const hadPrevious = values.has(context);
@@ -3433,8 +3443,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function reconcileCurrentChildren(parent: F, children: FigNode): void {
-    reconcile(parent, children, parent.alternate?.child ?? null, false);
+  function reconcileCurrentChildren(
+    parent: F,
+    children: FigNode,
+    root = rootOf(parent),
+  ): void {
+    reconcile(parent, children, parent.alternate?.child ?? null, false, root);
   }
 
   function reconcile(
@@ -3442,6 +3456,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     children: FigNode,
     currentFirstChild: F | null,
     forcePlacement: boolean,
+    root = rootOf(parent),
   ): void {
     const nextChildren = collectChildren(children);
     const seenKeys = __DEV__ ? new Set<string>() : null;
@@ -3453,7 +3468,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     let old: F | null = currentFirstChild;
     let index = 0;
     let lastPlacedIndex = 0;
-    const root = rootOf(parent);
     const isHydratingNewTree =
       parent.tag !== PortalTag &&
       root.isHydrating &&

@@ -683,6 +683,40 @@ describe("reconciler", () => {
     ).toThrow("Hoisted assets are not supported by this renderer.");
   });
 
+  it("caches negative hoisting classification within each render", () => {
+    const isHoistedInstance = vi.fn(() => false);
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      isHoistedInstance,
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "section",
+          { version: 1 },
+          createElement("span", { version: 1 }),
+        ),
+      ),
+    );
+
+    expect(isHoistedInstance).toHaveBeenCalledTimes(2);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "section",
+          { version: 2 },
+          createElement("span", { version: 2 }),
+        ),
+      ),
+    );
+
+    expect(isHoistedInstance).toHaveBeenCalledTimes(4);
+  });
+
   it("coalesces adjacent text children into one host text node", () => {
     let createdTexts = 0;
     let textUpdates = 0;
