@@ -12,7 +12,7 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { act } from "./act.ts";
-import { createRoot } from "./index.ts";
+import { createRoot, hydrateRoot } from "./index.ts";
 
 interface MockViewTransitionDocument {
   startViewTransition?: (update: () => void) => {
@@ -775,6 +775,82 @@ describe("ViewTransition", () => {
       expect(snapshots).toEqual(["hero", "hero-share", "hero", "hero-share"]);
     } finally {
       ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("does not animate the first re-render of hydrated single-text content", async () => {
+    const container = document.createElement("div");
+    container.innerHTML = "<main><p>0</p><section>Static</section></main>";
+    document.body.append(container);
+    const starts: string[][] = [];
+    let setCount: StateSetter<number> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const section = container.querySelector("section") as HTMLElement;
+      const before = section.style.viewTransitionName || "";
+      update();
+      starts.push([before, section.style.viewTransitionName || ""]);
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement(
+        "main",
+        null,
+        createElement("p", null, String(count)),
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("section", null, "Static"),
+        ),
+      );
+    }
+
+    try {
+      await act(() => hydrateRoot(container, createElement(App, null)));
+
+      // The boundary's content is untouched; only the sibling <p> changes.
+      // Hydration adopted the section's text as a child fiber — collapsing
+      // that shape here used to read as a content mutation and animate a
+      // no-op morph on the first post-hydration commit.
+      await act(() => transition(() => setCount?.(1)));
+
+      expect(starts).toEqual([]);
+      expect(container.textContent).toBe("1Static");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("updates hydrated single-text content through its kept text fiber", async () => {
+    const container = document.createElement("div");
+    container.innerHTML = "<section>First</section>";
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement("section", null, label);
+    }
+
+    try {
+      await act(() => hydrateRoot(container, createElement(App, null)));
+      const section = container.querySelector("section") as HTMLElement;
+      const textNode = section.firstChild;
+
+      await act(() => setLabel?.("Second"));
+
+      expect(container.textContent).toBe("Second");
+      // The adopted text node itself was updated, not replaced wholesale.
+      expect(section.firstChild).toBe(textNode);
+    } finally {
       container.remove();
     }
   });

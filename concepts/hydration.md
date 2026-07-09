@@ -20,6 +20,13 @@ content. Suspense retries after a committed fallback schedule on retry
 lanes — low priority, excluded from expiration, reusing the boundary's retry
 lane when a retry suspends again.
 
+Hydration adopts single-text host children as text fibers (they must match
+the server's text nodes), and re-renders **keep that shape** instead of
+collapsing to the client's textContent optimization. Collapsing would delete
+the adopted fiber and rewrite identical text on the first post-hydration
+commit — wasted DOM work whose flags read as a real content mutation
+(it made view transitions animate a no-op on the first navigation).
+
 ## Event Replay
 
 Replayable events (click, key, pointer) that target a still-dehydrated

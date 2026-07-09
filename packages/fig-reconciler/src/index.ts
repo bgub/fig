@@ -2074,8 +2074,19 @@ export function createRenderer<Container, Instance, TextInstance>(
       // renders fresh: its text must replace any server content wholesale
       // rather than match against it.
       (!rootOf(node).isHydrating || hydrationBypassedHost(node)) &&
+      // Hydration adopted the text as a child fiber (it had to match the
+      // server's text node); keep that shape on re-renders. Collapsing to
+      // textContent would delete the adopted fiber and rewrite identical
+      // text — flag noise that reads as a real mutation (and made view
+      // transitions animate the first post-hydration commit).
+      !adoptedSingleTextChild(node) &&
       hostTextContent(node.props.children) !== null
     );
+  }
+
+  function adoptedSingleTextChild(node: F): boolean {
+    const child = node.alternate?.child ?? node.child;
+    return child !== null && child.tag === TextTag && child.sibling === null;
   }
 
   function hydrationBypassedHost(node: F): boolean {
@@ -3525,6 +3536,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): boolean {
     if (host.setTextContent === undefined) return false;
     if (hasUnsafeHTML(next)) return false;
+    // Hydration-adopted single-text children keep their fiber shape: the
+    // text fiber owns updates (commitTextUpdate). Setting textContent here
+    // would replace the very node that fiber points at.
+    if (adoptedSingleTextChild(current)) return false;
 
     const previousText = hostTextContent(previous.children);
     const nextText = hostTextContent(next.children);

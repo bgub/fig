@@ -121,6 +121,78 @@ test("turns the home link into the view transitions page title", async ({
   expect(errors()).toEqual([]);
 });
 
+test("morphs the title when clicking immediately after first load", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.addInitScript(() => {
+    const snapshots: ViewTransitionSnapshot[] = [];
+    const collectSurfaces = (): ViewTransitionSurface[] =>
+      Array.from(document.querySelectorAll<HTMLElement>("*")).flatMap(
+        (element) => {
+          const name = element.style.viewTransitionName;
+          if (name.length === 0 || name === "none") return [];
+          const rect = element.getBoundingClientRect();
+          return [
+            {
+              name,
+              rect: { height: rect.height, width: rect.width },
+              tag: element.tagName.toLowerCase(),
+            },
+          ];
+        },
+      );
+
+    window.__figStartViewTransitionSnapshots = snapshots;
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        const before = collectSurfaces();
+        update();
+        snapshots.push({
+          action: "immediate",
+          after: collectSurfaces(),
+          before,
+        });
+        return { finished: Promise.resolve(), ready: Promise.resolve() };
+      },
+    });
+  });
+
+  // Pin the "clicked right after hydration, before anything else" regime:
+  // earlier clicks fall back to native MPA navigation (no SPA transition by
+  // design), later ones were always fine. The first post-hydration commit
+  // (the router's pending state) used to read hydrated single-text shape
+  // collapse as a content mutation and burn a no-op transition here,
+  // deferring and disrupting the real morph.
+  await page.goto("/", { waitUntil: "commit" });
+  await page.locator("[data-fig-start-hydrated]").waitFor();
+  await page.waitForFunction(() => {
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_COMMENT,
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if ((node.nodeValue ?? "").startsWith("fig:suspense:")) return false;
+    }
+    return true;
+  });
+  await page
+    .getByRole("link", { exact: true, name: "View transitions" })
+    .click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "View transitions" }),
+  ).toBeVisible();
+
+  const snapshots = await page.evaluate(
+    () => window.__figStartViewTransitionSnapshots ?? [],
+  );
+  expect(snapshots).toHaveLength(1);
+  expectPageTitleTransition(snapshots, "immediate");
+  expect(errors()).toEqual([]);
+});
+
 async function clickRoute(
   page: Page,
   action: string,
