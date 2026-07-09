@@ -8,6 +8,7 @@ import {
   type FigNode,
   Fragment,
   font,
+  isTemplateDescriptor,
   lazy,
   modulepreload,
   preload,
@@ -15,6 +16,8 @@ import {
   readPromise,
   Suspense,
   stylesheet,
+  template,
+  type TemplateDescriptor,
   title,
   ViewTransition,
 } from "@bgub/fig";
@@ -1652,6 +1655,76 @@ describe("payload rendering", () => {
     if (isValidElement(first) && isValidElement(refreshed)) {
       expect(first.type).toBe(refreshed.type);
     }
+  });
+
+  it("round-trips template elements with wire dedup and canonical identity", async () => {
+    const rowTemplate = template(
+      "<li><span> </span></li>",
+      [{ kind: "text", path: [0, 0] }],
+      ["<li><span>", 0, "</span></li>"],
+    );
+
+    const rows = await renderToPayloadRows(
+      createElement(
+        "ul",
+        null,
+        createElement(rowTemplate as never, { key: "a", slots: ["Row a"] }),
+        createElement(rowTemplate as never, { key: "b", slots: ["Row b"] }),
+      ),
+    );
+
+    // The descriptor serializes once (html appears in the definition's html
+    // and segments); the second occurrence is a generic graph ref.
+    const wire = JSON.stringify(rows);
+    expect(wire.split("<li><span>").length - 1).toBe(2);
+    expect(wire).toContain('"$fig":"template"');
+    expect(wire).toContain('"$fig":"ref"');
+
+    const root = evaluatePayloadNode(decodeTestPayloadRows(rows)) as FigElement;
+    const [first, second] = root.props.children as [FigElement, FigElement];
+
+    expect(isTemplateDescriptor(first.type)).toBe(true);
+    // Within-payload identity: the ref resolves to the same object.
+    expect(second.type).toBe(first.type);
+    expect(first.key).toBe("a");
+    expect(first.props.slots).toEqual(["Row a"]);
+    expect(second.props.slots).toEqual(["Row b"]);
+
+    const decoded = first.type as unknown as TemplateDescriptor;
+    expect(decoded.html).toBe("<li><span> </span></li>");
+    expect(decoded.slots).toEqual([{ kind: "text", path: [0, 0] }]);
+    expect(decoded.segments).toEqual(["<li><span>", 0, "</span></li>"]);
+
+    // Cross-payload identity: a separate render decoded by a separate
+    // response canonicalizes to the same descriptor object, so template
+    // fibers keep their identity across boundary refreshes and navigations.
+    const later = evaluatePayloadNode(
+      decodeTestPayloadRows(
+        await renderToPayloadRows(
+          createElement(rowTemplate as never, { slots: ["Solo"] }),
+        ),
+      ),
+    ) as FigElement;
+    expect(later.type).toBe(first.type);
+  });
+
+  it("rejects functions in template slots at the payload boundary", async () => {
+    const rowTemplate = template(
+      "<li><button> </button></li>",
+      [
+        { kind: "text", path: [0, 0] },
+        { kind: "events", path: [0] },
+      ],
+      ["<li><button>", 0, "</button></li>"],
+    );
+
+    const rows = await renderToPayloadRows(
+      createElement(rowTemplate as never, {
+        slots: ["Go", [{ callback: () => undefined, type: "click" }]],
+      }),
+    );
+
+    expect(rows.some((row) => row.tag === "error")).toBe(true);
   });
 
   it("rejects functions passed across the server-to-client boundary", async () => {

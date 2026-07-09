@@ -310,11 +310,17 @@ v0 eligibility bails on: components/fragments/spreads/bind/unsafeHTML
 anywhere, dynamic text sharing an element with siblings (adjacent text
 nodes merge when HTML parses — paths would shift), non-root keys,
 single-element trees. Cost: ~630 B fig-dom, ~180 B reconciler, ~90 B fig.
-Remaining before productizing: payload/server-component transport for
-descriptors (template IDs + a module registry — same shape as client
-references), a real-browser benchmark, `bind` inside templates, dev
-mismatch diagnostics for hydrated templates, and a concepts/ file
-graduating the descriptor contract.
+**Payload transport shipped (same day):** descriptors are pure data, so
+they serialize inline — no module registry. First occurrence per request
+is a `$fig: "template"` node under a graph object id; later occurrences
+are generic `$fig: "ref"`s (existing dedup + multi-stream id rebasing).
+Decoding canonicalizes by content into a client-global registry so
+template fiber identity survives boundary refreshes and navigations.
+Event slots never serialize (function-prop rule; error-row test).
+Documented in `concepts/payload.md`. Remaining before productizing: a
+real-browser benchmark (demo app using `figTemplates()`), `bind` inside
+templates, dev mismatch diagnostics for hydrated templates, and a
+concepts/ file graduating the descriptor contract itself.
 
 ### C2. Direct-to-host data binding (signals as an optimization, not a model)
 

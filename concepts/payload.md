@@ -35,6 +35,18 @@ Payload refreshes use the `x-fig-payload-boundary` header. Ids minted by
 - `model` — a serialized tree chunk (id 0 is the root). Trees serialize as
   `$fig`-tagged nodes: elements, fragments, suspense, boundaries, and
   outlined `lazy`/`promise` references that suspend-and-fill by row id.
+  Template descriptors (experimental) serialize inline as
+  `$fig: "template"` nodes in element-type position — pure data, no module
+  registry: the first occurrence per request carries
+  `{ id, html, slots, segments? }` under a graph object id and later
+  occurrences are generic `$fig: "ref"` nodes, so dedup and multi-stream
+  id rebasing work exactly like any payload object. Decoding
+  canonicalizes by content into a client-global registry, so equal
+  descriptors from later payloads (boundary refreshes, navigations)
+  decode to the same object and template fibers keep identity across
+  payloads. Event-slot values are functions and never serialize;
+  templates with event slots belong in client components, the same
+  standing rule as any function prop.
 - `client` — a client reference: `{ id, exportName?, assets?, ssr? }`.
 - `data` — settled data-resource hydration entries encoded with the payload
   value codec (see data.md).

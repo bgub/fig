@@ -13,6 +13,7 @@ import {
   type FigNode,
   type FontResource,
   Fragment,
+  isTemplateDescriptor,
   type Key,
   type ModulePreloadResource,
   type PreconnectResource,
@@ -22,6 +23,10 @@ import {
   type ScriptResource,
   type StylesheetResource,
   Suspense,
+  template,
+  type TemplateDescriptor,
+  type TemplateSegment,
+  type TemplateSlotSpec,
   ViewTransition,
 } from "@bgub/fig";
 import {
@@ -203,6 +208,13 @@ type PayloadSpecialModel =
   | { $fig: "set"; id: number; values: PayloadModel[] }
   | { $fig: "symbol"; key: string }
   | { $fig: "suspense" }
+  | {
+      $fig: "template";
+      id: number;
+      html: string;
+      slots: readonly TemplateSlotSpec[];
+      segments?: readonly TemplateSegment[];
+    }
   | { $fig: "undefined" }
   | { $fig: "view-transition" };
 
@@ -1537,11 +1549,45 @@ function serializeElement(
     );
   }
 
+  if (isTemplateDescriptor(type)) {
+    return serializeElementModel(
+      element,
+      serializeTemplateType(frame.request.graph, type),
+      frame,
+      preserveIdentity,
+    );
+  }
+
   if (typeof type === "function") {
     return serializeFunctionComponent(type as Component, element.props, frame);
   }
 
   throw new Error("Unsupported Fig element type during payload render.");
+}
+
+// Template descriptors are pure data, so they cross the wire inline rather
+// than through a module registry: the first occurrence carries the full
+// descriptor under a graph object id, and every later occurrence in the
+// same request is a generic ref — the same dedup and multi-stream id
+// rebasing every payload object gets. Event-slot values are functions and
+// cannot serialize; templates with event slots belong in client components,
+// the same standing rule as any function prop.
+function serializeTemplateType(
+  graph: PayloadGraphEncodeContext,
+  descriptor: TemplateDescriptor,
+): PayloadSpecialModel {
+  const existing = graphReference(graph, descriptor);
+  if (existing !== null) return existing;
+  const id = defineGraphObject(graph, descriptor);
+  return {
+    $fig: "template",
+    id,
+    html: descriptor.html,
+    slots: descriptor.slots,
+    ...(descriptor.segments === undefined
+      ? null
+      : { segments: descriptor.segments }),
+  };
 }
 
 function serializeElementModel(
@@ -2953,6 +2999,14 @@ function decodeSpecialModel(
     }
     case "symbol":
       return Symbol.for(model.key);
+    case "template":
+      // Registered as an object ref so later `$fig: "ref"` occurrences (and
+      // multi-stream id rebasing) resolve exactly like any payload object.
+      return response.defineObjectRef(
+        model.id,
+        () => canonicalTemplateDescriptor(model),
+        () => undefined,
+      );
     case "undefined":
       return undefined;
     case "boundary":
@@ -3013,6 +3067,28 @@ function decodeElementType(
 ): ElementType<any> {
   if (typeof type === "string") return type;
   return decodeSpecialModel(response, type) as ElementType<any>;
+}
+
+// Cross-payload canonicalization: the reconciler keys template sameness on
+// descriptor object identity (and fig-dom its <template> prototype cache),
+// so equal descriptor content arriving in later payloads — boundary
+// refreshes, navigations — must decode to the same object. Keyed by full
+// content; growth is bounded by the number of distinct templates the app
+// ever receives.
+const canonicalTemplates = new Map<string, TemplateDescriptor>();
+
+function canonicalTemplateDescriptor(model: {
+  html: string;
+  slots: readonly TemplateSlotSpec[];
+  segments?: readonly TemplateSegment[];
+}): TemplateDescriptor {
+  const key = JSON.stringify([model.html, model.slots, model.segments ?? null]);
+  let descriptor = canonicalTemplates.get(key);
+  if (descriptor === undefined) {
+    descriptor = template(model.html, model.slots, model.segments);
+    canonicalTemplates.set(key, descriptor);
+  }
+  return descriptor;
 }
 
 function PayloadResponseRoot(props: {
