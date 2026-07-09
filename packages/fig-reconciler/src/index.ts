@@ -1009,7 +1009,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const root = createFiberRoot(container, request.options ?? {});
     roots.set(container as object, root);
-    if (hasRefreshHandler()) mountedRoots.add(root);
+    if (__DEV__) {
+      if (hasRefreshHandler()) mountedRoots.add(root);
+    }
 
     if (request.kind === "hydration") {
       root.isHydrating = true;
@@ -2154,9 +2156,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function renderFunction(node: F): void {
     // Hot reload: run the latest version of this component's family. In
-    // production no handler is set, so this is a no-op.
-    if (hasRefreshHandler()) {
-      node.type = resolveLatestType(node.type) as F["type"];
+    // production the whole block strips out.
+    if (__DEV__) {
+      if (hasRefreshHandler()) {
+        node.type = resolveLatestType(node.type) as F["type"];
+      }
     }
     prepareHookRender(node);
 
@@ -6590,9 +6594,13 @@ function sameType<Container, Instance, TextInstance>(
     return fiber.tag === PortalTag && fiber.props.target === child.target;
   }
 
-  return (
-    isValidElement(child) && matchesComponentFamily(fiber.type, child.type)
-  );
+  if (!isValidElement(child)) return false;
+
+  if (__DEV__) {
+    return matchesComponentFamily(fiber.type, child.type);
+  }
+
+  return fiber.type === child.type;
 }
 
 function propsFor(child: NormalizedChild): Props {
