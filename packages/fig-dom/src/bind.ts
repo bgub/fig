@@ -1,6 +1,8 @@
 import { isEmptyPropValue } from "./tree.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 export type Bind<T extends Element = Element> = (
   node: T,
@@ -89,7 +91,7 @@ function attachBindSlot(element: Element, slot: BindSlot): void {
   }
 
   let runStrict = false;
-  if (process.env.NODE_ENV !== "production") {
+  if (__DEV__) {
     // Marked before the callback so re-entrant attaches cannot re-enter the
     // strict cycle.
     runStrict = !slot.strictRan;
@@ -97,7 +99,7 @@ function attachBindSlot(element: Element, slot: BindSlot): void {
   }
   slot.controller = new AbortController();
   slot.callback(element, slot.controller.signal);
-  if (process.env.NODE_ENV !== "production" && runStrict) {
+  if (__DEV__ && runStrict) {
     // Strict re-run: abort and re-invoke first-time binds so callbacks that
     // ignore their AbortSignal surface in development.
     removeBindSlot(slot);

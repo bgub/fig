@@ -12,6 +12,10 @@ const runtimes = clientRuntimes.map((runtime) => ({
   ...runtime,
   components: createBenchmarkComponents(runtime),
 }));
+const viewTransitionRuntimes = runtimes.filter(
+  (runtime) =>
+    runtime.ViewTransition !== undefined && runtime.transition !== undefined,
+);
 
 const neverResolves = new Promise(() => undefined);
 
@@ -42,6 +46,30 @@ function createBenchmarkComponents(runtime) {
           runtime.createElement("span", null, `v${version}`),
         ),
       ),
+    );
+  }
+
+  function ViewTransitionRows({ count, reverse = false }) {
+    const Boundary = runtime.ViewTransition;
+    return runtime.createElement(
+      "ul",
+      null,
+      rowIds(count, 0, reverse).map((id) => {
+        const row = runtime.createElement(
+          "li",
+          Boundary === undefined ? { key: id } : null,
+          runtime.createElement("span", null, `Row ${id}`),
+          runtime.createElement("span", null, "v0"),
+        );
+
+        return Boundary === undefined
+          ? row
+          : runtime.createElement(
+              Boundary,
+              { key: id, name: `row-${id}` },
+              row,
+            );
+      }),
     );
   }
 
@@ -217,6 +245,7 @@ function createBenchmarkComponents(runtime) {
     SparseContextTree,
     SuspenseSiblingTree,
     state,
+    ViewTransitionRows,
   };
 }
 
@@ -495,6 +524,36 @@ function measureSuspenseReveal(runtime, rows, iterations) {
   });
 }
 
+function measureViewTransitionReverseKeyed(runtime, rows, iterations) {
+  return measureWithRoots(runtime, iterations, {
+    setup: (roots) =>
+      renderAll(runtime, roots, runtime.components.ViewTransitionRows, {
+        count: rows,
+      }),
+    run: (roots) =>
+      runtime.transition(() =>
+        renderAll(runtime, roots, runtime.components.ViewTransitionRows, {
+          count: rows,
+          reverse: true,
+        }),
+      ),
+    validate: (roots) => assertViewTransitionReverse(roots, rows),
+  });
+}
+
+function assertViewTransitionReverse(roots, rows) {
+  for (const { container } of roots) {
+    const text = container.textContent;
+    if (!text.startsWith(`Row ${rows - 1}v0`) || !text.endsWith("Row 0v0")) {
+      throw new Error(
+        `View transition reverse update committed unexpected text: ${JSON.stringify(
+          text.slice(0, 80),
+        )}`,
+      );
+    }
+  }
+}
+
 function assertProviderChildUpdate(roots) {
   for (const { container } of roots) {
     const text = container.textContent;
@@ -637,6 +696,14 @@ export function clientScenariosForRows(rows) {
       measure: (runtime, iterations) =>
         measureSuspenseReveal(runtime, rows, iterations),
       runtimes,
+    },
+    {
+      group: "view-transition",
+      name: "view-transition.reverse-keyed",
+      rows,
+      measure: (runtime, iterations) =>
+        measureViewTransitionReverseKeyed(runtime, rows, iterations),
+      runtimes: viewTransitionRuntimes,
     },
   ];
 }

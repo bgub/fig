@@ -376,8 +376,8 @@ Runs the Fig and React reconciler scenario matrix against in-memory hosts.
 Options:
   --rows=100,1000          Comma-separated benchmark sizes.
   --group=name             Comma-separated groups: reconciler, context,
-                           external-store, commit, suspense, hydration,
-                           payload, server.
+                           external-store, commit, suspense, view-transition,
+                           hydration, payload, server.
   --scenario=name          Comma-separated scenario/group substrings.
   --runtime=name           Comma-separated runtimes: fig, react, scan, map.
   --samples=7              Timed samples per scenario.

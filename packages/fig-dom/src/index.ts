@@ -54,13 +54,7 @@ import {
   mathNamespace,
   svgNamespace,
 } from "./tree.ts";
-import {
-  applyViewTransitionName,
-  commitViewTransition,
-  measureViewTransitionSurface,
-  restoreViewTransitionName,
-  suspendOnActiveViewTransition,
-} from "./view-transition.ts";
+import { viewTransitionHostConfig } from "./view-transition.ts";
 
 type TextLike = Text | Comment;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
@@ -88,7 +82,7 @@ interface DomRenderer {
   scheduleRefresh(this: void, update: RefreshUpdate): void;
 }
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const __FIG_DEV__: boolean | undefined;
 
 export { insertAssetResources } from "./asset-resources.ts";
 export type { Bind } from "./bind.ts";
@@ -107,11 +101,13 @@ export type {
 } from "./jsx.ts";
 export { composeBind };
 
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
+
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>
     createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
-  // The NODE_ENV gates below run at call time (never at module scope, which
+  // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must
   // stay in block form — `if (dev) { validate() }` — not early-return form:
   // esbuild only eliminates the constant branch (and with it the dom-nesting
@@ -119,7 +115,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   // after an `if (prod) return` keeps the import referenced and ships the
   // whole module in production bundles.
   validateInstanceNesting: (type, props, ancestors) => {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       // Asset resources hoist to <head>, so their fiber position is not
       // their DOM position; the server exempts them the same way.
       if (assetResourceFromHostProps(type, props) !== null) return;
@@ -127,7 +123,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     }
   },
   validateTextNesting: (text, ancestors) => {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       validateTextNesting(text, ancestors);
     }
   },
@@ -279,11 +275,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   removePortalContainer: (container) => {
     removePortalContainer(container as Container);
   },
-  commitViewTransition,
-  applyViewTransitionName,
-  restoreViewTransitionName,
-  measureViewTransitionSurface,
-  suspendOnActiveViewTransition,
+  viewTransition: viewTransitionHostConfig,
 };
 
 const renderer: DomRenderer = createRenderer(hostConfig);

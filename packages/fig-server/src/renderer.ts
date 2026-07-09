@@ -83,7 +83,9 @@ import type {
   ServerRenderOptions,
 } from "./types.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 interface Request {
   abortableTasks: Set<Task>;
@@ -537,7 +539,7 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
     if (frame.request.document !== null && !frame.request.document.hasHead) {
       if (text.trim() !== "") throw invalidDocumentShellError();
     }
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       validateTextNesting(text, frame.hostAncestors);
     }
     if (text !== "") {
@@ -930,7 +932,7 @@ function renderHostElement(
 ): void {
   if (renderHostAsset(type, props, frame)) return;
 
-  if (process.env.NODE_ENV !== "production") {
+  if (__DEV__) {
     validateInstanceNesting(type, frame.hostAncestors);
   }
 
@@ -1009,7 +1011,7 @@ function renderHostElement(
   const previousHostAncestors = frame.hostAncestors;
   const previousViewTransition = frame.viewTransition;
   if (viewTransition !== null) frame.viewTransition = null;
-  if (process.env.NODE_ENV !== "production") {
+  if (__DEV__) {
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
 
@@ -1613,9 +1615,7 @@ function reportBoundaryError(
 ): ServerErrorPayload {
   const info = { componentStack: componentStack(stackForError(error, stack)) };
   if (request.onError === undefined) {
-    return process.env.NODE_ENV !== "production"
-      ? { message: errorMessage(error) }
-      : {};
+    return __DEV__ ? { message: errorMessage(error) } : {};
   }
 
   try {

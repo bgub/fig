@@ -11,6 +11,7 @@ export function createOperationCounts() {
     appendChildToContainer: 0,
     appendInitialChild: 0,
     clearContainer: 0,
+    commitViewTransition: 0,
     commitTextUpdate: 0,
     commitUpdate: 0,
     createInstance: 0,
@@ -22,6 +23,10 @@ export function createOperationCounts() {
     removeChild: 0,
     removeChildFromContainer: 0,
     resetTextContent: 0,
+    measureViewTransitionSurface: 0,
+    applyViewTransitionName: 0,
+    restoreViewTransitionName: 0,
+    suspendViewTransition: 0,
     unhideInstance: 0,
     unhideTextInstance: 0,
   };

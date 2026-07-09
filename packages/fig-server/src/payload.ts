@@ -62,7 +62,9 @@ import {
 } from "./shared.ts";
 import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 export interface PayloadRenderResult {
   abort(reason?: unknown): void;
@@ -607,7 +609,7 @@ function createPayloadRequest(
     abortListener: null,
     abortSignal: null,
     allReady: deferred<void>(),
-    boundaryIds: process.env.NODE_ENV !== "production" ? new Set() : null,
+    boundaryIds: __DEV__ ? new Set() : null,
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
     codec: options.codec ?? jsonPayloadCodec,
@@ -2144,9 +2146,7 @@ function errorRowPayload(
     componentStack: componentStack(stackForError(error, stack)),
   };
   if (request.onError === undefined) {
-    return process.env.NODE_ENV !== "production"
-      ? { message: errorMessage(error) }
-      : {};
+    return __DEV__ ? { message: errorMessage(error) } : {};
   }
 
   try {

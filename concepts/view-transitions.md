@@ -78,7 +78,7 @@ content is skipped (never captured by the browser); a boundary hiding this
 commit still animates its old side away.
 
 Commit sequence and measurement: the prepare pass measures old surfaces
-(host `measureViewTransitionSurface`, `getBoundingClientRect`-based) and
+(host view-transition adapter `measure`, `getBoundingClientRect`-based) and
 applies temporary inline names before the old snapshot — exits whose old
 geometry is outside the viewport are reverted here. The host runs one
 view-transition transaction around the existing deletion/mutation/visibility
@@ -143,9 +143,9 @@ freeze the root until the callback runs — that capture window is sub-frame,
 unlike the animation-length park. Errors thrown inside the callback are
 routed through the same uncaught-error path as synchronous commits (report
 to `onUncaughtError`, clear the root) rather than vanishing into the
-transition's promise. Hosts wired without the `suspendOnActiveViewTransition`
-hook fall back to fig-dom's chained wait, which freezes the root for the
-previous animation's full duration.
+transition's promise. Hosts wired without the view-transition adapter's
+`suspend` hook fall back to fig-dom's chained wait, which freezes the root for
+the previous animation's full duration.
 
 Exploring: whether parked-commit latency under rapid input warrants
 API-free mitigation (fast-forward via `playbackRate`, a park-timeout

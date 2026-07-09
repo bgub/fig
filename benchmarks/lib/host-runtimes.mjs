@@ -1,10 +1,12 @@
 import { performance } from "node:perf_hooks";
 import {
   Suspense as FigSuspense,
+  ViewTransition as FigViewTransition,
   createContext as createFigContext,
   createElement as createFigElement,
   readContext as readFigContext,
   readPromise as readFigPromise,
+  transition as figTransition,
   useSyncExternalStore as useFigSyncExternalStore,
   useState as useFigState,
 } from "../../packages/fig/dist/index.js";
@@ -137,6 +139,45 @@ function createFigBenchRenderer() {
     commitTextUpdate: (text, value) => {
       operations.commitTextUpdate += 1;
       text.nodeValue = value;
+    },
+    viewTransition: {
+      commit: (_container, prepare, mutate, cleanup) => {
+        operations.commitViewTransition += 1;
+        prepare();
+        try {
+          mutate();
+          return "committed";
+        } finally {
+          cleanup();
+        }
+      },
+      apply: (instance, name, className) => {
+        operations.applyViewTransitionName += 1;
+        instance.viewTransitionName = name;
+        instance.viewTransitionClassName = className;
+      },
+      restore: (instance) => {
+        operations.restoreViewTransitionName += 1;
+        instance.viewTransitionName = null;
+        instance.viewTransitionClassName = null;
+      },
+      measure: (instance) => {
+        operations.measureViewTransitionSurface += 1;
+        const parent = instance.parentNode;
+        const index = parent?.childNodes.indexOf(instance) ?? 0;
+        return {
+          absolutelyPositioned: false,
+          height: 1,
+          inViewport: !instance.hidden,
+          width: 1,
+          x: 0,
+          y: index,
+        };
+      },
+      suspend: () => {
+        operations.suspendViewTransition += 1;
+        return false;
+      },
     },
   };
   const renderer = createFigRenderer(host);
@@ -331,8 +372,10 @@ export const clientRuntimes = [
     readContext: readFigContext,
     readPromise: readFigPromise,
     Suspense: FigSuspense,
+    transition: figTransition,
     useSyncExternalStore: useFigSyncExternalStore,
     useState: useFigState,
+    ViewTransition: FigViewTransition,
   },
   {
     createContext: createReactContext,

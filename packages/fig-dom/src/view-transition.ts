@@ -2,6 +2,7 @@ import type { Props } from "@bgub/fig";
 import { VIEW_TRANSITION_PENDING_PROPERTY } from "@bgub/fig/internal";
 import type {
   ViewTransitionCommitResult,
+  ViewTransitionHostConfig,
   ViewTransitionMutationResult,
   ViewTransitionSurfaceMeasurement,
 } from "@bgub/fig-reconciler";
@@ -25,7 +26,7 @@ interface CssGlobal {
   };
 }
 
-export function commitViewTransition(
+function commitViewTransition(
   container: Container,
   prepareSnapshot: () => void,
   mutate: () => ViewTransitionMutationResult,
@@ -96,10 +97,9 @@ export function commitViewTransition(
   // the browser abruptly skip the running animation, and the skipped
   // transition's restore could race this one's old-state capture. The
   // reconciler normally parks eligible commits upstream (render-during-wait
-  // via suspendOnActiveViewTransition), so for fig-dom this chain is a
-  // fallback for renderers that wire commitViewTransition without the
-  // suspend hook — chaining freezes the root until the previous animation
-  // finishes, parking keeps rendering live.
+  // via the adapter's suspend hook), so for fig-dom this chain is a fallback
+  // for renderers that wire commit without suspend — chaining freezes the root
+  // until the previous animation finishes, parking keeps rendering live.
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
   const pendingSettled = pending?.finished ?? pending?.ready;
   if (pending != null && pendingSettled !== undefined) {
@@ -214,7 +214,7 @@ function registerPendingTransition(
 // shared per-document mutex — client commits and streaming reveals alike)
 // and re-schedules once it settles. Rendering continues during the park;
 // only the commit waits.
-export function suspendOnActiveViewTransition(
+function suspendOnActiveViewTransition(
   container: Container,
   onFinished: () => void,
 ): boolean {
@@ -227,7 +227,7 @@ export function suspendOnActiveViewTransition(
   return true;
 }
 
-export function measureViewTransitionSurface(
+function measureViewTransitionSurface(
   element: Element,
 ): ViewTransitionSurfaceMeasurement | null {
   if (typeof element.getBoundingClientRect !== "function") return null;
@@ -260,7 +260,7 @@ export function measureViewTransitionSurface(
   };
 }
 
-export function applyViewTransitionName(
+function applyViewTransitionName(
   element: Element,
   name: string,
   className: string | null,
@@ -274,10 +274,7 @@ export function applyViewTransitionName(
   if (className !== null) style.viewTransitionClass = className;
 }
 
-export function restoreViewTransitionName(
-  element: Element,
-  props: Props,
-): void {
+function restoreViewTransitionName(element: Element, props: Props): void {
   const style = (element as HTMLElement).style as CSSStyleDeclaration & {
     viewTransitionClass?: string;
     viewTransitionName?: string;
@@ -310,3 +307,14 @@ function styleValue(value: unknown): string {
 
   return "";
 }
+
+export const viewTransitionHostConfig: ViewTransitionHostConfig<
+  Container,
+  Element
+> = {
+  commit: commitViewTransition,
+  apply: applyViewTransitionName,
+  restore: restoreViewTransitionName,
+  measure: measureViewTransitionSurface,
+  suspend: suspendOnActiveViewTransition,
+};

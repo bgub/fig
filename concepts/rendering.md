@@ -64,7 +64,8 @@ with no reconciliation — and commits only the second invocation. Effects and
 fig-dom `bind` callbacks run, abort, and run again with a fresh signal once
 per lifetime (tracked via `strictRan` flags set before the first call so
 re-entrant runs cannot re-enter the cycle). Strict behavior is client-only —
-server rendering never double-invokes — and production builds strip all of it.
+server rendering never double-invokes — and production builds strip all of it
+through compile-time `__FIG_DEV__` gates.
 
 ## Pre-Commit Diagnostics
 

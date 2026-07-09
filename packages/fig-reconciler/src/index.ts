@@ -147,10 +147,9 @@ function hydrationLaneForPriority(priority: EventPriority): Lane {
   return priority === "discrete" ? SyncLane : SelectiveHydrationLane;
 }
 
-declare const process: { env?: { NODE_ENV?: string } } | undefined;
+declare const __FIG_DEV__: boolean | undefined;
 
-const __DEV__ =
-  typeof process === "undefined" || process.env?.NODE_ENV !== "production";
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 setTransitionHandler(runWithTransition);
 
@@ -194,6 +193,32 @@ export interface ViewTransitionSurfaceMeasurement {
 export interface ViewTransitionMutationResult {
   canceledNames: string[];
   cancelRootSnapshot: boolean;
+}
+
+export interface ViewTransitionHostConfig<Container, Instance> {
+  commit(
+    this: void,
+    container: Container,
+    prepareSnapshot: () => void,
+    mutate: () => ViewTransitionMutationResult,
+    cleanup: () => void,
+  ): ViewTransitionCommitResult;
+  apply(
+    this: void,
+    instance: Instance,
+    name: string,
+    className: string | null,
+  ): void;
+  restore(this: void, instance: Instance, props: Props): void;
+  measure?(
+    this: void,
+    instance: Instance,
+  ): ViewTransitionSurfaceMeasurement | null;
+  // True when a view transition is currently running on the container's
+  // document; `onFinished` fires once it settles (and never fires when this
+  // returns false). Lets the reconciler park eligible commits behind a
+  // running animation instead of committing under it.
+  suspend?(this: void, container: Container, onFinished: () => void): boolean;
 }
 
 export interface HostConfig<Container, Instance, TextInstance> {
@@ -311,29 +336,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
     logicalParent: Parent<Container, Instance>,
   ): void;
   removePortalContainer?(container: Parent<Container, Instance>): void;
-  commitViewTransition?(
-    container: Container,
-    prepareSnapshot: () => void,
-    mutate: () => ViewTransitionMutationResult,
-    cleanup: () => void,
-  ): ViewTransitionCommitResult;
-  applyViewTransitionName?(
-    instance: Instance,
-    name: string,
-    className: string | null,
-  ): void;
-  restoreViewTransitionName?(instance: Instance, props: Props): void;
-  measureViewTransitionSurface?(
-    instance: Instance,
-  ): ViewTransitionSurfaceMeasurement | null;
-  // True when a view transition is currently running on the container's
-  // document; `onFinished` fires once it settles (and never fires when this
-  // returns false). Lets the reconciler park eligible commits behind a
-  // running animation instead of committing under it.
-  suspendOnActiveViewTransition?(
-    container: Container,
-    onFinished: () => void,
-  ): boolean;
+  viewTransition?: ViewTransitionHostConfig<Container, Instance>;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -896,20 +899,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     TextInstance
   > &
     HostHoistedAssetConfig<Container, Instance, TextInstance>;
-  type RequiredViewTransitionHostConfig = Required<
-    Pick<
-      HostConfig<Container, Instance, TextInstance>,
-      | "commitViewTransition"
-      | "applyViewTransitionName"
-      | "restoreViewTransitionName"
-    >
-  > &
-    // Measurement stays optional: hosts without it keep every candidate
-    // surface (no cancellation) instead of losing view transitions entirely.
-    Pick<
-      HostConfig<Container, Instance, TextInstance>,
-      "measureViewTransitionSurface"
-    >;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -939,7 +928,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
   let hoistedAssetHostConfig: RequiredHoistedAssetHostConfig | null = null;
-  let viewTransitionHostConfig: RequiredViewTransitionHostConfig | null = null;
+  const viewTransitionHost = host.viewTransition ?? null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
@@ -3622,7 +3611,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       !root.clearContainerBeforeCommit &&
       root.renderLanes !== NoLanes &&
       (root.renderLanes & ~ViewTransitionEligibleLanes) === NoLanes &&
-      optionalViewTransitionHostConfig() !== null
+      viewTransitionHost !== null
     );
   }
 
@@ -3697,7 +3686,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberSubtree(node, (cursor) => {
       if (cursor.deletions !== null) {
         for (const deletion of cursor.deletions) {
-          collectDeletedViewTransitionFiber(deletion, plan, exitsByName);
+          collectDeletedViewTransitionFiber(deletion, plan, exitsByName, true);
         }
       }
 
@@ -3712,6 +3701,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     cursor: F,
     plan: ViewTransitionPlan<Instance>,
     exitsByName: Map<string, F>,
+    collectExit: boolean,
   ): void {
     if (cursor.tag === PortalTag || isHiddenBoundary(cursor)) return;
 
@@ -3719,16 +3709,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (explicitViewTransitionName(cursor) !== null) {
         exitsByName.set(viewTransitionName(cursor), cursor);
       }
-      collectViewTransitionSurfaces(
-        cursor,
-        "exit",
-        plan.oldSurfaces,
-        "committed",
-      );
+      if (collectExit) {
+        collectViewTransitionSurfaces(
+          cursor,
+          "exit",
+          plan.oldSurfaces,
+          "committed",
+        );
+      }
       // The outermost deleted boundary owns the exit; deeper named
       // boundaries never exit on their own but stay eligible to pair with
       // an appearing counterpart (share).
-      registerDeletedPairCandidates(cursor.child, exitsByName);
+      for (let child = cursor.child; child !== null; child = child.sibling) {
+        collectDeletedViewTransitionFiber(child, plan, exitsByName, false);
+      }
       return;
     }
 
@@ -3737,27 +3731,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // subtree instead of walking every deleted fiber.
     if ((cursor.subtreeFlags & ViewTransitionStaticFlag) === 0) return;
     for (let child = cursor.child; child !== null; child = child.sibling) {
-      collectDeletedViewTransitionFiber(child, plan, exitsByName);
-    }
-  }
-
-  function registerDeletedPairCandidates(
-    node: F | null,
-    exitsByName: Map<string, F>,
-  ): void {
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-      if (cursor.tag === PortalTag || isHiddenBoundary(cursor)) continue;
-
-      if (cursor.tag === ViewTransitionTag) {
-        if (explicitViewTransitionName(cursor) !== null) {
-          exitsByName.set(viewTransitionName(cursor), cursor);
-        }
-        registerDeletedPairCandidates(cursor.child, exitsByName);
-        continue;
-      }
-
-      if ((cursor.subtreeFlags & ViewTransitionStaticFlag) === 0) continue;
-      registerDeletedPairCandidates(cursor.child, exitsByName);
+      collectDeletedViewTransitionFiber(child, plan, exitsByName, collectExit);
     }
   }
 
@@ -3817,19 +3791,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           if (pairedExit !== undefined) {
             // A pair vacates one slot and fills another: both relayout.
             if (!insideBoundary) plan.rootAffected = true;
-            removeViewTransitionSurfaces(plan.oldSurfaces, pairedExit);
-            collectViewTransitionSurfaces(
-              pairedExit,
-              "share",
-              plan.oldSurfaces,
-              "committed",
-            );
-            collectViewTransitionSurfaces(
-              cursor,
-              "share",
-              plan.newSurfaces,
-              "finished",
-            );
+            collectViewTransitionPair(plan, pairedExit, cursor);
             exitsByName.delete(viewTransitionName(cursor));
           } else if (cursor.alternate !== null) {
             // A moved boundary keeps its identity: naming both the committed
@@ -3940,25 +3902,33 @@ export function createRenderer<Container, Instance, TextInstance>(
             ? exitsByName.get(viewTransitionName(cursor))
             : undefined;
         if (pairedExit !== undefined) {
-          removeViewTransitionSurfaces(plan.oldSurfaces, pairedExit);
-          collectViewTransitionSurfaces(
-            pairedExit,
-            "share",
-            plan.oldSurfaces,
-            "committed",
-          );
-          collectViewTransitionSurfaces(
-            cursor,
-            "share",
-            plan.newSurfaces,
-            "finished",
-          );
+          collectViewTransitionPair(plan, pairedExit, cursor);
           exitsByName.delete(viewTransitionName(cursor));
         }
       }
 
       collectAppearingPairViewTransitions(cursor.child, plan, exitsByName);
     }
+  }
+
+  function collectViewTransitionPair(
+    plan: ViewTransitionPlan<Instance>,
+    oldBoundary: F,
+    newBoundary: F,
+  ): void {
+    removeViewTransitionSurfaces(plan.oldSurfaces, oldBoundary);
+    collectViewTransitionSurfaces(
+      oldBoundary,
+      "share",
+      plan.oldSurfaces,
+      "committed",
+    );
+    collectViewTransitionSurfaces(
+      newBoundary,
+      "share",
+      plan.newSurfaces,
+      "finished",
+    );
   }
 
   function isStablyHiddenBoundary(node: F): boolean {
@@ -4083,9 +4053,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   function applyOldViewTransitionSurfaces(
     plan: ViewTransitionPlan<Instance>,
   ): void {
-    const viewTransitionHost = optionalViewTransitionHostConfig();
     if (viewTransitionHost === null) return;
-    const measure = viewTransitionHost.measureViewTransitionSurface;
+    const measure = viewTransitionHost.measure;
 
     for (const surface of plan.oldSurfaces) {
       surface.measurement = measure?.(surface.instance) ?? null;
@@ -4097,7 +4066,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         surface.skipped = true;
         continue;
       }
-      viewTransitionHost.applyViewTransitionName(
+      viewTransitionHost.apply(
         surface.instance,
         surface.name,
         surface.className,
@@ -4122,9 +4091,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       canceledNames: [],
       cancelRootSnapshot: false,
     };
-    const viewTransitionHost = optionalViewTransitionHostConfig();
     if (viewTransitionHost === null || plan === null) return result;
-    const measure = viewTransitionHost.measureViewTransitionSurface;
+    const measure = viewTransitionHost.measure;
 
     const oldByName = new Map<string, ViewTransitionSurface<Instance>>();
     for (const surface of plan.oldSurfaces) {
@@ -4162,10 +4130,7 @@ export function createRenderer<Container, Instance, TextInstance>(
             // share it between sides); take the name back off so the new
             // capture skips it, and hide the old capture at ready.
             surface.skipped = true;
-            viewTransitionHost.restoreViewTransitionName(
-              surface.instance,
-              surface.props,
-            );
+            viewTransitionHost.restore(surface.instance, surface.props);
             if (oldByName.has(surface.name)) {
               result.canceledNames.push(surface.name);
             }
@@ -4197,20 +4162,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function applyViewTransitionSurface(
-    viewTransitionHost: RequiredViewTransitionHostConfig,
+    viewTransitionHost: ViewTransitionHostConfig<Container, Instance>,
     surface: ViewTransitionSurface<Instance>,
   ): void {
-    viewTransitionHost.applyViewTransitionName(
-      surface.instance,
-      surface.name,
-      surface.className,
-    );
+    viewTransitionHost.apply(surface.instance, surface.name, surface.className);
   }
 
   function restoreViewTransitionSurfaces(
     plan: ViewTransitionPlan<Instance>,
   ): void {
-    const viewTransitionHost = optionalViewTransitionHostConfig();
     if (viewTransitionHost === null) return;
 
     const propsByInstance = new Map<Instance, Props>();
@@ -4222,7 +4182,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     for (const [instance, props] of propsByInstance) {
-      viewTransitionHost.restoreViewTransitionName(instance, props);
+      viewTransitionHost.restore(instance, props);
     }
   }
 
@@ -4242,7 +4202,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (
       !root.pendingViewTransitionCommit &&
       isViewTransitionEligibleCommit(root) &&
-      host.suspendOnActiveViewTransition?.(root.container, () =>
+      viewTransitionHost?.suspend?.(root.container, () =>
         scheduleRoot(root),
       ) === true
     ) {
@@ -4372,9 +4332,8 @@ export function createRenderer<Container, Instance, TextInstance>(
           }
         }
       };
-      const viewTransitionHost = optionalViewTransitionHostConfig();
       if (viewTransitionPlan !== null && viewTransitionHost !== null) {
-        const viewTransitionResult = viewTransitionHost.commitViewTransition(
+        const viewTransitionResult = viewTransitionHost.commit(
           root.container,
           () => applyOldViewTransitionSurfaces(viewTransitionPlan),
           commitWithViewTransition,
@@ -5759,7 +5718,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // families re-render in place (hook state preserved); stale families (hook
   // signature changed) remount via their parent. The refresh runtime swaps each
   // family's `current` before calling this.
-  // Each refresh function wraps its whole body in a block-form NODE_ENV gate
+  // Each refresh function wraps its whole body in a block-form dev gate
   // (not an early return: esbuild only drops the bodies — and with them the
   // machinery — via parse-time branch elimination) so production builds ship
   // empty stubs.
@@ -5870,21 +5829,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     activityHostConfig = host as ReturnType<typeof requireActivityHostConfig>;
     return activityHostConfig;
-  }
-
-  function optionalViewTransitionHostConfig(): RequiredViewTransitionHostConfig | null {
-    if (viewTransitionHostConfig !== null) return viewTransitionHostConfig;
-
-    if (
-      host.commitViewTransition === undefined ||
-      host.applyViewTransitionName === undefined ||
-      host.restoreViewTransitionName === undefined
-    ) {
-      return null;
-    }
-
-    viewTransitionHostConfig = host as RequiredViewTransitionHostConfig;
-    return viewTransitionHostConfig;
   }
 
   function commitHiddenBoundaryVisibility(

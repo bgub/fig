@@ -16,7 +16,7 @@ import {
   setCurrentDataStore,
 } from "./data.ts";
 
-declare const process: { env?: { NODE_ENV?: string } } | undefined;
+declare const __FIG_DEV__: boolean | undefined;
 
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
@@ -93,8 +93,7 @@ const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
-const __DEV__ =
-  typeof process === "undefined" || process.env?.NODE_ENV !== "production";
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 

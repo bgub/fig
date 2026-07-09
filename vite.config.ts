@@ -72,6 +72,8 @@ const libraryEntries: Record<string, string[]> = {
   ],
 };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
+const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };
+const figProductionDefine = { __FIG_DEV__: JSON.stringify(false) };
 const packWorkspacePaths = [
   "packages/fig",
   "packages/fig-server",
@@ -97,6 +99,7 @@ export default defineConfig({
   resolve: {
     alias: figSourceResolveAliases(),
   },
+  define: figDevDefine,
   test: testConfigFor(packagePath),
   pack:
     packagePath === "." && !isPackCommand
@@ -167,6 +170,7 @@ function packConfigFor(path: string): PackConfig | undefined {
     return {
       entry: libraryEntry,
       dts: true,
+      define: figProductionDefine,
       minify: browser ? true : undefined,
       outExtensions,
       platform: browser ? "browser" : undefined,
@@ -304,7 +308,10 @@ function demoClientPackConfig(): PackConfig {
     deps: {
       alwaysBundle: demoClientBundleDependencies,
     },
-    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    define: {
+      ...figProductionDefine,
+      "process.env.NODE_ENV": JSON.stringify("production"),
+    },
     dts: false,
     minify: false,
     sourcemap: true,

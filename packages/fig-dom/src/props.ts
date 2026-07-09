@@ -8,7 +8,9 @@ import {
   isHtmlElement,
 } from "./tree.ts";
 
-declare const process: { env: { NODE_ENV?: string } };
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 interface SelectState {
   appliedDefault: boolean;
@@ -72,7 +74,7 @@ export function updateElement(
     }
 
     if (reserved(name)) {
-      if (process.env.NODE_ENV !== "production" && event(name)) {
+      if (__DEV__ && event(name)) {
         warnDroppedProp(name, eventPropWarning(name, type, nextProps));
       }
       continue;
@@ -80,7 +82,7 @@ export function updateElement(
 
     if (formProp(name)) {
       if (
-        process.env.NODE_ENV !== "production" &&
+        __DEV__ &&
         (name === "checked" || name === "defaultChecked") &&
         next !== undefined &&
         typeof next !== "boolean" &&
@@ -98,11 +100,7 @@ export function updateElement(
 
     if (previous === next) continue;
     if (name === "style") {
-      if (
-        process.env.NODE_ENV !== "production" &&
-        typeof next === "string" &&
-        next !== ""
-      ) {
+      if (__DEV__ && typeof next === "string" && next !== "") {
         warnDroppedProp(
           "style:string",
           "The style prop must be an object of properties; string styles " +
@@ -175,17 +173,12 @@ export function hydrateElement(element: Element, nextProps: Props): void {
   // style prop into the same declaration and runs the bind callback (which
   // may set attributes), so a post-update enumeration could not tell
   // server-set names from client-set ones.
-  const serverStyles =
-    process.env.NODE_ENV !== "production" ? hydratedStyleNames(element) : [];
-  const serverAttributes =
-    process.env.NODE_ENV !== "production" ? attributeNames(element) : [];
+  const serverStyles = __DEV__ ? hydratedStyleNames(element) : [];
+  const serverAttributes = __DEV__ ? attributeNames(element) : [];
 
   updateElement(element, {}, nextProps, { hydrating: true });
 
-  if (
-    process.env.NODE_ENV !== "production" &&
-    nextProps.suppressHydrationWarning !== true
-  ) {
+  if (__DEV__ && nextProps.suppressHydrationWarning !== true) {
     warnExtraHydratedAttributes(
       element,
       nextProps,
@@ -588,7 +581,7 @@ function setStyleProperty(
   value: unknown,
 ): void {
   if (typeof value === "number" || typeof value === "bigint") {
-    if (process.env.NODE_ENV !== "production") {
+    if (__DEV__) {
       warnDroppedProp(
         `style:${name}:${typeof value}`,
         `The style property "${name}" received a ${typeof value} ` +

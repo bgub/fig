@@ -48,7 +48,7 @@ dropped and Fig-specific APIs are adopted where they are clearer.
 - Explicit read verbs instead of `use(resource)`: `readContext`,
   `readPromise`, `readData` → `concepts/hooks.md`, `concepts/data.md`.
 - Always-strict dev rendering; diagnostics throw before commit; dev behavior
-  strips via inline `NODE_ENV` gates → `concepts/rendering.md`.
+  strips via compile-time `__FIG_DEV__` gates → `concepts/rendering.md`.
 - Server errors cross the wire only as `onError → { digest?, message? }`;
   streaming vs prerender semantics → `concepts/server-rendering.md`,
   `concepts/errors.md`.

@@ -86,5 +86,5 @@ runtime footprint.
   work loop prefers `setImmediate` and creates its `MessageChannel` lazily, so
   importing a renderer can never keep a Node process alive.
 - Dev-only behavior (strict double render, diagnostics, DevTools emission)
-  uses inline `process.env.NODE_ENV !== "production"` checks that app bundlers
-  strip; there are no separate dev builds.
+  uses inline `__FIG_DEV__` checks that Fig library builds define away; there
+  are no separate dev builds.
