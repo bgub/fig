@@ -38,6 +38,9 @@ Questions → Provisional Stance).
   handoff.
 - [assets.md](./assets.md) — asset resources: creators, dedupe keys,
   destinations, reveal gating.
+- [templates.md](./templates.md) — compiler-extracted templates
+  (experimental): the descriptor contract, slot kinds, identity, hydration
+  policy, compiler eligibility.
 - [server-rendering.md](./server-rendering.md) — the entry grid, streaming
   results, `prerender`, the `onError` digest contract.
 - [suspense-streaming.md](./suspense-streaming.md) — markers, segments, the
