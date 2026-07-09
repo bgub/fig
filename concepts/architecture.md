@@ -40,6 +40,17 @@ fig-server is a fully separate render implementation (it depends only on
 `@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never
 grew a server mode.
 
+### Reconciler internals
+
+`createRenderer` is the stateful kernel: render, hydration, Suspense, commit,
+and effect phases stay together because they share one host configuration and
+one set of fiber invariants. Pure mechanisms sit behind small internal modules
+instead: fiber/hook vocabularies, traversal, hook-queue operations, host-content
+interpretation, lazy root-data installation, lanes/scheduling, refresh, and
+DevTools snapshotting. New files should hide a complete rule or state machine;
+do not split the kernel into callback-heavy pass-through layers merely to make
+the main file shorter.
+
 ## The Internal Entry (`@bgub/fig/internal`)
 
 The cross-package protocol registry, versioned together with the sibling

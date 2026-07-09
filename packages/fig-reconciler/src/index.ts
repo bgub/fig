@@ -1,9 +1,7 @@
 import {
   type ActionStateAction,
   type ActionStateRunner,
-  type DataRefreshResult,
   type DataResource,
-  type DataResourceKey,
   type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
@@ -13,10 +11,8 @@ import {
   type FigContext,
   type FigDataHydrationEntry,
   type FigDataStoreHandle,
-  type FigElement,
   type FigNode,
   type FigPortal,
-  Fragment,
   type Props,
   type StableEventArgs,
   type StartTransition,
@@ -28,18 +24,10 @@ import {
   collectChildren,
   dataResourceKeysForError,
   type FigDataStore,
-  type FigDataStoreFactory,
-  type FigDataStoreHost,
   invalidChildError,
-  isActivity,
-  isAssets,
-  isContext,
-  isErrorBoundary,
   isPortal,
-  isSuspense,
   isThenable,
   isValidElement,
-  isViewTransition,
   type NormalizedChild,
   type RenderDispatcher,
   readThenable,
@@ -48,19 +36,57 @@ import {
   setTransitionHandler,
   type Thenable,
 } from "@bgub/fig/internal";
+import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
+import { devtoolsTypeName } from "./devtools.ts";
 import {
-  devtoolsTypeName,
-  type FigDevtoolsCommitInspection,
-  type FigDevtoolsEffectPhase,
-  type FigDevtoolsFiberKind,
-  type FigDevtoolsFiberSnapshot,
-  type FigDevtoolsHookKind,
-  type FigDevtoolsHookSnapshot,
-  type FigDevtoolsHostSnapshot,
-  type FigDevtoolsRootSnapshot,
-  type FigDevtoolsWorkLabel,
-  getFigDevtoolsGlobalHook,
-} from "./devtools.ts";
+  ActivityTag,
+  AssetsTag,
+  ContextProviderTag,
+  ErrorBoundaryTag,
+  FragmentTag,
+  FunctionTag,
+  HostTag,
+  PortalTag,
+  RootTag,
+  SuspenseTag,
+  tagFor,
+  type Tag,
+  TextTag,
+  ViewTransitionTag,
+} from "./fiber-tags.ts";
+import { walkFiberForest, walkFiberSubtree } from "./fiber-traversal.ts";
+import {
+  ActionStateHook,
+  BeforeLayoutEffect,
+  BeforePaintEffect,
+  DeferredValueHook,
+  type EffectPhase,
+  ExternalStoreHook,
+  hookKindNames,
+  type HookKind,
+  IdHook,
+  isEffectHook,
+  MemoHook,
+  ReactiveEffect,
+  StableEventHook,
+  StateHook,
+  TransitionHook,
+} from "./hook-kinds.ts";
+import {
+  clearQueueLanes,
+  cloneQueue,
+  cloneQueueNodes,
+  cloneUpdateNode,
+  type HookQueue,
+  type HookUpdate,
+  mergeQueues,
+  type StateUpdate,
+} from "./hook-queue.ts";
+import {
+  hasUnsafeHTML,
+  hostChildren,
+  hostTextContent,
+} from "./host-content.ts";
 import {
   AllTransitionLanes,
   claimNextRetryLane,
@@ -69,13 +95,10 @@ import {
   DefaultHydrationLane,
   DefaultLane,
   DeferredLane,
-  GestureLane,
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
-  IdleHydrationLane,
   IdleLane,
-  InputContinuousHydrationLane,
   InputContinuousLane,
   includesOnlyTransitions,
   includesSomeLane,
@@ -100,9 +123,7 @@ import {
   runWithTransition,
   runWithTransitionLane,
   SelectiveHydrationLane,
-  SyncHydrationLane,
   SyncLane,
-  TransitionHydrationLane,
 } from "./lanes.ts";
 import {
   hasRefreshHandler,
@@ -113,6 +134,7 @@ import {
 } from "./refresh-internal.ts";
 import type { RefreshUpdate } from "./refresh.ts";
 export type { RefreshUpdate } from "./refresh.ts";
+import { createRootDataStore } from "./root-data-store.ts";
 import {
   NormalPriority,
   now,
@@ -470,32 +492,6 @@ export interface FigRenderer<Container> {
 type RequiredHydrationHostConfig<Container, Instance, TextInstance> =
   HostHydrationConfig<Container, Instance, TextInstance>;
 
-const RootTag = 0;
-const HostTag = 1;
-const TextTag = 2;
-const FunctionTag = 3;
-const FragmentTag = 4;
-const ContextProviderTag = 5;
-const SuspenseTag = 6;
-const ErrorBoundaryTag = 7;
-const PortalTag = 8;
-const AssetsTag = 9;
-const ActivityTag = 10;
-const ViewTransitionTag = 11;
-type Tag =
-  | typeof RootTag
-  | typeof HostTag
-  | typeof TextTag
-  | typeof FunctionTag
-  | typeof FragmentTag
-  | typeof ContextProviderTag
-  | typeof SuspenseTag
-  | typeof ErrorBoundaryTag
-  | typeof PortalTag
-  | typeof AssetsTag
-  | typeof ActivityTag
-  | typeof ViewTransitionTag;
-
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
 const UpdateFlag = 1 << 1;
@@ -552,56 +548,6 @@ const StaticFlagsMask = ViewTransitionStaticFlag;
 // mid-animation. Mirrors React's includesOnlyViewTransitionEligibleLanes.
 const ViewTransitionEligibleLanes =
   AllTransitionLanes | RetryLanes | DeferredLane | IdleLane;
-
-const ReactiveEffect = 0;
-const BeforePaintEffect = 1;
-const BeforeLayoutEffect = 2;
-type EffectPhase =
-  | typeof ReactiveEffect
-  | typeof BeforePaintEffect
-  | typeof BeforeLayoutEffect;
-
-// Hook kinds are numeric internally; effect hooks reuse their EffectPhase
-// constant as the kind, so isEffectHook is a range check and updateEffectHook
-// needs no separate kind argument. Devtools snapshots and dev-only errors map
-// back to the public FigDevtoolsHookKind strings through hookKindNames.
-const StateHook = 3;
-const ActionStateHook = 4;
-const IdHook = 5;
-const DeferredValueHook = 6;
-const ExternalStoreHook = 7;
-const MemoHook = 8;
-const TransitionHook = 9;
-const StableEventHook = 10;
-type HookKind = number;
-
-const hookKindNames: readonly FigDevtoolsHookKind[] = [
-  "reactive",
-  "before-paint",
-  "before-layout",
-  "state",
-  "action-state",
-  "id",
-  "deferred-value",
-  "external-store",
-  "memo",
-  "transition",
-  "stable-event",
-];
-
-// The queue payload: what a StateSetter accepts.
-type StateUpdate<S> = S | ((previous: S) => S);
-
-interface HookUpdate<S> {
-  action: StateUpdate<S>;
-  lane: Lane;
-  next: HookUpdate<S>;
-}
-
-interface HookQueue<S> {
-  pending: HookUpdate<S> | null;
-  dispatch: StateSetter<S> | null;
-}
 
 interface Hook<S = any> {
   kind: HookKind;
@@ -4550,47 +4496,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function walkFiberForest(
-    node: F | null,
-    visitor: (node: F) => boolean | void,
-  ): void {
-    walkFiberTree(node, true, visitor);
-  }
-
-  function walkFiberSubtree(
-    node: F,
-    visitor: (node: F) => boolean | void,
-  ): void {
-    walkFiberTree(node, false, visitor);
-  }
-
-  // Pointer walk over return links — no per-walk stack allocation.
-  // Backtracking is bounded by the walk root (and its parent), so a walk
-  // over a detached deletion entry can never escape into the kept tree its
-  // return and sibling pointers still reference.
-  function walkFiberTree(
-    node: F | null,
-    includeRootSiblings: boolean,
-    visitor: (node: F) => boolean | void,
-  ): void {
-    const stack: F[] = [];
-    let cursor = node;
-
-    while (cursor !== null) {
-      const shouldDescend = visitor(cursor) !== false && cursor.child !== null;
-
-      if ((includeRootSiblings || cursor !== node) && cursor.sibling !== null) {
-        stack.push(cursor.sibling);
-      }
-
-      if (shouldDescend) {
-        cursor = cursor.child;
-      } else {
-        cursor = stack.pop() ?? null;
-      }
-    }
-  }
-
   function scheduleDehydratedSuspenseRetries(root: R): void {
     if (
       !root.isHydrationRoot &&
@@ -5207,7 +5112,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function deleteFiberDataTree(node: F): void {
     const store = rootOf(node).dataStore;
-    walkFiberTree(node, true, (cursor) => {
+    walkFiberForest(node, (cursor) => {
       deleteFiberDataOwner(cursor, store);
     });
   }
@@ -6745,7 +6650,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function restoreConsumedPendingQueuesForRetry(root: R, from: number): void {
     for (const consumed of root.consumedPendingQueues.splice(from)) {
-      markHookQueueNoLane(consumed.pending);
+      clearQueueLanes(consumed.pending);
       restoreConsumedPendingQueue(consumed);
     }
   }
@@ -6757,22 +6662,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     queue.pending =
       queue.pending === null ? pending : mergeQueues(pending, queue.pending);
   }
-
-  function markHookQueueNoLane(queue: HookUpdate<unknown>): void {
-    let update = queue.next;
-    do {
-      update.lane = NoLane;
-      update = update.next;
-    } while (update !== queue.next);
-  }
 }
 
 function activityHidden(props: Props): boolean {
   return props.mode === "hidden";
-}
-
-function isEffectHook(kind: HookKind): boolean {
-  return kind <= BeforeLayoutEffect;
 }
 
 // Dev-only (inline-gated at call sites): maps a numeric kind back to its
@@ -6821,171 +6714,6 @@ function resolveInitialState<S>(initialState: S | (() => S)): S {
   return typeof initialState === "function"
     ? (initialState as () => S)()
     : initialState;
-}
-
-function mergeQueues<S>(
-  baseQueue: HookUpdate<S> | null,
-  pendingQueue: HookUpdate<S>,
-): HookUpdate<S> {
-  if (baseQueue === null) return pendingQueue;
-
-  const baseFirst = baseQueue.next;
-  const pendingFirst = pendingQueue.next;
-  baseQueue.next = pendingFirst;
-  pendingQueue.next = baseFirst;
-  return pendingQueue;
-}
-
-function cloneUpdateNode<S>(update: HookUpdate<S>): HookUpdate<S> {
-  const clone: HookUpdate<S> = {
-    action: update.action,
-    lane: update.lane,
-    next: null as never,
-  };
-  clone.next = clone;
-  return clone;
-}
-
-function cloneQueue<S>(queue: HookUpdate<S> | null): HookUpdate<S> | null {
-  if (queue === null) return null;
-  return cloneQueueNodes(queue);
-}
-
-function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
-  let clone: HookUpdate<S> | null = null;
-  let update = queue.next;
-
-  do {
-    clone = mergeQueues(clone, cloneUpdateNode(update));
-    update = update.next;
-  } while (update !== queue.next);
-
-  return clone as HookUpdate<S>;
-}
-
-function tagFor(element: FigElement): Tag {
-  if (typeof element.type === "string") return HostTag;
-  if (element.type === Fragment) return FragmentTag;
-  if (isAssets(element.type)) return AssetsTag;
-  if (isContext(element.type)) return ContextProviderTag;
-  if (isSuspense(element.type)) return SuspenseTag;
-  if (isActivity(element.type)) return ActivityTag;
-  if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
-  if (isViewTransition(element.type)) return ViewTransitionTag;
-  return FunctionTag;
-}
-
-// Renderer bundles do not import @bgub/fig. Instead, resources created by
-// that package carry the store factory on an internal symbol. Roots buffer
-// initialData until the first real data resource operation lazily installs the
-// store, covering code-split apps whose only dataResource import is a lazy chunk.
-const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
-
-function createRootDataStore(host: FigDataStoreHost): FigDataStore {
-  let inner: FigDataStore | null = null;
-  let buffered: FigDataHydrationEntry[] | null = null;
-  let disposed = false;
-
-  function installStore<TArgs extends unknown[], TValue>(
-    resource: DataResource<TArgs, TValue>,
-  ): FigDataStore {
-    if (inner !== null) return inner;
-    if (disposed) {
-      throw new Error("Data resource APIs require a live Fig root.");
-    }
-
-    const factory = (
-      resource as DataResource & Record<symbol, FigDataStoreFactory>
-    )[DataStoreFactorySymbol];
-    if (factory === undefined) {
-      throw new Error("Data resource APIs require @bgub/fig.");
-    }
-
-    inner = factory(host);
-    if (buffered !== null) inner.hydrate(buffered);
-    buffered = null;
-    return inner;
-  }
-
-  const store: FigDataStore = {
-    hydrate(entries: readonly FigDataHydrationEntry[]): void {
-      if (inner !== null) {
-        inner.hydrate(entries);
-        return;
-      }
-      (buffered ??= []).push(...entries);
-    },
-    run<T>(callback: () => T): T {
-      if (inner !== null) return inner.run(callback);
-
-      const previousStore = setCurrentDataStore(store);
-      try {
-        return callback();
-      } finally {
-        setCurrentDataStore(previousStore);
-      }
-    },
-    readData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      args: TArgs,
-      owner: object,
-    ): TValue {
-      return installStore(resource).readData(resource, args, owner);
-    },
-    preloadData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      ...args: TArgs
-    ): void {
-      installStore(resource).preloadData(resource, ...args);
-    },
-    invalidateData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      ...args: TArgs
-    ): void {
-      installStore(resource).invalidateData(resource, ...args);
-    },
-    invalidateDataError(error: unknown): boolean {
-      return inner?.invalidateDataError(error) ?? false;
-    },
-    invalidateDataKey(key: DataResourceKey): void {
-      inner?.invalidateDataKey(key);
-    },
-    invalidateDataPrefix(prefix: DataResourceKey): void {
-      inner?.invalidateDataPrefix(prefix);
-    },
-    refreshData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      ...args: TArgs
-    ): Promise<DataRefreshResult<TValue>> {
-      return installStore(resource).refreshData(resource, ...args);
-    },
-    commitDataDependencies(owner: object, previousOwner: object | null): void {
-      inner?.commitDataDependencies(owner, previousOwner);
-    },
-    deleteDataOwner(owner: object): void {
-      inner?.deleteDataOwner(owner);
-    },
-    releaseDataOwner(owner: object): void {
-      inner?.releaseDataOwner(owner);
-    },
-    resetDataDependencies(owner: object): void {
-      inner?.resetDataDependencies(owner);
-    },
-    dispose() {
-      disposed = true;
-      inner?.dispose();
-      inner = null;
-      buffered = null;
-    },
-    inspectDataEntries() {
-      return inner?.inspectDataEntries() ?? [];
-    },
-    snapshot() {
-      return inner?.snapshot() ?? buffered?.slice() ?? [];
-    },
-  };
-
-  return store;
 }
 
 function sameType<Container, Instance, TextInstance>(
@@ -7054,78 +6782,6 @@ function childExplicitKey(child: NormalizedChild): string | null {
     : null;
 }
 
-const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
-const NonTextHostContent = Symbol("fig.non-text-host-content");
-
-type HostTextContent =
-  | string
-  | typeof EmptyHostTextContent
-  | typeof NonTextHostContent;
-
-function hostTextContent(children: unknown): string | null {
-  const text = hostTextContentPart(children as FigNode);
-  return typeof text === "string" ? text : null;
-}
-
-function validateHostContentProps(props: Props): void {
-  if (!hasRenderableChild(props.children as FigNode)) return;
-
-  throw new Error("Host elements cannot have both unsafeHTML and children.");
-}
-
-function hostChildren(props: Props): FigNode {
-  if (!hasUnsafeHTML(props)) return props.children as FigNode;
-  validateHostContentProps(props);
-  return null;
-}
-
-function hasUnsafeHTML(props: Props): boolean {
-  return !emptyValue(props.unsafeHTML);
-}
-
-function hasRenderableChild(node: FigNode): boolean {
-  if (Array.isArray(node)) return node.some(hasRenderableChild);
-  return !emptyChild(node);
-}
-
-function emptyValue(value: unknown): boolean {
-  return value === null || value === undefined || value === false;
-}
-
-function emptyChild(value: unknown): boolean {
-  return value === null || value === undefined || typeof value === "boolean";
-}
-
-function hostTextContentPart(node: FigNode): HostTextContent {
-  if (Array.isArray(node)) {
-    let hasText = false;
-    let text = "";
-
-    for (const child of node) {
-      const childText = hostTextContentPart(child as FigNode);
-      if (childText === NonTextHostContent) return NonTextHostContent;
-      if (childText === EmptyHostTextContent) continue;
-
-      hasText = true;
-      text += childText;
-    }
-
-    return hasText ? text : EmptyHostTextContent;
-  }
-
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return EmptyHostTextContent;
-  }
-
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-
-  if (isValidElement(node) || isPortal(node)) return NonTextHostContent;
-
-  throw invalidChildError(node);
-}
-
 function duplicateKeyError(key: string | number): Error {
   return new Error(`Duplicate key "${String(key)}" found among siblings.`);
 }
@@ -7175,356 +6831,4 @@ function suspenseRetryLane(lanes: Lanes): Lane {
   return retryLanes === NoLanes
     ? claimNextRetryLane()
     : getHighestPriorityLane(retryLanes);
-}
-
-const devtoolsFiberIds = new WeakMap<object, number>();
-const devtoolsRootIds = new WeakMap<object, number>();
-const devtoolsRendererIds = new WeakMap<object, number>();
-let nextDevtoolsFiberId = 1;
-let nextDevtoolsRootId = 1;
-
-interface DevtoolsInspectionState {
-  hostFibers: WeakMap<object, number>;
-}
-
-function emitDevtoolsCommit<Container, Instance, TextInstance>(
-  renderer: object,
-  root: FiberRoot<Container, Instance, TextInstance>,
-): void {
-  const hook = getFigDevtoolsGlobalHook();
-  if (hook === null) return;
-
-  try {
-    let rendererId = devtoolsRendererIds.get(renderer);
-    if (rendererId === undefined) {
-      rendererId = hook.inject({
-        name: "Fig",
-        packageName: "@bgub/fig-reconciler",
-      });
-      devtoolsRendererIds.set(renderer, rendererId);
-    }
-
-    const inspection = createDevtoolsInspectionState();
-    const snapshot = snapshotDevtoolsRoot(root, rendererId, inspection);
-    hook.onCommitRoot(
-      rendererId,
-      snapshot,
-      createDevtoolsCommitInspection(snapshot.id, inspection),
-    );
-  } catch {
-    // DevTools should never affect application rendering.
-  }
-}
-
-function snapshotDevtoolsRoot<Container, Instance, TextInstance>(
-  root: FiberRoot<Container, Instance, TextInstance>,
-  rendererId: number,
-  inspection: DevtoolsInspectionState,
-): FigDevtoolsRootSnapshot {
-  return {
-    id: devtoolsRootId(root),
-    rendererId,
-    committedAt: now(),
-    dataResources: root.dataStore.inspectDataEntries(),
-    pendingWork: devtoolsWorkLabels(root.pendingLanes),
-    suspendedWork: devtoolsWorkLabels(root.suspendedLanes),
-    pingedWork: devtoolsWorkLabels(root.pingedLanes),
-    expiredWork: devtoolsWorkLabels(root.expiredLanes),
-    tree: snapshotDevtoolsFiber(root.current, null, inspection),
-  };
-}
-
-function snapshotDevtoolsFiber<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-  parentId: number | null,
-  inspection: DevtoolsInspectionState,
-): FigDevtoolsFiberSnapshot {
-  const id = devtoolsFiberId(node);
-  const { kind, name } = devtoolsFiberInfo(node);
-  const children: FigDevtoolsFiberSnapshot[] = [];
-  recordDevtoolsHostFiber(node, id, inspection);
-
-  for (let child = node.child; child !== null; child = child.sibling) {
-    appendDevtoolsChildSnapshots(child, id, inspection, children);
-  }
-
-  return {
-    id,
-    parentId,
-    name,
-    kind,
-    key: node.key,
-    index: node.index,
-    props: devtoolsProps(node),
-    pendingWork: devtoolsWorkLabels(node.lanes),
-    childWork: devtoolsWorkLabels(node.childLanes),
-    hooks: devtoolsHooks(node.memoizedState),
-    contextDependencies: devtoolsContextDependencies(node),
-    host: devtoolsHost(node),
-    capturedError: node.errorBoundaryState?.error,
-    componentStack: node.errorBoundaryState?.info.componentStack,
-    children,
-  };
-}
-
-function devtoolsWorkLabels(lanes: Lanes): FigDevtoolsWorkLabel[] {
-  const labels: FigDevtoolsWorkLabel[] = [];
-  if (includesSomeLane(lanes, SyncHydrationLane | SyncLane))
-    labels.push("sync");
-  if (
-    includesSomeLane(lanes, InputContinuousHydrationLane | InputContinuousLane)
-  ) {
-    labels.push("input");
-  }
-  if (includesSomeLane(lanes, DefaultHydrationLane | DefaultLane)) {
-    labels.push("default");
-  }
-  if (includesSomeLane(lanes, GestureLane)) labels.push("gesture");
-  if (includesSomeLane(lanes, AllTransitionLanes | TransitionHydrationLane)) {
-    labels.push("transition");
-  }
-  if (includesSomeLane(lanes, RetryLanes)) labels.push("retry");
-  if (includesSomeLane(lanes, IdleHydrationLane | IdleLane)) {
-    labels.push("idle");
-  }
-  if (includesSomeLane(lanes, OffscreenLane)) labels.push("offscreen");
-  if (includesSomeLane(lanes, DeferredLane)) labels.push("deferred");
-  if (includesSomeLane(lanes, SelectiveHydrationLane)) {
-    labels.push("selective-hydration");
-  }
-  return labels;
-}
-
-function appendDevtoolsChildSnapshots<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-  parentId: number,
-  inspection: DevtoolsInspectionState,
-  children: FigDevtoolsFiberSnapshot[],
-): void {
-  if (node.tag === ActivityTag && node.type === null) {
-    for (let child = node.child; child !== null; child = child.sibling) {
-      appendDevtoolsChildSnapshots(child, parentId, inspection, children);
-    }
-    return;
-  }
-
-  children.push(snapshotDevtoolsFiber(node, parentId, inspection));
-}
-
-function devtoolsRootId(root: object): number {
-  const existing = devtoolsRootIds.get(root);
-  if (existing !== undefined) return existing;
-
-  const id = nextDevtoolsRootId;
-  nextDevtoolsRootId += 1;
-  devtoolsRootIds.set(root, id);
-  return id;
-}
-
-function createDevtoolsInspectionState(): DevtoolsInspectionState {
-  return { hostFibers: new WeakMap() };
-}
-
-function createDevtoolsCommitInspection(
-  rootId: number,
-  inspection: DevtoolsInspectionState,
-): FigDevtoolsCommitInspection {
-  return {
-    inspectElement(target) {
-      if (typeof target !== "object" || target === null) return null;
-
-      const fiberId = inspection.hostFibers.get(target);
-      return fiberId === undefined ? null : { rootId, fiberId };
-    },
-  };
-}
-
-function recordDevtoolsHostFiber<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-  id: number,
-  inspection: DevtoolsInspectionState,
-): void {
-  if (node.tag !== HostTag && node.tag !== TextTag) return;
-  if (typeof node.stateNode !== "object" || node.stateNode === null) return;
-  inspection.hostFibers.set(node.stateNode, id);
-}
-
-function devtoolsFiberId<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-): number {
-  const existing =
-    devtoolsFiberIds.get(node) ??
-    (node.alternate === null
-      ? undefined
-      : devtoolsFiberIds.get(node.alternate));
-
-  if (existing !== undefined) {
-    devtoolsFiberIds.set(node, existing);
-    if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, existing);
-    return existing;
-  }
-
-  const id = nextDevtoolsFiberId;
-  nextDevtoolsFiberId += 1;
-  devtoolsFiberIds.set(node, id);
-  if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, id);
-  return id;
-}
-
-function devtoolsProps<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-): Props {
-  const props: Props = {};
-  const source = node.memoizedProps ?? node.props;
-
-  for (const [key, value] of Object.entries(source)) {
-    if (key !== "children") props[key] = value;
-  }
-
-  return props;
-}
-
-function devtoolsHooks(firstHook: Hook | null): FigDevtoolsHookSnapshot[] {
-  const hooks: FigDevtoolsHookSnapshot[] = [];
-  let id = 0;
-
-  for (
-    let hook: Hook<any> | null = firstHook;
-    hook !== null;
-    hook = hook.next
-  ) {
-    id += 1;
-
-    const kind = hookKindNames[hook.kind];
-    if (isEffectHook(hook.kind)) {
-      const effect = hook.memoizedState as Effect;
-      hooks.push({
-        id,
-        kind,
-        deps: effect.deps,
-        phase: devtoolsEffectPhase(effect.phase),
-        active: effect.controller !== null,
-      });
-    } else if (hook.kind === MemoHook) {
-      const memo = hook.memoizedState as MemoState<unknown>;
-      hooks.push({
-        id,
-        kind,
-        state: memo.value,
-        deps: memo.deps,
-      });
-    } else if (hook.kind === ExternalStoreHook) {
-      const store = hook.memoizedState as ExternalStoreState<unknown, unknown>;
-      hooks.push({
-        id,
-        kind,
-        state: store.value,
-      });
-    } else {
-      hooks.push({
-        id,
-        kind,
-        state: (hook as Hook<unknown>).memoizedState,
-      });
-    }
-  }
-
-  return hooks;
-}
-
-function devtoolsContextDependencies<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-): string[] {
-  return (
-    node.contextDependencies?.map((dependency) =>
-      devtoolsTypeName(dependency.context, "Context"),
-    ) ?? []
-  );
-}
-
-function devtoolsHost<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-): FigDevtoolsHostSnapshot | undefined {
-  if (node.tag === TextTag) {
-    const text = node.stateNode as { nodeValue?: unknown } | null;
-    const value =
-      typeof text?.nodeValue === "string"
-        ? text.nodeValue
-        : typeof node.memoizedProps?.nodeValue === "string"
-          ? node.memoizedProps.nodeValue
-          : undefined;
-
-    return {
-      kind: "text",
-      text: value === undefined ? undefined : devtoolsTruncate(value),
-    };
-  }
-
-  if (node.tag !== HostTag) return undefined;
-
-  const instance = node.stateNode as {
-    localName?: unknown;
-    tagName?: unknown;
-  } | null;
-
-  return {
-    kind: "element",
-    tagName:
-      typeof instance?.localName === "string"
-        ? instance.localName
-        : typeof instance?.tagName === "string"
-          ? instance.tagName.toLowerCase()
-          : String(node.type),
-    attributes: {},
-  };
-}
-
-function devtoolsFiberInfo<Container, Instance, TextInstance>(
-  node: Fiber<Container, Instance, TextInstance>,
-): {
-  kind: FigDevtoolsFiberKind;
-  name: string;
-} {
-  switch (node.tag) {
-    case RootTag:
-      return { kind: "root", name: "Root" };
-    case HostTag:
-      return { kind: "host", name: String(node.type) };
-    case TextTag:
-      return { kind: "text", name: "#text" };
-    case FunctionTag:
-      return {
-        kind: "function",
-        name: devtoolsTypeName(node.type, "Anonymous"),
-      };
-    case FragmentTag:
-      return { kind: "fragment", name: "Fragment" };
-    case ContextProviderTag:
-      return {
-        kind: "context-provider",
-        name: `${devtoolsTypeName(node.type, "Context")}.Provider`,
-      };
-    case SuspenseTag:
-      return { kind: "suspense", name: "Suspense" };
-    case ErrorBoundaryTag:
-      return { kind: "error-boundary", name: "ErrorBoundary" };
-    case ActivityTag:
-      return { kind: "activity", name: "Activity" };
-    case ViewTransitionTag:
-      return { kind: "view-transition", name: "ViewTransition" };
-    case PortalTag:
-      return { kind: "portal", name: "Portal" };
-    case AssetsTag:
-      return { kind: "assets", name: "Assets" };
-  }
-}
-
-function devtoolsEffectPhase(phase: EffectPhase): FigDevtoolsEffectPhase {
-  if (phase === BeforePaintEffect) return "before-paint";
-  if (phase === BeforeLayoutEffect) return "before-layout";
-  return "reactive";
-}
-
-function devtoolsTruncate(value: string): string {
-  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
 }
