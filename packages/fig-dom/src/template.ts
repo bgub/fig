@@ -133,9 +133,24 @@ export function commitTemplateUpdate(
   }
 }
 
+function expectedSlotText(value: unknown): string | null {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  // Non-primitive slot values have no canonical server text; skip checking.
+  return null;
+}
+
+// Mirrors host hydration policy: a text-slot mismatch is a hydration
+// mismatch (the caller recovers by client-rendering), attribute-slot
+// differences are preserved with a dev warning, and event slots only need
+// an element to bind to. Static regions between slots came from the same
+// descriptor the server rendered, so they carry the same trust as any
+// server-rendered markup.
 export function canHydrateTemplateInstance(
   node: unknown,
   descriptor: TemplateDescriptor,
+  slots: readonly unknown[],
 ): boolean {
   if (
     typeof node !== "object" ||
@@ -144,10 +159,47 @@ export function canHydrateTemplateInstance(
   ) {
     return false;
   }
-  return (
-    (node as Element).localName.toLowerCase() ===
+  const instance = node as Element;
+  if (
+    instance.localName.toLowerCase() !==
     prototypeFor(descriptor).localName.toLowerCase()
-  );
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < descriptor.slots.length; index += 1) {
+    const spec = descriptor.slots[index];
+    let target: ChildNode;
+    try {
+      target = resolveSlotNode(instance, spec.path);
+    } catch {
+      return false;
+    }
+
+    if (spec.kind === "text") {
+      if (target.nodeType !== 3) return false;
+      const expected = expectedSlotText(slots[index]);
+      if (expected !== null && target.nodeValue !== expected) return false;
+      continue;
+    }
+
+    if (target.nodeType !== 1) return false;
+
+    if (spec.kind === "attr" && __DEV__) {
+      const expected = expectedSlotText(slots[index]);
+      const actual = (target as Element).getAttribute(spec.name);
+      if (expected !== null && actual !== expected) {
+        console.error(
+          `Hydrated template attribute "${spec.name}" differs from the ` +
+            `client slot value ("${actual ?? ""}" on the server, ` +
+            `"${expected}" on the client). The server value is kept; ` +
+            "updates apply once the slot value changes.",
+        );
+      }
+    }
+  }
+
+  return true;
 }
 
 // Server segments already rendered text and attribute slot values; adoption

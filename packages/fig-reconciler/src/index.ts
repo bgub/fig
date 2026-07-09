@@ -246,6 +246,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   canHydrateTemplateInstance?(
     node: HostNode<Instance, TextInstance>,
     descriptor: object,
+    slots: readonly unknown[],
   ): boolean;
   commitHydratedTemplateInstance?(
     instance: Instance,
@@ -1955,8 +1956,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (
       hydratable === null ||
-      host.canHydrateTemplateInstance?.(hydratable, node.type as object) !==
-        true
+      host.canHydrateTemplateInstance?.(
+        hydratable,
+        node.type as object,
+        templateSlots(node.props),
+      ) !== true
     ) {
       throwHydrationMismatch(root, node, "template");
     }

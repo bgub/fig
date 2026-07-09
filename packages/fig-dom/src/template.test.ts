@@ -176,6 +176,64 @@ describe("@bgub/fig-dom templates", () => {
     expect(clicks).toEqual(["first", "second"]);
   });
 
+  it("recovers by client-rendering when a hydrated text slot mismatches", () => {
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<ul><li class="row"><span>Stale server</span><button>Go</button></li></ul>';
+    const serverLi = container.querySelector("li");
+    const errors: string[] = [];
+
+    hydrateRoot(
+      container,
+      createElement("ul", null, row("a", ["Fresh client", "Go", [], "row"])),
+      {
+        onRecoverableError: (error) =>
+          errors.push(error instanceof Error ? error.message : String(error)),
+      },
+    );
+    flushSync(() => undefined);
+
+    // The mismatch surfaced and the tree was client-rendered fresh.
+    expect(errors.length).toBeGreaterThan(0);
+    expect(container.querySelector("li")).not.toBe(serverLi);
+    expect(container.querySelector("span")?.textContent).toBe("Fresh client");
+  });
+
+  it("preserves mismatched attribute slots and warns in dev", () => {
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<ul><li class="server-class"><span>Row a</span><button>Go</button></li></ul>';
+    const serverLi = container.querySelector("li");
+    const warnings: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => warnings.push(args[0]);
+
+    try {
+      hydrateRoot(
+        container,
+        createElement(
+          "ul",
+          null,
+          row("a", ["Row a", "Go", [], "client-class"]),
+        ),
+      );
+      flushSync(() => undefined);
+    } finally {
+      console.error = original;
+    }
+
+    // Adopted (no recovery), server attribute kept, dev warning emitted.
+    expect(container.querySelector("li")).toBe(serverLi);
+    expect(serverLi?.getAttribute("class")).toBe("server-class");
+    expect(
+      warnings.some(
+        (message) =>
+          typeof message === "string" &&
+          message.includes('template attribute "class"'),
+      ),
+    ).toBe(true);
+  });
+
   it("moves template instances on keyed reorder without recreating them", () => {
     const container = document.createElement("div");
     const root = createRoot(container);

@@ -123,8 +123,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
       previous,
       next,
     ),
-  canHydrateTemplateInstance: (node, descriptor) =>
-    canHydrateTemplateInstance(node, descriptor as TemplateDescriptor),
+  canHydrateTemplateInstance: (node, descriptor, slots) =>
+    canHydrateTemplateInstance(node, descriptor as TemplateDescriptor, slots),
   commitHydratedTemplateInstance: (instance, descriptor, slots) =>
     commitHydratedTemplateInstance(
       instance,
