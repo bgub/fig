@@ -1,4 +1,11 @@
 export { createContext, type FigContext } from "./context.ts";
+export {
+  isTemplateDescriptor,
+  template,
+  type TemplateDescriptor,
+  type TemplateSegment,
+  type TemplateSlotSpec,
+} from "./template.ts";
 // Data-protocol types referenced by public renderer APIs (root.data,
 // createRoot({ initialData }), the server results' getData()). Types only:
 // every runtime data API is importable exclusively from @bgub/fig —

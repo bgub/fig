@@ -26,6 +26,13 @@ import {
   updateHoistedResource,
 } from "./asset-resources.ts";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
+import {
+  canHydrateTemplateInstance,
+  commitHydratedTemplateInstance,
+  commitTemplateUpdate,
+  createTemplateInstance,
+} from "./template.ts";
+import type { TemplateDescriptor } from "@bgub/fig";
 import { composeBind, resumeBind, suspendBind } from "./bind.ts";
 import {
   type Container,
@@ -107,6 +114,23 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: (type, props, parent) =>
     createDomElement(type, props, parent),
   createTextInstance: (text) => document.createTextNode(text),
+  createTemplateInstance: (descriptor, slots) =>
+    createTemplateInstance(descriptor as TemplateDescriptor, slots),
+  commitTemplateUpdate: (instance, descriptor, previous, next) =>
+    commitTemplateUpdate(
+      instance,
+      descriptor as TemplateDescriptor,
+      previous,
+      next,
+    ),
+  canHydrateTemplateInstance: (node, descriptor) =>
+    canHydrateTemplateInstance(node, descriptor as TemplateDescriptor),
+  commitHydratedTemplateInstance: (instance, descriptor, slots) =>
+    commitHydratedTemplateInstance(
+      instance,
+      descriptor as TemplateDescriptor,
+      slots,
+    ),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must
   // stay in block form — `if (dev) { validate() }` — not early-return form:

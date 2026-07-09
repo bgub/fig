@@ -17,6 +17,7 @@ import {
   Suspense,
   script,
   stylesheet,
+  template,
   title,
   useSyncExternalStore,
   useId,
@@ -160,6 +161,34 @@ describe("@bgub/fig-server", () => {
 
     expect(html).toBe(
       '<article class="content"><strong>Fig</strong>&</article>',
+    );
+  });
+
+  it("renders template elements from compiled segments with slot escaping", async () => {
+    const rowTemplate = template(
+      "<li><span> </span><button> </button></li>",
+      [
+        { kind: "text", path: [0, 0] },
+        { kind: "text", path: [1, 0] },
+        { kind: "events", path: [1] },
+        { kind: "attr", name: "class", path: [] },
+      ],
+      ['<li class="', 3, '"><span>', 0, "</span><button>", 1, "</button></li>"],
+    );
+
+    const html = await renderToHtml(
+      createElement(
+        "ul",
+        null,
+        createElement(rowTemplate as never, {
+          slots: ["A & B", "<Go>", [() => undefined], 'row "x"'],
+        }),
+      ),
+    );
+
+    expect(html).toBe(
+      '<ul><li class="row &quot;x&quot;"><span>A &amp; B</span>' +
+        "<button>&lt;Go&gt;</button></li></ul>",
     );
   });
 

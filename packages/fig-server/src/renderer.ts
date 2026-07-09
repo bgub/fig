@@ -7,7 +7,9 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  isTemplateDescriptor,
   type Props,
+  type TemplateDescriptor,
   type ViewTransitionProps,
 } from "@bgub/fig";
 import {
@@ -48,6 +50,7 @@ import {
 import { AssetResourceRegistry } from "./asset-registry.ts";
 import {
   escapeAttribute,
+  escapeText,
   formTextContent,
   hasRenderableChild,
   isVoidElement,
@@ -664,6 +667,11 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
     return;
   }
 
+  if (isTemplateDescriptor(type)) {
+    renderTemplateElement(type, element.props, frame);
+    return;
+  }
+
   if (typeof type === "function") {
     renderFunctionComponent(type as Component, element.props, frame);
     return;
@@ -672,6 +680,42 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
   throw new Error(
     `Unsupported Fig element type: ${describeElementType(type)}.`,
   );
+}
+
+// Experimental (bet-2 template project): the descriptor's segments are the
+// server projection — static HTML interleaved with slot indexes, escaped by
+// the slot's kind. Event slots render nothing; hydration binds them when
+// the client adopts the element.
+function renderTemplateElement(
+  descriptor: TemplateDescriptor,
+  props: Props,
+  frame: RenderFrame,
+): void {
+  const segments = descriptor.segments;
+  if (segments === undefined) {
+    throw new Error(
+      "Template elements need compiled segments to render on the server.",
+    );
+  }
+
+  consumePendingLeadingNewline(frame);
+  const slots = (props.slots ?? []) as readonly unknown[];
+  const sink = frame.segment;
+
+  for (const segment of segments) {
+    if (typeof segment === "string") {
+      sink.write(segment);
+      continue;
+    }
+    const spec = descriptor.slots[segment];
+    if (spec === undefined || spec.kind === "events") continue;
+    const value = slots[segment];
+    const text =
+      value === null || value === undefined
+        ? ""
+        : String(value as string | number);
+    sink.write(spec.kind === "attr" ? escapeAttribute(text) : escapeText(text));
+  }
 }
 
 function renderFunctionComponent(

@@ -287,6 +287,35 @@ IDs; server renders template HTML; client adopts DOM ranges), the actual
 `fig-vite` transform (mechanical), and fig-dom host hooks
 (`<template>`-backed clones).
 
+**Status (2026-07-09, later): ALL FOUR FRONTS SHIPPED — feasibility
+CONFIRMED.** (1) Events: fig-dom dispatch turned out to be per-DOM-element
+(`eventSlots` keyed by element, `eventPath` walks DOM ancestry), so
+template interiors reuse `updateEvents` verbatim — positional slot
+identity, abort-on-change, delegation, and attach/detach-on-insertion all
+work unchanged; delegated clicks bubble from template interiors into
+fiber-level handlers with zero dispatch changes. (2) SSR + hydration: the
+descriptor moved to `@bgub/fig` (`template(html, slots, segments?)`) with
+`segments` as the server projection — static strings interleaved with
+slot indexes, escaped by slot kind, event slots skipped; fig-server
+renders them in `renderTemplateElement`; hydration adopts the server
+element (`tryHydrateTemplate` consumes one hydratable, never descends;
+`commitHydratedTemplateInstance` resolves slot paths and binds event
+slots only). (3) fig-dom host hooks: real `<template>`-prototype clones
+with path-resolved slot nodes; attr slots route through single-prop
+`updateElement` for full policy correctness. (4) Compiler: `figTemplates()`
+Babel plugin in fig-vite compiles eligible JSX to hoisted descriptors
+(html + slots + segments), forwards root keys, and compiles eligible
+subtrees nested inside ineligible parents (e.g. rows inside a `.map`).
+v0 eligibility bails on: components/fragments/spreads/bind/unsafeHTML
+anywhere, dynamic text sharing an element with siblings (adjacent text
+nodes merge when HTML parses — paths would shift), non-root keys,
+single-element trees. Cost: ~630 B fig-dom, ~180 B reconciler, ~90 B fig.
+Remaining before productizing: payload/server-component transport for
+descriptors (template IDs + a module registry — same shape as client
+references), a real-browser benchmark, `bind` inside templates, dev
+mismatch diagnostics for hydrated templates, and a concepts/ file
+graduating the descriptor contract.
+
 ### C2. Direct-to-host data binding (signals as an optimization, not a model)
 
 Preact Signals' bypass trick without adopting its programming model: when a

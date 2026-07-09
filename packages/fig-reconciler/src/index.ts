@@ -243,6 +243,15 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousSlots: readonly unknown[],
     nextSlots: readonly unknown[],
   ): void;
+  canHydrateTemplateInstance?(
+    node: HostNode<Instance, TextInstance>,
+    descriptor: object,
+  ): boolean;
+  commitHydratedTemplateInstance?(
+    instance: Instance,
+    descriptor: object,
+    slots: readonly unknown[],
+  ): void;
   validateInstanceNesting?(
     type: string,
     props: Props,
@@ -1716,6 +1725,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === TemplateTag) {
+      if (tryHydrateTemplate(node)) return;
       // Recreated until the first commit so a discarded render's slot values
       // never leak into the instance the committed tree finally adopts.
       if (node.committedProps === null || node.stateNode === null) {
@@ -1927,6 +1937,35 @@ export function createRenderer<Container, Instance, TextInstance>(
       hydratable as Instance,
       node.props,
     );
+
+    return true;
+  }
+
+  // A template consumes exactly one hydratable element and the cursor never
+  // descends into it: its interior came from the same descriptor's server
+  // segments. Update|Hydration flags route the commit through the mutation
+  // walk's hydration branch, where commitUpdate binds event slots via
+  // commitHydratedTemplateInstance.
+  function tryHydrateTemplate(node: F): boolean {
+    const root = rootOf(node);
+    if (!shouldHydrateFiber(root, node)) return false;
+
+    const hydrationHost = requireHydrationHostConfig();
+    const hydratable = root.nextHydratableInstance;
+
+    if (
+      hydratable === null ||
+      host.canHydrateTemplateInstance?.(hydratable, node.type as object) !==
+        true
+    ) {
+      throwHydrationMismatch(root, node, "template");
+    }
+
+    node.stateNode = hydratable as Instance;
+    node.flags |= UpdateFlag | HydrationFlag;
+    queueCommitFiber(root, node);
+    root.nextHydratableInstance =
+      hydrationHost.getNextHydratableSibling(hydratable);
 
     return true;
   }
@@ -5034,12 +5073,23 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitUpdate(node: F): void {
     if (node.tag === TemplateTag) {
-      requireTemplateHostConfig().commitTemplateUpdate(
-        node.stateNode as Instance,
-        node.type as object,
-        templateSlots(previousCommittedProps(node)),
-        templateSlots(node.props),
-      );
+      if (
+        (node.flags & HydrationFlag) !== 0 &&
+        host.commitHydratedTemplateInstance !== undefined
+      ) {
+        host.commitHydratedTemplateInstance(
+          node.stateNode as Instance,
+          node.type as object,
+          templateSlots(node.props),
+        );
+      } else {
+        requireTemplateHostConfig().commitTemplateUpdate(
+          node.stateNode as Instance,
+          node.type as object,
+          templateSlots(previousCommittedProps(node)),
+          templateSlots(node.props),
+        );
+      }
     } else if (node.tag === TextTag) {
       host.commitTextUpdate(
         node.stateNode as TextInstance,
