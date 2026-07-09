@@ -513,6 +513,11 @@ const VisibilityFlag = 1 << 5;
 // signal (committedProps) before the placement walk reads it.
 const AssembledFlag = 1 << 6;
 const DeletionFlag = 1 << 7;
+// The fiber is already in root.commitQueue. Duplicate entries were tolerable
+// while every queue pass was idempotent; effect execution is not, so the
+// queue holds each fiber at most once (captures force-push after truncating,
+// which preserves the invariant: truncation removed the earlier entry).
+const CommitQueuedFlag = 1 << 8;
 const EffectFlag = 1 << 9;
 const ContextPropagationFlag = 1 << 10;
 const StoreConsistencyFlag = 1 << 11;
@@ -1537,7 +1542,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.renderLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
-    root.commitQueue.length = 0;
+    clearCommitQueue(root);
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -2218,10 +2223,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     node.memoizedState = null;
     node.contextDependencies = null;
     root.dataStore.resetDataDependencies(node);
-    if (!node.dataDependenciesDirty) {
-      node.dataDependenciesDirty = true;
-      root.commitQueue.push(node);
-    }
+    node.dataDependenciesDirty = true;
+    queueCommitFiber(root, node);
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -3344,7 +3347,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
-      subtreeFlags |= child.flags;
+      // CommitQueuedFlag stays out of subtreeFlags: the queue clears it when
+      // drained or truncated, so no commit walk ever needs to reach it.
+      subtreeFlags |= child.flags & ~CommitQueuedFlag;
       subtreeFlags |= child.subtreeFlags;
       contextSubtreeDependencies = appendContextDependencies(
         contextSubtreeDependencies,
@@ -3550,13 +3555,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function appendDeletion(parent: F, child: F): void {
     const root = rootOf(parent);
-    if (parent.deletions === null) {
-      parent.deletions = [];
-      root.commitQueue.push(parent);
-    }
+    parent.deletions ??= [];
     parent.deletions.push(child);
     parent.flags |= DeletionFlag;
     root.needsCommitDeletions = true;
+    queueCommitFiber(root, parent);
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -3664,7 +3667,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const exitsByName = new Map<string, F>();
 
     if (root.needsCommitDeletions) {
-      collectDeletedViewTransitions(finishedWork, plan, exitsByName);
+      collectDeletedViewTransitions(root, finishedWork, plan, exitsByName);
     }
     collectFinishedViewTransitions(
       finishedWork.child,
@@ -3708,19 +3711,34 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function collectDeletedViewTransitions(
+    root: R,
     node: F,
     plan: ViewTransitionPlan<Instance>,
     exitsByName: Map<string, F>,
   ): void {
-    walkFiberSubtree(node, (cursor) => {
-      if (cursor.deletions !== null) {
-        for (const deletion of cursor.deletions) {
-          collectDeletedViewTransitionFiber(deletion, plan, exitsByName, true);
-        }
+    let collected = 0;
+    for (const cursor of root.commitQueue) {
+      if (cursor.deletions === null) continue;
+      if (__DEV__) collected += 1;
+      for (const deletion of cursor.deletions) {
+        collectDeletedViewTransitionFiber(deletion, plan, exitsByName, true);
       }
+    }
 
-      return (cursor.subtreeFlags & DeletionFlag) !== 0;
-    });
+    if (__DEV__) {
+      let expected = 0;
+      walkFiberSubtree(node, (cursor) => {
+        if (cursor.deletions !== null) expected += 1;
+        return (cursor.subtreeFlags & DeletionFlag) !== 0;
+      });
+      if (collected !== expected) {
+        throw new Error(
+          "Fig internal parity error: the commit queue collected deleted " +
+            `view transitions from ${collected} fiber(s) where the tree ` +
+            `walk found ${expected}.`,
+        );
+      }
+    }
   }
 
   // A deletions entry is a single detached subtree; its sibling pointers
@@ -4311,7 +4329,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           finishedWork.flags &= StaticFlagsMask;
           finishedWork.subtreeFlags &= StaticFlagsMask;
           scheduleReactiveEffects(root);
-          root.commitQueue.length = 0;
+          clearCommitQueue(root);
         }
         if (__DEV__ && root.devtools) {
           emitDevtoolsCommit(host, root);
@@ -4609,7 +4627,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.consumedPendingQueues = [];
     root.commitEffectPhases = 0;
     root.needsCommitDeletions = false;
-    root.commitQueue.length = 0;
     root.committedCaughtErrors.length = 0;
     markRootFinished(root, NoLanes);
     pendingRoots.delete(root);
@@ -5301,7 +5318,22 @@ export function createRenderer<Container, Instance, TextInstance>(
   // state the finished tree does not contain.
   function truncateCommitQueue(root: R, mark: number | undefined): void {
     const queue = root.commitQueue;
-    if (mark !== undefined && mark < queue.length) queue.length = mark;
+    if (mark === undefined || mark >= queue.length) return;
+    for (let index = mark; index < queue.length; index += 1) {
+      queue[index].flags &= ~CommitQueuedFlag;
+    }
+    queue.length = mark;
+  }
+
+  function clearCommitQueue(root: R): void {
+    for (const node of root.commitQueue) node.flags &= ~CommitQueuedFlag;
+    root.commitQueue.length = 0;
+  }
+
+  function queueCommitFiber(root: R, node: F): void {
+    if ((node.flags & CommitQueuedFlag) !== 0) return;
+    node.flags |= CommitQueuedFlag;
+    root.commitQueue.push(node);
   }
 
   function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
@@ -5313,7 +5345,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // the reveal path) belong to the boundary, not its discarded subtree;
     // requeue them. Paths that discard them null boundary.deletions, which
     // leaves this entry inert.
-    if (boundary.deletions !== null) root.commitQueue.push(boundary);
+    if (boundary.deletions !== null) queueCommitFiber(root, boundary);
 
     const dehydrated = boundary.alternate?.suspenseState;
     if (
@@ -5395,7 +5427,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): F | null {
     const root = rootOf(boundary);
     truncateCommitQueue(root, boundary.commitQueueStart);
-    root.commitQueue.push(boundary);
+    queueCommitFiber(root, boundary);
     boundary.errorBoundaryState = createErrorBoundaryState(error, source);
     reconcileCurrentChildren(
       boundary,
@@ -6044,7 +6076,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (!effects.includes(effect)) effects.push(effect);
       owner.flags |= EffectFlag;
       markSubtreeFlag(owner, EffectFlag);
-      markCommitEffectPhase(rootOf(owner), effect.phase);
+      const root = rootOf(owner);
+      markCommitEffectPhase(root, effect.phase);
+      // Re-armed owners that did not re-render are not in the commit queue
+      // yet; the arming pass runs before every effect pass consumes it.
+      queueCommitFiber(root, owner);
     });
   }
 
@@ -6206,10 +6242,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     const mask = 1 << phase;
     if ((root.commitEffectPhases & mask) === 0) return;
 
+    let executed = 0;
     const runEffects = () => {
-      visitEffects(node, (effect) => {
-        if (effect.phase === phase) runCommitEffect(effect, phase);
-      });
+      for (const owner of root.commitQueue) {
+        const effects = owner.effects;
+        if (effects === null) continue;
+        // Effects under hidden boundaries stay deferred until reveal.
+        if (hasHiddenBoundaries && isInsideHiddenBoundary(owner)) continue;
+        for (const effect of effects) {
+          if (effect.phase !== phase) continue;
+          if (__DEV__) executed += 1;
+          runCommitEffect(effect, phase);
+        }
+      }
     };
 
     if (phase === BeforePaintEffect) {
@@ -6218,6 +6263,20 @@ export function createRenderer<Container, Instance, TextInstance>(
       runEffects();
     }
     root.commitEffectPhases &= ~mask;
+
+    if (__DEV__) {
+      let expected = 0;
+      visitEffects(node, (effect) => {
+        if (effect.phase === phase) expected += 1;
+      });
+      if (executed !== expected) {
+        throw new Error(
+          "Fig internal parity error: the commit queue executed " +
+            `${executed} ${hookKindNames[phase]} effect(s) where the tree ` +
+            `walk found ${expected}.`,
+        );
+      }
+    }
   }
 
   function runCommitEffect(effect: Effect, phase: EffectPhase): void {

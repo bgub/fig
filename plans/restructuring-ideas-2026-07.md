@@ -181,9 +181,20 @@ dev-only parity assertions (stripped from prod). Results:
 `commit.sparse-leaf-state-update` −37% (1k rows), sparse context −12%,
 suspense sibling reveal −6%, everything else flat-or-better; +68 B minified.
 Contract documented in `concepts/rendering.md` (Commit And Batching).
-Remaining categories for stage 2: host mutations/placements (order- and
-context-sensitive), effects (pre-order execution contract), hydration
-retries, VT collection. The new `rows.remove-10pct` benchmark also exposed a
+
+**Stage 2 (same day): effects + deleted-view-transition collection.**
+Effect execution is not idempotent, so the queue gained a uniqueness
+invariant: `CommitQueuedFlag` (reusing the retired `DataDependencyFlag`
+bit) dedupes pushes, is masked out of `subtreeFlags` aggregation, and is
+cleared on drain/truncation so the flag-clearing walk never has to reach
+it. `visitEffects` became a dev-only parity counter; commit-time arming of
+revealed boundaries' deferred effects queues owners directly. Host
+mutations/placements stay walk-driven on purpose: view-transition gating
+reads `subtreeFlags & MutationMask` in several places (`rootAffected`,
+boundary `mustAnimate`), so update-discovery cannot leave `subtreeFlags`
+until VT consumes per-commit plan data — that is the commit-tape stage.
+Hydration-retry collection also stays: it needs boundaries in the committed
+tree that the render never touched (a registry redesign, not a queue fit). The new `rows.remove-10pct` benchmark also exposed a
 pre-existing gap: Fig performs optimal host ops on head removal but is ~50%
 slower than React in reconcile CPU time — a `plans/
 reconciler-placement-performance.md` candidate, unrelated to the queue.

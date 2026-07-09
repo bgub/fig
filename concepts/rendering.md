@@ -90,17 +90,22 @@ loop yields before further scheduled work runs.
 Non-mutation commit work is discovered during render, not by walking the
 finished tree: every fiber that renders hooks, records deletions, or catches
 an error is pushed onto a per-root commit queue in begin order, and the
-deletion, data-dependency, external-store, live-hook, and caught-error passes
-iterate that queue instead of traversing. Entries are hints, not commands —
-each pass re-checks its own per-fiber state before acting, so duplicate and
-stale entries are inert. Suspense and error boundaries record the queue
-length when they begin; a capture truncates back to that watermark so work
-queued by a discarded subtree never commits (a boundary's own deletions are
-requeued — they belong to the boundary, not the subtree). The queue is
-cleared on render restart and after every commit. Host mutations and effect
-execution still walk the finished tree via `flags`/`subtreeFlags`. In
-development, every commit re-runs the old tree walks as parity assertions
-that throw if the queue missed work. Uncaught render errors
+deletion, data-dependency, external-store, live-hook, caught-error, effect,
+and deleted-view-transition passes iterate that queue instead of traversing.
+Each fiber appears at most once (`CommitQueuedFlag`, invisible to
+`subtreeFlags`) — effect execution is not idempotent, so the queue itself
+guarantees uniqueness while every other pass additionally re-checks its own
+per-fiber state, keeping stale entries inert. Commit-time arming of a
+revealed boundary's deferred effects queues their owners the same way.
+Suspense and error boundaries record the queue length when they begin; a
+capture truncates back to that watermark so work queued by a discarded
+subtree never commits (a boundary's own deletions are requeued — they belong
+to the boundary, not the subtree). The queue is cleared on render restart
+and after every commit. Host mutations still walk the finished tree via
+`flags`/`subtreeFlags`; converting them requires view transitions to read
+per-commit plan data instead of `subtreeFlags & MutationMask`, which is the
+commit-tape stage. In development, every commit re-runs the old tree walks
+as parity assertions that throw if the queue missed or double-ran work. Uncaught render errors
 rethrow to `flushSync` callers; outside `flushSync` they go to the root's
 `onUncaughtError`, or rethrow from a detached task when no handler exists —
 scheduler ticks never die silently.
