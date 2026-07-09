@@ -1037,6 +1037,144 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("keeps rendering during an animation and commits the latest state once", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const renders: string[] = [];
+    const commits: string[] = [];
+    let setLabel: StateSetter<string> | null = null;
+    let releaseFirst: () => void = () => undefined;
+    const firstFinished = new Promise<void>((done) => {
+      releaseFirst = done;
+    });
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const first = commits.length === 0;
+      update();
+      commits.push(container.textContent ?? "");
+      return first
+        ? { finished: firstFinished, ready: Promise.resolve() }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, set] = useState("A");
+      setLabel = set;
+      renders.push(label);
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("B")));
+
+      expect(commits).toEqual(["B"]);
+
+      // Two more updates while the first transition is still animating.
+      // The commits park, but RENDERING must stay live (React's
+      // suspend-commits model: only the commit waits, never the work) —
+      // the old behavior froze the root and neither C nor D rendered here.
+      await act(() => transition(() => setLabel?.("C")));
+      await act(() => transition(() => setLabel?.("D")));
+
+      expect(renders).toContain("C");
+      expect(renders).toContain("D");
+      expect(container.textContent).toBe("B");
+      expect(commits).toEqual(["B"]);
+
+      // The animation ends: the LATEST parked state commits in a single
+      // transition. C was superseded and never commits (batching, not
+      // sequencing — the toast rationale from react#32002).
+      releaseFirst();
+      await act(async () => {
+        await firstFinished;
+      });
+
+      expect(commits).toEqual(["B", "D"]);
+      expect(container.textContent).toBe("D");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("lets urgent updates commit while a transition commit is parked", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    let setCount: StateSetter<number> | null = null;
+    let releaseFirst: () => void = () => undefined;
+    const firstFinished = new Promise<void>((done) => {
+      releaseFirst = done;
+    });
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const first = ownerDocument.__figViewTransition == null;
+      update();
+      return first
+        ? { finished: firstFinished, ready: Promise.resolve() }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, setL] = useState("A");
+      const [count, setC] = useState(0);
+      setLabel = setL;
+      setCount = setC;
+      return createElement(
+        "main",
+        null,
+        createElement("p", null, String(count)),
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("section", null, label),
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("B"))); // animating
+      await act(() => transition(() => setLabel?.("C"))); // parked
+
+      expect(container.textContent).toBe("0B");
+
+      // A default-lane update is not view-transition eligible: it must not
+      // wait behind the animation (React commits urgent work through too).
+      // The parked transition state stays parked and lands afterwards.
+      await act(() => setCount?.(1));
+
+      expect(container.textContent).toBe("1B");
+
+      releaseFirst();
+      await act(async () => {
+        await firstFinished;
+      });
+
+      expect(container.textContent).toBe("1C");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
   it("serializes transitions per document instead of skipping the running one", async () => {
     const container = document.createElement("div");
     document.body.append(container);

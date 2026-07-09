@@ -116,20 +116,40 @@ untouched regions stay interactive while named groups animate (React's
 `cancelRootViewTransitionName`). Pure moves (reorders) leave the root
 canceled: their companions are themselves flagged and morph on their own.
 
-## Serialization
+## Serialization (Suspend Commits, Not Rendering)
 
 Transitions are serialized per document through a shared mutex property
-(`__figViewTransition`, exported as `VIEW_TRANSITION_PENDING_PROPERTY`).
-Client commits and inline streaming reveals both check it and chain on the
-previous transition's `finished` promise instead of starting a transition
-that would abruptly skip the running animation (or race its style restore
-against the new capture). Unannotated reveals never park.
+(`__figViewTransition`, exported as `VIEW_TRANSITION_PENDING_PROPERTY`),
+shared between client commits and inline streaming reveals. Serialization
+over interruption is deliberate: the browser cannot hand an interrupted
+transition off to a new one — `skipTransition()` hard-stops and restarts —
+and waiting lets rapid updates batch into one clean animation instead of a
+stutter of stubs (React's suspend-commits rationale, facebook/react#32002).
+
+Only the **commit** waits, never the rendering. An eligible commit arriving
+while a transition is animating **parks** before any commit phase runs (so a
+superseded parked commit never runs effects) and the reconciler keeps
+scheduling: newer renders replace the parked tree — its lanes were never
+marked finished, so a fresh render absorbs them — and the **latest** state
+commits the moment the running animation's `finished` resolves. Rapid
+interactions therefore advance at one latest-state animation per
+animation-window rather than queueing one animation per interaction.
+Non-eligible (sync/default-lane) commits never park; urgent updates land
+under the animation, matching React. Unannotated streaming reveals never
+park either.
 
 Deferred commits (the browser invokes the update callback asynchronously)
-freeze the root until the callback runs; errors thrown inside the callback
-are routed through the same uncaught-error path as synchronous commits
-(report to `onUncaughtError`, clear the root) rather than vanishing into the
-transition's promise.
+freeze the root until the callback runs — that capture window is sub-frame,
+unlike the animation-length park. Errors thrown inside the callback are
+routed through the same uncaught-error path as synchronous commits (report
+to `onUncaughtError`, clear the root) rather than vanishing into the
+transition's promise. Hosts wired without the `suspendOnActiveViewTransition`
+hook fall back to fig-dom's chained wait, which freezes the root for the
+previous animation's full duration.
+
+Exploring: whether parked-commit latency under rapid input warrants
+API-free mitigation (fast-forward via `playbackRate`, a park-timeout
+backstop, stale-surface auto-interrupt) — see open-questions.md.
 
 ## Server Streaming
 

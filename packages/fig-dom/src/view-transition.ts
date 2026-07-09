@@ -94,9 +94,12 @@ export function commitViewTransition(
 
   // Serialize per document: starting a transition while one is running makes
   // the browser abruptly skip the running animation, and the skipped
-  // transition's restore could race this one's old-state capture. Matches
-  // React's suspend-on-active-transition behavior; the mutex is shared with
-  // the inline streaming runtime.
+  // transition's restore could race this one's old-state capture. The
+  // reconciler normally parks eligible commits upstream (render-during-wait
+  // via suspendOnActiveViewTransition), so for fig-dom this chain is a
+  // fallback for renderers that wire commitViewTransition without the
+  // suspend hook — chaining freezes the root until the previous animation
+  // finishes, parking keeps rendering live.
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
   const pendingSettled = pending?.finished ?? pending?.ready;
   if (pending != null && pendingSettled !== undefined) {
@@ -205,6 +208,23 @@ function registerPendingTransition(
   const settled = transition.finished ?? transition.ready;
   if (settled === undefined) release();
   else settled.then(release, release);
+}
+
+// The reconciler parks eligible commits behind a running transition (the
+// shared per-document mutex — client commits and streaming reveals alike)
+// and re-schedules once it settles. Rendering continues during the park;
+// only the commit waits.
+export function suspendOnActiveViewTransition(
+  container: Container,
+  onFinished: () => void,
+): boolean {
+  const owner = ownerDocument(container) as ViewTransitionDocument;
+  const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
+  const settled = pending?.finished ?? pending?.ready;
+  if (pending == null || settled === undefined) return false;
+
+  settled.then(onFinished, onFinished);
+  return true;
 }
 
 export function measureViewTransitionSurface(

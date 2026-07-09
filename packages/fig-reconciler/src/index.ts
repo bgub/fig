@@ -326,6 +326,14 @@ export interface HostConfig<Container, Instance, TextInstance> {
   measureViewTransitionSurface?(
     instance: Instance,
   ): ViewTransitionSurfaceMeasurement | null;
+  // True when a view transition is currently running on the container's
+  // document; `onFinished` fires once it settles (and never fires when this
+  // returns false). Lets the reconciler park eligible commits behind a
+  // running animation instead of committing under it.
+  suspendOnActiveViewTransition?(
+    container: Container,
+    onFinished: () => void,
+  ): boolean;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -793,6 +801,12 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
   pendingViewTransitionCommit: boolean;
+  // finishedWork is rendered but its commit waits for a running view
+  // transition to finish. Unlike pendingViewTransitionCommit (the sub-frame
+  // capture window, which freezes the root), a parked root keeps rendering:
+  // newer work supersedes the parked tree so the latest state commits when
+  // the animation ends.
+  parkedViewTransitionCommit: boolean;
   dataStore: FigDataStore;
   contextValues: Map<FigContext<unknown>, unknown>;
   contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
@@ -1045,6 +1059,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       finishedWork: null,
       renderLanes: NoLanes,
       pendingViewTransitionCommit: false,
+      parkedViewTransitionCommit: false,
       dataStore,
       contextValues: new Map(),
       contextStack: [],
@@ -1422,6 +1437,32 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     flushPendingReactiveEffects(root);
+
+    if (root.parkedViewTransitionCommit) {
+      root.parkedViewTransitionCommit = false;
+      // The parked tree's lanes were never marked finished, so they are
+      // still inside pendingLanes; anything beyond them is newer work.
+      const supersededByNewerWork =
+        (root.pendingLanes & ~root.renderLanes) !== NoLanes;
+      if (
+        !supersededByNewerWork &&
+        root.wip === null &&
+        root.finishedWork !== null
+      ) {
+        // Nothing changed while the animation ran: commit the parked tree
+        // as-is (commitRoot re-parks it if yet another transition started
+        // in between, e.g. a streaming reveal).
+        if (commitRoot(root, root.finishedWork)) return;
+        finishRootWork(root);
+        flushPostCommitSyncWork();
+        return;
+      }
+      // Newer work supersedes the parked commit — React cancels its
+      // suspended commit the same way. restartRootWork restores the update
+      // queues the parked render consumed, and the fresh render below
+      // absorbs the parked lanes, so the latest state commits instead.
+      restartRootWork(root);
+    }
 
     const nextLanes = getNextLanes(root, root.renderLanes);
     if (nextLanes === NoLanes && root.wip === null) {
@@ -3571,18 +3612,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
+  // Shared by the commit-parking gate and the plan builder. Parking uses
+  // this WITHOUT checking for boundaries on purpose: even a commit with no
+  // annotated surfaces must not land under a running animation — mutations
+  // to captured regions stay invisible until the animation settles and then
+  // pop in. React parks all eligible commits the same way.
+  function isViewTransitionEligibleCommit(root: R): boolean {
+    return (
+      !root.clearContainerBeforeCommit &&
+      root.renderLanes !== NoLanes &&
+      (root.renderLanes & ~ViewTransitionEligibleLanes) === NoLanes &&
+      optionalViewTransitionHostConfig() !== null
+    );
+  }
+
   function prepareViewTransitionPlan(
     root: R,
     finishedWork: F,
   ): ViewTransitionPlan<Instance> | null {
-    if (root.clearContainerBeforeCommit) return null;
-    if (
-      root.renderLanes === NoLanes ||
-      (root.renderLanes & ~ViewTransitionEligibleLanes) !== NoLanes
-    ) {
-      return null;
-    }
-    if (optionalViewTransitionHostConfig() === null) return null;
+    if (!isViewTransitionEligibleCommit(root)) return null;
     if (
       (finishedWork.subtreeFlags & ViewTransitionStaticFlag) === 0 &&
       !root.needsCommitDeletions
@@ -4179,6 +4227,34 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitRoot(root: R, finishedWork: F): boolean {
+    // While a previous view transition is animating, park eligible commits
+    // instead of committing under it: mutations to captured surfaces would
+    // stay invisible until the animation ends (a visual pop at settle), and
+    // the browser cannot hand an interrupted transition off to a new one —
+    // skipTransition() hard-stops and restarts, which is the jank this
+    // avoids. Rendering stays live while parked, and any newer render
+    // supersedes the parked tree (its lanes are still pending, so the fresh
+    // render absorbs them): the LATEST state commits the moment the
+    // animation finishes. This is React's suspend-commits model
+    // (facebook/react#32002) — waiting is cheap because only the commit
+    // waits, never the rendering. The park sits before every commit phase
+    // so a superseded parked commit never runs its effects.
+    if (
+      !root.pendingViewTransitionCommit &&
+      isViewTransitionEligibleCommit(root) &&
+      host.suspendOnActiveViewTransition?.(root.container, () =>
+        scheduleRoot(root),
+      ) === true
+    ) {
+      root.parkedViewTransitionCommit = true;
+      // The scheduler callback that carried this attempt is spent; clear it
+      // so the finished-callback's (or a newer update's) scheduleRoot isn't
+      // deduped against it.
+      root.callback = null;
+      root.callbackPriority = NoLane;
+      return true;
+    }
+
     commitDepth += 1;
     try {
       commitLiveHookInstances(finishedWork.child);

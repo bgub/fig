@@ -57,6 +57,27 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
   ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those
   loaders, or keeps auth and services in module scope. → `concepts/data.md`
 
+## View Transitions
+
+- **Responsiveness under rapid input** — commits park behind a running
+  transition (React's suspend-commits model: rendering stays live, latest
+  state batches into one animation per animation-window). The browser cannot
+  retarget a snapshot animation mid-flight, so the ecosystem's answer for
+  truly high-frequency motion (sortable lists, steppers) is live-element
+  FLIP with springs/CSS transitions, not view transitions — worth a docs
+  pointer. If parked-commit latency proves to matter in practice, three
+  API-free designs were sketched (2026-07), in preference order:
+  fast-forwarding the running transition's pseudo-element animations via
+  `playbackRate` when a commit parks (no teleport, safe for background
+  commits); a park-timeout backstop that `skipTransition()`s a non-settling
+  animation (also closes the `animation-iteration-count: infinite` footgun,
+  which today parks eligible commits until the animation ends — sync/default
+  commits are unaffected); and stale-surface auto-interrupt (skip only when
+  the incoming commit's surface names overlap the running transition's —
+  the animation is heading somewhere the commit invalidates). An opt-in
+  `transition(cb, { interrupt: true })` stays in the drawer unless real
+  usage demands per-call control. → `concepts/view-transitions.md`
+
 ## Performance
 
 - **Reconciler placement, remaining gaps** — the placement passes closed the

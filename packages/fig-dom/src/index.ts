@@ -59,6 +59,7 @@ import {
   commitViewTransition,
   measureViewTransitionSurface,
   restoreViewTransitionName,
+  suspendOnActiveViewTransition,
 } from "./view-transition.ts";
 
 type TextLike = Text | Comment;
@@ -282,6 +283,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   applyViewTransitionName,
   restoreViewTransitionName,
   measureViewTransitionSurface,
+  suspendOnActiveViewTransition,
 };
 
 const renderer: DomRenderer = createRenderer(hostConfig);

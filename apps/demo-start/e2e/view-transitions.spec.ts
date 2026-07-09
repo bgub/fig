@@ -193,6 +193,69 @@ test("morphs the title when clicking immediately after first load", async ({
   expect(errors()).toEqual([]);
 });
 
+test("coalesces rapid cycle clicks into the latest state (render-during-wait)", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.addInitScript(() => {
+    const scope = window as Window & {
+      __vtStarts?: number;
+      __vtRelease?: (() => void) | null;
+    };
+    scope.__vtStarts = 0;
+    scope.__vtRelease = null;
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        update();
+        scope.__vtStarts = (scope.__vtStarts ?? 0) + 1;
+        let release: () => void = () => undefined;
+        const finished = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        scope.__vtRelease = release;
+        return { finished, ready: Promise.resolve() };
+      },
+    });
+  });
+
+  await page.goto("/view-transitions", { waitUntil: "commit" });
+  await page.waitForLoadState("networkidle");
+  const cycle = page.getByRole("button", { name: "Cycle surface" });
+  const detail = page.locator("aside h2");
+  await expect(detail).toHaveText("Route shell");
+
+  // Two rapid clicks while the first animation is held open. The first
+  // commit animates; the second click's commit parks — but its RENDER
+  // happens live and the parked state tracks the latest click (React's
+  // suspend-commits model), so releasing the animation commits the second
+  // click's state directly in one more transition.
+  await cycle.click();
+  await expect(detail).toHaveText("Stream slot");
+  await cycle.click();
+
+  await expect(detail).toHaveText("Stream slot");
+  expect(
+    await page.evaluate(() => (window as { __vtStarts?: number }).__vtStarts),
+  ).toBe(1);
+
+  await page.evaluate(() => {
+    (window as { __vtRelease?: (() => void) | null }).__vtRelease?.();
+  });
+
+  await expect(detail).toHaveText("Hydrated island");
+  expect(
+    await page.evaluate(() => (window as { __vtStarts?: number }).__vtStarts),
+  ).toBe(2);
+
+  // Settle the second transition so nothing leaks into other tests.
+  await page.evaluate(() => {
+    (window as { __vtRelease?: (() => void) | null }).__vtRelease?.();
+  });
+  expect(errors()).toEqual([]);
+});
+
 async function clickRoute(
   page: Page,
   action: string,
