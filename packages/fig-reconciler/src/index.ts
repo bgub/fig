@@ -513,7 +513,6 @@ const VisibilityFlag = 1 << 5;
 // signal (committedProps) before the placement walk reads it.
 const AssembledFlag = 1 << 6;
 const DeletionFlag = 1 << 7;
-const DataDependencyFlag = 1 << 8;
 const EffectFlag = 1 << 9;
 const ContextPropagationFlag = 1 << 10;
 const StoreConsistencyFlag = 1 << 11;
@@ -744,6 +743,9 @@ interface Fiber<Container, Instance, TextInstance> {
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   suspenseQueueStart?: number;
+  // Suspense/ErrorBoundary only: root.commitQueue length when this boundary
+  // began, so a capture can truncate entries queued by its discarded subtree.
+  commitQueueStart?: number;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
@@ -830,8 +832,17 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   uncaughtErrorInfo: ErrorInfo | null;
   commitEffectPhases: number;
   needsCommitDeletions: boolean;
-  needsDataDependencyCommit: boolean;
-  needsCaughtBoundaryErrorFlush: boolean;
+  // Commit work discovered during render: every fiber that rendered hooks,
+  // recorded deletions, or caught an error, in begin order (pre-order over
+  // the rendered region). Commit passes iterate this instead of walking the
+  // tree; each pass re-checks its own per-fiber predicate, so duplicate and
+  // stale entries are inert. Truncated to a boundary's commitQueueStart when
+  // a capture discards its subtree; cleared on restart and after commit.
+  commitQueue: Fiber<Container, Instance, TextInstance>[];
+  // Boundaries that caught during the commit phase (effects, reactive
+  // flushes). Kept outside commitQueue: these must survive render restarts
+  // until a later commit reports them.
+  committedCaughtErrors: Fiber<Container, Instance, TextInstance>[];
   isHydrating: boolean;
   isHydrationRoot: boolean;
   hydrationParent: Fiber<Container, Instance, TextInstance> | null;
@@ -1066,8 +1077,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      needsDataDependencyCommit: false,
-      needsCaughtBoundaryErrorFlush: false,
+      commitQueue: [],
+      committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
       hydrationParent: null,
@@ -1526,6 +1537,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.renderLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
+    root.commitQueue.length = 0;
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -1603,6 +1615,12 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function begin(node: F): void {
     const root = rootOf(node);
+
+    // Recorded before any path that can render descendants (including the
+    // clone-and-descend bailout), so a capture always has a fresh watermark.
+    if (node.tag === SuspenseTag || node.tag === ErrorBoundaryTag) {
+      node.commitQueueStart = root.commitQueue.length;
+    }
 
     if (canBailout(node, root)) {
       let hasChildWork = includesSomeLane(node.childLanes, root.renderLanes);
@@ -2200,9 +2218,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     node.memoizedState = null;
     node.contextDependencies = null;
     root.dataStore.resetDataDependencies(node);
-    node.dataDependenciesDirty = true;
-    node.flags |= DataDependencyFlag;
-    root.needsDataDependencyCommit = true;
+    if (!node.dataDependenciesDirty) {
+      node.dataDependenciesDirty = true;
+      root.commitQueue.push(node);
+    }
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -3530,10 +3549,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function appendDeletion(parent: F, child: F): void {
-    parent.deletions ??= [];
+    const root = rootOf(parent);
+    if (parent.deletions === null) {
+      parent.deletions = [];
+      root.commitQueue.push(parent);
+    }
     parent.deletions.push(child);
     parent.flags |= DeletionFlag;
-    rootOf(parent).needsCommitDeletions = true;
+    root.needsCommitDeletions = true;
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -4223,7 +4246,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     commitDepth += 1;
     try {
-      commitLiveHookInstances(finishedWork.child);
+      commitLiveHookInstances(root);
+      if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
       const viewTransitionPlan = prepareViewTransitionPlan(root, finishedWork);
@@ -4233,13 +4257,12 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.clearContainerBeforeCommit = false;
         }
         if (root.needsCommitDeletions) {
-          commitDeletions(finishedWork);
+          commitDeletions(root);
           root.needsCommitDeletions = false;
         }
-        if (root.needsDataDependencyCommit) {
-          commitDataDependencies(root, finishedWork.child);
-          root.needsDataDependencyCommit = false;
-        }
+        if (__DEV__) assertDeletionCommitParity(finishedWork);
+        commitDataDependencies(root);
+        if (__DEV__) assertDataDependencyCommitParity(finishedWork.child);
         commitMutationEffects(finishedWork.child);
         if (hasHiddenBoundaries)
           commitHiddenBoundaryVisibility(finishedWork.child);
@@ -4275,13 +4298,12 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
-          commitExternalStores(root, finishedWork.child);
+          commitExternalStores(root);
+          if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
           scheduleDehydratedSuspenseRetries(root);
           commitEffects(root, finishedWork.child, BeforePaintEffect);
-          if (root.needsCaughtBoundaryErrorFlush) {
-            flushCaughtBoundaryErrors(root, finishedWork.child);
-            root.needsCaughtBoundaryErrorFlush = false;
-          }
+          flushCaughtBoundaryErrors(root);
+          if (__DEV__) assertCaughtBoundaryErrorParity(finishedWork.child);
         } finally {
           // Once the tree is current its flags must be cleared even when a
           // commit step throws, or a later render would adopt stale flags.
@@ -4289,6 +4311,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           finishedWork.flags &= StaticFlagsMask;
           finishedWork.subtreeFlags &= StaticFlagsMask;
           scheduleReactiveEffects(root);
+          root.commitQueue.length = 0;
         }
         if (__DEV__ && root.devtools) {
           emitDevtoolsCommit(host, root);
@@ -4490,9 +4513,32 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function flushCaughtBoundaryErrors(root: R, node: F | null): void {
+  function flushCaughtBoundaryErrors(root: R): void {
+    if (root.committedCaughtErrors.length > 0) {
+      const boundaries = root.committedCaughtErrors;
+      root.committedCaughtErrors = [];
+      for (const boundary of boundaries) {
+        flushCaughtBoundaryError(root, boundary);
+      }
+    }
+
+    for (const boundary of root.commitQueue) {
+      flushCaughtBoundaryError(root, boundary);
+    }
+  }
+
+  function assertCaughtBoundaryErrorParity(node: F | null): void {
     walkFiberForest(node, (cursor) => {
-      flushCaughtBoundaryError(root, cursor);
+      if (
+        cursor.tag === ErrorBoundaryTag &&
+        cursor.errorBoundaryState !== null &&
+        !cursor.errorBoundaryState.didReport
+      ) {
+        throw new Error(
+          "Fig internal parity error: a caught boundary error was missing " +
+            "from the commit queue.",
+        );
+      }
     });
   }
 
@@ -4563,8 +4609,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.consumedPendingQueues = [];
     root.commitEffectPhases = 0;
     root.needsCommitDeletions = false;
-    root.needsDataDependencyCommit = false;
-    root.needsCaughtBoundaryErrorFlush = false;
+    root.commitQueue.length = 0;
+    root.committedCaughtErrors.length = 0;
     markRootFinished(root, NoLanes);
     pendingRoots.delete(root);
   }
@@ -4884,18 +4930,28 @@ export function createRenderer<Container, Instance, TextInstance>(
     adoptSwappedHoistedInstance(node, resolved);
   }
 
-  function commitDeletions(node: F): void {
+  function commitDeletions(root: R): void {
+    for (const cursor of root.commitQueue) {
+      if (cursor.deletions === null) continue;
+      const parent = isHostParent(cursor)
+        ? hostParentFor(cursor)
+        : hostParent(cursor);
+      for (const child of cursor.deletions) {
+        deleteFiberData(child);
+        abortFiberEffects(child);
+        remove(child, parent);
+      }
+      cursor.deletions = null;
+    }
+  }
+
+  function assertDeletionCommitParity(node: F): void {
     walkFiberSubtree(node, (cursor) => {
       if (cursor.deletions !== null) {
-        const parent = isHostParent(cursor)
-          ? hostParentFor(cursor)
-          : hostParent(cursor);
-        for (const child of cursor.deletions) {
-          deleteFiberData(child);
-          abortFiberEffects(child);
-          remove(child, parent);
-        }
-        cursor.deletions = null;
+        throw new Error(
+          "Fig internal parity error: a fiber with pending deletions was " +
+            "missing from the commit queue.",
+        );
       }
 
       return (
@@ -4905,19 +4961,26 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function commitDataDependencies(root: R, node: F | null): void {
+  function commitDataDependencies(root: R): void {
+    for (const cursor of root.commitQueue) {
+      if (!cursor.dataDependenciesDirty) continue;
+      root.dataStore.commitDataDependencies(cursor, cursor.alternate);
+      cursor.dataDependenciesDirty = false;
+      if (cursor.alternate !== null)
+        cursor.alternate.dataDependenciesDirty = false;
+    }
+  }
+
+  function assertDataDependencyCommitParity(node: F | null): void {
     walkFiberForest(node, (cursor) => {
       if (cursor.dataDependenciesDirty) {
-        root.dataStore.commitDataDependencies(cursor, cursor.alternate);
-        cursor.dataDependenciesDirty = false;
-        if (cursor.alternate !== null)
-          cursor.alternate.dataDependenciesDirty = false;
+        throw new Error(
+          "Fig internal parity error: a fiber with dirty data dependencies " +
+            "was missing from the commit queue.",
+        );
       }
 
-      return (
-        (cursor.flags & AdoptedFlag) === 0 &&
-        (cursor.subtreeFlags & DataDependencyFlag) !== 0
-      );
+      return (cursor.flags & AdoptedFlag) === 0;
     });
   }
 
@@ -5232,10 +5295,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     return null;
   }
 
+  // Entries queued while rendering the boundary's discarded subtree must not
+  // commit: their fibers are detached (or kept only as retry input), so
+  // committing their data reads, deletions, or hook publishes would act on
+  // state the finished tree does not contain.
+  function truncateCommitQueue(root: R, mark: number | undefined): void {
+    const queue = root.commitQueue;
+    if (mark !== undefined && mark < queue.length) queue.length = mark;
+  }
+
   function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
     const root = rootOf(boundary);
     const lanes = root.renderLanes;
     attachSuspensePing(root, boundary, thenable, lanes);
+    truncateCommitQueue(root, boundary.commitQueueStart);
+    // The boundary's own deletions (e.g. the committed fallback recorded by
+    // the reveal path) belong to the boundary, not its discarded subtree;
+    // requeue them. Paths that discard them null boundary.deletions, which
+    // leaves this entry inert.
+    if (boundary.deletions !== null) root.commitQueue.push(boundary);
 
     const dehydrated = boundary.alternate?.suspenseState;
     if (
@@ -5315,7 +5393,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     error: unknown,
     source: F,
   ): F | null {
-    rootOf(boundary).needsCaughtBoundaryErrorFlush = true;
+    const root = rootOf(boundary);
+    truncateCommitQueue(root, boundary.commitQueueStart);
+    root.commitQueue.push(boundary);
     boundary.errorBoundaryState = createErrorBoundaryState(error, source);
     reconcileCurrentChildren(
       boundary,
@@ -5329,7 +5409,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     error: unknown,
     source: F,
   ): void {
-    rootOf(boundary).needsCaughtBoundaryErrorFlush = true;
+    rootOf(boundary).committedCaughtErrors.push(boundary);
     const state = createErrorBoundaryState(error, source);
     boundary.errorBoundaryState = state;
     if (boundary.alternate !== null)
@@ -5968,18 +6048,59 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function commitLiveHookInstances(node: F | null): void {
+  function commitLiveHookInstances(root: R): void {
+    for (const owner of root.commitQueue) {
+      for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+        commitLiveHookInstance(owner, hook);
+      }
+    }
+  }
+
+  function commitLiveHookInstance(owner: F, hook: Hook): void {
+    if (isStableEventHook(hook)) {
+      const instance = hook.memoizedState.instance;
+      instance.handler = hook.memoizedState.next;
+      instance.live = !hasHiddenBoundaries || !isInsideHiddenBoundary(owner);
+    }
+
+    if (hook.kind === ActionStateHook) {
+      const state = hook.memoizedState as ActionState<unknown, unknown[]>;
+      state.instance.action = state.action;
+      state.instance.value = state.value;
+    }
+  }
+
+  // Bailed-out (cloned) fibers share their hook state objects with the last
+  // rendered generation, so their instances already hold the published
+  // values; the queue therefore only carries rendered fibers. This walk
+  // proves that assumption on every dev commit.
+  function assertLiveHookInstanceParity(node: F | null): void {
     visitRenderedFiberHooks(node, (owner, hook) => {
       if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
-        instance.handler = hook.memoizedState.next;
-        instance.live = !hasHiddenBoundaries || !isInsideHiddenBoundary(owner);
+        if (
+          instance.handler !== hook.memoizedState.next ||
+          instance.live !==
+            (!hasHiddenBoundaries || !isInsideHiddenBoundary(owner))
+        ) {
+          throw new Error(
+            "Fig internal parity error: a stable-event hook was not " +
+              "published by the commit queue.",
+          );
+        }
       }
 
       if (hook.kind === ActionStateHook) {
         const state = hook.memoizedState as ActionState<unknown, unknown[]>;
-        state.instance.action = state.action;
-        state.instance.value = state.value;
+        if (
+          state.instance.action !== state.action ||
+          state.instance.value !== state.value
+        ) {
+          throw new Error(
+            "Fig internal parity error: an action-state hook was not " +
+              "published by the commit queue.",
+          );
+        }
       }
     });
   }
@@ -5996,18 +6117,41 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hook.kind === StableEventHook;
   }
 
-  function commitExternalStores(root: R, node: F | null): void {
+  function commitExternalStores(root: R): void {
+    for (const cursor of root.commitQueue) {
+      if ((cursor.flags & StoreConsistencyFlag) === 0) continue;
+      // Subscriptions under hidden boundaries are deferred until reveal.
+      if (hasHiddenBoundaries && isInsideHiddenBoundary(cursor)) continue;
+      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
+        if (isExternalStoreHook(hook))
+          commitExternalStore(root, cursor, hook.memoizedState);
+      }
+    }
+  }
+
+  function assertExternalStoreCommitParity(node: F | null): void {
     walkFiberForest(node, (cursor) => {
       if ((cursor.flags & AdoptedFlag) !== 0) return false;
 
       if ((cursor.flags & StoreConsistencyFlag) !== 0) {
         for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
-          if (isExternalStoreHook(hook))
-            commitExternalStore(root, cursor, hook.memoizedState);
+          if (!isExternalStoreHook(hook)) continue;
+          const state = hook.memoizedState;
+          const instance = state.instance;
+          if (
+            instance.committedSubscribe !== state.subscribe ||
+            instance.getSnapshot !== state.getSnapshot ||
+            instance.owner !== cursor ||
+            !Object.is(instance.value, state.value)
+          ) {
+            throw new Error(
+              "Fig internal parity error: an external-store hook was not " +
+                "committed by the commit queue.",
+            );
+          }
         }
       }
 
-      // Subscriptions under hidden boundaries are deferred until reveal.
       return (
         !isHiddenBoundary(cursor) &&
         (cursor.subtreeFlags & StoreConsistencyFlag) !== 0

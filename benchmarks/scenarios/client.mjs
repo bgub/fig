@@ -629,6 +629,20 @@ export function clientScenariosForRows(rows) {
     },
     {
       group: "reconciler",
+      name: "rows.remove-10pct",
+      rows,
+      measure: (runtime, iterations) =>
+        measureRowsUpdate(
+          runtime,
+          rows,
+          iterations,
+          { count: rows },
+          { count: rows - appendCount, start: appendCount },
+        ),
+      runtimes,
+    },
+    {
+      group: "reconciler",
       name: "rows.reverse-keyed",
       rows,
       measure: (runtime, iterations) =>
