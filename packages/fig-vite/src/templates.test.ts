@@ -12,7 +12,7 @@ describe("fig:templates transform", () => {
       `export function Row({ id, label, onGo }) {
         return (
           <li class="row" data-id={id}>
-            <span>{label}</span>
+            <span>{"Row " + label}</span>
             <button events={[onGo]}>Go</button>
           </li>
         );
@@ -36,7 +36,7 @@ describe("fig:templates transform", () => {
     expect(code).toContain('" data-id=\\""');
     // The JSX collapsed into one element call carrying slot values.
     expect(code).toMatch(
-      /_figElement\(_figTmpl\$0, \{\s*slots: \[id, label, \[onGo\]\]\s*\}\)/,
+      /_figElement\(_figTmpl\$0, \{\s*slots: \[id, "Row " \+ label, \[onGo\]\]\s*\}\)/,
     );
   });
 
@@ -57,6 +57,39 @@ describe("fig:templates transform", () => {
       "const b = <li {...rest}><span>x</span></li>;",
       "const c = <li bind={fn}><span>x</span></li>;",
       "const d = <li><span>v{version}</span><span>x</span></li>;",
+      // Identifier/member/call expressions are not provably textual: a text
+      // slot stringifies, and these could evaluate to elements.
+      "const e = <li><span>{label}</span><span>x</span></li>;",
+      "const f = <div><h3>t</h3><ul>{rows.map(renderRow)}</ul></div>;",
+    ]) {
+      expect(await transformTemplates(source, "/app/x.tsx")).toBeNull();
+    }
+  });
+
+  it("wraps templates that replace JSX children in expression containers", async () => {
+    const code = await transform(
+      `export const page = (
+        <main>
+          <Header />
+          <section class="rows">
+            <span>first</span>
+            <span>second</span>
+          </section>
+        </main>
+      );`,
+    );
+
+    // <main> bails (component child); <section> compiles and must remain a
+    // valid JSX child of the surviving <main> JSX.
+    expect(code).not.toBeNull();
+    expect(code).toMatch(/\{_figElement\(_figTmpl\$0/);
+  });
+
+  it("bails on document-shell and hoisted-asset tags", async () => {
+    for (const source of [
+      'const a = <head><meta charset="utf-8" /><title>x</title></head>;',
+      'const b = <div><span>x</span><script src="/x.js"></script></div>;',
+      'const c = <div><link rel="stylesheet" href="/x.css" /><span>x</span></div>;',
     ]) {
       expect(await transformTemplates(source, "/app/x.tsx")).toBeNull();
     }
@@ -75,7 +108,7 @@ describe("fig:templates transform", () => {
           <ul class="list">
             {rows.map((row) => (
               <li key={row.id} class="row">
-                <span>{row.label}</span>
+                <span>{\`Row \${row.id}\`}</span>
                 <span>fixed</span>
               </li>
             ))}

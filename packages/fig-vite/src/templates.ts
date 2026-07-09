@@ -42,6 +42,25 @@ interface TemplateBuild {
   key: T.Expression | null;
 }
 
+// Tags a template must never swallow: document-shell structure (the server
+// tracks html/head/body for doctype and shell validation), hoisted asset
+// resources (title/meta/link/script/style route through the asset system,
+// not the DOM position they appear at), and parser-special containers.
+const blockedElements = new Set([
+  "base",
+  "body",
+  "head",
+  "html",
+  "link",
+  "meta",
+  "noscript",
+  "script",
+  "slot",
+  "style",
+  "template",
+  "title",
+]);
+
 const voidElements = new Set([
   "area",
   "base",
@@ -94,6 +113,22 @@ function cleanJsxText(raw: string): string {
   return kept.join(" ");
 }
 
+function isTextualExpression(
+  t: typeof babel.types,
+  node: T.Expression,
+): boolean {
+  if (
+    t.isStringLiteral(node) ||
+    t.isNumericLiteral(node) ||
+    t.isTemplateLiteral(node)
+  ) {
+    return true;
+  }
+  // `+` always yields a primitive (string or number), never an element.
+  if (t.isBinaryExpression(node) && node.operator === "+") return true;
+  return false;
+}
+
 function templatesBabelPlugin(api: typeof babel): PluginObj {
   const t = api.types;
   let counter = 0;
@@ -117,6 +152,7 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
     if (!t.isJSXIdentifier(opening.name)) return false;
     const name = opening.name.name;
     if (!/^[a-z][\w-]*$/.test(name)) return false;
+    if (blockedElements.has(name)) return false;
 
     build.elementCount += 1;
     writeStatic(build, `<${name}`);
@@ -203,7 +239,15 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
       }
       if (t.isJSXExpressionContainer(child)) {
         if (t.isJSXEmptyExpression(child.expression)) continue;
-        if (!t.isExpression(child.expression)) return false;
+        // A text slot stringifies its value, so only expressions that are
+        // provably textual may become one — an identifier or call could
+        // evaluate to elements, which have no place inside a template.
+        if (
+          !t.isExpression(child.expression) ||
+          !isTextualExpression(t, child.expression)
+        ) {
+          return false;
+        }
         children.push({ kind: "expr", expression: child.expression });
         continue;
       }
@@ -340,11 +384,16 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
           ),
         );
 
+        const call = t.callExpression(t.identifier("_figElement"), [
+          t.cloneNode(id),
+          t.objectExpression(properties),
+        ]);
+        // A template replacing a JSX child of an ineligible JSX parent must
+        // stay a valid JSX child: wrap the call in an expression container.
         path.replaceWith(
-          t.callExpression(t.identifier("_figElement"), [
-            t.cloneNode(id),
-            t.objectExpression(properties),
-          ]),
+          t.isJSXElement(path.parent) || t.isJSXFragment(path.parent)
+            ? t.jsxExpressionContainer(call)
+            : call,
         );
         path.skip();
       },
