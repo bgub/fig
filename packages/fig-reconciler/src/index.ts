@@ -228,6 +228,21 @@ export interface HostConfig<Container, Instance, TextInstance> {
     parent: Parent<Container, Instance>,
   ): Instance;
   createTextInstance(text: string): TextInstance;
+  // Experimental (bet-2 template spike): materialize an instance for a
+  // template element (type object marked with Symbol.for("fig.template"))
+  // with its initial slot values, and apply changed slot values on update.
+  // The descriptor's shape is a host contract; the reconciler only carries
+  // it through.
+  createTemplateInstance?(
+    descriptor: object,
+    slots: readonly unknown[],
+  ): Instance;
+  commitTemplateUpdate?(
+    instance: Instance,
+    descriptor: object,
+    previousSlots: readonly unknown[],
+    nextSlots: readonly unknown[],
+  ): void;
   validateInstanceNesting?(
     type: string,
     props: Props,
@@ -482,6 +497,7 @@ const PortalTag = 8;
 const AssetsTag = 9;
 const ActivityTag = 10;
 const ViewTransitionTag = 11;
+const TemplateTag = 12;
 type Tag =
   | typeof RootTag
   | typeof HostTag
@@ -494,7 +510,22 @@ type Tag =
   | typeof PortalTag
   | typeof AssetsTag
   | typeof ActivityTag
-  | typeof ViewTransitionTag;
+  | typeof ViewTransitionTag
+  | typeof TemplateTag;
+
+// Experimental template elements (bet-2 spike): an element whose type is an
+// object carrying this marker renders as a single host instance materialized
+// by the host from the descriptor plus per-render slot values — no child
+// fibers. Cross-package by Symbol.for, like the data-store factory.
+const TemplateSymbol = Symbol.for("fig.template");
+
+function isTemplateType(type: unknown): type is object {
+  return (
+    typeof type === "object" &&
+    type !== null &&
+    (type as Record<symbol, unknown>)[TemplateSymbol] === true
+  );
+}
 
 const NoFlags = 0;
 const PlacementFlag = 1 << 0;
@@ -1681,6 +1712,18 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       if (tryHydrateText(node)) return;
       node.stateNode ??= host.createTextInstance(String(node.props.nodeValue));
+      return;
+    }
+
+    if (node.tag === TemplateTag) {
+      // Recreated until the first commit so a discarded render's slot values
+      // never leak into the instance the committed tree finally adopts.
+      if (node.committedProps === null || node.stateNode === null) {
+        node.stateNode = requireTemplateHostConfig().createTemplateInstance(
+          node.type as object,
+          templateSlots(node.props),
+        );
+      }
       return;
     }
 
@@ -3425,7 +3468,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       // Hoisted instances live out-of-band; commit acquires them instead.
       if (isHoistedFiber(node)) continue;
 
-      if (node.tag === HostTag || node.tag === TextTag) {
+      if (isHost(node)) {
         host.appendInitialChild(parent, hostNode(node));
       } else {
         appendAllHostChildren(parent, node.child);
@@ -3581,6 +3624,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
     if (current.tag === TextTag) {
       return current.committedProps?.nodeValue !== nextProps.nodeValue
+        ? UpdateFlag
+        : NoFlags;
+    }
+
+    if (current.tag === TemplateTag) {
+      return templateSlotsChanged(current.committedProps, nextProps)
         ? UpdateFlag
         : NoFlags;
     }
@@ -4961,8 +5010,37 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function requireTemplateHostConfig(): Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      "createTemplateInstance" | "commitTemplateUpdate"
+    >
+  > &
+    HostConfig<Container, Instance, TextInstance> {
+    if (
+      host.createTemplateInstance === undefined ||
+      host.commitTemplateUpdate === undefined
+    ) {
+      throw new Error("Template elements are not supported by this renderer.");
+    }
+    return host as Required<
+      Pick<
+        HostConfig<Container, Instance, TextInstance>,
+        "createTemplateInstance" | "commitTemplateUpdate"
+      >
+    > &
+      HostConfig<Container, Instance, TextInstance>;
+  }
+
   function commitUpdate(node: F): void {
-    if (node.tag === TextTag) {
+    if (node.tag === TemplateTag) {
+      requireTemplateHostConfig().commitTemplateUpdate(
+        node.stateNode as Instance,
+        node.type as object,
+        templateSlots(previousCommittedProps(node)),
+        templateSlots(node.props),
+      );
+    } else if (node.tag === TextTag) {
       host.commitTextUpdate(
         node.stateNode as TextInstance,
         String(node.props.nodeValue),
@@ -6182,7 +6260,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // Subtrees hidden by their own boundary keep their visibility.
     if (isHiddenBoundary(cursor)) return;
 
-    if (cursor.tag === HostTag) {
+    if (cursor.tag === HostTag || cursor.tag === TemplateTag) {
       const activityHost = requireActivityHostConfig();
       if (hidden) activityHost.hideInstance(cursor.stateNode as Instance);
       else {
@@ -6205,10 +6283,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function hideHostFiber(node: F): void {
     const activityHost = requireActivityHostConfig();
-    if (node.tag === HostTag) {
-      activityHost.hideInstance(node.stateNode as Instance);
-    } else {
+    if (node.tag === TextTag) {
       activityHost.hideTextInstance(node.stateNode as TextInstance);
+    } else {
+      activityHost.hideInstance(node.stateNode as Instance);
     }
   }
 
@@ -6858,7 +6936,26 @@ function tagFor(element: FigElement): Tag {
   if (isActivity(element.type)) return ActivityTag;
   if (isErrorBoundary(element.type)) return ErrorBoundaryTag;
   if (isViewTransition(element.type)) return ViewTransitionTag;
+  if (isTemplateType(element.type)) return TemplateTag;
   return FunctionTag;
+}
+
+function templateSlots(props: Props | null): readonly unknown[] {
+  return (props?.slots as readonly unknown[] | undefined) ?? [];
+}
+
+function templateSlotsChanged(
+  previousProps: Props | null,
+  nextProps: Props,
+): boolean {
+  if (previousProps === null) return true;
+  const previous = templateSlots(previousProps);
+  const next = templateSlots(nextProps);
+  if (previous.length !== next.length) return true;
+  for (let index = 0; index < next.length; index += 1) {
+    if (!Object.is(previous[index], next[index])) return true;
+  }
+  return false;
 }
 
 // Renderer bundles do not import @bgub/fig. Instead, resources created by
@@ -7119,7 +7216,9 @@ function duplicateKeyError(key: string | number): Error {
 function isHost<Container, Instance, TextInstance>(
   fiber: Fiber<Container, Instance, TextInstance>,
 ): boolean {
-  return fiber.tag === HostTag || fiber.tag === TextTag;
+  return (
+    fiber.tag === HostTag || fiber.tag === TextTag || fiber.tag === TemplateTag
+  );
 }
 
 function hostNode<Container, Instance, TextInstance>(
@@ -7502,6 +7601,9 @@ function devtoolsFiberInfo<Container, Instance, TextInstance>(
       return { kind: "portal", name: "Portal" };
     case AssetsTag:
       return { kind: "assets", name: "Assets" };
+    case TemplateTag:
+      // A template renders exactly one host instance.
+      return { kind: "host", name: "Template" };
   }
 }
 

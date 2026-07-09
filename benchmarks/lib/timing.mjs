@@ -15,6 +15,8 @@ export function createOperationCounts() {
     commitTextUpdate: 0,
     commitUpdate: 0,
     createInstance: 0,
+    createTemplateInstance: 0,
+    commitTemplateUpdate: 0,
     createTextInstance: 0,
     hideInstance: 0,
     hideTextInstance: 0,

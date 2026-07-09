@@ -92,6 +92,36 @@ class BenchElement {
 
 export { BenchElement };
 
+function buildTemplateNode(spec) {
+  if (typeof spec === "string") return new BenchText(spec);
+  const element = new BenchElement(spec.type);
+  for (const child of spec.children ?? []) {
+    const built = buildTemplateNode(child);
+    element.childNodes.push(built);
+    built.parentNode = element;
+  }
+  return element;
+}
+
+function cloneTemplateNode(node) {
+  if (node instanceof BenchText) return new BenchText(node.nodeValue);
+  const element = new BenchElement(node.type);
+  for (const child of node.childNodes) {
+    const clone = cloneTemplateNode(child);
+    element.childNodes.push(clone);
+    clone.parentNode = element;
+  }
+  return element;
+}
+
+function resolveTemplatePath(root, path) {
+  let node = root;
+  for (const index of path) node = node.childNodes[index];
+  return node;
+}
+
+const templatePrototypes = new WeakMap();
+
 function createFigBenchRenderer() {
   const operations = createOperationCounts();
   const host = {
@@ -102,6 +132,36 @@ function createFigBenchRenderer() {
     createTextInstance: (text) => {
       operations.createTextInstance += 1;
       return new BenchText(text);
+    },
+    // Bet-2 spike: descriptor = { spec, slotPaths } with text-only slots,
+    // standing in for compiler output. The prototype is built once per
+    // descriptor and cloned per instance — the in-memory analog of a
+    // <template> element's cloneNode.
+    createTemplateInstance: (descriptor, slots) => {
+      operations.createTemplateInstance += 1;
+      let prototype = templatePrototypes.get(descriptor);
+      if (prototype === undefined) {
+        prototype = buildTemplateNode(descriptor.spec);
+        templatePrototypes.set(descriptor, prototype);
+      }
+      const instance = cloneTemplateNode(prototype);
+      const slotNodes = descriptor.slotPaths.map((path) =>
+        resolveTemplatePath(instance, path),
+      );
+      for (let index = 0; index < slotNodes.length; index += 1) {
+        slotNodes[index].nodeValue = String(slots[index]);
+      }
+      instance.templateSlotNodes = slotNodes;
+      return instance;
+    },
+    commitTemplateUpdate: (instance, _descriptor, previous, next) => {
+      operations.commitTemplateUpdate += 1;
+      const slotNodes = instance.templateSlotNodes;
+      for (let index = 0; index < next.length; index += 1) {
+        if (!Object.is(previous[index], next[index])) {
+          slotNodes[index].nodeValue = String(next[index]);
+        }
+      }
     },
     appendInitialChild: (parent, child) => {
       operations.appendInitialChild += 1;

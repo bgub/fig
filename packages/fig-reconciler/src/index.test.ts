@@ -280,6 +280,91 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Ready");
   });
 
+  it("mounts, updates, reorders, and removes template elements", () => {
+    const templateDescriptor = {
+      [Symbol.for("fig.template")]: true,
+    };
+    const slotTexts = new WeakMap<TestElement, TestText>();
+    let creates = 0;
+    let updates = 0;
+    const templateHost: HostConfig<TestElement, TestElement, TestText> = {
+      ...host,
+      // Test contract: <li><span>{slot0}</span></li> with one text slot.
+      createTemplateInstance: (_descriptor, slots) => {
+        creates += 1;
+        const li = new TestElement("li");
+        const span = new TestElement("span");
+        const text = new TestText(String(slots[0]));
+        li.insertBefore(span, null);
+        span.insertBefore(text, null);
+        slotTexts.set(li, text);
+        return li;
+      },
+      commitTemplateUpdate: (instance, _descriptor, previous, next) => {
+        updates += 1;
+        if (!Object.is(previous[0], next[0])) {
+          const text = slotTexts.get(instance);
+          if (text) text.nodeValue = String(next[0]);
+        }
+      },
+    };
+    const { createRoot, flushSync } = createRenderer(templateHost);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    const list = (rows: Array<{ id: string; label: string }>) =>
+      createElement(
+        "ul",
+        null,
+        rows.map((row) =>
+          createElement(templateDescriptor as never, {
+            key: row.id,
+            slots: [row.label],
+          }),
+        ),
+      );
+
+    flushSync(() =>
+      root.render(
+        list([
+          { id: "a", label: "A1" },
+          { id: "b", label: "B1" },
+        ]),
+      ),
+    );
+    expect(container.textContent).toBe("A1B1");
+    expect(creates).toBe(2);
+
+    // Same-order slot update commits through the host update queue.
+    flushSync(() =>
+      root.render(
+        list([
+          { id: "a", label: "A2" },
+          { id: "b", label: "B1" },
+        ]),
+      ),
+    );
+    expect(container.textContent).toBe("A2B1");
+    expect(updates).toBe(1);
+    expect(creates).toBe(2);
+
+    // Keyed reorder moves instances without recreating them.
+    flushSync(() =>
+      root.render(
+        list([
+          { id: "b", label: "B1" },
+          { id: "a", label: "A2" },
+        ]),
+      ),
+    );
+    expect(container.textContent).toBe("B1A2");
+    expect(creates).toBe(2);
+
+    // Keyed removal deletes the instance.
+    flushSync(() => root.render(list([{ id: "a", label: "A2" }])));
+    expect(container.textContent).toBe("A2");
+  });
+
   it("keeps kept siblings' hooks live when a keyed sibling is deleted", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

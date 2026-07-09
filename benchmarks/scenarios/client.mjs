@@ -235,6 +235,37 @@ function createBenchmarkComponents(runtime) {
     );
   }
 
+  // Bet-2 spike: hand-authored stand-in for compiler output — the same row
+  // shape Rows renders (<li><span>Row N</span><span>vN</span></li>), as one
+  // template descriptor with two text slots instead of five fibers per row.
+  const rowTemplate = {
+    [Symbol.for("fig.template")]: true,
+    slotPaths: [
+      [0, 0],
+      [1, 0],
+    ],
+    spec: {
+      children: [
+        { children: ["?"], type: "span" },
+        { children: ["?"], type: "span" },
+      ],
+      type: "li",
+    },
+  };
+
+  function TemplateRows({ count, reverse = false, start = 0, version = 0 }) {
+    return runtime.createElement(
+      "ul",
+      null,
+      rowIds(count, start, reverse).map((id) =>
+        runtime.createElement(rowTemplate, {
+          key: id,
+          slots: [`Row ${id}`, `v${version}`],
+        }),
+      ),
+    );
+  }
+
   return {
     DeepTree,
     ExternalStoreUnrelatedUpdateTree,
@@ -245,6 +276,7 @@ function createBenchmarkComponents(runtime) {
     SparseContextTree,
     SuspenseSiblingTree,
     state,
+    TemplateRows,
     ViewTransitionRows,
   };
 }
@@ -392,6 +424,31 @@ function measureRowsInitialMount(runtime, rows, iterations) {
         count: rows,
         version: 1,
       }),
+  });
+}
+
+function measureTemplateRowsInitialMount(runtime, rows, iterations) {
+  return measureWithRoots(runtime, iterations, {
+    run: (roots) =>
+      renderAll(runtime, roots, runtime.components.TemplateRows, {
+        count: rows,
+        version: 1,
+      }),
+  });
+}
+
+function measureTemplateRowsUpdate(
+  runtime,
+  rows,
+  iterations,
+  previousProps,
+  nextProps,
+) {
+  return measureWithRoots(runtime, iterations, {
+    setup: (roots) =>
+      renderAll(runtime, roots, runtime.components.TemplateRows, previousProps),
+    run: (roots) =>
+      renderAll(runtime, roots, runtime.components.TemplateRows, nextProps),
   });
 }
 
@@ -626,6 +683,42 @@ export function clientScenariosForRows(rows) {
           { count: rows + appendCount, start: -appendCount },
         ),
       runtimes,
+    },
+    {
+      group: "template",
+      name: "template.initial-mount",
+      rows,
+      measure: (runtime, iterations) =>
+        measureTemplateRowsInitialMount(runtime, rows, iterations),
+      runtimes: runtimes.filter((runtime) => runtime.id === "fig"),
+    },
+    {
+      group: "template",
+      name: "template.same-order-update",
+      rows,
+      measure: (runtime, iterations) =>
+        measureTemplateRowsUpdate(
+          runtime,
+          rows,
+          iterations,
+          { count: rows, version: 1 },
+          { count: rows, version: 2 },
+        ),
+      runtimes: runtimes.filter((runtime) => runtime.id === "fig"),
+    },
+    {
+      group: "template",
+      name: "template.reverse-keyed",
+      rows,
+      measure: (runtime, iterations) =>
+        measureTemplateRowsUpdate(
+          runtime,
+          rows,
+          iterations,
+          { count: rows, version: 1 },
+          { count: rows, reverse: true, version: 1 },
+        ),
+      runtimes: runtimes.filter((runtime) => runtime.id === "fig"),
     },
     {
       group: "reconciler",

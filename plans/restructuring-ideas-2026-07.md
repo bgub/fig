@@ -269,6 +269,24 @@ markers all need slot-aware paths. The central design question is the slot
 identity contract — Fig has prior art in positional `events={[on(...)]}`
 identity.
 
+**Status (2026-07-09): runtime spike SHIPPED, verdict — EARNS THE PROJECT.**
+An experimental `TemplateTag` fiber (element type = object marked
+`Symbol.for("fig.template")`; host hooks `createTemplateInstance` /
+`commitTemplateUpdate`; slot updates ride the commit queue; ~180 B) plus a
+hand-authored descriptor standing in for compiler output, measured on the
+in-memory bench host against the identical fiber-rendered row shape:
+initial mount **2.2–2.8×**, same-order slot updates **3.0–4.2×**,
+reverse-keyed reorders **2.2–2.3×** — inside the 2–5× kill-criterion band,
+and this counts only reconciler-side savings (native `cloneNode` should
+widen it in real DOM). Spike scope cuts: single-root templates, text
+slots, CSR only, in-memory host. The full project's open fronts, in order
+of risk: event handling inside templates (fig-dom dispatch walks the
+fiber tree; template interiors have no fibers — needs slot-registered
+handlers or delegation metadata), hydration/SSR (payload carries template
+IDs; server renders template HTML; client adopts DOM ranges), the actual
+`fig-vite` transform (mechanical), and fig-dom host hooks
+(`<template>`-backed clones).
+
 ### C2. Direct-to-host data binding (signals as an optimization, not a model)
 
 Preact Signals' bypass trick without adopting its programming model: when a
