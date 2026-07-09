@@ -280,6 +280,47 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Ready");
   });
 
+  it("keeps kept siblings' hooks live when a keyed sibling is deleted", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    const events: string[] = [];
+    function Item({ id }: { id: string }) {
+      useReactive(
+        (signal) => {
+          events.push(`run:${id}`);
+          signal.addEventListener("abort", () => events.push(`abort:${id}`));
+        },
+        [id],
+      );
+      return createElement("span", null, id);
+    }
+
+    const list = (ids: string[]) =>
+      createElement(
+        "ul",
+        null,
+        ids.map((id) => createElement(Item, { key: id, id })),
+      );
+
+    flushSync(() => root.render(list(["a", "b", "c"])));
+    await delay();
+    // Dev strict rendering re-runs each effect once; only deletion behavior
+    // is under test here.
+    events.length = 0;
+
+    // Deleting the head goes through the keyed-map path, where the deletion
+    // entry's old-generation sibling pointers still reference kept fibers
+    // whose hook state is shared with the new generation. Teardown must stay
+    // inside the deleted subtree.
+    flushSync(() => root.render(list(["b", "c"])));
+    await delay();
+
+    expect(container.textContent).toBe("bc");
+    expect(events).toEqual(["abort:a"]);
+  });
+
   it("commits Suspense fallback and retries the boundary", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

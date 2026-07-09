@@ -4550,6 +4550,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberTree(node, false, visitor);
   }
 
+  // Pointer walk over return links — no per-walk stack allocation.
+  // Backtracking is bounded by the walk root (and its parent), so a walk
+  // over a detached deletion entry can never escape into the kept tree its
+  // return and sibling pointers still reference.
   function walkFiberTree(
     node: F | null,
     includeRootSiblings: boolean,
@@ -5127,14 +5131,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDeletions(root: R): void {
+    const store = root.dataStore;
     for (const cursor of root.commitQueue) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
         ? hostParentFor(cursor)
         : hostParent(cursor);
       for (const child of cursor.deletions) {
-        deleteFiberData(child);
-        abortFiberEffects(child);
+        // One walk, bounded to the deleted subtree: a deletion entry's old
+        // sibling pointers still reference kept fibers whose hook state is
+        // shared with the live generation, so a forest walk here would tear
+        // down hooks that are still mounted.
+        walkFiberSubtree(child, (deleted) => {
+          deleteFiberDataOwner(deleted, store);
+          abortFiberHooks(deleted, false);
+        });
         remove(child, parent);
       }
       cursor.deletions = null;
@@ -5180,20 +5191,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  function deleteFiberData(node: F): void {
-    const store = rootOf(node).dataStore;
-    deleteFiberDataFromStore(node, store);
-  }
-
   function deleteFiberDataTree(node: F): void {
     const store = rootOf(node).dataStore;
     walkFiberTree(node, true, (cursor) => {
-      deleteFiberDataOwner(cursor, store);
-    });
-  }
-
-  function deleteFiberDataFromStore(node: F, store: R["dataStore"]): void {
-    walkFiberSubtree(node, (cursor) => {
       deleteFiberDataOwner(cursor, store);
     });
   }
@@ -6652,8 +6652,18 @@ export function createRenderer<Container, Instance, TextInstance>(
   // the run's lane and downgrades to the offscreen lane like any hidden
   // update); deletions and root unmount skip the scheduling — the fiber is
   // going away, so only the abort matters.
+  // Walks the node AND its siblings (a hiding boundary tears down all of
+  // its content children). Deletion teardown must NOT use this: deletion
+  // entries' sibling pointers reference kept fibers — it walks each deleted
+  // subtree itself and calls abortFiberHooks per fiber.
   function abortFiberEffects(node: F, retirePending = false): void {
-    visitFiberHooks(node, (owner, hook) => {
+    walkFiberForest(node, (cursor) => {
+      abortFiberHooks(cursor, retirePending);
+    });
+  }
+
+  function abortFiberHooks(owner: F, retirePending: boolean): void {
+    for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
       if (isExternalStoreHook(hook))
         unsubscribeExternalStore(hook.memoizedState);
@@ -6693,7 +6703,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
       }
-    });
+    }
   }
 
   function abortEffect(effect: Effect): void {

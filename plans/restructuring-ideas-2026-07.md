@@ -216,6 +216,34 @@ the right substrate for a future tape with explicit ordering. Cumulative
 cost of all three stages: +342 B minified; benchmarks flat-to-improved
 throughout.
 
+**Follow-up (2026-07-09): the remove-10pct gap was a real bug, now fixed.**
+Profiling showed ~40% of the scenario's CPU inside walk machinery, and the
+attribution led to deletion teardown: `abortFiberEffects` walks root
+siblings (correct for its hiding-boundary caller), but keyed-map deletion
+entries are old-generation fibers whose sibling pointers still reference
+kept fibers with hook state shared with the live tree — so deleting N
+head rows aborted effects/stores/stable-events on every kept row,
+O(deleted × remaining), silently correct-looking in hook-free benchmarks.
+Fixed by fusing deletion teardown (data release + hook aborts) into one
+walk bounded to each deleted subtree, with a regression test. Result:
+remove-10pct(1k) 2.9ms → ~0.9ms, from ~50% behind React to ~45% ahead. The
+"placement performance" investigation this benchmark seemed to motivate is
+closed — the gap was teardown, not placement.
+
+**Negative result: the tmp-notes "pointer walk" idea is invalid.**
+Rewriting `walkFiberTree` to backtrack over `return` links (no per-walk
+stack) deterministically broke the demo-ssr
+failed-Suspense-inside-hidden-Activity e2e: tier-1 bailouts adopt
+current-generation children whose `.return` still points at the other
+generation's parent, so walks that descend through an adopted seam (e.g.
+`collectDehydratedSuspense`, which prunes nothing) escape into the previous
+fiber generation on backtrack. The stack walk never dereferences `.return`
+and is immune. This also cuts against the A1 arena's "integer links +
+return-based traversal" variant — any traversal design must treat adopted
+seams as generation boundaries. With teardown fixed, walk overhead is not
+a measurable cost anyway (the profile's walk-heavy readings were the
+O(deleted × remaining) bug, not walk machinery).
+
 ---
 
 ## Theme C — Reconciliation strategy shifts
