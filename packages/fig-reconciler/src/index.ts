@@ -3582,7 +3582,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   function hostPropsChanged(previous: Props, next: Props): boolean {
     let previousCount = 0;
 
-    for (const key of Object.keys(previous)) {
+    for (const key in previous) {
+      if (!Object.hasOwn(previous, key)) continue;
       if (!committedHostProp(key)) continue;
       previousCount += 1;
       if (!(key in next) || previous[key] !== next[key]) return true;
@@ -3590,7 +3591,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let nextCount = 0;
 
-    for (const key of Object.keys(next)) {
+    for (const key in next) {
+      if (!Object.hasOwn(next, key)) continue;
       if (committedHostProp(key)) nextCount += 1;
     }
 
