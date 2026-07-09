@@ -101,11 +101,26 @@ Suspense and error boundaries record the queue length when they begin; a
 capture truncates back to that watermark so work queued by a discarded
 subtree never commits (a boundary's own deletions are requeued — they belong
 to the boundary, not the subtree). The queue is cleared on render restart
-and after every commit. Host mutations still walk the finished tree via
-`flags`/`subtreeFlags`; converting them requires view transitions to read
-per-commit plan data instead of `subtreeFlags & MutationMask`, which is the
-commit-tape stage. In development, every commit re-runs the old tree walks
-as parity assertions that throw if the queue missed or double-ran work. Uncaught render errors
+and after every commit.
+
+Steady-state host updates are queued too, and their bits never enter
+`subtreeFlags`, so the mutation and flag-clearing walks skip update-only
+regions entirely. Ownership is split by commit kind: the queue pass commits
+updates on already-committed instances (text included — a hydrated text
+node's first "update" is how its differing value applies), while hydration
+commits stay in the walk (an Activity template must unpack before its
+hydrated children bind; Suspense boundary commits follow their instances)
+and first commits stay with the placement/assembly paths (an early update
+would set `committedProps` and defeat hoisted acquisition and
+placement-time updates). View transitions recover the missing subtree
+signal from the queue: each pending update is attributed to its innermost
+enclosing boundary — or to the root snapshot when nothing encloses it, or
+to nothing when a portal intervenes — replacing the
+`subtreeFlags & MutationMask` reads. Placements, visibility, and hydration
+still walk via `flags`/`subtreeFlags`. In development, every commit re-runs
+the old tree walks as parity assertions that throw if the queue missed or
+double-ran work, and view-transition classification is checked against an
+own-flag recomputation. Uncaught render errors
 rethrow to `flushSync` callers; outside `flushSync` they go to the root's
 `onUncaughtError`, or rethrow from a detached task when no handler exists —
 scheduler ticks never die silently.

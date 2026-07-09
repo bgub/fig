@@ -188,16 +188,33 @@ invariant: `CommitQueuedFlag` (reusing the retired `DataDependencyFlag`
 bit) dedupes pushes, is masked out of `subtreeFlags` aggregation, and is
 cleared on drain/truncation so the flag-clearing walk never has to reach
 it. `visitEffects` became a dev-only parity counter; commit-time arming of
-revealed boundaries' deferred effects queues owners directly. Host
-mutations/placements stay walk-driven on purpose: view-transition gating
-reads `subtreeFlags & MutationMask` in several places (`rootAffected`,
-boundary `mustAnimate`), so update-discovery cannot leave `subtreeFlags`
-until VT consumes per-commit plan data — that is the commit-tape stage.
-Hydration-retry collection also stays: it needs boundaries in the committed
-tree that the render never touched (a registry redesign, not a queue fit). The new `rows.remove-10pct` benchmark also exposed a
+revealed boundaries' deferred effects queues owners directly.
+Hydration-retry collection stays walk-based: it needs boundaries in the
+committed tree that the render never touched (a registry redesign, not a
+queue fit). The new `rows.remove-10pct` benchmark also exposed a
 pre-existing gap: Fig performs optimal host ops on head removal but is ~50%
 slower than React in reconcile CPU time — a `plans/
 reconciler-placement-performance.md` candidate, unrelated to the queue.
+
+**Stage 3 (same day): host updates + view-transition attribution.**
+`UpdateFlag`/`TextContentFlag` no longer enter `subtreeFlags`; steady-state
+host updates commit from the queue before the mutation walk, which now
+prunes update-only regions (as does the flag-clearing walk). View
+transitions recover the lost subtree signal via
+`attributeQueuedHostUpdates`: each pending update attributes to its
+innermost enclosing VT boundary, to the root snapshot when nothing encloses
+it, or to nothing when a portal intervenes — replacing both
+`subtreeFlags & MutationMask` reads. Ownership lessons the parity asserts
+and tests taught: hydration commits are position-sensitive (an Activity
+template must unpack before its hydrated children bind) and stay in the
+walk; first commits belong to placement/assembly (an early `commitUpdate`
+sets `committedProps` and silently defeats `acquireHoistedInstance` — the
+head-stylesheet test class); hydrated text is the exception (its first
+"update" is how the differing value applies). Placements and visibility
+remain walk-driven — the residual walk is now placement-shaped, which is
+the right substrate for a future tape with explicit ordering. Cumulative
+cost of all three stages: +342 B minified; benchmarks flat-to-improved
+throughout.
 
 ---
 

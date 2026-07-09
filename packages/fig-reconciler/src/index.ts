@@ -526,6 +526,13 @@ type Flag = number;
 
 const MutationMask =
   PlacementFlag | UpdateFlag | HydrationFlag | TextContentFlag | VisibilityFlag;
+const HostUpdateMask = UpdateFlag | TextContentFlag;
+// Bits that never enter subtreeFlags. Host updates are discovered through
+// the commit queue, so no commit walk needs to find them below a fiber;
+// view-transition change detection gets them via commit-queue attribution
+// (attributeQueuedHostUpdates) instead of subtree bits. Own-fiber flags
+// still carry them until the host-update pass commits and clears them.
+const SubtreeMaskedFlags = CommitQueuedFlag | HostUpdateMask;
 // Static flags record unchanging facts about a subtree (a ViewTransition
 // exists below here), not pending commit work. They must survive commits and
 // bailouts: cleared bits would make boundaries inside adopted subtrees
@@ -1871,6 +1878,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.stateNode = hydratable as Instance;
     node.flags |= UpdateFlag | HydrationFlag;
+    queueCommitFiber(root, node);
     root.hydrationParent = node;
     root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
       hydratable as Instance,
@@ -1905,6 +1913,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.stateNode = hydratable as TextInstance;
     node.flags |= UpdateFlag;
+    queueCommitFiber(root, node);
     root.nextHydratableInstance =
       hydrationHost.getNextHydratableSibling(hydratable);
 
@@ -3347,9 +3356,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
-      // CommitQueuedFlag stays out of subtreeFlags: the queue clears it when
-      // drained or truncated, so no commit walk ever needs to reach it.
-      subtreeFlags |= child.flags & ~CommitQueuedFlag;
+      subtreeFlags |= child.flags & ~SubtreeMaskedFlags;
       subtreeFlags |= child.subtreeFlags;
       contextSubtreeDependencies = appendContextDependencies(
         contextSubtreeDependencies,
@@ -3446,9 +3453,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     let old: F | null = currentFirstChild;
     let index = 0;
     let lastPlacedIndex = 0;
+    const root = rootOf(parent);
     const isHydratingNewTree =
       parent.tag !== PortalTag &&
-      rootOf(parent).isHydrating &&
+      root.isHydrating &&
       currentFirstChild === null;
 
     for (; old !== null && index < nextChildren.length; index += 1) {
@@ -3462,10 +3470,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.index = index;
       next.return = parent;
 
+      const updateFlags = hostUpdateFlags(old, next.props);
+      if (updateFlags !== NoFlags) {
+        next.flags |= updateFlags;
+        queueCommitFiber(root, next);
+      }
       if (forcePlacement) {
-        next.flags |= PlacementFlag | hostUpdateFlags(old, next.props);
+        next.flags |= PlacementFlag;
       } else {
-        next.flags |= hostUpdateFlags(old, next.props);
         lastPlacedIndex = old.index;
       }
 
@@ -3524,10 +3536,14 @@ export function createRenderer<Container, Instance, TextInstance>(
         } else {
           existingByKey?.delete(key);
         }
+        const updateFlags = hostUpdateFlags(matched, next.props);
+        if (updateFlags !== NoFlags) {
+          next.flags |= updateFlags;
+          queueCommitFiber(root, next);
+        }
         if (forcePlacement || matched.index < lastPlacedIndex) {
-          next.flags |= PlacementFlag | hostUpdateFlags(matched, next.props);
+          next.flags |= PlacementFlag;
         } else {
-          next.flags |= hostUpdateFlags(matched, next.props);
           lastPlacedIndex = matched.index;
         }
       } else {
@@ -3669,14 +3685,23 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (root.needsCommitDeletions) {
       collectDeletedViewTransitions(root, finishedWork, plan, exitsByName);
     }
+    const changedBoundaries = attributeQueuedHostUpdates(root, plan);
     collectFinishedViewTransitions(
       finishedWork.child,
       false,
       false,
       false,
+      changedBoundaries,
       plan,
       exitsByName,
     );
+
+    if (__DEV__ && !plan.rootAffected && devFlagRootAffected(finishedWork)) {
+      throw new Error(
+        "Fig internal parity error: commit-queue attribution missed a " +
+          "mutation outside view-transition boundaries (rootAffected).",
+      );
+    }
 
     if (plan.oldSurfaces.length === 0 && plan.newSurfaces.length === 0) {
       return null;
@@ -3782,6 +3807,74 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  // Host-update bits never reach subtreeFlags, so the collect walk cannot
+  // see updates below a fiber. This pass recovers that signal from the
+  // commit queue: each pending host update is attributed to its innermost
+  // enclosing ViewTransition boundary (matching "the innermost boundary owns
+  // an update"), to nothing when a portal intervenes (the collect walks skip
+  // portal content), or to the root snapshot when no boundary encloses it.
+  function attributeQueuedHostUpdates(
+    root: R,
+    plan: ViewTransitionPlan<Instance>,
+  ): Set<F> | null {
+    let changed: Set<F> | null = null;
+
+    for (const entry of root.commitQueue) {
+      if ((entry.flags & HostUpdateMask) === 0) continue;
+      let sawPortal = false;
+      let boundary: F | null = null;
+      for (let parent = entry.return; parent !== null; parent = parent.return) {
+        if (parent.tag === ViewTransitionTag) {
+          boundary = parent;
+          break;
+        }
+        if (parent.tag === PortalTag) sawPortal = true;
+      }
+      if (boundary === null) {
+        // Portal content still repaints the page, and the pre-queue walk
+        // counted it through raw subtree bits when no boundary enclosed it.
+        plan.rootAffected = true;
+      } else if (!sawPortal) {
+        (changed ??= new Set()).add(boundary);
+      }
+    }
+
+    return changed;
+  }
+
+  // Dev-only pre-masking truth: does any own-fiber mutation/deletion flag
+  // exist outside every ViewTransition boundary? Mirrors the old
+  // subtree-bit rootAffected discovery (portal content counts only outside
+  // boundaries; stably hidden VT-containing subtrees are skipped).
+  function devFlagRootAffected(node: F): boolean {
+    let affected = false;
+    walkFiberSubtree(node, (cursor) => {
+      if (cursor === node) return true;
+      const containsViewTransition =
+        cursor.tag === ViewTransitionTag ||
+        (cursor.subtreeFlags & ViewTransitionStaticFlag) !== 0;
+      if (!containsViewTransition) {
+        if (devSubtreeHasMutations(cursor)) affected = true;
+        return false;
+      }
+      if (isStablyHiddenBoundary(cursor)) return false;
+      if (cursor.tag === ViewTransitionTag) return false;
+      if (cursor.tag === PortalTag) return false;
+      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) affected = true;
+      return true;
+    });
+    return affected;
+  }
+
+  function devSubtreeHasMutations(node: F): boolean {
+    let found = false;
+    walkFiberSubtree(node, (cursor) => {
+      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) found = true;
+      return !found;
+    });
+    return found;
+  }
+
   function collectFinishedViewTransitions(
     node: F | null,
     placed: boolean,
@@ -3794,6 +3887,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // morphs be visual no-ops. Sibling-insertion shifts are still missed:
     // placement flags live on the inserted fiber, not its parent.
     ancestorLayoutChanged: boolean,
+    changedBoundaries: Set<F> | null,
     plan: ViewTransitionPlan<Instance>,
     exitsByName: Map<string, F>,
   ): void {
@@ -3883,7 +3977,20 @@ export function createRenderer<Container, Instance, TextInstance>(
         // so nested boundaries classify their own changes (an outer
         // update="none" must not disable them).
         const current = cursor.alternate;
-        const contentChanged = viewTransitionChangedOutsideNested(cursor);
+        const contentChanged = viewTransitionChangedOutsideNested(
+          cursor,
+          changedBoundaries,
+        );
+        if (__DEV__) {
+          const expected = devViewTransitionChangedOutsideNested(cursor);
+          if (contentChanged !== expected) {
+            throw new Error(
+              "Fig internal parity error: commit-queue attribution " +
+                `classified a view-transition boundary as ${contentChanged ? "changed" : "unchanged"} ` +
+                "where own-fiber flags disagree.",
+            );
+          }
+        }
         if (current !== null && (contentChanged || ancestorLayoutChanged)) {
           collectViewTransitionSurfaces(
             current,
@@ -3905,6 +4012,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursorPlaced,
           true,
           contentChanged || ancestorLayoutChanged,
+          changedBoundaries,
           plan,
           exitsByName,
         );
@@ -3926,6 +4034,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           insideBoundary,
           ancestorLayoutChanged ||
             (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
+          changedBoundaries,
           plan,
           exitsByName,
         );
@@ -3986,9 +4095,30 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function viewTransitionChangedOutsideNested(boundary: F): boolean {
+  function viewTransitionChangedOutsideNested(
+    boundary: F,
+    changedBoundaries: Set<F> | null,
+  ): boolean {
     if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
+    // Host updates below this boundary (outside nested boundaries) were
+    // attributed from the commit queue; subtree bits no longer carry them.
+    if (changedBoundaries !== null && changedBoundaries.has(boundary)) {
+      return true;
+    }
     return subtreeChangedOutsideNested(boundary.child);
+  }
+
+  // Dev-only pre-masking truth via own-fiber flags, no subtree pruning.
+  function devViewTransitionChangedOutsideNested(boundary: F): boolean {
+    if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
+    let changed = false;
+    walkFiberForest(boundary.child, (cursor) => {
+      if (changed || cursor.tag === PortalTag) return false;
+      if (cursor.tag === ViewTransitionTag) return false;
+      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) changed = true;
+      return !changed;
+    });
+    return changed;
   }
 
   function subtreeChangedOutsideNested(node: F | null): boolean {
@@ -4281,6 +4411,8 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (__DEV__) assertDeletionCommitParity(finishedWork);
         commitDataDependencies(root);
         if (__DEV__) assertDataDependencyCommitParity(finishedWork.child);
+        commitHostUpdates(root);
+        if (__DEV__) assertHostUpdateCommitParity(finishedWork.child);
         commitMutationEffects(finishedWork.child);
         if (hasHiddenBoundaries)
           commitHiddenBoundaryVisibility(finishedWork.child);
@@ -4656,13 +4788,16 @@ export function createRenderer<Container, Instance, TextInstance>(
         commitHydratedActivityBoundary(cursor);
       }
 
+      // Hydration commits are position-sensitive (Activity templates unpack
+      // above, Suspense boundaries commit below), so they stay in the walk
+      // rather than the host-update queue pass.
       if (
-        (cursor.flags & (UpdateFlag | TextContentFlag)) !== 0 &&
+        (cursor.flags & HydrationFlag) !== 0 &&
+        (cursor.flags & HostUpdateMask) !== 0 &&
         isHost(cursor)
       ) {
         const hostFiber = cursor;
         commitHostMutation(hostFiber, () => commitUpdate(hostFiber));
-        // Prerendered mutations inside hidden trees must stay hidden.
         if (hidden) hideHostFiber(hostFiber);
       }
 
@@ -4945,6 +5080,50 @@ export function createRenderer<Container, Instance, TextInstance>(
     // The identity resolved to a shared live instance (e.g. inserted while
     // this render was suspended); drop the stale duplicate.
     adoptSwappedHoistedInstance(node, resolved);
+  }
+
+  // Runs before the mutation walk, and owns only steady-state updates:
+  // hydration commits stay in the walk (an Activity template must unpack
+  // before its hydrated children bind, and Suspense boundary commits follow
+  // their instances), and first commits stay with the placement/assembly
+  // paths (committing an update first would set committedProps and defeat
+  // hoisted acquisition and shouldCommitPlacementUpdate). Updates inside
+  // subtrees the walk will place apply while those nodes are still at their
+  // old position (or detached); the insertion carries them over.
+  function commitHostUpdates(root: R): void {
+    for (const cursor of root.commitQueue) {
+      if ((cursor.flags & HostUpdateMask) === 0 || !isHost(cursor)) continue;
+      if ((cursor.flags & (HydrationFlag | PlacementFlag)) !== 0) continue;
+      // First commits belong to placement/assembly — except text, whose
+      // first "update" is how hydration applies a differing value.
+      if (cursor.committedProps === null && cursor.tag !== TextTag) continue;
+      commitHostMutation(cursor, () => commitUpdate(cursor));
+      // Prerendered mutations inside hidden trees must stay hidden.
+      if (hasHiddenBoundaries && isInsideHiddenBoundary(cursor)) {
+        hideHostFiber(cursor);
+      }
+      // Own-fiber update bits never reach subtreeFlags, so the flag-clearing
+      // walk cannot be relied on to reach them; the pass owns their cleanup.
+      cursor.flags &= ~HostUpdateMask;
+    }
+  }
+
+  function assertHostUpdateCommitParity(node: F | null): void {
+    walkFiberForest(node, (cursor) => {
+      if (
+        (cursor.flags & HostUpdateMask) !== 0 &&
+        (cursor.flags & (HydrationFlag | PlacementFlag)) === 0 &&
+        (cursor.committedProps !== null || cursor.tag === TextTag) &&
+        isHost(cursor)
+      ) {
+        throw new Error(
+          "Fig internal parity error: a host fiber with pending updates " +
+            "was missing from the commit queue.",
+        );
+      }
+
+      return (cursor.flags & AdoptedFlag) === 0;
+    });
   }
 
   function commitDeletions(root: R): void {
