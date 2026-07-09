@@ -84,6 +84,14 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
   reverse-keyed reorder gap (append/prepend now beat React on the tracked
   benchmark); initial mount and same-order updates still trail. →
   `plans/reconciler-placement-performance.md`
+- **Compiler-extracted templates** — a complete opt-in experiment lives on
+  [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates),
+  including DOM/SSR/hydration/payload integration, regression coverage, and a
+  real-browser benchmark. The direction is promising, but the compile-time
+  optimization is deliberately outside `main` until its transformation and
+  long-term maintenance contract feel mature enough to adopt. Revisit from
+  the branch rather than rebuilding the spike. → C1 in
+  `plans/restructuring-ideas-2026-07.md`
 
 ## DevTools
 
