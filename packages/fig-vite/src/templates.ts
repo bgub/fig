@@ -19,7 +19,8 @@ export interface TemplateTransformResult {
 // Eligibility (v0 — every rule exists to keep slot paths stable or the
 // semantics identical to fiber rendering; anything else bails to normal JSX):
 // - every element is a lowercase intrinsic; no components, fragments,
-//   spreads, namespaces, bind, or unsafeHTML anywhere in the subtree
+//   spreads, namespaces, bind, unsafeHTML, forms, foreign/raw-text roots, or
+//   context-sensitive parser containers anywhere in the subtree
 // - a dynamic {expression} child must be its element's only child (adjacent
 //   text nodes merge when the browser parses HTML, which would shift paths)
 // - `key` is allowed on the root only and forwards to the element props
@@ -31,6 +32,7 @@ interface SlotSpec {
   kind: "text" | "attr" | "events";
   name?: string;
   path: number[];
+  tag?: string;
 }
 
 interface TemplateBuild {
@@ -40,6 +42,13 @@ interface TemplateBuild {
   values: T.Expression[];
   elementCount: number;
   key: T.Expression | null;
+  rootDynamicAttributeSeen: boolean;
+}
+
+interface TemplatePluginState {
+  figElementImport?: T.Identifier;
+  figTemplateImport?: T.Identifier;
+  figTemplates?: T.Statement[];
 }
 
 // Tags a template must never swallow: document-shell structure (the server
@@ -60,6 +69,90 @@ const blockedElements = new Set([
   "template",
   "title",
 ]);
+
+// These elements either use context-sensitive HTML parsing, have host form
+// semantics that are not representable as independent attribute slots, or
+// enter a foreign/raw-text parsing mode. The generic fiber path remains the
+// correctness fallback until a later template format models them directly.
+const contextSensitiveElements = new Set([
+  "caption",
+  "col",
+  "colgroup",
+  "foreignobject",
+  "iframe",
+  "input",
+  "listing",
+  "math",
+  "noembed",
+  "option",
+  "optgroup",
+  "plaintext",
+  "pre",
+  "select",
+  "svg",
+  "table",
+  "tbody",
+  "td",
+  "textarea",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "xmp",
+]);
+
+const pAutoClosingElements = new Set([
+  "address",
+  "article",
+  "aside",
+  "blockquote",
+  "center",
+  "details",
+  "dialog",
+  "dir",
+  "div",
+  "dl",
+  "fieldset",
+  "figcaption",
+  "figure",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hgroup",
+  "hr",
+  "main",
+  "menu",
+  "nav",
+  "ol",
+  "p",
+  "pre",
+  "section",
+  "ul",
+]);
+
+function parserKeepsNesting(
+  name: string,
+  ancestors: readonly string[],
+): boolean {
+  if (name === "a" && ancestors.includes("a")) return false;
+  if (name === "button" && ancestors.includes("button")) return false;
+  if (ancestors.includes("p") && pAutoClosingElements.has(name)) return false;
+  if (name === "li" && ancestors.includes("li")) return false;
+  if (
+    (name === "dd" || name === "dt") &&
+    (ancestors.includes("dd") || ancestors.includes("dt"))
+  ) {
+    return false;
+  }
+  if (name === "form" && ancestors.includes("form")) return false;
+  return true;
+}
 
 const voidElements = new Set([
   "area",
@@ -133,6 +226,15 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
   const t = api.types;
   let counter = 0;
 
+  function compilerBlockedElement(element: T.JSXElement): boolean {
+    const name = element.openingElement.name;
+    return (
+      t.isJSXIdentifier(name) &&
+      (blockedElements.has(name.name) ||
+        contextSensitiveElements.has(name.name))
+    );
+  }
+
   function writeStatic(build: TemplateBuild, chunk: string): void {
     build.html += chunk;
     const last = build.segments.length - 1;
@@ -147,12 +249,16 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
     element: T.JSXElement,
     path: number[],
     build: TemplateBuild,
+    ancestors: readonly string[] = [],
   ): boolean {
     const opening = element.openingElement;
     if (!t.isJSXIdentifier(opening.name)) return false;
     const name = opening.name.name;
     if (!/^[a-z][\w-]*$/.test(name)) return false;
-    if (blockedElements.has(name)) return false;
+    if (blockedElements.has(name) || contextSensitiveElements.has(name)) {
+      return false;
+    }
+    if (!parserKeepsNesting(name, ancestors)) return false;
 
     build.elementCount += 1;
     writeStatic(build, `<${name}`);
@@ -163,7 +269,13 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
       const attrName = attribute.name.name;
 
       if (attrName === "key") {
-        if (path.length !== 0 || attribute.value === null) return false;
+        if (
+          path.length !== 0 ||
+          attribute.value === null ||
+          build.rootDynamicAttributeSeen
+        ) {
+          return false;
+        }
         if (t.isStringLiteral(attribute.value)) {
           build.key = attribute.value;
           continue;
@@ -178,7 +290,15 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         return false;
       }
 
-      if (attrName === "bind" || attrName === "unsafeHTML") return false;
+      if (
+        attrName === "bind" ||
+        (attrName === "style" && t.isStringLiteral(attribute.value)) ||
+        attrName === "suppressHydrationWarning" ||
+        attrName === "unsafeHTML" ||
+        /^on[A-Z]/.test(attrName)
+      ) {
+        return false;
+      }
 
       if (attrName === "events") {
         if (
@@ -187,13 +307,22 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         ) {
           return false;
         }
+        if (path.length === 0) build.rootDynamicAttributeSeen = true;
         build.slots.push({ kind: "events", path: [...path] });
         build.values.push(attribute.value.expression);
         continue;
       }
 
       if (attribute.value === null) {
-        writeStatic(build, ` ${attrName}=""`);
+        if (path.length === 0) build.rootDynamicAttributeSeen = true;
+        build.slots.push({
+          kind: "attr",
+          name: attrName,
+          path: [...path],
+          tag: name,
+        });
+        build.values.push(t.booleanLiteral(true));
+        build.segments.push(build.slots.length - 1);
         continue;
       }
 
@@ -209,14 +338,17 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         t.isJSXExpressionContainer(attribute.value) &&
         t.isExpression(attribute.value.expression)
       ) {
-        build.slots.push({ kind: "attr", name: attrName, path: [...path] });
+        if (path.length === 0) build.rootDynamicAttributeSeen = true;
+        build.slots.push({
+          kind: "attr",
+          name: attrName,
+          path: [...path],
+          tag: name,
+        });
         build.values.push(attribute.value.expression);
-        // The attribute exists only in the server projection; the client
-        // applies it as an initial slot after cloning.
-        build.html += "";
-        build.segments.push(` ${attrName}="`);
+        // The server writes the whole attribute through its ordinary host
+        // serializer; the client applies it through updateElement.
         build.segments.push(build.slots.length - 1);
-        build.segments.push('"');
         continue;
       }
 
@@ -234,7 +366,11 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
     for (const child of element.children) {
       if (t.isJSXText(child)) {
         const value = cleanJsxText(child.value);
-        if (value !== "") children.push({ kind: "text", value });
+        if (value !== "") {
+          const previous = children[children.length - 1];
+          if (previous?.kind === "text") previous.value += value;
+          else children.push({ kind: "text", value });
+        }
         continue;
       }
       if (t.isJSXExpressionContainer(child)) {
@@ -280,7 +416,12 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         childIndex += 1;
         continue;
       }
-      if (!buildElement(child.element, [...path, childIndex], build)) {
+      if (
+        !buildElement(child.element, [...path, childIndex], build, [
+          name,
+          ...ancestors,
+        ])
+      ) {
         return false;
       }
       childIndex += 1;
@@ -299,6 +440,11 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         t.objectProperty(t.identifier("name"), t.stringLiteral(slot.name)),
       );
     }
+    if (slot.tag !== undefined) {
+      properties.push(
+        t.objectProperty(t.identifier("tag"), t.stringLiteral(slot.tag)),
+      );
+    }
     properties.push(
       t.objectProperty(
         t.identifier("path"),
@@ -312,22 +458,27 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
     name: "fig-templates",
     visitor: {
       Program: {
-        enter() {
+        enter(path, state) {
           counter = 0;
+          const holder = state as TemplatePluginState;
+          holder.figElementImport =
+            path.scope.generateUidIdentifier("figElement");
+          holder.figTemplateImport =
+            path.scope.generateUidIdentifier("figTemplate");
         },
         exit(path, state) {
-          const templates = (state as { figTemplates?: T.Statement[] })
-            .figTemplates;
+          const holder = state as TemplatePluginState;
+          const templates = holder.figTemplates;
           if (templates === undefined || templates.length === 0) return;
           path.node.body.unshift(
             t.importDeclaration(
               [
                 t.importSpecifier(
-                  t.identifier("_figTemplate"),
+                  t.cloneNode(holder.figTemplateImport as T.Identifier),
                   t.identifier("template"),
                 ),
                 t.importSpecifier(
-                  t.identifier("_figElement"),
+                  t.cloneNode(holder.figElementImport as T.Identifier),
                   t.identifier("createElement"),
                 ),
               ],
@@ -338,10 +489,19 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         },
       },
       JSXElement(path: NodePath<T.JSXElement>, state) {
+        if (
+          path.findParent(
+            (parent) =>
+              parent.isJSXElement() && compilerBlockedElement(parent.node),
+          ) !== null
+        ) {
+          return;
+        }
         const build: TemplateBuild = {
           elementCount: 0,
           html: "",
           key: null,
+          rootDynamicAttributeSeen: false,
           segments: [],
           slots: [],
           values: [],
@@ -350,27 +510,35 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
         if (!buildElement(path.node, [], build)) return;
         if (build.elementCount < 2) return;
 
-        const id = t.identifier(`_figTmpl$${counter}`);
+        const id = path.scope
+          .getProgramParent()
+          .generateUidIdentifier(`figTmpl${counter}`);
         counter += 1;
 
         const declaration = t.variableDeclaration("const", [
           t.variableDeclarator(
             id,
-            t.callExpression(t.identifier("_figTemplate"), [
-              t.stringLiteral(build.html),
-              t.arrayExpression(build.slots.map(slotSpecExpression)),
-              t.arrayExpression(
-                build.segments.map((segment) =>
-                  typeof segment === "string"
-                    ? t.stringLiteral(segment)
-                    : t.numericLiteral(segment),
-                ),
+            t.callExpression(
+              t.cloneNode(
+                (state as TemplatePluginState)
+                  .figTemplateImport as T.Identifier,
               ),
-            ]),
+              [
+                t.stringLiteral(build.html),
+                t.arrayExpression(build.slots.map(slotSpecExpression)),
+                t.arrayExpression(
+                  build.segments.map((segment) =>
+                    typeof segment === "string"
+                      ? t.stringLiteral(segment)
+                      : t.numericLiteral(segment),
+                  ),
+                ),
+              ],
+            ),
           ),
         ]);
 
-        const holder = state as { figTemplates?: T.Statement[] };
+        const holder = state as TemplatePluginState;
         (holder.figTemplates ??= []).push(declaration);
 
         const properties: T.ObjectProperty[] = [];
@@ -384,10 +552,10 @@ function templatesBabelPlugin(api: typeof babel): PluginObj {
           ),
         );
 
-        const call = t.callExpression(t.identifier("_figElement"), [
-          t.cloneNode(id),
-          t.objectExpression(properties),
-        ]);
+        const call = t.callExpression(
+          t.cloneNode(holder.figElementImport as T.Identifier),
+          [t.cloneNode(id), t.objectExpression(properties)],
+        );
         // A template replacing a JSX child of an ineligible JSX parent must
         // stay a valid JSX child: wrap the call in an expression container.
         path.replaceWith(

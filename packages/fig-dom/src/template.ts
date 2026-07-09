@@ -133,12 +133,86 @@ export function commitTemplateUpdate(
   }
 }
 
-function expectedSlotText(value: unknown): string | null {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  // Non-primitive slot values have no canonical server text; skip checking.
-  return null;
+function expectedHydratedInstance(
+  descriptor: TemplateDescriptor,
+  slots: readonly unknown[],
+): Element {
+  const expected = prototypeFor(descriptor).cloneNode(true) as Element;
+  const nodes = descriptor.slots.map((slot) =>
+    resolveSlotNode(expected, slot.path),
+  );
+  for (let index = 0; index < descriptor.slots.length; index += 1) {
+    const spec = descriptor.slots[index];
+    if (spec.kind === "events") continue;
+    applySlot(spec, nodes[index], undefined, slots[index], true);
+  }
+  return expected;
+}
+
+function dynamicAttributes(
+  descriptor: TemplateDescriptor,
+  expected: Element,
+): Map<ChildNode, string[]> {
+  const attributes = new Map<ChildNode, string[]>();
+  for (const spec of descriptor.slots) {
+    if (spec.kind !== "attr") continue;
+    const node = resolveSlotNode(expected, spec.path);
+    let names = attributes.get(node);
+    if (names === undefined) {
+      names = [];
+      attributes.set(node, names);
+    }
+    names.push(spec.name.toLowerCase());
+  }
+  return attributes;
+}
+
+function sameHydratedTree(
+  actual: ChildNode,
+  expected: ChildNode,
+  expectedDynamicAttributes: ReadonlyMap<ChildNode, readonly string[]>,
+): boolean {
+  if (actual.nodeType !== expected.nodeType) return false;
+
+  if (expected.nodeType === 3) return actual.nodeValue === expected.nodeValue;
+
+  if (expected.nodeType === 1) {
+    const actualElement = actual as Element;
+    const expectedElement = expected as Element;
+    if (actualElement.localName !== expectedElement.localName) {
+      return false;
+    }
+
+    const dynamic = expectedDynamicAttributes.get(expected) ?? [];
+    for (const name of expectedElement.getAttributeNames()) {
+      if (dynamic.includes(name)) continue;
+      if (
+        actualElement.getAttribute(name) !== expectedElement.getAttribute(name)
+      ) {
+        return false;
+      }
+    }
+    for (const name of actualElement.getAttributeNames()) {
+      if (dynamic.includes(name) || expectedElement.hasAttribute(name)) {
+        continue;
+      }
+      return false;
+    }
+  }
+
+  if (actual.childNodes.length !== expected.childNodes.length) return false;
+  for (let index = 0; index < expected.childNodes.length; index += 1) {
+    if (
+      !sameHydratedTree(
+        actual.childNodes[index],
+        expected.childNodes[index],
+        expectedDynamicAttributes,
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Mirrors host hydration policy: a text-slot mismatch is a hydration
@@ -160,39 +234,52 @@ export function canHydrateTemplateInstance(
     return false;
   }
   const instance = node as Element;
+  let expected: Element;
+  let expectedNodes: readonly ChildNode[];
+  let actualNodes: readonly ChildNode[];
+  try {
+    expected = expectedHydratedInstance(descriptor, slots);
+    expectedNodes = descriptor.slots.map((slot) =>
+      resolveSlotNode(expected, slot.path),
+    );
+    actualNodes = descriptor.slots.map((slot) =>
+      resolveSlotNode(instance, slot.path),
+    );
+  } catch {
+    return false;
+  }
+
   if (
-    instance.localName.toLowerCase() !==
-    prototypeFor(descriptor).localName.toLowerCase()
+    !sameHydratedTree(
+      instance,
+      expected,
+      dynamicAttributes(descriptor, expected),
+    )
   ) {
     return false;
   }
 
   for (let index = 0; index < descriptor.slots.length; index += 1) {
     const spec = descriptor.slots[index];
-    let target: ChildNode;
-    try {
-      target = resolveSlotNode(instance, spec.path);
-    } catch {
-      return false;
-    }
+    const target = actualNodes[index];
 
     if (spec.kind === "text") {
       if (target.nodeType !== 3) return false;
-      const expected = expectedSlotText(slots[index]);
-      if (expected !== null && target.nodeValue !== expected) return false;
       continue;
     }
 
     if (target.nodeType !== 1) return false;
 
     if (spec.kind === "attr" && __DEV__) {
-      const expected = expectedSlotText(slots[index]);
+      const expectedValue = (expectedNodes[index] as Element).getAttribute(
+        spec.name,
+      );
       const actual = (target as Element).getAttribute(spec.name);
-      if (expected !== null && actual !== expected) {
+      if (actual !== expectedValue) {
         console.error(
           `Hydrated template attribute "${spec.name}" differs from the ` +
             `client slot value ("${actual ?? ""}" on the server, ` +
-            `"${expected}" on the client). The server value is kept; ` +
+            `"${expectedValue ?? ""}" on the client). The server value is kept; ` +
             "updates apply once the slot value changes.",
         );
       }
@@ -216,4 +303,23 @@ export function commitHydratedTemplateInstance(
     if (spec.kind !== "events") continue;
     updateEvents(nodes[index] as Element, slots[index]);
   }
+}
+
+export function templateRootDisplay(
+  descriptor: TemplateDescriptor,
+  slots: readonly unknown[],
+): string {
+  for (let index = 0; index < descriptor.slots.length; index += 1) {
+    const spec = descriptor.slots[index];
+    if (
+      spec.kind !== "attr" ||
+      spec.name !== "style" ||
+      spec.path.length !== 0
+    ) {
+      continue;
+    }
+    const display = (slots[index] as { display?: unknown } | null)?.display;
+    return typeof display === "string" ? display : "";
+  }
+  return "";
 }

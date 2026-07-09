@@ -31,6 +31,7 @@ import {
   commitHydratedTemplateInstance,
   commitTemplateUpdate,
   createTemplateInstance,
+  templateRootDisplay,
 } from "./template.ts";
 import type { TemplateDescriptor } from "@bgub/fig";
 import { composeBind, resumeBind, suspendBind } from "./bind.ts";
@@ -151,6 +152,14 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
       validateTextNesting(text, ancestors);
     }
   },
+  validateTemplateNesting: (descriptor, ancestors) => {
+    if (__DEV__) {
+      validateInstanceNesting(
+        (descriptor as TemplateDescriptor).rootTag,
+        ancestors,
+      );
+    }
+  },
   containerType: (container) =>
     isElementNode(container) ? elementName(container) : null,
   appendInitialChild: (parent, child) => {
@@ -250,6 +259,13 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     (instance as HTMLElement).style.setProperty(
       "display",
       typeof display === "string" ? display : "",
+    );
+    resumeBind(instance);
+  },
+  unhideTemplateInstance: (instance, descriptor, slots) => {
+    (instance as HTMLElement).style.setProperty(
+      "display",
+      templateRootDisplay(descriptor as TemplateDescriptor, slots),
     );
     resumeBind(instance);
   },

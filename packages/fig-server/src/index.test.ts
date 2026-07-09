@@ -171,9 +171,9 @@ describe("@bgub/fig-server", () => {
         { kind: "text", path: [0, 0] },
         { kind: "text", path: [1, 0] },
         { kind: "events", path: [1] },
-        { kind: "attr", name: "class", path: [] },
+        { kind: "attr", name: "class", path: [], tag: "li" },
       ],
-      ['<li class="', 3, '"><span>', 0, "</span><button>", 1, "</button></li>"],
+      ["<li", 3, "><span>", 0, "</span><button>", 1, "</button></li>"],
     );
 
     const html = await renderToHtml(
@@ -190,6 +190,51 @@ describe("@bgub/fig-server", () => {
       '<ul><li class="row &quot;x&quot;"><span>A &amp; B</span>' +
         "<button>&lt;Go&gt;</button></li></ul>",
     );
+  });
+
+  it("routes template attribute slots through normal server prop semantics", async () => {
+    const buttonTemplate = template(
+      "<button><span>ready</span></button>",
+      [
+        { kind: "attr", name: "disabled", path: [], tag: "button" },
+        { kind: "attr", name: "style", path: [], tag: "button" },
+      ],
+      ["<button", 0, 1, "><span>ready</span></button>"],
+    );
+
+    await expect(
+      renderToHtml(
+        createElement(buttonTemplate as never, {
+          slots: [false, { color: "red" }],
+        }),
+      ),
+    ).resolves.toBe('<button style="color:red"><span>ready</span></button>');
+
+    await expect(
+      renderToHtml(
+        createElement(buttonTemplate as never, {
+          slots: [true, null],
+        }),
+      ),
+    ).resolves.toBe("<button disabled><span>ready</span></button>");
+  });
+
+  it("validates template roots against server host ancestry", async () => {
+    const descriptor = template(
+      "<div><span>x</span></div>",
+      [],
+      ["<div><span>x</span></div>"],
+    );
+
+    await expect(
+      renderToHtml(
+        createElement(
+          "p",
+          null,
+          createElement(descriptor as never, { slots: [] }),
+        ),
+      ),
+    ).rejects.toThrow("Invalid DOM nesting");
   });
 
   it("preserves leading newlines in pre and textarea content", async () => {

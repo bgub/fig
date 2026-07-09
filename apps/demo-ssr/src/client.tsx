@@ -10,6 +10,7 @@ import {
   demoDataScriptId,
   demoRootId,
 } from "./app.tsx";
+import { installTemplateBrowserBenchmark } from "./template-benchmark.tsx";
 
 const data = readClientData();
 const initialData = readInitialData();
@@ -33,6 +34,7 @@ hydrateRoot(root, <App request={createClientRequest(data)} />, {
 });
 
 document.body.dataset.figHydrated = "true";
+installTemplateBrowserBenchmark();
 
 function readClientData(): ClientData {
   const script = document.getElementById(demoDataScriptId);

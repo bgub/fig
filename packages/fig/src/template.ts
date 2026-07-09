@@ -18,6 +18,10 @@ export type TemplateSlotSpec =
       readonly kind: "attr";
       readonly name: string;
       readonly path: readonly number[];
+      // The server projection needs the owning tag so it can route the
+      // value through the same host-prop serializer as ordinary JSX. The
+      // client resolves the element from path and does not otherwise use it.
+      readonly tag: string;
     }
   | { readonly kind: "events"; readonly path: readonly number[] };
 
@@ -25,6 +29,7 @@ export type TemplateSegment = string | number;
 
 export interface TemplateDescriptor {
   readonly html: string;
+  readonly rootTag: string;
   readonly slots: readonly TemplateSlotSpec[];
   readonly segments?: readonly TemplateSegment[];
 }
@@ -36,7 +41,8 @@ export function template(
   slots: readonly TemplateSlotSpec[] = [],
   segments?: readonly TemplateSegment[],
 ): TemplateDescriptor {
-  const descriptor = { html, segments, slots };
+  const rootTag = /^<([A-Za-z][\w-]*)/.exec(html)?.[1]?.toLowerCase() ?? "";
+  const descriptor = { html, rootTag, segments, slots };
   (descriptor as unknown as Record<symbol, boolean>)[TemplateSymbol] = true;
   return descriptor;
 }

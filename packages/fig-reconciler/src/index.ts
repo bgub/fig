@@ -258,6 +258,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     props: Props,
     ancestors: readonly string[],
   ): void;
+  validateTemplateNesting?(
+    descriptor: object,
+    ancestors: readonly string[],
+  ): void;
   validateTextNesting?(text: string, ancestors: readonly string[]): void;
   containerType?(container: Parent<Container, Instance>): string | null;
   appendInitialChild?(
@@ -332,6 +336,11 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitHydratedActivityBoundary?(boundary: Instance): void;
   hideInstance?(instance: Instance): void;
   unhideInstance?(instance: Instance, props: Props): void;
+  unhideTemplateInstance?(
+    instance: Instance,
+    descriptor: object,
+    slots: readonly unknown[],
+  ): void;
   hideTextInstance?(instance: TextInstance): void;
   unhideTextInstance?(instance: TextInstance, text: string): void;
   getSuspenseBoundary?(
@@ -1726,6 +1735,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (node.tag === TemplateTag) {
+      if (__DEV__ && node.alternate === null) {
+        host.validateTemplateNesting?.(
+          node.type as object,
+          hostAncestorTypes(node),
+        );
+      }
       if (tryHydrateTemplate(node)) return;
       // Recreated until the first commit so a discarded render's slot values
       // never leak into the instance the committed tree finally adopts.
@@ -6317,7 +6332,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (cursor.tag === HostTag || cursor.tag === TemplateTag) {
       const activityHost = requireActivityHostConfig();
       if (hidden) activityHost.hideInstance(cursor.stateNode as Instance);
-      else {
+      else if (
+        cursor.tag === TemplateTag &&
+        activityHost.unhideTemplateInstance !== undefined
+      ) {
+        activityHost.unhideTemplateInstance(
+          cursor.stateNode as Instance,
+          cursor.type as object,
+          templateSlots(cursor.props),
+        );
+      } else {
         activityHost.unhideInstance(cursor.stateNode as Instance, cursor.props);
       }
     } else if (cursor.tag === TextTag) {

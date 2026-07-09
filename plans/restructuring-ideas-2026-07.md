@@ -322,6 +322,20 @@ real-browser benchmark (demo app using `figTemplates()`), `bind` inside
 templates, dev mismatch diagnostics for hydrated templates, and a
 concepts/ file graduating the descriptor contract itself.
 
+**Hardening follow-up (2026-07-09):** attribute segments now invoke the
+ordinary server prop serializer (fixing false/null booleans, styles, and
+validation), hydration compares a fully slotted expected clone before
+adoption, template roots participate in client/server DOM-nesting checks,
+Activity reveal restores root display slots, compiler helper names are
+collision-free, and form/foreign/raw-text/table contexts conservatively bail.
+The real Chromium benchmark (1,000 rows, 15 alternating samples, ten
+operations per update/reorder sample) measured **1.43–1.47× mount**,
+**2.74–2.92× same-order update**, and **1.10–1.11× reverse-keyed** speedups.
+The real-DOM mount/reorder gains are smaller than the in-memory spike, while
+the update result remains close to it. This closes the benchmark and
+hydration-diagnostics items above; `bind` and default-toolchain graduation
+remain open in the concept.
+
 ### C2. Direct-to-host data binding (signals as an optimization, not a model)
 
 Preact Signals' bypass trick without adopting its programming model: when a

@@ -38,6 +38,20 @@ export function writeElementStart(
   sink.write(">");
 }
 
+// Template attribute slots use the ordinary host-prop policy rather than a
+// second stringification model. The compiler emits a slot at the attribute's
+// source position and this helper writes the whole attribute (or nothing), so
+// null/false, boolean, style, validation, and thrown-value behavior stay
+// identical to a normal host element.
+export function writeTemplateAttribute(
+  type: string,
+  name: string,
+  value: unknown,
+  sink: HtmlSink,
+): void {
+  writeAttributes(type, { [name]: value }, {}, sink);
+}
+
 export function writeElementEnd(type: string, sink: HtmlSink): void {
   sink.write(`</${type}>`);
 }

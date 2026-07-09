@@ -57,6 +57,7 @@ import {
   unsafeHTMLContent,
   writeElementEnd,
   writeElementStart,
+  writeTemplateAttribute,
   writeText,
 } from "./html.ts";
 import {
@@ -683,9 +684,9 @@ function renderElement(element: FigElement, frame: RenderFrame): void {
 }
 
 // Experimental (bet-2 template project): the descriptor's segments are the
-// server projection — static HTML interleaved with slot indexes, escaped by
-// the slot's kind. Event slots render nothing; hydration binds them when
-// the client adopts the element.
+// server projection — static HTML interleaved with slot indexes. Text slots
+// escape as text, attribute slots use the ordinary host-prop serializer, and
+// event slots render nothing; hydration binds events when the client adopts.
 function renderTemplateElement(
   descriptor: TemplateDescriptor,
   props: Props,
@@ -697,6 +698,8 @@ function renderTemplateElement(
       "Template elements need compiled segments to render on the server.",
     );
   }
+
+  if (__DEV__) validateInstanceNesting(descriptor.rootTag, frame.hostAncestors);
 
   consumePendingLeadingNewline(frame);
   const slots = (props.slots ?? []) as readonly unknown[];
@@ -710,11 +713,15 @@ function renderTemplateElement(
     const spec = descriptor.slots[segment];
     if (spec === undefined || spec.kind === "events") continue;
     const value = slots[segment];
+    if (spec.kind === "attr") {
+      writeTemplateAttribute(spec.tag, spec.name, value, sink);
+      continue;
+    }
     const text =
       value === null || value === undefined
         ? ""
         : String(value as string | number);
-    sink.write(spec.kind === "attr" ? escapeAttribute(text) : escapeText(text));
+    sink.write(escapeText(text));
   }
 }
 

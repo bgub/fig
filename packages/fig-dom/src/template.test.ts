@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement, template } from "@bgub/fig";
+import { Activity, createElement, template } from "@bgub/fig";
 import { describe, expect, it } from "vite-plus/test";
 import { createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 
@@ -8,7 +8,7 @@ const rowTemplate = template("<li><span> </span><button> </button></li>", [
   { kind: "text", path: [0, 0] },
   { kind: "text", path: [1, 0] },
   { kind: "events", path: [1] },
-  { kind: "attr", name: "class", path: [] },
+  { kind: "attr", name: "class", path: [], tag: "li" },
 ]);
 
 function row(key: string, slots: readonly unknown[]) {
@@ -30,6 +30,24 @@ describe("@bgub/fig-dom templates", () => {
     expect(li?.getAttribute("class")).toBe("row");
     expect(li?.querySelector("span")?.textContent).toBe("Row a");
     expect(li?.querySelector("button")?.textContent).toBe("Go");
+  });
+
+  it("validates a template root against its surrounding host ancestry", () => {
+    const descriptor = template("<div><span>x</span></div>");
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    expect(() =>
+      flushSync(() =>
+        root.render(
+          createElement(
+            "p",
+            null,
+            createElement(descriptor as never, { slots: [] }),
+          ),
+        ),
+      ),
+    ).toThrow("Invalid DOM nesting");
   });
 
   it("updates only changed slots through the commit queue", () => {
@@ -199,6 +217,35 @@ describe("@bgub/fig-dom templates", () => {
     expect(container.querySelector("span")?.textContent).toBe("Fresh client");
   });
 
+  it("recovers when the hydrated static template skeleton differs", () => {
+    const descriptor = template(
+      '<li class="new"><span>New static</span><em> </em></li>',
+      [{ kind: "text", path: [1, 0] }],
+    );
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<ul><li class="old"><strong>Old static</strong><em>same</em></li></ul>';
+    const serverLi = container.querySelector("li");
+    const errors: unknown[] = [];
+
+    hydrateRoot(
+      container,
+      createElement(
+        "ul",
+        null,
+        createElement(descriptor as never, { slots: ["same"] }),
+      ),
+      { onRecoverableError: (error) => errors.push(error) },
+    );
+    flushSync(() => undefined);
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(container.querySelector("li")).not.toBe(serverLi);
+    expect(container.querySelector("li")?.outerHTML).toBe(
+      '<li class="new"><span>New static</span><em>same</em></li>',
+    );
+  });
+
   it("preserves mismatched attribute slots and warns in dev", () => {
     const container = document.createElement("div");
     container.innerHTML =
@@ -257,5 +304,36 @@ describe("@bgub/fig-dom templates", () => {
     expect(after[0]).toBe(liB);
     expect(after[1]).toBe(liA);
     expect(after[0]?.querySelector("span")?.textContent).toBe("Row b");
+  });
+
+  it("restores the current root display slot when Activity reveals", () => {
+    const descriptor = template("<section><span>ready</span></section>", [
+      { kind: "attr", name: "style", path: [], tag: "section" },
+    ]);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const render = (mode: "hidden" | "visible", display: string) =>
+      flushSync(() =>
+        root.render(
+          createElement(
+            Activity,
+            { mode },
+            createElement(descriptor as never, {
+              slots: [{ display }],
+            }),
+          ),
+        ),
+      );
+
+    render("visible", "grid");
+    const section = container.querySelector("section") as HTMLElement;
+    expect(section.style.display).toBe("grid");
+
+    render("hidden", "grid");
+    expect(section.style.display).toBe("none");
+
+    render("hidden", "flex");
+    render("visible", "flex");
+    expect(section.style.display).toBe("flex");
   });
 });

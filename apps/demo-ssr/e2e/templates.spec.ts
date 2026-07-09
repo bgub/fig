@@ -24,6 +24,9 @@ test("compiled templates hydrate, dispatch events, and update slots", async ({
     "data-fig-hydrated",
     "true",
   );
+  expect(
+    await page.locator("body").getAttribute("data-recoverable-hydration-error"),
+  ).toBeNull();
 
   // The template rows were adopted, not re-created: event slots bound to
   // the server DOM dispatch through delegation.
