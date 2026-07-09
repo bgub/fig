@@ -90,7 +90,7 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
   real-browser benchmark. The direction is promising, but the compile-time
   optimization is deliberately outside `main` until its transformation and
   long-term maintenance contract feel mature enough to adopt. Revisit from
-  the branch rather than rebuilding the spike. → C1 in
+  the branch rather than rebuilding the spike. → Compiler-extracted templates in
   `plans/restructuring-ideas-2026-07.md`
 
 ## DevTools
