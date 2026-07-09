@@ -242,6 +242,7 @@ export function App({
               resource={request.resources.hidden}
               errorResource={request.resources.hiddenBroken}
             />
+            <TemplatePanel />
           </section>
         </div>
       </main>
@@ -644,6 +645,64 @@ function CounterButton({ id, label }: { id: string; label: string }) {
     >
       {label}: {count}
     </button>
+  );
+}
+
+// --- Compiled templates ------------------------------------------------
+// The row JSX below is deliberately template-eligible (all-intrinsic,
+// textual sole-child expressions), so the figTemplates() build plugin in
+// this app's pack config compiles it into hoisted descriptors: the server
+// streams their segments, the client clones their prototypes and binds
+// event slots. The e2e suite drives this section to prove the compiled
+// pipeline end to end, including a template inside a streamed Suspense
+// boundary.
+
+const templateRowIds = ["alpha", "beta", "gamma"];
+
+const templateStreamContent = delay("template", scaledDemoDelay(400));
+
+function StreamedTemplateNote(): FigNode {
+  readResource(templateStreamContent);
+  return (
+    <div class="muted" data-template-stream="ready">
+      <span>{"Streamed "}</span>
+      <strong>template content</strong>
+    </div>
+  );
+}
+
+function TemplatePanel(): FigNode {
+  const [picked, setPicked] = useState("none");
+  return (
+    <article class="card template-panel">
+      <h3>Compiled templates</h3>
+      <p class="muted" data-template-status={picked}>
+        Picked: {picked}
+      </p>
+      <ul class="template-rows">
+        {templateRowIds.map((id) => (
+          <li key={id} class="template-row" data-template-row={id}>
+            <span class="template-label">{`Row ${id}`}</span>
+            <button
+              class="button"
+              data-template-action={id}
+              events={[
+                on("click", () => {
+                  flushSync(() => setPicked(id));
+                }),
+              ]}
+            >
+              Pick
+            </button>
+          </li>
+        ))}
+      </ul>
+      <Suspense
+        fallback={<p data-template-stream="pending">Streaming template…</p>}
+      >
+        <StreamedTemplateNote />
+      </Suspense>
+    </article>
   );
 }
 

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 import type { UserConfig } from "vite-plus";
 import { figStart } from "./packages/fig-start/src/vite/index.ts";
+import { figTemplates } from "./packages/fig-vite/src/index.ts";
 
 const workspaceRoot = workspacePath(".");
 const packagePath =
@@ -224,6 +225,8 @@ function packConfigFor(path: string): PackConfig | undefined {
         },
       ];
     case "apps/demo-ssr":
+      // Both builds compile templates: the server renders their segments,
+      // the client clones their prototypes — one descriptor, two projections.
       return [
         {
           entry: ["./src/server.tsx"],
@@ -234,6 +237,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           dts: false,
           minify: false,
           outExtensions,
+          plugins: [figTemplates()],
           sourcemap: true,
         },
         {
@@ -246,6 +250,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           },
           dts: false,
           minify: false,
+          plugins: [figTemplates()],
           sourcemap: true,
           clean: false,
         },
