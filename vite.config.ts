@@ -81,6 +81,13 @@ const demoBrowserDefine = {
   ...figDevDefine,
   "process.env.NODE_ENV": JSON.stringify("development"),
 };
+// Enforcement lives next to the grant: browser demo entries assert after
+// every pack (watch builds included) that the dev define survived into the
+// bundle — unit tests run source-linked with the dev define and cannot see a
+// stripped bundle. Targets are relative to the app's cwd.
+function assertDevBundle(target: string): string {
+  return `node ${workspacePath("scripts/assert-dev-bundle.mjs")} ${target}`;
+}
 const packWorkspacePaths = [
   "packages/fig",
   "packages/fig-server",
@@ -218,6 +225,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           entry: ["./src/client.tsx"],
           alias: sourceAliases,
           define: demoBrowserDefine,
+          onSuccess: assertDevBundle("dist/client.js"),
           platform: "browser",
           format: "esm",
           deps: {
@@ -250,6 +258,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           entry: ["./src/client.tsx"],
           alias: sourceAliases,
           define: demoBrowserDefine,
+          onSuccess: assertDevBundle("dist/client.js"),
           platform: "browser",
           format: "esm",
           deps: {
@@ -283,6 +292,7 @@ function packConfigFor(path: string): PackConfig | undefined {
           entry: { client: "virtual:fig-start/client-entry" },
           alias: sourceAliases,
           define: figDevDefine,
+          onSuccess: assertDevBundle("dist"),
           platform: "browser",
           format: "esm",
           deps: {
@@ -322,6 +332,7 @@ function demoClientPackConfig(): PackConfig {
       alwaysBundle: demoClientBundleDependencies,
     },
     define: demoBrowserDefine,
+    onSuccess: assertDevBundle("dist/main.js"),
     dts: false,
     minify: false,
     sourcemap: true,
