@@ -51,6 +51,13 @@ DevTools snapshotting. New files should hide a complete rule or state machine;
 do not split the kernel into callback-heavy pass-through layers merely to make
 the main file shorter.
 
+Fiber flags are the source of truth for commit work. Completion folds the
+subtree-visible flags into a compact descendant summary: order-sensitive work
+is interpreted through pruned tree walks, while fiber-local work also enters a
+sparse commit index. That index is only an acceleration structure; captures
+roll it back to a typed checkpoint, and development parity checks verify it
+against the tree.
+
 ## The Internal Entry (`@bgub/fig/internal`)
 
 The cross-package protocol registry, versioned together with the sibling

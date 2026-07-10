@@ -36,6 +36,15 @@ import {
   setTransitionHandler,
   type Thenable,
 } from "@bgub/fig/internal";
+import {
+  clearCommitIndex,
+  commitIndexCheckpoint,
+  type CommitIndex,
+  type CommitIndexCheckpoint,
+  createCommitIndex,
+  recordCommitWork,
+  rollbackCommitIndex,
+} from "./commit-index.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
 import { devtoolsTypeName } from "./devtools.ts";
 import {
@@ -55,6 +64,28 @@ import {
   ViewTransitionTag,
 } from "./fiber-tags.ts";
 import { walkFiberForest, walkFiberSubtree } from "./fiber-traversal.ts";
+import {
+  AdoptedFlag,
+  AssembledFlag,
+  childSubtreeFlags,
+  clearTransientFlags,
+  ContextPropagationFlag,
+  DeletionFlag,
+  EffectFlag,
+  type Flag,
+  HostUpdateMask,
+  HydrationFlag,
+  MutationMask,
+  NoFlags,
+  NotHoistedFlag,
+  PlacementFlag,
+  StaticFlagsMask,
+  StoreConsistencyFlag,
+  TextContentFlag,
+  UpdateFlag,
+  ViewTransitionStaticFlag,
+  VisibilityFlag,
+} from "./fiber-work.ts";
 import {
   ActionStateHook,
   BeforeLayoutEffect,
@@ -491,54 +522,6 @@ export interface FigRenderer<Container> {
 
 type RequiredHydrationHostConfig<Container, Instance, TextInstance> =
   HostHydrationConfig<Container, Instance, TextInstance>;
-
-const NoFlags = 0;
-const PlacementFlag = 1 << 0;
-const UpdateFlag = 1 << 1;
-const HydrationFlag = 1 << 2;
-const TextContentFlag = 1 << 3;
-// The fiber reused its committed children without cloning; render skips the
-// subtree and commit walks must not re-read its already-committed state.
-const AdoptedFlag = 1 << 4;
-// An Activity boundary whose visibility changes this commit (or mounts
-// hidden); the mutation phase applies host hiding and effect deferral.
-const VisibilityFlag = 1 << 5;
-// A host fiber that assembled its children at complete-time (appendInitialChild
-// path), so commit inserts the whole subtree once instead of placing children
-// individually. Recorded at complete-time because commit mutates the underlying
-// signal (committedProps) before the placement walk reads it.
-const AssembledFlag = 1 << 6;
-const DeletionFlag = 1 << 7;
-// The fiber is already in root.commitQueue. Duplicate entries were tolerable
-// while every queue pass was idempotent; effect execution is not, so the
-// queue holds each fiber at most once (captures force-push after truncating,
-// which preserves the invariant: truncation removed the earlier entry).
-const CommitQueuedFlag = 1 << 8;
-const EffectFlag = 1 << 9;
-const ContextPropagationFlag = 1 << 10;
-const StoreConsistencyFlag = 1 << 11;
-const ViewTransitionStaticFlag = 1 << 12;
-// Several paths ask whether a host fiber is hoisted during one render/commit.
-// Cache the overwhelmingly common negative result in the existing flags word
-// rather than growing every fiber object.
-const NotHoistedFlag = 1 << 13;
-type Flag = number;
-
-const MutationMask =
-  PlacementFlag | UpdateFlag | HydrationFlag | TextContentFlag | VisibilityFlag;
-const HostUpdateMask = UpdateFlag | TextContentFlag;
-// Bits that never enter subtreeFlags. Host updates are discovered through
-// the commit queue, so no commit walk needs to find them below a fiber;
-// view-transition change detection gets them via commit-queue attribution
-// (attributeQueuedHostUpdates) instead of subtree bits. Own-fiber flags
-// still carry them until the host-update pass commits and clears them.
-const SubtreeMaskedFlags = CommitQueuedFlag | HostUpdateMask | NotHoistedFlag;
-// Static flags record unchanging facts about a subtree (a ViewTransition
-// exists below here), not pending commit work. They must survive commits and
-// bailouts: cleared bits would make boundaries inside adopted subtrees
-// invisible to commit-time collection and deleted subtrees unsearchable
-// without a full walk. Mirrors React's StaticMask.
-const StaticFlagsMask = ViewTransitionStaticFlag;
 // A commit may animate only when every rendered lane is transition-shaped:
 // transitions, retries (client Suspense reveals), deferred follow-ups, idle.
 // Hydration lanes are excluded on purpose — hydration changes no pixels, so
@@ -705,9 +688,9 @@ interface Fiber<Container, Instance, TextInstance> {
   dataDependenciesDirty: boolean;
   suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
   suspenseQueueStart?: number;
-  // Suspense/ErrorBoundary only: root.commitQueue length when this boundary
+  // Suspense/ErrorBoundary only: root commit-index length when this boundary
   // began, so a capture can truncate entries queued by its discarded subtree.
-  commitQueueStart?: number;
+  commitIndexCheckpoint?: CommitIndexCheckpoint;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
   errorBoundaryState: ErrorBoundaryState | null;
   // Shared by both fiber generations and updated at commit, so visibility
@@ -798,11 +781,11 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   // recorded deletions, or caught an error, in begin order (pre-order over
   // the rendered region). Commit passes iterate this instead of walking the
   // tree; each pass re-checks its own per-fiber predicate, so duplicate and
-  // stale entries are inert. Truncated to a boundary's commitQueueStart when
-  // a capture discards its subtree; cleared on restart and after commit.
-  commitQueue: Fiber<Container, Instance, TextInstance>[];
+  // stale entries are inert. Truncated to a boundary checkpoint when a
+  // capture discards its subtree; cleared on restart and after commit.
+  commitIndex: CommitIndex<Fiber<Container, Instance, TextInstance>>;
   // Boundaries that caught during the commit phase (effects, reactive
-  // flushes). Kept outside commitQueue: these must survive render restarts
+  // flushes). Kept outside the commit index: these must survive render restarts
   // until a later commit reports them.
   committedCaughtErrors: Fiber<Container, Instance, TextInstance>[];
   isHydrating: boolean;
@@ -1039,7 +1022,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      commitQueue: [],
+      commitIndex: createCommitIndex(),
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1499,7 +1482,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.renderLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
-    clearCommitQueue(root);
+    clearCommitIndex(root.commitIndex);
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -1581,7 +1564,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
     if (node.tag === SuspenseTag || node.tag === ErrorBoundaryTag) {
-      node.commitQueueStart = root.commitQueue.length;
+      node.commitIndexCheckpoint = commitIndexCheckpoint(root.commitIndex);
     }
 
     if (canBailout(node, root)) {
@@ -1829,8 +1812,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as Instance;
-    node.flags |= UpdateFlag | HydrationFlag;
-    queueCommitFiber(root, node);
+    recordCommitWork(root.commitIndex, node, UpdateFlag | HydrationFlag);
     root.hydrationParent = node;
     root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
       hydratable as Instance,
@@ -1863,8 +1845,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as TextInstance;
-    node.flags |= UpdateFlag;
-    queueCommitFiber(root, node);
+    recordCommitWork(root.commitIndex, node, UpdateFlag);
     root.nextHydratableInstance =
       hydrationHost.getNextHydratableSibling(hydratable);
 
@@ -2190,7 +2171,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     node.contextDependencies = null;
     root.dataStore.resetDataDependencies(node);
     node.dataDependenciesDirty = true;
-    queueCommitFiber(root, node);
+    recordCommitWork(root.commitIndex, node);
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -2907,7 +2888,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       value,
     };
 
-    fiber.flags |= StoreConsistencyFlag;
+    recordCommitWork(root.commitIndex, fiber, StoreConsistencyFlag);
     appendHook(createHook(ExternalStoreHook, state));
     return value;
   }
@@ -3128,8 +3109,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (hasChanged) {
       fiber.effects ??= [];
       fiber.effects.push(effect);
-      fiber.flags |= EffectFlag;
-      markCommitEffectPhase(rootOf(fiber), phase);
+      const root = rootOf(fiber);
+      recordCommitWork(root.commitIndex, fiber, EffectFlag);
+      markCommitEffectPhase(root, phase);
     }
   }
 
@@ -3312,8 +3294,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
-      subtreeFlags |= child.flags & ~SubtreeMaskedFlags;
-      subtreeFlags |= child.subtreeFlags;
+      subtreeFlags |= childSubtreeFlags(child);
       contextSubtreeDependencies = appendContextDependencies(
         contextSubtreeDependencies,
         child.contextDependencies,
@@ -3432,8 +3413,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const updateFlags = hostUpdateFlags(old, next.props);
       if (updateFlags !== NoFlags) {
-        next.flags |= updateFlags;
-        queueCommitFiber(root, next);
+        recordCommitWork(root.commitIndex, next, updateFlags);
       }
       if (forcePlacement) {
         next.flags |= PlacementFlag;
@@ -3498,8 +3478,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         const updateFlags = hostUpdateFlags(matched, next.props);
         if (updateFlags !== NoFlags) {
-          next.flags |= updateFlags;
-          queueCommitFiber(root, next);
+          recordCommitWork(root.commitIndex, next, updateFlags);
         }
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
@@ -3533,9 +3512,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     const root = rootOf(parent);
     parent.deletions ??= [];
     parent.deletions.push(child);
-    parent.flags |= DeletionFlag;
     root.needsCommitDeletions = true;
-    queueCommitFiber(root, parent);
+    recordCommitWork(root.commitIndex, parent, DeletionFlag);
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -3702,7 +3680,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     exitsByName: Map<string, F>,
   ): void {
     let collected = 0;
-    for (const cursor of root.commitQueue) {
+    for (const cursor of root.commitIndex) {
       if (cursor.deletions === null) continue;
       if (__DEV__) collected += 1;
       for (const deletion of cursor.deletions) {
@@ -3718,7 +3696,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       });
       if (collected !== expected) {
         throw new Error(
-          "Fig internal parity error: the commit queue collected deleted " +
+          "Fig internal parity error: the commit index collected deleted " +
             `view transitions from ${collected} fiber(s) where the tree ` +
             `walk found ${expected}.`,
         );
@@ -3769,7 +3747,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   // Host-update bits never reach subtreeFlags, so the collect walk cannot
   // see updates below a fiber. This pass recovers that signal from the
-  // commit queue: each pending host update is attributed to its innermost
+  // commit index: each pending host update is attributed to its innermost
   // enclosing ViewTransition boundary (matching "the innermost boundary owns
   // an update"), to nothing when a portal intervenes (the collect walks skip
   // portal content), or to the root snapshot when no boundary encloses it.
@@ -3779,7 +3757,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): Set<F> | null {
     let changed: Set<F> | null = null;
 
-    for (const entry of root.commitQueue) {
+    for (const entry of root.commitIndex) {
       if ((entry.flags & HostUpdateMask) === 0) continue;
       let sawPortal = false;
       let boundary: F | null = null;
@@ -4061,7 +4039,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): boolean {
     if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
     // Host updates below this boundary (outside nested boundaries) were
-    // attributed from the commit queue; subtree bits no longer carry them.
+    // attributed from the commit index; subtree bits no longer carry them.
     if (changedBoundaries !== null && changedBoundaries.has(boundary)) {
       return true;
     }
@@ -4418,10 +4396,9 @@ export function createRenderer<Container, Instance, TextInstance>(
           // Once the tree is current its flags must be cleared even when a
           // commit step throws, or a later render would adopt stale flags.
           collectReactiveEffects(root, finishedWork.child);
-          finishedWork.flags &= StaticFlagsMask;
-          finishedWork.subtreeFlags &= StaticFlagsMask;
+          clearTransientFlags(finishedWork);
           scheduleReactiveEffects(root);
-          clearCommitQueue(root);
+          clearCommitIndex(root.commitIndex);
         }
         if (__DEV__ && root.devtools) {
           emitDevtoolsCommit(host, root);
@@ -4595,7 +4572,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    for (const boundary of root.commitQueue) {
+    for (const boundary of root.commitIndex) {
       flushCaughtBoundaryError(root, boundary);
     }
   }
@@ -4609,7 +4586,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       ) {
         throw new Error(
           "Fig internal parity error: a caught boundary error was missing " +
-            "from the commit queue.",
+            "from the commit index.",
         );
       }
     });
@@ -5014,7 +4991,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // subtrees the walk will place apply while those nodes are still at their
   // old position (or detached); the insertion carries them over.
   function commitHostUpdates(root: R): void {
-    for (const cursor of root.commitQueue) {
+    for (const cursor of root.commitIndex) {
       if ((cursor.flags & HostUpdateMask) === 0 || !isHost(cursor)) continue;
       if ((cursor.flags & (HydrationFlag | PlacementFlag)) !== 0) continue;
       // First commits belong to placement/assembly — except text, whose
@@ -5041,7 +5018,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       ) {
         throw new Error(
           "Fig internal parity error: a host fiber with pending updates " +
-            "was missing from the commit queue.",
+            "was missing from the commit index.",
         );
       }
 
@@ -5051,7 +5028,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitDeletions(root: R): void {
     const store = root.dataStore;
-    for (const cursor of root.commitQueue) {
+    for (const cursor of root.commitIndex) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
         ? hostParentFor(cursor)
@@ -5076,7 +5053,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (cursor.deletions !== null) {
         throw new Error(
           "Fig internal parity error: a fiber with pending deletions was " +
-            "missing from the commit queue.",
+            "missing from the commit index.",
         );
       }
 
@@ -5088,7 +5065,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDataDependencies(root: R): void {
-    for (const cursor of root.commitQueue) {
+    for (const cursor of root.commitIndex) {
       if (!cursor.dataDependenciesDirty) continue;
       root.dataStore.commitDataDependencies(cursor, cursor.alternate);
       cursor.dataDependenciesDirty = false;
@@ -5102,7 +5079,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (cursor.dataDependenciesDirty) {
         throw new Error(
           "Fig internal parity error: a fiber with dirty data dependencies " +
-            "was missing from the commit queue.",
+            "was missing from the commit index.",
         );
       }
 
@@ -5410,40 +5387,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     return null;
   }
 
-  // Entries queued while rendering the boundary's discarded subtree must not
-  // commit: their fibers are detached (or kept only as retry input), so
-  // committing their data reads, deletions, or hook publishes would act on
-  // state the finished tree does not contain.
-  function truncateCommitQueue(root: R, mark: number | undefined): void {
-    const queue = root.commitQueue;
-    if (mark === undefined || mark >= queue.length) return;
-    for (let index = mark; index < queue.length; index += 1) {
-      queue[index].flags &= ~CommitQueuedFlag;
-    }
-    queue.length = mark;
-  }
-
-  function clearCommitQueue(root: R): void {
-    for (const node of root.commitQueue) node.flags &= ~CommitQueuedFlag;
-    root.commitQueue.length = 0;
-  }
-
-  function queueCommitFiber(root: R, node: F): void {
-    if ((node.flags & CommitQueuedFlag) !== 0) return;
-    node.flags |= CommitQueuedFlag;
-    root.commitQueue.push(node);
-  }
-
   function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
     const root = rootOf(boundary);
     const lanes = root.renderLanes;
     attachSuspensePing(root, boundary, thenable, lanes);
-    truncateCommitQueue(root, boundary.commitQueueStart);
+    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
     // The boundary's own deletions (e.g. the committed fallback recorded by
     // the reveal path) belong to the boundary, not its discarded subtree;
     // requeue them. Paths that discard them null boundary.deletions, which
     // leaves this entry inert.
-    if (boundary.deletions !== null) queueCommitFiber(root, boundary);
+    if (boundary.deletions !== null)
+      recordCommitWork(root.commitIndex, boundary);
 
     const dehydrated = boundary.alternate?.suspenseState;
     if (
@@ -5524,8 +5478,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     source: F,
   ): F | null {
     const root = rootOf(boundary);
-    truncateCommitQueue(root, boundary.commitQueueStart);
-    queueCommitFiber(root, boundary);
+    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
+    recordCommitWork(root.commitIndex, boundary);
     boundary.errorBoundaryState = createErrorBoundaryState(error, source);
     reconcileCurrentChildren(
       boundary,
@@ -6172,18 +6126,17 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const effects = (owner.effects ??= []);
       if (!effects.includes(effect)) effects.push(effect);
-      owner.flags |= EffectFlag;
-      markSubtreeFlag(owner, EffectFlag);
       const root = rootOf(owner);
+      recordCommitWork(root.commitIndex, owner, EffectFlag);
+      markSubtreeFlag(owner, EffectFlag);
       markCommitEffectPhase(root, effect.phase);
-      // Re-armed owners that did not re-render are not in the commit queue
+      // Re-armed owners that did not re-render are not in the commit index
       // yet; the arming pass runs before every effect pass consumes it.
-      queueCommitFiber(root, owner);
     });
   }
 
   function commitLiveHookInstances(root: R): void {
-    for (const owner of root.commitQueue) {
+    for (const owner of root.commitIndex) {
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
         commitLiveHookInstance(owner, hook);
       }
@@ -6219,7 +6172,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         ) {
           throw new Error(
             "Fig internal parity error: a stable-event hook was not " +
-              "published by the commit queue.",
+              "published by the commit index.",
           );
         }
       }
@@ -6232,7 +6185,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         ) {
           throw new Error(
             "Fig internal parity error: an action-state hook was not " +
-              "published by the commit queue.",
+              "published by the commit index.",
           );
         }
       }
@@ -6252,7 +6205,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitExternalStores(root: R): void {
-    for (const cursor of root.commitQueue) {
+    for (const cursor of root.commitIndex) {
       if ((cursor.flags & StoreConsistencyFlag) === 0) continue;
       // Subscriptions under hidden boundaries are deferred until reveal.
       if (hasHiddenBoundaries && isInsideHiddenBoundary(cursor)) continue;
@@ -6280,7 +6233,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           ) {
             throw new Error(
               "Fig internal parity error: an external-store hook was not " +
-                "committed by the commit queue.",
+                "committed by the commit index.",
             );
           }
         }
@@ -6342,7 +6295,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let executed = 0;
     const runEffects = () => {
-      for (const owner of root.commitQueue) {
+      for (const owner of root.commitIndex) {
         const effects = owner.effects;
         if (effects === null) continue;
         // Effects under hidden boundaries stay deferred until reveal.
@@ -6369,7 +6322,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       });
       if (executed !== expected) {
         throw new Error(
-          "Fig internal parity error: the commit queue executed " +
+          "Fig internal parity error: the commit index executed " +
             `${executed} ${hookKindNames[phase]} effect(s) where the tree ` +
             `walk found ${expected}.`,
         );
@@ -6400,8 +6353,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       // The last flag consumer in the commit clears them (static facts
       // excepted), so committed trees stay flag-clean and adopted subtrees
       // never expose stale commit state.
-      cursor.flags &= StaticFlagsMask;
-      cursor.subtreeFlags &= StaticFlagsMask;
+      clearTransientFlags(cursor);
       if (adopted) return false;
       if (isHiddenBoundary(cursor)) {
         if (subtreeFlags !== NoFlags) clearHiddenSubtreeFlags(cursor.child);
@@ -6419,8 +6371,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       const adopted = (cursor.flags & AdoptedFlag) !== 0;
       const subtreeFlags = cursor.subtreeFlags;
-      cursor.flags &= StaticFlagsMask;
-      cursor.subtreeFlags &= StaticFlagsMask;
+      clearTransientFlags(cursor);
       return !adopted && (subtreeFlags & ~StaticFlagsMask) !== NoFlags;
     });
   }
