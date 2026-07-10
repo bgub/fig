@@ -53,6 +53,7 @@ body {
   background: #171923;
 }
 
+html[data-fig-devtools-closed] .fig-demo-devtools-pane,
 .fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
   width: 0;
   min-width: 0;
@@ -331,7 +332,7 @@ button[data-demo-control="transition"] {
     border-left: 0;
   }
 
-  .fig-demo-devtools-pane:not(:has(.fig-devtools.is-closed)) {
+  .fig-demo-devtools-pane:has(.fig-devtools:not(.is-closed)) {
     width: auto;
     height: min(620px, 70vh);
     overflow: hidden;

@@ -7,6 +7,8 @@ import {
   createClientRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
+  demoDevtoolsOpenKey,
+  demoDevtoolsPaneId,
   demoRootId,
 } from "./app.tsx";
 
@@ -16,11 +18,19 @@ const root = document.getElementById(demoRootId);
 if (root === null) {
   throw new Error("Missing streaming demo root.");
 }
+const devtoolsContainer = document.getElementById(demoDevtoolsPaneId);
+if (devtoolsContainer === null) {
+  throw new Error("Missing streaming demo devtools pane.");
+}
 
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
-const devtoolsContainer = installDemoDevtoolsLayout(root);
 createRoot(devtoolsContainer, { devtools: false }).render(
-  <FigDevtools hook={devtoolsHook} placement="sidebar" />,
+  <FigDevtools
+    hook={devtoolsHook}
+    placement="sidebar"
+    defaultOpen={readStoredDevtoolsOpen()}
+    onOpenChange={storeDevtoolsOpen}
+  />,
 );
 
 hydrateRoot(root, <App request={createClientRequest(data)} />, {
@@ -49,16 +59,19 @@ function readInitialData(): FigDataHydrationEntry[] {
   return JSON.parse(script.textContent ?? "[]") as FigDataHydrationEntry[];
 }
 
-function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
-  const layout = document.createElement("div");
-  const appPane = document.createElement("div");
-  const devtoolsPane = document.createElement("aside");
+function readStoredDevtoolsOpen(): boolean {
+  try {
+    return localStorage.getItem(demoDevtoolsOpenKey) !== "false";
+  } catch {
+    return true;
+  }
+}
 
-  layout.className = "fig-demo-devtools-layout";
-  appPane.className = "fig-demo-app-pane";
-  devtoolsPane.className = "fig-demo-devtools-pane";
-  appRoot.replaceWith(layout);
-  appPane.appendChild(appRoot);
-  layout.append(appPane, devtoolsPane);
-  return devtoolsPane;
+function storeDevtoolsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(demoDevtoolsOpenKey, String(open));
+  } catch {
+    // Private mode: the panel still toggles, it just isn't remembered.
+  }
+  document.documentElement.toggleAttribute("data-fig-devtools-closed", !open);
 }

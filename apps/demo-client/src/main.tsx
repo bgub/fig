@@ -2366,13 +2366,37 @@ if (container === null) {
   throw new Error("Could not find #root.");
 }
 
+// Shared across the fig demos so the panel state follows the user.
+const devtoolsOpenKey = "fig-demo-devtools-open";
+
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
 const devtoolsContainer = installDemoDevtoolsLayout(container);
 createRoot(devtoolsContainer, { devtools: false }).render(
-  <FigDevtools hook={devtoolsHook} placement="sidebar" />,
+  <FigDevtools
+    hook={devtoolsHook}
+    placement="sidebar"
+    defaultOpen={readStoredDevtoolsOpen()}
+    onOpenChange={storeDevtoolsOpen}
+  />,
 );
 
 createRoot(container).render(<App />);
+
+function readStoredDevtoolsOpen(): boolean {
+  try {
+    return localStorage.getItem(devtoolsOpenKey) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function storeDevtoolsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(devtoolsOpenKey, String(open));
+  } catch {
+    // Private mode: the panel still toggles, it just isn't remembered.
+  }
+}
 
 function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
   const layout = document.createElement("div");

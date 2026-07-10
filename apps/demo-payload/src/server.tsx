@@ -22,7 +22,13 @@ import {
   handleDevReloadRequest,
   watchDevReloadFile,
 } from "../../dev-reload.ts";
-import { appRootId, feedBoundaryId, noteBoundaryId } from "./shared.ts";
+import {
+  appRootId,
+  devtoolsPaneId,
+  devtoolsStateScript,
+  feedBoundaryId,
+  noteBoundaryId,
+} from "./shared.ts";
 import { LoadingShell } from "./shell.tsx";
 import { styles } from "./styles.ts";
 
@@ -130,9 +136,16 @@ async function documentHtml(): Promise<string> {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     "<title>Fig payload Demo</title>",
     '<link rel="stylesheet" href="/style.css">',
+    `<script>${devtoolsStateScript}</script>`,
     "</head>",
     "<body>",
-    `<div id="${appRootId}">${shell}</div>`,
+    // The DevTools layout ships in the shell so the sidebar space is reserved
+    // from first paint; the client mounts the panel into the aside without
+    // reflowing the app.
+    '<div class="fig-demo-devtools-layout">',
+    `<div class="fig-demo-app-pane"><div id="${appRootId}">${shell}</div></div>`,
+    `<aside class="fig-demo-devtools-pane" id="${devtoolsPaneId}"></aside>`,
+    "</div>",
     devReloadScript(),
     '<script type="module" src="/client.js"></script>',
     "</body>",

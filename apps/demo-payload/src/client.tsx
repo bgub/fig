@@ -14,6 +14,8 @@ import {
 import {
   appRefreshButtonReferenceId,
   appRootId,
+  devtoolsOpenKey,
+  devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
   refreshButtonReferenceId,
@@ -25,11 +27,19 @@ if (rootElement === null) {
   throw new Error("Missing payload demo root.");
 }
 const appRootElement = rootElement;
+const devtoolsContainer = document.getElementById(devtoolsPaneId);
+if (devtoolsContainer === null) {
+  throw new Error("Missing payload demo devtools pane.");
+}
 
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
-const devtoolsContainer = installDemoDevtoolsLayout(appRootElement);
 createRoot(devtoolsContainer, { devtools: false }).render(
-  <FigDevtools hook={devtoolsHook} placement="sidebar" />,
+  <FigDevtools
+    hook={devtoolsHook}
+    placement="sidebar"
+    defaultOpen={readStoredDevtoolsOpen()}
+    onOpenChange={storeDevtoolsOpen}
+  />,
 );
 
 const response = createPayloadResponse({
@@ -84,16 +94,19 @@ void fetchPayload(response, "/payload", {
 
 document.body.dataset.figPayloadDemo = "ready";
 
-function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
-  const layout = document.createElement("div");
-  const appPane = document.createElement("div");
-  const devtoolsPane = document.createElement("aside");
+function readStoredDevtoolsOpen(): boolean {
+  try {
+    return localStorage.getItem(devtoolsOpenKey) !== "false";
+  } catch {
+    return true;
+  }
+}
 
-  layout.className = "fig-demo-devtools-layout";
-  appPane.className = "fig-demo-app-pane";
-  devtoolsPane.className = "fig-demo-devtools-pane";
-  appRoot.replaceWith(layout);
-  appPane.appendChild(appRoot);
-  layout.append(appPane, devtoolsPane);
-  return devtoolsPane;
+function storeDevtoolsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(devtoolsOpenKey, String(open));
+  } catch {
+    // Private mode: the panel still toggles, it just isn't remembered.
+  }
+  document.documentElement.toggleAttribute("data-fig-devtools-closed", !open);
 }

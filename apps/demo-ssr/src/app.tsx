@@ -96,6 +96,12 @@ export type ClientData = Pick<DemoRequest, "abortDelay" | "startedAt">;
 export const demoDataScriptId = "fig-stream-demo-data";
 export const demoDataResourceScriptId = "fig-stream-demo-data-resources";
 export const demoRootId = "fig-stream-demo-root";
+export const demoDevtoolsPaneId = "fig-stream-demo-devtools";
+// Shared across the fig demos so the panel state follows the user.
+export const demoDevtoolsOpenKey = "fig-demo-devtools-open";
+// Runs before first paint: collapses the server-reserved DevTools pane when
+// the panel was last closed, so neither state causes layout shift.
+export const demoDevtoolsStateScript = `try{if(localStorage.getItem("${demoDevtoolsOpenKey}")==="false")document.documentElement.setAttribute("data-fig-devtools-closed","")}catch(e){}`;
 export const streamBoundaryDigest = "stream-demo-suspense";
 export const streamIdentifierPrefix = "stream-demo";
 

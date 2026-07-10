@@ -17,6 +17,8 @@ import {
   type DemoRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
+  demoDevtoolsPaneId,
+  demoDevtoolsStateScript,
   demoRootId,
   scaledDemoDelay,
   serverInfoResourceId,
@@ -129,27 +131,36 @@ async function handleRequest(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="stylesheet" href="/style.css" />
+        <script nonce={nonce} unsafeHTML={demoDevtoolsStateScript} />
       </head>
       <body>
-        {assets(
-          [
-            title("Fig Streaming SSR"),
-            meta({
-              name: "description",
-              content: "Fig streaming Suspense and hydration demo.",
-            }),
-          ],
-          <div id={demoRootId}>
-            <App
-              request={demoRequest}
-              serverInfoResource={createServerInfoResource(serverInfo)}
-              serverOnlyInfoResource={createServerOnlyInfoResource(
-                requestId,
-                serverInfo,
-              )}
-            />
-          </div>,
-        )}
+        {/* The DevTools layout ships in the shell so the sidebar space is
+            reserved from first paint; the client mounts the panel into the
+            aside without reflowing the app. */}
+        <div class="fig-demo-devtools-layout">
+          <div class="fig-demo-app-pane">
+            {assets(
+              [
+                title("Fig Streaming SSR"),
+                meta({
+                  name: "description",
+                  content: "Fig streaming Suspense and hydration demo.",
+                }),
+              ],
+              <div id={demoRootId}>
+                <App
+                  request={demoRequest}
+                  serverInfoResource={createServerInfoResource(serverInfo)}
+                  serverOnlyInfoResource={createServerOnlyInfoResource(
+                    requestId,
+                    serverInfo,
+                  )}
+                />
+              </div>,
+            )}
+          </div>
+          <aside class="fig-demo-devtools-pane" id={demoDevtoolsPaneId} />
+        </div>
       </body>
     </html>,
     {
