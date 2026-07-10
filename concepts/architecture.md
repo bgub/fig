@@ -105,4 +105,13 @@ runtime footprint.
   importing a renderer can never keep a Node process alive.
 - Dev-only behavior (strict double render, diagnostics, DevTools emission)
   uses inline `__FIG_DEV__` checks that Fig library builds define away; there
-  are no separate dev builds.
+  are no separate dev builds. `__FIG_DEV__` is the only dev-gating mechanism:
+  runtime `process.env.NODE_ENV` is never consulted (a consumer that wants
+  dev mode must define `__FIG_DEV__: true` at build time, as the monorepo's
+  demos and tests do via `vite.config.ts`). Each gated module carries its own
+  `declare const __FIG_DEV__` plus a module-local `__DEV__` const on purpose:
+  JSR publishes raw source, so ambient declaration files are unavailable, and
+  bundlers only fold gates whose const lives in the same module. Demo builds
+  are asserted dev-mode by `scripts/assert-dev-bundle.mjs` right after pack,
+  because unit tests always run source-linked with the dev define and cannot
+  see a stripped bundle.
