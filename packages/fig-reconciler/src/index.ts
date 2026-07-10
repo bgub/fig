@@ -851,6 +851,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 ): FigRenderer<Container> {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
+  // Shared read-only stand-in for the common no-retries commit; never pushed
+  // to (commits swap in a fresh array before recording anything).
+  const noSuspenseRetries: PendingSuspenseRetry<
+    Container,
+    Instance,
+    TextInstance
+  >[] = [];
   type ActivityHydrationHostConfig = HostConfig<
     Container,
     Instance,
@@ -1500,7 +1507,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callbackPriority = NoLane;
     // Retries recorded by the discarded render die with it; their thenables
     // stay covered by the root pings attached at capture time.
-    root.pendingSuspenseRetries = [];
+    if (root.pendingSuspenseRetries.length > 0) {
+      root.pendingSuspenseRetries = [];
+    }
     clearCommitIndex(root.commitIndex);
     resetHydrationPointers(root);
     resetContextStack(root);
@@ -3851,18 +3860,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     // let measurement cancel the boundaries that did not actually move. A
     // placed fiber that was committed before (it has an alternate, or was
     // adopted in place by a bailout) is a move; fresh insertions keep the
-    // documented behavior of not animating the siblings they shift.
-    let siblingMoved = false;
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+    // documented behavior of not animating the siblings they shift. The scan
+    // only runs when it can still change the answer.
+    let layoutChanged = ancestorLayoutChanged;
+    for (
+      let cursor = node;
+      !layoutChanged && cursor !== null;
+      cursor = cursor.sibling
+    ) {
       if (
         (cursor.flags & PlacementFlag) !== 0 &&
         (cursor.alternate !== null || (cursor.flags & AdoptedFlag) !== 0)
       ) {
-        siblingMoved = true;
-        break;
+        layoutChanged = true;
       }
     }
-    const layoutChanged = ancestorLayoutChanged || siblingMoved;
 
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       const cursorPlaced = placed || (cursor.flags & PlacementFlag) !== 0;
@@ -4377,9 +4389,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       // Taken before any commit step runs: the closures below may defer
       // completion across ticks (view transitions), and a later render must
-      // not see or clear this commit's retries.
-      const suspenseRetries = root.pendingSuspenseRetries;
-      root.pendingSuspenseRetries = [];
+      // not see or clear this commit's retries. Most commits carry none —
+      // the shared empty list avoids a per-commit allocation, and holding
+      // root's own (empty) array instead would let a later render's pushes
+      // leak into this commit's deferred attach.
+      let suspenseRetries = noSuspenseRetries;
+      if (root.pendingSuspenseRetries.length > 0) {
+        suspenseRetries = root.pendingSuspenseRetries;
+        root.pendingSuspenseRetries = [];
+      }
       commitLiveHookInstances(root);
       if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
@@ -5084,16 +5102,16 @@ export function createRenderer<Container, Instance, TextInstance>(
           abortFiberHooks(deleted, false);
         });
         // Deletion is the one event that invalidates a committed fiber
-        // identity; record it at the source by severing the upward links
-        // (both generations die together). Anything that later schedules
-        // through these fibers — a late suspense retry, a setState from a
-        // stale closure — fails root lookup and no-ops instead of marking
-        // phantom lanes through the old return chain. A second walk, because
-        // the teardown above still resolves roots through these chains.
-        walkFiberSubtree(child, (deleted) => {
-          deleted.return = null;
-          if (deleted.alternate !== null) deleted.alternate.return = null;
-        });
+        // identity; record it at the source by severing the subtree root's
+        // upward links (both generations die together). Every return chain
+        // out of the deleted subtree passes through one of the root's two
+        // generations, so anything that later schedules through a deleted
+        // fiber — a late suspense retry, a setState from a stale closure —
+        // fails root lookup and no-ops instead of marking phantom lanes.
+        // Severing waits until here because the teardown above still
+        // resolves roots through these chains.
+        child.return = null;
+        if (child.alternate !== null) child.alternate.return = null;
         remove(child, parent);
       }
       cursor.deletions = null;
@@ -5615,15 +5633,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   // Boundary retries attach here, after the tree flipped: the recorded fiber
   // is in the committed tree by construction, so no tree-membership question
   // ever arises. A retry that fires after the boundary is deleted no-ops in
-  // scheduleFiber, because deletion teardown severs the fiber's return
-  // pointers and root lookup finds nothing.
+  // scheduleFiber, because deletion teardown severs the deleted subtree's
+  // upward links and root lookup finds nothing.
   function attachCommittedSuspenseRetries(
     root: R,
     retries: PendingSuspenseRetry<Container, Instance, TextInstance>[],
   ): void {
     for (const { boundary, thenable, lanes } of retries) {
-      if (lanes === NoLanes) continue;
-
       // A boundary that re-suspends on a still-pending thenable in a later
       // commit would otherwise stack duplicate listeners; one per conceptual
       // boundary (either generation) is enough.

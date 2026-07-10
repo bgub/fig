@@ -45,7 +45,6 @@ function commitViewTransition(
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
   let mutationResult: ViewTransitionMutationResult | null = null;
-  const hideAnimations: CancellableAnimation[] = [];
 
   const run = (): void => {
     prepareSnapshot();
@@ -63,39 +62,21 @@ function commitViewTransition(
       });
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
-        hideCanceledSnapshots(
-          owner,
-          transition,
-          () => mutationResult,
-          hideAnimations,
-        );
+        hideCanceledSnapshots(owner, transition, () => mutationResult);
       }
-      const cleanupAfterSnapshot = transition?.ready ?? transition?.finished;
       // Root-name restore waits for the transition to fully settle: putting
       // `view-transition-name: root` back on the live <html> while the
       // transition still runs can re-associate the live root with its
       // (force-hidden) captured group, which paints the page blank for the
-      // rest of the animation. The filled hide animations are cancelled at
-      // the same point so they can never apply to a later transition's
-      // pseudo tree.
+      // rest of the animation.
       const settleAfterTransition = transition?.finished ?? transition?.ready;
-      const settle = (): void => {
-        restoreRootName?.();
-        for (const animation of hideAnimations) {
-          try {
-            animation.cancel();
-          } catch {
-            // Cancelling a finished pseudo animation is best-effort.
-          }
-        }
-        hideAnimations.length = 0;
-      };
-      if (cleanupAfterSnapshot === undefined) {
-        settle();
+      const restore = (): void => restoreRootName?.();
+      if (settleAfterTransition === undefined) {
+        restore();
         cleanup();
       } else {
-        cleanupAfterSnapshot.then(cleanup, cleanup);
-        settleAfterTransition?.then(settle, settle);
+        (transition?.ready ?? settleAfterTransition).then(cleanup, cleanup);
+        settleAfterTransition.then(restore, restore);
       }
     } catch (error) {
       restoreRootName?.();
@@ -174,8 +155,22 @@ function hideCanceledSnapshots(
   owner: ViewTransitionDocument,
   transition: RunningViewTransition,
   getResult: () => ViewTransitionMutationResult | null,
-  hideAnimations: CancellableAnimation[],
 ): void {
+  // The filled zero-duration animations outlive their pseudo tree: without
+  // an explicit cancel once the transition settles they would apply to the
+  // next transition's pseudo tree and hide its groups.
+  const hideAnimations: CancellableAnimation[] = [];
+  const cancelHideAnimations = (): void => {
+    for (const animation of hideAnimations) {
+      try {
+        animation.cancel();
+      } catch {
+        // Cancelling a finished pseudo animation is best-effort.
+      }
+    }
+    hideAnimations.length = 0;
+  };
+
   const hide = (): void => {
     const result = getResult();
     if (result === null) return;
@@ -240,6 +235,10 @@ function hideCanceledSnapshots(
   const ready = transition.ready ?? transition.finished;
   if (ready === undefined) hide();
   else ready.then(hide, () => undefined);
+
+  const settled = transition.finished ?? transition.ready;
+  if (settled === undefined) cancelHideAnimations();
+  else settled.then(cancelHideAnimations, cancelHideAnimations);
 }
 
 function registerPendingTransition(

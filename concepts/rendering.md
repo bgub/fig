@@ -139,9 +139,12 @@ in-place bailout reuse means a fiber's `return` chain cannot prove tree
 membership (lane marking survives that skew by writing through alternates; a
 membership test does not — do not add one). Deletion is the one event that
 invalidates a committed identity, and deletion teardown records it at the
-source by severing both generations' `return` pointers, so a late retry or a
-setState from a stale closure fails root lookup and no-ops instead of
-marking phantom lanes. Consequently `rootOf` stays a throwing invariant only
+source by severing the deleted subtree root's `return` pointers (both
+generations — every upward chain out of the subtree passes through one of
+them), so a late retry or a setState from a stale closure fails root lookup
+and no-ops instead of marking phantom lanes. Severing waits until the
+subtree's teardown walk finishes, which still resolves roots through those
+chains. Consequently `rootOf` stays a throwing invariant only
 on render/commit paths; anything reachable from user code after unmount
 (transition starters, stable events) must tolerate a rootless fiber.
 
