@@ -2614,43 +2614,14 @@ export function createRenderer<Container, Instance, TextInstance>(
         // releasing its pending slot now (on DefaultLane — the retired run's
         // held transition lane may never render). A retired run's settlement
         // — value or rejection — never touches state, error, or pending.
-        if (retireRun(instance)) updatePending(-1, DefaultLane);
-
-        const lane = claimNextTransitionLane();
-        const controller = new AbortController();
-        const generation = (instance.generation += 1);
-        instance.controller = controller;
-        updatePending(1, SyncLane);
-
-        const settleIfLive = (): boolean => {
-          if (generation !== instance.generation) return false;
-          instance.controller = null;
-          return true;
-        };
-
-        let result: S | PromiseLike<S>;
-        try {
-          result = rootOf(fiber).dataStore.run(() =>
-            runWithTransitionLane(lane, () =>
-              instance.action(instance.value, ...args, controller.signal),
-            ),
-          );
-        } catch (error) {
-          if (settleIfLive()) finish(lane, error);
-          return;
-        }
-
-        if (!isThenable(result)) {
-          if (settleIfLive()) finish(lane, NoActionStateError, result);
-          return;
-        }
-
-        result.then(
-          (value) => {
-            if (settleIfLive()) finish(lane, NoActionStateError, value);
-          },
-          (error: unknown) => {
-            if (settleIfLive()) finish(lane, error);
+        runLatest(
+          instance,
+          fiber,
+          (signal) => instance.action(instance.value, ...args, signal),
+          updatePending,
+          (lane, value, failed) => {
+            if (failed) finish(lane, value);
+            else finish(lane, NoActionStateError, value as S);
           },
         );
       }) as unknown as StateSetter<ActionState<S, Args>>;
@@ -2774,46 +2745,17 @@ export function createRenderer<Container, Instance, TextInstance>(
         // decrement goes to DefaultLane — the retired run's own transition
         // lane is held until its callback settles (possibly never), and a
         // cancelled run has nothing to commit atomically with.
-        if (retireRun(instance)) updatePending(-1, DefaultLane);
-
-        const lane = claimNextTransitionLane();
-        const controller = new AbortController();
-        const generation = (instance.generation += 1);
-        instance.controller = controller;
-        updatePending(1, SyncLane);
-
-        // Retired settlements are fully inert: the pending slot was released
-        // at abort time, state updates the callback already made stay
-        // committed (aborting is a signal, not an unwind), and rejections
-        // are swallowed — an aborted fetch rejecting is the happy path.
-        const settleIfLive = (): boolean => {
-          if (generation !== instance.generation) return false;
-          instance.controller = null;
-          updatePending(-1, lane);
-          return true;
-        };
-
-        let result: unknown;
-        try {
-          result = rootOf(fiber).dataStore.run(() =>
-            runWithTransitionLane(lane, () => callback(controller.signal)),
-          );
-        } catch (error) {
-          if (settleIfLive()) throw error;
-          return;
-        }
-
-        if (!isThenable(result)) {
-          settleIfLive();
-          return;
-        }
-
-        result.then(
-          () => void settleIfLive(),
-          (error: unknown) => {
-            if (settleIfLive()) {
+        runLatest(
+          instance,
+          fiber,
+          callback,
+          updatePending,
+          (lane, value, failed, asynchronous) => {
+            updatePending(-1, lane);
+            if (failed) {
+              if (!asynchronous) throw value;
               queueMicrotask(() => {
-                throw error;
+                throw value;
               });
             }
           },
@@ -2827,6 +2769,59 @@ export function createRenderer<Container, Instance, TextInstance>(
       hook.memoizedState.pendingCount > 0,
       hook.memoizedState.start as StartTransition,
     ];
+  }
+
+  // A transition and an action are the same cancellable effect up to how
+  // their result is folded into state. This owns the shared protocol: one
+  // scope, one generation token, and settlements from only the latest run.
+  function runLatest<T>(
+    instance: RunInstance,
+    fiber: F,
+    run: (signal: AbortSignal) => T | PromiseLike<T>,
+    updatePending: (delta: 1 | -1, lane: Lane) => void,
+    settled: (
+      lane: Lane,
+      value: unknown,
+      failed: boolean,
+      asynchronous: boolean,
+    ) => void,
+  ): void {
+    if (retireRun(instance)) updatePending(-1, DefaultLane);
+    const lane = claimNextTransitionLane();
+    const controller = new AbortController();
+    const generation = (instance.generation += 1);
+    instance.controller = controller;
+    updatePending(1, SyncLane);
+
+    const settle = (
+      value: unknown,
+      failed: boolean,
+      asynchronous: boolean,
+    ): void => {
+      if (generation !== instance.generation) return;
+      instance.controller = null;
+      settled(lane, value, failed, asynchronous);
+    };
+
+    let result: T | PromiseLike<T>;
+    try {
+      result = rootOf(fiber).dataStore.run(() =>
+        runWithTransitionLane(lane, () => run(controller.signal)),
+      );
+    } catch (error) {
+      settle(error, true, false);
+      return;
+    }
+
+    if (!isThenable(result)) {
+      settle(result, false, false);
+      return;
+    }
+
+    result.then(
+      (value) => settle(value, false, true),
+      (error: unknown) => settle(error, true, true),
+    );
   }
 
   function requireRenderingFiber(): F {
