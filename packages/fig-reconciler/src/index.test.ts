@@ -357,6 +357,53 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("HeaderLoadedFooter");
   });
 
+  it("retries a suspended boundary reused in place across a parent bailout", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const { promise, resolve } = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(promise));
+    }
+
+    function Section() {
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        createElement(Message, null),
+      );
+    }
+
+    // A stable element identity makes Section bail out on the next render,
+    // reusing the suspended boundary in place: the boundary's return chain
+    // then ends at the previous root generation while the committed tree
+    // still contains it, and its ping must not be dropped.
+    const section = createElement(Section, null);
+
+    function App({ tick }: { tick: number }) {
+      return createElement(
+        "main",
+        null,
+        createElement("span", null, `tick ${tick}`),
+        section,
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { tick: 0 })));
+    expect(container.textContent).toBe("tick 0Loading");
+
+    // One commit while suspended flips root.current away from the generation
+    // the boundary's return pointers lead to.
+    flushSync(() => root.render(createElement(App, { tick: 1 })));
+    expect(container.textContent).toBe("tick 1Loading");
+
+    resolve("Loaded");
+    await delay();
+
+    expect(container.textContent).toBe("tick 1Loaded");
+  });
+
   it("retries a boundary that suspends again during a retry render", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

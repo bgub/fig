@@ -5601,12 +5601,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  // Return-pointer walks alone cannot decide tree membership: a bailed-out
+  // parent reuses its children in place, so a live boundary's return chain can
+  // still end at the previous root generation (markLanes/markChildLanes cover
+  // that skew by marking alternates, but a membership test does not). Treat
+  // the return walk as a fast path only, and before dropping a ping, search
+  // the committed tree for the boundary or its alternate.
   function currentFiberForPing(root: R, boundary: F): F | null {
     if (isInCurrentTree(root, boundary)) return boundary;
     const alternate = boundary.alternate;
-    return alternate !== null && isInCurrentTree(root, alternate)
-      ? alternate
-      : null;
+    if (alternate !== null && isInCurrentTree(root, alternate)) {
+      return alternate;
+    }
+    return findFiberInCurrentTree(root, boundary);
   }
 
   function isInCurrentTree(root: R, node: F): boolean {
@@ -5615,6 +5622,18 @@ export function createRenderer<Container, Instance, TextInstance>(
       cursor = cursor.return;
     }
     return cursor === root.current;
+  }
+
+  function findFiberInCurrentTree(root: R, target: F): F | null {
+    const alternate = target.alternate;
+    let found: F | null = null;
+
+    walkFiberSubtree(root.current, (node) => {
+      if (node === target || node === alternate) found = node;
+      return found === null;
+    });
+
+    return found;
   }
 
   // Context propagation is lazy: providers push new values without walking
