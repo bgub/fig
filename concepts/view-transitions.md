@@ -52,17 +52,25 @@ mutation/deletion flags, then a measurement pass decides who really animates
 (React's before/after-mutation measurement, adapted to Fig's single host
 transaction). Candidate classification:
 
-- **enter** — mounted with no prior identity (`alternate === null`), unpaired.
-  Hydration is excluded: a non-placed boundary whose content carries
-  hydration flags adopted pixels that were already on screen (retry-lane
-  commits that finish a dehydrated Suspense boundary — e.g. a lazy route
-  module resolving after first load — land here) and must not animate. React
-  reaches the same outcome by keying enter off Placement flags.
+- **enter** — inside a placed subtree (Placement flags only, like React),
+  unpaired. `alternate === null` is NOT an enter signal: in-place bailout
+  reuse means a fiber that mounted once and always bailed out since keeps a
+  null alternate forever, and reading that as "mounted this commit" replays
+  the enter animation on every eligible commit. Hydration is excluded: a
+  non-placed boundary whose content carries hydration flags adopted pixels
+  that were already on screen (retry-lane commits that finish a dehydrated
+  Suspense boundary — e.g. a lazy route module resolving after first load —
+  land here) and must not animate.
 - **update (morph)** — in-place content changes, moved boundaries (placed
   with a prior identity), and boundaries whose **ancestor layout changed**
   around them (a container's own props/child list changed, so descendants
-  may have shifted — React's nested-boundary pass). Both sides carry the
-  same name so the browser morphs position.
+  may have shifted — React's nested-boundary pass). A keyed reorder counts:
+  a placed sibling that was committed before (it has an alternate or was
+  adopted in place) marks the whole level layout-changed, so reorder
+  companions collect and measurement cancels the still ones. A bailed-out
+  boundary is its own committed instance — eligible commits are never first
+  mounts, so placement-less alternate-less boundaries were committed before.
+  Both sides carry the same name so the browser morphs position.
 - **exit** — the outermost boundary of a deleted subtree. Deletion entries
   are walked as single detached subtrees (never their stale siblings).
 - **share** — an exiting explicit name matching an appearing explicit name

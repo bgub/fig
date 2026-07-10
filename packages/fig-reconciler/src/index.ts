@@ -3846,6 +3846,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     plan: ViewTransitionPlan<Instance>,
     exitsByName: Map<string, F>,
   ): void {
+    // A keyed reorder moves existing content: every sibling at the level may
+    // shift without its own flags, so treat the level as layout-changed and
+    // let measurement cancel the boundaries that did not actually move. A
+    // placed fiber that was committed before (it has an alternate, or was
+    // adopted in place by a bailout) is a move; fresh insertions keep the
+    // documented behavior of not animating the siblings they shift.
+    let siblingMoved = false;
+    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
+      if (
+        (cursor.flags & PlacementFlag) !== 0 &&
+        (cursor.alternate !== null || (cursor.flags & AdoptedFlag) !== 0)
+      ) {
+        siblingMoved = true;
+        break;
+      }
+    }
+    const layoutChanged = ancestorLayoutChanged || siblingMoved;
+
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       const cursorPlaced = placed || (cursor.flags & PlacementFlag) !== 0;
       const containsViewTransition =
@@ -3871,18 +3889,23 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (isStablyHiddenBoundary(cursor)) continue;
 
       if (cursor.tag === ViewTransitionTag) {
-        if (cursorPlaced || cursor.alternate === null) {
-          // Hydration mounts fresh fibers over already-visible server
-          // pixels: nothing enters visually, so a hydrated boundary must not
-          // animate (retry-lane commits that finish a dehydrated Suspense
-          // boundary land here). React reaches the same outcome by keying
-          // enter off Placement flags, which hydration never sets.
-          if (
-            !cursorPlaced &&
-            ((cursor.flags | cursor.subtreeFlags) & HydrationFlag) !== 0
-          ) {
-            continue;
-          }
+        // Hydration mounts fresh fibers over already-visible server pixels:
+        // nothing enters or changes visually, so a hydrating boundary must
+        // not animate (retry-lane commits that finish a dehydrated Suspense
+        // boundary land here). React reaches the same outcome by keying
+        // enter off Placement flags, which hydration never sets.
+        if (
+          !cursorPlaced &&
+          ((cursor.flags | cursor.subtreeFlags) & HydrationFlag) !== 0
+        ) {
+          continue;
+        }
+        // Enter is keyed off Placement flags only (like React). A missing
+        // alternate must NOT read as "mounted this commit": in-place bailout
+        // reuse means a fiber that mounted once and always bailed out since
+        // keeps alternate === null forever, and treating it as entering
+        // replays its enter animation on every eligible commit.
+        if (cursorPlaced) {
           const pairedExit = exitsByName.get(viewTransitionName(cursor));
           if (pairedExit !== undefined) {
             // A pair vacates one slot and fills another: both relayout.
@@ -3894,7 +3917,8 @@ export function createRenderer<Container, Instance, TextInstance>(
             // and finished instances lets the browser morph position instead
             // of treating the move as an enter-only cross-fade. Measurement
             // decides whether it actually moved, and reorder companions are
-            // themselves flagged, so the root snapshot is not forced here.
+            // collected through the sibling-move level rule, so the root
+            // snapshot is not forced here.
             collectViewTransitionSurfaces(
               cursor.alternate,
               "update",
@@ -3930,8 +3954,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         // when something changed outside its nested boundaries (or an
         // ancestor's layout change moved it), and the walk always descends
         // so nested boundaries classify their own changes (an outer
-        // update="none" must not disable them).
-        const current = cursor.alternate;
+        // update="none" must not disable them). A bailed-out boundary is its
+        // own committed instance (in-place reuse never created an
+        // alternate): eligible commits cannot be first mounts, so a fiber
+        // with neither placement nor alternate was committed before.
+        const current = cursor.alternate ?? cursor;
         const contentChanged = viewTransitionChangedOutsideNested(
           cursor,
           changedBoundaries,
@@ -3946,7 +3973,7 @@ export function createRenderer<Container, Instance, TextInstance>(
             );
           }
         }
-        if (current !== null && (contentChanged || ancestorLayoutChanged)) {
+        if (contentChanged || layoutChanged) {
           collectViewTransitionSurfaces(
             current,
             "update",
@@ -3966,7 +3993,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursor.child,
           cursorPlaced,
           true,
-          contentChanged || ancestorLayoutChanged,
+          contentChanged || layoutChanged,
           changedBoundaries,
           plan,
           exitsByName,
@@ -3987,8 +4014,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           cursor.child,
           cursorPlaced,
           insideBoundary,
-          ancestorLayoutChanged ||
-            (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
+          layoutChanged || (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
           changedBoundaries,
           plan,
           exitsByName,

@@ -278,6 +278,71 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("does not re-enter a bailed-out boundary on unrelated commits", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const starts: string[][] = [];
+    let setLabel: StateSetter<string> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    const namedSurfaces = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>("section"))
+        .filter((element) => Boolean(element.style.viewTransitionName))
+        .map((element) => `${element.id}:${element.style.viewTransitionName}`)
+        .sort();
+
+    ownerDocument.startViewTransition = (update) => {
+      const before = namedSurfaces();
+      update();
+      starts.push(before, namedSurfaces());
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function Stable() {
+      return createElement(
+        ViewTransition,
+        { default: "fade", name: "stable-card" },
+        createElement("section", { id: "stable" }, "Stable"),
+      );
+    }
+
+    // A stable element identity makes the subtree bail out on every later
+    // render: with in-place reuse its fibers never gain an alternate, and a
+    // missing alternate must not read as "mounted this commit".
+    const stable = createElement(Stable, null);
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement(
+        "main",
+        null,
+        createElement(
+          ViewTransition,
+          { default: "fade", name: "live-card" },
+          createElement("section", { id: "live" }, label),
+        ),
+        stable,
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+
+      await act(() => transition(() => setLabel?.("Next")));
+
+      // Only the boundary whose content changed participates; the bailed-out
+      // sibling neither enters again nor gets named.
+      expect(starts).toEqual([["live:live-card"], ["live:live-card"]]);
+      expect(container.textContent).toBe("NextStable");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
   it("uses the share phase for named insert/delete pairs", async () => {
     const container = document.createElement("div");
     document.body.append(container);
