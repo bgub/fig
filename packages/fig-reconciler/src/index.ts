@@ -649,6 +649,19 @@ interface ErrorBoundaryState {
   didReport: boolean;
 }
 
+interface ActivityState<Instance> {
+  hidden: boolean;
+  // The host boundary (an inert template holding server content) while the
+  // boundary is dehydrated, or null; cleared when the content unpacks at
+  // commit.
+  dehydrated: Instance | null;
+}
+
+type BoundaryState<Container, Instance, TextInstance> =
+  | SuspenseState<Container, Instance, TextInstance>
+  | ErrorBoundaryState
+  | ActivityState<Instance>;
+
 interface ContextDependency {
   context: FigContext<unknown>;
   memoizedValue: unknown;
@@ -686,24 +699,16 @@ interface Fiber<Container, Instance, TextInstance> {
   contextDependencies: ContextDependency[] | null;
   contextSubtreeDependencies: FigContext<unknown>[] | null;
   dataDependenciesDirty: boolean;
-  suspenseState: SuspenseState<Container, Instance, TextInstance> | null;
+  // The fiber tag discriminates this union. Keep this cold slot after the
+  // topology and work fields: changing their object offsets slows hot paths.
+  // Activity state is shared by both generations so stale return chains see
+  // the committed visibility state.
+  boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
   suspenseQueueStart?: number;
   // Suspense/ErrorBoundary only: root commit-index length when this boundary
   // began, so a capture can truncate entries queued by its discarded subtree.
   commitIndexCheckpoint?: CommitIndexCheckpoint;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
-  errorBoundaryState: ErrorBoundaryState | null;
-  // Shared by both fiber generations and updated at commit, so visibility
-  // checks from stale .return chains stay authoritative.
-  activityState: ActivityState<Instance> | null;
-}
-
-interface ActivityState<Instance> {
-  hidden: boolean;
-  // The host boundary (an inert template holding server content) while the
-  // boundary is dehydrated, or null; cleared when the content unpacks at
-  // commit.
-  dehydrated: Instance | null;
 }
 
 interface ViewTransitionState {
@@ -1131,7 +1136,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let start = host.getEnclosingSuspenseBoundaryStart(target);
     while (start !== null) {
       const fiber = root.dehydratedBoundaries.get(start) ?? null;
-      if (fiber?.suspenseState?.kind === "dehydrated") return fiber;
+      if (fiberSuspenseState(fiber)?.kind === "dehydrated") return fiber;
       start = host.getEnclosingSuspenseBoundaryStart(start);
     }
 
@@ -1330,7 +1335,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function recoverFromSuspenseHydrationMismatch(root: R, boundary: F): void {
     const current = boundary.alternate ?? boundary;
-    const state = current.suspenseState;
+    const state = fiberSuspenseState(current);
 
     restartRootWork(root);
 
@@ -1714,8 +1719,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hidden = activityHidden(node.props);
     if (hidden) hasHiddenBoundaries = true;
 
-    node.activityState ??= { hidden: false, dehydrated: null };
-    const state = node.activityState;
+    const state = ensureFiberActivityState(node);
 
     if (
       state.dehydrated === null &&
@@ -1745,7 +1749,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         ? false
         : activityHidden(node.alternate.memoizedProps ?? {});
 
-    node.activityState ??= { hidden: false, dehydrated: null };
+    ensureFiberActivityState(node);
 
     if (hidden !== previousHidden) {
       node.flags |= VisibilityFlag;
@@ -1949,7 +1953,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           dehydratedSuspenseBoundary(parent.alternate) !== null) ||
         (parent.tag === ActivityTag &&
           (parent.flags & HydrationFlag) !== 0 &&
-          parent.activityState?.dehydrated != null)
+          fiberActivityState(parent)?.dehydrated != null)
       ) {
         return parent;
       }
@@ -2176,13 +2180,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
     const root = rootOf(node);
-    const previousSuspenseState = node.alternate?.suspenseState ?? null;
+    const previousSuspenseState = fiberSuspenseState(node.alternate);
 
-    node.suspenseState = null;
+    node.boundaryState = null;
 
     if (previousSuspenseState?.kind === "dehydrated") {
       if (!hasOwnWork) {
-        node.suspenseState = previousSuspenseState;
+        node.boundaryState = previousSuspenseState;
         return;
       }
       hydrateDehydratedSuspenseBoundary(node, previousSuspenseState.boundary);
@@ -2325,7 +2329,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const boundary = host.getSuspenseBoundary(hydratable);
     if (boundary === null) return false;
 
-    node.suspenseState = {
+    node.boundaryState = {
       boundary,
       kind: "dehydrated",
       wasPending: boundary.status === "pending",
@@ -2349,14 +2353,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (!boundary.forceClientRender) {
       if (boundary.status === "completed") {
         enterSuspenseHydration(node, boundary);
-        node.suspenseState = null;
+        node.boundaryState = null;
         node.flags |= HydrationFlag;
         beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
         return;
       }
 
       if (boundary.status === "pending") {
-        node.suspenseState = {
+        node.boundaryState = {
           boundary,
           kind: "dehydrated",
           wasPending: true,
@@ -2369,7 +2373,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       queueClientRenderedSuspenseError(rootOf(node), node, boundary);
     }
 
-    node.suspenseState = null;
+    node.boundaryState = null;
     node.flags |= HydrationFlag;
     beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
   }
@@ -2397,7 +2401,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function canHydratePendingSuspenseTextMismatch(root: R): boolean {
     const boundary = root.hydratingSuspenseBoundary;
-    const state = boundary?.alternate?.suspenseState;
+    const state = fiberSuspenseState(boundary?.alternate);
     return state?.kind === "dehydrated" && state.wasPending;
   }
 
@@ -2475,8 +2479,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   // forced client render cannot recurse into the same failed hydration.
   function abandonActivityHydration(root: R, forceClientRender = false): void {
     if (forceClientRender) {
-      const state = root.hydratingActivityBoundary?.activityState;
-      if (state !== undefined && state !== null) state.dehydrated = null;
+      const state = fiberActivityState(root.hydratingActivityBoundary);
+      if (state !== null) state.dehydrated = null;
     }
     deactivateHydration(root);
   }
@@ -2504,9 +2508,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function beginErrorBoundary(node: F): void {
-    const previousErrorState = node.alternate?.errorBoundaryState ?? null;
+    const previousErrorState = fiberErrorBoundaryState(node.alternate);
 
-    node.errorBoundaryState = previousErrorState;
+    node.boundaryState = previousErrorState;
 
     reconcileCurrentChildren(
       node,
@@ -3027,7 +3031,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     for (let parent = node.return; parent !== null; parent = parent.return) {
       if (
         isHiddenBoundaryTag(parent) &&
-        parent.activityState?.hidden === true
+        fiberActivityState(parent)?.hidden === true
       ) {
         return OffscreenLane;
       }
@@ -4495,7 +4499,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     queueMicrotask(() => {
       for (const boundary of boundaries) {
-        const state = boundary.suspenseState;
+        const state = fiberSuspenseState(boundary);
         if (state?.kind !== "dehydrated") continue;
 
         const lane = dehydratedSuspenseRetryLane(state.boundary);
@@ -4511,15 +4515,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): number {
     let count = 0;
     walkFiberForest(node, (cursor) => {
-      if (cursor.suspenseState?.kind === "dehydrated") {
+      const state = fiberSuspenseState(cursor);
+      if (state?.kind === "dehydrated") {
         count += 1;
-        byStartMarker.set(cursor.suspenseState.boundary.start, cursor);
+        byStartMarker.set(state.boundary.start, cursor);
         // A dehydrated boundary has no live children to descend into, but its
         // siblings may be retriable too (e.g. several boundaries inside one
         // revealed Activity), so keep walking the sibling chain.
         if (
           !abandonedHydrationBoundaries.has(cursor) &&
-          dehydratedSuspenseRetryLane(cursor.suspenseState.boundary) !== NoLane
+          dehydratedSuspenseRetryLane(state.boundary) !== NoLane
         ) {
           boundaries.push(cursor);
         }
@@ -4579,11 +4584,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function assertCaughtBoundaryErrorParity(node: F | null): void {
     walkFiberForest(node, (cursor) => {
-      if (
-        cursor.tag === ErrorBoundaryTag &&
-        cursor.errorBoundaryState !== null &&
-        !cursor.errorBoundaryState.didReport
-      ) {
+      const state = fiberErrorBoundaryState(cursor);
+      if (state !== null && !state.didReport) {
         throw new Error(
           "Fig internal parity error: a caught boundary error was missing " +
             "from the commit index.",
@@ -4593,17 +4595,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function flushCaughtBoundaryError(root: R, node: F): void {
-    if (
-      node.tag !== ErrorBoundaryTag ||
-      node.errorBoundaryState === null ||
-      node.errorBoundaryState.didReport
-    ) {
-      return;
-    }
+    const state = fiberErrorBoundaryState(node);
+    if (state === null || state.didReport) return;
 
-    const state = node.errorBoundaryState;
     state.didReport = true;
-    if (node.alternate !== null) node.alternate.errorBoundaryState = state;
+    if (node.alternate !== null) node.alternate.boundaryState = state;
 
     const onError = node.props.onError;
     if (typeof onError !== "function") return;
@@ -4925,7 +4921,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitHydratedActivityBoundary(node: F): void {
-    const state = node.activityState;
+    const state = fiberActivityState(node);
     if (state?.dehydrated == null) return;
 
     requireActivityHydrationHostConfig().commitHydratedActivityBoundary(
@@ -5099,12 +5095,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (node.alternate !== null) store.releaseDataOwner(node.alternate);
     // A hidden boundary removed from the tree stops counting toward
     // `hasHiddenBoundaries`; both generations share the one state object.
-    if (node.activityState !== null) hiddenStates.delete(node.activityState);
+    const state = fiberActivityState(node);
+    if (state !== null) hiddenStates.delete(state);
   }
 
   function dehydratedActivityBoundary(node: F): Instance | null {
     return node.tag === ActivityTag
-      ? (node.activityState?.dehydrated ?? null)
+      ? (fiberActivityState(node)?.dehydrated ?? null)
       : null;
   }
 
@@ -5309,10 +5306,45 @@ export function createRenderer<Container, Instance, TextInstance>(
   function dehydratedSuspenseBoundary(
     node: F | null | undefined,
   ): DehydratedSuspenseBoundary<Instance, TextInstance> | null {
-    if (node?.tag !== SuspenseTag) return null;
-    return node.suspenseState?.kind === "dehydrated"
-      ? node.suspenseState.boundary
+    const state = fiberSuspenseState(node);
+    return state?.kind === "dehydrated" ? state.boundary : null;
+  }
+
+  function fiberSuspenseState(
+    node: F | null | undefined,
+  ): SuspenseState<Container, Instance, TextInstance> | null {
+    return node?.tag === SuspenseTag
+      ? (node.boundaryState as SuspenseState<
+          Container,
+          Instance,
+          TextInstance
+        > | null)
       : null;
+  }
+
+  function fiberErrorBoundaryState(
+    node: F | null | undefined,
+  ): ErrorBoundaryState | null {
+    return node?.tag === ErrorBoundaryTag
+      ? (node.boundaryState as ErrorBoundaryState | null)
+      : null;
+  }
+
+  function fiberActivityState(
+    node: F | null | undefined,
+  ): ActivityState<Instance> | null {
+    return node?.tag === ActivityTag
+      ? (node.boundaryState as ActivityState<Instance> | null)
+      : null;
+  }
+
+  function ensureFiberActivityState(node: F): ActivityState<Instance> {
+    const current = fiberActivityState(node);
+    if (current !== null) return current;
+
+    const state = { hidden: false, dehydrated: null };
+    node.boundaryState = state;
+    return state;
   }
 
   function scheduleFiber(node: F, lane: Lane): void {
@@ -5366,7 +5398,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function findSuspenseBoundary(node: F): F | null {
     for (let parent = node.return; parent !== null; parent = parent.return) {
-      if (parent.tag === SuspenseTag && parent.suspenseState === null) {
+      if (parent.tag === SuspenseTag && fiberSuspenseState(parent) === null) {
         return parent;
       }
     }
@@ -5378,7 +5410,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     for (let parent = node.return; parent !== null; parent = parent.return) {
       if (
         parent.tag === ErrorBoundaryTag &&
-        parent.errorBoundaryState === null
+        fiberErrorBoundaryState(parent) === null
       ) {
         return parent;
       }
@@ -5399,7 +5431,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (boundary.deletions !== null)
       recordCommitWork(root.commitIndex, boundary);
 
-    const dehydrated = boundary.alternate?.suspenseState;
+    const dehydrated = fiberSuspenseState(boundary.alternate);
     if (
       root.hydratingSuspenseBoundary === boundary &&
       dehydrated?.kind === "dehydrated"
@@ -5409,7 +5441,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       // retries hydration once the thenable settles, so commit-time retry
       // scheduling must skip the boundary until then.
       leaveSuspenseHydration(root, boundary, dehydrated.boundary);
-      boundary.suspenseState = dehydrated;
+      boundary.boundaryState = dehydrated;
       boundary.flags &= ~HydrationFlag;
       boundary.child = null;
       abandonedHydrationBoundaries.add(boundary);
@@ -5426,7 +5458,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const currentPrimary = suspensePrimaryFiber(boundary.alternate);
     if (currentPrimary !== null) {
-      boundary.suspenseState = { kind: "fallback", primaryChild: null };
+      boundary.boundaryState = { kind: "fallback", primaryChild: null };
       boundary.deletions = null;
       restoreConsumedPendingQueuesForRetry(
         root,
@@ -5460,7 +5492,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // There is no committed primary on an initial suspension. Keep the partial
     // render only as retry input; committing it hidden would publish an
     // incomplete host tree.
-    boundary.suspenseState = {
+    boundary.boundaryState = {
       kind: "fallback",
       primaryChild:
         boundary.child?.tag === ActivityTag && boundary.child.type === null
@@ -5480,11 +5512,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     const root = rootOf(boundary);
     rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
     recordCommitWork(root.commitIndex, boundary);
-    boundary.errorBoundaryState = createErrorBoundaryState(error, source);
-    reconcileCurrentChildren(
-      boundary,
-      errorBoundaryFallback(boundary, boundary.errorBoundaryState),
-    );
+    const state = createErrorBoundaryState(error, source);
+    boundary.boundaryState = state;
+    reconcileCurrentChildren(boundary, errorBoundaryFallback(boundary, state));
     return boundary.child ?? completeUnit(boundary);
   }
 
@@ -5495,9 +5525,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): void {
     rootOf(boundary).committedCaughtErrors.push(boundary);
     const state = createErrorBoundaryState(error, source);
-    boundary.errorBoundaryState = state;
-    if (boundary.alternate !== null)
-      boundary.alternate.errorBoundaryState = state;
+    boundary.boundaryState = state;
+    if (boundary.alternate !== null) boundary.alternate.boundaryState = state;
   }
 
   function createErrorBoundaryState(
@@ -5514,7 +5543,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function shouldPreserveSuspenseBoundary(root: R, boundary: F): boolean {
     return (
       boundary.alternate !== null &&
-      boundary.alternate.suspenseState === null &&
+      fiberSuspenseState(boundary.alternate) === null &&
       isTransitionOrDeferredRender(root)
     );
   }
@@ -5728,10 +5757,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.contextDependencies = current.contextDependencies;
     next.contextSubtreeDependencies = current.contextSubtreeDependencies;
     next.dataDependenciesDirty = false;
-    next.suspenseState = current.suspenseState;
+    next.boundaryState = current.boundaryState;
     next.hiddenState = null;
-    next.errorBoundaryState = current.errorBoundaryState;
-    next.activityState = current.activityState;
     next.alternate = current;
     current.alternate = next;
 
@@ -5807,10 +5834,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       contextDependencies: null,
       contextSubtreeDependencies: null,
       dataDependenciesDirty: false,
-      suspenseState: null,
+      boundaryState: null,
       hiddenState: null,
-      errorBoundaryState: null,
-      activityState: null,
     };
   }
 
@@ -5950,7 +5975,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return null;
     }
 
-    const state = node.suspenseState;
+    const state = fiberSuspenseState(node);
     if (
       state?.kind === "dehydrated" &&
       host.isTargetWithinSuspenseBoundary(target, state.boundary)
@@ -6018,7 +6043,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (boundary && (cursor.flags & VisibilityFlag) !== 0) {
         const effectiveHidden = hidden || boundaryHidden;
-        const state = cursor.activityState;
+        const state = fiberActivityState(cursor);
         if (state !== null) {
           state.hidden = effectiveHidden;
           if (effectiveHidden) hiddenStates.add(state);

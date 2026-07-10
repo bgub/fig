@@ -396,6 +396,56 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Hello World");
   });
 
+  it("keeps tag-specific boundary state isolated across alternates", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let fail = false;
+    let resolve: (value: string) => void = () => undefined;
+    const message = new Promise<string>((done) => {
+      resolve = done;
+    });
+
+    function Content() {
+      if (fail) throw new Error("failed");
+      return createElement("span", null, readPromise(message));
+    }
+
+    function App({ mode }: { mode: "hidden" | "visible" }) {
+      return createElement(
+        Activity,
+        { mode },
+        createElement(
+          ErrorBoundary,
+          { fallback: createElement("span", null, "Crashed") },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Loading") },
+            createElement(Content, null),
+          ),
+        ),
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    expect(container.textContent).toBe("Loading");
+
+    resolve("Loaded");
+    await delay();
+    expect(container.textContent).toBe("Loaded");
+
+    flushSync(() => root.render(createElement(App, { mode: "hidden" })));
+    expect(container.textContent).toBe("");
+
+    fail = true;
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    expect(container.textContent).toBe("Crashed");
+
+    flushSync(() => root.render(createElement(App, { mode: "hidden" })));
+    flushSync(() => root.render(createElement(App, { mode: "visible" })));
+    expect(container.textContent).toBe("Crashed");
+  });
+
   it("publishes committed fiber snapshots to the Fig DevTools hook", () => {
     const commits = collectDevtoolsCommits();
     const { createRoot, flushSync } = createRenderer(host);

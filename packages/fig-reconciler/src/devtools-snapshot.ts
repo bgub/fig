@@ -68,6 +68,11 @@ interface DevtoolsContextDependency {
   context: FigContext<unknown>;
 }
 
+interface DevtoolsErrorBoundaryState {
+  error: unknown;
+  info: { componentStack: string };
+}
+
 interface DevtoolsFiber {
   tag: Tag;
   type: ElementType | FigContext<unknown> | null;
@@ -77,16 +82,13 @@ interface DevtoolsFiber {
   memoizedProps: Props | null;
   memoizedState: DevtoolsHook | null;
   stateNode: unknown;
+  boundaryState: unknown;
   child: DevtoolsFiber | null;
   sibling: DevtoolsFiber | null;
   alternate: DevtoolsFiber | null;
   lanes: Lanes;
   childLanes: Lanes;
   contextDependencies: DevtoolsContextDependency[] | null;
-  errorBoundaryState: {
-    error: unknown;
-    info: { componentStack: string };
-  } | null;
 }
 
 interface DevtoolsRoot {
@@ -162,6 +164,7 @@ function snapshotDevtoolsFiber(
   const id = devtoolsFiberId(node);
   const { kind, name } = devtoolsFiberInfo(node);
   const children: FigDevtoolsFiberSnapshot[] = [];
+  const errorState = devtoolsErrorBoundaryState(node);
   recordDevtoolsHostFiber(node, id, inspection);
 
   for (let child = node.child; child !== null; child = child.sibling) {
@@ -181,10 +184,18 @@ function snapshotDevtoolsFiber(
     hooks: devtoolsHooks(node.memoizedState),
     contextDependencies: devtoolsContextDependencies(node),
     host: devtoolsHost(node),
-    capturedError: node.errorBoundaryState?.error,
-    componentStack: node.errorBoundaryState?.info.componentStack,
+    capturedError: errorState?.error,
+    componentStack: errorState?.info.componentStack,
     children,
   };
+}
+
+function devtoolsErrorBoundaryState(
+  node: DevtoolsFiber,
+): DevtoolsErrorBoundaryState | null {
+  return node.tag === ErrorBoundaryTag
+    ? (node.boundaryState as DevtoolsErrorBoundaryState | null)
+    : null;
 }
 
 function devtoolsWorkLabels(lanes: Lanes): FigDevtoolsWorkLabel[] {
