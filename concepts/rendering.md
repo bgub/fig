@@ -125,6 +125,26 @@ rethrow to `flushSync` callers; outside `flushSync` they go to the root's
 `onUncaughtError`, or rethrow from a detached task when no handler exists —
 scheduler ticks never die silently.
 
+## Suspension Retries
+
+Every suspension gets two pings. At capture time an identity-free root ping
+is attached: if the render never commits (preserved suspension, restart,
+interruption), the resolved thenable revives the suspended lanes at the root
+and the update re-renders whole; once the lanes committed it is a masked
+no-op. The targeted retry — `scheduleFiber(boundary, retryLane)` — is only
+recorded at capture and attaches at commit, to the boundary fiber the commit
+just made current. Fiber identities captured mid-render are never trusted:
+render-time fibers can be discarded, restarted, or reused in place, and
+in-place bailout reuse means a fiber's `return` chain cannot prove tree
+membership (lane marking survives that skew by writing through alternates; a
+membership test does not — do not add one). Deletion is the one event that
+invalidates a committed identity, and deletion teardown records it at the
+source by severing both generations' `return` pointers, so a late retry or a
+setState from a stale closure fails root lookup and no-ops instead of
+marking phantom lanes. Consequently `rootOf` stays a throwing invariant only
+on render/commit paths; anything reachable from user code after unmount
+(transition starters, stable events) must tolerate a rootless fiber.
+
 ## Testing Flushes
 
 `act(callback)` is a scheduler-backed test helper. While an act scope is open,

@@ -404,6 +404,52 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("tick 1Loaded");
   });
 
+  it("no-ops retries and updates that land after their boundary is deleted", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const { promise, resolve } = deferred<string>();
+    let setOutside: (value: number) => void = () => undefined;
+
+    function Message() {
+      return createElement("span", null, readPromise(promise));
+    }
+
+    function App({ showBoundary }: { showBoundary: boolean }) {
+      const [outside, setState] = useState(0);
+      setOutside = setState;
+      return createElement(
+        "main",
+        null,
+        createElement("span", null, `outside ${outside}`),
+        showBoundary
+          ? createElement(
+              Suspense,
+              { fallback: createElement("span", null, "Loading") },
+              createElement(Message, null),
+            )
+          : null,
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, { showBoundary: true })));
+    expect(container.textContent).toBe("outside 0Loading");
+
+    // Delete the suspended boundary while its thenable is still pending;
+    // deletion teardown severs the boundary's root path.
+    flushSync(() => root.render(createElement(App, { showBoundary: false })));
+    expect(container.textContent).toBe("outside 0");
+
+    // The late resolution must neither crash nor resurrect the boundary.
+    resolve("Loaded");
+    await delay();
+    expect(container.textContent).toBe("outside 0");
+
+    // The root itself must stay fully schedulable afterwards.
+    flushSync(() => setOutside(1));
+    expect(container.textContent).toBe("outside 1");
+  });
+
   it("retries a boundary that suspends again during a retry render", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

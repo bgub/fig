@@ -667,9 +667,14 @@ interface ContextDependency {
   memoizedValue: unknown;
 }
 
-interface SuspensePings<Container, Instance, TextInstance> {
-  boundaries: Set<Fiber<Container, Instance, TextInstance>>;
-  lanes: WeakMap<Fiber<Container, Instance, TextInstance>, Lanes>;
+// A suspension recorded during render, retried through the boundary fiber
+// once a commit blesses that fiber's identity. Entries from discarded renders
+// die with the render; their thenables are covered by the root ping attached
+// at capture time.
+interface PendingSuspenseRetry<Container, Instance, TextInstance> {
+  boundary: Fiber<Container, Instance, TextInstance>;
+  thenable: Thenable;
+  lanes: Lanes;
 }
 
 interface Fiber<Container, Instance, TextInstance> {
@@ -771,9 +776,14 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
-  suspendedBoundaries: WeakMap<
+  pendingSuspenseRetries: PendingSuspenseRetry<
+    Container,
+    Instance,
+    TextInstance
+  >[];
+  attachedSuspenseRetries: WeakMap<
     object,
-    SuspensePings<Container, Instance, TextInstance>
+    WeakSet<Fiber<Container, Instance, TextInstance>>
   >;
   consumedPendingQueues: ConsumedPendingQueue[];
   onRecoverableError: (error: unknown, info: RecoverableErrorInfo) => void;
@@ -1019,7 +1029,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
-      suspendedBoundaries: new WeakMap(),
+      pendingSuspenseRetries: [],
+      attachedSuspenseRetries: new WeakMap(),
       consumedPendingQueues: [],
       onRecoverableError: options.onRecoverableError ?? noop,
       onUncaughtError: options.onUncaughtError ?? null,
@@ -1487,6 +1498,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.renderLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
+    // Retries recorded by the discarded render die with it; their thenables
+    // stay covered by the root pings attached at capture time.
+    root.pendingSuspenseRetries = [];
     clearCommitIndex(root.commitIndex);
     resetHydrationPointers(root);
     resetContextStack(root);
@@ -2803,11 +2817,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       settled(lane, value, failed, asynchronous);
     };
 
+    // A run started after the owner unmounted (deletion severs the fiber's
+    // root path) still executes for its side effects, just without an
+    // ambient data store; its settlements schedule into the void.
+    const store = rootOfOrNull(fiber)?.dataStore;
     let result: T | PromiseLike<T>;
     try {
-      result = rootOf(fiber).dataStore.run(() =>
-        runWithTransitionLane(lane, () => run(controller.signal)),
-      );
+      const invoke = () =>
+        runWithTransitionLane(lane, () => run(controller.signal));
+      result = store === undefined ? invoke() : store.run(invoke);
     } catch (error) {
       settle(error, true, false);
       return;
@@ -4331,6 +4349,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     commitDepth += 1;
     try {
+      // Taken before any commit step runs: the closures below may defer
+      // completion across ticks (view transitions), and a later render must
+      // not see or clear this commit's retries.
+      const suspenseRetries = root.pendingSuspenseRetries;
+      root.pendingSuspenseRetries = [];
       commitLiveHookInstances(root);
       if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
@@ -4387,6 +4410,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         try {
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
+          attachCommittedSuspenseRetries(root, suspenseRetries);
           scheduleDehydratedSuspenseRetries(root);
           commitEffects(root, finishedWork.child, BeforePaintEffect);
           flushCaughtBoundaryErrors(root);
@@ -5033,6 +5057,17 @@ export function createRenderer<Container, Instance, TextInstance>(
           deleteFiberDataOwner(deleted, store);
           abortFiberHooks(deleted, false);
         });
+        // Deletion is the one event that invalidates a committed fiber
+        // identity; record it at the source by severing the upward links
+        // (both generations die together). Anything that later schedules
+        // through these fibers — a late suspense retry, a setState from a
+        // stale closure — fails root lookup and no-ops instead of marking
+        // phantom lanes through the old return chain. A second walk, because
+        // the teardown above still resolves roots through these chains.
+        walkFiberSubtree(child, (deleted) => {
+          deleted.return = null;
+          if (deleted.alternate !== null) deleted.alternate.return = null;
+        });
         remove(child, parent);
       }
       cursor.deletions = null;
@@ -5417,7 +5452,14 @@ export function createRenderer<Container, Instance, TextInstance>(
   function captureSuspenseBoundary(boundary: F, thenable: Thenable): F | null {
     const root = rootOf(boundary);
     const lanes = root.renderLanes;
-    attachSuspensePing(root, boundary, thenable, lanes);
+    // Two pings per suspension. The root ping is identity-free: if this
+    // render never commits (preserved suspension, restart, interruption),
+    // the resolved thenable revives the suspended lanes at the root, and it
+    // no-ops once the lanes committed (markRootPinged masks by
+    // suspendedLanes). The boundary retry is recorded here but attached only
+    // at commit, to the fiber identity the commit blessed.
+    attachPing(root, thenable, lanes);
+    root.pendingSuspenseRetries.push({ boundary, thenable, lanes });
     rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
     // The boundary's own deletions (e.g. the committed fallback recorded by
     // the reveal path) belong to the boundary, not its discarded subtree;
@@ -5432,9 +5474,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       dehydrated?.kind === "dehydrated"
     ) {
       // Hydrating this boundary suspended. Abandon the attempt and stay
-      // dehydrated so the server-rendered content survives; the attached ping
-      // retries hydration once the thenable settles, so commit-time retry
-      // scheduling must skip the boundary until then.
+      // dehydrated so the server-rendered content survives; the retry
+      // recorded above re-attempts hydration once the thenable settles, so
+      // commit-time dehydrated retry scheduling must skip the boundary until
+      // then.
       leaveSuspenseHydration(root, boundary, dehydrated.boundary);
       boundary.boundaryState = dehydrated;
       boundary.flags &= ~HydrationFlag;
@@ -5543,97 +5586,37 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function attachSuspensePing(
+  // Boundary retries attach here, after the tree flipped: the recorded fiber
+  // is in the committed tree by construction, so no tree-membership question
+  // ever arises. A retry that fires after the boundary is deleted no-ops in
+  // scheduleFiber, because deletion teardown severs the fiber's return
+  // pointers and root lookup finds nothing.
+  function attachCommittedSuspenseRetries(
     root: R,
-    boundary: F,
-    thenable: Thenable,
-    lanes: Lanes,
+    retries: PendingSuspenseRetry<Container, Instance, TextInstance>[],
   ): void {
-    if (lanes === NoLanes) return;
+    for (const { boundary, thenable, lanes } of retries) {
+      if (lanes === NoLanes) continue;
 
-    let pings = root.suspendedBoundaries.get(thenable);
-    const shouldAttach = pings === undefined;
-
-    if (pings === undefined) {
-      pings = { boundaries: new Set(), lanes: new WeakMap() };
-      root.suspendedBoundaries.set(thenable, pings);
-    }
-
-    pings.boundaries.add(boundary);
-    pings.lanes.set(
-      boundary,
-      mergeLanes(pings.lanes.get(boundary) ?? NoLanes, lanes),
-    );
-
-    if (!shouldAttach) return;
-
-    thenable.then(
-      () => pingSuspenseBoundaries(root, thenable),
-      () => pingSuspenseBoundaries(root, thenable),
-    );
-  }
-
-  function pingSuspenseBoundaries(root: R, thenable: object): void {
-    const pings = root.suspendedBoundaries.get(thenable);
-    if (pings === undefined) return;
-
-    root.suspendedBoundaries.delete(thenable);
-    pingCurrentSuspenseBoundaries(root, pings);
-  }
-
-  function pingCurrentSuspenseBoundaries(
-    root: R,
-    pings: SuspensePings<Container, Instance, TextInstance>,
-  ): void {
-    for (const boundary of pings.boundaries) {
-      const current = currentFiberForPing(root, boundary);
-      if (current === null) continue;
-
-      const lanes = mergeLanes(
-        pings.lanes.get(current) ?? NoLanes,
-        current.alternate === null
-          ? NoLanes
-          : (pings.lanes.get(current.alternate) ?? NoLanes),
-      );
-      if (lanes !== NoLanes) {
-        scheduleFiber(current, suspenseRetryLane(lanes));
+      // A boundary that re-suspends on a still-pending thenable in a later
+      // commit would otherwise stack duplicate listeners; one per conceptual
+      // boundary (either generation) is enough.
+      let attached = root.attachedSuspenseRetries.get(thenable);
+      if (attached === undefined) {
+        attached = new WeakSet();
+        root.attachedSuspenseRetries.set(thenable, attached);
       }
+      if (
+        attached.has(boundary) ||
+        (boundary.alternate !== null && attached.has(boundary.alternate))
+      ) {
+        continue;
+      }
+      attached.add(boundary);
+
+      const retry = () => scheduleFiber(boundary, suspenseRetryLane(lanes));
+      thenable.then(retry, retry);
     }
-  }
-
-  // Return-pointer walks alone cannot decide tree membership: a bailed-out
-  // parent reuses its children in place, so a live boundary's return chain can
-  // still end at the previous root generation (markLanes/markChildLanes cover
-  // that skew by marking alternates, but a membership test does not). Treat
-  // the return walk as a fast path only, and before dropping a ping, search
-  // the committed tree for the boundary or its alternate.
-  function currentFiberForPing(root: R, boundary: F): F | null {
-    if (isInCurrentTree(root, boundary)) return boundary;
-    const alternate = boundary.alternate;
-    if (alternate !== null && isInCurrentTree(root, alternate)) {
-      return alternate;
-    }
-    return findFiberInCurrentTree(root, boundary);
-  }
-
-  function isInCurrentTree(root: R, node: F): boolean {
-    let cursor: F | null = node;
-    while (cursor !== null && cursor.return !== null) {
-      cursor = cursor.return;
-    }
-    return cursor === root.current;
-  }
-
-  function findFiberInCurrentTree(root: R, target: F): F | null {
-    const alternate = target.alternate;
-    let found: F | null = null;
-
-    walkFiberSubtree(root.current, (node) => {
-      if (node === target || node === alternate) found = node;
-      return found === null;
-    });
-
-    return found;
   }
 
   // Context propagation is lazy: providers push new values without walking
@@ -5854,11 +5837,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function rootOf(node: F): R {
+    const root = rootOfOrNull(node);
+    if (root === null) throw new Error("Could not find a root for fiber.");
+    return root;
+  }
+
+  // Deletion teardown severs return pointers, so fibers held past unmount
+  // (transition starters, stale closures) legitimately have no root. Paths
+  // reachable from user code after unmount take this form; render- and
+  // commit-time paths keep the throwing rootOf invariant.
+  function rootOfOrNull(node: F): R | null {
     for (let parent: F | null = node; parent !== null; parent = parent.return) {
       if (parent.tag === RootTag) return parent.stateNode as R;
     }
 
-    throw new Error("Could not find a root for fiber.");
+    return null;
   }
 
   function errorInfoFor(node: F, error?: unknown): ErrorInfo {
