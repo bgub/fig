@@ -74,6 +74,13 @@ const libraryEntries: Record<string, string[]> = {
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };
 const figProductionDefine = { __FIG_DEV__: JSON.stringify(false) };
+// Demos are dev-mode showcases: Fig dev diagnostics and DevTools emission stay
+// in, and bundled React (demo-client) runs its development build. Server
+// entries take only the Fig gate so NODE_ENV stays a runtime concern on node.
+const demoBrowserDefine = {
+  ...figDevDefine,
+  "process.env.NODE_ENV": JSON.stringify("development"),
+};
 const packWorkspacePaths = [
   "packages/fig",
   "packages/fig-server",
@@ -193,6 +200,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         {
           entry: ["./src/server.tsx"],
           alias: sourceAliases,
+          define: figDevDefine,
           platform: "node",
           format: "esm",
           deps: {
@@ -209,6 +217,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         {
           entry: ["./src/client.tsx"],
           alias: sourceAliases,
+          define: demoBrowserDefine,
           platform: "browser",
           format: "esm",
           deps: {
@@ -228,6 +237,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         {
           entry: ["./src/server.tsx"],
           alias: isDevSourcePack ? sourceAliases : undefined,
+          define: figDevDefine,
           deps: figServerDeps(),
           platform: "node",
           format: "esm",
@@ -239,6 +249,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         {
           entry: ["./src/client.tsx"],
           alias: sourceAliases,
+          define: demoBrowserDefine,
           platform: "browser",
           format: "esm",
           deps: {
@@ -258,6 +269,7 @@ function packConfigFor(path: string): PackConfig | undefined {
             server: "virtual:fig-start/server-entry",
           },
           alias: isDevSourcePack ? sourceAliases : undefined,
+          define: figDevDefine,
           deps: figServerDeps(),
           platform: "node",
           format: "esm",
@@ -270,6 +282,7 @@ function packConfigFor(path: string): PackConfig | undefined {
         {
           entry: { client: "virtual:fig-start/client-entry" },
           alias: sourceAliases,
+          define: figDevDefine,
           platform: "browser",
           format: "esm",
           deps: {
@@ -308,10 +321,7 @@ function demoClientPackConfig(): PackConfig {
     deps: {
       alwaysBundle: demoClientBundleDependencies,
     },
-    define: {
-      ...figProductionDefine,
-      "process.env.NODE_ENV": JSON.stringify("production"),
-    },
+    define: demoBrowserDefine,
     dts: false,
     minify: false,
     sourcemap: true,

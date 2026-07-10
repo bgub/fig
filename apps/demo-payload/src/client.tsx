@@ -1,4 +1,3 @@
-import "./dev-env.ts";
 import { createRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {

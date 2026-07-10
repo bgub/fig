@@ -1,4 +1,3 @@
-import "./dev-env.ts";
 import {
   Activity,
   createContext,
@@ -1791,13 +1790,13 @@ function ReactBenchmarkRows({
 }: BenchmarkRowsProps): ReactNode {
   return createElement(
     "ul",
-    { class: "benchmark-list" },
+    { className: "benchmark-list" },
     benchmarkRowIds(count, start, reverse).map((id) =>
       createElement(
         "li",
-        { class: "benchmark-row", key: id },
+        { className: "benchmark-row", key: id },
         createElement("span", null, `${label} ${id}`),
-        createElement("span", { class: "tag" }, `v${version}`),
+        createElement("span", { className: "tag" }, `v${version}`),
       ),
     ),
   );

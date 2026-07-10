@@ -43,7 +43,11 @@ export default defineConfig({
   },
   // Only transform this app's own components for Fast Refresh (not Fig source).
   plugins: [figRefresh({ include: /\/apps\/demo-hmr\/src\/.*\.[jt]sx?$/ })],
-  // Fig packages read process.env.NODE_ENV for dev-only paths.
-  define: { "process.env.NODE_ENV": JSON.stringify("development") },
+  // Fig dev-only paths (diagnostics, DevTools emission, refresh matching)
+  // compile in through the __FIG_DEV__ gate; NODE_ENV covers bundled deps.
+  define: {
+    __FIG_DEV__: JSON.stringify(true),
+    "process.env.NODE_ENV": JSON.stringify("development"),
+  },
   esbuild: { jsx: "automatic", jsxImportSource: "@bgub/fig" },
 });
