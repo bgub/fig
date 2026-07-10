@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build:e2e": "vp run --filter @bgub/fig-demo-client... build",
-    "build": "vp pack",
+    "build": "vp pack && node ../../scripts/assert-dev-bundle.mjs dist/main.js",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs static",
     "dev:build": "vp pack --watch --no-clean",

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp pack",
+    "build": "vp pack && node ../../scripts/assert-dev-bundle.mjs dist/client.js",
     "build:e2e": "vp run --filter @bgub/fig-demo-payload... build",
     "dev": "portless",
     "dev:app": "node ../dev-server.mjs node",
