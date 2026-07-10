@@ -24,6 +24,7 @@ function createBenchmarkComponents(runtime) {
   const state = {
     deepLeafSetters: [],
     externalStoreLeafSetters: [],
+    hookDenseSetters: [],
     metrics: createScenarioMetrics(),
     providerLeafSetters: [],
   };
@@ -109,6 +110,19 @@ function createBenchmarkComponents(runtime) {
       null,
       createDeepChildren(runtime.createElement, depth, fanout, version, "r"),
     );
+  }
+
+  function HookDense({ count }) {
+    state.metrics.componentRenders += 1;
+    let total = 0;
+
+    for (let index = 0; index < count; index += 1) {
+      const [value, setValue] = runtime.useState(0);
+      total += value;
+      if (index === count - 1) state.hookDenseSetters.push(setValue);
+    }
+
+    return runtime.createElement("span", null, total);
   }
 
   function SparseContextConsumer() {
@@ -239,6 +253,7 @@ function createBenchmarkComponents(runtime) {
     DeepTree,
     ExternalStoreUnrelatedUpdateTree,
     ExternalStoreTree,
+    HookDense,
     ProviderTree,
     Rows,
     SparseCommitTree,
@@ -425,6 +440,17 @@ function measureDeepLeafUpdate(runtime, rows, iterations) {
   });
 }
 
+function measureDenseHookUpdate(runtime, rows, iterations) {
+  runtime.components.state.hookDenseSetters = [];
+
+  return measureWithRoots(runtime, iterations, {
+    setup: (roots) =>
+      renderAll(runtime, roots, runtime.components.HookDense, { count: rows }),
+    run: () => incrementAll(runtime.components.state.hookDenseSetters),
+    validate: assertDenseHookUpdate,
+  });
+}
+
 function measureStableProviderChildUpdate(runtime, rows, iterations) {
   runtime.components.state.providerLeafSetters = [];
 
@@ -567,6 +593,16 @@ function assertProviderChildUpdate(roots) {
   }
 }
 
+function assertDenseHookUpdate(roots) {
+  for (const { container } of roots) {
+    if (container.textContent !== "1") {
+      throw new Error(
+        `Dense hook update committed unexpected state: ${JSON.stringify(container.textContent)}`,
+      );
+    }
+  }
+}
+
 function deepTreeShape(rows) {
   if (rows <= 100) return { depth: 3, fanout: 4 };
   if (rows <= 1000) return { depth: 4, fanout: 5 };
@@ -661,6 +697,14 @@ export function clientScenariosForRows(rows) {
       rows,
       measure: (runtime, iterations) =>
         measureDeepLeafUpdate(runtime, rows, iterations),
+      runtimes,
+    },
+    {
+      group: "reconciler",
+      name: "hooks.dense-state-update",
+      rows,
+      measure: (runtime, iterations) =>
+        measureDenseHookUpdate(runtime, rows, iterations),
       runtimes,
     },
     {
