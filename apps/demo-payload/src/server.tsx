@@ -4,6 +4,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { createFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToHtml } from "@bgub/fig-server";
 import {
   PAYLOAD_BOUNDARY_HEADER,
@@ -127,6 +128,12 @@ function boundaryReplacement(boundary: string | null, data: DemoData) {
 
 async function documentHtml(): Promise<string> {
   const shell = await renderToHtml(<LoadingShell />);
+  // The panel server-renders its empty state ("Waiting for a commit") so the
+  // reserved pane paints real chrome instead of a void; the client hydrates
+  // it with the live hook when the stored state is open.
+  const devtools = await renderToHtml(
+    <FigDevtools hook={createFigDevtoolsGlobalHook()} placement="sidebar" />,
+  );
 
   return [
     "<!doctype html>",
@@ -144,7 +151,7 @@ async function documentHtml(): Promise<string> {
     // reflowing the app.
     '<div class="fig-demo-devtools-layout">',
     `<div class="fig-demo-app-pane"><div id="${appRootId}">${shell}</div></div>`,
-    `<aside class="fig-demo-devtools-pane" id="${devtoolsPaneId}"></aside>`,
+    `<aside class="fig-demo-devtools-pane" id="${devtoolsPaneId}">${devtools}</aside>`,
     "</div>",
     devReloadScript(),
     '<script type="module" src="/client.js"></script>',

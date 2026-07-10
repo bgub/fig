@@ -9,7 +9,7 @@ import {
   noteBoundaryId,
   RefreshButtonRef,
 } from "./shared.ts";
-import { AppFrame } from "./shell.tsx";
+import { AppFrame, appDescription } from "./shell.tsx";
 
 interface DemoStats {
   latencyMs: number;
@@ -48,7 +48,7 @@ export function PayloadApp({ data }: { data: DemoData }) {
           </a>
         </div>
       }
-      description="Initial render is fetched as a payload stream; the dashboard and note cards can refresh as independent server-rendered boundaries."
+      description={appDescription}
       title="Server Components"
     >
       <section class="grid">

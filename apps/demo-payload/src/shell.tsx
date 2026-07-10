@@ -1,5 +1,10 @@
 import type { FigNode } from "@bgub/fig";
 
+// Shared between the loading shell and the loaded app so the header chrome
+// is byte-identical and the stream swap causes no layout shift.
+export const appDescription =
+  "Initial render is fetched as a payload stream; the dashboard and note cards can refresh as independent server-rendered boundaries.";
+
 interface AppFrameProps {
   actions?: FigNode;
   children?: FigNode;
@@ -35,9 +40,24 @@ export function AppFrame({
 export function LoadingShell() {
   return (
     <AppFrame
-      description="Loading server component stream..."
+      actions={
+        <div class="actions">
+          <a class="button" href="/payload">
+            Raw stream
+          </a>
+          <button class="button" disabled type="button">
+            Refresh app (0)
+          </button>
+          <a class="button" href="/">
+            Reload page
+          </a>
+        </div>
+      }
+      description={appDescription}
       title="Server Components"
-    />
+    >
+      <p class="muted">Loading server component stream...</p>
+    </AppFrame>
   );
 }
 

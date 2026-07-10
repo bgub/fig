@@ -6,6 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { assets, meta, title } from "@bgub/fig";
+import { createFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig";
@@ -159,7 +160,15 @@ async function handleRequest(
               </div>,
             )}
           </div>
-          <aside class="fig-demo-devtools-pane" id={demoDevtoolsPaneId} />
+          <aside class="fig-demo-devtools-pane" id={demoDevtoolsPaneId}>
+            {/* The panel's empty state streams with the shell so the pane
+                paints real chrome; the client hydrates it with the live
+                hook. */}
+            <FigDevtools
+              hook={createFigDevtoolsGlobalHook()}
+              placement="sidebar"
+            />
+          </aside>
         </div>
       </body>
     </html>,

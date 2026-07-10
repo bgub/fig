@@ -1,4 +1,4 @@
-import { createRoot } from "@bgub/fig-dom";
+import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   createPayloadResponse,
@@ -33,14 +33,7 @@ if (devtoolsContainer === null) {
 }
 
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
-createRoot(devtoolsContainer, { devtools: false }).render(
-  <FigDevtools
-    hook={devtoolsHook}
-    placement="sidebar"
-    defaultOpen={readStoredDevtoolsOpen()}
-    onOpenChange={storeDevtoolsOpen}
-  />,
-);
+mountDevtoolsPanel(devtoolsContainer, devtoolsHook);
 
 const response = createPayloadResponse({
   resolveClientReference(metadata) {
@@ -93,6 +86,33 @@ void fetchPayload(response, "/payload", {
 });
 
 document.body.dataset.figPayloadDemo = "ready";
+
+function mountDevtoolsPanel(
+  container: HTMLElement,
+  hook: ReturnType<typeof ensureFigDevtoolsGlobalHook>,
+): void {
+  const open = readStoredDevtoolsOpen();
+  const panel = (
+    <FigDevtools
+      hook={hook}
+      placement="sidebar"
+      defaultOpen={open}
+      onOpenChange={storeDevtoolsOpen}
+    />
+  );
+
+  // The shell server-renders the panel's empty state; hydrate it when the
+  // stored state matches the server-rendered default (open). A closed panel
+  // renders fresh — the pane is collapsed before first paint, so nothing
+  // flashes.
+  if (open && container.firstChild !== null) {
+    hydrateRoot(container, panel, { devtools: false });
+    return;
+  }
+
+  container.textContent = "";
+  createRoot(container, { devtools: false }).render(panel);
+}
 
 function readStoredDevtoolsOpen(): boolean {
   try {
