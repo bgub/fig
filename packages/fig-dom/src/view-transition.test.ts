@@ -1058,6 +1058,75 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("keeps the root name canceled until the transition finishes", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+    const documentElement = document.documentElement as HTMLElement & {
+      animate?: unknown;
+    };
+    const previousAnimate = documentElement.animate;
+    const cancelled: string[] = [];
+
+    documentElement.animate = ((
+      _keyframes: unknown,
+      options: { pseudoElement?: string },
+    ) => ({
+      cancel: () => cancelled.push(options.pseudoElement ?? ""),
+    })) as unknown as typeof documentElement.animate;
+
+    let resolveFinished: () => void = () => undefined;
+    const finished = new Promise<void>((done) => {
+      resolveFinished = done;
+    });
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      return { finished, ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("Second")));
+      await Promise.resolve();
+
+      // Ready resolved but the transition still runs: restoring the root
+      // name mid-flight can re-associate the live root with its hidden
+      // captured group and blank the page, so the cancel must hold...
+      expect(documentElement.style.viewTransitionName).toBe("none");
+      expect(cancelled).toEqual([]);
+
+      resolveFinished();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // ...and the author's style plus the hide animations release only
+      // once the pseudo tree is gone.
+      expect(documentElement.style.viewTransitionName || "").toBe("");
+      expect(cancelled).toEqual([
+        "::view-transition-group(root)",
+        "::view-transition",
+      ]);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      documentElement.animate = previousAnimate;
+      container.remove();
+    }
+  });
+
   it("keeps the root snapshot when changes land outside boundaries", async () => {
     const container = document.createElement("div");
     document.body.append(container);

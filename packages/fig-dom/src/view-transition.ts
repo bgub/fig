@@ -13,6 +13,10 @@ interface RunningViewTransition {
   ready?: Promise<unknown>;
 }
 
+interface CancellableAnimation {
+  cancel(): void;
+}
+
 type ViewTransitionDocument = Document & {
   startViewTransition?: (
     update: () => void,
@@ -41,6 +45,7 @@ function commitViewTransition(
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
   let mutationResult: ViewTransitionMutationResult | null = null;
+  const hideAnimations: CancellableAnimation[] = [];
 
   const run = (): void => {
     prepareSnapshot();
@@ -58,15 +63,40 @@ function commitViewTransition(
       });
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
-        hideCanceledSnapshots(owner, transition, () => mutationResult);
+        hideCanceledSnapshots(
+          owner,
+          transition,
+          () => mutationResult,
+          hideAnimations,
+        );
       }
       const cleanupAfterSnapshot = transition?.ready ?? transition?.finished;
-      const finalize = (): void => {
+      // Root-name restore waits for the transition to fully settle: putting
+      // `view-transition-name: root` back on the live <html> while the
+      // transition still runs can re-associate the live root with its
+      // (force-hidden) captured group, which paints the page blank for the
+      // rest of the animation. The filled hide animations are cancelled at
+      // the same point so they can never apply to a later transition's
+      // pseudo tree.
+      const settleAfterTransition = transition?.finished ?? transition?.ready;
+      const settle = (): void => {
         restoreRootName?.();
-        cleanup();
+        for (const animation of hideAnimations) {
+          try {
+            animation.cancel();
+          } catch {
+            // Cancelling a finished pseudo animation is best-effort.
+          }
+        }
+        hideAnimations.length = 0;
       };
-      if (cleanupAfterSnapshot === undefined) finalize();
-      else cleanupAfterSnapshot.then(finalize, finalize);
+      if (cleanupAfterSnapshot === undefined) {
+        settle();
+        cleanup();
+      } else {
+        cleanupAfterSnapshot.then(cleanup, cleanup);
+        settleAfterTransition?.then(settle, settle);
+      }
     } catch (error) {
       restoreRootName?.();
       if (!didMutate) {
@@ -144,6 +174,7 @@ function hideCanceledSnapshots(
   owner: ViewTransitionDocument,
   transition: RunningViewTransition,
   getResult: () => ViewTransitionMutationResult | null,
+  hideAnimations: CancellableAnimation[],
 ): void {
   const hide = (): void => {
     const result = getResult();
@@ -162,14 +193,24 @@ function hideCanceledSnapshots(
       | null;
     if (element === null || typeof element.animate !== "function") return;
 
+    const track = (animation: unknown): void => {
+      if (
+        typeof (animation as CancellableAnimation | null)?.cancel === "function"
+      ) {
+        hideAnimations.push(animation as CancellableAnimation);
+      }
+    };
+
     const hideGroup = (name: string): void => {
-      element.animate?.(
-        { opacity: [0, 0], pointerEvents: ["none", "none"] },
-        {
-          duration: 0,
-          fill: "forwards",
-          pseudoElement: `::view-transition-group(${name})`,
-        },
+      track(
+        element.animate?.(
+          { opacity: [0, 0], pointerEvents: ["none", "none"] },
+          {
+            duration: 0,
+            fill: "forwards",
+            pseudoElement: `::view-transition-group(${name})`,
+          },
+        ),
       );
     };
 
@@ -179,9 +220,15 @@ function hideCanceledSnapshots(
       }
       if (result.cancelRootSnapshot) {
         hideGroup("root");
-        element.animate(
-          { height: [0, 0], width: [0, 0] },
-          { duration: 0, fill: "forwards", pseudoElement: "::view-transition" },
+        track(
+          element.animate(
+            { height: [0, 0], width: [0, 0] },
+            {
+              duration: 0,
+              fill: "forwards",
+              pseudoElement: "::view-transition",
+            },
+          ),
         );
       }
     } catch {

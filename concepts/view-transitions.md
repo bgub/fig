@@ -122,7 +122,16 @@ capture, then at `ready` the captured old root group is hidden with a
 filling zero-duration animation and `::view-transition` is zero-sized — so
 untouched regions stay interactive while named groups animate (React's
 `cancelRootViewTransitionName`). Pure moves (reorders) leave the root
-canceled: their companions are themselves flagged and morph on their own.
+canceled: their companions are collected through the sibling-move level rule
+and morph on their own.
+
+Both halves of the cancel release only at `finished`, never at `ready`:
+restoring `view-transition-name: root` on the live root mid-transition can
+re-associate it with its force-hidden captured group and paint the page
+blank for the rest of the animation (compositor-timing dependent, so it
+reproduces intermittently), and the filled hide animations are explicitly
+cancelled at the same point so they can never apply to a later transition's
+pseudo tree.
 
 ## Serialization (Suspend Commits, Not Rendering)
 
