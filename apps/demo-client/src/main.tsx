@@ -34,7 +34,7 @@ import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   readDevtoolsOpen,
   storeDevtoolsOpen,
-} from "../../demo-devtools-client.ts";
+} from "../../demo-devtools-cookie.ts";
 import { renderToHtml } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";

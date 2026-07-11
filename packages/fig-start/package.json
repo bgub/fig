@@ -65,6 +65,7 @@
     "@babel/core": "^7.25.0",
     "@babel/preset-typescript": "^7.25.0",
     "@bgub/fig": "workspace:*",
+    "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-refresh": "workspace:*",
     "@bgub/fig-server": "workspace:*",

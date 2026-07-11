@@ -1,30 +1,21 @@
-// Server half of the demos' shared DevTools wiring: converts fig-server's
-// collected render tree into a Fig DevTools snapshot, serves it to the panel
-// through a read-only hook, and inlines the same snapshot as JSON so the
-// client can hydrate the streamed panel instead of replacing it. The
-// snapshot materializes lazily — the DevTools aside renders after the app
-// pane in document order, so by the time the panel reads the hook the
-// collector already holds the app's tree. Hooks, lanes, and fiber ids are
-// client-runtime facts the server cannot know; the hydrated panel swaps to
-// the live hook after the first real commit (demo-devtools-client.ts).
+// Server half of the SSR DevTools wiring: converts a fig-server render-tree
+// collector into a Fig DevTools snapshot, serves it to the panel through a
+// read-only hook, and inlines the same snapshot as JSON so the client can
+// hydrate the streamed panel instead of replacing it. The snapshot
+// materializes lazily — render the panel (and DevtoolsSnapshotScript) after
+// the app in document order so the collector already holds the app's tree.
+// Hooks, lanes, and fiber ids are client-runtime facts the server cannot
+// know; the hydrated panel swaps to the live hook after the first commit.
 import { createElement, type FigNode } from "@bgub/fig";
 import type {
   FigDevtoolsFiberSnapshot,
-  FigDevtoolsHook,
   FigDevtoolsRootSnapshot,
-} from "@bgub/fig-devtools";
+} from "@bgub/fig-reconciler/devtools";
 import type { RenderTreeCollector, RenderTreeNode } from "@bgub/fig-server";
-import {
-  devtoolsSnapshotScriptId,
-  readDevtoolsOpen,
-  snapshotDevtoolsHook,
-} from "./demo-devtools-client.ts";
+import type { FigDevtoolsHook } from "./hook.ts";
+import { devtoolsSnapshotScriptId, snapshotDevtoolsHook } from "./snapshot.ts";
 
-export function devtoolsOpenFromCookieHeader(
-  header: string | string[] | undefined,
-): boolean {
-  return readDevtoolsOpen((Array.isArray(header) ? header[0] : header) ?? "");
-}
+export { devtoolsSnapshotScriptId } from "./snapshot.ts";
 
 export interface PrerenderedDevtools {
   hook: FigDevtoolsHook;
@@ -60,6 +51,7 @@ export function prerenderedDevtools(
       subscribe: () => () => undefined,
       clear: () => undefined,
       inspectElement: () => null,
+      elementForFiber: () => null,
     },
     snapshot,
   };
@@ -67,8 +59,8 @@ export function prerenderedDevtools(
 
 /**
  * Inlines the snapshot the panel prerendered from, for client hydration.
- * Render it after the DevTools aside in document order: the first snapshot
- * read caches, so panel markup and inlined JSON come from the same data.
+ * Render it after the panel in document order: the first snapshot read
+ * caches, so panel markup and inlined JSON come from the same data.
  */
 export function DevtoolsSnapshotScript(props: {
   devtools: PrerenderedDevtools;
@@ -112,8 +104,8 @@ function buildSnapshot(
     };
   };
 
-  // The document render collects everything, the aside included; the panel
-  // shows the app's subtree.
+  // The document render collects everything, the panel included; show the
+  // app's subtree.
   const appRoot = findByElementId(tree, appRootId) ?? tree;
   return {
     id: 1,

@@ -5,6 +5,7 @@ import "./styles.css";
 
 export const start = {
   appName: "Fig Start",
+  devtools: true,
   context: (request) => ({
     serverTheme: requestTheme(request),
   }),

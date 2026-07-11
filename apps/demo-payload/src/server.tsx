@@ -29,9 +29,9 @@ import {
 } from "../../dev-reload.ts";
 import {
   DevtoolsSnapshotScript,
-  devtoolsOpenFromCookieHeader,
   prerenderedDevtools,
-} from "../../demo-devtools-prerender.ts";
+} from "@bgub/fig-devtools/server";
+import { devtoolsOpenFromCookieHeader } from "../../demo-devtools-cookie.ts";
 import {
   appRefreshButtonReferenceId,
   appRootId,

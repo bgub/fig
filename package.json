@@ -7,7 +7,7 @@
     "bench:reconciler": "vp run --filter @bgub/fig --filter @bgub/fig-reconciler --filter @bgub/fig-server build && node benchmarks/reconciler.mjs",
     "build": "sh -c 'missing=; for d in packages/*; do [ -d \"$d/dist\" ] || missing=1; done; if [ -n \"$missing\" ]; then vp run --no-cache --filter \"./packages/*\" build; else vp run --cache --filter \"./packages/*\" build; fi' && vp run --no-cache --filter './apps/*' build",
     "check": "vp check",
-    "dev": "vp run --filter '@bgub/fig-start...' build && FIG_DEV_SOURCE=1 FIG_DEV_SERVER_SKIP_SETUP=1 vp run --filter '@bgub/fig-start' --filter './apps/demo-client' --filter './apps/demo-hmr' --filter './apps/demo-payload' --filter './apps/demo-ssr' --filter './apps/demo-start' --parallel --log labeled dev",
+    "dev": "FIG_DEV_SOURCE=1 vp run --filter '@bgub/fig-start...' build && FIG_DEV_SOURCE=1 FIG_DEV_SERVER_SKIP_SETUP=1 vp run --filter '@bgub/fig-start' --filter './apps/demo-client' --filter './apps/demo-hmr' --filter './apps/demo-payload' --filter './apps/demo-ssr' --filter './apps/demo-start' --parallel --log labeled dev",
     "generate:jsx-attributes": "node scripts/generate-jsx-attributes.mjs",
     "prepare": "./scripts/prepare-effect.sh",
     "test": "vp test && node --test benchmarks/*.test.mjs",

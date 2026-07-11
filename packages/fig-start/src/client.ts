@@ -13,6 +13,12 @@ import {
 } from "@bgub/fig";
 import { assetResourceKey } from "@bgub/fig/internal";
 import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
+import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
+import {
+  DEVTOOLS_PANE_ID,
+  readDevtoolsOpenCookie,
+  storeDevtoolsOpen,
+} from "./devtools.ts";
 import {
   createPayloadResponse,
   decodePayloadDataEntries,
@@ -89,6 +95,13 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     throw new Error(`Missing #${ROOT_ELEMENT_ID} container to hydrate into.`);
   }
 
+  // When the server rendered the DevTools panel, create the global hook BEFORE
+  // hydrating the app so the app's first commit (and its element↔fiber
+  // inspection) registers — otherwise Select mode and tree-hover highlighting
+  // have no live data to resolve against.
+  const devtoolsContainer = document.getElementById(DEVTOOLS_PANE_ID);
+  if (devtoolsContainer !== null) ensureFigDevtoolsGlobalHook();
+
   // Prefetching the payload before the commit keeps the previous page
   // visible until the next server route can render. The closure reads
   // `serverRouteContent`, declared below (it needs the router); beforeCommit
@@ -164,7 +177,23 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
   // race-free way to script a first interaction.
   container.setAttribute("data-fig-start-hydrated", "");
 
+  if (devtoolsContainer !== null) void hydrateDevtoolsPanel(devtoolsContainer);
+
   return router;
+}
+
+// Hydrate the prerendered DevTools panel as its own root (devtools off, so it
+// never inspects itself) and swap it to the live global hook — which already
+// captured the app's first commit (ensured before hydration above). The panel
+// UI is dynamic-imported so it stays out of the base client bundle.
+async function hydrateDevtoolsPanel(container: HTMLElement): Promise<void> {
+  const { hydrateDevtoolsPanel: hydrate } =
+    await import("@bgub/fig-devtools/client");
+  hydrate(container, ensureFigDevtoolsGlobalHook(), {
+    defaultOpen: readDevtoolsOpenCookie(),
+    onOpenChange: storeDevtoolsOpen,
+    placement: "sidebar",
+  });
 }
 
 interface PayloadStream {

@@ -17,10 +17,24 @@ import {
 } from "@bgub/fig";
 import { assetResourceKey, normalizeDataResourceKey } from "@bgub/fig/internal";
 import {
+  createRenderTreeCollector,
   escapeAttribute,
   escapeText,
   renderToDocumentStream,
 } from "@bgub/fig-server";
+import { FigDevtools } from "@bgub/fig-devtools";
+import {
+  DevtoolsSnapshotScript,
+  prerenderedDevtools,
+} from "@bgub/fig-devtools/server";
+import {
+  DEVTOOLS_APP_PANE_CLASS,
+  DEVTOOLS_LAYOUT_CLASS,
+  DEVTOOLS_PANE_CLASS,
+  DEVTOOLS_PANE_ID,
+  devtoolsLayoutStyle,
+  devtoolsOpenFromRequest,
+} from "./devtools.ts";
 import {
   createPayloadResponse,
   decodePayloadValue,
@@ -76,6 +90,9 @@ export interface StartHandlerOptions {
   // Per-request context for beforeLoad/loader (e.g. a data/query client). May
   // return a promise; it is awaited before routing.
   context?: (request: Request) => unknown;
+  // Render the Fig DevTools panel into the document (server-rendered and
+  // hydrated). Opt-in; off by default.
+  devtools?: boolean;
   // Extra <head> content (e.g. <title>, <meta>). fig-server lowers host
   // title/meta/link into hoisted document resources.
   head?: FigNode;
@@ -230,6 +247,17 @@ export function createRequestHandler(
             routerTree,
           );
     const htmlProps = options.html?.(request) ?? {};
+    // The DevTools panel renders after the app in document order so the
+    // render-tree collector already holds the app's tree when the panel reads
+    // its hook; the client hydrates it against the inlined snapshot and swaps
+    // to the live hook after the first commit (see @bgub/fig-devtools).
+    const renderTree = options.devtools
+      ? createRenderTreeCollector()
+      : undefined;
+    const devtools =
+      renderTree === undefined
+        ? undefined
+        : prerenderedDevtools(renderTree, ROOT_ELEMENT_ID);
     const document = createElement(
       "html",
       { lang: options.htmlLang ?? "en", ...htmlProps },
@@ -245,11 +273,36 @@ export function createRequestHandler(
           ? null
           : assets(hoistedServerRouteResources),
         options.head ?? null,
+        devtools === undefined
+          ? null
+          : createElement("style", { unsafeHTML: devtoolsLayoutStyle }),
       ),
       createElement(
         "body",
         null,
-        createElement("div", { id: ROOT_ELEMENT_ID }, appTree),
+        devtools === undefined
+          ? createElement("div", { id: ROOT_ELEMENT_ID }, appTree)
+          : createElement(
+              "div",
+              { class: DEVTOOLS_LAYOUT_CLASS },
+              createElement(
+                "div",
+                { class: DEVTOOLS_APP_PANE_CLASS },
+                createElement("div", { id: ROOT_ELEMENT_ID }, appTree),
+              ),
+              createElement(
+                "aside",
+                { class: DEVTOOLS_PANE_CLASS, id: DEVTOOLS_PANE_ID },
+                createElement(FigDevtools, {
+                  defaultOpen: devtoolsOpenFromRequest(request),
+                  hook: devtools.hook,
+                  placement: "sidebar",
+                }),
+              ),
+            ),
+        devtools === undefined
+          ? null
+          : createElement(DevtoolsSnapshotScript, { devtools }),
       ),
     );
 
@@ -257,6 +310,7 @@ export function createRequestHandler(
       clientReferenceFallback: clientReferencePlaceholder,
       nonce,
       onError: () => ({ digest: "fig-start-error" }),
+      renderTree,
     });
 
     try {

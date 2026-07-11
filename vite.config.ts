@@ -14,6 +14,8 @@ const figSourceAliasEntries = [
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig/server", "packages/fig/src/server.ts"],
+  ["@bgub/fig-devtools/server", "packages/fig-devtools/src/server.ts"],
+  ["@bgub/fig-devtools/client", "packages/fig-devtools/src/client.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
   ["@bgub/fig-dom/test-utils", "packages/fig-dom/src/act.ts"],
   ["@bgub/fig-dom/refresh", "packages/fig-dom/src/refresh.ts"],
@@ -51,7 +53,11 @@ const libraryEntries: Record<string, string[]> = {
     "./src/server.ts",
     "./src/server.browser.ts",
   ],
-  "packages/fig-devtools": ["./src/index.ts"],
+  "packages/fig-devtools": [
+    "./src/index.ts",
+    "./src/server.ts",
+    "./src/client.ts",
+  ],
   "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts", "./src/act.ts"],
   "packages/fig-reconciler": [
     "./src/index.ts",
@@ -184,7 +190,11 @@ function packConfigFor(path: string): PackConfig | undefined {
     return {
       entry: libraryEntry,
       dts: true,
-      define: figProductionDefine,
+      // Monorepo dev (FIG_DEV_SOURCE=1) builds the libraries with __DEV__ on so
+      // the fig-start dev server — which consumes these built packages — gets
+      // strict diagnostics and DevTools commit emission. Publishing builds
+      // (flag unset) stay production, preserving dead-code elimination.
+      define: isDevSourcePack ? figDevDefine : figProductionDefine,
       minify: browser ? true : undefined,
       outExtensions,
       platform: browser ? "browser" : undefined,

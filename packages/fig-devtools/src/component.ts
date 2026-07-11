@@ -101,10 +101,7 @@ export function FigDevtools({
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
   useSyncExternalStore(subscribe, getSnapshot, () => 0);
 
-  const treePaneRef = useMemo(
-    () => ({ current: null as Element | null }),
-    [],
-  );
+  const treePaneRef = useMemo(() => ({ current: null as Element | null }), []);
   const bindTreePane = useMemo(
     () => (node: Element, signal: AbortSignal) => {
       treePaneRef.current = node;
@@ -786,7 +783,9 @@ function fiberScreenRect(
 }
 
 function revealSelectedFiber(treePane: Element | null): void {
-  const selected = treePane?.querySelector(".fig-devtools__tree-button.is-selected");
+  const selected = treePane?.querySelector(
+    ".fig-devtools__tree-button.is-selected",
+  );
   if (selected === null || selected === undefined) return;
   selected.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
@@ -1091,14 +1090,25 @@ function button(
   onClick: () => void,
   options: ButtonOptions = {},
 ): FigNode {
-  const { active = false, ariaLabel, ariaPressed, className, disabled, title } =
-    options;
+  const {
+    active = false,
+    ariaLabel,
+    ariaPressed,
+    className,
+    disabled,
+    title,
+  } = options;
   return h(
     "button",
     {
       "aria-label": ariaLabel,
-      "aria-pressed": ariaPressed === undefined ? undefined : String(ariaPressed),
-      class: classNames("fig-devtools__button", className, active && "is-active"),
+      "aria-pressed":
+        ariaPressed === undefined ? undefined : String(ariaPressed),
+      class: classNames(
+        "fig-devtools__button",
+        className,
+        active && "is-active",
+      ),
       disabled: disabled === true ? true : undefined,
       title,
       type: "button",
@@ -1295,7 +1305,6 @@ function formatDuration(ms: number): string {
   if (value < 1000) return `${Math.round(value)}ms`;
   return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)}s`;
 }
-
 
 function truncate(value: string): string {
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
