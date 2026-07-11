@@ -76,7 +76,7 @@ export const DevtoolsStyle = `
 }
 .fig-devtools__header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 44px;
@@ -84,22 +84,6 @@ export const DevtoolsStyle = `
   border-bottom: 1px solid #252936;
   background: #171923;
   color: #f8fafc;
-}
-.fig-devtools__tab {
-  width: 38px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #3f475a;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #111827;
-  cursor: pointer;
-  padding: 0;
-}
-.fig-devtools__mark {
-  font-weight: 700;
-  font-size: 11px;
 }
 .fig-devtools__collapsed-tab {
   width: 44px;
@@ -125,16 +109,14 @@ export const DevtoolsStyle = `
 }
 .fig-devtools__heading {
   min-width: 0;
-  display: grid;
-  gap: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .fig-devtools__title {
-  font-size: 13px;
-}
-.fig-devtools__subtitle {
   min-width: 0;
   overflow: hidden;
-  color: #cbd5e1;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -145,17 +127,20 @@ export const DevtoolsStyle = `
   justify-content: flex-end;
   gap: 8px;
 }
-.fig-devtools__badge {
-  min-width: 58px;
-  border: 1px solid #475569;
+.fig-devtools__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  padding: 3px 8px;
-  color: #dbe3ef;
-  text-align: center;
+  background: #64748b;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.18);
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
-.fig-devtools__badge.is-live {
-  border-color: rgba(5, 150, 105, 0.5);
-  color: #a7f3d0;
+.fig-devtools__dot.is-live {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
 }
 .fig-devtools__button {
   border: 1px solid #c9d1df;
@@ -179,6 +164,14 @@ export const DevtoolsStyle = `
   border-color: #93c5fd;
   background: #1d4ed8;
   color: #ffffff;
+}
+.fig-devtools__hide {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  padding: 4px 0;
+  font-size: 14px;
+  line-height: 1;
 }
 .fig-devtools__body {
   min-height: 0;
@@ -340,17 +333,36 @@ export const DevtoolsStyle = `
 .fig-devtools__tree-button {
   width: 100%;
   min-height: 28px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
+  display: flex;
+  align-items: stretch;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: #17202a;
   cursor: pointer;
-  padding: 5px 8px;
+  padding: 0;
   text-align: left;
+}
+.fig-devtools__tree-rails {
+  flex: none;
+  margin-left: 8px;
+  width: calc(var(--fig-devtools-depth, 0) * 14px);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--fig-devtools-line) 0,
+    var(--fig-devtools-line) 1px,
+    transparent 1px,
+    transparent 14px
+  );
+}
+.fig-devtools__tree-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 0;
 }
 .fig-devtools__tree-button:hover {
   background: #eef2f7;

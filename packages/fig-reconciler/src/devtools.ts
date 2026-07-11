@@ -104,6 +104,7 @@ export interface FigDevtoolsElementInspection {
 
 export interface FigDevtoolsCommitInspection {
   inspectElement(target: unknown): FigDevtoolsElementInspection | null;
+  elementForFiber(fiberId: number): unknown;
 }
 
 export interface FigDevtoolsRendererInfo {

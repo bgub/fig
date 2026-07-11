@@ -93,10 +93,15 @@ describe("@bgub/fig-devtools", () => {
         inspectElement(value) {
           return value === parent ? { rootId: 1, fiberId: 7 } : null;
         },
+        elementForFiber(fiberId) {
+          return fiberId === 7 ? parent : null;
+        },
       },
     );
 
     expect(hook.inspectElement(target)).toEqual({ rootId: 1, fiberId: 7 });
+    expect(hook.elementForFiber(1, 7)).toBe(parent);
+    expect(hook.elementForFiber(1, 99)).toBeNull();
   });
 
   it("keeps bounded commit history and clears history without clearing roots", () => {

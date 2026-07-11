@@ -8,6 +8,7 @@ import {
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import type {
+  FigDevtoolsFiberKind,
   FigDevtoolsFiberSnapshot,
   FigDevtoolsHookSnapshot,
   FigDevtoolsRootSnapshot,
@@ -97,7 +98,9 @@ export function FigDevtools({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const [selection, setSelection] = useState<Selection>(InitialSelection);
   const [selectMode, setSelectMode] = useState(false);
+  const [showHost, setShowHost] = useState(false);
   const [hover, setHover] = useState<InspectHover | null>(null);
+  const [treeHover, setTreeHover] = useState<InspectHover | null>(null);
   const [commitsOpen, setCommitsOpen] = useState(false);
   const subscribe = useMemo(() => hook.subscribe.bind(hook), [hook]);
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
@@ -112,7 +115,22 @@ export function FigDevtools({
     onOpenChange?.(nextOpen);
   };
 
-  useInspectMode(hook, selectMode, setSelection, setSelectMode, setHover);
+  const onFiberHover = (fiber: FigDevtoolsFiberSnapshot | null) => {
+    if (fiber === null || snapshot.root === null) {
+      setTreeHover(null);
+      return;
+    }
+    setTreeHover(fiberInspectHover(hook, snapshot.root, fiber));
+  };
+
+  useInspectMode(
+    hook,
+    selectMode,
+    showHost,
+    setSelection,
+    setSelectMode,
+    setHover,
+  );
 
   return h(
     "section",
@@ -136,22 +154,27 @@ export function FigDevtools({
           setOpen,
           setSelectMode,
           setSelection,
+          setShowHost,
+          showHost,
           snapshot,
         })
       : collapsedTab(setOpen),
     isOpen
-      ? panelBody(
-          hook,
-          snapshot,
-          selection,
-          setSelection,
+      ? panelBody({
           banner,
-          selectMode,
           commitsOpen,
+          hook,
+          onFiberHover,
+          selectMode,
+          selection,
           setCommitsOpen,
-        )
+          setSelection,
+          showHost,
+          snapshot,
+        })
       : null,
     selectMode && hover !== null ? inspectOverlay(hover) : null,
+    !selectMode && treeHover !== null ? inspectOverlay(treeHover) : null,
   );
 }
 
@@ -161,6 +184,8 @@ interface DevtoolsHeaderOptions {
   setOpen: (open: boolean) => void;
   setSelectMode: (selectMode: boolean) => void;
   setSelection: SetSelection;
+  setShowHost: (showHost: boolean) => void;
+  showHost: boolean;
   snapshot: RenderSnapshot;
 }
 
@@ -170,26 +195,23 @@ function devtoolsHeader({
   setOpen,
   setSelectMode,
   setSelection,
+  setShowHost,
+  showHost,
   snapshot,
 }: DevtoolsHeaderOptions): FigNode {
   return h(
     "header",
     { class: "fig-devtools__header" },
     h(
-      "button",
-      {
-        "aria-label": "Hide Fig DevTools",
-        class: "fig-devtools__tab",
-        type: "button",
-        events: [on("click", () => setOpen(false))],
-      },
-      h("span", { class: "fig-devtools__mark" }, "Fig"),
-    ),
-    h(
       "div",
       { class: "fig-devtools__heading" },
       h("strong", { class: "fig-devtools__title" }, "Fig DevTools"),
-      h("span", { class: "fig-devtools__subtitle" }, rootStatus(snapshot)),
+      h("span", {
+        "aria-label": snapshot.live ? "Live" : "Snapshot",
+        class: classNames("fig-devtools__dot", snapshot.live && "is-live"),
+        role: "img",
+        title: snapshot.live ? "Live" : "Snapshot",
+      }),
     ),
     h(
       "div",
@@ -200,21 +222,28 @@ function devtoolsHeader({
           if (!selectMode) setSelection(liveSelection(selection));
           setSelectMode(!selectMode);
         },
-        selectMode,
+        { active: selectMode },
       ),
-      h(
-        "span",
-        {
-          class: classNames("fig-devtools__badge", snapshot.live && "is-live"),
-        },
-        snapshot.live ? "Live" : "Snapshot",
-      ),
+      button("HTML", () => setShowHost(!showHost), {
+        active: showHost,
+        ariaLabel: hostToggleLabel(showHost),
+        ariaPressed: showHost,
+        title: hostToggleLabel(showHost),
+      }),
       snapshot.live
         ? null
         : button("Resume", () => setSelection(liveSelection(selection))),
-      button("Hide", () => setOpen(false)),
+      button("✕", () => setOpen(false), {
+        ariaLabel: "Hide Fig DevTools",
+        className: "fig-devtools__hide",
+        title: "Hide Fig DevTools",
+      }),
     ),
   );
+}
+
+function hostToggleLabel(showHost: boolean): string {
+  return showHost ? "Hide HTML elements" : "Show HTML elements";
 }
 
 function collapsedTab(setOpen: (open: boolean) => void): FigNode {
@@ -235,6 +264,7 @@ function collapsedTab(setOpen: (open: boolean) => void): FigNode {
 function useInspectMode(
   hook: FigDevtoolsHook,
   selectMode: boolean,
+  showHost: boolean,
   setSelection: SetSelection,
   setSelectMode: (selectMode: boolean) => void,
   setHover: (hover: InspectHover | null) => void,
@@ -257,23 +287,13 @@ function useInspectMode(
         if (inspected === null) return null;
 
         const root = hook.roots.get(inspected.rootId);
-        const fiber = findFiber(root?.tree ?? null, inspected.fiberId);
-        if (root === undefined || fiber === null) return null;
+        const inspectedFiber = findFiber(root?.tree ?? null, inspected.fiberId);
+        if (root === undefined || inspectedFiber === null) return null;
 
-        const rect = target.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) return null;
+        const fiber = nearestVisibleFiber(root.tree, inspectedFiber, showHost);
+        if (fiber === null) return null;
 
-        return {
-          fiberId: fiber.id,
-          label: inspectLabel(root.tree, fiber),
-          rect: {
-            height: rect.height,
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-          },
-          rootId: inspected.rootId,
-        };
+        return fiberInspectHover(hook, root, fiber);
       };
 
       const updateHover = (hover: InspectHover | null) => {
@@ -316,7 +336,7 @@ function useInspectMode(
       document.addEventListener("click", onClick, { capture: true, signal });
       document.addEventListener("keydown", onKeyDown, { signal });
     },
-    [hook, selectMode],
+    [hook, selectMode, showHost],
   );
 }
 
@@ -399,16 +419,31 @@ function nearestComponentOwner(
   return null;
 }
 
-function panelBody(
-  hook: FigDevtoolsHook,
-  snapshot: RenderSnapshot,
-  selection: Selection,
-  setSelection: SetSelection,
-  banner: string | undefined,
-  selectMode: boolean,
-  commitsOpen: boolean,
-  setCommitsOpen: (commitsOpen: boolean) => void,
-): FigNode {
+interface PanelBodyOptions {
+  banner: string | undefined;
+  commitsOpen: boolean;
+  hook: FigDevtoolsHook;
+  onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void;
+  selectMode: boolean;
+  selection: Selection;
+  setCommitsOpen: (commitsOpen: boolean) => void;
+  setSelection: SetSelection;
+  showHost: boolean;
+  snapshot: RenderSnapshot;
+}
+
+function panelBody({
+  banner,
+  commitsOpen,
+  hook,
+  onFiberHover,
+  selectMode,
+  selection,
+  setCommitsOpen,
+  setSelection,
+  showHost,
+  snapshot,
+}: PanelBodyOptions): FigNode {
   return h(
     "div",
     { class: "fig-devtools__body" },
@@ -418,7 +453,7 @@ function panelBody(
       h(
         "div",
         { class: "fig-devtools__tree-pane" },
-        treePane(snapshot, selection, setSelection),
+        treePane(snapshot, selection, setSelection, showHost, onFiberHover),
       ),
       h(
         "div",
@@ -588,6 +623,8 @@ function treePane(
   snapshot: RenderSnapshot,
   selection: Selection,
   setSelection: SetSelection,
+  showHost: boolean,
+  onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void,
 ): FigNode {
   if (snapshot.root === null) {
     return h("p", { class: "fig-devtools__empty" }, "Render a Fig root.");
@@ -595,8 +632,18 @@ function treePane(
 
   return h(
     "div",
-    { class: "fig-devtools__tree" },
-    fiberTree(snapshot.root.tree, 0, selection, setSelection),
+    {
+      class: "fig-devtools__tree",
+      events: [on("pointerleave", () => onFiberHover(null))],
+    },
+    fiberTree(
+      snapshot.root.tree,
+      0,
+      selection,
+      setSelection,
+      showHost,
+      onFiberHover,
+    ),
   );
 }
 
@@ -605,6 +652,8 @@ function fiberTree(
   depth: number,
   selection: Selection,
   setSelection: SetSelection,
+  showHost: boolean,
+  onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void,
 ): FigNode {
   return h(
     "div",
@@ -616,22 +665,130 @@ function fiberTree(
           "fig-devtools__tree-button",
           fiber.id === selection.selectedFiberId && "is-selected",
         ),
-        style: { paddingLeft: `${8 + depth * 14}px` },
         type: "button",
         events: [
           on("click", () => setSelection(fiberSelection(selection, fiber.id))),
+          on("pointerenter", () => onFiberHover(fiber)),
         ],
       },
-      h("span", { class: `fig-devtools__kind is-${fiber.kind}` }),
-      h("span", { class: "fig-devtools__tree-label" }, treeLabel(fiber)),
-      fiber.hooks.length === 0
-        ? null
-        : h("span", { class: "fig-devtools__hook-count" }, fiber.hooks.length),
+      indentGuides(depth),
+      h(
+        "span",
+        { class: "fig-devtools__tree-row" },
+        h("span", { class: `fig-devtools__kind is-${fiber.kind}` }),
+        h("span", { class: "fig-devtools__tree-label" }, treeLabel(fiber)),
+        fiber.hooks.length === 0
+          ? null
+          : h(
+              "span",
+              { class: "fig-devtools__hook-count" },
+              fiber.hooks.length,
+            ),
+      ),
     ),
-    fiber.children.map((child) =>
-      fiberTree(child, depth + 1, selection, setSelection),
+    visibleChildren(fiber, showHost).map((child) =>
+      fiberTree(
+        child,
+        depth + 1,
+        selection,
+        setSelection,
+        showHost,
+        onFiberHover,
+      ),
     ),
   );
+}
+
+function isHostKind(kind: FigDevtoolsFiberKind): boolean {
+  return kind === "host" || kind === "text";
+}
+
+function nearestVisibleFiber(
+  root: FigDevtoolsFiberSnapshot,
+  fiber: FigDevtoolsFiberSnapshot,
+  showHost: boolean,
+): FigDevtoolsFiberSnapshot | null {
+  if (showHost) return fiber;
+
+  let cursor: FigDevtoolsFiberSnapshot | null = fiber;
+  while (cursor !== null && isHostKind(cursor.kind)) {
+    cursor = findFiber(root, cursor.parentId);
+  }
+  return cursor;
+}
+
+function fiberInspectHover(
+  hook: FigDevtoolsHook,
+  root: FigDevtoolsRootSnapshot,
+  fiber: FigDevtoolsFiberSnapshot,
+): InspectHover | null {
+  const rect = fiberScreenRect(hook, root.id, fiber);
+  if (rect === null) return null;
+
+  return {
+    fiberId: fiber.id,
+    label: inspectLabel(root.tree, fiber),
+    rect,
+    rootId: root.id,
+  };
+}
+
+function fiberScreenRect(
+  hook: FigDevtoolsHook,
+  rootId: number,
+  fiber: FigDevtoolsFiberSnapshot,
+): InspectRect | null {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+
+  const visit = (node: FigDevtoolsFiberSnapshot): void => {
+    if (isHostKind(node.kind)) {
+      const element = hook.elementForFiber(rootId, node.id);
+      if (isElementTarget(element)) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width > 0 || rect.height > 0) {
+          left = Math.min(left, rect.left);
+          top = Math.min(top, rect.top);
+          right = Math.max(right, rect.left + rect.width);
+          bottom = Math.max(bottom, rect.top + rect.height);
+        }
+      }
+    }
+    for (const child of node.children) visit(child);
+  };
+
+  visit(fiber);
+  if (!Number.isFinite(left)) return null;
+
+  return { height: bottom - top, left, top, width: right - left };
+}
+
+function visibleChildren(
+  fiber: FigDevtoolsFiberSnapshot,
+  showHost: boolean,
+): FigDevtoolsFiberSnapshot[] {
+  if (showHost) return fiber.children;
+
+  const visible: FigDevtoolsFiberSnapshot[] = [];
+  for (const child of fiber.children) {
+    if (isHostKind(child.kind)) {
+      visible.push(...visibleChildren(child, showHost));
+    } else {
+      visible.push(child);
+    }
+  }
+  return visible;
+}
+
+function indentGuides(depth: number): FigNode {
+  // One rail element per row; a repeating gradient (see style.ts) draws one
+  // guide line per depth level, so this stays O(1) nodes regardless of depth.
+  return h("span", {
+    class: "fig-devtools__tree-rails",
+    style: { "--fig-devtools-depth": String(depth) },
+  });
 }
 
 function detailsPane(
@@ -832,11 +989,27 @@ function row(label: string, value: string): FigNode {
   );
 }
 
-function button(label: string, onClick: () => void, active = false): FigNode {
+interface ButtonOptions {
+  active?: boolean;
+  ariaLabel?: string;
+  ariaPressed?: boolean;
+  className?: string | false;
+  title?: string;
+}
+
+function button(
+  label: string,
+  onClick: () => void,
+  options: ButtonOptions = {},
+): FigNode {
+  const { active = false, ariaLabel, ariaPressed, className, title } = options;
   return h(
     "button",
     {
-      class: classNames("fig-devtools__button", active && "is-active"),
+      "aria-label": ariaLabel,
+      "aria-pressed": ariaPressed === undefined ? undefined : String(ariaPressed),
+      class: classNames("fig-devtools__button", className, active && "is-active"),
+      title,
       type: "button",
       events: [on("click", onClick)],
     },
@@ -875,17 +1048,6 @@ function currentSnapshot(
     commit: selectedCommit,
     live: selectedCommit === null,
   };
-}
-
-function rootStatus(snapshot: RenderSnapshot): string {
-  if (snapshot.root === null) return "Waiting for a commit";
-
-  const count = snapshot.root.tree.children.length;
-  const commitLabel =
-    snapshot.commit === null
-      ? "latest commit"
-      : `commit #${snapshot.commit.id}`;
-  return `Root ${snapshot.root.id} - ${commitLabel} - ${count} ${plural(count, "child", "children")}`;
 }
 
 function liveSelection(selection: Selection): Selection {
@@ -1035,7 +1197,7 @@ function tabLabel(tab: DetailTab): string {
   return "Data";
 }
 
-function classNames(...values: Array<string | false>): string {
+function classNames(...values: Array<string | false | undefined>): string {
   return values.filter(Boolean).join(" ");
 }
 

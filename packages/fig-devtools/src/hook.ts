@@ -17,6 +17,7 @@ export interface FigDevtoolsHook extends FigDevtoolsGlobalHook {
   subscribe(listener: FigDevtoolsListener): () => void;
   clear(): void;
   inspectElement(target: unknown): FigDevtoolsElementInspection | null;
+  elementForFiber(rootId: number, fiberId: number): unknown;
 }
 
 export interface FigDevtoolsCommitSnapshot {
@@ -102,6 +103,9 @@ export function createFigDevtoolsGlobalHook(
     inspectElement(target) {
       return inspectElement(target, roots, inspections);
     },
+    elementForFiber(rootId, fiberId) {
+      return inspections.get(rootId)?.elementForFiber(fiberId) ?? null;
+    },
   };
 }
 
@@ -129,7 +133,8 @@ export function isFigDevtoolsHook(value: unknown): value is FigDevtoolsHook {
     typeof candidate.onCommitRoot === "function" &&
     typeof candidate.subscribe === "function" &&
     typeof candidate.clear === "function" &&
-    typeof candidate.inspectElement === "function"
+    typeof candidate.inspectElement === "function" &&
+    typeof candidate.elementForFiber === "function"
   );
 }
 

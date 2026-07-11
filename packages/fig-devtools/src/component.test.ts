@@ -28,7 +28,7 @@ describe("FigDevtools panel", () => {
         );
       });
 
-      expect(devtoolsContainer.textContent).toContain("Waiting for a commit");
+      expect(devtoolsContainer.textContent).toContain("Render a Fig root.");
 
       function Counter() {
         const [count] = useState(1);
@@ -43,7 +43,6 @@ describe("FigDevtools panel", () => {
 
       const panelText = devtoolsContainer.textContent ?? "";
       expect(panelText).not.toContain("Render a Fig root.");
-      expect(panelText).not.toContain("Waiting for a commit");
       expect(panelText).toContain("Counter");
     } finally {
       target[FIG_DEVTOOLS_HOOK_KEY] = previous;

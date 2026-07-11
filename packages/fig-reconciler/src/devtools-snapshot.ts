@@ -104,6 +104,7 @@ interface DevtoolsRoot {
 
 interface DevtoolsInspectionState {
   hostFibers: WeakMap<object, number>;
+  fiberElements: Map<number, object>;
 }
 
 const devtoolsFiberIds = new WeakMap<object, number>();
@@ -254,7 +255,7 @@ function devtoolsRootId(root: object): number {
 }
 
 function createDevtoolsInspectionState(): DevtoolsInspectionState {
-  return { hostFibers: new WeakMap() };
+  return { hostFibers: new WeakMap(), fiberElements: new Map() };
 }
 
 function createDevtoolsCommitInspection(
@@ -268,6 +269,9 @@ function createDevtoolsCommitInspection(
       const fiberId = inspection.hostFibers.get(target);
       return fiberId === undefined ? null : { rootId, fiberId };
     },
+    elementForFiber(fiberId) {
+      return inspection.fiberElements.get(fiberId) ?? null;
+    },
   };
 }
 
@@ -279,6 +283,7 @@ function recordDevtoolsHostFiber(
   if (node.tag !== HostTag && node.tag !== TextTag) return;
   if (typeof node.stateNode !== "object" || node.stateNode === null) return;
   inspection.hostFibers.set(node.stateNode, id);
+  inspection.fiberElements.set(id, node.stateNode);
 }
 
 function devtoolsFiberId(node: DevtoolsFiber): number {
