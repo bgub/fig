@@ -87,10 +87,14 @@ export function hydrateDevtoolsPanel(
     );
   };
 
-  // The snapshot script streams after the aside; during streaming this
-  // module can execute before either finishes parsing, so wait for the
-  // document before reading and adopting that markup.
-  if (document.readyState === "loading") {
+  // The snapshot script streams right after the aside, and this module runs
+  // only once the parser is past this module's own later script tag — so if
+  // the snapshot script exists, the panel markup and JSON are complete and
+  // hydration can adopt them immediately, mid-stream. The DOMContentLoaded
+  // fallback covers entries loaded ahead of the snapshot.
+  if (document.getElementById(devtoolsSnapshotScriptId) !== null) {
+    hydrate();
+  } else if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", hydrate, { once: true });
   } else {
     hydrate();

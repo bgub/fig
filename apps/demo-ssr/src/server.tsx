@@ -360,73 +360,37 @@ function bootstrapScripts(
   ].join("");
 }
 
+// The renderer flushes the whole shell as its first enqueue and keeps later
+// chunk boundaries at complete-markup edges (concepts/server-rendering.md),
+// so appending the bootstrap to the first chunk lands it right after the
+// shell — DevTools aside included — inside one write. No write boundary ever
+// splits the shell, so the browser gets no paint opportunity between the app
+// pane and the aside that reserves the sidebar.
 async function pipeStream(
   stream: ReadableStream<Uint8Array>,
   response: ServerResponse,
   bootstrap: string,
 ): Promise<void> {
   const reader = stream.getReader();
-  const decoder = new TextDecoder();
   let bootstrapped = false;
-  let pending = "";
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
-    const chunk = done
-      ? decoder.decode()
-      : value === undefined
-        ? ""
-        : decoder.decode(value, { stream: true });
-
+    if (done) {
+      if (!bootstrapped) await writeResponse(response, bootstrap);
+      return;
+    }
     if (bootstrapped) {
-      await writeResponse(response, chunk);
-    } else {
-      pending += chunk;
-      bootstrapped = await flushShell(response, pending, bootstrap);
-      if (bootstrapped) pending = "";
+      await writeResponse(response, value);
+      continue;
     }
 
-    if (!done) continue;
-    if (!bootstrapped) {
-      await writeResponse(response, pending);
-      await writeResponse(response, bootstrap);
-    }
-    return;
+    bootstrapped = true;
+    await writeResponse(
+      response,
+      Buffer.concat([value, Buffer.from(bootstrap)]),
+    );
   }
-}
-
-async function flushShell(
-  response: ServerResponse,
-  html: string,
-  bootstrap: string,
-): Promise<boolean> {
-  const shellEnd = rootElementEndIndex(html);
-  if (shellEnd === -1) return false;
-
-  await writeResponse(response, html.slice(0, shellEnd));
-  await writeResponse(response, bootstrap);
-  await writeResponse(response, html.slice(shellEnd));
-  return true;
-}
-
-function rootElementEndIndex(html: string): number {
-  const rootStart = html.indexOf(`<div id="${demoRootId}"`);
-  if (rootStart === -1) return -1;
-
-  const tags = /<\/?div\b[^>]*>/g;
-  tags.lastIndex = rootStart;
-
-  let depth = 0;
-  for (let match = tags.exec(html); match !== null; match = tags.exec(html)) {
-    if (match[0].startsWith("</")) {
-      depth -= 1;
-      if (depth === 0) return match.index + match[0].length;
-    } else {
-      depth += 1;
-    }
-  }
-
-  return -1;
 }
 
 function writeResponse(
