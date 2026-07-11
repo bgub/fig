@@ -20,6 +20,7 @@
     "@bgub/fig": "workspace:*",
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-reconciler": "workspace:*",
     "@bgub/fig-server": "workspace:*"
   },
   "devDependencies": {

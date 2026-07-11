@@ -53,7 +53,6 @@ body {
   background: #171923;
 }
 
-html[data-fig-devtools-closed] .fig-demo-devtools-pane,
 .fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
   width: 0;
   min-width: 0;

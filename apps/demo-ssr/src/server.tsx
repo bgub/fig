@@ -18,8 +18,8 @@ import {
   type DemoRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
+  demoDevtoolsOpenCookie,
   demoDevtoolsPaneId,
-  demoDevtoolsStateScript,
   demoRootId,
   scaledDemoDelay,
   serverInfoResourceId,
@@ -132,7 +132,6 @@ async function handleRequest(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="stylesheet" href="/style.css" />
-        <script nonce={nonce} unsafeHTML={demoDevtoolsStateScript} />
       </head>
       <body>
         {/* The DevTools layout ships in the shell so the sidebar space is
@@ -165,6 +164,7 @@ async function handleRequest(
                 paints real chrome; the client hydrates it with the live
                 hook. */}
             <FigDevtools
+              defaultOpen={devtoolsOpenFromCookie(request)}
               hook={createFigDevtoolsGlobalHook()}
               placement="sidebar"
             />
@@ -324,6 +324,13 @@ function abortDelayFor(url: URL): number | null {
 
   const delayMs = Number(value);
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null;
+}
+
+function devtoolsOpenFromCookie(request: IncomingMessage): boolean {
+  const cookies = request.headers.cookie ?? "";
+  return !cookies
+    .split(";")
+    .some((entry) => entry.trim() === `${demoDevtoolsOpenCookie}=false`);
 }
 
 function publicUrl(port: number): string {

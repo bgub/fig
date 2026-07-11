@@ -7,7 +7,7 @@ import {
   createClientRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
-  demoDevtoolsOpenKey,
+  demoDevtoolsOpenCookie,
   demoDevtoolsPaneId,
   demoRootId,
 } from "./app.tsx";
@@ -56,41 +56,31 @@ function mountDevtoolsPanel(
   container: HTMLElement,
   hook: ReturnType<typeof ensureFigDevtoolsGlobalHook>,
 ): void {
-  const open = readStoredDevtoolsOpen();
   const panel = (
     <FigDevtools
+      defaultOpen={readDevtoolsOpenCookie()}
       hook={hook}
+      onOpenChange={storeDevtoolsOpenCookie}
       placement="sidebar"
-      defaultOpen={open}
-      onOpenChange={storeDevtoolsOpen}
     />
   );
 
-  // The shell streams the panel's empty state; hydrate it when the stored
-  // state matches the server-rendered default (open). A closed panel renders
-  // fresh — the pane is collapsed before first paint, so nothing flashes.
-  if (open && container.firstChild !== null) {
+  // The shell streams the panel rendered from the same cookie state, so the
+  // client can always hydrate it in place.
+  if (container.firstChild !== null) {
     hydrateRoot(container, panel, { devtools: false });
     return;
   }
 
-  container.textContent = "";
   createRoot(container, { devtools: false }).render(panel);
 }
 
-function readStoredDevtoolsOpen(): boolean {
-  try {
-    return localStorage.getItem(demoDevtoolsOpenKey) !== "false";
-  } catch {
-    return true;
-  }
+function readDevtoolsOpenCookie(): boolean {
+  return !document.cookie
+    .split(";")
+    .some((entry) => entry.trim() === `${demoDevtoolsOpenCookie}=false`);
 }
 
-function storeDevtoolsOpen(open: boolean): void {
-  try {
-    localStorage.setItem(demoDevtoolsOpenKey, String(open));
-  } catch {
-    // Private mode: the panel still toggles, it just isn't remembered.
-  }
-  document.documentElement.toggleAttribute("data-fig-devtools-closed", !open);
+function storeDevtoolsOpenCookie(open: boolean): void {
+  document.cookie = `${demoDevtoolsOpenCookie}=${String(open)};path=/;max-age=31536000;samesite=lax`;
 }

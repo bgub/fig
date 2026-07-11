@@ -1,10 +1,6 @@
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
-import {
-  createPayloadResponse,
-  fetchPayload,
-  isPayloadRequestCancelled,
-} from "@bgub/fig-server/payload";
+import { createPayloadResponse, fetchPayload } from "@bgub/fig-server/payload";
 import {
   AppRefreshButton,
   RefreshButton,
@@ -14,26 +10,23 @@ import {
 import {
   appRefreshButtonReferenceId,
   appRootId,
-  devtoolsOpenKey,
+  devtoolsOpenCookie,
   devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
+  payloadFramesGlobal,
+  type PayloadFramesGlobal,
   refreshButtonReferenceId,
 } from "./shared.ts";
-import { ErrorShell } from "./shell.tsx";
 
 const rootElement = document.getElementById(appRootId);
 if (rootElement === null) {
   throw new Error("Missing payload demo root.");
 }
-const appRootElement = rootElement;
 const devtoolsContainer = document.getElementById(devtoolsPaneId);
 if (devtoolsContainer === null) {
   throw new Error("Missing payload demo devtools pane.");
 }
-
-const devtoolsHook = ensureFigDevtoolsGlobalHook();
-mountDevtoolsPanel(devtoolsContainer, devtoolsHook);
 
 const response = createPayloadResponse({
   resolveClientReference(metadata) {
@@ -42,25 +35,14 @@ const response = createPayloadResponse({
     throw new Error(`Unknown client reference "${metadata.id}".`);
   },
 });
-const root = createRoot(appRootElement);
-const initialRequest = new AbortController();
-let shellCleared = false;
 
-window.addEventListener("pagehide", () => initialRequest.abort(), {
-  once: true,
-});
-window.addEventListener("beforeunload", () => initialRequest.abort(), {
-  once: true,
-});
-
-function render(node = response.getRoot()): void {
-  if (!shellCleared) {
-    appRootElement.textContent = "";
-    shellCleared = true;
-  }
-
-  root.render(node);
-}
+// The document inlined the payload rows it was rendered from as frame
+// scripts; replaying them into the response reconstructs the exact tree the
+// server turned into HTML, so hydration adopts the streamed markup.
+const frames = (globalThis as Record<string, unknown>)[
+  payloadFramesGlobal
+] as PayloadFramesGlobal;
+frames.s((frame) => response.processStringChunk(frame));
 
 function refreshBoundary(boundary: string, seed: number): Promise<void> {
   return fetchPayload(response, `/payload?seed=${seed}`, {
@@ -76,57 +58,37 @@ setAppRefreshHandler(async (seed) => {
   }
 });
 
-response.subscribe(() => render());
+const devtoolsHook = ensureFigDevtoolsGlobalHook();
 
-void fetchPayload(response, "/payload", {
-  signal: initialRequest.signal,
-}).catch((error: unknown) => {
-  if (isPayloadRequestCancelled(error)) return;
-  render(<ErrorShell error={error} />);
+void response.rootReady.then(() => {
+  const root = hydrateRoot(rootElement, response.getRoot());
+  response.subscribe(() => root.render(response.getRoot()));
+  document.body.dataset.figPayloadDemo = "ready";
 });
 
-document.body.dataset.figPayloadDemo = "ready";
-
-function mountDevtoolsPanel(
-  container: HTMLElement,
-  hook: ReturnType<typeof ensureFigDevtoolsGlobalHook>,
-): void {
-  const open = readStoredDevtoolsOpen();
-  const panel = (
+// The server prerendered the panel from the payload model (structure only —
+// no hooks or fiber ids). Swap in the live panel once the first real commit
+// gives the hook actual data; the replacement paints near-identical pixels.
+const unsubscribeDevtoolsSwap = devtoolsHook.subscribe(() => {
+  if (devtoolsHook.commits.length === 0) return;
+  unsubscribeDevtoolsSwap();
+  devtoolsContainer.textContent = "";
+  createRoot(devtoolsContainer, { devtools: false }).render(
     <FigDevtools
-      hook={hook}
+      defaultOpen={readDevtoolsOpenCookie()}
+      hook={devtoolsHook}
+      onOpenChange={storeDevtoolsOpenCookie}
       placement="sidebar"
-      defaultOpen={open}
-      onOpenChange={storeDevtoolsOpen}
-    />
+    />,
   );
+});
 
-  // The shell server-renders the panel's empty state; hydrate it when the
-  // stored state matches the server-rendered default (open). A closed panel
-  // renders fresh — the pane is collapsed before first paint, so nothing
-  // flashes.
-  if (open && container.firstChild !== null) {
-    hydrateRoot(container, panel, { devtools: false });
-    return;
-  }
-
-  container.textContent = "";
-  createRoot(container, { devtools: false }).render(panel);
+function readDevtoolsOpenCookie(): boolean {
+  return !document.cookie
+    .split(";")
+    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
 }
 
-function readStoredDevtoolsOpen(): boolean {
-  try {
-    return localStorage.getItem(devtoolsOpenKey) !== "false";
-  } catch {
-    return true;
-  }
-}
-
-function storeDevtoolsOpen(open: boolean): void {
-  try {
-    localStorage.setItem(devtoolsOpenKey, String(open));
-  } catch {
-    // Private mode: the panel still toggles, it just isn't remembered.
-  }
-  document.documentElement.toggleAttribute("data-fig-devtools-closed", !open);
+function storeDevtoolsOpenCookie(open: boolean): void {
+  document.cookie = `${devtoolsOpenCookie}=${String(open)};path=/;max-age=31536000;samesite=lax`;
 }

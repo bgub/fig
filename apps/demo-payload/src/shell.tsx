@@ -1,7 +1,5 @@
 import type { FigNode } from "@bgub/fig";
 
-// Shared between the loading shell and the loaded app so the header chrome
-// is byte-identical and the stream swap causes no layout shift.
 export const appDescription =
   "Initial render is fetched as a payload stream; the dashboard and note cards can refresh as independent server-rendered boundaries.";
 
@@ -34,39 +32,6 @@ export function AppFrame({
         </div>
       </main>
     </div>
-  );
-}
-
-export function LoadingShell() {
-  return (
-    <AppFrame
-      actions={
-        <div class="actions">
-          <a class="button" href="/payload">
-            Raw stream
-          </a>
-          <button class="button" disabled type="button">
-            Refresh app (0)
-          </button>
-          <a class="button" href="/">
-            Reload page
-          </a>
-        </div>
-      }
-      description={appDescription}
-      title="Server Components"
-    >
-      <p class="muted">Loading server component stream...</p>
-    </AppFrame>
-  );
-}
-
-export function ErrorShell({ error }: { error: unknown }) {
-  return (
-    <AppFrame
-      description="payload request failed"
-      title={error instanceof Error ? error.message : String(error)}
-    />
   );
 }
 

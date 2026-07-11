@@ -14,6 +14,15 @@ test("streams data resources through initial payload and boundary refresh", asyn
     }
   });
 
+  // The initial document is server-rendered from the payload and carries the
+  // rows inline: the server components' HTML streams with the page and the
+  // DevTools panel arrives prerendered with the tree.
+  const documentHtml = await (await page.request.get("/")).text();
+  expect(documentHtml).toContain("Regional order pulse");
+  expect(documentHtml).toContain("data-fig-payload-frame");
+  expect(documentHtml).toContain("fig-devtools__tree-label");
+  expect(documentHtml).not.toContain("Loading server component");
+
   await page.goto("/", { waitUntil: "commit" });
   await expect(page.locator("body")).toHaveAttribute(
     "data-fig-payload-demo",
@@ -28,7 +37,8 @@ test("streams data resources through initial payload and boundary refresh", asyn
   ).toBeVisible();
   await expect(shared).toContainText("shared · bucket-");
   await expect(serverOnly).toContainText("server-only · request ");
-  expect(payloadRequests).toHaveLength(1);
+  // Hydration replays the inlined frames: no initial /payload fetch.
+  expect(payloadRequests).toHaveLength(0);
 
   const seedBefore = await dashboard.getAttribute("data-seed");
   const serverOnlyBefore = await serverOnly.textContent();
@@ -37,7 +47,7 @@ test("streams data resources through initial payload and boundary refresh", asyn
   await expect(dashboard).not.toHaveAttribute("data-seed", seedBefore ?? "");
   await expect(shared).toContainText("shared · bucket-");
   await expect(serverOnly).not.toHaveText(serverOnlyBefore ?? "");
-  expect(payloadRequests).toHaveLength(2);
+  expect(payloadRequests).toHaveLength(1);
   expect(errors()).toEqual([]);
 });
 
@@ -73,9 +83,8 @@ test("refreshes active server boundaries after a manual boundary refresh", async
   await expect(dashboard).toHaveAttribute("data-seed", "0");
   await expect(note).toHaveAttribute("data-note-seed", "0");
   await expect(note).not.toHaveClass(/tone-warn/);
-  expect(payloadRequests).toEqual([
-    { boundary: null, url: expect.any(String) },
-  ]);
+  // The initial render arrives inlined with the document.
+  expect(payloadRequests).toEqual([]);
 
   const beforeFeedRefresh = await viewTransitionSnapshotCount(page);
   await page.getByRole("button", { name: "Refresh feed (0)" }).click();
