@@ -38,7 +38,7 @@ export type FigDevtoolsPosition =
   | "TopRight"
   | "TopLeft";
 
-type DetailTab = "inspect" | "props" | "hooks" | "context" | "data";
+type DetailTab = "details" | "advanced";
 type DataResourceSnapshot = FigDevtoolsRootSnapshot["dataResources"][number];
 
 interface Selection {
@@ -73,18 +73,12 @@ interface RenderSnapshot {
   live: boolean;
 }
 
-const DetailTabs: DetailTab[] = [
-  "inspect",
-  "props",
-  "hooks",
-  "context",
-  "data",
-];
+const DetailTabs: DetailTab[] = ["details", "advanced"];
 const InitialSelection: Selection = {
   selectedCommitId: null,
   selectedRootId: null,
   selectedFiberId: null,
-  tab: "inspect",
+  tab: "details",
 };
 
 export function FigDevtools({
@@ -889,30 +883,159 @@ function detailTab(
   fiber: FigDevtoolsFiberSnapshot,
   root: FigDevtoolsRootSnapshot | null,
 ): FigNode {
-  if (tab === "props") return recordSection("Props", fiber.props);
-  if (tab === "hooks") return hooksSection(fiber.hooks);
-  if (tab === "context")
-    return listSection("Context reads", fiber.contextDependencies);
-  if (tab === "data") return dataResourcesSection(root?.dataResources ?? []);
+  return tab === "advanced" ? advancedTab(fiber) : detailsTab(fiber, root);
+}
 
+// The everyday view: props, hooks, and (when present) context and data,
+// stacked so the common questions are answered without switching tabs.
+function detailsTab(
+  fiber: FigDevtoolsFiberSnapshot,
+  root: FigDevtoolsRootSnapshot | null,
+): FigNode {
   return h(
     "div",
     { class: "fig-devtools__inspect" },
-    row("Kind", fiber.kind),
-    row("Key", fiber.key === null ? "none" : String(fiber.key)),
-    row("Fiber id", String(fiber.id)),
-    row("Work", formatWork(fiber.pendingWork, fiber.childWork)),
+    propsSection(fiber.props),
+    hooksSection(fiber.hooks),
+    contextSection(fiber.contextDependencies),
+    dataResourcesSection(root?.dataResources ?? []),
+  );
+}
+
+// The low-level fiber internals, tucked away from the everyday view.
+function advancedTab(fiber: FigDevtoolsFiberSnapshot): FigNode {
+  return h(
+    "div",
+    { class: "fig-devtools__inspect" },
+    section("Fiber", [
+      row("Kind", fiber.kind),
+      row("Key", fiber.key === null ? "none" : String(fiber.key)),
+      row("Fiber id", String(fiber.id)),
+      row("Work", formatWork(fiber.pendingWork, fiber.childWork)),
+    ]),
     fiber.host === undefined ? null : hostSection(fiber),
     fiber.capturedError === undefined
       ? null
-      : h(
-          "section",
-          { class: "fig-devtools__section" },
-          h("h3", { class: "fig-devtools__section-title" }, "Error"),
+      : section("Error", [
           row("Captured", formatValue(fiber.capturedError)),
           row("Stack", fiber.componentStack?.trim() ?? ""),
+        ]),
+  );
+}
+
+function section(title: string, body: FigNode | FigNode[]): FigNode {
+  return h(
+    "section",
+    { class: "fig-devtools__section" },
+    h("h3", { class: "fig-devtools__section-title" }, title),
+    body,
+  );
+}
+
+function propsSection(props: Record<string, unknown>): FigNode {
+  const entries = Object.entries(props);
+  return section(
+    "Props",
+    entries.length === 0
+      ? emptyNote("No props")
+      : entries.map(([key, value]) => kvRow(key, value)),
+  );
+}
+
+function hooksSection(hooks: FigDevtoolsHookSnapshot[]): FigNode {
+  return section(
+    "Hooks",
+    hooks.length === 0
+      ? emptyNote("No hooks")
+      : hooks.map((hook, index) => hookRow(hook, index)),
+  );
+}
+
+function hookRow(hook: FigDevtoolsHookSnapshot, index: number): FigNode {
+  return h(
+    "div",
+    { class: "fig-devtools__hook", key: hook.id },
+    h(
+      "div",
+      { class: "fig-devtools__hook-head" },
+      h("span", { class: "fig-devtools__hook-index" }, String(index + 1)),
+      h("span", { class: "fig-devtools__hook-kind" }, hook.kind),
+      hook.phase === undefined
+        ? null
+        : h("span", { class: "fig-devtools__hook-tag" }, hook.phase),
+      hook.active
+        ? h("span", { class: "fig-devtools__hook-tag is-active" }, "active")
+        : null,
+      hook.state === undefined ? null : valueCode(hook.state),
+    ),
+    hook.deps === undefined || hook.deps === null
+      ? null
+      : h(
+          "div",
+          { class: "fig-devtools__hook-deps" },
+          h("span", { class: "fig-devtools__row-label" }, "deps"),
+          valueCode(hook.deps),
         ),
   );
+}
+
+function contextSection(items: string[]): FigNode | null {
+  if (items.length === 0) return null;
+  return section(
+    "Context",
+    h(
+      "div",
+      { class: "fig-devtools__chips" },
+      items.map((name) =>
+        h("span", { class: "fig-devtools__value-chip", key: name }, name),
+      ),
+    ),
+  );
+}
+
+function dataResourcesSection(
+  entries: FigDevtoolsRootSnapshot["dataResources"],
+): FigNode | null {
+  if (entries.length === 0) return null;
+  return section("Data", entries.map(dataResourceSection));
+}
+
+function dataResourceSection(entry: DataResourceSnapshot): FigNode {
+  return h(
+    "div",
+    { class: "fig-devtools__data", key: entry.canonicalKey },
+    dataResourceRows(entry),
+  );
+}
+
+function dataResourceRows(entry: DataResourceSnapshot): FigNode[] {
+  const rows = [
+    kvRow(entry.canonicalKey, entry.status),
+    kvRow("Key", entry.key),
+    row("Subscribers", String(entry.subscriberCount)),
+    row("Stale", entry.stale ? "yes" : "no"),
+  ];
+
+  if (entry.pending) rows.push(row("Pending", "yes"));
+  if (entry.hasValue) rows.push(kvRow("Value", entry.value));
+  if (entry.error !== undefined) rows.push(kvRow("Error", entry.error));
+  if (entry.refreshError !== undefined) {
+    rows.push(kvRow("Refresh error", entry.refreshError));
+  }
+
+  return rows;
+}
+
+function emptyNote(text: string): FigNode {
+  return h("p", { class: "fig-devtools__empty" }, text);
+}
+
+function hostSection(fiber: FigDevtoolsFiberSnapshot): FigNode {
+  const html =
+    fiber.host?.kind === "text"
+      ? formatTextNode(fiber)
+      : formatElementNode(fiber);
+  return section("HTML", h("pre", { class: "fig-devtools__html" }, html));
 }
 
 function formatWork(
@@ -924,100 +1047,33 @@ function formatWork(
   return `${own} / child ${child}`;
 }
 
-function hostSection(fiber: FigDevtoolsFiberSnapshot): FigNode {
-  if (fiber.host?.kind === "text") {
-    return h(
-      "section",
-      { class: "fig-devtools__section" },
-      h("h3", { class: "fig-devtools__section-title" }, "HTML"),
-      h("pre", { class: "fig-devtools__html" }, formatTextNode(fiber)),
-    );
-  }
-
-  return h(
-    "section",
-    { class: "fig-devtools__section" },
-    h("h3", { class: "fig-devtools__section-title" }, "HTML"),
-    h("pre", { class: "fig-devtools__html" }, formatElementNode(fiber)),
-  );
-}
-
-function recordSection(
-  title: string,
-  record: Record<string, unknown>,
-): FigNode {
-  const entries = Object.entries(record);
-
-  return h(
-    "section",
-    { class: "fig-devtools__section" },
-    h("h3", { class: "fig-devtools__section-title" }, title),
-    entries.length === 0
-      ? h("p", { class: "fig-devtools__empty" }, "None")
-      : entries.map(([key, value]) => row(key, formatValue(value))),
-  );
-}
-
-function hooksSection(hooks: FigDevtoolsHookSnapshot[]): FigNode {
-  return h(
-    "section",
-    { class: "fig-devtools__section" },
-    h("h3", { class: "fig-devtools__section-title" }, "Hooks"),
-    hooks.length === 0
-      ? h("p", { class: "fig-devtools__empty" }, "None")
-      : hooks.map((hook) => row(`#${hook.id} ${hook.kind}`, hookValue(hook))),
-  );
-}
-
-function dataResourcesSection(
-  entries: FigDevtoolsRootSnapshot["dataResources"],
-): FigNode {
-  return h(
-    "section",
-    { class: "fig-devtools__section" },
-    h("h3", { class: "fig-devtools__section-title" }, "Data resources"),
-    entries.length === 0
-      ? h("p", { class: "fig-devtools__empty" }, "None")
-      : entries.map(dataResourceSection),
-  );
-}
-
-function dataResourceSection(entry: DataResourceSnapshot): FigNode {
+// A labelled value with light per-type coloring; the everyday sections use
+// this so props/hooks/data read at a glance.
+function kvRow(label: string, value: unknown): FigNode {
   return h(
     "div",
-    { class: "fig-devtools__section", key: entry.canonicalKey },
-    dataResourceRows(entry),
+    { class: "fig-devtools__row" },
+    h("span", { class: "fig-devtools__row-label" }, label),
+    valueCode(value),
   );
 }
 
-function dataResourceRows(entry: DataResourceSnapshot): FigNode[] {
-  const rows = [
-    row(entry.canonicalKey, entry.status),
-    row("Key", formatValue(entry.key)),
-    row("Subscribers", String(entry.subscriberCount)),
-    row("Stale", entry.stale ? "yes" : "no"),
-  ];
-
-  if (entry.pending) rows.push(row("Pending", "yes"));
-  if (entry.hasValue) rows.push(row("Value", formatValue(entry.value)));
-  if (entry.error !== undefined)
-    rows.push(row("Error", formatValue(entry.error)));
-  if (entry.refreshError !== undefined) {
-    rows.push(row("Refresh error", formatValue(entry.refreshError)));
-  }
-
-  return rows;
-}
-
-function listSection(title: string, items: string[]): FigNode {
+function valueCode(value: unknown): FigNode {
   return h(
-    "section",
-    { class: "fig-devtools__section" },
-    h("h3", { class: "fig-devtools__section-title" }, title),
-    items.length === 0
-      ? h("p", { class: "fig-devtools__empty" }, "None")
-      : items.map((item) => row("", item)),
+    "code",
+    { class: classNames("fig-devtools__row-value", valueTypeClass(value)) },
+    formatValue(value),
   );
+}
+
+function valueTypeClass(value: unknown): string {
+  if (value === null || value === undefined) return "is-nullish";
+  const type = typeof value;
+  if (type === "string") return "is-string";
+  if (type === "number" || type === "bigint") return "is-number";
+  if (type === "boolean") return "is-boolean";
+  if (type === "function") return "is-function";
+  return "is-object";
 }
 
 function row(label: string, value: string): FigNode {
@@ -1099,7 +1155,7 @@ function inspectedSelection(hover: InspectHover): Selection {
     selectedCommitId: null,
     selectedFiberId: hover.fiberId,
     selectedRootId: hover.rootId,
-    tab: "inspect",
+    tab: "details",
   };
 }
 
@@ -1161,16 +1217,6 @@ function treeLabel(fiber: FigDevtoolsFiberSnapshot): string {
   return `${fiber.name}${key}`;
 }
 
-function hookValue(hook: FigDevtoolsHookSnapshot): string {
-  if (hook.kind === "state") return formatValue(hook.state);
-  if (hook.kind === "external-store") return formatValue(hook.state);
-  if (hook.kind === "memo") {
-    return `${formatValue(hook.state)} deps ${formatValue(hook.deps)}`;
-  }
-
-  return `${hook.phase ?? hook.kind} deps ${formatValue(hook.deps)}${hook.active ? " active" : ""}`;
-}
-
 function formatElementNode(fiber: FigDevtoolsFiberSnapshot): string {
   const tagName = fiber.host?.tagName ?? fiber.name;
   const attributes = Object.entries(fiber.host?.attributes ?? {});
@@ -1230,11 +1276,7 @@ function formatValue(
 }
 
 function tabLabel(tab: DetailTab): string {
-  if (tab === "inspect") return "Inspect";
-  if (tab === "props") return "Props";
-  if (tab === "hooks") return "Hooks";
-  if (tab === "context") return "Context";
-  return "Data";
+  return tab === "details" ? "Details" : "Advanced";
 }
 
 function classNames(...values: Array<string | false | undefined>): string {

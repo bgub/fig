@@ -447,16 +447,19 @@ export const DevtoolsStyle = `
   margin-top: 12px;
 }
 .fig-devtools__section-title {
-  margin: 0 0 6px;
-  color: #475569;
+  margin: 0 0 8px;
+  color: #64748b;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .fig-devtools__row {
   display: grid;
   grid-template-columns: minmax(76px, 0.32fr) minmax(0, 1fr);
+  align-items: baseline;
   gap: 8px;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 .fig-devtools__row-label {
   min-width: 0;
@@ -465,9 +468,93 @@ export const DevtoolsStyle = `
 }
 .fig-devtools__row-value {
   min-width: 0;
-  color: #111827;
+  border-radius: 5px;
+  background: rgba(2, 6, 23, 0.04);
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  padding: 2px 6px;
+}
+.fig-devtools__row-value.is-string {
+  color: #047857;
+}
+.fig-devtools__row-value.is-number {
+  color: #b45309;
+}
+.fig-devtools__row-value.is-boolean {
+  color: #7c3aed;
+}
+.fig-devtools__row-value.is-function {
+  color: #db2777;
+}
+.fig-devtools__row-value.is-nullish {
+  color: #94a3b8;
+}
+.fig-devtools__hook + .fig-devtools__hook,
+.fig-devtools__data + .fig-devtools__data {
+  margin-top: 6px;
+}
+.fig-devtools__hook,
+.fig-devtools__data {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--fig-devtools-line);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 8px;
+}
+.fig-devtools__hook-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.fig-devtools__hook-index {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #64748b;
+  font-size: 11px;
+  padding: 0 5px;
+}
+.fig-devtools__hook-kind {
+  font-weight: 650;
+  color: #1d4ed8;
+}
+.fig-devtools__hook-tag {
+  border: 1px solid var(--fig-devtools-line);
+  border-radius: 999px;
+  color: #64748b;
+  font-size: 11px;
+  padding: 1px 7px;
+}
+.fig-devtools__hook-tag.is-active {
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #047857;
+}
+.fig-devtools__hook-deps {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.fig-devtools__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fig-devtools__value-chip {
+  border: 1px solid var(--fig-devtools-line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 2px 9px;
 }
 .fig-devtools__html {
   margin: 0;
