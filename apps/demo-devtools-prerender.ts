@@ -15,18 +15,15 @@ import type {
 } from "@bgub/fig-devtools";
 import type { RenderTreeCollector, RenderTreeNode } from "@bgub/fig-server";
 import {
-  devtoolsOpenCookie,
   devtoolsSnapshotScriptId,
+  readDevtoolsOpen,
   snapshotDevtoolsHook,
 } from "./demo-devtools-client.ts";
 
 export function devtoolsOpenFromCookieHeader(
   header: string | string[] | undefined,
 ): boolean {
-  const cookies = (Array.isArray(header) ? header[0] : header) ?? "";
-  return !cookies
-    .split(";")
-    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
+  return readDevtoolsOpen((Array.isArray(header) ? header[0] : header) ?? "");
 }
 
 export interface PrerenderedDevtools {

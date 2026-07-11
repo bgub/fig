@@ -71,34 +71,22 @@ export function hydrateDevtoolsPanel(
   container: HTMLElement,
   hook: FigDevtoolsHook,
 ): void {
-  const hydrate = () => {
-    const script = document.getElementById(devtoolsSnapshotScriptId);
-    const json = script?.textContent ?? "";
-    if (json === "") {
-      throw new Error("Missing prerendered devtools snapshot.");
-    }
-    hydrateRoot(
-      container,
-      createElement(DevtoolsPanel, {
-        liveHook: hook,
-        snapshotRoot: JSON.parse(json) as FigDevtoolsRootSnapshot,
-      }),
-      { devtools: false },
-    );
-  };
-
-  // The snapshot script streams right after the aside, and this module runs
-  // only once the parser is past this module's own later script tag — so if
-  // the snapshot script exists, the panel markup and JSON are complete and
-  // hydration can adopt them immediately, mid-stream. The DOMContentLoaded
-  // fallback covers entries loaded ahead of the snapshot.
-  if (document.getElementById(devtoolsSnapshotScriptId) !== null) {
-    hydrate();
-  } else if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", hydrate, { once: true });
-  } else {
-    hydrate();
+  // Both demos emit the snapshot script before the client entry, and this
+  // module runs only once the parser is past that entry's script tag — so
+  // the panel markup and JSON are already complete, even mid-stream.
+  const script = document.getElementById(devtoolsSnapshotScriptId);
+  const json = script?.textContent ?? "";
+  if (json === "") {
+    throw new Error("Missing prerendered devtools snapshot.");
   }
+  hydrateRoot(
+    container,
+    createElement(DevtoolsPanel, {
+      liveHook: hook,
+      snapshotRoot: JSON.parse(json) as FigDevtoolsRootSnapshot,
+    }),
+    { devtools: false },
+  );
 }
 
 function DevtoolsPanel(props: {

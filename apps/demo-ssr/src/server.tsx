@@ -9,6 +9,8 @@ import { assets, meta, title } from "@bgub/fig";
 import { FigDevtools } from "@bgub/fig-devtools";
 import {
   createRenderTreeCollector,
+  escapeAttribute,
+  escapeText,
   renderToDocumentStream,
 } from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig";
@@ -451,23 +453,6 @@ function shellErrorHtml(error: unknown): string {
   return `<!doctype html><html lang="en"><body><pre>${escapeText(
     error instanceof Error ? error.message : String(error),
   )}</pre></body></html>`;
-}
-
-function escapeText(value: string): string {
-  return value.replace(/[&<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
-}
-
-function escapeAttribute(value: string): string {
-  return value.replace(/[&"<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === '"') return "&quot;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
 }
 
 function escapeJson(value: unknown): string {
