@@ -252,7 +252,6 @@ export interface PayloadResponseOptions {
 }
 
 export interface PayloadResponse {
-  beginRefreshPayload(): void;
   bindRoot(root: PayloadRootLike): () => void;
   readonly codec: PayloadCodec;
   getAssetResources(): readonly FigAssetResource[];
@@ -592,7 +591,9 @@ export async function fetchPayload(
 
   // A refresh reuses this response's chunks Map but its row ids restart at 1 on
   // the server; namespace them past existing chunks before decoding the stream.
-  if (refreshBoundary !== undefined) response.beginRefreshPayload();
+  if (refreshBoundary !== undefined) {
+    (response as PayloadResponseImpl).beginRefreshPayload();
+  }
 
   await processPayloadStream(response, result.body, signal);
   return result;
@@ -2051,16 +2052,6 @@ export function decodePayloadDataEntries(
   return entries.map((entry) => decodePayloadDataEntryWithGraph(entry, graph));
 }
 
-/** Encode one Fig data hydration entry for transport in payload/data streams. */
-export function encodePayloadDataEntry(
-  entry: FigDataHydrationEntry,
-): PayloadDataHydrationEntry {
-  return encodePayloadDataEntryWithGraph(
-    entry,
-    createPayloadGraphEncodeContext(),
-  );
-}
-
 function encodePayloadDataEntryWithGraph(
   entry: FigDataHydrationEntry,
   graph: PayloadGraphEncodeContext,
@@ -2069,16 +2060,6 @@ function encodePayloadDataEntryWithGraph(
     ...entry,
     value: encodePayloadValueInternal(entry.value, graph),
   };
-}
-
-/** Decode one payload data hydration entry back into a Fig data entry. */
-export function decodePayloadDataEntry(
-  entry: PayloadDataHydrationEntry,
-): FigDataHydrationEntry {
-  return decodePayloadDataEntryWithGraph(
-    entry,
-    createPayloadGraphDecodeContext(),
-  );
 }
 
 function decodePayloadDataEntryWithGraph(

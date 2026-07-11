@@ -39,6 +39,7 @@ import {
   type PayloadRow,
   type PayloadClientReferenceMetadata,
   type PayloadFetch,
+  type PayloadResponse,
   renderToPayloadStream,
 } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
@@ -54,6 +55,15 @@ declare const process: {
   on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
   off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
 };
+
+// beginRefreshPayload is not part of the public PayloadResponse interface
+// (fetchPayload calls it internally); these tests feed refresh streams by
+// hand, so reach through to the implementation.
+function beginRefreshPayload(response: PayloadResponse): void {
+  (
+    response as PayloadResponse & { beginRefreshPayload(): void }
+  ).beginRefreshPayload();
+}
 
 type TestPayloadModel =
   | null
@@ -952,7 +962,7 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       parseTestPayloadRows(await readStream(result.stream)),
@@ -1004,7 +1014,7 @@ describe("payload rendering", () => {
       parseTestPayloadRows(await readStream(result.stream)),
     );
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows("refreshed", { refreshBoundary: "slot" }),
@@ -1078,7 +1088,7 @@ describe("payload rendering", () => {
       type: "main",
     });
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -1156,7 +1166,7 @@ describe("payload rendering", () => {
     ).chunks;
     expect(chunks.get(1)?.hasDecoded).toBe(true);
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -1194,7 +1204,7 @@ describe("payload rendering", () => {
       type: "main",
     });
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -1231,7 +1241,7 @@ describe("payload rendering", () => {
       type: "main",
     });
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -1378,7 +1388,7 @@ describe("payload rendering", () => {
 
     const second: Record<string, unknown> = { label: "second" };
     second.self = second;
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(createElement(Viewer, { value: second }), {
@@ -1630,7 +1640,7 @@ describe("payload rendering", () => {
     );
     const first = unwrapFunctionComponent(readPayloadRoot(response));
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(
@@ -1870,7 +1880,7 @@ describe("payload rendering", () => {
         ),
       ),
     );
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(createElement("p", null, "Updated"), {
@@ -1907,7 +1917,7 @@ describe("payload rendering", () => {
       ),
     );
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(
@@ -1932,7 +1942,7 @@ describe("payload rendering", () => {
       ),
     );
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows("targeted inner", {
@@ -1941,7 +1951,7 @@ describe("payload rendering", () => {
     );
     expect(evaluatePayloadNode(response.getRoot())).toBe("targeted inner");
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(
@@ -1985,7 +1995,7 @@ describe("payload rendering", () => {
     const initialFeed = unwrapFunctionComponent(initialRoot.props.children[0]);
     const initialNote = unwrapFunctionComponent(initialRoot.props.children[1]);
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(createElement("p", null, "feed 1"), {
@@ -2125,7 +2135,7 @@ describe("payload rendering", () => {
     // Refresh the boundary with a DIFFERENT client reference. Its outlined row
     // restarts at id 1 on the server and would overwrite chunk 1 (First) in the
     // shared chunks Map without per-payload namespacing.
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(
       response,
       await renderToPayloadRows(createElement(Second, {}), {
@@ -2155,7 +2165,7 @@ describe("payload rendering", () => {
       // The lazy root is intentionally pending while a refresh starts.
     }
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "ignored" },
     ]);
@@ -2248,7 +2258,7 @@ describe("payload rendering", () => {
     const initial = controlledTextStream();
     const initialDone = processStreamInto(response, initial.stream);
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -2300,7 +2310,7 @@ describe("payload rendering", () => {
       },
     ]);
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
@@ -2333,7 +2343,7 @@ describe("payload rendering", () => {
       },
     ]);
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "inner", tag: "refresh", value: { $fig: "lazy", id: 1 } },
       {
@@ -2349,7 +2359,7 @@ describe("payload rendering", () => {
       type: "span",
     });
 
-    response.beginRefreshPayload();
+    beginRefreshPayload(response);
     processTestPayloadRows(response, [
       { boundary: "outer", tag: "refresh", value: "outer only" },
     ]);
@@ -2391,7 +2401,7 @@ describe("payload rendering", () => {
         load: () => Promise.resolve({}),
       });
 
-      response.beginRefreshPayload();
+      beginRefreshPayload(response);
       processTestPayloadRows(
         response,
         await renderToPayloadRows(createElement(Client, {}), {
