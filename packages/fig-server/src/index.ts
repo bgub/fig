@@ -9,6 +9,12 @@ import type {
 } from "./types.ts";
 
 export { escapeAttribute, escapeText } from "./html.ts";
+export {
+  createRenderTreeCollector,
+  type RenderTreeCollector,
+  type RenderTreeKind,
+  type RenderTreeNode,
+} from "./render-tree.ts";
 
 // The four render entry points form one grid: render + To + (Document?) +
 // output form. Stream results are returned synchronously — a shell failure

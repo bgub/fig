@@ -56,23 +56,23 @@ function mountDevtoolsPanel(
   container: HTMLElement,
   hook: ReturnType<typeof ensureFigDevtoolsGlobalHook>,
 ): void {
-  const panel = (
-    <FigDevtools
-      defaultOpen={readDevtoolsOpenCookie()}
-      hook={hook}
-      onOpenChange={storeDevtoolsOpenCookie}
-      placement="sidebar"
-    />
-  );
-
-  // The shell streams the panel rendered from the same cookie state, so the
-  // client can always hydrate it in place.
-  if (container.firstChild !== null) {
-    hydrateRoot(container, panel, { devtools: false });
-    return;
-  }
-
-  createRoot(container, { devtools: false }).render(panel);
+  // The shell streams the panel prerendered with the server's render tree —
+  // structure only, since hooks and fiber ids are client-runtime facts. Swap
+  // in the live panel once the first real commit gives the hook actual data;
+  // the replacement paints near-identical pixels.
+  const unsubscribe = hook.subscribe(() => {
+    if (hook.commits.length === 0) return;
+    unsubscribe();
+    container.textContent = "";
+    createRoot(container, { devtools: false }).render(
+      <FigDevtools
+        defaultOpen={readDevtoolsOpenCookie()}
+        hook={hook}
+        onOpenChange={storeDevtoolsOpenCookie}
+        placement="sidebar"
+      />,
+    );
+  });
 }
 
 function readDevtoolsOpenCookie(): boolean {

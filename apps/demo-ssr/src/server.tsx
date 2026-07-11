@@ -6,8 +6,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import { assets, meta, title } from "@bgub/fig";
-import { createFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
-import { renderToDocumentStream } from "@bgub/fig-server";
+import { FigDevtools } from "@bgub/fig-devtools";
+import {
+  createRenderTreeCollector,
+  renderToDocumentStream,
+} from "@bgub/fig-server";
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig";
 import { normalizeDataResourceKey } from "@bgub/fig/internal";
@@ -26,6 +29,7 @@ import {
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
+import { prerenderedDevtoolsHook } from "./devtools-prerender.ts";
 import {
   createServerInfo,
   createServerInfoResource,
@@ -126,6 +130,7 @@ async function handleRequest(
   );
   const requestId = nonce.slice(0, 8);
   const serverInfo = createServerInfo();
+  const renderTree = createRenderTreeCollector();
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -160,12 +165,13 @@ async function handleRequest(
             )}
           </div>
           <aside class="fig-demo-devtools-pane" id={demoDevtoolsPaneId}>
-            {/* The panel's empty state streams with the shell so the pane
-                paints real chrome; the client hydrates it with the live
-                hook. */}
+            {/* The aside renders after the app pane, so the collector holds
+                the app's tree by the time the panel reads the hook: the
+                panel streams prerendered with the actual content. The client
+                replaces it with the live hook after the first commit. */}
             <FigDevtools
               defaultOpen={devtoolsOpenFromCookie(request)}
-              hook={createFigDevtoolsGlobalHook()}
+              hook={prerenderedDevtoolsHook(renderTree, demoRootId)}
               placement="sidebar"
             />
           </aside>
@@ -175,6 +181,7 @@ async function handleRequest(
     {
       identifierPrefix: streamIdentifierPrefix,
       nonce,
+      renderTree,
       onError(error, info) {
         if (logRecoveredErrors) {
           console.error("Boundary recovered on the server", {

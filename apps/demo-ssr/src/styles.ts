@@ -331,7 +331,7 @@ button[data-demo-control="transition"] {
     border-left: 0;
   }
 
-  .fig-demo-devtools-pane:has(.fig-devtools:not(.is-closed)) {
+  .fig-demo-devtools-pane:not(:has(.fig-devtools.is-closed)) {
     width: auto;
     height: min(620px, 70vh);
     overflow: hidden;

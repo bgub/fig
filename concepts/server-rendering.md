@@ -91,3 +91,18 @@ context, component stack, enclosing hidden-activity id), and a retry renders
 into a child segment spliced at the parent's cursor. A suspension in one
 child never blocks starting later siblings, and resumed output — ids and
 provider values included — is byte-identical to the never-suspending render.
+
+## Render-Tree Collection
+
+`renderTree: createRenderTreeCollector()` on any render entry makes the
+renderer record the component structure as it renders — one node per element
+or text child (name, kind, key, props minus children), attached through a
+`treeParent` pointer forked into suspended tasks so resumed content lands
+under its boundary. The collector is caller-owned and readable mid-render: a
+subtree later in document order (a DevTools panel in an aside) sees
+everything rendered before it, which is how introspection UI prerenders
+without a second pass. Hooks, lanes, and fiber ids are client-runtime facts
+the server never fabricates; consumers converting the tree into a DevTools
+snapshot replace it with the live hook after the client's first commit.
+With no collector passed, the threading is a null pointer copy per fork —
+plain renders record nothing.

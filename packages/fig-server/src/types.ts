@@ -8,6 +8,7 @@ import type {
   FigNode,
   Props,
 } from "@bgub/fig";
+import type { RenderTreeCollector } from "./render-tree.ts";
 
 export interface ServerRenderOptions {
   /**
@@ -28,6 +29,13 @@ export interface ServerRenderOptions {
   resolveAssetKey?: (type: ElementType) => string | undefined;
   dataPartition?: DataResourceKeyInput;
   assets?: Record<string, FigAssetResourceList>;
+  /**
+   * Caller-owned collector the renderer fills with the component structure
+   * as it renders (see createRenderTreeCollector) — readable mid-render, so
+   * a subtree later in document order can prerender introspection UI from
+   * everything rendered before it.
+   */
+  renderTree?: RenderTreeCollector;
   signal?: AbortSignal;
 }
 

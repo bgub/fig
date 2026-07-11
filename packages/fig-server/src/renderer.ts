@@ -77,6 +77,7 @@ import {
   deferred,
   withContextValue,
 } from "./shared.ts";
+import type { RenderTreeNode } from "./render-tree.ts";
 import type {
   ServerErrorPayload,
   ServerFragmentRenderResult,
@@ -150,6 +151,10 @@ interface RenderScope {
   idPath: string;
   selectProps: Props | null;
   stack: StackFrame | null;
+  // Where collected render-tree nodes attach; null when no collector was
+  // passed. Forked into suspended tasks so resumed content lands under its
+  // boundary's node.
+  treeParent: RenderTreeNode | null;
   viewTransition: ServerViewTransitionContext | null;
 }
 
@@ -334,6 +339,7 @@ export function createServerRenderRequest(
     idPath: "",
     selectProps: null,
     stack: null,
+    treeParent: options.renderTree?.tree ?? null,
     viewTransition: null,
   });
   request.pingedTasks.push(rootTask);
@@ -395,6 +401,7 @@ function forkScope(scope: RenderScope): RenderScope {
     idPath: scope.idPath,
     selectProps: scope.selectProps,
     stack: scope.stack,
+    treeParent: scope.treeParent,
     // Forked branches get their own surface-index cursor from the same
     // snapshot. A Suspense fallback and its streamed content then produce
     // the SAME name sequence, so the reveal pairs (morphs) them instead of
@@ -543,6 +550,15 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
       validateTextNesting(text, frame.hostAncestors);
     }
     if (text !== "") {
+      if (frame.treeParent !== null) {
+        frame.treeParent.children.push({
+          children: [],
+          key: null,
+          kind: "text",
+          name: "#text",
+          props: { nodeValue: text },
+        });
+      }
       const output = consumePendingLeadingNewline(frame)
         ? preserveParserStrippedLeadingNewline(text)
         : text;
@@ -617,6 +633,65 @@ function withIdSegment<T>(
 }
 
 function renderElement(element: FigElement, frame: RenderFrame): void {
+  if (frame.treeParent === null) {
+    renderElementKind(element, frame);
+    return;
+  }
+
+  const treeNode = collectedTreeNode(element);
+  frame.treeParent.children.push(treeNode);
+  const previousTreeParent = frame.treeParent;
+  frame.treeParent = treeNode;
+  try {
+    renderElementKind(element, frame);
+  } finally {
+    frame.treeParent = previousTreeParent;
+  }
+}
+
+function collectedTreeNode(element: FigElement): RenderTreeNode {
+  const { children: _children, ...ownProps } = element.props;
+  const [name, kind] = collectedNameAndKind(element.type);
+  return {
+    children: [],
+    key: element.key ?? null,
+    kind,
+    name,
+    props: ownProps,
+  };
+}
+
+function collectedNameAndKind(type: unknown): [string, RenderTreeNode["kind"]] {
+  if (typeof type === "string") return [type, "host"];
+  if (type === Fragment) return ["Fragment", "fragment"];
+  if (isContext(type)) {
+    const named = type as { displayName?: unknown };
+    const name =
+      typeof named.displayName === "string" && named.displayName !== ""
+        ? named.displayName
+        : "Context";
+    return [`${name}.Provider`, "context-provider"];
+  }
+  if (isAssets(type)) return ["Assets", "assets"];
+  if (isSuspense(type)) return ["Suspense", "suspense"];
+  if (isErrorBoundary(type)) return ["ErrorBoundary", "error-boundary"];
+  if (isActivity(type)) return ["Activity", "activity"];
+  if (isViewTransition(type)) return ["ViewTransition", "view-transition"];
+  if (isClientReference(type)) {
+    const id = (type as FigClientReference).id;
+    const exportName = id.slice(id.lastIndexOf("#") + 1);
+    return [
+      exportName === "" ? "ClientReference" : exportName,
+      "client-reference",
+    ];
+  }
+  if (typeof type === "function") {
+    return [type.name === "" ? "Anonymous" : type.name, "function"];
+  }
+  return ["Anonymous", "function"];
+}
+
+function renderElementKind(element: FigElement, frame: RenderFrame): void {
   const type = element.type;
 
   if (typeof type === "string") {
