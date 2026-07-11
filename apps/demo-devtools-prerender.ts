@@ -1,36 +1,42 @@
-// Converts fig-server's collected render tree into a Fig DevTools snapshot
-// and serves it through a read-only hook. The hook materializes lazily: the
-// DevTools aside renders after the app pane in document order, so by the
-// time the panel reads it the collector already holds the app's tree. Hooks,
-// lanes, and fiber ids are client-runtime facts the server cannot know; the
-// client replaces this panel with the live one after the first real commit.
-import type { FigDevtoolsHook } from "@bgub/fig-devtools";
-import type { RenderTreeCollector, RenderTreeNode } from "@bgub/fig-server";
+// Server half of the demos' shared DevTools wiring: converts fig-server's
+// collected render tree into a Fig DevTools snapshot and serves it through a
+// read-only hook. The hook materializes lazily — the DevTools aside renders
+// after the app pane in document order, so by the time the panel reads it
+// the collector already holds the app's tree. Hooks, lanes, and fiber ids
+// are client-runtime facts the server cannot know; the client replaces this
+// panel with the live one after the first real commit
+// (demo-devtools-client.ts).
 import type {
   FigDevtoolsFiberSnapshot,
+  FigDevtoolsHook,
   FigDevtoolsRootSnapshot,
-} from "@bgub/fig-reconciler/devtools";
+} from "@bgub/fig-devtools";
+import type { RenderTreeCollector, RenderTreeNode } from "@bgub/fig-server";
+import { devtoolsOpenCookie } from "./demo-devtools-client.ts";
+
+export function devtoolsOpenFromCookieHeader(
+  header: string | string[] | undefined,
+): boolean {
+  const cookies = (Array.isArray(header) ? header[0] : header) ?? "";
+  return !cookies
+    .split(";")
+    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
+}
 
 export function prerenderedDevtoolsHook(
   collector: RenderTreeCollector,
   appRootId: string,
 ): FigDevtoolsHook {
-  let seeded: FigDevtoolsRootSnapshot | null = null;
-  const snapshot = (): FigDevtoolsRootSnapshot =>
-    (seeded ??= buildSnapshot(collector.tree, appRootId));
-
-  return {
-    get renderers() {
-      return new Map([
-        [1, { name: "Fig", packageName: "@bgub/fig-reconciler" }],
-      ]);
-    },
-    get roots() {
-      return new Map([[1, snapshot()]]);
-    },
-    get commits() {
-      const root = snapshot();
-      return [
+  let seeded: {
+    commits: FigDevtoolsHook["commits"];
+    renderers: FigDevtoolsHook["renderers"];
+    roots: FigDevtoolsHook["roots"];
+  } | null = null;
+  const materialize = () => {
+    if (seeded !== null) return seeded;
+    const root = buildSnapshot(collector.tree, appRootId);
+    seeded = {
+      commits: [
         {
           id: 1,
           rendererId: 1,
@@ -39,7 +45,24 @@ export function prerenderedDevtoolsHook(
           tree: root.tree,
           root,
         },
-      ];
+      ],
+      renderers: new Map([
+        [1, { name: "Fig", packageName: "@bgub/fig-reconciler" }],
+      ]),
+      roots: new Map([[1, root]]),
+    };
+    return seeded;
+  };
+
+  return {
+    get renderers() {
+      return materialize().renderers;
+    },
+    get roots() {
+      return materialize().roots;
+    },
+    get commits() {
+      return materialize().commits;
     },
     get revision() {
       return 1;

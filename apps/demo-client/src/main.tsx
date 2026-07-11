@@ -31,6 +31,10 @@ import {
   type DataResourceKey,
 } from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
+import {
+  readDevtoolsOpen,
+  storeDevtoolsOpen,
+} from "../../demo-devtools-client.ts";
 import { renderToHtml } from "@bgub/fig-server";
 import { createElement, type ReactNode } from "react";
 import { flushSync as reactFlushSync } from "react-dom";
@@ -2366,31 +2370,18 @@ if (container === null) {
   throw new Error("Could not find #root.");
 }
 
-// Same cookie the server-rendered demos use, for consistent behavior.
-const devtoolsOpenCookie = "fig-demo-devtools-open";
-
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
 const devtoolsContainer = installDemoDevtoolsLayout(container);
 createRoot(devtoolsContainer, { devtools: false }).render(
   <FigDevtools
     hook={devtoolsHook}
     placement="sidebar"
-    defaultOpen={readStoredDevtoolsOpen()}
+    defaultOpen={readDevtoolsOpen(document.cookie)}
     onOpenChange={storeDevtoolsOpen}
   />,
 );
 
 createRoot(container).render(<App />);
-
-function readStoredDevtoolsOpen(): boolean {
-  return !document.cookie
-    .split(";")
-    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
-}
-
-function storeDevtoolsOpen(open: boolean): void {
-  document.cookie = `${devtoolsOpenCookie}=${String(open)};path=/;max-age=31536000;samesite=lax`;
-}
 
 function installDemoDevtoolsLayout(appRoot: HTMLElement): HTMLElement {
   const layout = document.createElement("div");

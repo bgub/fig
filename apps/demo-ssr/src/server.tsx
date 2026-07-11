@@ -21,7 +21,6 @@ import {
   type DemoRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
-  demoDevtoolsOpenCookie,
   demoDevtoolsPaneId,
   demoRootId,
   scaledDemoDelay,
@@ -29,7 +28,10 @@ import {
   streamBoundaryDigest,
   streamIdentifierPrefix,
 } from "./app.tsx";
-import { prerenderedDevtoolsHook } from "./devtools-prerender.ts";
+import {
+  devtoolsOpenFromCookieHeader,
+  prerenderedDevtoolsHook,
+} from "../../demo-devtools-prerender.ts";
 import {
   createServerInfo,
   createServerInfoResource,
@@ -170,7 +172,7 @@ async function handleRequest(
                 panel streams prerendered with the actual content. The client
                 replaces it with the live hook after the first commit. */}
             <FigDevtools
-              defaultOpen={devtoolsOpenFromCookie(request)}
+              defaultOpen={devtoolsOpenFromCookieHeader(request.headers.cookie)}
               hook={prerenderedDevtoolsHook(renderTree, demoRootId)}
               placement="sidebar"
             />
@@ -331,13 +333,6 @@ function abortDelayFor(url: URL): number | null {
 
   const delayMs = Number(value);
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null;
-}
-
-function devtoolsOpenFromCookie(request: IncomingMessage): boolean {
-  const cookies = request.headers.cookie ?? "";
-  return !cookies
-    .split(";")
-    .some((entry) => entry.trim() === `${demoDevtoolsOpenCookie}=false`);
 }
 
 function publicUrl(port: number): string {

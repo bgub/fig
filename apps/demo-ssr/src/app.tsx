@@ -97,9 +97,6 @@ export const demoDataScriptId = "fig-stream-demo-data";
 export const demoDataResourceScriptId = "fig-stream-demo-data-resources";
 export const demoRootId = "fig-stream-demo-root";
 export const demoDevtoolsPaneId = "fig-stream-demo-devtools";
-// The panel state lives in a cookie so the server renders the true state
-// directly — no pre-paint scripts, no post-load correction, no layout shift.
-export const demoDevtoolsOpenCookie = "fig-demo-devtools-open";
 export const streamBoundaryDigest = "stream-demo-suspense";
 export const streamIdentifierPrefix = "stream-demo";
 

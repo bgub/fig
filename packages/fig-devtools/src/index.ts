@@ -7,6 +7,18 @@ import {
 } from "./component.ts";
 import { ensureFigDevtoolsGlobalHook, type FigDevtoolsHook } from "./hook.ts";
 
+// Types that appear in this package's public signatures (FigDevtoolsHook,
+// FigDevtoolsCommitSnapshot) — re-exported so consumers never reach into the
+// reconciler subpath.
+export type {
+  FigDevtoolsCommitInspection,
+  FigDevtoolsElementInspection,
+  FigDevtoolsFiberSnapshot,
+  FigDevtoolsGlobalHook,
+  FigDevtoolsHookSnapshot,
+  FigDevtoolsRendererInfo,
+  FigDevtoolsRootSnapshot,
+} from "@bgub/fig-reconciler/devtools";
 export {
   FigDevtools,
   type FigDevtoolsPlacement,

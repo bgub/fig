@@ -2,9 +2,6 @@ import { clientReference } from "@bgub/fig";
 
 export const appRootId = "fig-payload-root";
 export const devtoolsPaneId = "fig-payload-devtools";
-// The panel state lives in a cookie so the server renders the true state
-// directly — no pre-paint scripts, no post-load correction, no layout shift.
-export const devtoolsOpenCookie = "fig-demo-devtools-open";
 // The document streams payload rows as inline frame scripts; this head
 // bootstrap installs the queue they push into before any frame executes,
 // and the client subscribes to drain it.

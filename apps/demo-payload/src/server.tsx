@@ -4,8 +4,11 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { createFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
-import { renderToDocumentStream } from "@bgub/fig-server";
+import { FigDevtools } from "@bgub/fig-devtools";
+import {
+  createRenderTreeCollector,
+  renderToDocumentStream,
+} from "@bgub/fig-server";
 import {
   createPayloadResponse,
   PAYLOAD_BOUNDARY_HEADER,
@@ -25,17 +28,17 @@ import {
   watchDevReloadFile,
 } from "../../dev-reload.ts";
 import {
-  collectPrerenderRows,
-  seedPrerenderedSnapshot,
-} from "./devtools-prerender.ts";
+  devtoolsOpenFromCookieHeader,
+  prerenderedDevtoolsHook,
+} from "../../demo-devtools-prerender.ts";
 import {
   appRefreshButtonReferenceId,
   appRootId,
-  devtoolsOpenCookie,
   devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
   payloadFramesBootstrap,
+  payloadFramesGlobal,
   refreshButtonReferenceId,
 } from "./shared.ts";
 import { styles } from "./styles.ts";
@@ -50,6 +53,7 @@ const textJs = {
 };
 const textPlain = { "content-type": "text/plain; charset=utf-8" };
 const textEncoder = new TextEncoder();
+const devReloadScriptBytes = textEncoder.encode(devReloadScript());
 
 watchDevReloadFile(clientScriptUrl);
 
@@ -134,12 +138,13 @@ function boundaryReplacement(boundary: string | null, data: DemoData) {
 }
 
 // The initial document is server-rendered FROM the payload: one
-// renderToPayloadStream call is teed three ways — one branch decodes into a
-// server-side payload response whose root renders (and streams Suspense
-// reveals) through renderToDocumentStream, one branch is forwarded to the
-// browser as inline frame scripts for hydration, and one branch seeds the
-// prerendered DevTools snapshot. HTML and payload come from the same render,
+// renderToPayloadStream call is teed — one branch decodes into a server-side
+// payload response whose root renders (and streams Suspense reveals) through
+// renderToDocumentStream, the other is forwarded to the browser as inline
+// frame scripts for hydration. HTML and payload come from the same render,
 // so the hydrated client tree matches the streamed markup byte for byte.
+// The same document render fills the render-tree collector the DevTools
+// panel prerenders from.
 async function sendDocument(
   request: IncomingMessage,
   response: ServerResponse,
@@ -149,8 +154,7 @@ async function sendDocument(
   const data = createDemoData(seed);
   const payload = renderToPayloadStream(<PayloadApp data={data} />, {});
   void payload.allReady.catch(() => undefined);
-  const [ssrRows, forwardRows] = payload.stream.tee();
-  const [clientRows, prerenderRows] = forwardRows.tee();
+  const [ssrRows, clientRows] = payload.stream.tee();
 
   const ssrPayload = createPayloadResponse({
     resolveClientReference(metadata) {
@@ -160,21 +164,10 @@ async function sendDocument(
     },
   });
   void ssrPayload.processStream(ssrRows).catch(() => undefined);
+  await ssrPayload.rootReady;
 
-  const devtoolsHook = createFigDevtoolsGlobalHook();
-  const [prerender] = await Promise.all([
-    collectPrerenderRows(prerenderRows),
-    ssrPayload.rootReady,
-  ]);
-  if (prerender !== null) {
-    seedPrerenderedSnapshot(
-      devtoolsHook,
-      prerender.rootModel,
-      prerender.clientNames,
-    );
-  }
-
-  const devtoolsOpen = devtoolsOpenFromCookie(request);
+  const renderTree = createRenderTreeCollector();
+  const devtoolsOpen = devtoolsOpenFromCookieHeader(request.headers.cookie);
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -190,11 +183,12 @@ async function sendDocument(
             <div id={appRootId}>{ssrPayload.getRoot()}</div>
           </div>
           <aside class="fig-demo-devtools-pane" id={devtoolsPaneId}>
-            {/* Prerendered with the tree from the payload model; the client
+            {/* The aside renders after the app pane, so the collector holds
+                the app's tree when the panel reads the hook; the client
                 replaces it with the live hook after the first commit. */}
             <FigDevtools
               defaultOpen={devtoolsOpen}
-              hook={devtoolsHook}
+              hook={prerenderedDevtoolsHook(renderTree, appRootId)}
               placement="sidebar"
             />
           </aside>
@@ -206,6 +200,7 @@ async function sendDocument(
       onError() {
         return { digest: "payload-demo-boundary" };
       },
+      renderTree,
     },
   );
 
@@ -219,47 +214,48 @@ async function sendDocument(
 }
 
 // Writes HTML chunks as they stream and flushes buffered payload rows as
-// inline frame scripts between them (fig-server flushes complete markup per
-// chunk, so between-chunk injection is parse-safe — the same invariant the
-// demo-ssr bootstrap injection relies on).
+// inline frame scripts between them (fig-server emits complete markup per
+// chunk, so between-chunk injection is parse-safe — the contract in
+// concepts/server-rendering.md that the demo-ssr bootstrap injection also
+// relies on).
 async function interleaveDocument(
   html: ReadableStream<Uint8Array>,
   rows: ReadableStream<Uint8Array>,
   response: ServerResponse,
 ): Promise<void> {
-  const decoder = new TextDecoder();
   let pendingFrames: string[] = [];
+  const decoder = new TextDecoder();
   const rowsReader = rows.getReader();
   const rowsDone = (async () => {
     for (;;) {
       const { done, value } = await rowsReader.read();
-      const text =
-        done && value === undefined
-          ? decoder.decode()
-          : decoder.decode(value, { stream: !done });
+      // A default reader's final read carries no value; decoding undefined
+      // without stream mode is exactly the flush.
+      const text = decoder.decode(value, { stream: !done });
       if (text.length > 0) pendingFrames.push(text);
       if (done) return;
     }
   })();
 
   const flushFrames = async (): Promise<void> => {
-    const frames = pendingFrames;
+    if (pendingFrames.length === 0) return;
+    const scripts = pendingFrames.map(frameScript).join("");
     pendingFrames = [];
-    for (const frame of frames) {
-      await writeResponse(response, textEncoder.encode(frameScript(frame)));
-    }
+    await writeResponse(response, textEncoder.encode(scripts));
   };
 
   const htmlReader = html.getReader();
-  let injectedDevReload = false;
   try {
-    for (;;) {
+    // The shell is complete (shellReady was awaited), so the first chunk is
+    // a safe spot for the dev-reload script.
+    const shell = await htmlReader.read();
+    if (shell.value !== undefined) await writeResponse(response, shell.value);
+    await writeResponse(response, devReloadScriptBytes);
+    await flushFrames();
+
+    while (!shell.done) {
       const { done, value } = await htmlReader.read();
       if (value !== undefined) await writeResponse(response, value);
-      if (!injectedDevReload) {
-        injectedDevReload = true;
-        await writeResponse(response, textEncoder.encode(devReloadScript()));
-      }
       await flushFrames();
       if (done) break;
     }
@@ -276,19 +272,12 @@ function frameScript(frame: string): string {
     `<script type="application/json" data-fig-payload-frame>${escapeJson(
       frame,
     )}</script>` +
-    `<script>globalThis.__figPayloadDemoFrames.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
+    `<script>globalThis.${payloadFramesGlobal}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
   );
 }
 
 function escapeJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003C");
-}
-
-function devtoolsOpenFromCookie(request: IncomingMessage): boolean {
-  const cookies = headerValue(request.headers.cookie) ?? "";
-  return !cookies
-    .split(";")
-    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
 }
 
 function requestUrl(request: IncomingMessage): URL {

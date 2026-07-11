@@ -98,3 +98,15 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
 - Data-store and asset-registry inspection panels (entry snapshots exist via
   `onEntryChange`/`inspectDataEntries`; no UI consumes them yet) — sketched
   in both resource proposals' DevTools sections.
+- **Prerender helpers** — the demos share apps-level modules
+  (`apps/demo-devtools-client.ts` / `apps/demo-devtools-prerender.ts`) that
+  convert fig-server's render tree into a snapshot, fake a read-only hook,
+  and swap in the live panel after the first client commit. Once a consumer
+  outside the demos wants this, the pair belongs in `@bgub/fig-devtools`
+  (which owns the hook interface and the reconciler types), e.g.
+  `prerenderedFigDevtoolsHook(tree)` + a panel-adopt mount option.
+  Related: the inline payload frame-script/bootstrap builders now exist in
+  fig-start (internal) and demo-payload — a third consumer moves them to
+  `@bgub/fig-server/payload`; and `renderToPayloadStream` could accept
+  `renderTree` for server-component-fidelity trees (the flattening pass is
+  the only one that still knows server component names).

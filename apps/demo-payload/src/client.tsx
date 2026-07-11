@@ -1,6 +1,7 @@
-import { createRoot, hydrateRoot } from "@bgub/fig-dom";
-import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
+import { hydrateRoot } from "@bgub/fig-dom";
+import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
 import { createPayloadResponse, fetchPayload } from "@bgub/fig-server/payload";
+import { mountLiveDevtoolsPanel } from "../../demo-devtools-client.ts";
 import {
   AppRefreshButton,
   RefreshButton,
@@ -10,7 +11,6 @@ import {
 import {
   appRefreshButtonReferenceId,
   appRootId,
-  devtoolsOpenCookie,
   devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
@@ -66,29 +66,4 @@ void response.rootReady.then(() => {
   document.body.dataset.figPayloadDemo = "ready";
 });
 
-// The server prerendered the panel from the payload model (structure only —
-// no hooks or fiber ids). Swap in the live panel once the first real commit
-// gives the hook actual data; the replacement paints near-identical pixels.
-const unsubscribeDevtoolsSwap = devtoolsHook.subscribe(() => {
-  if (devtoolsHook.commits.length === 0) return;
-  unsubscribeDevtoolsSwap();
-  devtoolsContainer.textContent = "";
-  createRoot(devtoolsContainer, { devtools: false }).render(
-    <FigDevtools
-      defaultOpen={readDevtoolsOpenCookie()}
-      hook={devtoolsHook}
-      onOpenChange={storeDevtoolsOpenCookie}
-      placement="sidebar"
-    />,
-  );
-});
-
-function readDevtoolsOpenCookie(): boolean {
-  return !document.cookie
-    .split(";")
-    .some((entry) => entry.trim() === `${devtoolsOpenCookie}=false`);
-}
-
-function storeDevtoolsOpenCookie(open: boolean): void {
-  document.cookie = `${devtoolsOpenCookie}=${String(open)};path=/;max-age=31536000;samesite=lax`;
-}
+mountLiveDevtoolsPanel(devtoolsContainer, devtoolsHook);

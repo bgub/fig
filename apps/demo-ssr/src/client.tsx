@@ -1,13 +1,13 @@
-import { createRoot, hydrateRoot } from "@bgub/fig-dom";
+import { hydrateRoot } from "@bgub/fig-dom";
 import type { FigDataHydrationEntry } from "@bgub/fig";
-import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
+import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
+import { mountLiveDevtoolsPanel } from "../../demo-devtools-client.ts";
 import {
   App,
   type ClientData,
   createClientRequest,
   demoDataResourceScriptId,
   demoDataScriptId,
-  demoDevtoolsOpenCookie,
   demoDevtoolsPaneId,
   demoRootId,
 } from "./app.tsx";
@@ -24,7 +24,7 @@ if (devtoolsContainer === null) {
 }
 
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
-mountDevtoolsPanel(devtoolsContainer, devtoolsHook);
+mountLiveDevtoolsPanel(devtoolsContainer, devtoolsHook);
 
 hydrateRoot(root, <App request={createClientRequest(data)} />, {
   initialData,
@@ -50,37 +50,4 @@ function readInitialData(): FigDataHydrationEntry[] {
   if (script === null) return [];
 
   return JSON.parse(script.textContent ?? "[]") as FigDataHydrationEntry[];
-}
-
-function mountDevtoolsPanel(
-  container: HTMLElement,
-  hook: ReturnType<typeof ensureFigDevtoolsGlobalHook>,
-): void {
-  // The shell streams the panel prerendered with the server's render tree —
-  // structure only, since hooks and fiber ids are client-runtime facts. Swap
-  // in the live panel once the first real commit gives the hook actual data;
-  // the replacement paints near-identical pixels.
-  const unsubscribe = hook.subscribe(() => {
-    if (hook.commits.length === 0) return;
-    unsubscribe();
-    container.textContent = "";
-    createRoot(container, { devtools: false }).render(
-      <FigDevtools
-        defaultOpen={readDevtoolsOpenCookie()}
-        hook={hook}
-        onOpenChange={storeDevtoolsOpenCookie}
-        placement="sidebar"
-      />,
-    );
-  });
-}
-
-function readDevtoolsOpenCookie(): boolean {
-  return !document.cookie
-    .split(";")
-    .some((entry) => entry.trim() === `${demoDevtoolsOpenCookie}=false`);
-}
-
-function storeDevtoolsOpenCookie(open: boolean): void {
-  document.cookie = `${demoDevtoolsOpenCookie}=${String(open)};path=/;max-age=31536000;samesite=lax`;
 }

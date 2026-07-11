@@ -14,6 +14,18 @@ importers:
 
   .:
     devDependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:packages/fig
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:packages/fig-devtools
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:packages/fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:packages/fig-server
       '@size-limit/preset-small-lib':
         specifier: ^8.2.4
         version: 8.2.6(size-limit@8.2.6)
@@ -115,9 +127,6 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
-      '@bgub/fig-reconciler':
-        specifier: workspace:*
-        version: link:../../packages/fig-reconciler
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:../../packages/fig-server
@@ -140,9 +149,6 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
-      '@bgub/fig-reconciler':
-        specifier: workspace:*
-        version: link:../../packages/fig-reconciler
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:../../packages/fig-server

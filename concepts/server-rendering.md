@@ -79,7 +79,9 @@ Suspense streams fallbacks first; completed content and partial segments
 follow as hidden staging nodes moved into place by a nonce-compatible inline
 runtime (no external runtime format) — see suspense-streaming.md for the
 marker/op protocol. Writes buffer per flush pass and leave as one encoded
-enqueue. `identifierPrefix` scopes generated ids; `nonce` flows to every
+enqueue, and every flushed chunk ends on complete markup — injecting between
+chunks is parse-safe, a contract the demos' bootstrap and payload-frame
+interleaving rely on. `identifierPrefix` scopes generated ids; `nonce` flows to every
 inline script.
 
 Suspended work is task-scoped: every children array renders under a per-child

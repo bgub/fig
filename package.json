@@ -39,6 +39,10 @@
     }
   ],
   "devDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-devtools": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*",
     "@size-limit/preset-small-lib": "^8.2.4",
     "@tsdown/css": "0.21.10",
     "@types/node": "^20.19.0",

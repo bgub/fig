@@ -1,8 +1,5 @@
 import type { FigNode } from "@bgub/fig";
 
-export const appDescription =
-  "Initial render is fetched as a payload stream; the dashboard and note cards can refresh as independent server-rendered boundaries.";
-
 interface AppFrameProps {
   actions?: FigNode;
   children?: FigNode;
