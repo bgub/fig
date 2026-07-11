@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-dom",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
@@ -8,7 +8,15 @@
     "./test-utils": "./src/act.ts"
   },
   "publish": {
-    "include": ["LICENSE", "README.md", "src/**/*.ts"],
-    "exclude": ["src/**/*.test.*", "src/**/*.d.ts", "src/**/test-utils.ts"]
+    "include": [
+      "LICENSE",
+      "README.md",
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "src/**/*.test.*",
+      "src/**/*.d.ts",
+      "src/**/test-utils.ts"
+    ]
   }
 }

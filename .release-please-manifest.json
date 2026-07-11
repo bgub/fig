@@ -1,7 +1,7 @@
 {
-  "packages/fig": "0.0.1",
-  "packages/fig-dom": "0.0.1",
-  "packages/fig-reconciler": "0.0.1",
-  "packages/fig-refresh": "0.0.1",
-  "packages/fig-server": "0.0.1"
+  "packages/fig": "1.0.0",
+  "packages/fig-dom": "1.0.0",
+  "packages/fig-reconciler": "1.0.0",
+  "packages/fig-refresh": "0.1.0",
+  "packages/fig-server": "1.0.0"
 }
