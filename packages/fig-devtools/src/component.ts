@@ -1,12 +1,13 @@
 import {
   createElement,
   type FigNode,
+  useBeforePaint,
   useSyncExternalStore,
   useMemo,
   useReactive,
   useState,
 } from "@bgub/fig";
-import { on } from "@bgub/fig-dom";
+import { type Bind, on } from "@bgub/fig-dom";
 import type {
   FigDevtoolsFiberKind,
   FigDevtoolsFiberSnapshot,
@@ -102,9 +103,31 @@ export function FigDevtools({
   const [hover, setHover] = useState<InspectHover | null>(null);
   const [treeHover, setTreeHover] = useState<InspectHover | null>(null);
   const [commitsOpen, setCommitsOpen] = useState(false);
+  const [scrollToken, setScrollToken] = useState(0);
   const subscribe = useMemo(() => hook.subscribe.bind(hook), [hook]);
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
   useSyncExternalStore(subscribe, getSnapshot, () => 0);
+
+  const treePaneRef = useMemo(
+    () => ({ current: null as Element | null }),
+    [],
+  );
+  const bindTreePane = useMemo(
+    () => (node: Element, signal: AbortSignal) => {
+      treePaneRef.current = node;
+      signal.addEventListener("abort", () => {
+        if (treePaneRef.current === node) treePaneRef.current = null;
+      });
+    },
+    [treePaneRef],
+  );
+
+  // Reveal the selected node after a select-mode pick lands in the tree.
+  // Keyed on scrollToken (bumped by onInspected), not selectedFiberId, so
+  // tree clicks and live commits don't yank the scroll position.
+  useBeforePaint(() => {
+    revealSelectedFiber(treePaneRef.current);
+  }, [scrollToken]);
 
   const isOpen = open ?? uncontrolledOpen;
   const snapshot = currentSnapshot(hook, selection);
@@ -123,6 +146,11 @@ export function FigDevtools({
     setTreeHover(fiberInspectHover(hook, snapshot.root, fiber));
   };
 
+  const onInspected = useMemo(
+    () => () => setScrollToken((token) => token + 1),
+    [setScrollToken],
+  );
+
   useInspectMode(
     hook,
     selectMode,
@@ -130,6 +158,7 @@ export function FigDevtools({
     setSelection,
     setSelectMode,
     setHover,
+    onInspected,
   );
 
   return h(
@@ -162,6 +191,7 @@ export function FigDevtools({
     isOpen
       ? panelBody({
           banner,
+          bindTreePane,
           commitsOpen,
           hook,
           onFiberHover,
@@ -268,6 +298,7 @@ function useInspectMode(
   setSelection: SetSelection,
   setSelectMode: (selectMode: boolean) => void,
   setHover: (hover: InspectHover | null) => void,
+  onInspected: () => void,
 ): void {
   useReactive(
     (signal: AbortSignal) => {
@@ -321,6 +352,7 @@ function useInspectMode(
         setSelection(inspectedSelection(hover));
         setSelectMode(false);
         setHover(null);
+        onInspected();
       };
 
       const onKeyDown = (event: KeyboardEvent) => {
@@ -336,7 +368,7 @@ function useInspectMode(
       document.addEventListener("click", onClick, { capture: true, signal });
       document.addEventListener("keydown", onKeyDown, { signal });
     },
-    [hook, selectMode, showHost],
+    [hook, selectMode, showHost, onInspected],
   );
 }
 
@@ -421,6 +453,7 @@ function nearestComponentOwner(
 
 interface PanelBodyOptions {
   banner: string | undefined;
+  bindTreePane: Bind;
   commitsOpen: boolean;
   hook: FigDevtoolsHook;
   onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void;
@@ -434,6 +467,7 @@ interface PanelBodyOptions {
 
 function panelBody({
   banner,
+  bindTreePane,
   commitsOpen,
   hook,
   onFiberHover,
@@ -452,7 +486,7 @@ function panelBody({
       { class: "fig-devtools__main" },
       h(
         "div",
-        { class: "fig-devtools__tree-pane" },
+        { class: "fig-devtools__tree-pane", bind: bindTreePane },
         treePane(snapshot, selection, setSelection, showHost, onFiberHover),
       ),
       h(
@@ -763,6 +797,12 @@ function fiberScreenRect(
   if (!Number.isFinite(left)) return null;
 
   return { height: bottom - top, left, top, width: right - left };
+}
+
+function revealSelectedFiber(treePane: Element | null): void {
+  const selected = treePane?.querySelector(".fig-devtools__tree-button.is-selected");
+  if (selected === null || selected === undefined) return;
+  selected.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function visibleChildren(
