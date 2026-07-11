@@ -1,7 +1,7 @@
 import { hydrateRoot } from "@bgub/fig-dom";
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
-import { mountLiveDevtoolsPanel } from "../../demo-devtools-client.ts";
+import { hydrateDevtoolsPanel } from "../../demo-devtools-client.ts";
 import {
   App,
   type ClientData,
@@ -24,7 +24,7 @@ if (devtoolsContainer === null) {
 }
 
 const devtoolsHook = ensureFigDevtoolsGlobalHook();
-mountLiveDevtoolsPanel(devtoolsContainer, devtoolsHook);
+hydrateDevtoolsPanel(devtoolsContainer, devtoolsHook);
 
 hydrateRoot(root, <App request={createClientRequest(data)} />, {
   initialData,

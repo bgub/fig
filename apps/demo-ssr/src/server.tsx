@@ -29,8 +29,9 @@ import {
   streamIdentifierPrefix,
 } from "./app.tsx";
 import {
+  DevtoolsSnapshotScript,
   devtoolsOpenFromCookieHeader,
-  prerenderedDevtoolsHook,
+  prerenderedDevtools,
 } from "../../demo-devtools-prerender.ts";
 import {
   createServerInfo,
@@ -133,6 +134,7 @@ async function handleRequest(
   const requestId = nonce.slice(0, 8);
   const serverInfo = createServerInfo();
   const renderTree = createRenderTreeCollector();
+  const devtools = prerenderedDevtools(renderTree, demoRootId);
   const render = renderToDocumentStream(
     <html lang="en">
       <head>
@@ -170,14 +172,16 @@ async function handleRequest(
             {/* The aside renders after the app pane, so the collector holds
                 the app's tree by the time the panel reads the hook: the
                 panel streams prerendered with the actual content. The client
-                replaces it with the live hook after the first commit. */}
+                hydrates it against the same snapshot (inlined below) and
+                swaps to the live hook after the first commit. */}
             <FigDevtools
               defaultOpen={devtoolsOpenFromCookieHeader(request.headers.cookie)}
-              hook={prerenderedDevtoolsHook(renderTree, demoRootId)}
+              hook={devtools.hook}
               placement="sidebar"
             />
           </aside>
         </div>
+        <DevtoolsSnapshotScript devtools={devtools} />
       </body>
     </html>,
     {

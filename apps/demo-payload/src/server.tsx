@@ -28,8 +28,9 @@ import {
   watchDevReloadFile,
 } from "../../dev-reload.ts";
 import {
+  DevtoolsSnapshotScript,
   devtoolsOpenFromCookieHeader,
-  prerenderedDevtoolsHook,
+  prerenderedDevtools,
 } from "../../demo-devtools-prerender.ts";
 import {
   appRefreshButtonReferenceId,
@@ -167,6 +168,7 @@ async function sendDocument(
   await ssrPayload.rootReady;
 
   const renderTree = createRenderTreeCollector();
+  const devtools = prerenderedDevtools(renderTree, appRootId);
   const devtoolsOpen = devtoolsOpenFromCookieHeader(request.headers.cookie);
   const render = renderToDocumentStream(
     <html lang="en">
@@ -185,14 +187,16 @@ async function sendDocument(
           <aside class="fig-demo-devtools-pane" id={devtoolsPaneId}>
             {/* The aside renders after the app pane, so the collector holds
                 the app's tree when the panel reads the hook; the client
-                replaces it with the live hook after the first commit. */}
+                hydrates it against the same snapshot (inlined below) and
+                swaps to the live hook after the first commit. */}
             <FigDevtools
               defaultOpen={devtoolsOpen}
-              hook={prerenderedDevtoolsHook(renderTree, appRootId)}
+              hook={devtools.hook}
               placement="sidebar"
             />
           </aside>
         </div>
+        <DevtoolsSnapshotScript devtools={devtools} />
         <script src="/client.js" type="module" />
       </body>
     </html>,

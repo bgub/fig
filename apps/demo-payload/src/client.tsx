@@ -1,7 +1,7 @@
 import { hydrateRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
 import { createPayloadResponse, fetchPayload } from "@bgub/fig-server/payload";
-import { mountLiveDevtoolsPanel } from "../../demo-devtools-client.ts";
+import { hydrateDevtoolsPanel } from "../../demo-devtools-client.ts";
 import {
   AppRefreshButton,
   RefreshButton,
@@ -66,4 +66,4 @@ void response.rootReady.then(() => {
   document.body.dataset.figPayloadDemo = "ready";
 });
 
-mountLiveDevtoolsPanel(devtoolsContainer, devtoolsHook);
+hydrateDevtoolsPanel(devtoolsContainer, devtoolsHook);
