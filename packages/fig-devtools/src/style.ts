@@ -179,13 +179,13 @@ export const DevtoolsStyle = `
   grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
 }
-.fig-devtools__history,
 .fig-devtools__tree-pane,
 .fig-devtools__details-pane {
   min-width: 0;
   overflow: auto;
 }
-.fig-devtools__history {
+.fig-devtools__footer {
+  min-width: 0;
   overflow: hidden;
   border-top: 1px solid var(--fig-devtools-line);
   background: #eef1f6;
@@ -205,105 +205,91 @@ export const DevtoolsStyle = `
   color: #1e3a8a;
 }
 .fig-devtools__root-select {
-  width: 100%;
-  min-height: 30px;
-  margin-bottom: 10px;
+  flex: none;
+  min-height: 28px;
+  max-width: 120px;
 }
-.fig-devtools__commit-history {
-  display: grid;
-}
-.fig-devtools__history-head {
+.fig-devtools__timetravel {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  min-height: 38px;
-  padding: 6px 10px;
-  color: #334155;
-  font-weight: 650;
+  min-height: 40px;
+  padding: 6px 8px;
 }
-.fig-devtools__history-head .fig-devtools__button {
-  padding: 3px 7px;
+.fig-devtools__tt-arrow {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  padding: 4px 0;
+  font-size: 16px;
+  line-height: 1;
 }
-.fig-devtools__history-toggle {
+.fig-devtools__button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fig-devtools__tt-status {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
-  border: 0;
-  background: transparent;
-  color: #334155;
-  cursor: pointer;
+}
+.fig-devtools__tt-position {
   font-weight: 650;
-  padding: 3px 0;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
 }
-.fig-devtools__chevron {
-  width: 14px;
-  display: inline-block;
-  color: #64748b;
-  font-size: 18px;
-  line-height: 1;
-  transform: rotate(0deg);
+.fig-devtools__tt-time {
+  color: var(--fig-devtools-muted);
+  font-variant-numeric: tabular-nums;
 }
-.fig-devtools__chevron.is-open {
-  transform: rotate(90deg);
-}
-.fig-devtools__commit-count {
-  min-width: 22px;
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1.2;
-  padding: 1px 6px;
-  text-align: center;
-}
-.fig-devtools__history-body {
-  max-height: 178px;
-  overflow: auto;
-  border-top: 1px solid #dfe5ef;
-  padding: 10px;
-}
-.fig-devtools.is-sidebar .fig-devtools__history-body {
-  max-height: 160px;
-}
-.fig-devtools__commit-list {
-  display: grid;
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.fig-devtools__commit {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 8px;
-  border: 1px solid #d3d9e5;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1f2937;
-  cursor: pointer;
-  padding: 7px;
-  text-align: left;
-}
-.fig-devtools__commit:hover {
-  border-color: #9fb0ca;
-}
-.fig-devtools__commit.is-selected {
-  border-color: var(--fig-devtools-accent);
-  box-shadow: inset 3px 0 0 var(--fig-devtools-accent);
-}
-.fig-devtools__commit-id {
-  font-weight: 700;
-}
-.fig-devtools__commit-meta,
-.fig-devtools__commit-time {
+.fig-devtools__tt-empty {
   color: var(--fig-devtools-muted);
 }
-.fig-devtools__commit-time {
-  grid-column: 2;
+.fig-devtools__tt-state {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #64748b;
+  font-size: 11px;
+  padding: 1px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fig-devtools__tt-state.is-live {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+.fig-devtools__tt-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.fig-devtools__tt-badge {
+  border: 1px solid var(--fig-devtools-line);
+  border-radius: 4px;
+  background: #ffffff;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+}
+.fig-devtools__tt-badge.is-sync,
+.fig-devtools__tt-badge.is-input {
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #b91c1c;
+}
+.fig-devtools__tt-badge.is-transition,
+.fig-devtools__tt-badge.is-gesture {
+  border-color: rgba(124, 58, 237, 0.4);
+  color: #6d28d9;
+}
+.fig-devtools__tt-badge.is-retry {
+  border-color: rgba(180, 83, 9, 0.4);
+  color: #b45309;
 }
 .fig-devtools__main {
   min-width: 0;
@@ -604,9 +590,6 @@ export const DevtoolsStyle = `
     max-height: 180px;
     border-right: 0;
     border-bottom: 1px solid var(--fig-devtools-line);
-  }
-  .fig-devtools__history-body {
-    max-height: 150px;
   }
 }
 `;

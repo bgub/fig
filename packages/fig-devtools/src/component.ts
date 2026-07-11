@@ -96,7 +96,6 @@ export function FigDevtools({
   const [showHost, setShowHost] = useState(false);
   const [hover, setHover] = useState<InspectHover | null>(null);
   const [treeHover, setTreeHover] = useState<InspectHover | null>(null);
-  const [commitsOpen, setCommitsOpen] = useState(false);
   const [scrollToken, setScrollToken] = useState(0);
   const subscribe = useMemo(() => hook.subscribe.bind(hook), [hook]);
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
@@ -186,12 +185,9 @@ export function FigDevtools({
       ? panelBody({
           banner,
           bindTreePane,
-          commitsOpen,
-          hook,
           onFiberHover,
           selectMode,
           selection,
-          setCommitsOpen,
           setSelection,
           showHost,
           snapshot,
@@ -448,12 +444,9 @@ function nearestComponentOwner(
 interface PanelBodyOptions {
   banner: string | undefined;
   bindTreePane: Bind;
-  commitsOpen: boolean;
-  hook: FigDevtoolsHook;
   onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void;
   selectMode: boolean;
   selection: Selection;
-  setCommitsOpen: (commitsOpen: boolean) => void;
   setSelection: SetSelection;
   showHost: boolean;
   snapshot: RenderSnapshot;
@@ -462,12 +455,9 @@ interface PanelBodyOptions {
 function panelBody({
   banner,
   bindTreePane,
-  commitsOpen,
-  hook,
   onFiberHover,
   selectMode,
   selection,
-  setCommitsOpen,
   setSelection,
   showHost,
   snapshot,
@@ -491,9 +481,7 @@ function panelBody({
     ),
     h(
       "aside",
-      {
-        class: classNames("fig-devtools__history", commitsOpen && "is-open"),
-      },
+      { class: "fig-devtools__footer" },
       banner === undefined
         ? null
         : h("p", { class: "fig-devtools__banner" }, banner),
@@ -504,14 +492,7 @@ function panelBody({
             "Select mode is active. Hover an element, click to inspect it, or press Escape.",
           )
         : null,
-      commitHistory(
-        hook,
-        snapshot,
-        selection,
-        setSelection,
-        commitsOpen,
-        setCommitsOpen,
-      ),
+      timeTravelBar(snapshot, selection, setSelection),
     ),
   );
 }
@@ -541,110 +522,121 @@ function rootSelector(
   );
 }
 
-function commitList(
+// A compact scrubber over the per-root commit history: step backward/forward
+// and the Tree/Details panes follow via each commit's captured snapshot.
+// Reaching the newest commit resumes live so fresh commits keep flowing in.
+function timeTravelBar(
   snapshot: RenderSnapshot,
   selection: Selection,
   setSelection: SetSelection,
 ): FigNode {
-  if (snapshot.rootCommits.length === 0) {
-    return h("p", { class: "fig-devtools__empty" }, "No commits recorded.");
-  }
+  const commits = snapshot.rootCommits;
+  const total = commits.length;
+  const index = currentCommitIndex(snapshot);
+  const shown = snapshot.commit ?? commits.at(-1) ?? null;
 
   return h(
-    "ol",
-    { class: "fig-devtools__commit-list" },
-    snapshot.rootCommits.map((commit, index) =>
-      h(
-        "li",
-        { key: commit.id },
-        h(
-          "button",
-          {
-            class: classNames(
-              "fig-devtools__commit",
-              commit.id === selection.selectedCommitId && "is-selected",
-            ),
-            type: "button",
-            events: [
-              on("click", () =>
-                setSelection(commitSelection(selection, commit)),
-              ),
-            ],
-          },
-          h("span", { class: "fig-devtools__commit-id" }, `#${index + 1}`),
-          h(
+    "section",
+    { class: "fig-devtools__timetravel" },
+    button(
+      "‹",
+      () => setSelection(stepCommit(selection, snapshot, index - 1)),
+      {
+        ariaLabel: "Previous commit",
+        className: "fig-devtools__tt-arrow",
+        disabled: index <= 0,
+      },
+    ),
+    h(
+      "div",
+      { class: "fig-devtools__tt-status" },
+      total === 0
+        ? h("span", { class: "fig-devtools__tt-empty" }, "No commits yet")
+        : h(
             "span",
-            { class: "fig-devtools__commit-meta" },
-            `${commit.tree.children.length} ${plural(commit.tree.children.length, "child", "children")}`,
+            { class: "fig-devtools__tt-position" },
+            `${index + 1} / ${total}`,
           ),
-          h(
+      total === 0
+        ? null
+        : h(
             "time",
-            { class: "fig-devtools__commit-time" },
-            formatCommitTime(commit.committedAt),
+            { class: "fig-devtools__tt-time" },
+            commitTimeLabel(commits, index),
           ),
-        ),
+      total === 0
+        ? null
+        : snapshot.live
+          ? h("span", { class: "fig-devtools__tt-state is-live" }, "live")
+          : h("span", { class: "fig-devtools__tt-state" }, "snapshot"),
+      shown === null ? null : workBadges(shown),
+    ),
+    snapshot.roots.length > 1
+      ? rootSelector(snapshot, selection, setSelection)
+      : null,
+    button(
+      "›",
+      () => setSelection(stepCommit(selection, snapshot, index + 1)),
+      {
+        ariaLabel: "Next commit",
+        className: "fig-devtools__tt-arrow",
+        disabled: total === 0 || snapshot.live,
+      },
+    ),
+  );
+}
+
+function currentCommitIndex(snapshot: RenderSnapshot): number {
+  const total = snapshot.rootCommits.length;
+  if (total === 0) return -1;
+  if (snapshot.commit === null) return total - 1;
+
+  const index = snapshot.rootCommits.findIndex(
+    (commit) => commit.id === snapshot.commit?.id,
+  );
+  return index === -1 ? total - 1 : index;
+}
+
+function stepCommit(
+  selection: Selection,
+  snapshot: RenderSnapshot,
+  index: number,
+): Selection {
+  const commits = snapshot.rootCommits;
+  if (commits.length === 0) return selection;
+
+  const clamped = Math.max(0, Math.min(index, commits.length - 1));
+  // Landing on the newest commit resumes live so the panes keep following
+  // later commits instead of pinning to a soon-to-be-stale id.
+  if (clamped === commits.length - 1) return liveSelection(selection);
+  return commitSelection(selection, commits[clamped]);
+}
+
+function workBadges(commit: FigDevtoolsCommitSnapshot): FigNode | null {
+  const labels = commitWorkLabels(commit);
+  if (labels.length === 0) return null;
+
+  return h(
+    "span",
+    { class: "fig-devtools__tt-badges" },
+    labels.map((label) =>
+      h(
+        "span",
+        { class: `fig-devtools__tt-badge is-${label}`, key: label },
+        label,
       ),
     ),
   );
 }
 
-function commitHistory(
-  hook: FigDevtoolsHook,
-  snapshot: RenderSnapshot,
-  selection: Selection,
-  setSelection: SetSelection,
-  commitsOpen: boolean,
-  setCommitsOpen: (commitsOpen: boolean) => void,
-): FigNode {
-  return h(
-    "section",
-    { class: "fig-devtools__commit-history" },
-    h(
-      "div",
-      { class: "fig-devtools__history-head" },
-      h(
-        "button",
-        {
-          "aria-expanded": commitsOpen ? "true" : "false",
-          class: "fig-devtools__history-toggle",
-          type: "button",
-          events: [on("click", () => setCommitsOpen(!commitsOpen))],
-        },
-        h(
-          "span",
-          {
-            class: classNames(
-              "fig-devtools__chevron",
-              commitsOpen && "is-open",
-            ),
-          },
-          "›",
-        ),
-        h("span", null, "Commits"),
-        h(
-          "span",
-          { class: "fig-devtools__commit-count" },
-          String(snapshot.rootCommits.length),
-        ),
-      ),
-      commitsOpen
-        ? button("Clear", () => {
-            hook.clear();
-            setSelection(liveSelection(selection));
-          })
-        : null,
-    ),
-    commitsOpen
-      ? h(
-          "div",
-          { class: "fig-devtools__history-body" },
-          snapshot.roots.length > 1
-            ? rootSelector(snapshot, selection, setSelection)
-            : null,
-          commitList(snapshot, selection, setSelection),
-        )
-      : null,
-  );
+function commitWorkLabels(commit: FigDevtoolsCommitSnapshot): string[] {
+  const root = commit.root;
+  const labels = new Set<string>();
+  for (const label of root.pendingWork) labels.add(label);
+  for (const label of root.suspendedWork) labels.add(label);
+  for (const label of root.pingedWork) labels.add(label);
+  for (const label of root.expiredWork) labels.add(label);
+  return [...labels];
 }
 
 function treePane(
@@ -1090,6 +1082,7 @@ interface ButtonOptions {
   ariaLabel?: string;
   ariaPressed?: boolean;
   className?: string | false;
+  disabled?: boolean;
   title?: string;
 }
 
@@ -1098,13 +1091,15 @@ function button(
   onClick: () => void,
   options: ButtonOptions = {},
 ): FigNode {
-  const { active = false, ariaLabel, ariaPressed, className, title } = options;
+  const { active = false, ariaLabel, ariaPressed, className, disabled, title } =
+    options;
   return h(
     "button",
     {
       "aria-label": ariaLabel,
       "aria-pressed": ariaPressed === undefined ? undefined : String(ariaPressed),
       class: classNames("fig-devtools__button", className, active && "is-active"),
+      disabled: disabled === true ? true : undefined,
       title,
       type: "button",
       events: [on("click", onClick)],
@@ -1283,13 +1278,24 @@ function classNames(...values: Array<string | false | undefined>): string {
   return values.filter(Boolean).join(" ");
 }
 
-function formatCommitTime(time: number): string {
-  return `${Math.max(0, Math.round(time))}ms`;
+// committedAt is a performance.now() timestamp (ms since page load), which is
+// meaningless on its own; show each commit's gap from the previous one so the
+// column reads as a cadence timeline instead of raw uptime.
+function commitTimeLabel(
+  commits: FigDevtoolsCommitSnapshot[],
+  index: number,
+): string {
+  const previous = commits[index - 1];
+  if (previous === undefined) return "—";
+  return `+${formatDuration(commits[index].committedAt - previous.committedAt)}`;
 }
 
-function plural(count: number, singular: string, pluralValue: string): string {
-  return count === 1 ? singular : pluralValue;
+function formatDuration(ms: number): string {
+  const value = Math.max(0, ms);
+  if (value < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)}s`;
 }
+
 
 function truncate(value: string): string {
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
