@@ -5,7 +5,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./refresh": "./src/refresh.ts",
-    "./test-utils": "./src/act.ts"
+    "./test-utils": "./src/act.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-runtime.ts"
   },
   "publish": {
     "include": ["LICENSE", "README.md", "src/**/*.ts"],

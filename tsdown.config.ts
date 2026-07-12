@@ -27,7 +27,12 @@ const libraryEntries: Record<string, string[]> = {
     "./src/server.ts",
     "./src/client.ts",
   ],
-  "packages/fig-dom": ["./src/index.ts", "./src/refresh.ts", "./src/act.ts"],
+  "packages/fig-dom": [
+    "./src/index.ts",
+    "./src/refresh.ts",
+    "./src/act.ts",
+    "./src/jsx-runtime.ts",
+  ],
   "packages/fig-reconciler": [
     "./src/index.ts",
     "./src/devtools.ts",

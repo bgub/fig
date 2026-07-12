@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@bgub/fig"
+    "jsxImportSource": "@bgub/fig-dom"
   },
   "include": ["src"]
 }

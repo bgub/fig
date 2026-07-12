@@ -6,19 +6,20 @@ How JSX is typed, and who owns the host-prop vocabulary.
 
 ## Namespace Placement
 
-`@bgub/fig/jsx-runtime` exports the `JSX` namespace TypeScript resolves under
-`jsxImportSource: "@bgub/fig"`: `Element = FigNode` (components may return
-strings, numbers, null, arrays), `ElementChildrenAttribute`,
-`IntrinsicAttributes { key }`, and a deliberately **empty**
-`IntrinsicElements`. The runtime module's value exports are exactly the
-transform contract: `jsx`/`jsxs`/`jsxDEV`/`Fragment` (`jsxDEV` aliases `jsx`;
+JSX uses the renderer as its import source. DOM projects configure
+`jsxImportSource: "@bgub/fig-dom"`; that package's `jsx-runtime` and
+`jsx-dev-runtime` entrypoints expose the core transform values alongside a
+DOM-owned `JSX` namespace. `Element = FigNode` (components may return strings,
+numbers, null, arrays), `ElementChildrenAttribute`, `IntrinsicAttributes {
+key }`, and `IntrinsicElements` are therefore available without global or
+module augmentation. The runtime value exports are exactly the transform
+contract: `jsx`/`jsxs`/`jsxDEV`/`Fragment` (`jsxDEV` aliases `jsx`;
 dev-transform extra arguments are ignored — Fig builds component stacks from
 fibers).
 
-Host-prop vocabulary belongs to renderers: `@bgub/fig-dom` fills
-`IntrinsicElements` via module augmentation (global once any fig-dom import
-is in the program). A compilation with no renderer types in scope rejects
-intrinsic tags.
+`@bgub/fig/jsx-runtime` remains renderer-neutral and deliberately has an empty
+`IntrinsicElements`. Custom renderers provide their own JSX runtime entrypoints;
+a compilation using core directly as its import source rejects intrinsic tags.
 
 ## `HostProps<E, AttributeName>`
 

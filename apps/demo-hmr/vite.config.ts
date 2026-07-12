@@ -13,12 +13,12 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: "@bgub/fig/jsx-runtime",
-        replacement: pkg("fig/src/jsx-runtime.ts"),
+        find: "@bgub/fig-dom/jsx-runtime",
+        replacement: pkg("fig-dom/src/jsx-runtime.ts"),
       },
       {
-        find: "@bgub/fig/jsx-dev-runtime",
-        replacement: pkg("fig/src/jsx-runtime.ts"),
+        find: "@bgub/fig-dom/jsx-dev-runtime",
+        replacement: pkg("fig-dom/src/jsx-runtime.ts"),
       },
       { find: "@bgub/fig/internal", replacement: pkg("fig/src/internal.ts") },
       {
@@ -49,5 +49,5 @@ export default defineConfig({
     __FIG_DEV__: JSON.stringify(true),
     "process.env.NODE_ENV": JSON.stringify("development"),
   },
-  esbuild: { jsx: "automatic", jsxImportSource: "@bgub/fig" },
+  esbuild: { jsx: "automatic", jsxImportSource: "@bgub/fig-dom" },
 });

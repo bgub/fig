@@ -10,6 +10,8 @@ const entries = [
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
   ["@bgub/fig-dom/test-utils", "packages/fig-dom/src/act.ts"],
   ["@bgub/fig-dom/refresh", "packages/fig-dom/src/refresh.ts"],
+  ["@bgub/fig-dom/jsx-runtime", "packages/fig-dom/src/jsx-runtime.ts"],
+  ["@bgub/fig-dom/jsx-dev-runtime", "packages/fig-dom/src/jsx-runtime.ts"],
   ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
   ["@bgub/fig-reconciler/devtools", "packages/fig-reconciler/src/devtools.ts"],
   ["@bgub/fig-reconciler/refresh", "packages/fig-reconciler/src/refresh.ts"],

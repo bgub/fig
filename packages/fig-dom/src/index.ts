@@ -5,7 +5,6 @@ import {
   type Key,
   type Props,
 } from "@bgub/fig";
-import "./jsx-augmentation.ts";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   assetResourceFromHostProps,
