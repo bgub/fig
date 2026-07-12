@@ -1,0 +1,44 @@
+core:changelogs:
+  - content: "---\npackages:\n  group:fig:\n    type: minor\n---\n\n## Initial alpha release\n\nFirst public alpha release of Fig.\n"
+    filename: initial-alpha.md
+    v: 0.0.0
+core:packages:
+  - changelogIds:
+      - initial-alpha.md
+    id: npm:@bgub/fig
+    updated: true
+  - changelogIds:
+      - initial-alpha.md
+    id: npm:@bgub/fig-dom
+    updated: true
+  - changelogIds:
+      - initial-alpha.md
+    id: npm:@bgub/fig-reconciler
+    updated: true
+  - changelogIds:
+      - initial-alpha.md
+    id: npm:@bgub/fig-refresh
+    updated: true
+  - changelogIds:
+      - initial-alpha.md
+    id: npm:@bgub/fig-server
+    updated: true
+npm:packages:
+  - distTag: alpha
+    id: npm:@bgub/fig
+  - distTag: alpha
+    id: npm:@bgub/fig-dom
+  - distTag: alpha
+    id: npm:@bgub/fig-reconciler
+  - distTag: alpha
+    id: npm:@bgub/fig-refresh
+  - distTag: alpha
+    id: npm:@bgub/fig-server
+  - id: npm:@bgub/fig-demo-client
+  - id: npm:@bgub/fig-demo-payload
+  - id: npm:@bgub/fig-demo-ssr
+  - id: npm:@bgub/fig-demo-start
+  - id: npm:@bgub/fig-devtools
+  - id: npm:@bgub/fig-start
+  - id: npm:@bgub/fig-demo-hmr
+  - id: npm:@bgub/fig-vite

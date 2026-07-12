@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha.0",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
@@ -10,7 +10,15 @@
     "./server": "./src/server.browser.ts"
   },
   "publish": {
-    "include": ["LICENSE", "README.md", "src/**/*.ts"],
-    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts", "src/server.ts"]
+    "include": [
+      "LICENSE",
+      "README.md",
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "src/**/*.test.*",
+      "src/**/test-utils.ts",
+      "src/server.ts"
+    ]
   }
 }

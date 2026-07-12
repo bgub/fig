@@ -1,13 +1,20 @@
 {
   "name": "@bgub/fig-server",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha.0",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./payload": "./src/payload.ts"
   },
   "publish": {
-    "include": ["LICENSE", "README.md", "src/**/*.ts"],
-    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]
+    "include": [
+      "LICENSE",
+      "README.md",
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "src/**/*.test.*",
+      "src/**/test-utils.ts"
+    ]
   }
 }
