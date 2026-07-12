@@ -130,6 +130,30 @@ The demo sites run through Portless:
 Use a demo package's `dev:app` script to run the underlying server without
 Portless.
 
+## Releases
+
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release the five public
+packages as one alpha-versioned group to npm and JSR. Contributor tooling
+requires Node.js 24.
+
+Add a changelog for a publishable change with `pnpm tegami`, or create an
+explicit `.tegami/<description>.md` file:
+
+```md
+---
+packages:
+  "@bgub/fig": minor
+  "@bgub/fig-dom": patch
+---
+
+## Describe the user-visible change
+```
+
+On `main`, the publish workflow opens or updates a Version Packages pull
+request. Merging that pull request publishes the matching versions to both
+registries and creates one grouped GitHub release. See
+[docs/releases.md](./docs/releases.md) for maintainer setup and recovery.
+
 ## License
 
 MIT

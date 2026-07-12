@@ -22,6 +22,9 @@ dropped and Fig-specific APIs are adopted where they are clearer.
 - Use conventional commit messages (`feat:`, `fix:`, `refactor:`, `perf:`,
   `test:`, `docs:`, `chore:`, with an optional scope like
   `fix(fig-dom): ...`).
+- Add a `.tegami/<short-description>.md` changelog for changes that should ship
+  in the public packages. Use Tegami's explicit frontmatter format and list the
+  affected `@bgub/fig*` packages with `major`, `minor`, or `patch` bumps.
 
 ## Terminology
 

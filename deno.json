@@ -1,5 +1,11 @@
 {
   "workspace": {
-    "members": ["packages/fig", "packages/fig-reconciler"]
+    "members": [
+      "packages/fig",
+      "packages/fig-dom",
+      "packages/fig-reconciler",
+      "packages/fig-refresh",
+      "packages/fig-server"
+    ]
   }
 }
