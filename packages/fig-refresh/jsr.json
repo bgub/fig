@@ -4,14 +4,7 @@
   "license": "MIT",
   "exports": "./src/index.ts",
   "publish": {
-    "include": [
-      "LICENSE",
-      "README.md",
-      "src/**/*.ts"
-    ],
-    "exclude": [
-      "src/**/*.test.*",
-      "src/**/test-utils.ts"
-    ]
+    "include": ["LICENSE", "README.md", "src/**/*.ts"],
+    "exclude": ["src/**/*.test.*", "src/**/test-utils.ts"]
   }
 }

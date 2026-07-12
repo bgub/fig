@@ -8,15 +8,7 @@
     "./test-utils": "./src/act.ts"
   },
   "publish": {
-    "include": [
-      "LICENSE",
-      "README.md",
-      "src/**/*.ts"
-    ],
-    "exclude": [
-      "src/**/*.test.*",
-      "src/**/*.d.ts",
-      "src/**/test-utils.ts"
-    ]
+    "include": ["LICENSE", "README.md", "src/**/*.ts"],
+    "exclude": ["src/**/*.test.*", "src/**/*.d.ts", "src/**/test-utils.ts"]
   }
 }
