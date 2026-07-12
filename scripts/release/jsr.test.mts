@@ -19,6 +19,7 @@ void test("release graph contains one synchronized public group", async () => {
   const group = context.graph.getGroup("fig");
   assert.ok(group !== undefined);
   assert.equal(group.options.prerelease, "alpha");
+  assert.equal(group.options.npm?.distTag, "latest");
   assert.equal(group.options.syncBump, true);
   assert.equal(group.options.syncGitTag, true);
   assert.deepEqual(

@@ -18,7 +18,7 @@ export function createFigRelease(cwd = process.cwd()) {
         prerelease: "alpha",
         syncBump: true,
         syncGitTag: true,
-        npm: { distTag: "alpha" },
+        npm: { distTag: "latest" },
       },
     },
     ignore: [

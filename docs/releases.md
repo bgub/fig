@@ -3,7 +3,9 @@
 Fig uses Tegami to version the public packages, publish them to npm and JSR,
 and create grouped GitHub releases. All five public packages belong to one
 `fig` release group, use the `alpha` prerelease channel, and receive the same
-version bump.
+version bump. npm publishes these prerelease versions under `latest`, so the
+default install always resolves to the newest Fig release even while its
+SemVer version includes an `alpha` prerelease suffix.
 
 ## Contributor workflow
 
