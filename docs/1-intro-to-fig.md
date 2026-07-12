@@ -103,8 +103,7 @@ start(async (signal) => {
 });
 ```
 
-Superseded and unmounted runs are aborted and retired: their pending slot releases immediately. A callback that ignores an abort signal and keeps running may still update state. (`useActionState`, unlike transitions, generation-guards results so the
-last run wins.) Top-level `transition(cb)` exists for scopes without a hook.
+Superseded and unmounted runs are aborted and retired: their pending slot releases immediately. A callback that ignores an abort signal and keeps running may still update state. (`useActionState`, unlike transitions, generation-guards results so the last run wins.) Top-level `transition(cb)` exists for scopes without a hook.
 
 ### SSR
 

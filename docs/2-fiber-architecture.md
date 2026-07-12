@@ -76,25 +76,22 @@ After our two clicks, the queue holds `[A: transition, c => c + 10]`, `[B: sync,
 
 A lane is one bit in a 31-bit bitmask; a lower bit means higher priority. The taxonomy:
 
-| Lane                   | What lands there                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| `SyncLane`             | discrete events (click, keydown, ...) — the user expects an immediate response   |
-| `InputContinuousLane`  | continuous events (scroll, pointermove, drag) — urgent, but fine to coalesce     |
-| `GestureLane`          | gesture-driven updates                                                           |
-| `DefaultLane`          | code running in no special context (timers, network callbacks)                   |
-| `TransitionLane` ×10   | `transition()` updates; overlapping transitions claim distinct lanes round-robin |
-| transition-deferred ×4 | reserved transition-shaped follow-up lanes; not claimed by `transition()`        |
-| `RetryLane` ×4         | suspense retries (a thrown promise resolved, re-render the boundary)             |
-| `DeferredLane`         | `useDeferredValue` re-renders                                                    |
-| `OffscreenLane`        | updates inside hidden Activity subtrees                                          |
-| `IdleLane`             | idle work                                                                        |
+| Lane | What lands there |
+| --- | --- |
+| `SyncLane` | discrete events (click, keydown, ...) — the user expects an immediate response |
+| `InputContinuousLane` | continuous events (scroll, pointermove, drag) — urgent, but fine to coalesce |
+| `GestureLane` | gesture-driven updates |
+| `DefaultLane` | code running in no special context (timers, network callbacks) |
+| `TransitionLane` ×10 | `transition()` updates; overlapping transitions claim distinct lanes round-robin |
+| transition-deferred ×4 | reserved transition-shaped follow-up lanes; not claimed by `transition()` |
+| `RetryLane` ×4 | suspense retries (a thrown promise resolved, re-render the boundary) |
+| `DeferredLane` | `useDeferredValue` re-renders |
+| `OffscreenLane` | updates inside hidden Activity subtrees |
+| `IdleLane` | idle work |
 
 Most of these also have hydration twins (`SyncHydrationLane`, `DefaultHydrationLane`, `SelectiveHydrationLane`, ...); those matter in doc 4.
 
-Why bits instead of a priority number? Merging is OR, membership is AND, and a
-_set_ of lanes can render as one mask — the ten claimable transition lanes and
-four reserved transition-deferred lanes form one render group, so overlapping
-transitions batch into one pass for free.
+Why bits instead of a priority number? Merging is OR, membership is AND, and a _set_ of lanes can render as one mask — the ten claimable transition lanes and four reserved transition-deferred lanes form one render group, so overlapping transitions batch into one pass for free.
 
 ### From setter to root
 
@@ -260,12 +257,7 @@ Invalid render input throws before commit instead of warning after — the commi
 
 Everything above is gated behind inline `__FIG_DEV__` checks, so Fig library builds strip it — no dev/prod package split, no runtime flag. Even the lane name table survives only for tests and diagnostics; production code uses raw mask checks.
 
-(Other subsystems ship their own dev diagnostics — the `onChange` →
-`on("input")` steering warning in events, key/args drift fingerprinting in the
-data layer, late head-asset reports in assets — but those belong to their own
-docs. Dev-only tooling seams, for completeness:
-`@bgub/fig-reconciler/devtools` for commit snapshots and
-`@bgub/fig-reconciler/refresh` for HMR.)
+(Other subsystems ship their own dev diagnostics — the `onChange` → `on("input")` steering warning in events, key/args drift fingerprinting in the data layer, late head-asset reports in assets — but those belong to their own docs. Dev-only tooling seams, for completeness: `@bgub/fig-reconciler/devtools` for commit snapshots and `@bgub/fig-reconciler/refresh` for HMR.)
 
 ---
 

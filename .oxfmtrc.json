@@ -1,4 +1,10 @@
 {
+  "overrides": [
+    {
+      "files": ["docs/**/*.md"],
+      "options": { "proseWrap": "never" }
+    }
+  ],
   "printWidth": 80,
   "sortPackageJson": false
 }

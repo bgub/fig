@@ -30,20 +30,16 @@ Raw tags still work. Host `<link>`, `<script>`, `<title>`, and `<meta>` elements
 
 Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion. A stylesheet discovered three ways — an `assets(...)` wrapper, a client reference, a raw `<link>` — renders once. Fonts and equivalent `preload`-as-font entries share a key space, so those dedupe against each other too. `title` collapses to a single head slot, last writer wins.
 
-In HTML server rendering, same-key entries with different definitions throw
-`AssetResourceConflictError`: a shared key is a claim that two descriptors are
-the same asset. The exception is `title`, where the singleton slot uses the
-latest value. Payload and DOM insertion use first-live-definition-wins dedupe
-instead; they do not compare descriptor signatures.
+In HTML server rendering, same-key entries with different definitions throw `AssetResourceConflictError`: a shared key is a claim that two descriptors are the same asset. The exception is `title`, where the singleton slot uses the latest value. Payload and DOM insertion use first-live-definition-wins dedupe instead; they do not compare descriptor signatures.
 
 ## Destinations
 
 Each kind has a destination:
 
-| Destination | Kinds                                                                    | Where it lands                           |
-| ----------- | ------------------------------------------------------------------------ | ---------------------------------------- |
-| head        | `title`, `meta`                                                          | document state, sealed with the shell    |
-| stream      | `stylesheet`, `script`, `preload`, `modulepreload`, `font`, `preconnect` | emitted near the segment that needs them |
+| Destination | Kinds | Where it lands |
+| --- | --- | --- |
+| head | `title`, `meta` | document state, sealed with the shell |
+| stream | `stylesheet`, `script`, `preload`, `modulepreload`, `font`, `preconnect` | emitted near the segment that needs them |
 
 The sealing rules differ by mode. In streaming SSR the head is sealed when the shell flushes, so a head-destined asset discovered inside suspended content arrives too late (dev warns; see diagnostics). `prerender` holds every flush until all tasks settle (doc 4), so it seals the head at flush and late-discovered head assets still land.
 
@@ -53,24 +49,12 @@ Only streamed kinds travel on the payload wire — doc 6's `assets` rows — ser
 
 On the client, `insertAssetResources` (from `@bgub/fig-dom`) inserts descriptors idempotently by key and returns load tracking.
 
-The reveal gate is the part you've already seen from the other side: doc 4's
-inline runtime has an `r` op that delays a boundary completion until its
-stylesheets load. That's this system. A streamed boundary's content waits for
-its blocking stylesheets before the swap runs, so streamed content never
-flashes unstyled. Payload boundary refreshes use the same gate: old content
-remains visible until newly discovered blocking stylesheets are ready.
-Non-blocking kinds (preloads, preconnects, scripts, and fonts) never gate, and a
-stylesheet inserted directly can opt out with `blocking: "none"`. Payload
-asset descriptors omit this hint, so payload-delivered stylesheets
-conservatively gate.
+The reveal gate is the part you've already seen from the other side: doc 4's inline runtime has an `r` op that delays a boundary completion until its stylesheets load. That's this system. A streamed boundary's content waits for its blocking stylesheets before the swap runs, so streamed content never flashes unstyled. Payload boundary refreshes use the same gate: old content remains visible until newly discovered blocking stylesheets are ready. Non-blocking kinds (preloads, preconnects, scripts, and fonts) never gate, and a stylesheet inserted directly can opt out with `blocking: "none"`. Payload asset descriptors omit this hint, so payload-delivered stylesheets conservatively gate.
 
 ## Diagnostics
 
-- `onAssetError` reports a head-destined asset discovered after the head was
-  sealed in streaming mode. There is no automatic warning when no handler is
-  configured. Prerender avoids the class entirely by sealing late.
-- The HTML server registry throws `AssetResourceConflictError` for conflicting
-  definitions; payload and DOM insertion dedupe by key as described above.
+- `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode. There is no automatic warning when no handler is configured. Prerender avoids the class entirely by sealing late.
+- The HTML server registry throws `AssetResourceConflictError` for conflicting definitions; payload and DOM insertion dedupe by key as described above.
 
 ---
 
