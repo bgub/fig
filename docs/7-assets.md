@@ -22,7 +22,7 @@ function Chart({ points }: { points: Point[] }) {
 
 The full creator set: `stylesheet`, `preload`, `modulepreload`, `script`, `font`, `preconnect`, `title`, `meta`. Each returns plain data — `stylesheet("/chart.css")` is just `{ kind: "stylesheet", href: "/chart.css" }`. Nothing registers or hoists at creation time; discovery happens when a render actually reaches the `assets(...)` element, which is what "render-discovered" means: an asset ships only if the UI that needs it ships.
 
-Client references carry assets too: `clientReference({ assets })` declares what a client component needs, and the render-level `clientReferenceAssets` resolver exists for bundler manifests (the manifest integration itself is still planned — see `concepts/assets.md` for status).
+Client references carry assets too: `clientReference({ assets })` declares what a client component needs, and Fig Start's generated asset manifest feeds the render-level `clientReferenceAssets` resolver so only rendered client components contribute their CSS and preload assets.
 
 Raw tags still work. Host `<link>`, `<script>`, `<title>`, and `<meta>` elements are lowered into the same registry (`assetResourceFromHostProps`), so raw-tag authoring participates in dedupe like everything else. This is what replaces React 19's implicit hoistable behavior: data plus one documented mechanism, as doc 1 promised.
 

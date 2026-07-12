@@ -1,7 +1,6 @@
 # Asset Resources
 
-Status: stable (bundler-manifest integration still planned — see
-plans/asset-resources.md phases 4–5)
+Status: stable
 
 Render-discovered delivery assets: CSS, scripts, module preloads, fonts,
 preconnects, titles, and meta — discovered, deduped, loaded, retained, and

@@ -1,4 +1,4 @@
-# Reconciler Exploration Backlog — July 2026
+# Reconciler Exploration Backlog
 
 Status: **future exploration / not queued**. These directions remain worth
 exploring at some arbitrary point, but none is scheduled or ordered. When an

@@ -22,8 +22,6 @@ and leaves this list.
 
 ## Data Resources
 
-From `plans/data-resources.md` (open questions that survived shipping):
-
 - **ErrorBoundary reset ergonomics** — data-key attribution and invalidation
   now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still
   open: whether `ErrorBoundary` should expose a first-class reset/retry
@@ -36,19 +34,14 @@ From `plans/data-resources.md` (open questions that survived shipping):
 
 ## Asset Resources
 
-From `plans/asset-resources.md` (phase 5 unimplemented):
-
-- **Bundler manifest integration** — the minimal manifest shape Fig requires
-  for client-reference assets (also README's standing "future goal").
-- Open: how stylesheet precedence interacts with independently streamed
-  segments once bundler-discovered stylesheets are common.
+- **Streamed stylesheet precedence** — how precedence should interact with
+  independently streamed segments when bundler-discovered stylesheets share
+  or conflict in ordering. The current manifest integration preserves
+  discovery order but does not define a stronger cross-segment policy. →
+  `concepts/assets.md`
 
 ## fig-start
 
-- **M2 of the server plan** (`plans/fig-start-servers.md`): the production
-  server milestone — Effect-internal lifecycle, static asset policy,
-  manifest caching, operational logging — behind the same Effect-free public
-  boundary as the dev server.
 - **Server action transport** — deliberately left out of `useActionState`
   core; the framework layer owns the wire (`concepts/hooks.md`).
 - **Request state for remote data loaders** — `remoteDataResource` loaders
@@ -59,14 +52,13 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
 
 ## View Transitions
 
-- **Responsiveness under rapid input** — commits park behind a running
-  transition (React's suspend-commits model: rendering stays live, latest
-  state batches into one animation per animation-window). The browser cannot
-  retarget a snapshot animation mid-flight, so the ecosystem's answer for
-  truly high-frequency motion (sortable lists, steppers) is live-element
-  FLIP with springs/CSS transitions, not view transitions — worth a docs
+- **Parked-commit latency safeguards** — rapid interactions already render
+  while the current transition runs and coalesce to the latest state for the
+  next animation window. The browser cannot retarget a snapshot animation
+  mid-flight, so truly high-frequency motion (sortable lists, steppers) still
+  belongs on live-element FLIP with springs/CSS transitions — worth a docs
   pointer. If parked-commit latency proves to matter in practice, three
-  API-free designs were sketched (2026-07), in preference order:
+  unimplemented API-free designs were sketched (2026-07), in preference order:
   fast-forwarding the running transition's pseudo-element animations via
   `playbackRate` when a commit parks (no teleport, safe for background
   commits); a park-timeout backstop that `skipTransition()`s a non-settling
@@ -82,8 +74,7 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
 
 - **Reconciler placement, remaining gaps** — the placement passes closed the
   reverse-keyed reorder gap (append/prepend now beat React on the tracked
-  benchmark); initial mount and same-order updates still trail. →
-  `plans/reconciler-placement-performance.md`
+  benchmark); initial mount and same-order updates still trail.
 - **Compiler-extracted templates** — a complete opt-in experiment lives on
   [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates),
   including DOM/SSR/hydration/payload integration, regression coverage, and a
@@ -91,22 +82,17 @@ From `plans/asset-resources.md` (phase 5 unimplemented):
   optimization is deliberately outside `main` until its transformation and
   long-term maintenance contract feel mature enough to adopt. Revisit from
   the branch rather than rebuilding the spike. → Compiler-extracted templates in
-  `plans/restructuring-ideas-2026-07.md`
+  `plans/reconciler-explorations.md`
 
 ## DevTools
 
-- Data-store and asset-registry inspection panels (entry snapshots exist via
-  `onEntryChange`/`inspectDataEntries`; no UI consumes them yet) — sketched
-  in both resource proposals' DevTools sections.
-- **Prerender helpers** — the demos share apps-level modules
-  (`apps/demo-devtools-client.ts` / `apps/demo-devtools-prerender.ts`) that
-  convert fig-server's render tree into a snapshot, fake a read-only hook,
-  and swap in the live panel after the first client commit. Once a consumer
-  outside the demos wants this, the pair belongs in `@bgub/fig-devtools`
-  (which owns the hook interface and the reconciler types), e.g.
-  `prerenderedFigDevtoolsHook(tree)` + a panel-adopt mount option.
-  Related: the inline payload frame-script/bootstrap builders now exist in
-  fig-start (internal) and demo-payload — a third consumer moves them to
-  `@bgub/fig-server/payload`; and `renderToPayloadStream` could accept
-  `renderTree` for server-component-fidelity trees (the flattening pass is
-  the only one that still knows server component names).
+- **Asset-registry inspection** — data-resource entries are already included
+  in reconciler snapshots and rendered by the DevTools panel; equivalent
+  asset-registry ownership, loading, gating, and conflict state is not yet
+  exposed.
+- **Payload bootstrap consolidation** — inline payload frame/bootstrap
+  builders still exist separately in Fig Start and `demo-payload`. A third
+  consumer should move the shared mechanism to `@bgub/fig-server/payload`.
+- **Payload render-tree fidelity** — `renderToPayloadStream` could accept a
+  render-tree collector so server-component names survive into DevTools; the
+  payload flattening pass is the last layer that knows those names.
