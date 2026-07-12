@@ -19,3 +19,5 @@ yarn.lock
 .repos/effect
 playwright-report
 test-results
+.claude
+.repos/

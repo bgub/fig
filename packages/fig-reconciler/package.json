@@ -50,7 +50,7 @@
     "@bgub/fig": "0.1.0-alpha.0"
   },
   "devDependencies": {
-    "@bgub/fig": "0.1.0-alpha.0"
+    "@bgub/fig": "workspace:*"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
