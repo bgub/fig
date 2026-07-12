@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 import {
   figSourceResolveAliases,
   workspacePath,
-} from "./tooling/fig-source-aliases.ts";
+} from "./scripts/lib/fig-source-aliases.ts";
 
 const packagePath =
   relative(workspacePath("."), process.cwd()).replaceAll("\\", "/") || ".";

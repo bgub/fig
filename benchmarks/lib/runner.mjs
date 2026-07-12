@@ -369,7 +369,7 @@ function positiveNumber(value, label) {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm bench:reconciler [options]
+  console.log(`Usage: pnpm bench [options]
 
 Runs the Fig and React reconciler scenario matrix against in-memory hosts.
 
@@ -388,7 +388,7 @@ Options:
   --threshold-pct=10       Fail when current median is this much slower.
 
 For lower GC noise, run with:
-  node --expose-gc scripts/bench-reconciler.mjs
+  node --expose-gc benchmarks/reconciler.mjs
 `);
 }
 

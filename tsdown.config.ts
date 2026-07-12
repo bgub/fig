@@ -5,7 +5,7 @@ import { figStart } from "./packages/fig-start/src/vite/index.ts";
 import {
   figSourceAliases,
   workspacePath,
-} from "./tooling/fig-source-aliases.ts";
+} from "./scripts/lib/fig-source-aliases.ts";
 
 const workspaceRoot = workspacePath(".");
 const packagePath =

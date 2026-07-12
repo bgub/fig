@@ -220,7 +220,7 @@ async function sendDocument(
 // Writes HTML chunks as they stream and flushes buffered payload rows as
 // inline frame scripts between them (fig-server emits complete markup per
 // chunk, so between-chunk injection is parse-safe — the contract in
-// concepts/server-rendering.md that the demo-ssr bootstrap injection also
+// docs/concepts/server-rendering.md that the demo-ssr bootstrap injection also
 // relies on).
 async function interleaveDocument(
   html: ReadableStream<Uint8Array>,

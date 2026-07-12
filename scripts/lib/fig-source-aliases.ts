@@ -48,5 +48,5 @@ export function figSourceResolveAliases(): Array<{
 }
 
 export function workspacePath(path: string): string {
-  return fileURLToPath(new URL(`../${path}`, import.meta.url));
+  return fileURLToPath(new URL(`../../${path}`, import.meta.url));
 }

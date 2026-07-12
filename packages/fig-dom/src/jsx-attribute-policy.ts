@@ -47,7 +47,7 @@ type FigOwnedPropName = keyof FigHostProps<Element> | keyof ReactHabitTraps;
 // Form state is Fig policy, not generated vocabulary: `value`/`checked`
 // control the live DOM state while `defaultValue`/`defaultChecked` own the
 // default value and HTML representation (props.ts;
-// concepts/intentional-differences-from-react.md). The generated snapshot
+// docs/concepts/intentional-differences-from-react.md). The generated snapshot
 // only knows content attributes — it lacks the default* props entirely and
 // `value` on textarea/select — so these per-tag extensions supply the form
 // props and take their names over from the snapshot.

@@ -22,7 +22,7 @@ describe("bench-reconciler", () => {
         const { stdout } = await execFileAsync(
           "pnpm",
           [
-            "bench:reconciler",
+            "bench",
             "--rows=4",
             "--samples=1",
             "--target-ms=1",
@@ -75,7 +75,7 @@ describe("bench-reconciler", () => {
         await execFileAsync(
           "pnpm",
           [
-            "bench:reconciler",
+            "bench",
             "--group=payload",
             "--scenario=nested",
             "--rows=4",

@@ -58,4 +58,4 @@ The reveal gate is the part you've already seen from the other side: doc 4's inl
 
 ---
 
-The full contract lives in `concepts/assets.md`. That's the end of the numbered series for now — `concepts/` (starting at `concepts/README.md`) is the spec for everything the guides didn't cover.
+The full contract lives in `docs/concepts/assets.md`. That's the end of the numbered series for now — `docs/concepts/` (starting at `docs/concepts/README.md`) is the spec for everything the guides didn't cover.

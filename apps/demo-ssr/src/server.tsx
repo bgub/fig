@@ -363,7 +363,7 @@ function bootstrapScripts(
 }
 
 // The renderer flushes the whole shell as its first enqueue and keeps later
-// chunk boundaries at complete-markup edges (concepts/server-rendering.md),
+// chunk boundaries at complete-markup edges (docs/concepts/server-rendering.md),
 // so appending the bootstrap to the first chunk lands it right after the
 // shell — DevTools aside included — inside one write. No write boundary ever
 // splits the shell, so the browser gets no paint opportunity between the app

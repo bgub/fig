@@ -109,4 +109,4 @@ If you squint, it's React: `useState`, JSX, a root. The differences you can see 
 - **Doc 5** — the data layer in depth.
 - **Doc 6** — payload, the server-component wire format.
 - **Doc 7** — asset resources: stylesheets, fonts, preloads, and reveal gating.
-- **Concepts** (`concepts/`) — the spec: every contract and invariant, one file per subsystem.
+- **Concepts** (`docs/concepts/`) — the spec: every contract and invariant, one file per subsystem.

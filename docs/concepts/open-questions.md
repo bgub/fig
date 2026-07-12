@@ -4,7 +4,7 @@ Status: living summary
 
 Every open design question and planned piece of work, in one place. Each item
 links its source (a concept file's `exploring` section or a plan in
-`plans/`); when an item resolves, it graduates into the owning concept file
+`docs/plans/`); when an item resolves, it graduates into the owning concept file
 and leaves this list.
 
 ## Hydration
@@ -18,7 +18,7 @@ and leaves this list.
   failure mode. Request-known shell state like cookie-backed color scheme
   belongs in the Fig Start document shell. `suppressHydrationWarning` now
   exists only as React-compatible one-level host escape hatch. →
-  `concepts/hydration.md`
+  `docs/concepts/hydration.md`
 
 ## Data Resources
 
@@ -38,17 +38,17 @@ and leaves this list.
   independently streamed segments when bundler-discovered stylesheets share
   or conflict in ordering. The current manifest integration preserves
   discovery order but does not define a stronger cross-segment policy. →
-  `concepts/assets.md`
+  `docs/concepts/assets.md`
 
 ## fig-start
 
 - **Server action transport** — deliberately left out of `useActionState`
-  core; the framework layer owns the wire (`concepts/hooks.md`).
+  core; the framework layer owns the wire (`docs/concepts/hooks.md`).
 - **Request state for remote data loaders** — `remoteDataResource` loaders
   run inside fig-start's data endpoint, which owns the request; loaders
   receive only `(...args, { signal })`. Open: whether fig-start provides an
   ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those
-  loaders, or keeps auth and services in module scope. → `concepts/data.md`
+  loaders, or keeps auth and services in module scope. → `docs/concepts/data.md`
 
 ## View Transitions
 
@@ -68,7 +68,7 @@ and leaves this list.
   the incoming commit's surface names overlap the running transition's —
   the animation is heading somewhere the commit invalidates). An opt-in
   `transition(cb, { interrupt: true })` stays in the drawer unless real
-  usage demands per-call control. → `concepts/view-transitions.md`
+  usage demands per-call control. → `docs/concepts/view-transitions.md`
 
 ## Performance
 
@@ -82,7 +82,7 @@ and leaves this list.
   optimization is deliberately outside `main` until its transformation and
   long-term maintenance contract feel mature enough to adopt. Revisit from
   the branch rather than rebuilding the spike. → Compiler-extracted templates in
-  `plans/reconciler-explorations.md`
+  `docs/plans/reconciler-explorations.md`
 
 ## DevTools
 

@@ -21,9 +21,9 @@ Principles:
 - Fail early for invalid render inputs instead of warning after commit.
 
 The full divergence list lives in
-[docs/intentional-differences-from-react.md](./docs/intentional-differences-from-react.md);
+[docs/concepts/intentional-differences-from-react.md](./docs/concepts/intentional-differences-from-react.md);
 subsystem contracts, invariants, and rationale live in
-[concepts/](./concepts/README.md). Highlights:
+[docs/concepts/](./docs/concepts/README.md). Highlights:
 
 - Effects, events, binds, transitions, actions, and data loaders all receive
   an `AbortSignal`; nothing returns a cleanup function.

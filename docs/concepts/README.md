@@ -2,7 +2,7 @@
 
 The spec: one file per subsystem, each the single authoritative source for
 that subsystem's contracts, invariants, wire formats, and rationale. Written
-for someone changing the code; user guides live in `docs/`. When a contract
+for someone changing the code; user guides live one directory up. When a contract
 changes, the owning concept file updates in the same commit.
 
 The principles every file applies: prefer small runtime concepts over

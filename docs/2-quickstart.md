@@ -1,6 +1,6 @@
 # Quickstart
 
-If you know React, you already know 90% of Fig. This doc is the other 10%: the differences you'll hit in your first hour, with code. (The exhaustive list lives in `concepts/intentional-differences-from-react.md`; the internals are doc 3.)
+If you know React, you already know 90% of Fig. This doc is the other 10%: the differences you'll hit in your first hour, with code. (The exhaustive list lives in `docs/concepts/intentional-differences-from-react.md`; the internals are doc 3.)
 
 ## Hello Fig
 

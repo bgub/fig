@@ -55,7 +55,7 @@ Exploring: remote loaders run inside the framework data endpoint, which owns
 the request — so whether those loaders get an ambient per-request context
 (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is
 Fig Start's decision, not a core data contract
-(`concepts/open-questions.md`).
+(`docs/concepts/open-questions.md`).
 
 ## Remote Refresh Is A Framework Layer
 

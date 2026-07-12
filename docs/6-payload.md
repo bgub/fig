@@ -156,4 +156,4 @@ Doc 4 drew this line from the other side, so briefly: the HTML+ops protocol carr
 
 ---
 
-The full contract lives in `concepts/payload.md`. Next: doc 7 — asset resources, including the `assets` rows this doc skipped over.
+The full contract lives in `docs/concepts/payload.md`. Next: doc 7 — asset resources, including the `assets` rows this doc skipped over.

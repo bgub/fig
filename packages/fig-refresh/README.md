@@ -9,7 +9,7 @@ This package is wiring, not an API you call from application code: build
 tooling (such as `@bgub/fig-vite`) injects `register`/`setSignature` calls
 into transformed modules and drives `performRefresh` on hot updates.
 
-See the repository's `concepts/` directory for the underlying contracts.
+See the repository's `docs/concepts/` directory for the underlying contracts.
 
 ## Installation
 

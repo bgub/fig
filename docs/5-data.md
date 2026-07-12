@@ -241,4 +241,4 @@ Fig keeps the surface narrow. It doesn't absorb polling, focus refetch, retry po
 
 ---
 
-The full contract — retention and eviction windows, key encoding rules, every edge case — lives in `concepts/data.md`. Next: doc 6 — payload, the wire these data entries ride during server-component navigation.
+The full contract — retention and eviction windows, key encoding rules, every edge case — lives in `docs/concepts/data.md`. Next: doc 6 — payload, the wire these data entries ride during server-component navigation.

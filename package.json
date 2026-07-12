@@ -4,7 +4,6 @@
   "type": "module",
   "scripts": {
     "bench": "turbo run build --filter=@bgub/fig-server... --filter=@bgub/fig-reconciler... && node benchmarks/reconciler.mjs",
-    "bench:reconciler": "turbo run build --filter=@bgub/fig-server... --filter=@bgub/fig-reconciler... && node benchmarks/reconciler.mjs",
     "build": "turbo run build",
     "check": "turbo run quality",
     "dev": "FIG_DEV_SOURCE=1 turbo run dev --filter=@bgub/fig-start --filter='./apps/*' --ui=tui",

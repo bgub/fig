@@ -4,7 +4,7 @@ Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks,
 Suspense, streaming, selective hydration — and drops the rest. This is the
 running list of deliberate divergences, written for readers who know React.
 Each area's full contract and rationale live in the matching file under
-[`concepts/`](../concepts/README.md) — this list is the orientation, not the
+[`docs/concepts/`](./README.md) — this list is the orientation, not the
 spec.
 
 ## General

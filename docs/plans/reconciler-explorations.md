@@ -3,7 +3,7 @@
 Status: **future exploration / not queued**. These directions remain worth
 exploring at some arbitrary point, but none is scheduled or ordered. When an
 idea ships, its contracts and rationale graduate to the owning file in
-`concepts/`.
+`docs/concepts/`.
 
 The reconciler is a single ~7.1k-LOC closure per renderer instance, Fig owns
 its Vite plugin and JSX runtime, and reads are explicit (`readContext`,
