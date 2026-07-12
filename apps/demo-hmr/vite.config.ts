@@ -20,6 +20,14 @@ export default defineConfig({
         find: "@bgub/fig-dom/jsx-dev-runtime",
         replacement: pkg("fig-dom/src/jsx-runtime.ts"),
       },
+      {
+        find: "@bgub/fig/jsx-runtime",
+        replacement: pkg("fig/src/jsx-runtime.ts"),
+      },
+      {
+        find: "@bgub/fig/jsx-dev-runtime",
+        replacement: pkg("fig/src/jsx-runtime.ts"),
+      },
       { find: "@bgub/fig/internal", replacement: pkg("fig/src/internal.ts") },
       {
         find: "@bgub/fig-dom/refresh",
