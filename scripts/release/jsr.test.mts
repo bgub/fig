@@ -105,7 +105,7 @@ void test("jsrRelease validates unpublished packages during dry runs", async () 
   assert.deepEqual(commands, [
     {
       command: "pnpm",
-      args: ["exec", "jsr", "publish", "--dry-run"],
+      args: ["exec", "jsr", "publish", "--allow-slow-types", "--dry-run"],
       cwd: dir,
     },
   ]);

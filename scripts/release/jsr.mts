@@ -46,7 +46,7 @@ export function jsrRelease(options: JsrReleaseOptions = {}): TegamiPlugin {
           continue;
         }
 
-        const args = ["exec", "jsr", "publish"];
+        const args = ["exec", "jsr", "publish", "--allow-slow-types"];
         if (plan.options.dryRun === true) args.push("--dry-run");
         await run("pnpm", args, pkg.path);
       }
