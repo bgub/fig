@@ -36,9 +36,11 @@ First, what stays: Fig keeps the modern React runtime model wholesale — compon
 `dataResource` defines keyed async values where the key _is_ the identity. No id registry, no React-Query-sized vocabulary:
 
 - `readData` suspends while loading, and errors hit your `ErrorBoundary`
-- Freshness is exactly two verbs: `invalidateData` (mark stale) and `refreshData` (load now)
+- Freshness has two operations: invalidate (by resource, exact key, prefix, or
+  attributed error) and refresh (load now)
 - Mutations, SSR handoff, and hydration all flow through one flat cache
-- Loaders receive an `AbortSignal` and a typed app context
+- Loaders receive an `AbortSignal`; framework/request context is supplied by
+  the framework layer rather than the core data contract
 
 ### Assets are fine-grained and render-discovered
 

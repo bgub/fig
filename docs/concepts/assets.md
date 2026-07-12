@@ -46,13 +46,16 @@ unstyled. Payload boundary refreshes follow the same rule: refreshed content
 keeps the last revealed tree visible until newly required stylesheets load.
 If a later payload depends on a stylesheet Fig already inserted and that sheet
 is still loading, it joins the existing gate. Non-blocking kinds (preloads,
-preconnects) never gate.
+preconnects, scripts, and fonts) never gate, and a stylesheet may opt out with
+`blocking: "none"` when inserted directly. Payload asset descriptors omit this
+authoring hint, so payload-delivered stylesheets conservatively gate.
 
 ## Diagnostics
 
-Dev builds warn when a head-destined asset is discovered after the head was
-sealed in streaming mode (`onAssetError` reports late assets and conflicts);
-prerender mode avoids the class entirely by sealing late. Conflicting
-same-key definitions throw (`AssetResourceConflictError`), except `title`:
-there is only one document title slot, so the latest title replaces the
-previous value.
+`onAssetError` reports a head-destined asset discovered after the head was
+sealed in streaming mode; no handler means no automatic warning. Prerender
+mode avoids the class entirely by sealing late. The HTML server registry
+throws `AssetResourceConflictError` for conflicting same-key definitions,
+except `title`, whose singleton slot uses the latest value. Payload and DOM
+insertion instead treat the first live definition for a key as authoritative
+and dedupe later definitions without signature comparison.

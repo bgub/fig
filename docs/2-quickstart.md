@@ -34,7 +34,10 @@ Fig uses the platform's names: `class`, `for`, `tabindex`, `stroke-width`. The R
 ```tsx
 <input
   events={[
-    on("input", (event, signal) => setQuery(event.currentTarget.value)),
+    on("input", (event, signal) => {
+      const input = event.currentTarget;
+      if (input instanceof HTMLInputElement) setQuery(input.value);
+    }),
     on("keydown", (event) => event.key === "Enter" && submit()),
   ]}
 />
@@ -136,7 +139,11 @@ start(async (signal) => {
 });
 ```
 
-Superseded and unmounted runs are aborted and retired — last run wins, with no stale clobbering. Top-level `transition(cb)` exists for scopes without a hook.
+Superseded and unmounted runs are aborted and retired: their pending slot
+releases immediately and their eventual rejection is inert. Abort is a signal,
+not an unwind — a callback that ignores it and keeps running may still update
+state. (`useActionState`, unlike transitions, generation-guards results so the
+last run wins.) Top-level `transition(cb)` exists for scopes without a hook.
 
 ## What's gone (and what replaces it)
 

@@ -6,21 +6,25 @@ How the packages relate, who owns what, and the cross-package protocol.
 
 ## Package Ownership
 
-Every export has exactly one home: behavior lives in the package whose domain
-defines it. Renderer packages never mirror core symbols; a package re-exports a
-_type_ only when that type appears in its own public signatures (types follow
-signatures — that is what gives consumers semver protection).
+Every app-facing export has exactly one home: behavior lives in the package
+whose domain defines it. Renderer packages do not mirror core app APIs, and a
+package re-exports a _type_ only when that type appears in its own public
+signatures (types follow signatures — that is what gives consumers semver
+protection). The one mechanical exception is a renderer's JSX transform
+subpaths: `@bgub/fig-dom/jsx-runtime` re-exports the core transform functions
+while supplying the DOM-specific `JSX` namespace required by TypeScript.
 
 - `@bgub/fig` — the component model: elements and the JSX runtime, components
-  (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`), hooks, the
+  (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`, `ViewTransition`), hooks, the
   read verbs (`readContext`, `readPromise`, `readData`), `transition`,
   `isValidElement`, `lazy`, `clientReference`, asset-resource creators, and
   the data layer — `dataResource`, the freshness verbs, and the store
   implementation (which stays out of data-free bundles; see the lazy store
   installation protocol below). The `./server` subpath is the server-file authoring entry
-  (`serverDataResource`); its packaging transform ships as `figData` in
-  `@bgub/fig-vite` (version-synced — build-time skew is benign, runtime
-  symbol skew is not).
+  (`serverDataResource`); its packaging transform is `figData` in
+  `@bgub/fig-vite`. That package is currently a private workspace preview,
+  not part of the synchronized public release group; Fig Start consumes it
+  in-repo while the standalone bundler contract matures.
 - `@bgub/fig-dom` — the browser boundary: `createRoot`/`hydrateRoot`/
   `createPortal`, `flushSync`, `on()`/`events`, `bind`/`composeBind`,
   `insertAssetResources`, host-prop JSX types, the `./refresh` HMR subpath,
@@ -33,8 +37,10 @@ signatures — that is what gives consumers semver protection).
   and the `./payload` server-component layer. `escapeAttribute`/`escapeText`
   are exported because their contract is "consistent with fig-server's own
   HTML emission".
-- `@bgub/fig-start`, `@bgub/fig-vite`, `@bgub/fig-refresh`,
-  `@bgub/fig-devtools` — framework, bundler, HMR, and DevTools layers on top.
+- `@bgub/fig-refresh` — the published HMR runtime layer.
+- `@bgub/fig-start`, `@bgub/fig-vite`, and `@bgub/fig-devtools` — implemented
+  framework, bundler, and DevTools workspace previews. They are private and
+  excluded from the synchronized public release group today.
 
 fig-server is a fully separate render implementation (it depends only on
 `@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never
@@ -89,10 +95,14 @@ data operation (`readData`, `preloadData`, `invalidateData`, or
 `refreshData`) passes a resource to the stub; the stub installs the real
 store from the resource's factory and replays buffered hydration entries.
 
-The invariant that makes this safe: every runtime data operation takes a
-resource, and every resource comes from `dataResource`, which carries the
-factory. Type exports do not weaken it — the data-protocol types have no
-runtime footprint.
+The operations that can install the real store (`readData`, `preloadData`,
+`invalidateData`, and `refreshData`) all take a resource created by
+`dataResource`, which carries the factory. Exact-key, prefix, and attributed-
+error invalidation cannot install a store because they have no resource from
+which to obtain the factory; on an uninstalled stub they are inert
+(`invalidateDataError` returns `false`). Once any resource-backed operation
+installs the store, those targeting variants operate normally. Type exports do
+not weaken the invariant — the data-protocol types have no runtime footprint.
 
 ## Boundaries That Never Leak
 

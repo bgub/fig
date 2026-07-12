@@ -4,7 +4,8 @@ Fig data resources are keyed async values tied into rendering, scheduling, SSR, 
 
 - a per-root store of entries keyed by resource keys
 - a render-time read verb: `readData`
-- freshness verbs: `invalidateData`, `invalidateDataPrefix`, and `refreshData`
+- freshness verbs: resource, exact-key, prefix, and attributed-error invalidation,
+  plus immediate refresh
 - server serialization of fulfilled entries
 
 The point isn't to replace every feature of a query library. Fig owns the parts that need renderer cooperation: committed subscriptions, cancellation, scheduling, error attribution, and the server-to-client handoff.
@@ -89,7 +90,11 @@ Loads are generation-guarded. If a newer load supersedes an older one, the old s
 
 Every root owns a data store. Server renders get a fresh store per request. There's no process-global data cache.
 
-The free functions `invalidateData`, `preloadData`, and `refreshData` use an ambient store. That ambient store exists only while Fig is executing synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects. After an `await`, capture an explicit handle first:
+The free functions `preloadData`, the four invalidation variants, and
+`refreshData` use an ambient store. That ambient store exists only while Fig is
+executing synchronously: render, event dispatch, the synchronous prefix of
+actions and transitions, and effects. After an `await`, capture an explicit
+handle first:
 
 ```ts
 import { readDataStore } from "@bgub/fig";
@@ -174,7 +179,11 @@ export const userServerResource = serverDataResource({
 
 Browser components import and read `userResource`. Server code imports and preloads or reads `userServerResource`. Because both resources return the same key, they address the same store entry.
 
-If you import a `.server.ts(x)` module from browser code, use the `figData` plugin from `@bgub/fig-vite` so the server loader is replaced by a client stub. Fig Start includes this transform.
+If you import a `.server.ts(x)` module from browser code, the `figData` plugin
+from `@bgub/fig-vite` replaces the server loader with a client stub. Fig Start
+includes this transform. Both packages are currently private workspace previews,
+so this is the in-repo framework path rather than a standalone public install
+surface.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed a value for that key, `readData(userResource, id)` can read it. If the client tries to refresh it directly, the result is:
 
@@ -188,7 +197,8 @@ Fresh data for hydrate-only resources must come through a server render, payload
 
 Sometimes the client should be able to refresh a server value directly — outside a document render or payload navigation. Fig's data layer deliberately has no verb for this: an HTTP endpoint has to exist to serve the refresh, and endpoints belong to the framework layer.
 
-In Fig Start, declare the resource with `remoteDataResource` instead of `serverDataResource`:
+In the private Fig Start workspace preview, declare the resource with
+`remoteDataResource` instead of `serverDataResource`:
 
 ```ts
 // user-data.server.ts

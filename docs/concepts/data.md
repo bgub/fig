@@ -40,6 +40,10 @@ server-file resources become key-only stubs (the browser-safe `key` survives;
 the server loader is stripped). Server-file modules imported without that
 transform must fail before server code enters the client bundle.
 
+`@bgub/fig-vite` is currently a private workspace preview rather than part of
+the synchronized public release group. Fig Start uses it in-repo; standalone
+consumers cannot yet rely on this transform from the public release set.
+
 Those two loader placements — loader-backed and hydrate-only — are the only
 resource kinds the store knows. There is deliberately no third "remote" kind:
 see Remote Refresh Is A Framework Layer.
@@ -64,6 +68,9 @@ core data concept: an endpoint must exist to serve the refresh, and endpoints
 belong to frameworks. Fig Start owns that layer with `remoteDataResource`
 (from `@bgub/fig-start/server`, declared in `.server.ts(x)` files exactly like
 `serverDataResource`).
+
+Fig Start is currently an implemented private workspace preview, so this is
+the framework contract under development rather than a public install surface.
 
 On the server, a `remoteDataResource` is an ordinary server resource that Fig
 Start additionally registers behind its data endpoint under a stable generated

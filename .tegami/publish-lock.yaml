@@ -24,15 +24,15 @@ core:packages:
     id: npm:@bgub/fig-server
     updated: true
 npm:packages:
-  - distTag: alpha
+  - distTag: latest
     id: npm:@bgub/fig
-  - distTag: alpha
+  - distTag: latest
     id: npm:@bgub/fig-dom
-  - distTag: alpha
+  - distTag: latest
     id: npm:@bgub/fig-reconciler
-  - distTag: alpha
+  - distTag: latest
     id: npm:@bgub/fig-refresh
-  - distTag: alpha
+  - distTag: latest
     id: npm:@bgub/fig-server
   - id: npm:@bgub/fig-demo-client
   - id: npm:@bgub/fig-demo-payload

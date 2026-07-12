@@ -1,5 +1,7 @@
 # Concepts
 
+Status: stable index
+
 The spec: one file per subsystem, each the single authoritative source for
 that subsystem's contracts, invariants, wire formats, and rationale. Written
 for someone changing the code; user guides live one directory up. When a contract
@@ -14,9 +16,9 @@ React's legacy or compatibility behavior, Node-specific streams as the
 default SSR surface, and adding React APIs before a Fig use case proves they
 belong.
 
-Every file carries a `Status:` line — `stable` for settled contracts,
-`exploring` for open designs (Problem → Prior Art → Direction → Open
-Questions → Provisional Stance).
+Every concept file carries a `Status:` line — `stable` for settled contracts,
+`exploring` for open designs (Problem → Prior Art → Direction → Open Questions
+→ Provisional Stance), and a qualified status for mixed or living index files.
 
 - [open-questions.md](./open-questions.md) — every open design question and
   planned piece of work, in one place; items graduate into their owning
@@ -27,7 +29,7 @@ Questions → Provisional Stance).
 - [rendering.md](./rendering.md) — element model, bailout tiers,
   always-strict dev rendering, pre-commit diagnostics, commit/batching.
 - [hooks.md](./hooks.md) — the AbortSignal contract table, state/effects/
-  stable events, transitions and actions (cancellation, last-run-wins), the
+  stable events, transitions and actions (cancellation, action last-run-wins), the
   read verbs, deliberate omissions.
 - [events.md](./events.md) — `on()`/`events`, logical-tree delegation,
   native propagation (focus/blur stance), replay, `bind`.

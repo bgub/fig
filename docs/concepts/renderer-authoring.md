@@ -18,12 +18,25 @@ prepare or release portal containers. There are no mode flags
 (`supportsMutation`/`supportsPersistence`),
 no host-context push/pop — `createInstance(type, props, parent)` receives the
 parent directly (how fig-dom resolves SVG/MathML namespaces) — and no
-`prepareForCommit`/`getPublicInstance`/microtask hooks. Hydration is five
-optional boundary methods around a host-owned `DehydratedSuspenseBoundary`
-type, plus an optional `completeRootHydration(container)` lifecycle callback
-for tearing down host-side hydration state once no dehydrated Suspense
-boundaries remain. Marker parsing stays in the renderer package where the
-markup knowledge lives.
+`prepareForCommit`/`getPublicInstance`/microtask hooks.
+
+Hydration is split into capability groups:
+
+- General host adoption requires `getFirstHydratableChild`,
+  `getNextHydratableSibling`, `canHydrateInstance`, `canHydrateTextInstance`,
+  and `clearContainer`; `commitHydratedInstance` is optional within that group.
+- Suspense hydration is seven methods around the host-owned
+  `DehydratedSuspenseBoundary`: boundary parsing, enclosing-boundary lookup,
+  containment fallback, retry registration, hydrated commit, root-hydration
+  completion, and dehydrated-boundary removal.
+- Activity hydration/visibility is seven methods: boundary parsing and first-
+  child lookup, hydrated commit, and instance/text hide/unhide hooks.
+
+Each `HostConfig` member remains optional so a renderer can omit a capability;
+the exported `HostHydrationConfig`, `HostSuspenseHydrationConfig`, and
+`HostActivityConfig` types express the complete groups for renderers that
+implement them. Marker parsing stays in the renderer package where the markup
+knowledge lives.
 
 ## Root API
 

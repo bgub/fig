@@ -57,12 +57,12 @@ Payload is a semantic row model plus a pluggable byte codec. The default codec i
 ```
 {"id":1,"tag":"client","value":{"id":"src/like-button.tsx#LikeButton","exportName":"LikeButton"}}
 
-{"id":0,"tag":"model","value":{"$fig":"element","key":null,"props":{"children":[
-  {"$fig":"element","key":null,"props":{"children":"Ada Lovelace"},"type":"h1"},
-  {"$fig":"element","key":null,"props":{"userId":"42"},"type":{"$fig":"client","id":1}}
-]},"type":"main"}}
+{"id":0,"tag":"model","value":{"$fig":"element","key":null,"props":{"$fig":"object","value":{"children":[
+  {"$fig":"element","key":null,"props":{"$fig":"object","value":{"children":"Ada Lovelace"}},"type":"h1"},
+  {"$fig":"element","key":null,"props":{"$fig":"object","value":{"userId":"42"}},"type":{"$fig":"client","id":1}}
+]}},"type":"main"}}
 
-{"tag":"data","value":[{"key":["user","42"],"value":{"name":"Ada Lovelace"}}]}
+{"tag":"data","value":[{"key":["user","42"],"value":{"$fig":"object","id":1,"value":{"name":"Ada Lovelace"}}}]}
 ```
 
 Reading them in order:
@@ -73,20 +73,26 @@ Reading them in order:
 
 The full row vocabulary:
 
-| Tag       | Carries                                                             |
-| --------- | ------------------------------------------------------------------- |
-| `model`   | a serialized tree chunk; id 0 is the root                           |
-| `client`  | a client reference: `{ id, exportName?, assets?, ssr? }`            |
-| `data`    | settled data-resource entries (doc 5's map rows)                    |
-| `assets`  | stream-safe asset descriptors (doc 7)                               |
-| `error`   | `{ digest?, message? }` under the server `onError` contract (doc 4) |
-| `refresh` | a boundary refresh: replaces one `PayloadBoundary`'s content by id  |
+| Tag             | Carries                                                             |
+| --------------- | ------------------------------------------------------------------- |
+| `model`         | a serialized tree chunk; id 0 is the root                           |
+| `client`        | a client reference: `{ id, exportName?, assets?, ssr? }`            |
+| `data`          | settled data-resource entries (doc 5's map rows)                    |
+| `assets`        | stream-safe asset descriptors (doc 7)                               |
+| `error`         | `{ digest?, message? }` under the server `onError` contract (doc 4) |
+| `refresh`       | a boundary refresh: replaces one `PayloadBoundary`'s content by id  |
+| `refresh-error` | a failed targeted refresh; keeps the previous boundary content      |
 
 Some things are deliberately absent from the row model: server actions and temporary references. The byte encoding is deliberately pluggable: JSON is the readable default for development, and a binary production codec can be added without changing the row semantics. Codec ids identify implementations, not stable public formats. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
 
 ## Serialization fidelity
 
-Payload data is not just `JSON.stringify` with crossed fingers. The shared value codec round-trips JSON scalars/arrays, plain objects (including a user-authored `$fig` key), `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global `Symbol.for` symbols. It rejects functions, cycles, class instances/non-plain objects, and non-global symbols.
+Payload data is not just `JSON.stringify` with crossed fingers. The shared
+value codec round-trips JSON scalars/arrays, plain objects (including a
+user-authored `$fig` key), shared references and cyclic graphs, `undefined`,
+`Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global
+`Symbol.for` symbols. It rejects functions, class instances/non-plain objects,
+and non-global symbols.
 
 Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. Fig Start uses the same helpers for data hydration and remote data resource args/results, so data values don't silently degrade to JSON.
 

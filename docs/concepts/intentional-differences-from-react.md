@@ -1,5 +1,7 @@
 # Intentional Differences from React
 
+Status: stable orientation
+
 Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks,
 Suspense, streaming, selective hydration — and drops the rest. This is the
 running list of deliberate divergences, written for readers who know React.
@@ -105,14 +107,15 @@ spec.
   property; `defaultChecked` owns the `checked` content attribute (the
   `defaultChecked` reflection form reset restores).
 - JSX host-prop types come from the renderer: core's `JSX.IntrinsicElements`
-  is deliberately empty and `@bgub/fig-dom` augments it with a per-tag
-  `HostProps<E>` map, so `bind` infers the concrete element type per tag
+  is deliberately empty and `@bgub/fig-dom/jsx-runtime` supplies its own
+  per-tag `HostProps<E, AttributeName>` map, so `bind` infers the concrete
+  element type per tag
   (no `forwardRef` gymnastics), `events`/`style`/`unsafeHTML` are
   shape-checked (numeric style values are compile errors, matching the
   runtime), and React-habit props — `className`, `htmlFor`, `ref`,
   `dangerouslySetInnerHTML`, and the whole `on*` family — are rejected at
-  compile time. Attributes stay an open, natively-named vocabulary; no
-  React-style per-element attribute catalogs.
+  compile time. HTML and SVG use closed, natively named, generated per-tag
+  attribute vocabularies; MathML and dashed custom elements remain open.
 - Render diagnostics throw before commit (duplicate keys, invalid children,
   render-phase updates, invalid DOM nesting) instead of warning after it.
 

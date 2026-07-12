@@ -46,7 +46,7 @@ dashed names get the custom-element arm at the `HTMLElement` baseline):
   are app-defined or not well-covered by the external sources.
 
 The contract is pinned by a type-level test
-(`fig-dom/src/jsx-types.test.tsx`) whose `@ts-expect-error` markers are
+(`packages/fig-dom/src/jsx-types.test.tsx`) whose `@ts-expect-error` markers are
 enforced by typecheck — a regression that stops rejecting `className`, host
 attribute typos, or object-valued native attributes fails the build.
 
@@ -56,11 +56,11 @@ The HTML/SVG attribute source is intentionally quarantined:
 
 - `scripts/generate-jsx-attributes.mjs` reads `html-element-attributes` and
   `svg-element-attributes`.
-- `fig-dom/src/jsx-attributes.generated.ts` is a checked-in generated snapshot
+- `packages/fig-dom/src/jsx-attributes.generated.ts` is a checked-in generated snapshot
   of literal tag/attribute unions. It exists because those packages publish
   widened `Record<string, string[]>` declarations, which TypeScript cannot use
   directly as literal JSX prop names.
-- `fig-dom/src/jsx-attribute-policy.ts` is the small handwritten policy layer:
+- `packages/fig-dom/src/jsx-attribute-policy.ts` is the small handwritten policy layer:
   Fig props, React-habit traps, `aria-*`/`data-*`, `role`, legacy SVG namespace
   attributes, scalar attribute values, and the open MathML/custom-element
   escape hatches.

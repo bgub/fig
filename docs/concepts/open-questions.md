@@ -72,9 +72,12 @@ and leaves this list.
 
 ## Performance
 
-- **Reconciler placement, remaining gaps** — the placement passes closed the
-  reverse-keyed reorder gap (append/prepend now beat React on the tracked
-  benchmark); initial mount and same-order updates still trail.
+- **Reconciler performance tracking** — the current 1,000-row in-memory-host
+  matrix has Fig ahead of React on initial mount, same-order updates,
+  append/prepend, and reverse-keyed reorder on the development machine. These
+  numbers are machine- and revision-sensitive, so keep the paired 15-sample
+  measurement protocol in `docs/plans/reconciler-explorations.md` rather than
+  treating a particular lead or gap as a durable contract.
 - **Compiler-extracted templates** — a complete opt-in experiment lives on
   [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates),
   including DOM/SSR/hydration/payload integration, regression coverage, and a

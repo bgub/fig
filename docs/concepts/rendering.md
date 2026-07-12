@@ -89,23 +89,23 @@ loop yields before further scheduled work runs.
 
 Non-mutation commit work is discovered during render, not by walking the
 finished tree: every fiber that renders hooks, records deletions, or catches
-an error is pushed onto a per-root commit queue in begin order, and the
+an error is recorded in a per-root sparse commit index in begin order, and the
 deletion, data-dependency, external-store, live-hook, caught-error, effect,
-and deleted-view-transition passes iterate that queue instead of traversing.
-Each fiber appears at most once (`CommitQueuedFlag`, invisible to
-`subtreeFlags`) — effect execution is not idempotent, so the queue itself
+and deleted-view-transition passes iterate that index instead of traversing.
+Each fiber appears at most once (`CommitIndexedFlag`, invisible to
+`subtreeFlags`) — effect execution is not idempotent, so the index itself
 guarantees uniqueness while every other pass additionally re-checks its own
 per-fiber state, keeping stale entries inert. Commit-time arming of a
-revealed boundary's deferred effects queues their owners the same way.
-Suspense and error boundaries record the queue length when they begin; a
-capture truncates back to that watermark so work queued by a discarded
-subtree never commits (a boundary's own deletions are requeued — they belong
-to the boundary, not the subtree). The queue is cleared on render restart
+revealed boundary's deferred effects records their owners the same way.
+Suspense and error boundaries record the index length when they begin; a
+capture truncates back to that watermark so work indexed by a discarded
+subtree never commits (a boundary's own deletions are re-indexed — they belong
+to the boundary, not the subtree). The index is cleared on render restart
 and after every commit.
 
-Steady-state host updates are queued too, and their bits never enter
+Steady-state host updates are indexed too, and their bits never enter
 `subtreeFlags`, so the mutation and flag-clearing walks skip update-only
-regions entirely. Ownership is split by commit kind: the queue pass commits
+regions entirely. Ownership is split by commit kind: the index pass commits
 updates on already-committed instances (text included — a hydrated text
 node's first "update" is how its differing value applies), while hydration
 commits stay in the walk (an Activity template must unpack before its
