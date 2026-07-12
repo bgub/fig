@@ -1,114 +1,184 @@
 # Intro to Fig
 
-Fig is an attempt to imagine what React would look like if it was designed from scratch in 2026.
+*Note: this doc is for people who already know React! If you don't, skip ahead to the next page which goes into more detail.*
 
-It starts from a simple premise: React made almost all the right choices. Its model — components, fibers, scheduling, suspense, and streaming — is worth keeping. Fig keeps that model but uses slightly different syntax, adds some features, and removes others. In addition to React, it was heavily inspired by Remix 3 and the TanStack libraries.
+In general, Fig follows a simple rule: when syntax is identical to React, use the same API name. When it's different, use a different name.
 
-## What React got right
+## What's the same as React?
+- UI as a declarative function of state
+- Fiber/concurrent rendering
+- Platform-agnostic core (you can use Fig in web, CLI, native, desktop)
+- Hooks instead of signals (see the FAQ)
+- The following APIs: `useState`, `useMemo`, `useCallback`, `useId`, `useDeferredValue`, `useSyncExternalStore`, `createElement`, `isValidElement`, `Fragment`, `createPortal`, `flushSync`, `Suspense`, `Activity`, `createRoot`, `hydrateRoot`, root `.render()` and `.unmount()` 
 
-- **UI as a declarative function of state.** You describe what the screen should look like for a given state, and you never imperatively mutate the view.
-- **Framework-owned updates.** Letting the framework update the view to match state prevents footguns (forgotten DOM updates, stale UI) and improves performance, since it can batch and order the work.
-- **A platform-agnostic core.** The component model doesn't know about the DOM, so it can be used in web, CLI, native, desktop — even GPU renderers.
-- **Coarse-grained updates instead of signals.** Signals are super cool, but in real-world apps the perf gains from fine-grained reactivity rarely matter, and the model complicates everything else: tooling, server rendering, hydration, concurrent/background rendering. Re-rendering components and diffing is simpler and composes with all of the above. (I'll probably write a full article about this decision elsewhere.)
-- **Fiber.** Representing the UI as a tree of small work units means expensive renders can be split up and interrupted, urgent updates can jump the queue, and commits are atomic — the user never sees a half-rendered screen.
-- **Streaming SSR with suspense.** The server streams HTML as it's ready, slower content streams in afterward inside suspense boundaries, and selective hydration makes each piece interactive independently.
-- **Server components.** People bash on this model, but it's a great idea: run several data-fetching and processing steps inside the component that uses them, all on the server, in one pass (no client round trips), then stream the serialized component to the browser without shipping the code that produced it (the data-fetching code, the markdown renderer, ...).
-- **Transitions and Activity.** A transition renders in the background and swaps the result into the tree all at once, so the committed UI stays consistent. Activity keeps hidden UI alive and pre-renders it offscreen. Together they're why well-built React apps feel really, really fast.
+## What's different?
 
-## What React got wrong
+### Props
 
-But React has a few real drawbacks too. Each maps to something Fig fixes below.
+Fig uses native names for props: `class`, `for`, `tabindex`, etc. No `className` allowed!
 
-- **Bundle size.** A meaningful chunk of it is backwards compatibility: class components, legacy context, synthetic events, ref plumbing.
-- **Server components were framework-coupled and confusing.** The wire format was an internal detail, historically unstable and underdocumented, and frameworks like Next.js layered "magic behavior" on top (auto-detecting dynamic boundaries, for example), which made it even more confusing.
-- **Confusing terminology.** "Server-side rendering" and "server components" are completely different things that sound like the same thing. `useEffect` vs `useLayoutEffect` says nothing about when either one runs.
-- **Synthetic events.** A parallel event system with React-specific names and non-native propagation quirks.
-- **Using the platform.** The web grew standard primitives and React's APIs predate them. The platform settled on `AbortSignal` for cancellation, but React effects signal cleanup by returning a closure, so aborting an in-flight fetch means wiring up your own `AbortController` in every effect. Server rendering split into environment-specific entry points (`renderToPipeableStream` for Node, `renderToReadableStream` for the web) instead of one API.
-- **Data fetching.** Loading keyed async data is the most common thing apps do, and React never owned it. There's no cache, no invalidation, no server-to-client handoff, so every app bolts on React Query, SWR, or a framework's loader layer, each with its own vocabulary for staleness, mutations, and hydration.
-- **Asset loading.** Stylesheets, fonts, and preloads determine when UI is safe to show, but React didn't address them until React 19's hoistables — and then implicitly: render a `<link>` anywhere and hoisting rules dedupe and relocate it for you. Without knowing the rules, it's hard to predict what will happen.
-
-## What Fig does about it
-
-First, what stays: Fig keeps the modern React runtime model wholesale — components, fibers, lanes, scheduling, suspense, streaming, selective hydration. The machinery is the same shape (docs 3 and 4 walk through it). Everything below is the delta.
-
-### Data is built in, not bolted on
-
-`dataResource` defines keyed async values where the key _is_ the identity. No id registry, no React-Query-sized vocabulary:
-
-- `readData` suspends while loading, and errors hit your `ErrorBoundary`
-- Freshness has two operations: invalidate (by resource, exact key, prefix, or
-  attributed error) and refresh (load now)
-- Mutations, SSR handoff, and hydration all flow through one flat cache
-- Loaders receive an `AbortSignal`; framework/request context is supplied by
-  the framework layer rather than the core data contract
-
-### Assets are fine-grained and render-discovered
-
-Explicit creators (`stylesheet`, `preload`, `font`, `preconnect`, ...) produce plain data with deterministic dedupe keys. A stylesheet discovered three different ways renders once. Streamed content waits for its CSS before revealing (no flash of unstyled content), and preloads/preconnects stream near the segment that needs them. This replaces React 19's implicit hoistable magic with data plus one documented mechanism.
-
-### The compat layers go away
-
-- No classes, no legacy context, no synthetic events, and no refs at all — DOM access is `bind`, a normal prop that receives `(node, signal)`
-- Redundant APIs are pruned: no `memo` (tiered bailouts preserve child identity, so unchanged siblings bail out automatically), no `useRef`, no `useReducer`
-- Shedding the compat layers is what keeps the bundle small — Fig isn't carrying two of everything
-
-### Events are native
-
-Events are declared as descriptors: `events={[on("click", (event, signal) => ...)]}`. The callback receives the real native event, and propagation is native with no exceptions. No wrapper, no pooling, no React-specific event names.
-
-### Names mean what they say
-
-- Native platform names where they're clearer: `class`, `for`, `tabindex`, native event names
-- Hooks are named for _when_ they run: `useReactive` (React: `useEffect`), `useBeforePaint` (React: `useLayoutEffect`)
-- The server entry points form one `renderTo*` grid instead of a pile of unrelated names
-- The server-component wire layer is called "payload" — never "RSC" or "Flight"
-
-### Explicit APIs instead of overloaded magic
-
-React's `use(resource)` is three explicit verbs: `readContext`, `readPromise`, `readData`. There's no auto-detection magic anywhere.
-
-### One cancellation contract
-
-Effects, events, binds, stable events, actions, data loaders, and `useTransition` callbacks all receive an `AbortSignal`, and none of them return a cleanup. Abort _is_ the cleanup. (Top-level `transition()` is the one exception — it has nothing to cancel against.)
-
-### Server components, specified
-
-Fig's server components serialize to payload, Fig's own wire layer: a specified
-row model with pluggable codecs. The default JSON codec is readable in
-development; the byte format itself is not promised as a stable public format.
-
-### Dev mode is strict and loud
-
-Dev rendering is always strict (there's no toggle), and diagnostics throw before commit instead of warning after.
-
-## What it looks like
+### Events
 
 ```tsx
-import { useState } from "@bgub/fig";
-import { createRoot, on } from "@bgub/fig-dom";
-
-function Counter() {
-  const [count, setCount] = useState(0);
-  return (
-    <button
-      class="counter"
-      events={[on("click", () => setCount((c) => c + 1))]}
-    >
-      clicked {count} times
-    </button>
-  );
-}
-
-createRoot(document.getElementById("root")!).render(<Counter />);
+<input
+  events={[
+    on("input", (event, signal) => {
+      const input = event.currentTarget;
+      if (input instanceof HTMLInputElement) setQuery(input.value);
+    }),
+    on("keydown", (event) => event.key === "Enter" && submit()),
+  ]}
+/>
 ```
 
-If you squint, it's React: `useState`, JSX, a root. The differences you can see (`class`, `events={[on(...)]}`, the package split) are where doc 2 picks up.
+- `event` is the native event (not synthetic like React)
+- Propagation is native with no exceptions: `focus`/`blur` don't bubble (use `focusin`/`focusout` for ancestor tracking), and there's no `mouseenter`/`mouseleave` emulation.
+- There's no onChange-that-is-really-onInput. `on("input")` is what you want; `change` fires on commit.
+- The `signal` aborts on re-entry and on listener removal.
 
-## Where to next
+### Effects: AbortSignal in, nothing out
 
-- **Doc 2 (quickstart)** — the common differences from React, with code. Start here if you're migrating.
-- **Docs 3–4** — the internals: fiber architecture, then async, streaming & hydration.
-- **Doc 5** — the data layer in depth.
-- **Doc 6** — payload, the server-component wire format.
-- **Doc 7** — asset resources: stylesheets, fonts, preloads, and reveal gating.
-- **Concepts** (`docs/concepts/`) — the spec: every contract and invariant, one file per subsystem.
+Effects receive a signal and must return `undefined` — a React-style returned cleanup is a type error. Abort _is_ the cleanup: Fig aborts the signal on dependency change and on unmount.
+
+```tsx
+useReactive(
+  (signal) => {
+    fetch(`/api/search?q=${query}`, { signal })
+      .then((res) => res.json())
+      .then(setResults);
+    // no return. cancellation/cleanup = the signal aborting
+  },
+  [query],
+);
+```
+
+For imperative teardown, listen to the signal:
+
+```tsx
+useReactive((signal) => {
+  const id = setInterval(tick, 1000);
+  signal.addEventListener("abort", () => clearInterval(id));
+}, []);
+```
+
+The effect hooks are named for when they run: `useReactive` (React: `useEffect`, after paint), `useBeforePaint` (React: `useLayoutEffect`), `useBeforeLayout` (React: `useInsertionEffect`). For a mount-only hook, use `useReactive(fn, [])`.
+
+### No refs — `bind`
+
+DOM access is a normal prop taking `(node, signal)`. No `useRef`, `forwardRef`, or `.current` threading:
+
+```tsx
+<input
+  bind={(node, signal) => {
+    node.focus(); // node is inferred as HTMLInputElement from the tag
+  }}
+/>
+```
+
+The signal aborts on identity change and unmount. `composeBind(...)` merges several binds. For mutable storage that isn't DOM access, use `useMemo(() => ({ current: null }), [])`.
+
+### Context objects are their own provider
+
+No `.Provider` or `Consumer`:
+
+```tsx
+const Theme = createContext("light");
+
+<Theme value="dark">
+  <App />
+</Theme>;
+```
+
+### Transitions get a signal too
+
+```tsx
+const [isPending, start] = useTransition();
+
+start(async (signal) => {
+  const results = await fetch(`/api/heavy?q=${q}`, { signal }).then((r) =>
+    r.json(),
+  );
+  setResults(results); // post-await updates stay in the transition
+});
+```
+
+Superseded and unmounted runs are aborted and retired: their pending slot releases immediately. A callback that ignores an abort signal and keeps running may still update state. (`useActionState`, unlike transitions, generation-guards results so the
+last run wins.) Top-level `transition(cb)` exists for scopes without a hook.
+
+### SSR
+
+Fig handles SSR and streaming similarly to React, but there are some implementation differences. 
+
+### Server components and directives
+
+In Fig, all code is *isomorphic* (meaning it can run on either server or client) unless it ends in `.server.ts(x)`. There are no `"use client"` or `"use server"` directives.
+
+A server component is just a React component that you serialize into JSON. Fig uses a special serialization format ("Payload") that's different from RSCs. React's server component details are mostly internal and exposed to frameworks only, but Fig gives you first-class functions to deal with server components:
+- Serializing a React component into "Payload" (TODO: add demo)
+- Rendering a "Payload" stream (TODO: add demo)
+- Refreshing a server boundary (TODO: add demo)
+
+### Explicit reads instead of `use()`
+
+React's `use(resource)` splits into three explicit functions:
+
+```tsx
+const theme = readContext(Theme); // context — a render-time input, not a hook slot
+const value = readPromise(promise); // suspends; keyed by promise identity
+const user = readData(userResource, id); // suspends; cache-keyed (from @bgub/fig)
+```
+
+## What's new?
+
+### Data is built in
+
+I lied in the previous section - `readData` isn't actually an equivalent to something that exists in React today. Instead it's a new primitive meant to be used by libraries like React Query.
+
+Fig allows you to declare data resources with a key and a loader. It handles async loader functions (suspends by throwing a promise) and keeps track of which fibers use which resources so it can re-render. It also handles SSR streaming properly -- when you SSR a component and fetch data there, Fig emits `<script>` tags that inject and hydrate that same exact data on the client.
+
+```tsx
+import { dataResource, readData, invalidateData } from "@bgub/fig";
+
+const userResource = dataResource({
+  key: (id: string) => ["user", id],
+  load: async (id, { signal }) => fetchUser(id, signal),
+});
+
+function Profile({ id }: { id: string }) {
+  const user = readData(userResource, id); // suspends until loaded, cached by key
+  return <h1>{user.name}</h1>;
+}
+```
+
+You can use `invalidateData` to mark a key stale, `invalidateDataPrefix` to mark a key prefix stale, and `refreshData` to immediately refresh data. Errors from the loader hit your nearest `ErrorBoundary`.
+
+### Error boundaries are built in
+
+TODO
+
+### Granular asset declarations
+
+## What's gone (and what replaces it)
+
+- `memo()` → nothing needed: Fig's render bailouts preserve child identity, so unchanged siblings skip automatically
+- `useRef` → `bind` for DOM access, `useMemo(() => ({ current: null }), [])` for storage
+- `useReducer` → userland over `useState`
+- Class components, string refs, legacy context, `StrictMode` (dev is always strict), `forwardRef`, `Consumer`, `batchedUpdates` (batching is automatic; `flushSync` is the escape hatch)
+
+## Rename cheat sheet
+
+| React                       | Fig                                  |
+| --------------------------- | ------------------------------------ |
+| `className` / `htmlFor`     | `class` / `for`                      |
+| `onClick={fn}`              | `events={[on("click", fn)]}`         |
+| `ref` / `forwardRef`        | `bind`                               |
+| `dangerouslySetInnerHTML`   | `unsafeHTML`                         |
+| `useEffect`                 | `useReactive`                        |
+| `useLayoutEffect`           | `useBeforePaint`                     |
+| `useInsertionEffect`        | `useBeforeLayout`                    |
+| `useEffectEvent`            | `useStableEvent`                     |
+| `startTransition`           | `transition`                         |
+| `use(ctx)` / `use(promise)` | `readContext` / `readPromise`        |
+| RSC / Flight                | payload (`@bgub/fig-server/payload`) |
+
+The next doc explains what the runtime actually does with all of this (lanes, scheduling, rendering, commit); doc 4 covers suspense, streaming SSR, and hydration.
