@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { figRefresh } from "@bgub/fig-vite";
-import { defineConfig } from "vite-plus";
+import { defineConfig } from "vite";
 
 const pkg = (relative: string): string =>
   fileURLToPath(new URL(`../../packages/${relative}`, import.meta.url));

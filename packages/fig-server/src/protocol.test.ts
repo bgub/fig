@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vitest";
 import { serverRuntimeCodeFor } from "./protocol.ts";
 
 interface TestRuntime {

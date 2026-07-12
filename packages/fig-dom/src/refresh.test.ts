@@ -1,6 +1,6 @@
 import { createElement, type FigNode, useState } from "@bgub/fig";
 import { setRefreshHandler } from "@bgub/fig-reconciler/refresh";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
 import { type RefreshFamily, scheduleRefresh } from "./refresh.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";

@@ -47,9 +47,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
-    "dev": "vp pack --watch --no-clean",
-    "test": "vp test run --config ../../vite.config.ts src"
+    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "dev": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
+    "test": "vitest run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
   "repository": {
@@ -72,7 +72,7 @@
     "@bgub/fig-vite": "workspace:*",
     "@effect/platform-node": "4.0.0-beta.92",
     "effect": "4.0.0-beta.92",
-    "vite": "^7.3.2"
+    "vite": "^8.1.4"
   },
   "peerDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

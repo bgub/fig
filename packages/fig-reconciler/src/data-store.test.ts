@@ -3,7 +3,7 @@
 // install the real store lazily from the first actual data resource.
 import { createElement } from "@bgub/fig";
 import type { DataResource, FigDataStore } from "@bgub/fig/internal";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createRenderer, type HostConfig } from "./index.ts";
 
 class TestText {

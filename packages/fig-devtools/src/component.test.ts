@@ -2,7 +2,7 @@
 import { createElement, useState } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createFigDevtoolsGlobalHook, FigDevtools } from "./index.ts";
 import type { FigDevtoolsGlobalTarget } from "./hook.ts";
 import { FIG_DEVTOOLS_HOOK_KEY } from "./hook.ts";

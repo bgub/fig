@@ -3,14 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp pack",
-    "build:e2e": "vp run --filter @bgub/fig-demo-start... build",
+    "build": "tsdown --config ../../tsdown.config.ts",
+    "build:e2e": "turbo run build --filter=@bgub/fig-demo-start...",
     "dev": "portless",
     "dev:app": "fig-start dev --tailwind --public-url https://fig-demo-start.localhost/",
-    "dev:build": "vp pack --watch --no-clean",
     "serve": "node dist/server.js",
-    "serve:watch": "node --watch dist/server.js",
-    "test": "vp test run --passWithNoTests",
+    "test": "vitest run --config ../../vite.config.ts --passWithNoTests",
     "test:e2e": "sh ../../scripts/free-port.sh 4183 && playwright test"
   },
   "portless": {

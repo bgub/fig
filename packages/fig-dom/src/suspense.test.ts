@@ -8,7 +8,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, on } from "./index.ts";
 import {
   deferred,

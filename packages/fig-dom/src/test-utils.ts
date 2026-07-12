@@ -1,4 +1,4 @@
-import { afterEach, beforeEach } from "vite-plus/test";
+import { afterEach, beforeEach } from "vitest";
 
 export class FakeText {
   readonly nodeType = 3;

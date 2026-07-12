@@ -1,7 +1,7 @@
 // Demo bundles must be dev builds: Fig's dev-only paths (DevTools emission,
 // diagnostics) are gated on the compile-time __FIG_DEV__ define, and unit
 // tests always run source-linked with the dev define, so a missing or wrong
-// define in a demo pack config is invisible to `vp test`. Pack configs run
+// define in a demo bundle config is invisible to Vitest. Bundle configs run
 // this via `onSuccess`, right where the define is granted, so every build
 // (including --watch) fails instead.
 //

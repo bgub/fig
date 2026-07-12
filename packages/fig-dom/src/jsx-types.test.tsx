@@ -1,8 +1,8 @@
 import type { FigNode } from "@bgub/fig";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { on } from "./index.ts";
 
-// Type-level tests for the stage-1 JSX host-prop types: vp check enforces
+// Type-level tests for the stage-1 JSX host-prop types: oxlint enforces
 // every @ts-expect-error below (an unused one is itself an error), so this
 // file pins what the types reject and what they infer. The runtime test is
 // deliberately trivial — nothing here renders.

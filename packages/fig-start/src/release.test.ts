@@ -2,7 +2,7 @@ import figManifest from "../../fig/package.json";
 import figDevtoolsManifest from "../../fig-devtools/package.json";
 import figStartManifest from "../package.json";
 import figViteManifest from "../../fig-vite/package.json";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 describe("release readiness", () => {
   it("keeps unreleased workspace packages private", () => {

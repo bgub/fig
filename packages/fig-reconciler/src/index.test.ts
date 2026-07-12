@@ -25,7 +25,7 @@ import {
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   FigDevtoolsCommitInspection,
   FigDevtoolsGlobalHook,

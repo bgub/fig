@@ -14,7 +14,7 @@ import {
 } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
 import { createPayloadResponse } from "@bgub/fig-server/payload";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,

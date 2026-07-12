@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import type { ClientAssetResolver } from "../server-assets.ts";
 import { createStartWebHandler } from "./web-handler.ts";
 

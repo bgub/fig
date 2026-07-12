@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { walkFiberForest, walkFiberSubtree } from "./fiber-traversal.ts";
 
 interface Node {

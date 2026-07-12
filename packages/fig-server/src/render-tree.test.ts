@@ -1,5 +1,5 @@
 import { createElement, Suspense, readPromise } from "@bgub/fig";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createRenderTreeCollector, renderToHtml } from "./index.ts";
 import type { RenderTreeNode } from "./render-tree.ts";
 

@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:e2e": "vp run --filter @bgub/fig-demo-client... build",
-    "build": "vp pack",
+    "build:e2e": "turbo run build --filter=@bgub/fig-demo-client...",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "dev": "portless",
-    "dev:app": "node ../dev-server.mjs static",
-    "dev:build": "vp pack --watch --no-clean",
+    "dev:app": "node ../dev/static-server-cli.mjs",
+    "dev:build": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
     "serve": "sh -c 'python3 -m http.server \"${PORT:-4173}\" --bind 127.0.0.1'",
     "test:e2e": "sh ../../scripts/free-port.sh 4182 && playwright test"
   },

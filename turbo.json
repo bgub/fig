@@ -1,0 +1,53 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "env": ["FIG_DEV_SOURCE", "NODE_ENV"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "dependsOn": ["build"],
+      "with": ["dev:build"],
+      "cache": false,
+      "persistent": true,
+      "env": ["FIG_DEV_SOURCE", "PORT"]
+    },
+    "dev:build": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true,
+      "env": ["FIG_DEV_SOURCE"]
+    },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "passThroughEnv": ["CI"]
+    },
+    "test:e2e": {
+      "cache": false,
+      "passThroughEnv": ["CI"]
+    },
+    "//#quality": {
+      "dependsOn": ["//#lint", "//#format"]
+    },
+    "//#quality:fix": {
+      "dependsOn": ["//#lint:fix", "//#format:fix"]
+    },
+    "//#lint": {
+      "dependsOn": ["@bgub/fig-start#build"]
+    },
+    "//#lint:fix": {
+      "dependsOn": ["@bgub/fig-start#build"],
+      "cache": false
+    },
+    "//#format": {},
+    "//#format:fix": {
+      "dependsOn": ["//#lint:fix"],
+      "cache": false
+    },
+    "//#test:bench": {}
+  }
+}

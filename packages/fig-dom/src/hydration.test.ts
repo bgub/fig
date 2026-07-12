@@ -9,7 +9,7 @@ import {
 } from "@bgub/fig";
 import { prerender, renderToHtml } from "@bgub/fig-server";
 import type { DehydratedSuspenseBoundary } from "@bgub/fig-reconciler";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
 import {
   enclosingSuspenseBoundaryStart,

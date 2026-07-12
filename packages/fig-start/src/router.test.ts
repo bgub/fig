@@ -1,5 +1,5 @@
 import { setTransitionHandler } from "@bgub/fig/internal";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { redirect } from "./redirect.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { createRouter } from "./router.ts";

@@ -5,7 +5,7 @@ import {
   preload,
   stylesheet,
 } from "@bgub/fig";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { insertAssetResources } from "./index.ts";
 import { FakeElement } from "./test-utils.ts";
 

@@ -11,7 +11,7 @@ import {
   stylesheet,
 } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   PAYLOAD_BOUNDARY_HEADER,

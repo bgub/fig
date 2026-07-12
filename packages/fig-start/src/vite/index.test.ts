@@ -9,7 +9,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   CLIENT_ENTRY_ID,
   CLIENT_ROUTES_ID,

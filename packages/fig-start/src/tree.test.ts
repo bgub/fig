@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { markServerRoute } from "./internal.ts";
 import { createFileRoute, createRootRoute } from "./route.ts";
 import { buildRouteTree, matchRoutes } from "./tree.ts";

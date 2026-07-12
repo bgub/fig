@@ -1,7 +1,7 @@
 import { createElement, readData } from "@bgub/fig";
 import { createDataStore } from "@bgub/fig/internal";
 import { serverDataResource } from "@bgub/fig/server";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
 import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
 import { readStream } from "./test-utils.ts";

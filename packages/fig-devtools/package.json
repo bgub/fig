@@ -30,9 +30,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "vp pack && node ../../scripts/strip-declaration-map-comments.mjs dist",
-    "dev": "vp pack --watch --no-clean",
-    "test": "vp test run --config ../../vite.config.ts src"
+    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "test": "vitest run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
   "repository": {

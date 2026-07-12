@@ -3,13 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp pack",
-    "build:e2e": "vp run --filter @bgub/fig-demo-payload... build",
+    "build": "tsdown --config ../../tsdown.config.ts",
+    "build:e2e": "turbo run build --filter=@bgub/fig-demo-payload...",
     "dev": "portless",
-    "dev:app": "node ../dev-server.mjs node",
-    "dev:build": "vp pack --watch --no-clean",
+    "dev:app": "node --watch --watch-preserve-output dist/server.js",
+    "dev:build": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
     "serve": "node dist/server.js",
-    "serve:watch": "node --watch dist/server.js",
     "test:e2e": "sh ../../scripts/free-port.sh 4184 && playwright test"
   },
   "portless": {

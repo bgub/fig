@@ -5,7 +5,7 @@ import {
   EARLY_EVENT_QUEUE_PROPERTY,
   REPLAYABLE_EVENT_TYPES,
 } from "@bgub/fig/internal";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { act } from "./act.ts";
 import { hydrateRoot, on } from "./index.ts";
 

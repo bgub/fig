@@ -10,7 +10,7 @@ import {
   ViewTransition,
   type StateSetter,
 } from "@bgub/fig";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
 

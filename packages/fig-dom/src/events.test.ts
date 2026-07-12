@@ -1,5 +1,5 @@
 import { createElement, type FigNode } from "@bgub/fig";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 // White-box import of the reconciler's lane module (aliased to source, so it
 // shares state with the reconciler under test): lanes are the precise
 // observable for handler priority — any public projection would collapse

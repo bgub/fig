@@ -64,6 +64,9 @@ const output = `${[
 ].join("\n")}`;
 
 writeFileSync(target, output);
-execFileSync("pnpm", ["exec", "vp", "check", "--fix", fileURLToPath(target)], {
+execFileSync("pnpm", ["exec", "oxfmt", fileURLToPath(target)], {
+  stdio: "inherit",
+});
+execFileSync("pnpm", ["exec", "oxlint", "--fix", fileURLToPath(target)], {
   stdio: "inherit",
 });

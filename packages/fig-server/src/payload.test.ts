@@ -23,7 +23,7 @@ import {
   readThenable,
   setCurrentDispatcher,
 } from "@bgub/fig/internal";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   createPayloadResponse,
   decodePayloadDataEntries,
