@@ -115,14 +115,17 @@ Demo apps live in [`apps/`](./apps).
 pnpm dev
 ```
 
-`pnpm dev` starts one Vite Plus workspace watcher for packages, then runs the
-demo apps after the package builds are ready.
+`pnpm dev` opens Turborepo's task TUI. Its task graph builds each prerequisite
+once, then starts the long-running package builders and demo servers as
+separate tasks. Vite provides browser HMR; the bundled server demos rebuild
+with tsdown and restart automatically.
 
 The demo sites run through Portless:
 
 - `https://fig-demo-client.localhost`
 - `https://fig-demo-ssr.localhost`
 - `https://fig-demo-payload.localhost`
+- `https://fig-demo-start.localhost`
 
 Use a demo package's `dev:app` script to run the underlying server without
 Portless.

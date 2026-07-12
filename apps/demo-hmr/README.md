@@ -6,7 +6,7 @@ Replacement via `@bgub/fig-vite`.
 ## Run it
 
 ```sh
-pnpm --filter @bgub/fig-demo-hmr dev   # vp dev on http://localhost:4300
+pnpm --filter @bgub/fig-demo-hmr dev   # Vite on http://localhost:4300
 ```
 
 No build step needed — the dev server resolves `@bgub/fig*` to source via
