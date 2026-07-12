@@ -17,11 +17,13 @@ type CommandRunner = (
 
 interface JsrReleaseOptions {
   fetch?: typeof fetch;
+  publishOrder?: readonly string[];
   run?: CommandRunner;
 }
 
 export function jsrRelease(options: JsrReleaseOptions = {}): TegamiPlugin {
   const fetchRegistry = options.fetch ?? fetch;
+  const publishOrder = options.publishOrder ?? [];
   const run = options.run ?? runCommand;
 
   return {
@@ -33,7 +35,13 @@ export function jsrRelease(options: JsrReleaseOptions = {}): TegamiPlugin {
     },
 
     beforePublishAll: async function ({ plan }) {
-      for (const [id] of publishablePackages(plan)) {
+      const packages = publishablePackages(plan).sort(
+        ([leftId], [rightId]) =>
+          orderOf(this.graph.get(leftId)?.name, publishOrder) -
+          orderOf(this.graph.get(rightId)?.name, publishOrder),
+      );
+
+      for (const [id] of packages) {
         const pkg = this.graph.get(id);
         if (pkg?.version === undefined) continue;
 
@@ -113,6 +121,12 @@ function publishablePackages(plan: PublishPlan) {
   return Array.from(plan.packages).filter(
     ([, packagePlan]) => packagePlan.preflight?.shouldPublish === true,
   );
+}
+
+function orderOf(name: string | undefined, order: readonly string[]): number {
+  if (name === undefined) return order.length;
+  const index = order.indexOf(name);
+  return index === -1 ? order.length : index;
 }
 
 async function readJsrManifest(path: string): Promise<JsrManifest | undefined> {

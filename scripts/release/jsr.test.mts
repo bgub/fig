@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -108,5 +108,59 @@ void test("jsrRelease validates unpublished packages during dry runs", async () 
       args: ["exec", "jsr", "publish", "--dry-run"],
       cwd: dir,
     },
+  ]);
+});
+
+void test("jsrRelease publishes dependencies before their consumers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fig-jsr-release-"));
+  const packageNames = ["@bgub/fig-dom", "@bgub/fig-reconciler"];
+  const packages = new Map<
+    string,
+    { id: string; name: string; path: string; version: string }
+  >(
+    await Promise.all(
+      packageNames.map(async (name) => {
+        const path = join(dir, name.slice("@bgub/".length));
+        await mkdir(path, { recursive: true });
+        await writeFile(
+          join(path, "jsr.json"),
+          `${JSON.stringify({ name, version: "0.1.0-alpha.0" })}\n`,
+        );
+        return [
+          `npm:${name}`,
+          { id: `npm:${name}`, name, path, version: "0.1.0-alpha.0" },
+        ] as const;
+      }),
+    ),
+  );
+  const published: string[] = [];
+  const plugin = jsrRelease({
+    fetch: async () => new Response(null, { status: 404 }),
+    publishOrder: ["@bgub/fig-reconciler", "@bgub/fig-dom"],
+    run: async (_command, _args, cwd) => {
+      published.push(cwd);
+    },
+  });
+  const plan = {
+    options: { dryRun: false },
+    changelogs: new Map(),
+    packages: new Map(
+      packageNames.map((name) => [
+        `npm:${name}`,
+        {
+          changelogs: [],
+          updated: true,
+          preflight: { shouldPublish: true },
+        },
+      ]),
+    ),
+  };
+  const context = { graph: { get: (id: string) => packages.get(id) } };
+
+  await plugin.beforePublishAll?.call(context as never, { plan } as never);
+
+  assert.deepEqual(published, [
+    packages.get("npm:@bgub/fig-reconciler")?.path,
+    packages.get("npm:@bgub/fig-dom")?.path,
   ]);
 });

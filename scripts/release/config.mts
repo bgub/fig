@@ -4,8 +4,8 @@ import { jsrRelease } from "./jsr.mts";
 
 export const publicPackageNames = [
   "@bgub/fig",
-  "@bgub/fig-dom",
   "@bgub/fig-reconciler",
+  "@bgub/fig-dom",
   "@bgub/fig-refresh",
   "@bgub/fig-server",
 ] as const;
@@ -49,7 +49,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-server": { group: "fig" },
     },
     plugins: [
-      jsrRelease(),
+      jsrRelease({ publishOrder: publicPackageNames }),
       github({
         repo: "bgub/fig",
         versionPr: { base: "main" },
