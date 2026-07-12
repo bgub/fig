@@ -11,6 +11,7 @@ import {
   stylesheet,
 } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
+import { act } from "@bgub/fig-dom/test-utils";
 import { describe, expect, it } from "vitest";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -164,12 +165,13 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     expect(slot?.querySelector("[data-fig-client-reference]")).not.toBeNull();
 
     const errors: unknown[] = [];
-    const router = hydrateStart({
-      loadClientReference,
-      onRecoverableError: (error) => errors.push(error),
-      routes,
-    });
-    await flush();
+    const router = await act(() =>
+      hydrateStart({
+        loadClientReference,
+        onRecoverableError: (error) => errors.push(error),
+        routes,
+      }),
+    );
     const mountedSlot = document.querySelector(
       '[data-fig-payload-slot="/dash"]',
     );
@@ -186,8 +188,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     );
 
     // Navigating away tears the route content down — the island is gone, no leak/stale.
-    await router.navigate("/");
-    await flush();
+    await act(() => router.navigate("/"));
     expect(document.body.textContent).toContain("Home");
     expect(document.querySelector(".island")).toBeNull();
   });

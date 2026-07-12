@@ -233,7 +233,7 @@ importers:
   packages/fig-reconciler:
     devDependencies:
       '@bgub/fig':
-        specifier: 0.0.1
+        specifier: 0.1.0-alpha.0
         version: link:../fig
 
   packages/fig-refresh:

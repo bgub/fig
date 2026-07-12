@@ -15,6 +15,7 @@ import {
   hydrateRoot,
   on,
 } from "./index.ts";
+import { act } from "./act.ts";
 import {
   deferred,
   delay,
@@ -56,8 +57,7 @@ describe("@bgub/fig-dom activity", () => {
 
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
-    root.render(createElement(App, null));
-    await delay();
+    await act(() => root.render(createElement(App, null)));
 
     const span = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("0");
@@ -67,14 +67,12 @@ describe("@bgub/fig-dom activity", () => {
 
     // Update state, then hide: the effect aborts and the DOM hides.
     flushSync(() => setCount?.((count) => count + 1));
-    flushSync(() => setMode?.("hidden"));
-    await delay();
+    await act(() => flushSync(() => setMode?.("hidden")));
     expect(display(span)).toBe("none");
     expect(calls).toEqual(["run:0", "abort:0", "run:0", "abort:0"]);
 
     // Reveal: state survived, the DOM unhides, the effect re-runs once.
-    flushSync(() => setMode?.("visible"));
-    await delay();
+    await act(() => flushSync(() => setMode?.("visible")));
     expect(display(span)).toBe("");
     expect(container.textContent).toBe("1");
     expect(calls).toEqual(["run:0", "abort:0", "run:0", "abort:0", "run:1"]);
