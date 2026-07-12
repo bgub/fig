@@ -4777,7 +4777,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const afterPlaced = lastPlaced.sibling;
     const before = hostSibling(lastPlaced);
 
-    for (let placed: F | null = firstPlaced; placed !== afterPlaced; ) {
+    for (let placed: F | null = firstPlaced; placed !== afterPlaced;) {
       if (placed === null) break;
 
       const current: F = placed;

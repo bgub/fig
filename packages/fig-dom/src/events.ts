@@ -270,7 +270,7 @@ function adoptEarlyEvents(root: Container): void {
   }
 
   let claimed = false;
-  for (let index = 0; index < unclaimed.length; ) {
+  for (let index = 0; index < unclaimed.length;) {
     const event = unclaimed[index];
     if (
       replayableEvents.has(event.type) &&
@@ -539,7 +539,7 @@ export function replayQueuedEvents(): void {
   // never-completing boundary cannot head-of-line block everyone else.
   const stalledRoots = new Set<Container>();
 
-  for (let index = 0; index < queuedReplayableEvents.length; ) {
+  for (let index = 0; index < queuedReplayableEvents.length;) {
     const queued = queuedReplayableEvents[index];
 
     // Liveness is checked against the logical dispatch origin: a portal
@@ -1062,7 +1062,7 @@ function eventPath(
   }
 
   const path: Element[] = [];
-  for (let current: unknown = event.target; current !== listenerTarget; ) {
+  for (let current: unknown = event.target; current !== listenerTarget;) {
     if (isElementNode(current)) path.push(current);
     current = parentOf(current);
     if (current === null) break;
@@ -1103,7 +1103,7 @@ function targetWithinRoot(
   root: Container,
   target: EventTarget | null,
 ): boolean {
-  for (let current: unknown = target; current !== null; ) {
+  for (let current: unknown = target; current !== null;) {
     if (current === root) return true;
     current = parentOf(current);
   }
@@ -1112,7 +1112,7 @@ function targetWithinRoot(
 }
 
 function listenerTargetFor(node: EventTarget | null): Container | null {
-  for (let current: unknown = node; current !== null; ) {
+  for (let current: unknown = node; current !== null;) {
     if (isContainer(current)) {
       const record = containerRecords.get(current);
       if (

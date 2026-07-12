@@ -521,7 +521,7 @@ function forEachDescendantOption(
   element: Element,
   visitor: (option: Element) => void,
 ): void {
-  for (let child = element.firstChild; child !== null; ) {
+  for (let child = element.firstChild; child !== null;) {
     const next = child.nextSibling;
     if (isElementNode(child)) {
       if (elementName(child) === "option") {

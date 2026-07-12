@@ -207,7 +207,7 @@ function isSiblingBeforeEnd(
 export function removeSuspenseBoundaryRange(
   boundary: DehydratedSuspenseBoundary<Element, TextLike>,
 ): void {
-  for (let node: Element | TextLike | null = boundary.start; node !== null; ) {
+  for (let node: Element | TextLike | null = boundary.start; node !== null;) {
     const next = node.nextSibling as Element | TextLike | null;
     removeNode(node);
     if (node === boundary.end) return;
