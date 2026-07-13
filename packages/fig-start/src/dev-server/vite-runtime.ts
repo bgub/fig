@@ -1,5 +1,13 @@
-import { readdir, readFile, realpath } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Server } from "node:http";
 import type { FigAssetResource, FigAssetResourceList } from "@bgub/fig";
@@ -155,6 +163,11 @@ async function createFigStartViteServer(
 ): Promise<ViteDevServer> {
   const { createServer } = await import("vite");
   const port = options.port ?? 3000;
+  const forceReoptimize = await linkedDistsChangedSinceLastRun(
+    root,
+    options.vite?.cacheDir,
+    options.log ?? ((message) => console.log(message)),
+  );
   return createServer({
     appType: "custom",
     clearScreen: false,
@@ -178,6 +191,7 @@ async function createFigStartViteServer(
     ],
     root,
     optimizeDeps: {
+      ...(forceReoptimize ? { force: true } : {}),
       ...options.vite?.optimizeDeps,
       include: [
         ...FIG_START_PREBUNDLED_PACKAGES,
@@ -376,6 +390,87 @@ async function linkedPrebundledPackageDirs(
   }
 
   return [...directories];
+}
+
+// The dep optimizer's cache key covers the lockfile and config, not the
+// contents of workspace-linked dists — so a cold start after `pnpm build`
+// rewrote those dists happily serves stale prebundled chunks (mixed package
+// generations show up as hydration mismatches and dead DevTools). Fingerprint
+// the linked dist directories and force one re-optimization whenever the
+// fingerprint differs from the previous run's. The in-session watcher above
+// covers rebuilds while the server is running.
+export async function linkedDistsChangedSinceLastRun(
+  root: string,
+  cacheDir: string | undefined,
+  log: (message: string) => void,
+): Promise<boolean> {
+  const fingerprint = await linkedDistFingerprint(root);
+  if (fingerprint === null) return false;
+
+  const markerDir = cacheDir ?? join(root, "node_modules", ".vite");
+  const markerPath = join(markerDir, "fig-start-linked-dists.json");
+  const previous = await readFile(markerPath, "utf8").catch(() => null);
+
+  if (previous === fingerprint) return false;
+
+  await mkdir(markerDir, { recursive: true }).catch(() => undefined);
+  await writeFile(markerPath, fingerprint).catch(() => undefined);
+  if (previous !== null) {
+    log(
+      "Fig package dists changed since the last dev run; re-optimizing prebundled dependencies.",
+    );
+  }
+  return previous !== null;
+}
+
+// Resolves the workspace-linked Fig packages the prebundle list reaches and
+// hashes their dist file listings (path, size, mtime). Follows the same
+// resolution chain as linkedPrebundledPackageDirs, but through plain fs so it
+// can run before the Vite server exists.
+async function linkedDistFingerprint(root: string): Promise<string | null> {
+  const directories = new Set<string>();
+
+  const linkedPackageDist = async (
+    from: string,
+    name: string,
+  ): Promise<string | null> => {
+    const packageDir = await realpath(join(from, "node_modules", name)).catch(
+      () => null,
+    );
+    if (packageDir === null || packageDir.includes("/node_modules/")) {
+      return null;
+    }
+    directories.add(join(packageDir, "dist"));
+    return packageDir;
+  };
+
+  await linkedPackageDist(root, "@bgub/fig");
+  await linkedPackageDist(root, "@bgub/fig-server");
+  const figDom = await linkedPackageDist(root, "@bgub/fig-dom");
+  const figStart = await linkedPackageDist(root, "@bgub/fig-start");
+  if (figDom !== null) {
+    await linkedPackageDist(figDom, "@bgub/fig-reconciler");
+  }
+  if (figStart !== null) {
+    await linkedPackageDist(figStart, "@bgub/fig-devtools");
+  }
+
+  if (directories.size === 0) return null;
+
+  const lines: string[] = [];
+  for (const directory of [...directories].sort()) {
+    const entries = await readdir(directory).catch(() => null);
+    if (entries === null) continue;
+    for (const entry of entries.sort()) {
+      const file = join(directory, entry);
+      const stats = await stat(file).catch(() => null);
+      if (stats === null || !stats.isFile()) continue;
+      lines.push(`${file}\n${stats.size}\n${Math.floor(stats.mtimeMs)}`);
+    }
+  }
+  if (lines.length === 0) return null;
+
+  return createHash("sha256").update(lines.join("\n")).digest("hex");
 }
 
 export function devHotUpdateForFile(
