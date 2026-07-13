@@ -223,7 +223,9 @@ test("coalesces rapid cycle clicks into the latest state (render-during-wait)", 
   await page.goto("/view-transitions", { waitUntil: "commit" });
   await page.waitForLoadState("networkidle");
   const cycle = page.getByRole("button", { name: "Cycle surface" });
-  const detail = page.locator("aside h2");
+  // Scoped under <main>: the SSR DevTools panel (devtools: true in
+  // start.tsx) renders its own aside with an h2 outside the route content.
+  const detail = page.locator("main aside h2");
   await expect(detail).toHaveText("Route shell");
 
   // Two rapid clicks while the first animation is held open. The first
