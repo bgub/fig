@@ -11,6 +11,7 @@ Payload is a **data format, not an architecture**. A server serializes a rendere
 - `@bgub/fig/payload` — the browser-safe home: the row and model types, `jsonPayloadCodec` and codec pluggability (`PayloadCodec`), the value codec (`encodePayloadValue` / `decodePayloadValue`), data-entry helpers (`encodePayloadDataEntries` / `decodePayloadDataEntries`), codec negotiation (`payloadCodecIdFromContentType`, `assertPayloadCodecMatches`), error-row decoding (`errorFromPayloadValue`), and the client half: `decodePayloadStream`. Browser code never imports `@bgub/fig-server` to decode.
 - `@bgub/fig-server/payload` — the server half: `renderToPayloadStream`, the inline frame transport, and (until the deletion gate passes) the legacy consumer and targeted-refresh protocol.
 - `@bgub/fig` — `clientReference`, the one escape hatch for interactivity inside a serialized tree.
+- `@bgub/fig-dom` — `payloadDataLoader`, the web adapter that turns a payload endpoint into an ordinary data-resource loader: HTTP/codec validation, `insertAssetResources` as `prepareAssets`, the store's generation-guarded hydration capability, and the generation-lifetime signal wired into `decodePayloadStream` (data.md).
 
 ## Wire Format
 

@@ -14,11 +14,10 @@ Every open design question and planned piece of work, in one place. Each item li
 
 ## Serialized Components
 
-Adopted plan: `docs/plans/serialized-components.md` — payload trees delivered as ordinary data resources; the targeted-refresh protocol deletes behind a parity gate. Phase 1 (`decodePayloadStream` in `@bgub/fig/payload`) has landed; open before/while the remaining phases ship:
+Adopted plan: `docs/plans/serialized-components.md` — payload trees delivered as ordinary data resources; the targeted-refresh protocol deletes behind a parity gate. Phases 1–2 have landed (`decodePayloadStream` in `@bgub/fig/payload`; generation-lifetime loader signals and fig-dom's `payloadDataLoader` in the data layer); open before/while the remaining phases ship:
 
 - **Decode memoization across refreshes** — benchmark ordinary keyed reconciliation against the legacy consumer's decoded-chunk memoization before inventing stable cross-refresh identity (server-authored segment keys or content hashes; request-local row/graph ids are allocation details, not identity).
 - **Fulfilled entry containing a rejected hole** — the hole-rejection contract is specced (errors.md, payload.md); still open is how `invalidateDataError` attribution interacts with hole-level errors on the owning entry.
-- **Generation-lifetime loader context** — loader `signal`s must stay live after the promise fulfills and abort on supersession/hydration/eviction/disposal; open is how the internal payload adapter capability interacts with partitions (does `dataPartition` on `renderToPayloadStream` survive?).
 - **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
 - **Promise-valued children** — the plan's authoring story (`{loadComments(slug).then(...)}` as a Suspense child) needs thenable children accepted by the payload serializer and the client reconciler; today only suspending server components and promise-valued props outline holes.
 - **Optimistic-state primitive** — out of scope for the plan; needs lane awareness so it cannot live in a framework. Capture in its own plan.

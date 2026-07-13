@@ -8,7 +8,11 @@ import {
   preloadData,
   refreshData,
 } from "./index.ts";
-import { createDataStore, normalizeDataResourceKey } from "./internal.ts";
+import {
+  createDataStore,
+  loadContextHydrate,
+  normalizeDataResourceKey,
+} from "./internal.ts";
 
 const never = new Promise<never>(() => undefined);
 
@@ -848,6 +852,282 @@ describe("@bgub/fig", () => {
     await expect(store.refreshData(flakyResource, "one")).resolves.toEqual({
       status: "fulfilled",
       value: "recovered",
+    });
+  });
+});
+
+describe("generation-lifetime loader signals", () => {
+  function signalStore() {
+    return createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+  }
+
+  it("keeps the signal live after fulfillment and aborts it on supersession", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource({
+      key: (id: string) => ["gen", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return `value-${signals.length}`;
+      },
+    });
+    const store = signalStore();
+
+    await store.refreshData(resource, "one");
+    // The generation is authoritative: background work tied to the signal
+    // (a payload decode filling holes) keeps running after the value lands.
+    expect(signals[0]?.aborted).toBe(false);
+
+    await store.refreshData(resource, "one");
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
+  it("aborts the fulfilled generation's signal on hydrate-over", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource({
+      key: (id: string) => ["gen-hydrate", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return "loaded";
+      },
+    });
+    const store = signalStore();
+
+    await store.refreshData(resource, "one");
+    store.hydrate([{ key: ["gen-hydrate", "one"], value: "pushed" }]);
+
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("aborts the fulfilled generation's signal on store disposal", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource({
+      key: (id: string) => ["gen-dispose", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return "loaded";
+      },
+    });
+    const store = signalStore();
+
+    await store.refreshData(resource, "one");
+    store.dispose();
+
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("aborts the fulfilled generation's signal when the entry evicts", async () => {
+    const signals: AbortSignal[] = [];
+    const owner = {};
+    const resource = dataResource({
+      key: (id: string) => ["gen-evict", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return "loaded";
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      inactiveRetentionMs: 0,
+      schedule: () => undefined,
+    });
+
+    expect(store.readData(resource, ["one"], owner)).toBe("loaded");
+    store.commitDataDependencies(owner, null);
+    store.deleteDataOwner(owner);
+    await delay();
+
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("keeps the signal live across invalidateData", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource({
+      key: (id: string) => ["gen-invalidate", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return "loaded";
+      },
+    });
+    const store = signalStore();
+
+    await store.refreshData(resource, "one");
+    store.invalidateData(resource, "one");
+
+    // Marking stale does not revoke authority; only a newer load does.
+    expect(signals[0]?.aborted).toBe(false);
+  });
+
+  it("aborts a rejected load's own signal", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["gen-reject", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return signals.length === 1
+          ? Promise.reject(new Error("load failed"))
+          : "recovered";
+      },
+    });
+    const store = signalStore();
+
+    const first = await store.refreshData(resource, "one");
+    expect(first.status).toBe("rejected");
+    expect(signals[0]?.aborted).toBe(true);
+
+    const second = await store.refreshData(resource, "one");
+    expect(second.status).toBe("fulfilled");
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
+  it("aborts a failed refresh's signal while the stale generation stays aborted", async () => {
+    const signals: AbortSignal[] = [];
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["gen-refresh-fail", id],
+      load: (_id: string, { signal }) => {
+        signals.push(signal);
+        return signals.length === 1
+          ? "initial"
+          : Promise.reject(new Error("refresh failed"));
+      },
+    });
+    const store = signalStore();
+
+    await store.refreshData(resource, "one");
+    const refresh = await store.refreshData(resource, "one");
+
+    expect(refresh).toMatchObject({
+      status: "rejected",
+      staleValue: "initial",
+    });
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(true);
+  });
+});
+
+describe("load-context hydrate capability", () => {
+  function capturingResource(key: string) {
+    const captured: Array<ReturnType<typeof loadContextHydrate>> = [];
+    const resource = dataResource<[string], string>({
+      key: (id: string) => [key, id],
+      load: (_id, context) => {
+        captured.push(loadContextHydrate(context));
+        return `value-${captured.length}`;
+      },
+    });
+    return { captured, resource };
+  }
+
+  function capabilityStore() {
+    return createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+  }
+
+  it("hydrates foreign keys through the calling store while authoritative", async () => {
+    const { captured, resource } = capturingResource("cap");
+    const store = capabilityStore();
+
+    await store.refreshData(resource, "one");
+    const hydrate = captured[0];
+    expect(hydrate).toBeTypeOf("function");
+
+    expect(
+      hydrate?.([{ key: ["cap-user", "1"], value: { name: "Ada" } }]),
+    ).toBe(true);
+    expect(store.snapshot()).toEqual(
+      expect.arrayContaining([
+        { key: ["cap-user", "1"], value: { name: "Ada" } },
+      ]),
+    );
+  });
+
+  it("returns false after supersession and disposal without mutating the store", async () => {
+    const { captured, resource } = capturingResource("cap-guard");
+    const store = capabilityStore();
+
+    await store.refreshData(resource, "one");
+    await store.refreshData(resource, "one");
+    const superseded = captured[0];
+
+    expect(
+      superseded?.([{ key: ["cap-guard-late", "1"], value: "late" }]),
+    ).toBe(false);
+    expect(store.snapshot()).not.toEqual(
+      expect.arrayContaining([{ key: ["cap-guard-late", "1"], value: "late" }]),
+    );
+
+    const live = captured[1];
+    store.dispose();
+    expect(live?.([{ key: ["cap-guard-late", "2"], value: "late" }])).toBe(
+      false,
+    );
+  });
+
+  it("skips data rows targeting the loading entry's own key", async () => {
+    const { captured, resource } = capturingResource("cap-self");
+    const store = capabilityStore();
+    const signals: AbortSignal[] = [];
+    const selfAware = dataResource<[string], string>({
+      key: (id: string) => ["cap-self", id],
+      load: (_id, context) => {
+        signals.push(context.signal);
+        captured.push(loadContextHydrate(context));
+        return "loader-value";
+      },
+    });
+    void resource;
+
+    await store.refreshData(selfAware, "one");
+    const hydrate = captured[0];
+
+    expect(
+      hydrate?.([
+        { key: ["cap-self", "one"], value: "row-value" },
+        { key: ["cap-self-other", "1"], value: "other" },
+      ]),
+    ).toBe(true);
+    // The loader's own generation was not superseded by its own data row.
+    expect(signals[0]?.aborted).toBe(false);
+    const snapshot = store.snapshot();
+    expect(snapshot).toEqual(
+      expect.arrayContaining([
+        { key: ["cap-self", "one"], value: "loader-value" },
+        { key: ["cap-self-other", "1"], value: "other" },
+      ]),
+    );
+  });
+
+  it("hydrates mid-load, before the loader settles", async () => {
+    const gate = deferred<string>();
+    let hydrate: ReturnType<typeof loadContextHydrate>;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["cap-midload", id],
+      load: (_id, context) => {
+        hydrate = loadContextHydrate(context);
+        return gate.promise;
+      },
+    });
+    const store = capabilityStore();
+
+    const pending = store.refreshData(resource, "one");
+    expect(
+      hydrate?.([{ key: ["cap-midload-user", "1"], value: "early" }]),
+    ).toBe(true);
+    expect(store.snapshot()).toEqual(
+      expect.arrayContaining([
+        { key: ["cap-midload-user", "1"], value: "early" },
+      ]),
+    );
+
+    gate.resolve("done");
+    await expect(pending).resolves.toEqual({
+      status: "fulfilled",
+      value: "done",
     });
   });
 });

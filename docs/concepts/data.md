@@ -27,7 +27,11 @@ Those two loader placements — loader-backed and hydrate-only — are the only 
 
 ## Loader Inputs
 
-Loaders receive the resource arguments followed by `{ signal }`. The data layer does not own app/request context or dependency injection; frameworks and adapters that need request state should close over it when defining per-request server resources, or route remote data requests through their own endpoint code.
+Loaders receive the resource arguments followed by `{ signal }`. The signal's lifetime is the **load generation's**, not the pending promise's: it stays live after the loader fulfills and aborts when that generation loses authority — a newer load supersedes it, a server push hydrates over it, the entry evicts, or the store is disposed. A loader whose value keeps streaming in the background (a payload decode filling holes) ties that work to the signal; plain fetch loaders can ignore the extension. A rejected load's own signal aborts on settlement (its generation never became authoritative), and `invalidateData` does not abort — marking stale never revokes authority.
+
+The load context also carries a non-public, generation-guarded hydration capability (symbol-keyed; read through `@bgub/fig/internal`): fig-dom's `payloadDataLoader` uses it to hydrate a payload stream's `data` rows through the calling store. It hydrates only while the load's generation is authoritative, returns `false` after supersession or disposal, and skips rows targeting the loading entry's own key (a loader cannot supersede itself with its own data row).
+
+The data layer does not own app/request context or dependency injection; frameworks and adapters that need request state should close over it when defining per-request server resources, or route remote data requests through their own endpoint code.
 
 Exploring: remote loaders run inside the framework data endpoint, which owns the request — so whether those loaders get an ambient per-request context (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is Fig Start's decision, not a core data contract (`docs/concepts/open-questions.md`).
 

@@ -84,6 +84,10 @@ interface DomRenderer {
 declare const __FIG_DEV__: boolean | undefined;
 
 export { insertAssetResources } from "./asset-resources.ts";
+export {
+  payloadDataLoader,
+  type PayloadDataLoaderOptions,
+} from "./payload-loader.ts";
 export type { Bind } from "./bind.ts";
 export {
   type EventCallback,

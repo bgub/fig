@@ -116,6 +116,36 @@ export interface FigDataStoreHost {
 
 export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 
+// The internal, generation-guarded hydration capability a store attaches to
+// each loader context (symbol-keyed: DataResourceLoadContext stays { signal }
+// publicly). Adapters that decode payload streams (fig-dom's
+// payloadDataLoader) use it to hydrate `data` rows through the calling store;
+// it returns false once the load's generation has lost authority.
+export type LoadContextHydrate = (
+  entries: readonly FigDataHydrationEntry[],
+) => boolean;
+
+const LoadContextHydrateSymbol = Symbol.for("fig.data-load-hydrate");
+
+export function defineLoadContextHydrate(
+  context: DataResourceLoadContext,
+  hydrate: LoadContextHydrate,
+): void {
+  Object.defineProperty(context, LoadContextHydrateSymbol, {
+    configurable: true,
+    enumerable: false,
+    value: hydrate,
+  });
+}
+
+export function loadContextHydrate(
+  context: DataResourceLoadContext,
+): LoadContextHydrate | undefined {
+  return (context as unknown as Record<symbol, LoadContextHydrate | undefined>)[
+    LoadContextHydrateSymbol
+  ];
+}
+
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;

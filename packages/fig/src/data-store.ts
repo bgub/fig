@@ -6,6 +6,7 @@ import {
   type DataResourceLoadContext,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
+  defineLoadContextHydrate,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataStore,
@@ -45,6 +46,11 @@ export interface DataStore<
 
 interface Entry<Owner extends object, Lane> {
   canonicalKey: string;
+  // The authoritative generation's controller. Deliberately retained after
+  // the loader settles: the signal's lifetime is the generation's, not the
+  // pending promise's, so loaders that keep streaming into their value
+  // (payload decodes filling holes) learn when their generation is
+  // superseded, hydrated over, evicted, or the store is disposed.
   controller: AbortController | null;
   error: unknown;
   fingerprint: string | null;
@@ -695,7 +701,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     let loaded: TValue | PromiseLike<TValue>;
     try {
-      loaded = load(...args, { signal: controller.signal });
+      loaded = load(
+        ...args,
+        this.createLoadContext(entry, generation, controller),
+      );
     } catch (error) {
       loaded = Promise.reject(error);
     }
@@ -713,7 +722,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         return settleAborted();
       }
 
-      entry.controller = null;
+      // The controller stays on the entry: the signal is generation-lifetime,
+      // and this generation is now the authoritative value.
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
@@ -730,7 +740,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         return settleAborted();
       }
 
+      // A rejected load's generation never becomes authoritative; abort its
+      // signal so background work it started stops.
       entry.controller = null;
+      controller.abort();
       entry.pending = null;
 
       if (hadValue) {
@@ -766,6 +779,43 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return pending.promise;
   }
 
+  private createLoadContext(
+    entry: Entry<Owner, Lane>,
+    generation: number,
+    controller: AbortController,
+  ): DataResourceLoadContext {
+    const context: DataResourceLoadContext = { signal: controller.signal };
+    defineLoadContextHydrate(context, (entries) => {
+      // Server-pushed rows hydrate only while this load's generation is
+      // authoritative; a superseded, evicted, or disposed decode cannot
+      // mutate the store.
+      if (
+        this.disposed ||
+        entry.generation !== generation ||
+        controller.signal.aborted
+      ) {
+        return false;
+      }
+
+      // The loading entry's own value comes from the loader's return, never
+      // from a data row: hydrating its key here would supersede — and abort —
+      // the very load delivering it.
+      const foreign = entries.filter(
+        (hydrated) =>
+          this.storeKey(normalizeKey(hydrated.key).canonical) !==
+          entry.storeKey,
+      );
+      if (__DEV__ && foreign.length !== entries.length) {
+        warn(
+          `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
+        );
+      }
+      if (foreign.length > 0) this.hydrate(foreign);
+      return true;
+    });
+    return context;
+  }
+
   private publish(entry: Entry<Owner, Lane>): void {
     this.notifyEntryChange(entry);
     this.scheduleInactiveCleanup(entry);
@@ -783,11 +833,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry: Entry<Owner, Lane>,
     reason: AbortReason,
   ): void {
+    // Aborts the generation, not just an in-flight promise: a fulfilled
+    // entry's retained controller aborts here too, ending any background
+    // work still tied to that load's signal.
+    entry.controller?.abort();
+    entry.controller = null;
+
     const pending = entry.pending;
     if (pending === null) return;
 
-    entry.controller?.abort();
-    entry.controller = null;
     entry.pending = null;
     pending.resolve(abortedRefreshResult(entry, reason));
   }
