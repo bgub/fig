@@ -348,11 +348,6 @@ class PayloadStreamDecode {
         else gates.push(gate);
         return;
       }
-      case "refresh":
-      case "refresh-error":
-        throw new Error(
-          "decodePayloadStream does not support targeted-refresh rows; refresh a serialized component by refreshing the data resource that delivers it.",
-        );
     }
   }
 
@@ -566,10 +561,6 @@ class PayloadStreamDecode {
         return Symbol.for(model.key);
       case "undefined":
         return undefined;
-      case "boundary":
-        // Legacy targeted-refresh boundaries are transparent here: the
-        // refresh unit is the data-resource key, so only the child matters.
-        return this.decodeModel(model.child);
       case "element": {
         if (model.id !== undefined) {
           return this.defineObjectRef(

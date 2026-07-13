@@ -64,10 +64,6 @@ export interface PayloadErrorValue {
 /**
  * Semantic payload row before a PayloadCodec turns it into bytes. This row
  * model is the stable contract; a codec's byte layout is intentionally opaque.
- *
- * The `refresh` and `refresh-error` rows belong to the legacy targeted-refresh
- * protocol and are scheduled for removal once serialized components ship as
- * ordinary data resources (docs/concepts/payload.md).
  */
 export type PayloadRow =
   | { for?: number; tag: "assets"; value: SerializedAssetResource[] }
@@ -83,9 +79,7 @@ export type PayloadRow =
     }
   | { tag: "data"; value: PayloadDataHydrationEntry[] }
   | { id: number; tag: "error"; value: PayloadErrorValue }
-  | { id: number; tag: "model"; value: PayloadModel }
-  | { boundary: string; tag: "refresh-error"; value: PayloadErrorValue }
-  | { boundary: string; tag: "refresh"; value: PayloadModel };
+  | { id: number; tag: "model"; value: PayloadModel };
 
 /**
  * Transport-safe model value used inside payload rows. The shape is public so
@@ -112,7 +106,6 @@ export type PayloadElementModel = {
 
 export type PayloadSpecialModel =
   | { $fig: "array"; id: number; value: PayloadModel[] }
-  | { $fig: "boundary"; child: PayloadModel; id: string }
   | { $fig: "bigint"; value: string }
   | { $fig: "client"; id: number }
   | { $fig: "date"; value: string }
@@ -710,7 +703,6 @@ export function isPayloadSpecialModel(
   switch ((model as { $fig: unknown }).$fig) {
     case "array":
     case "bigint":
-    case "boundary":
     case "client":
     case "date":
     case "element":

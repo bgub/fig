@@ -1,6 +1,6 @@
 # Payload
 
-Status: stable API; byte encoding intentionally unstable; targeted-refresh layer pending deletion (see Legacy)
+Status: stable API; byte encoding intentionally unstable
 
 Fig's server-component wire layer. The terminology rule: it is **payload**, never "RSC" or "Flight"; those are React brands and the format is Fig's own.
 
@@ -9,7 +9,7 @@ Payload is a **data format, not an architecture**. A server serializes a rendere
 ## Homes
 
 - `@bgub/fig/payload` — the browser-safe home: the row and model types, `jsonPayloadCodec` and codec pluggability (`PayloadCodec`), the value codec (`encodePayloadValue` / `decodePayloadValue`), data-entry helpers (`encodePayloadDataEntries` / `decodePayloadDataEntries`), codec negotiation (`payloadCodecIdFromContentType`, `assertPayloadCodecMatches`), error-row decoding (`errorFromPayloadValue`), and the client half: `decodePayloadStream`. Browser code never imports `@bgub/fig-server` to decode.
-- `@bgub/fig-server/payload` — the server half: `renderToPayloadStream`, the inline frame transport, and (until the deletion gate passes) the legacy consumer and targeted-refresh protocol.
+- `@bgub/fig-server/payload` — the server half: `renderToPayloadStream` and the inline frame transport.
 - `@bgub/fig` — `clientReference`, the one escape hatch for interactivity inside a serialized tree.
 - `@bgub/fig-dom` — `payloadDataLoader`, the web adapter that turns a payload endpoint into an ordinary data-resource loader: HTTP/codec validation, `insertAssetResources` as `prepareAssets`, the store's generation-guarded hydration capability, and the generation-lifetime signal wired into `decodePayloadStream` (data.md).
 
@@ -32,7 +32,8 @@ Ids minted by `useId` during payload render use the `fig-pl-` prefix. Row tags:
 - `data` — settled data-resource hydration entries encoded with the payload value codec (see data.md).
 - `assets` — stream-safe asset descriptors (see assets.md), plus an optional `for`: the row id whose reveal depends on these assets. The owning row is decided at serialization scope exit: a subtree that completes keeps its assets with the row it inlines into, while one that suspends or fails takes the assets discovered inside it to its outlined row — so a stylesheet belonging to a streamed hole never gates the enclosing tree's reveal. Scope exits happen within the same synchronous serialization attempt, so association costs no preload latency.
 - `error` — `{ digest?, message? }` under the server `onError` contract; the referenced chunk rejects with a digest-carrying error (`errorFromPayloadValue`).
-- `refresh` / `refresh-error` — legacy targeted-refresh rows (see Legacy); `decodePayloadStream` rejects them as protocol errors.
+
+There is deliberately no refresh row: the refresh unit is the data-resource key that delivers the payload (data.md), so a refresh is simply a new request for the same stream.
 
 Deliberately absent from the row model: server actions and temporary references. Binary byte encodings are allowed as codecs, but no binary codec is currently the public default.
 
@@ -65,11 +66,11 @@ Context is render-scoped and erased by serialization: `renderToPayloadStream(<Se
 
 ## Client References
 
-`clientReference({ id, load, assets?, ssr? })` marks a component that serializes as a reference instead of rendering on the server. Ids are opaque unique keys; Fig's bundler tooling authors them as `"<module>#<export>"`, and only the server splits that convention — it derives `exportName` once at serialization, so loaders and the client never string-parse ids. Loading is a `loadClientReference(metadata)` function (manifest modules map id → import), `resolveClientReference` short-circuits it, and loads start as reference rows arrive so module fetches overlap the stream. `ssr`-capable references server-render through their `ssr` component with modules preloaded (legacy consumer path; retained through migration).
+`clientReference({ id, load, assets?, ssr? })` marks a component that serializes as a reference instead of rendering on the server. Ids are opaque unique keys; Fig's bundler tooling authors them as `"<module>#<export>"`, and only the server splits that convention — it derives `exportName` once at serialization, so loaders and the client never string-parse ids. Loading is a `loadClientReference(metadata)` function (manifest modules map id → import), `resolveClientReference` short-circuits it, and loads start as reference rows arrive so module fetches overlap the stream. `ssr`-capable references server-render through their `ssr` component when a server-side decode resolves them (fig-start's document path).
 
 ## Server API
 
-`renderToPayloadStream(node, { codec?, onError?, clientReferenceAssets?, dataPartition?, highWaterMark?, signal?, refreshBoundary? })` returns `{ stream, allReady, contentType, abort(reason?) }`. `signal` and `abort()` cancel hung payload renders and reject `allReady`. Error rows follow the `onError → { digest?, message? }` contract (errors.md). Streams respect consumer backpressure with the same contract as the HTML renderer (server-rendering.md Flow Control): rendering and `allReady` are task-driven, row flushing pauses at the byte high-water mark (default 65536) and resumes on pulls, gated between rows so every chunk stays one-or-more complete wire rows. `refreshBoundary` belongs to the legacy targeted-refresh protocol.
+`renderToPayloadStream(node, { codec?, onError?, clientReferenceAssets?, dataPartition?, highWaterMark?, signal? })` returns `{ stream, allReady, contentType, abort(reason?) }`. `signal` and `abort()` cancel hung payload renders and reject `allReady`. Error rows follow the `onError → { digest?, message? }` contract (errors.md). Streams respect consumer backpressure with the same contract as the HTML renderer (server-rendering.md Flow Control): rendering and `allReady` are task-driven, row flushing pauses at the byte high-water mark (default 65536) and resumes on pulls, gated between rows so every chunk stays one-or-more complete wire rows.
 
 Inline frame transport: how a document render carries payload rows to the client as inline scripts interleaved between HTML chunks (parse-safe per the complete-markup chunk contract, server-rendering.md). `payloadFrameBootstrapScript(options?)` installs the `{ q, p, s }` frame-queue global (must run before any frame; `payloadFrameBootstrapCode` is the raw JS for JSX-authored heads), `payloadFrameScript(frame, options?)` emits one frame as a JSON carrier script plus a push script, and the client's `getPayloadFrameStream(options?)` returns the queue — creating it and replaying document frames it missed when the bundle ran mid-stream or without the bootstrap. Frames are caller-defined JSON values (a raw row-chunk string, or an envelope like Fig Start's `{ chunk, id }`); options scope the queue global name and carrier attribute, and `nonce` flows to every emitted script.
 
@@ -108,12 +109,3 @@ interface PayloadDecode {
 | Client-reference load or resolution failure | The referencing decoded component rejects through its nearest `ErrorBoundary`; completion reports failure only when the failure prevents protocol ingestion from continuing. |
 | Abort or supersession | Remaining rows are ignored, unresolved holes reject with an internal abort reason (`isPayloadDecodeAborted`), and completion reports `aborted`. |
 | Late `data` or asset row after authority is lost | The generation-guarded capability rejects it; it cannot mutate the store or insert assets. |
-
-## Legacy: Targeted Refresh And The Consumer Seam
-
-Pending deletion behind the gate in `docs/plans/serialized-components.md` — replaced by "serialize a component, deliver it as a data resource": the resource key is the refresh boundary, and the existing freshness verbs (data.md) replace the boundary protocol. Until demo-start proves parity on the resource model, the following remain:
-
-- `PayloadBoundary` marks refreshable subtrees (dev throws on duplicate ids); serializes as `$fig: "boundary"` models. `decodePayloadStream` decodes boundary models transparently (child only).
-- `refresh` — replaces one `PayloadBoundary`'s content by id without replacing the app shell. A targeted refresh wins until a newer parent payload model sends that boundary id again. `refresh-error` — `{ boundary, value: { digest?, message? } }` for failed targeted refresh renders; the client keeps the previous boundary content.
-- Payload refreshes use the `x-fig-payload-boundary` header (`PAYLOAD_BOUNDARY_HEADER`).
-- `createPayloadConsumer({ codec?, loadClientReference?, resolveClientReference? })` — the stateful decoding seam (`processStream`, `rootReady`, `bindRoot`, `preloadClientReferences`, `consumer.fetch` with refresh id-range namespacing, decoded-chunk memoization so unchanged subtrees bail out of re-renders). It also runs server-side when a document render consumes a payload stream. Non-2xx payload responses reject with `PayloadFetchError`.

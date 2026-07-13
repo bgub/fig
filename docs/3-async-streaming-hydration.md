@@ -62,7 +62,7 @@ Server render errors cross the wire only through `onError(error, info) => { dige
 
 ### Not to be confused with payload
 
-This HTML+ops protocol carries rendered UI; its consumer is the browser's HTML parser plus the inline runtime. Payload (`@bgub/fig-server/payload`) is the server-component wire layer: row-encoded element trees consumed by Fig's client runtime, with JSON as the default codec. Both stream, both handle suspense, different layers. (Payload is doc 6.)
+This HTML+ops protocol carries rendered UI; its consumer is the browser's HTML parser plus the inline runtime. Payload (`@bgub/fig-server/payload` on the server, `@bgub/fig/payload` in the browser) is the server-component wire layer: row-encoded element trees consumed by Fig's client runtime, with JSON as the default codec. Both stream, both handle suspense, different layers. (Payload is doc 6.)
 
 ## The hydration lifecycle
 

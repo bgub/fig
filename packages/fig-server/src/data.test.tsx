@@ -1,9 +1,9 @@
 import { createElement, readData } from "@bgub/fig";
-import { createDataStore } from "@bgub/fig/internal";
+import { decodePayloadStream } from "@bgub/fig/payload";
 import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
-import { createPayloadConsumer, renderToPayloadStream } from "./payload.ts";
+import { renderToPayloadStream } from "./payload.ts";
 import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
@@ -58,28 +58,24 @@ describe("@bgub/fig-server data resources", () => {
 
     const result = renderToPayloadStream(createElement(ServerProfile, null));
 
-    await result.allReady;
-
-    const streamText = await readStream(result.stream);
+    const [rowText, decodeStream] = result.stream.tee();
+    const streamText = await readStream(rowText);
     const dataIndex = streamText.indexOf('"tag":"data"');
     const modelIndex = streamText.indexOf('"tag":"model"');
 
     expect(dataIndex).toBeGreaterThanOrEqual(0);
     expect(modelIndex).toBeGreaterThan(dataIndex);
 
-    const consumer = createPayloadConsumer();
-    const store = createDataStore<object, null>({
-      getLane: () => null,
-      schedule: () => undefined,
+    const hydrated: unknown[] = [];
+    const decode = decodePayloadStream(decodeStream, {
+      hydrate: (entries) => {
+        hydrated.push(...entries);
+        return true;
+      },
     });
+    await decode.completion;
 
-    consumer.bindRoot({
-      data: store,
-      render: () => undefined,
-    });
-    consumer.processStringChunk(streamText);
-
-    expect(store.snapshot()).toEqual([
+    expect(hydrated).toEqual([
       { key: ["payload-user", "one"], value: { name: "Grace" } },
     ]);
   });

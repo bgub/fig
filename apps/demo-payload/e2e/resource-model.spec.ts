@@ -15,7 +15,7 @@ test("streams a serialized post as a data resource with progressive holes and is
     }
   });
 
-  await page.goto("/resource", { waitUntil: "commit" });
+  await page.goto("/", { waitUntil: "commit" });
   await expect(page.locator("body")).toHaveAttribute(
     "data-fig-resource-demo",
     "ready",
@@ -57,7 +57,7 @@ test("refreshes the post resource in a transition, keeping previous content visi
 }) => {
   const errors = collectBrowserErrors(page);
 
-  await page.goto("/resource", { waitUntil: "commit" });
+  await page.goto("/", { waitUntil: "commit" });
   const post = page.locator(".resource-post");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
   await expect(page.locator('[data-resource-comments="ready"]')).toBeVisible();
@@ -93,7 +93,7 @@ test("navigates between posts by key and recovers from a failed post", async ({
 }) => {
   const errors = collectBrowserErrors(page);
 
-  await page.goto("/resource", { waitUntil: "commit" });
+  await page.goto("/", { waitUntil: "commit" });
   const post = page.locator(".resource-post");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
 

@@ -138,43 +138,31 @@ The tree. The `.server.tsx` suffix keeps it out of client bundles, and `clientRe
 ```tsx
 // app.server.tsx
 import { clientReference } from "@bgub/fig";
-import { PayloadBoundary } from "@bgub/fig-server/payload";
 
 export const LikeButton = clientReference<{ postId: string }>({
   id: "like-button.tsx#LikeButton",
   load: () => import("./like-button.tsx"),
 });
 
-export function Profile({ id }: { id: string }) {
-  return (
-    <section>
-      <h1>User #{id}</h1>
-      <p>Rendered on the server at {new Date().toLocaleTimeString()}</p>
-    </section>
-  );
-}
-
 export function ProfilePage({ id }: { id: string }) {
   return (
     <main>
-      <PayloadBoundary id="profile">
-        <Profile id={id} />
-      </PayloadBoundary>
+      <section>
+        <h1>User #{id}</h1>
+        <p>Rendered on the server at {new Date().toLocaleTimeString()}</p>
+      </section>
       <LikeButton postId={id} />
     </main>
   );
 }
 ```
 
-The server — routing shown with Hono, but anything that speaks `Request`/`Response` works. One route serves both the first render and refreshes: a refresh request names its boundary in a header and gets back only that boundary's contents:
+The server — routing shown with Hono, but anything that speaks `Request`/`Response` works. One route serves the payload stream:
 
 ```tsx
 // server.tsx
-import {
-  PAYLOAD_BOUNDARY_HEADER,
-  renderToPayloadStream,
-} from "@bgub/fig-server/payload";
-import { Profile, ProfilePage } from "./app.server.tsx";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
+import { ProfilePage } from "./app.server.tsx";
 
 const shell = `<!doctype html>
 <div id="app"></div>
@@ -185,14 +173,7 @@ export const app = new Hono();
 app.get("/", (c) => c.html(shell));
 
 app.get("/profile/:id", (c) => {
-  const id = c.req.param("id");
-  const boundary = c.req.header(PAYLOAD_BOUNDARY_HEADER);
-  const result =
-    boundary === "profile"
-      ? renderToPayloadStream(<Profile id={id} />, {
-          refreshBoundary: boundary,
-        })
-      : renderToPayloadStream(<ProfilePage id={id} />);
+  const result = renderToPayloadStream(<ProfilePage id={c.req.param("id")} />);
 
   return new Response(result.stream, {
     headers: { "content-type": result.contentType },
@@ -202,32 +183,39 @@ app.get("/profile/:id", (c) => {
 
 Serve the next file, bundled for the browser, as `/client.js` (build it with `jsxImportSource: "@bgub/fig-dom"`).
 
-The client entry creates a payload consumer — the decoding end of the wire — binds it to the DOM, and fetches. The manifest is the other half of `clientReference`: it maps ids back to real modules:
+On the client, the serialized page is an ordinary data resource: the key is the refresh boundary, and the manifest is the other half of `clientReference` — it maps ids back to real modules:
 
-```ts
-// client.ts — runs in the browser
-import { createRoot } from "@bgub/fig-dom";
-import { createPayloadConsumer } from "@bgub/fig-server/payload";
+```tsx
+// client.tsx — runs in the browser
+import { dataResource, readData, refreshData, transition } from "@bgub/fig";
+import { createRoot, payloadDataLoader } from "@bgub/fig-dom";
 
 const clientManifest: Record<string, () => Promise<unknown>> = {
   "like-button.tsx#LikeButton": () => import("./like-button.tsx"),
 };
 
-const consumer = createPayloadConsumer({
-  loadClientReference: ({ id }) => clientManifest[id](),
+const profileResource = dataResource({
+  key: (id: string) => ["profile", id],
+  load: payloadDataLoader({
+    request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
+    loadClientReference: ({ id }) => clientManifest[id](),
+  }),
 });
 
-consumer.bindRoot(createRoot(document.getElementById("app")!));
-await consumer.fetch("/profile/42");
+function ProfileScreen({ id }: { id: string }) {
+  return readData(profileResource, id); // suspends, then returns the decoded tree
+}
+
+createRoot(document.getElementById("app")!).render(<ProfileScreen id="42" />);
 ```
 
-Later, refresh only the marked boundary:
+Later, refresh it like any other data:
 
 ```ts
-await consumer.fetch("/profile/42", { refreshBoundary: "profile" });
+transition(() => refreshData(profileResource, "42"));
 ```
 
-The server re-renders `<Profile>`, the refresh row replaces the boundary's contents (the timestamp changes), and the root bound by `bindRoot` re-renders automatically. The `LikeButton` outside the boundary stays mounted and keeps its count.
+The server re-renders the page, the store swaps the tree in (the timestamp changes), and the `LikeButton` island keeps its count — same component identity, ordinary reconciliation. Finer refresh granularity is just finer resource keys.
 
 ### Explicit reads instead of `use()`
 
@@ -327,18 +315,18 @@ Fig discovers these declarations during rendering and deduplicates them across s
 
 ## Rename cheat sheet
 
-| React                       | Fig                                  |
-| --------------------------- | ------------------------------------ |
-| `className` / `htmlFor`     | `class` / `for`                      |
-| `onClick={fn}`              | `events={[on("click", fn)]}`         |
-| `ref` / `forwardRef`        | `bind`                               |
-| `dangerouslySetInnerHTML`   | `unsafeHTML`                         |
-| `useEffect`                 | `useReactive`                        |
-| `useLayoutEffect`           | `useBeforePaint`                     |
-| `useInsertionEffect`        | `useBeforeLayout`                    |
-| `useEffectEvent`            | `useStableEvent`                     |
-| `startTransition`           | `transition`                         |
-| `use(ctx)` / `use(promise)` | `readContext` / `readPromise`        |
-| RSC / Flight                | payload (`@bgub/fig-server/payload`) |
+| React | Fig |
+| --- | --- |
+| `className` / `htmlFor` | `class` / `for` |
+| `onClick={fn}` | `events={[on("click", fn)]}` |
+| `ref` / `forwardRef` | `bind` |
+| `dangerouslySetInnerHTML` | `unsafeHTML` |
+| `useEffect` | `useReactive` |
+| `useLayoutEffect` | `useBeforePaint` |
+| `useInsertionEffect` | `useBeforeLayout` |
+| `useEffectEvent` | `useStableEvent` |
+| `startTransition` | `transition` |
+| `use(ctx)` / `use(promise)` | `readContext` / `readPromise` |
+| RSC / Flight | payload (`@bgub/fig-server/payload` + `@bgub/fig/payload`) |
 
 The next doc explains what the runtime actually does with all of this (lanes, scheduling, rendering, commit); doc 4 covers suspense, streaming SSR, and hydration.

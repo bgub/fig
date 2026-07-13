@@ -629,19 +629,6 @@ describe("decodePayloadStream", () => {
     expect(rendered.type).toBe("i");
   });
 
-  it("fails ingestion on targeted-refresh rows", async () => {
-    const decode = decodeRows([
-      model(0, null),
-      { boundary: "feed", tag: "refresh", value: null } as PayloadRow,
-    ]);
-
-    const completion = await decode.completion;
-    expect(completion.status).toBe("failed");
-    expect(String((completion as { error?: unknown }).error)).toContain(
-      "does not support targeted-refresh rows",
-    );
-  });
-
   it("treats a model referencing an unarrived client row as a protocol failure", async () => {
     const decode = decodeRows([
       model(0, element({ $fig: "client", id: 9 }, {})),
@@ -651,20 +638,6 @@ describe("decodePayloadStream", () => {
       "Payload model referenced client row 9 before it arrived.",
     );
     expect((await decode.completion).status).toBe("failed");
-  });
-
-  it("decodes legacy boundary models transparently", async () => {
-    const decode = decodeRows([
-      model(0, {
-        $fig: "boundary",
-        child: element("section", { children: "content" }),
-        id: "legacy",
-      }),
-    ]);
-
-    const root = (await decode.value) as FigElement;
-    expect(root.type).toBe("section");
-    expect(root.props.children).toBe("content");
   });
 
   it("ignores rows still queued when the decode aborts", async () => {

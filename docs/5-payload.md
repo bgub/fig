@@ -1,6 +1,6 @@
 # Payload (server components)
 
-Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire through a codec, and becomes a live Fig tree in the browser. It lives at `@bgub/fig-server/payload`, and the terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
+Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire through a codec, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the format and the client half (`decodePayloadStream`) live at the browser-safe `@bgub/fig/payload`, and fig-dom's `payloadDataLoader` turns the whole thing into an ordinary data resource. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
 
 Like docs 3 and 4, this one follows a single scenario end to end.
 
@@ -80,8 +80,8 @@ The full row vocabulary:
 | `data` | settled data-resource entries (doc 5's map rows) |
 | `assets` | stream-safe asset descriptors (doc 7) |
 | `error` | `{ digest?, message? }` under the server `onError` contract (doc 4) |
-| `refresh` | a boundary refresh: replaces one `PayloadBoundary`'s content by id |
-| `refresh-error` | a failed targeted refresh; keeps the previous boundary content |
+
+There is deliberately no refresh row. The refresh unit is the data-resource key that delivers the payload — refreshing is just requesting the same stream again, and the store's ordinary freshness semantics do the rest.
 
 Some things are deliberately absent from the row model: server actions and temporary references. The byte encoding is deliberately pluggable: JSON is the readable default for development, and a binary production codec can be added without changing the row semantics. Codec ids identify implementations, not stable public formats. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
 
@@ -95,57 +95,48 @@ Server component values can additionally contain Fig elements, client references
 
 Suppose `userResource` isn't loaded when `ProfilePage` renders. Same trick as everywhere else (doc 4): the read throws, and the payload renderer outlines the not-ready subtree — the model ships with `{"$fig":"lazy","id":2}` in that position and rendering moves on. When the load settles, row 2 arrives with the missing chunk and the hole fills. Suspense boundaries serialize as their own `$fig` nodes, so the client knows where fallbacks belong while holes are outstanding. `allReady` resolves once every outstanding row has been written — the same contract as doc 4's HTML entry points.
 
-## The client side
+## The client side: a serialized tree is a data resource
 
-```ts
-import { createPayloadConsumer } from "@bgub/fig-server/payload";
-import { createRoot } from "@bgub/fig-dom";
-
-const consumer = createPayloadConsumer({
-  loadClientReference: (metadata) => manifest[metadata.id](),
-});
-
-consumer.processStream(payloadStream);
-await consumer.rootReady;
-consumer.bindRoot(createRoot(container));
-```
-
-- `consumer.fetch(input, options?)` fetches a payload endpoint and ingests the body; `processStream(stream)` is the ingestion seam under it for streams you obtained yourself (`processStringChunk` is the low-level escape hatch).
-- `renderToPayloadStream(node, { codec })` and `createPayloadConsumer({ codec })` must agree on the codec implementation. `consumer.fetch` sends the consumer's codec in `Accept` and checks the response `codec=` content-type parameter before decoding.
-- Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it. `preloadClientReferences()` awaits whatever is in flight.
-- `rootReady` resolves when the root row decodes. It never rejects — race it against your own timeout or error UI.
-- `bindRoot(root)` renders the decoded tree into a Fig root and replays streamed `data` rows into `root.data` — the doc 5 handoff, completed.
-- Decoded chunks are memoized, so unchanged subtrees bail out of re-renders exactly like doc 3's adopted subtrees.
-
-## Refreshing one boundary
-
-The `refresh` row is the part with no React equivalent — React refetches whole trees; Fig replaces one subtree in place. Mark the refreshable region on the server:
+The decoded page travels like any other keyed async value (doc 5). fig-dom's `payloadDataLoader` adapts the endpoint into an ordinary loader, and `readData` returns renderable elements:
 
 ```tsx
-import { PayloadBoundary } from "@bgub/fig-server/payload";
+import { dataResource, readData, refreshData, transition } from "@bgub/fig";
+import { payloadDataLoader } from "@bgub/fig-dom";
 
-<PayloadBoundary id="profile">
-  <ProfilePage id="42" />
-</PayloadBoundary>;
+const profileResource = dataResource({
+  key: (id: string) => ["profile", id],
+  load: payloadDataLoader({
+    request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
+    loadClientReference: (metadata) => manifest[metadata.id](),
+  }),
+});
+
+function Profile({ id }: { id: string }) {
+  const page = readData(profileResource, id); // suspends until the root row decodes
+  return <main>{page}</main>;
+}
 ```
 
-(Dev throws on duplicate boundary ids.) The client asks for just that boundary:
+- The loader validates the response (status, body, `codec=` content-type parameter; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
+- Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it.
+- Streamed `data` rows hydrate the same store through a generation-guarded capability — the doc 5 handoff, completed, with no second request.
+- `assets` rows insert into the document head as they arrive; stylesheet gates delay only the content that declared them.
+
+Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns `{ value, completion, abort }` — `value` resolves at the root row, the never-rejecting `completion` reports how background ingestion ended, and `abort` retires unresolved holes with a cancellation reason (`isPayloadDecodeAborted`).
+
+## Refreshing
+
+There is no refresh protocol, because there doesn't need to be one: **the resource key is the refresh boundary.**
 
 ```ts
-await consumer.fetch("/profile/42", { refreshBoundary: "profile" });
+transition(() => refreshData(profileResource, "42"));
 ```
 
-`consumer.fetch` sends the boundary id in the `x-fig-payload-boundary` request header (`PAYLOAD_BOUNDARY_HEADER`); the server passes it to `renderToPayloadStream` as `refreshBoundary` and emits a `refresh` row:
-
-```
-{"boundary":"profile","tag":"refresh","value":{...new content...}}
-```
-
-Ingesting it replaces that `PayloadBoundary`'s content by id without touching the app shell — no remount of everything around it. Two details make this safe: refresh row ids are namespaced past every id the consumer has already seen, so outlined rows can't collide with mounted chunks, and the refresh drops the decode caches for that boundary so refreshed content gets fresh identities instead of bailing out as "unchanged".
+The store re-requests the stream; the previous tree stays visible while the refresh is pending; the new root publishes and the reconciler diffs it in. Want finer granularity? Define finer resources — a comments section with its own key refreshes without re-shipping the page around it.
 
 ## Errors
 
-An `error` row carries `{ digest?, message? }` under the same `onError` contract as doc 4: production defaults to empty, dev includes the message. The decoded chunk rejects with a digest-carrying error, so the read site throws on the client and the nearest `ErrorBoundary` handles it — the same routing as any render error. Cancelled payload fetches are distinguishable with `isPayloadRequestCancelled(error)`, because cancellation is not an error in Fig.
+An `error` row carries `{ digest?, message? }` under the same `onError` contract as doc 4: production defaults to empty, dev includes the message. A failing root rejects the resource read — the nearest `ErrorBoundary` handles it with ordinary failed-refresh semantics. A failing _hole_ rejects just that slot while the surrounding fulfilled tree stays published. Aborted decodes retire their holes with a cancellation reason rather than a user error, because cancellation is not an error in Fig.
 
 ## Payload vs the HTML stream
 

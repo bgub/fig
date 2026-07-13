@@ -4,47 +4,19 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { FigDevtools } from "@bgub/fig-devtools";
-import {
-  createRenderTreeCollector,
-  renderToDocumentStream,
-} from "@bgub/fig-server";
-import {
-  createPayloadConsumer,
-  PAYLOAD_BOUNDARY_HEADER,
-  payloadFrameBootstrapCode,
-  payloadFrameScript,
-  renderToPayloadStream,
-} from "@bgub/fig-server/payload";
-import { AppRefreshButton, RefreshButton } from "./client-components.tsx";
-import { ResourcePost, resourceComments } from "./resource-app.tsx";
-import { brokenResourceSeed, resourceRootId } from "./resource-shared.ts";
-import {
-  createDemoData,
-  Dashboard,
-  type DemoData,
-  OperationsNote,
-  PayloadApp,
-} from "./app.tsx";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import {
   devReloadScript,
   handleDevReloadRequest,
   watchDevReloadFile,
 } from "../../dev-reload.ts";
-import {
-  DevtoolsSnapshotScript,
-  prerenderedDevtools,
-} from "@bgub/fig-devtools/server";
-import { devtoolsOpenFromCookieHeader } from "../../demo-devtools-cookie.ts";
-import {
-  appRefreshButtonReferenceId,
-  appRootId,
-  devtoolsPaneId,
-  feedBoundaryId,
-  noteBoundaryId,
-  refreshButtonReferenceId,
-} from "./shared.ts";
+import { ResourcePost, resourceComments } from "./resource-app.tsx";
+import { brokenResourceSeed, resourceRootId } from "./resource-shared.ts";
 import { styles } from "./styles.ts";
+
+// The standalone serialized-components demo (docs/plans/serialized-components.md):
+// no framework, no boundaries, no refresh protocol — one route serving a payload
+// stream, one client consuming it as an ordinary data resource.
 
 const port = Number(process.env.PORT ?? 5174);
 const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
@@ -59,8 +31,6 @@ const textHtml = {
   ...noStore,
   "content-type": "text/html; charset=utf-8",
 };
-const textEncoder = new TextEncoder();
-const devReloadScriptBytes = textEncoder.encode(devReloadScript());
 
 watchDevReloadFile(clientScriptUrl);
 
@@ -87,7 +57,7 @@ async function handleRequest(
 
   switch (url.pathname) {
     case "/":
-      await sendDocument(request, response, url);
+      send(response, 200, resourceDocument(), textHtml);
       return;
     case "/client.js":
       await sendFile(response, clientScriptUrl, textJs);
@@ -95,12 +65,6 @@ async function handleRequest(
     case "/favicon.ico":
       response.writeHead(204);
       response.end();
-      return;
-    case "/payload":
-      await sendPayload(request, response, url);
-      return;
-    case "/resource":
-      send(response, 200, resourceDocument(), textHtml);
       return;
     case "/resource-payload":
       await sendResourcePayload(response, url);
@@ -113,36 +77,9 @@ async function handleRequest(
   }
 }
 
-async function sendPayload(
-  request: IncomingMessage,
-  response: ServerResponse,
-  url: URL,
-): Promise<void> {
-  const seed = seedFor(url);
-  const boundary = headerValue(request.headers[PAYLOAD_BOUNDARY_HEADER]);
-  const data = createDemoData(seed);
-  const boundaryRefresh = boundaryReplacement(boundary, data);
-  const refreshBoundary =
-    boundaryRefresh === null || boundary === null ? undefined : boundary;
-  const result = renderToPayloadStream(
-    boundaryRefresh ?? <PayloadApp data={data} />,
-    {
-      refreshBoundary,
-    },
-  );
-
-  response.writeHead(200, {
-    ...noStore,
-    "content-type": result.contentType,
-    "x-accel-buffering": "no",
-  });
-  await pipeStream(result.stream, response);
-}
-
-// The resource-model endpoint (docs/plans/serialized-components.md): a plain
-// payload stream per post, no boundary options — the client refreshes it as
-// an ordinary data resource. Seed 500 fails so the demo covers pre-root
-// failure and recovery.
+// The serialized-components endpoint: a plain payload stream per post. The
+// client refreshes it with refreshData and navigates by resource key. Seed
+// 500 fails so the demo covers pre-root failure and recovery.
 async function sendResourcePayload(
   response: ServerResponse,
   url: URL,
@@ -170,9 +107,6 @@ async function sendResourcePayload(
   await pipeStream(result.stream, response);
 }
 
-// The /resource page is deliberately client-mounted (no SSR/hydration): the
-// non-authoritative demo path proves the resource model on its own before
-// fig-start's document integration.
 function resourceDocument(): string {
   return (
     '<!doctype html><html lang="en"><head>' +
@@ -186,152 +120,6 @@ function resourceDocument(): string {
     '<script src="/client.js" type="module"></script>' +
     "</body></html>"
   );
-}
-
-function boundaryReplacement(boundary: string | null, data: DemoData) {
-  switch (boundary) {
-    case feedBoundaryId:
-      return <Dashboard data={data} />;
-    case noteBoundaryId:
-      return <OperationsNote data={data} />;
-    default:
-      return null;
-  }
-}
-
-// The initial document is server-rendered FROM the payload: one
-// renderToPayloadStream call is teed — one branch decodes into a server-side
-// payload consumer whose root renders (and streams Suspense reveals) through
-// renderToDocumentStream, the other is forwarded to the browser as inline
-// frame scripts for hydration. HTML and payload come from the same render,
-// so the hydrated client tree matches the streamed markup byte for byte.
-// The same document render fills the render-tree collector the DevTools
-// panel prerenders from.
-async function sendDocument(
-  request: IncomingMessage,
-  response: ServerResponse,
-  url: URL,
-): Promise<void> {
-  const seed = seedFor(url);
-  const data = createDemoData(seed);
-  const payload = renderToPayloadStream(<PayloadApp data={data} />, {});
-  void payload.allReady.catch(() => undefined);
-  const [ssrRows, clientRows] = payload.stream.tee();
-
-  const ssrPayload = createPayloadConsumer({
-    resolveClientReference(metadata) {
-      if (metadata.id === appRefreshButtonReferenceId) return AppRefreshButton;
-      if (metadata.id === refreshButtonReferenceId) return RefreshButton;
-      throw new Error(`Unknown client reference "${metadata.id}".`);
-    },
-  });
-  void ssrPayload.processStream(ssrRows).catch(() => undefined);
-  await ssrPayload.rootReady;
-
-  const renderTree = createRenderTreeCollector();
-  const devtools = prerenderedDevtools(renderTree, appRootId);
-  const devtoolsOpen = devtoolsOpenFromCookieHeader(request.headers.cookie);
-  const render = renderToDocumentStream(
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Fig payload Demo</title>
-        <link rel="stylesheet" href="/style.css" />
-        <script unsafeHTML={payloadFrameBootstrapCode()} />
-      </head>
-      <body>
-        <div class="fig-demo-devtools-layout">
-          <div class="fig-demo-app-pane">
-            <div id={appRootId}>{ssrPayload.getRoot()}</div>
-          </div>
-          <aside class="fig-demo-devtools-pane" id={devtoolsPaneId}>
-            {/* The aside renders after the app pane, so the collector holds
-                the app's tree when the panel reads the hook; the client
-                hydrates it against the same snapshot (inlined below) and
-                swaps to the live hook after the first commit. */}
-            <FigDevtools
-              defaultOpen={devtoolsOpen}
-              hook={devtools.hook}
-              placement="sidebar"
-            />
-          </aside>
-        </div>
-        <DevtoolsSnapshotScript devtools={devtools} />
-        <script src="/client.js" type="module" />
-      </body>
-    </html>,
-    {
-      onError() {
-        return { digest: "payload-demo-boundary" };
-      },
-      renderTree,
-    },
-  );
-
-  await render.shellReady;
-  response.writeHead(200, {
-    ...noStore,
-    "content-type": render.contentType,
-    "x-accel-buffering": "no",
-  });
-  await interleaveDocument(render.stream, clientRows, response);
-}
-
-// Writes HTML chunks as they stream and flushes buffered payload rows as
-// inline frame scripts between them (fig-server emits complete markup per
-// chunk, so between-chunk injection is parse-safe — the contract in
-// docs/concepts/server-rendering.md that the demo-ssr bootstrap injection also
-// relies on).
-async function interleaveDocument(
-  html: ReadableStream<Uint8Array>,
-  rows: ReadableStream<Uint8Array>,
-  response: ServerResponse,
-): Promise<void> {
-  let pendingFrames: string[] = [];
-  const decoder = new TextDecoder();
-  const rowsReader = rows.getReader();
-  const rowsDone = (async () => {
-    for (;;) {
-      const { done, value } = await rowsReader.read();
-      // A default reader's final read carries no value; decoding undefined
-      // without stream mode is exactly the flush.
-      const text = decoder.decode(value, { stream: !done });
-      if (text.length > 0) pendingFrames.push(text);
-      if (done) return;
-    }
-  })();
-
-  const flushFrames = async (): Promise<void> => {
-    if (pendingFrames.length === 0) return;
-    const scripts = pendingFrames
-      .map((frame) => payloadFrameScript(frame))
-      .join("");
-    pendingFrames = [];
-    await writeResponse(response, textEncoder.encode(scripts));
-  };
-
-  const htmlReader = html.getReader();
-  try {
-    // The shell is complete (shellReady was awaited), so the first chunk is
-    // a safe spot for the dev-reload script.
-    const shell = await htmlReader.read();
-    if (shell.value !== undefined) await writeResponse(response, shell.value);
-    await writeResponse(response, devReloadScriptBytes);
-    await flushFrames();
-
-    while (!shell.done) {
-      const { done, value } = await htmlReader.read();
-      if (value !== undefined) await writeResponse(response, value);
-      await flushFrames();
-      if (done) break;
-    }
-    // The last payload rows land with (or just after) the last HTML reveal.
-    await rowsDone;
-    await flushFrames();
-  } finally {
-    response.end();
-  }
 }
 
 function requestUrl(request: IncomingMessage): URL {
@@ -349,7 +137,7 @@ function publicUrl(port: number): string {
 function seedFor(url: URL): number {
   const explicit = Number(url.searchParams.get("seed"));
   if (Number.isInteger(explicit)) return explicit;
-  return Math.floor(Date.now() / 1000) % 1000;
+  return 1;
 }
 
 async function pipeStream(
@@ -404,9 +192,4 @@ function writeResponse(
     response.on("close", finish);
     response.on("drain", finish);
   });
-}
-
-function headerValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
 }
