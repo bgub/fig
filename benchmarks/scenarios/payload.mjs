@@ -1,7 +1,7 @@
 import {
   decodePayloadValue,
   encodePayloadValue,
-} from "../../packages/fig-server/dist/payload.js";
+} from "../../packages/fig/dist/payload.js";
 import { figOnlyRuntime } from "../lib/host-runtimes.mjs";
 import {
   createOperationCounts,

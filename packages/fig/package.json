@@ -16,6 +16,11 @@
       "import": "./dist/internal.js",
       "default": "./dist/internal.js"
     },
+    "./payload": {
+      "types": "./dist/payload.d.ts",
+      "import": "./dist/payload.js",
+      "default": "./dist/payload.js"
+    },
     "./server": {
       "types": "./dist/server.d.ts",
       "browser": "./dist/server.browser.js",

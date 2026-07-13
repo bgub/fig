@@ -22,6 +22,10 @@ Uncaught render errors rethrow to `flushSync` callers; outside `flushSync` they 
 
 Server render errors cross the wire only through `onError(error, info) => { digest?, message? }` — authoritative payload, production-empty by default, shared by the HTML and payload renderers (see server-rendering.md). Client-render markers carry the digest into hydration (`data-dgst`/`data-msg`), and payload error rows reject their chunk with a digest-carrying error.
 
+## Payload Holes
+
+A decoded payload value can be fulfilled while streamed subtrees inside it are still outlined holes (payload.md). A hole's `error` row — or a post-root transport/protocol failure — rejects that hole, and the nearest `ErrorBoundary` covering the decoded slot catches it, digest contract intact; the surrounding fulfilled value stays published. Aborting a decode follows Cancellation Is Not An Error: unresolved holes reject with an internal abort reason (`isPayloadDecodeAborted`) that frameworks treat as retirement, not a user error.
+
 ## Cancellation Is Not An Error
 
 Across transitions, actions, and data loads, an aborted run is _retired_: its rejection is swallowed (an aborted fetch rejecting is the happy path) and its settlement cannot touch state. Only live-generation failures reach boundaries or rethrow paths. See hooks.md and data.md.

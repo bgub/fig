@@ -11,27 +11,27 @@ import {
   type FigDataStoreHandle,
   type FigElement,
   type FigNode,
-  type FontResource,
   Fragment,
   type Key,
-  type ModulePreloadResource,
-  type PreconnectResource,
-  type PreloadResource,
   type Props,
   readPromise,
-  type ScriptResource,
-  type StylesheetResource,
   Suspense,
   ViewTransition,
 } from "@bgub/fig";
 import {
   assetResourceDestination,
   assetResourceKey,
+  checkpointPayloadGraph,
   clientReferenceAssets,
   createDataStore,
+  createPayloadGraphEncodeContext,
   type DataStore,
   type DataStoreEntrySnapshot,
+  decodePayloadNumber,
+  definePayloadGraphElement,
+  definePayloadProperty,
   describeInvalidChild,
+  encodePayloadValueWithGraph,
   isActivity,
   isAssets,
   isClientReference,
@@ -39,19 +39,43 @@ import {
   isErrorBoundary,
   FigElementSymbol,
   isFigAssetResource,
+  isPayloadSpecialModel,
+  isPlainPayloadValue,
   isPortal,
   isSuspense,
   isThenable,
   isValidElement,
   isViewTransition,
   normalizeDataResourceKey,
+  type PayloadGraphEncodeContext,
   type RenderDispatcher,
   readThenable,
+  rollbackPayloadGraph,
+  serializePayloadArray,
+  serializePayloadMap,
+  serializePayloadPlainObject,
+  serializePayloadSet,
   setCurrentDataStore,
   setCurrentDispatcher,
   type Thenable,
   trackThenable,
 } from "@bgub/fig/internal";
+import {
+  assertPayloadCodecMatches,
+  decodePayloadDataEntries,
+  encodePayloadDataEntries,
+  encodePayloadValue,
+  errorFromPayloadValue,
+  jsonPayloadCodec,
+  type PayloadClientReferenceMetadata,
+  type PayloadCodec,
+  type PayloadElementModel,
+  type PayloadModel,
+  type PayloadRow,
+  type PayloadRowDecoder,
+  type PayloadSpecialModel,
+  type SerializedAssetResource,
+} from "@bgub/fig/payload";
 import {
   type ContextValues,
   cloneContextValues,
@@ -115,147 +139,6 @@ export interface PayloadRootLike {
   render(node: FigNode): void;
 }
 
-// Stream-safe asset resources only (no head-only title/meta). Optional fields
-// stay optional on the wire; omitted `undefined` values are part of the payload
-// contract, not a serializer implementation detail.
-export type SerializedAssetResource =
-  | {
-      crossOrigin?: StylesheetResource["crossOrigin"];
-      href: string;
-      kind: "stylesheet";
-      media?: string;
-      precedence?: string;
-    }
-  | {
-      as: string;
-      crossOrigin?: PreloadResource["crossOrigin"];
-      fetchPriority?: PreloadResource["fetchPriority"];
-      href: string;
-      kind: "preload";
-      type?: string;
-    }
-  | {
-      crossOrigin?: ModulePreloadResource["crossOrigin"];
-      fetchPriority?: ModulePreloadResource["fetchPriority"];
-      href: string;
-      kind: "modulepreload";
-    }
-  | {
-      async?: boolean;
-      crossOrigin?: ScriptResource["crossOrigin"];
-      defer?: boolean;
-      kind: "script";
-      module?: boolean;
-      src: string;
-    }
-  | {
-      crossOrigin?: FontResource["crossOrigin"];
-      fetchPriority?: FontResource["fetchPriority"];
-      href: string;
-      kind: "font";
-      type: string;
-    }
-  | {
-      crossOrigin?: PreconnectResource["crossOrigin"];
-      href: string;
-      kind: "preconnect";
-    };
-
-/**
- * Semantic payload row before a PayloadCodec turns it into bytes. This row
- * model is the stable contract; a codec's byte layout is intentionally opaque.
- */
-export type PayloadRow =
-  | { tag: "assets"; value: SerializedAssetResource[] }
-  | {
-      id: number;
-      tag: "client";
-      value: {
-        id: string;
-        assets?: SerializedAssetResource[];
-        exportName?: string;
-        ssr?: true;
-      };
-    }
-  | { tag: "data"; value: PayloadDataHydrationEntry[] }
-  | { id: number; tag: "error"; value: ServerErrorPayload }
-  | { id: number; tag: "model"; value: PayloadModel }
-  | { boundary: string; tag: "refresh-error"; value: ServerErrorPayload }
-  | { boundary: string; tag: "refresh"; value: PayloadModel };
-
-/**
- * Transport-safe model value used inside payload rows. The shape is public so
- * custom codecs and framework integrations can encode/decode rows, but callers
- * should not treat the exact tagged representation as an app data format.
- */
-export type PayloadModel =
-  | null
-  | boolean
-  | number
-  | string
-  | PayloadModel[]
-  | { [key: string]: PayloadModel }
-  | PayloadElementModel
-  | PayloadSpecialModel;
-
-type PayloadElementModel = {
-  $fig: "element";
-  id?: number;
-  key: Key | null;
-  props: PayloadModel;
-  type: string | PayloadSpecialModel;
-};
-
-type PayloadSpecialModel =
-  | { $fig: "array"; id: number; value: PayloadModel[] }
-  | { $fig: "boundary"; child: PayloadModel; id: string }
-  | { $fig: "bigint"; value: string }
-  | { $fig: "client"; id: number }
-  | { $fig: "date"; value: string }
-  | { $fig: "fragment" }
-  | { $fig: "lazy"; id: number }
-  | { $fig: "map"; entries: Array<[PayloadModel, PayloadModel]>; id: number }
-  | { $fig: "number"; value: "Infinity" | "-Infinity" | "-0" | "NaN" }
-  | { $fig: "object"; id?: number; value: Record<string, PayloadModel> }
-  | { $fig: "promise"; id: number }
-  | { $fig: "ref"; id: number }
-  | { $fig: "set"; id: number; values: PayloadModel[] }
-  | { $fig: "symbol"; key: string }
-  | { $fig: "suspense" }
-  | { $fig: "undefined" }
-  | { $fig: "view-transition" };
-
-type PayloadValueSpecialModel = Extract<
-  PayloadSpecialModel,
-  {
-    $fig:
-      | "array"
-      | "bigint"
-      | "date"
-      | "map"
-      | "number"
-      | "object"
-      | "ref"
-      | "set"
-      | "symbol"
-      | "undefined";
-  }
->;
-
-export type PayloadDataHydrationEntry = Omit<FigDataHydrationEntry, "value"> & {
-  value: PayloadModel;
-};
-
-export interface PayloadClientReferenceMetadata {
-  // Opaque unique key for loading and dedupe. Fig's bundler tooling authors
-  // ids as "<module specifier>#<export>", but only the server ever splits
-  // that convention — it derives exportName once at serialization, so
-  // loaders and the client treat id as a black box.
-  id: string;
-  exportName?: string;
-  ssr?: boolean;
-}
-
 export interface PayloadClientReferenceRecord extends PayloadClientReferenceMetadata {
   assets?: readonly FigAssetResource[];
 }
@@ -302,29 +185,6 @@ export type PayloadFetch = (
 export interface PayloadFetchOptions extends RequestInit {
   fetch?: PayloadFetch;
   refreshBoundary?: string;
-}
-
-export interface PayloadCodec {
-  /**
-   * Opaque implementation id, e.g. "json" or "binary". Fig checks this id at
-   * transport boundaries; the encoded byte layout is not a public contract.
-   */
-  readonly id: string;
-  readonly contentType: string;
-  /**
-   * Creates a streaming row decoder. The decoder calls `onRow` for each
-   * complete semantic row. If `onRow` throws, the decoder must propagate that
-   * error; when it can already see more complete sibling rows in the same
-   * input chunk, it should process those siblings before rethrowing so
-   * notifications already implied by earlier rows are not lost.
-   */
-  createDecoder(onRow: (row: PayloadRow) => void): PayloadDecoder;
-  encodeRow(row: PayloadRow): Uint8Array;
-}
-
-export interface PayloadDecoder {
-  decode(chunk: Uint8Array): void;
-  flush(): void;
 }
 
 export const PAYLOAD_BOUNDARY_HEADER = "x-fig-payload-boundary";
@@ -396,17 +256,10 @@ type RenderFrame = {
   dispatcher: RenderDispatcher | null;
   request: PayloadRequest;
   stack: StackFrame | null;
+  // The row id this frame's serialization will settle into. Assets rows carry
+  // it as `for` so the client gates exactly that row's reveal on the assets.
+  taskId: number;
 };
-
-interface PayloadGraphEncodeContext {
-  ids: WeakMap<object, number>;
-  nextId: number;
-  objects: Map<number, object>;
-}
-
-interface PayloadGraphDecodeContext {
-  refs: Map<number, unknown>;
-}
 
 interface PayloadObjectRef {
   value: unknown;
@@ -442,103 +295,6 @@ const errorStacks = new WeakMap<object, StackFrame>();
 const childrenTreeProps = new Set(["children"]);
 const emptyTreeProps = new Set<string>();
 const suspenseTreeProps = new Set(["children", "fallback"]);
-
-function createPayloadGraphEncodeContext(): PayloadGraphEncodeContext {
-  return { ids: new WeakMap(), nextId: 1, objects: new Map() };
-}
-
-function createPayloadGraphDecodeContext(): PayloadGraphDecodeContext {
-  return { refs: new Map() };
-}
-
-/**
- * Readable development-oriented codec: one JSON payload row per newline.
- */
-export const jsonPayloadCodec: PayloadCodec = {
-  id: "json",
-  contentType: "text/x-fig-payload; codec=json; charset=utf-8",
-  createDecoder(onRow) {
-    return createJsonPayloadDecoder(onRow);
-  },
-  encodeRow(row) {
-    return textEncoder.encode(`${JSON.stringify(row)}\n`);
-  },
-};
-
-function createJsonPayloadDecoder(
-  onRow: (row: PayloadRow) => void,
-): PayloadDecoder {
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let searchStart = 0;
-
-  function processBufferedLines(): void {
-    let lineStart = 0;
-    let firstError: unknown;
-
-    for (;;) {
-      const newlineIndex = buffer.indexOf("\n", searchStart);
-      if (newlineIndex === -1) {
-        searchStart = buffer.length;
-        break;
-      }
-      try {
-        processPayloadLine(buffer.slice(lineStart, newlineIndex), onRow);
-      } catch (error) {
-        firstError ??= error;
-      }
-      lineStart = newlineIndex + 1;
-      searchStart = lineStart;
-    }
-
-    if (firstError !== undefined) {
-      buffer = "";
-      searchStart = 0;
-      throw firstError;
-    }
-    if (lineStart > 0) {
-      buffer = buffer.slice(lineStart);
-      searchStart -= lineStart;
-    }
-  }
-
-  return {
-    decode(chunk) {
-      buffer += decoder.decode(chunk, { stream: true });
-      processBufferedLines();
-    },
-    flush() {
-      buffer += decoder.decode();
-      if (buffer.length > 0) {
-        const line = buffer;
-        buffer = "";
-        searchStart = 0;
-        processPayloadLine(line, onRow);
-      }
-    },
-  };
-}
-
-function processPayloadLine(
-  line: string,
-  onRow: (row: PayloadRow) => void,
-): void {
-  if (line.length > 0) onRow(JSON.parse(line) as PayloadRow);
-}
-
-function payloadCodecIdFromContentType(
-  contentTypeHeader: string,
-): string | null {
-  const parts = contentTypeHeader.split(";").slice(1);
-  for (const part of parts) {
-    const [name, rawValue] = part.split("=");
-    if (name?.trim().toLowerCase() !== "codec") continue;
-    const value = rawValue?.trim();
-    if (value === undefined || value.length === 0) return null;
-    return value.replace(/^"|"$/g, "");
-  }
-  return null;
-}
 
 type PayloadBoundaryProps = { children?: FigNode; id: string };
 
@@ -705,7 +461,7 @@ class PayloadConsumerImpl implements PayloadConsumer {
   private rootData: FigDataStoreHandle | null = null;
   private rowIdBase = 0;
   private currentDecodeRevision = 0;
-  private stringDecoder: PayloadDecoder;
+  private stringDecoder: PayloadRowDecoder;
   private nextModelRevision = 1;
   private maxObjectIdScanDirty = false;
   readonly codec: PayloadCodec;
@@ -841,7 +597,7 @@ class PayloadConsumerImpl implements PayloadConsumer {
   private createDecoder(
     rowIdBase: number,
     objectIdBase: number,
-  ): PayloadDecoder {
+  ): PayloadRowDecoder {
     return this.codec.createDecoder((row) =>
       this.processRow(row, rowIdBase, objectIdBase),
     );
@@ -885,7 +641,7 @@ class PayloadConsumerImpl implements PayloadConsumer {
 
     if (row.tag === "refresh-error") {
       this.notify();
-      throw errorFromPayload(row.value);
+      throw errorFromPayloadValue(row.value);
     }
 
     const revision = row.tag === "model" ? this.claimModelRevision() : 0;
@@ -1327,6 +1083,7 @@ function retryTask(request: PayloadRequest, task: Task): void {
     request,
     cloneContextValues(task.contextValues),
     task.stack,
+    task.id,
   );
 
   try {
@@ -1406,12 +1163,13 @@ function createRenderFrame(
   request: PayloadRequest,
   contextValues: ContextValues,
   stack: StackFrame | null,
+  taskId: number,
 ): RenderFrame {
-  return { contextValues, dispatcher: null, request, stack };
+  return { contextValues, dispatcher: null, request, stack, taskId };
 }
 
 function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
-  return createStaticDispatcher({
+  const dispatcher = createStaticDispatcher({
     contextValues: frame.contextValues,
     externalStoreError:
       "useSyncExternalStore requires getServerSnapshot during payload render.",
@@ -1429,6 +1187,29 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     updateError: "State updates are not allowed during payload render.",
   });
+
+  // Serialized components are render-only: they never re-run on the client,
+  // so state, effects, and interactivity are meaningless there — dev throws
+  // at first use instead of silently freezing initial state into the wire.
+  // Reads stay server-safe: readContext/readData/readPromise/preloadData,
+  // useMemo, useId, and useSyncExternalStore's getServerSnapshot path (a
+  // read, not a subscription — the static dispatcher already requires it).
+  if (__DEV__) {
+    const throwClientApi = (hook: string) => (): never => {
+      throw new Error(
+        `${hook} cannot be used during payload render: serialized components are render-only. Move state, effects, and interactivity into a client reference.`,
+      );
+    };
+    dispatcher.useState = throwClientApi("useState");
+    dispatcher.useActionState = throwClientApi("useActionState");
+    dispatcher.useTransition = throwClientApi("useTransition");
+    dispatcher.useStableEvent = throwClientApi("useStableEvent");
+    dispatcher.useReactive = throwClientApi("useReactive");
+    dispatcher.useBeforePaint = throwClientApi("useBeforePaint");
+    dispatcher.useBeforeLayout = throwClientApi("useBeforeLayout");
+  }
+
+  return dispatcher;
 }
 
 function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
@@ -1457,12 +1238,12 @@ function serializeNodeOrLazy(
   frame: RenderFrame,
   preserveElementIdentity = false,
 ): PayloadModel {
-  const graphCheckpoint = checkpointGraph(frame.request.graph);
+  const graphCheckpoint = checkpointPayloadGraph(frame.request.graph);
   try {
     if (!isValidElement(node)) return serializeNode(node, frame);
     return serializeElement(node, frame, preserveElementIdentity);
   } catch (error) {
-    rollbackGraph(frame.request.graph, graphCheckpoint);
+    rollbackPayloadGraph(frame.request.graph, graphCheckpoint);
     if (isThenable(error)) {
       return outlineTask(frame, "node", node, "lazy", error);
     }
@@ -1582,7 +1363,7 @@ function serializeElementModel(
   treeProps: ReadonlySet<string> = emptyTreeProps,
 ): PayloadModel {
   const id = preserveIdentity
-    ? defineGraphElement(frame.request.graph, element)
+    ? definePayloadGraphElement(frame.request.graph, element)
     : undefined;
   if (typeof id === "object") return id;
   return {
@@ -1632,7 +1413,15 @@ function serializeContextProvider(
 function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   const serialized = serializeAssetResources(frame.request, props.assets);
   if (serialized.length > 0) {
-    emitRow(frame.request, { tag: "assets", value: serialized });
+    // `for` declares the dependent row. If this subtree later suspends and
+    // outlines, the assets gate the enclosing row instead of the hole — the
+    // stylesheets are already loading by the time the hole's row arrives, so
+    // the skew only ever over-gates, never blocks.
+    emitRow(frame.request, {
+      for: frame.taskId,
+      tag: "assets",
+      value: serialized,
+    });
   }
   return serializeNode(props.children, frame);
 }
@@ -1682,22 +1471,22 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
 
   if (typeof value === "object" && value !== null) {
     if (value instanceof Date) {
-      return encodePayloadValueInternal(value, frame.request.graph);
+      return encodePayloadValueWithGraph(value, frame.request.graph);
     }
     if (value instanceof Map) {
-      return serializeMap(value, frame.request.graph, ([key, item]) => [
+      return serializePayloadMap(value, frame.request.graph, ([key, item]) => [
         serializeValue(key, frame),
         serializeValue(item, frame),
       ]);
     }
     if (value instanceof Set) {
-      return serializeSet(value, frame.request.graph, (item) =>
+      return serializePayloadSet(value, frame.request.graph, (item) =>
         serializeValue(item, frame),
       );
     }
 
     if (Array.isArray(value)) {
-      return serializeArray(
+      return serializePayloadArray(
         value,
         frame.request.graph,
         () => value,
@@ -1705,402 +1494,13 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
       );
     }
 
-    return serializePlainObject(value, frame.request.graph, (child) =>
+    return serializePayloadPlainObject(value, frame.request.graph, (child) =>
       serializeValue(child, frame),
     );
   }
 
   throw new Error(`Cannot serialize ${typeof value} into the payload.`);
 }
-
-function isPlainPayloadValue(value: unknown): boolean {
-  return (
-    value === null ||
-    value === undefined ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint" ||
-    typeof value === "symbol"
-  );
-}
-
-/**
- * Encode ordinary data values into PayloadModel. Server component references
- * such as Fig elements, promises, and client references are handled by the
- * payload renderer before ordinary values reach this helper.
- */
-export function encodePayloadValue(value: unknown): PayloadModel {
-  return encodePayloadValueInternal(value, createPayloadGraphEncodeContext());
-}
-
-function encodePayloadValueInternal(
-  value: unknown,
-  graph: PayloadGraphEncodeContext,
-): PayloadModel {
-  if (value === null) return null;
-  if (value === undefined) return { $fig: "undefined" };
-
-  if (typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") return encodePayloadNumber(value);
-  if (typeof value === "bigint") {
-    return { $fig: "bigint", value: value.toString() };
-  }
-  if (typeof value === "symbol") {
-    const key = Symbol.keyFor(value);
-    if (key === undefined) {
-      throw new Error("Only global Symbol.for symbols can be serialized.");
-    }
-    return { $fig: "symbol", key };
-  }
-  if (typeof value === "function") {
-    throw new Error("Functions cannot be serialized into the payload.");
-  }
-
-  if (Array.isArray(value)) {
-    return serializeArray(
-      value,
-      graph,
-      () => value,
-      (item) => encodePayloadValueInternal(item, graph),
-    );
-  }
-  if (value instanceof Date) {
-    const json = value.toJSON();
-    if (json === null) {
-      throw new Error("Invalid Date values cannot be serialized.");
-    }
-    return { $fig: "date", value: json };
-  }
-  if (value instanceof Map) {
-    return serializeMap(value, graph, ([key, item]) => [
-      encodePayloadValueInternal(key, graph),
-      encodePayloadValueInternal(item, graph),
-    ]);
-  }
-  if (value instanceof Set) {
-    return serializeSet(value, graph, (item) =>
-      encodePayloadValueInternal(item, graph),
-    );
-  }
-
-  if (typeof value === "object" && value !== null) {
-    return serializePlainObject(value, graph, (child) =>
-      encodePayloadValueInternal(child, graph),
-    );
-  }
-
-  throw new Error(`Cannot serialize ${typeof value} into the payload.`);
-}
-
-function serializeMap(
-  value: Map<unknown, unknown>,
-  graph: PayloadGraphEncodeContext,
-  encodeEntry: (entry: [unknown, unknown]) => [PayloadModel, PayloadModel],
-): PayloadModel {
-  const existing = graphReference(graph, value);
-  if (existing !== null) return existing;
-  const id = defineGraphObject(graph, value);
-  return {
-    $fig: "map",
-    id,
-    entries: [...value.entries()].map(encodeEntry),
-  };
-}
-
-function serializeSet(
-  value: Set<unknown>,
-  graph: PayloadGraphEncodeContext,
-  encodeItem: (value: unknown) => PayloadModel,
-): PayloadModel {
-  const existing = graphReference(graph, value);
-  if (existing !== null) return existing;
-  const id = defineGraphObject(graph, value);
-  return {
-    $fig: "set",
-    id,
-    values: [...value.values()].map(encodeItem),
-  };
-}
-
-function graphReference(
-  graph: PayloadGraphEncodeContext,
-  value: object,
-): PayloadSpecialModel | null {
-  const id = graph.ids.get(value);
-  return id === undefined ? null : { $fig: "ref", id };
-}
-
-function defineGraphObject(
-  graph: PayloadGraphEncodeContext,
-  value: object,
-): number {
-  const id = graph.nextId;
-  graph.nextId += 1;
-  graph.ids.set(value, id);
-  graph.objects.set(id, value);
-  return id;
-}
-
-function checkpointGraph(graph: PayloadGraphEncodeContext): number {
-  return graph.nextId;
-}
-
-function rollbackGraph(
-  graph: PayloadGraphEncodeContext,
-  checkpoint: number,
-): void {
-  for (let id = graph.nextId - 1; id >= checkpoint; id -= 1) {
-    const value = graph.objects.get(id);
-    if (value !== undefined) graph.ids.delete(value);
-    graph.objects.delete(id);
-  }
-  graph.nextId = checkpoint;
-}
-
-function defineGraphElement(
-  graph: PayloadGraphEncodeContext,
-  value: FigElement,
-): number | PayloadSpecialModel {
-  const existing = graphReference(graph, value);
-  if (existing !== null) return existing;
-  return defineGraphObject(graph, value);
-}
-
-function serializeArray<T>(
-  value: object,
-  graph: PayloadGraphEncodeContext,
-  entries: () => readonly T[],
-  encodeChild: (value: T) => PayloadModel,
-): PayloadModel {
-  const existing = graphReference(graph, value);
-  if (existing !== null) return existing;
-  const id = defineGraphObject(graph, value);
-  return { $fig: "array", id, value: entries().map(encodeChild) };
-}
-
-function serializePlainObject(
-  value: object,
-  graph: PayloadGraphEncodeContext,
-  encodeChild: (value: unknown) => PayloadModel,
-): PayloadModel {
-  const existing = graphReference(graph, value);
-  if (existing !== null) return existing;
-  const id = defineGraphObject(graph, value);
-  return {
-    $fig: "object",
-    id,
-    value: encodePayloadRecord(plainPayloadObject(value), encodeChild),
-  };
-}
-
-function plainPayloadObject(value: object): Record<string, unknown> {
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error(
-      `Cannot serialize ${prototype?.constructor?.name ?? "object"} into the payload.`,
-    );
-  }
-  return value as Record<string, unknown>;
-}
-
-function encodePayloadRecord(
-  record: Record<string, unknown>,
-  encodeChild: (value: unknown) => PayloadModel,
-): Record<string, PayloadModel> {
-  const encoded: Record<string, PayloadModel> = {};
-  for (const [name, child] of Object.entries(record)) {
-    encoded[name] = encodeChild(child);
-  }
-  return encoded;
-}
-
-function encodePayloadNumber(value: number): number | PayloadSpecialModel {
-  if (Number.isNaN(value)) return { $fig: "number", value: "NaN" };
-  if (value === Infinity) return { $fig: "number", value: "Infinity" };
-  if (value === -Infinity) return { $fig: "number", value: "-Infinity" };
-  if (Object.is(value, -0)) return { $fig: "number", value: "-0" };
-  return value;
-}
-
-/** Decode values produced by encodePayloadValue. */
-export function decodePayloadValue(model: PayloadModel): unknown {
-  return decodeModelValue(model, createPayloadGraphDecodeContext());
-}
-
-function decodeModelValue(
-  model: PayloadModel,
-  graph: PayloadGraphDecodeContext,
-): unknown {
-  if (model === null) return null;
-  if (Array.isArray(model))
-    return model.map((item) => decodeModelValue(item, graph));
-  if (typeof model !== "object") return model;
-
-  if (isPayloadValueSpecialModel(model)) {
-    return decodePayloadSpecialValue(model, graph);
-  }
-
-  return decodePayloadRecord(model as Record<string, PayloadModel>, (child) =>
-    decodeModelValue(child, graph),
-  );
-}
-
-function isPayloadValueSpecialModel(
-  model: object,
-): model is PayloadValueSpecialModel {
-  if (!("$fig" in model)) return false;
-  const tag = model.$fig;
-  return (
-    tag === "bigint" ||
-    tag === "array" ||
-    tag === "date" ||
-    tag === "map" ||
-    tag === "number" ||
-    tag === "object" ||
-    tag === "ref" ||
-    tag === "set" ||
-    tag === "symbol" ||
-    tag === "undefined"
-  );
-}
-
-function decodePayloadSpecialValue(
-  model: PayloadValueSpecialModel,
-  graph: PayloadGraphDecodeContext,
-): unknown {
-  switch (model.$fig) {
-    case "array": {
-      const value: unknown[] = [];
-      graph.refs.set(model.id, value);
-      value.push(...model.value.map((item) => decodeModelValue(item, graph)));
-      return value;
-    }
-    case "bigint":
-      return BigInt(model.value);
-    case "date":
-      return new Date(model.value);
-    case "map": {
-      const value = new Map();
-      graph.refs.set(model.id, value);
-      for (const [key, item] of model.entries) {
-        value.set(decodeModelValue(key, graph), decodeModelValue(item, graph));
-      }
-      return value;
-    }
-    case "number":
-      return decodePayloadNumber(model.value);
-    case "object":
-      return decodePayloadPlainObject(model, graph);
-    case "ref":
-      return readGraphRef(graph, model.id);
-    case "set": {
-      const value = new Set();
-      graph.refs.set(model.id, value);
-      for (const item of model.values) {
-        value.add(decodeModelValue(item, graph));
-      }
-      return value;
-    }
-    case "symbol":
-      return Symbol.for(model.key);
-    case "undefined":
-      return undefined;
-  }
-}
-
-function decodePayloadPlainObject(
-  model: Extract<PayloadValueSpecialModel, { $fig: "object" }>,
-  graph: PayloadGraphDecodeContext,
-): Record<string, unknown> {
-  const decoded: Record<string, unknown> = {};
-  if (model.id !== undefined) graph.refs.set(model.id, decoded);
-  for (const [name, value] of Object.entries(model.value)) {
-    definePayloadProperty(decoded, name, decodeModelValue(value, graph));
-  }
-  return decoded;
-}
-
-function decodePayloadRecord(
-  value: Record<string, PayloadModel>,
-  decodeChild: (model: PayloadModel) => unknown,
-): Record<string, unknown> {
-  const decoded: Record<string, unknown> = {};
-  for (const [name, child] of Object.entries(value)) {
-    definePayloadProperty(decoded, name, decodeChild(child));
-  }
-  return decoded;
-}
-
-function definePayloadProperty(
-  target: Record<string, unknown>,
-  name: string,
-  value: unknown,
-): void {
-  Object.defineProperty(target, name, {
-    configurable: true,
-    enumerable: true,
-    value,
-    writable: true,
-  });
-}
-
-function readGraphRef(graph: PayloadGraphDecodeContext, id: number): unknown {
-  if (!graph.refs.has(id)) {
-    throw new Error(`Payload referenced unknown object id ${id}.`);
-  }
-  return graph.refs.get(id);
-}
-
-function decodePayloadNumber(
-  value: "Infinity" | "-Infinity" | "-0" | "NaN",
-): number {
-  switch (value) {
-    case "Infinity":
-      return Infinity;
-    case "-Infinity":
-      return -Infinity;
-    case "-0":
-      return -0;
-    case "NaN":
-      return NaN;
-  }
-}
-
-export function encodePayloadDataEntries(
-  entries: readonly FigDataHydrationEntry[],
-): PayloadDataHydrationEntry[] {
-  const graph = createPayloadGraphEncodeContext();
-  return entries.map((entry) => encodePayloadDataEntryWithGraph(entry, graph));
-}
-
-export function decodePayloadDataEntries(
-  entries: readonly PayloadDataHydrationEntry[],
-): FigDataHydrationEntry[] {
-  const graph = createPayloadGraphDecodeContext();
-  return entries.map((entry) => decodePayloadDataEntryWithGraph(entry, graph));
-}
-
-function encodePayloadDataEntryWithGraph(
-  entry: FigDataHydrationEntry,
-  graph: PayloadGraphEncodeContext,
-): PayloadDataHydrationEntry {
-  return {
-    ...entry,
-    value: encodePayloadValueInternal(entry.value, graph),
-  };
-}
-
-function decodePayloadDataEntryWithGraph(
-  entry: PayloadDataHydrationEntry,
-  graph: PayloadGraphDecodeContext,
-): FigDataHydrationEntry {
-  return {
-    ...entry,
-    value: decodeModelValue(entry.value, graph),
-  };
-}
-
 function outlineTask(
   frame: RenderFrame,
   kind: Task["kind"],
@@ -2516,7 +1916,7 @@ function resolveDecodedRow(
   const chunk = consumer.getChunk(row.id);
 
   if (row.tag === "error") {
-    const error = errorFromPayload(row.value);
+    const error = errorFromPayloadValue(row.value);
     chunk.model = null;
     chunk.status = "rejected";
     chunk.value = error;
@@ -2543,16 +1943,6 @@ function resolveDecodedRow(
   chunk.status = "fulfilled";
   chunk.value = value;
   chunk.resolve(value);
-}
-
-function errorFromPayload(value: ServerErrorPayload): Error & {
-  digest?: string;
-} {
-  const error = new Error(
-    value.message ?? "The server render failed.",
-  ) as Error & { digest?: string };
-  if (value.digest !== undefined) error.digest = value.digest;
-  return error;
 }
 
 function shiftRowIds(
@@ -2864,36 +2254,6 @@ function addChunkRefs(target: Set<number>, ids: Set<number>): void {
   for (const id of ids) target.add(id);
 }
 
-function isPayloadSpecialModel(
-  model: object,
-): model is PayloadElementModel | PayloadSpecialModel {
-  if (!("$fig" in model)) return false;
-
-  switch ((model as { $fig: unknown }).$fig) {
-    case "array":
-    case "bigint":
-    case "boundary":
-    case "client":
-    case "date":
-    case "element":
-    case "fragment":
-    case "lazy":
-    case "map":
-    case "number":
-    case "object":
-    case "promise":
-    case "ref":
-    case "set":
-    case "suspense":
-    case "symbol":
-    case "undefined":
-    case "view-transition":
-      return true;
-    default:
-      return false;
-  }
-}
-
 function decodeModel(
   consumer: PayloadConsumerImpl,
   model: PayloadModel,
@@ -3093,18 +2453,6 @@ function appendPayloadHeaders(
   if (!next.has("accept")) next.set("accept", codec.contentType);
   if (boundary !== undefined) next.set(PAYLOAD_BOUNDARY_HEADER, boundary);
   return next;
-}
-
-function assertPayloadCodecMatches(
-  codec: PayloadCodec,
-  contentTypeHeader: string | null,
-): void {
-  if (contentTypeHeader === null) return;
-  const received = payloadCodecIdFromContentType(contentTypeHeader);
-  if (received === null || received === codec.id) return;
-  throw new Error(
-    `Payload codec mismatch: consumer used "${received}" but this client expects "${codec.id}".`,
-  );
 }
 
 function getOrCreateChunk(

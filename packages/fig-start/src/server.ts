@@ -36,14 +36,16 @@ import {
   devtoolsOpenFromRequest,
 } from "./devtools.ts";
 import {
-  createPayloadConsumer,
   decodePayloadValue,
   encodePayloadDataEntries,
   encodePayloadValue,
-  PayloadBoundary,
-  type PayloadClientReferenceRecord,
   type PayloadDataHydrationEntry,
   type PayloadModel,
+} from "@bgub/fig/payload";
+import {
+  createPayloadConsumer,
+  PayloadBoundary,
+  type PayloadClientReferenceRecord,
   payloadFrameBootstrapScript,
   payloadFrameScript,
   renderToPayloadStream,

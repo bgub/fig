@@ -55,6 +55,7 @@ export interface StartViteDevServerOptions {
 
 const FIG_START_EXTERNAL_PACKAGES = [
   "@bgub/fig",
+  "@bgub/fig/payload",
   "@bgub/fig-dom",
   "@bgub/fig-server",
   "@bgub/fig-server/payload",
@@ -77,6 +78,7 @@ const FIG_START_PREBUNDLED_PACKAGES = [
   "@bgub/fig",
   "@bgub/fig/internal",
   "@bgub/fig/jsx-runtime",
+  "@bgub/fig/payload",
   "@bgub/fig-dom",
   "@bgub/fig-dom/refresh",
   "@bgub/fig-dom > @bgub/fig-reconciler",

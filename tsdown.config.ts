@@ -19,6 +19,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/index.ts",
     "./src/internal.ts",
     "./src/jsx-runtime.ts",
+    "./src/payload.ts",
     "./src/server.ts",
     "./src/server.browser.ts",
   ],

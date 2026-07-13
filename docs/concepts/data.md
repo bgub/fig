@@ -71,11 +71,15 @@ The free functions (`readData` aside) resolve an **ambient store** that is set o
 
 ## Stores, Scopes, And SSR Handoff
 
-Stores are per-root on the client and per-request on the server — no global process cache. `partition` namespaces a store's keys. Server renders collect settled entries (`getData()` on render results; `data` rows in the payload stream); the client hydrates them via `createRoot({ initialData })` or `root.data.hydrate(entries)`, and hydrate-only values are readable immediately.
+Stores are per-root on the client and per-request on the server — no global process cache. `partition` namespaces a store's keys. Server renders collect settled entries (`getData()` on render results; `data` rows in the payload stream); the client hydrates them via `createRoot({ initialData })` or `root.data.hydrate(entries)`, and hydrate-only values are readable immediately. Payload stream decoding hydrates through `decodePayloadStream`'s `hydrate` capability (payload.md): the supplier keeps that capability generation-guarded so a superseded decode can no longer mutate the store.
 
 Hydration into a live store is a completed refresh pushed by the server: create the entry if missing, abort any in-flight load for that key as superseded, bump the entry generation, clear stale/error/refresh-error state, store the incoming value, and publish subscribers. Only settled values hydrate; a local refreshing entry's transient stale value never wins over the incoming fresh value.
 
 Payload navigation does not make a second data request: data read while rendering the server route segment streams in the same payload response as `data` rows. The framework data endpoint (Fig Start's `remoteDataResource` — see Remote Refresh Is A Framework Layer) serves only client-side cache misses and refreshes outside a route payload render.
+
+## Exploring: Serialized Components As Data Resources
+
+An adopted plan (`docs/plans/serialized-components.md`) extends this layer: a server can serialize any component tree (payload.md) and deliver it as an ordinary data-resource value — the resource key _is_ the refresh boundary, streaming structure is a property of the value (a tree with thenable holes), and a fulfilled entry may still contain live holes that settle as background decoding continues. The core client half (`decodePayloadStream`) exists today; the store-facing pieces — generation-lifetime loader signals, the fig-dom `payloadDataLoader` adapter, and hole-aware hydration timing — land with that plan and will graduate into this file as they stabilize.
 
 ## Error Attribution
 

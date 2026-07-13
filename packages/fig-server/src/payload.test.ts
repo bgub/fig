@@ -25,18 +25,20 @@ import {
 } from "@bgub/fig/internal";
 import { describe, expect, it } from "vitest";
 import {
-  createPayloadConsumer,
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadDataEntries,
   encodePayloadValue,
-  isPayloadRequestCancelled,
   jsonPayloadCodec,
+  type PayloadClientReferenceMetadata,
+  type PayloadRow,
+} from "@bgub/fig/payload";
+import {
+  createPayloadConsumer,
+  isPayloadRequestCancelled,
   PAYLOAD_BOUNDARY_HEADER,
   PayloadBoundary,
   PayloadFetchError,
-  type PayloadRow,
-  type PayloadClientReferenceMetadata,
   type PayloadFetch,
   type PayloadConsumer,
   renderToPayloadStream,
@@ -1478,7 +1480,7 @@ describe("payload rendering", () => {
           ),
       }),
     ).rejects.toThrow(
-      'Payload codec mismatch: consumer used "json" but this client expects "custom".',
+      'Payload codec mismatch: producer used "json" but this client expects "custom".',
     );
   });
 

@@ -20,14 +20,16 @@ import {
   storeDevtoolsOpen,
 } from "./devtools.ts";
 import {
-  createPayloadConsumer,
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadValue,
-  getPayloadFrameStream,
-  isPayloadRequestCancelled,
   type PayloadClientReferenceMetadata,
   type PayloadDataHydrationEntry,
+} from "@bgub/fig/payload";
+import {
+  createPayloadConsumer,
+  getPayloadFrameStream,
+  isPayloadRequestCancelled,
   type PayloadConsumer,
   type PayloadFrameStream,
 } from "@bgub/fig-server/payload";

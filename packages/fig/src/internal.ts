@@ -73,6 +73,24 @@ export {
   type ViewTransitionProps,
 } from "./element.ts";
 export { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
+// The payload serializer seam: fig-server's payload renderer builds element
+// and value models against the format that lives in @bgub/fig/payload.
+export {
+  checkpointPayloadGraph,
+  createPayloadGraphEncodeContext,
+  decodePayloadNumber,
+  definePayloadGraphElement,
+  definePayloadProperty,
+  encodePayloadValueWithGraph,
+  isPayloadSpecialModel,
+  isPlainPayloadValue,
+  type PayloadGraphEncodeContext,
+  rollbackPayloadGraph,
+  serializePayloadArray,
+  serializePayloadMap,
+  serializePayloadPlainObject,
+  serializePayloadSet,
+} from "./payload-format.ts";
 export {
   type AssetResourceDestination,
   type AssetResourceHostAttribute,
