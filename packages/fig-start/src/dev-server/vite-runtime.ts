@@ -1,5 +1,5 @@
-import { readdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readdir, readFile, realpath } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Server } from "node:http";
 import type { FigAssetResource, FigAssetResourceList } from "@bgub/fig";
@@ -62,6 +62,28 @@ const FIG_START_EXTERNAL_PACKAGES = [
   "@bgub/fig-start/client",
   "@bgub/fig-start/internal",
   "@bgub/fig-start/server",
+] as const;
+
+// Prebundle the Fig packages in dev. They are workspace-linked (outside
+// node_modules once resolved), so Vite would otherwise serve every dist
+// chunk as its own request. Entries that share stateful chunks must be
+// optimized together in one pass: fig-reconciler with fig-dom (refresh
+// state) and both fig-devtools entries (component store). The `a > b`
+// entries reach packages that are not direct dependencies of the app root.
+// @bgub/fig-start itself must stay unbundled: its client entry imports
+// virtual:fig-start/client-manifest and listens via import.meta.hot, and
+// neither survives prebundling.
+const FIG_START_PREBUNDLED_PACKAGES = [
+  "@bgub/fig",
+  "@bgub/fig/internal",
+  "@bgub/fig/jsx-runtime",
+  "@bgub/fig-dom",
+  "@bgub/fig-dom/refresh",
+  "@bgub/fig-dom > @bgub/fig-reconciler",
+  "@bgub/fig-dom > @bgub/fig-reconciler/refresh",
+  "@bgub/fig-server/payload",
+  "@bgub/fig-start > @bgub/fig-devtools",
+  "@bgub/fig-start > @bgub/fig-devtools/client",
 ] as const;
 
 interface StartModule {
@@ -149,9 +171,17 @@ async function createFigStartViteServer(
         }),
       ),
       figStartDevHmrPlugin(root),
+      figStartLinkedDepsPlugin(),
       ...(options.vite?.plugins ?? []),
     ],
     root,
+    optimizeDeps: {
+      ...options.vite?.optimizeDeps,
+      include: [
+        ...FIG_START_PREBUNDLED_PACKAGES,
+        ...(options.vite?.optimizeDeps?.include ?? []),
+      ],
+    },
     resolve: {
       ...options.vite?.resolve,
       dedupe: [
@@ -261,6 +291,89 @@ function figStartDevHmrPlugin(root: string): FigStartDevHmrPlugin {
       return [];
     },
   };
+}
+
+interface FigStartLinkedDepsPlugin {
+  configureServer(server: ViteDevServer): void;
+  name: string;
+}
+
+// The dep optimizer caches prebundled packages by lockfile and config hash,
+// so a rebuild of a workspace-linked package writes new dist files the
+// running server never re-reads. Watch the linked packages' dist
+// directories and force a re-optimizing restart when they change.
+function figStartLinkedDepsPlugin(): FigStartLinkedDepsPlugin {
+  return {
+    name: "fig-start:linked-deps",
+    configureServer(server) {
+      void watchLinkedPrebundledPackages(server);
+    },
+  };
+}
+
+async function watchLinkedPrebundledPackages(
+  server: ViteDevServer,
+): Promise<void> {
+  const directories = await linkedPrebundledPackageDirs(server);
+  if (directories.length === 0) return;
+
+  for (const directory of directories) server.watcher.add(directory);
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const onFileEvent = (file: string): void => {
+    if (!directories.some((directory) => file.startsWith(`${directory}/`))) {
+      return;
+    }
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      server.config.logger.info(
+        "Fig packages rebuilt; restarting with fresh prebundled dependencies.",
+        { timestamp: true },
+      );
+      void server.restart(true);
+    }, 200);
+  };
+  server.watcher.on("add", onFileEvent);
+  server.watcher.on("change", onFileEvent);
+}
+
+async function linkedPrebundledPackageDirs(
+  server: ViteDevServer,
+): Promise<string[]> {
+  const resolveId = server.config.createResolver();
+  const directories = new Set<string>();
+
+  const linkedEntryDir = async (
+    id: string,
+    importer?: string,
+  ): Promise<string | null> => {
+    const resolved = await resolveId(id, importer).catch(() => undefined);
+    if (resolved === undefined) return null;
+    const file = await realpath(resolved.split("?")[0] ?? resolved).catch(
+      () => null,
+    );
+    if (file === null || file.includes("/node_modules/")) return null;
+    const directory = dirname(file);
+    directories.add(directory);
+    return directory;
+  };
+
+  await linkedEntryDir("@bgub/fig");
+  await linkedEntryDir("@bgub/fig-server/payload");
+  const figDom = await linkedEntryDir("@bgub/fig-dom");
+  const figStart = await linkedEntryDir("@bgub/fig-start/client");
+  if (figDom !== null) {
+    await linkedEntryDir("@bgub/fig-reconciler", `${figDom}/index.js`);
+  }
+  if (figStart !== null) {
+    // fig-start itself is not prebundled (watched through the module graph),
+    // but it is the resolution scope that reaches fig-devtools.
+    directories.delete(figStart);
+    await linkedEntryDir("@bgub/fig-devtools", `${figStart}/client.js`);
+  }
+
+  return [...directories];
 }
 
 export function devHotUpdateForFile(

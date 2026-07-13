@@ -6,9 +6,10 @@ const RESOLVED_VIRTUAL_ID = "\0virtual:fig-refresh";
 const REFRESH_RUNTIME_IMPORT = viteFileImport(
   import.meta.resolve("@bgub/fig-refresh"),
 );
-const DOM_REFRESH_IMPORT = viteFileImport(
-  import.meta.resolve("@bgub/fig-dom/refresh"),
-);
+// A bare specifier so the app's resolve config (aliases, dedupe, prebundling)
+// applies; a file path would load a second copy of the scheduler state next to
+// the one `@bgub/fig-dom` wires up internally.
+const DOM_REFRESH_IMPORT = "@bgub/fig-dom/refresh";
 
 export interface FigRefreshOptions {
   // Files to consider for the refresh transform. Defaults to JS/TS(X).
