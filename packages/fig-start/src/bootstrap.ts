@@ -11,6 +11,12 @@ export const DATA_STREAM_GLOBAL = "__figStartData";
 export const PAYLOAD_SEGMENTS_SCRIPT_ID = "__fig_start_payload_segments__";
 export const PAYLOAD_FRAME_ATTR = "data-fig-payload-frame";
 export const PAYLOAD_STREAM_GLOBAL = "__figStartPayload";
+// Options for @bgub/fig-server/payload's inline frame transport, shared by
+// the server (bootstrap + frame scripts) and the client (queue reads).
+export const PAYLOAD_FRAME_TRANSPORT = {
+  attribute: PAYLOAD_FRAME_ATTR,
+  globalName: PAYLOAD_STREAM_GLOBAL,
+} as const;
 export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
 export const DEV_SERVER_UPDATE_EVENT = "fig-start:server-update";
 export const PAYLOAD_ROUTE_ID_HEADER = "x-fig-payload-route-id";

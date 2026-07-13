@@ -24,10 +24,12 @@ import {
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadValue,
+  getPayloadFrameStream,
   isPayloadRequestCancelled,
   type PayloadClientReferenceMetadata,
   type PayloadDataHydrationEntry,
   type PayloadConsumer,
+  type PayloadFrameStream,
 } from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -37,9 +39,8 @@ import {
   DATA_STREAM_GLOBAL,
   DEV_SERVER_UPDATE_EVENT,
   type DevServerUpdateMessage,
-  PAYLOAD_FRAME_ATTR,
+  PAYLOAD_FRAME_TRANSPORT,
   PAYLOAD_SEGMENTS_SCRIPT_ID,
-  PAYLOAD_STREAM_GLOBAL,
   ROOT_ELEMENT_ID,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedPayloadFrame,
@@ -195,11 +196,7 @@ async function hydrateDevtoolsPanel(container: HTMLElement): Promise<void> {
   });
 }
 
-interface PayloadStream {
-  p(frame: SerializedPayloadFrame): void;
-  q: SerializedPayloadFrame[];
-  s(listener: (frame: SerializedPayloadFrame) => void): () => void;
-}
+type PayloadStream = PayloadFrameStream<SerializedPayloadFrame>;
 
 interface DataStream {
   decoded?: true;
@@ -1152,21 +1149,11 @@ function readDataFramesFromDocument(): PayloadDataHydrationEntry[] {
   ).flat();
 }
 
-function readPayloadStream(): PayloadStream | null {
-  const value = (globalThis as Record<string, unknown>)[PAYLOAD_STREAM_GLOBAL];
-  return isPayloadStream(value) ? value : null;
-}
-
+// The shared transport getter reads-or-installs the queue global and replays
+// document frames the queue missed (a bundle that executed mid-stream or
+// without the bootstrap).
 function getPayloadStream(): PayloadStream {
-  const current = readPayloadStream();
-  if (current !== null) {
-    appendMissingPayloadFrames(current, readPayloadFramesFromDocument());
-    return current;
-  }
-
-  const stream = createPayloadStream(readPayloadFramesFromDocument());
-  (globalThis as Record<string, unknown>)[PAYLOAD_STREAM_GLOBAL] = stream;
-  return stream;
+  return getPayloadFrameStream<SerializedPayloadFrame>(PAYLOAD_FRAME_TRANSPORT);
 }
 
 function appendMissingDataEntries(
@@ -1174,58 +1161,6 @@ function appendMissingDataEntries(
   entries: readonly PayloadDataHydrationEntry[],
 ): void {
   if (entries.length > 0) stream.p(entries);
-}
-
-function appendMissingPayloadFrames(
-  stream: PayloadStream,
-  frames: readonly SerializedPayloadFrame[],
-): void {
-  const seen = new Set(stream.q.map((frame) => JSON.stringify(frame)));
-  for (const frame of frames) {
-    const key = JSON.stringify(frame);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    stream.p(frame);
-  }
-}
-
-function createPayloadStream(
-  initialFrames: readonly SerializedPayloadFrame[],
-): PayloadStream {
-  let listeners: Array<(frame: SerializedPayloadFrame) => void> = [];
-  const stream: PayloadStream = {
-    q: [...initialFrames],
-    p(frame) {
-      stream.q.push(frame);
-      for (const listener of listeners) listener(frame);
-    },
-    s(listener) {
-      listeners.push(listener);
-      for (const frame of stream.q) listener(frame);
-      return () => {
-        listeners = listeners.filter((item) => item !== listener);
-      };
-    },
-  };
-  return stream;
-}
-
-function isPayloadStream(value: unknown): value is PayloadStream {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { q?: unknown }).q) &&
-    typeof (value as { p?: unknown }).p === "function" &&
-    typeof (value as { s?: unknown }).s === "function"
-  );
-}
-
-function readPayloadFramesFromDocument(): SerializedPayloadFrame[] {
-  return Array.from(
-    document.querySelectorAll(`script[${PAYLOAD_FRAME_ATTR}]`),
-    (element) =>
-      JSON.parse(element.textContent ?? "") as SerializedPayloadFrame,
-  );
 }
 
 function browserHistory(): RouterHistory {

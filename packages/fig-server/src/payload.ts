@@ -64,6 +64,17 @@ import {
 } from "./shared.ts";
 import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
 
+// The inline frame transport is part of the payload subpath's public
+// surface; its implementation lives in payload-frames.ts.
+export {
+  getPayloadFrameStream,
+  payloadFrameBootstrapCode,
+  payloadFrameBootstrapScript,
+  payloadFrameScript,
+  type PayloadFrameStream,
+  type PayloadFrameTransportOptions,
+} from "./payload-frames.ts";
+
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;

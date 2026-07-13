@@ -44,6 +44,8 @@ import {
   type PayloadClientReferenceRecord,
   type PayloadDataHydrationEntry,
   type PayloadModel,
+  payloadFrameBootstrapScript,
+  payloadFrameScript,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
 import {
@@ -53,11 +55,10 @@ import {
   DATA_SCRIPT_ID,
   DATA_STREAM_GLOBAL,
   PAYLOAD_BOUNDARY_HEADER,
-  PAYLOAD_FRAME_ATTR,
+  PAYLOAD_FRAME_TRANSPORT,
   PAYLOAD_ROUTE_ID_HEADER,
   PAYLOAD_SEGMENT_ID_HEADER,
   PAYLOAD_SEGMENTS_SCRIPT_ID,
-  PAYLOAD_STREAM_GLOBAL,
   ROOT_ELEMENT_ID,
   ROUTER_STATE_SCRIPT_ID,
   type SerializedPayloadFrame,
@@ -745,7 +746,12 @@ function streamPayloadSegmentFrames(
   return streamPayloadSegment(segment, (chunk) =>
     chunk.length === 0
       ? undefined
-      : encoder.encode(payloadFrameScript(segment.metadata.id, chunk, nonce)),
+      : encoder.encode(
+          payloadFrameScript(
+            { chunk, id: segment.metadata.id } satisfies SerializedPayloadFrame,
+            { ...PAYLOAD_FRAME_TRANSPORT, nonce },
+          ),
+        ),
   );
 }
 
@@ -796,7 +802,12 @@ function renderStreamPrelude(input: {
   return [
     dataStreamBootstrapScript(input.nonce),
     ...(input.hasPayloadSegments
-      ? [payloadStreamBootstrapScript(input.nonce)]
+      ? [
+          payloadFrameBootstrapScript({
+            ...PAYLOAD_FRAME_TRANSPORT,
+            nonce: input.nonce,
+          }),
+        ]
       : []),
   ].join("");
 }
@@ -1153,28 +1164,6 @@ function dataFrameScript(
       encodePayloadDataEntries(entries),
     )}</script>` +
     `<script${nonceAttr}>globalThis.${DATA_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
-  );
-}
-
-function payloadStreamBootstrapScript(nonce: string | undefined): string {
-  const nonceAttr =
-    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${PAYLOAD_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${PAYLOAD_STREAM_GLOBAL}={q:q,p:function(f){q.push(f);for(var i=0;i<l.length;i++)l[i](f)},s:function(fn){l.push(fn);for(var i=0;i<q.length;i++)fn(q[i]);return function(){var n=[];for(var j=0;j<l.length;j++)if(l[j]!==fn)n.push(l[j]);l=n}}};})();</script>`;
-}
-
-function payloadFrameScript(
-  segmentId: string,
-  chunk: string,
-  nonce: string | undefined,
-): string {
-  const nonceAttr =
-    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  const frame: SerializedPayloadFrame = { chunk, id: segmentId };
-  return (
-    `<script type="application/json" ${PAYLOAD_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
-      frame,
-    )}</script>` +
-    `<script${nonceAttr}>globalThis.${PAYLOAD_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
   );
 }
 

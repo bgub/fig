@@ -1,6 +1,9 @@
 import { hydrateRoot } from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
-import { createPayloadConsumer } from "@bgub/fig-server/payload";
+import {
+  createPayloadConsumer,
+  getPayloadFrameStream,
+} from "@bgub/fig-server/payload";
 import { hydrateDevtoolsPanel } from "@bgub/fig-devtools/client";
 import {
   readDevtoolsOpen,
@@ -18,8 +21,6 @@ import {
   devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
-  payloadFramesGlobal,
-  type PayloadFramesGlobal,
   refreshButtonReferenceId,
 } from "./shared.ts";
 
@@ -43,10 +44,9 @@ const consumer = createPayloadConsumer({
 // The document inlined the payload rows it was rendered from as frame
 // scripts; replaying them into the consumer reconstructs the exact tree the
 // server turned into HTML, so hydration adopts the streamed markup.
-const frames = (globalThis as Record<string, unknown>)[
-  payloadFramesGlobal
-] as PayloadFramesGlobal;
-frames.s((frame) => consumer.processStringChunk(frame));
+getPayloadFrameStream<string>().s((frame) =>
+  consumer.processStringChunk(frame),
+);
 
 function refreshBoundary(boundary: string, seed: number): Promise<void> {
   return consumer

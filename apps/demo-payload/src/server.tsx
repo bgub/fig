@@ -12,6 +12,8 @@ import {
 import {
   createPayloadConsumer,
   PAYLOAD_BOUNDARY_HEADER,
+  payloadFrameBootstrapCode,
+  payloadFrameScript,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
 import { AppRefreshButton, RefreshButton } from "./client-components.tsx";
@@ -38,8 +40,6 @@ import {
   devtoolsPaneId,
   feedBoundaryId,
   noteBoundaryId,
-  payloadFramesBootstrap,
-  payloadFramesGlobal,
   refreshButtonReferenceId,
 } from "./shared.ts";
 import { styles } from "./styles.ts";
@@ -177,7 +177,7 @@ async function sendDocument(
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Fig payload Demo</title>
         <link rel="stylesheet" href="/style.css" />
-        <script unsafeHTML={payloadFramesBootstrap} />
+        <script unsafeHTML={payloadFrameBootstrapCode()} />
       </head>
       <body>
         <div class="fig-demo-devtools-layout">
@@ -243,7 +243,9 @@ async function interleaveDocument(
 
   const flushFrames = async (): Promise<void> => {
     if (pendingFrames.length === 0) return;
-    const scripts = pendingFrames.map(frameScript).join("");
+    const scripts = pendingFrames
+      .map((frame) => payloadFrameScript(frame))
+      .join("");
     pendingFrames = [];
     await writeResponse(response, textEncoder.encode(scripts));
   };
@@ -269,19 +271,6 @@ async function interleaveDocument(
   } finally {
     response.end();
   }
-}
-
-function frameScript(frame: string): string {
-  return (
-    `<script type="application/json" data-fig-payload-frame>${escapeJson(
-      frame,
-    )}</script>` +
-    `<script>globalThis.${payloadFramesGlobal}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
-  );
-}
-
-function escapeJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, "\\u003C");
 }
 
 function requestUrl(request: IncomingMessage): URL {

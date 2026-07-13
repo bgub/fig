@@ -34,5 +34,4 @@ Every open design question and planned piece of work, in one place. Each item li
 ## DevTools
 
 - **Asset-registry inspection** — data-resource entries are already included in reconciler snapshots and rendered by the DevTools panel; equivalent asset-registry ownership, loading, gating, and conflict state is not yet exposed.
-- **Payload bootstrap consolidation** — inline payload frame/bootstrap builders still exist separately in Fig Start and `demo-payload`. A third consumer should move the shared mechanism to `@bgub/fig-server/payload`.
 - **Payload render-tree fidelity** — `renderToPayloadStream` could accept a render-tree collector so server-component names survive into DevTools; the payload flattening pass is the last layer that knows those names.
