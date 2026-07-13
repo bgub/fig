@@ -9,7 +9,7 @@ In general, Fig follows a simple rule: when syntax is identical to React, use th
 - UI as a declarative function of state
 - Fiber/concurrent rendering
 - Platform-agnostic core (you can use Fig in web, CLI, native, desktop)
-- Hooks instead of signals (see the FAQ)
+- Hooks instead of signals (see the [FAQ](./faq.md))
 - The following APIs: `useState`, `useMemo`, `useCallback`, `useId`, `useDeferredValue`, `useSyncExternalStore`, `createElement`, `isValidElement`, `Fragment`, `createPortal`, `flushSync`, `Suspense`, `Activity`, `createRoot`, `hydrateRoot`, root `.render()` and `.unmount()`
 
 ## What's different?
@@ -76,7 +76,7 @@ DOM access is a normal prop taking `(node, signal)`. No `useRef`, `forwardRef`, 
 />
 ```
 
-The signal aborts on identity change and unmount. `composeBind(...)` merges several binds. For mutable storage that isn't DOM access, use `useMemo(() => ({ current: null }), [])`.
+The signal aborts on identity change and unmount. `composeBind(...)` merges several binds. For mutable storage that isn't DOM access, use `useMemo(() => ({ current: null }), [])`. For DOM access from custom hooks or from event handlers, see the [FAQ](./faq.md).
 
 ### Context objects are their own provider
 
@@ -115,47 +115,119 @@ In Fig, all code is _isomorphic_ (meaning it can run on either server or client)
 
 A server component is a Fig component that renders into a Payload stream instead of HTML. Payload is Fig's own semantic row format, with a readable JSON codec by default. React's server-component details are mostly internal and exposed to frameworks, but Fig exposes the whole round trip as first-class APIs.
 
-On the server, render a tree and return its stream:
+Here is the whole round trip — four files, one interactive component, one refreshable boundary.
+
+An interactive component. Nothing marks it as client code here; the tree does that:
 
 ```tsx
+// like-button.tsx
+export function LikeButton({ postId }: { postId: string }) {
+  const [likes, setLikes] = useState(0);
+  const addLike = on("click", () => setLikes((n) => n + 1));
+
+  return (
+    <button events={[addLike]}>
+      ♥ {likes} · post {postId}
+    </button>
+  );
+}
+```
+
+The tree. The `.server.tsx` suffix keeps it out of client bundles, and `clientReference` is the boundary between server and client code: the component serializes into the payload as an id instead of rendering. Ids are opaque; `"<module>#<export>"` is the convention bundler tooling uses, written by hand here:
+
+```tsx
+// app.server.tsx
+import { clientReference } from "@bgub/fig";
+import { PayloadBoundary } from "@bgub/fig-server/payload";
+
+export const LikeButton = clientReference<{ postId: string }>({
+  id: "like-button.tsx#LikeButton",
+  load: () => import("./like-button.tsx"),
+});
+
+export function Profile({ id }: { id: string }) {
+  return (
+    <section>
+      <h1>User #{id}</h1>
+      <p>Rendered on the server at {new Date().toLocaleTimeString()}</p>
+    </section>
+  );
+}
+
+export function ProfilePage({ id }: { id: string }) {
+  return (
+    <main>
+      <PayloadBoundary id="profile">
+        <Profile id={id} />
+      </PayloadBoundary>
+      <LikeButton postId={id} />
+    </main>
+  );
+}
+```
+
+The server — routing shown with Hono, but anything that speaks `Request`/`Response` works. One route serves both the first render and refreshes: a refresh request names its boundary in a header and gets back only that boundary's contents:
+
+```tsx
+// server.tsx
 import {
-  PayloadBoundary,
+  PAYLOAD_BOUNDARY_HEADER,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
+import { Profile, ProfilePage } from "./app.server.tsx";
 
-const result = renderToPayloadStream(
-  <PayloadBoundary id="profile">
-    <ProfilePage id="42" />
-  </PayloadBoundary>,
-);
+const shell = `<!doctype html>
+<div id="app"></div>
+<script type="module" src="/client.js"></script>`;
 
-return new Response(result.stream, {
-  headers: { "content-type": result.contentType },
+export const app = new Hono();
+
+app.get("/", (c) => c.html(shell));
+
+app.get("/profile/:id", (c) => {
+  const id = c.req.param("id");
+  const boundary = c.req.header(PAYLOAD_BOUNDARY_HEADER);
+  const result =
+    boundary === "profile"
+      ? renderToPayloadStream(<Profile id={id} />, {
+          refreshBoundary: boundary,
+        })
+      : renderToPayloadStream(<ProfilePage id={id} />);
+
+  return new Response(result.stream, {
+    headers: { "content-type": result.contentType },
+  });
 });
 ```
 
-On the client, decode the stream and bind its root to the DOM:
+Serve the next file, bundled for the browser, as `/client.js` (build it with `jsxImportSource: "@bgub/fig-dom"`).
+
+The client entry creates a payload consumer — the decoding end of the wire — binds it to the DOM, and fetches. The manifest is the other half of `clientReference`: it maps ids back to real modules:
 
 ```ts
+// client.ts — runs in the browser
 import { createRoot } from "@bgub/fig-dom";
-import { createPayloadResponse, fetchPayload } from "@bgub/fig-server/payload";
+import { createPayloadConsumer } from "@bgub/fig-server/payload";
 
-const payload = createPayloadResponse({
+const clientManifest: Record<string, () => Promise<unknown>> = {
+  "like-button.tsx#LikeButton": () => import("./like-button.tsx"),
+};
+
+const consumer = createPayloadConsumer({
   loadClientReference: ({ id }) => clientManifest[id](),
 });
 
-await fetchPayload(payload, "/profile/42");
-await payload.rootReady;
-payload.bindRoot(createRoot(document.getElementById("app")!));
+consumer.bindRoot(createRoot(document.getElementById("app")!));
+await consumer.fetch("/profile/42");
 ```
 
-Later, refresh only the marked boundary. The surrounding tree stays mounted:
+Later, refresh only the marked boundary:
 
 ```ts
-await fetchPayload(payload, "/profile/42", {
-  refreshBoundary: "profile",
-});
+await consumer.fetch("/profile/42", { refreshBoundary: "profile" });
 ```
+
+The server re-renders `<Profile>`, the refresh row replaces the boundary's contents (the timestamp changes), and the root bound by `bindRoot` re-renders automatically. The `LikeButton` outside the boundary stays mounted and keeps its count.
 
 ### Explicit reads instead of `use()`
 
