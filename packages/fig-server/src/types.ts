@@ -16,6 +16,12 @@ export interface ServerRenderOptions {
    * Defaults to an empty string.
    */
   identifierPrefix?: string;
+  /**
+   * Encoded bytes the result stream buffers before flushing pauses until the
+   * consumer reads (rendering itself never pauses; completed work waits in
+   * segment form). Defaults to 65536; values below 1 are clamped to 1.
+   */
+  highWaterMark?: number;
   nonce?: string;
   onError?: (
     error: unknown,

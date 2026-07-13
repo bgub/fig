@@ -1056,26 +1056,32 @@ function injectDocumentStreams(
     buffer = "";
   }
 
+  // Pull-driven, not an eager drain loop: the upstream HTML render is read
+  // only on downstream demand, so the renderer's flow control sees a slow
+  // consumer through the injection layer instead of buffering the whole
+  // document here. A pull that only fills the holdback buffer (no enqueue)
+  // resolves and the stream machinery pulls again.
   return new ReadableStream<Uint8Array>({
-    async start(controller) {
+    start() {
       htmlReader = stream.getReader();
+    },
+    async pull(controller) {
+      if (htmlReader === null) return;
 
-      for (;;) {
-        const { done, value } = await htmlReader.read();
-        if (done) {
-          buffer += decoder.decode();
-          processBeforeBodyPrelude(controller, true);
-          await processAfterBodyPrelude(controller, true);
-          processAfterBootstrap(controller);
-          controller.close();
-          return;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        processBeforeBodyPrelude(controller, false);
-        await processAfterBodyPrelude(controller, false);
+      const { done, value } = await htmlReader.read();
+      if (done) {
+        buffer += decoder.decode();
+        processBeforeBodyPrelude(controller, true);
+        await processAfterBodyPrelude(controller, true);
         processAfterBootstrap(controller);
+        controller.close();
+        return;
       }
+
+      buffer += decoder.decode(value, { stream: true });
+      processBeforeBodyPrelude(controller, false);
+      await processAfterBodyPrelude(controller, false);
+      processAfterBootstrap(controller);
     },
     cancel(reason) {
       void htmlReader?.cancel(reason).catch(() => undefined);

@@ -58,6 +58,8 @@ import {
   createStaticDispatcher,
   type Deferred,
   deferred,
+  streamFlowBlocked,
+  streamHighWaterMark,
   withContextValue,
 } from "./shared.ts";
 import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
@@ -77,6 +79,12 @@ export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   codec?: PayloadCodec;
   dataPartition?: DataResourceKeyInput;
+  /**
+   * Encoded bytes the result stream buffers before row flushing pauses until
+   * the consumer reads (rendering itself never pauses; encoded rows wait
+   * queued). Defaults to 65536; values below 1 are clamped to 1.
+   */
+  highWaterMark?: number;
   signal?: AbortSignal;
   /**
    * Decides what crosses the wire when a server render throws, mirroring the
@@ -349,6 +357,11 @@ type PayloadRequest = {
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: Uint8Array[];
+  // Reentrancy guard: enqueueing inside flushRows can synchronously invoke
+  // the stream's pull handler, which must not restart the drain — queuedRows
+  // is spliced only after the loop, so a reentrant pass would re-enqueue the
+  // same rows.
+  flushingRows: boolean;
   refreshBoundary: string | null;
   status: "opening" | "open" | "closed";
   stream: ReadableStream<Uint8Array>;
@@ -587,6 +600,7 @@ function createPayloadRequest(
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
+    flushingRows: false,
     refreshBoundary: options.refreshBoundary ?? null,
     status: "opening",
     stream: null as never,
@@ -598,15 +612,25 @@ function createPayloadRequest(
   // (await-ers still observe the rejection).
   void request.allReady.promise.catch(() => undefined);
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      request.controller = controller;
-      flushRows(request);
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        request.controller = controller;
+        flushRows(request);
+      },
+      pull() {
+        // The consumer drained below the high-water mark: resume flushing
+        // rows that queued while the flow was blocked.
+        flushRows(request);
+      },
+      cancel(reason) {
+        abortPayloadRequest(request, reason);
+      },
     },
-    cancel(reason) {
-      abortPayloadRequest(request, reason);
-    },
-  });
+    new ByteLengthQueuingStrategy({
+      highWaterMark: streamHighWaterMark(options.highWaterMark),
+    }),
+  );
   request.stream = stream;
 
   if (options.signal !== undefined) {
@@ -2360,13 +2384,29 @@ function pingTask(request: PayloadRequest, task: Task): void {
 function flushRows(request: PayloadRequest): void {
   if (request.controller === null || request.status === "closed") return;
   if (request.status === "opening") return;
+  if (request.flushingRows) return;
 
-  if (request.queuedRows.length > 0) {
-    for (const row of request.queuedRows) request.controller.enqueue(row);
-    request.queuedRows = [];
+  request.flushingRows = true;
+  try {
+    // Row-granular gating: rows already encode one complete wire row each,
+    // so stopping between rows keeps every chunk parse-safe for consumers
+    // that interleave per chunk.
+    let flushed = 0;
+    while (
+      flushed < request.queuedRows.length &&
+      !streamFlowBlocked(request.controller)
+    ) {
+      request.controller.enqueue(request.queuedRows[flushed]);
+      flushed += 1;
+    }
+    if (flushed > 0) request.queuedRows = request.queuedRows.slice(flushed);
+  } finally {
+    request.flushingRows = false;
   }
 
-  if (request.pendingTasks === 0) {
+  // Deliberately not conditioned on flow: close() only marks the end of the
+  // queue, so a full queue with no rows left to write still closes here.
+  if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
     request.status = "closed";
     cleanupPayloadAbortListener(request);
     request.dataStore.dispose();

@@ -109,6 +109,12 @@ Pass `identifierPrefix` when multiple streaming renders share a document. Fig
 uses it in generated Suspense marker and script identifiers, and it defaults to
 an empty string.
 
+Streams respect consumer backpressure: once the stream's internal queue holds
+`highWaterMark` encoded bytes (default 65536), completed Suspense content
+waits in segment form and flushes as the consumer reads. Rendering itself
+never pauses, so `shellReady`/`allReady` settle at the same time regardless of
+how fast the stream is consumed.
+
 ## Data Resources
 
 Server render requests have their own data-resource store. Reads through

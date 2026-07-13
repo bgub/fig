@@ -2860,3 +2860,93 @@ describe("payload rendering", () => {
   });
 });
 
+describe("payload flow control", () => {
+  async function readChunksSlowly(
+    stream: ReadableStream<Uint8Array>,
+  ): Promise<string[]> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return chunks;
+      chunks.push(decoder.decode(value, { stream: true }));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  it("resolves allReady unread, then flushes one blocked row per pull", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+
+    function Message(props: { promise: Promise<string> }) {
+      return createElement("span", null, readPromise(props.promise));
+    }
+
+    const result = renderToPayloadStream(
+      createElement(
+        "div",
+        null,
+        createElement(Message, { promise: first.promise }),
+        createElement(Message, { promise: second.promise }),
+      ),
+      { highWaterMark: 1 },
+    );
+
+    first.resolve("First");
+    second.resolve("Second");
+    // Readiness is task-driven, so it must settle with nothing reading.
+    await result.allReady;
+
+    const chunks = await readChunksSlowly(result.stream);
+
+    // Each encoded row is its own chunk; a 1-byte mark blocks after every
+    // enqueue, so each remaining row waits for a consumer pull.
+    expect(chunks.length).toBe(3);
+    for (const chunk of chunks) {
+      expect(chunk.endsWith("\n")).toBe(true);
+    }
+
+    const rows = parseTestPayloadRows(chunks.join(""));
+    expect(rows.map((row) => row.tag)).toEqual(["model", "model", "model"]);
+    expect(JSON.stringify(rows)).toContain("First");
+    expect(JSON.stringify(rows)).toContain("Second");
+  });
+
+  it("rejects allReady as cancelled when the consumer cancels while blocked", async () => {
+    const pending = deferred<string>();
+
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    const result = renderToPayloadStream(
+      createElement("div", null, createElement(Message, null)),
+      { highWaterMark: 1 },
+    );
+
+    // The root model row fills the queue past the mark; nothing reads it.
+    await Promise.resolve();
+    await result.stream.cancel(new Error("consumer gone"));
+
+    await expect(result.allReady).rejects.toSatisfy((reason: unknown) => {
+      expect(reason).toBeInstanceOf(Error);
+      return true;
+    });
+
+    // A late resolution must be ignored, not crash into a cancelled stream.
+    pending.resolve("late");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("clamps a zero high-water mark instead of deadlocking", async () => {
+    const rows = await renderToPayloadRows(createElement("p", null, "Ready"), {
+      highWaterMark: 0,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tag).toBe("model");
+    expect(JSON.stringify(rows[0])).toContain("Ready");
+  });
+});

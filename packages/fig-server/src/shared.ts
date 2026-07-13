@@ -90,6 +90,30 @@ export function cloneContextValues(values: ContextValues): ContextValues {
   return clone;
 }
 
+// Encoded bytes a render result stream's internal queue holds before flushing
+// pauses (resumed by consumer pulls). Shared by the HTML and payload
+// renderers. Large enough that a healthy consumer never blocks a flush; small
+// enough to bound per-connection buffering when the consumer stalls.
+// Rendering itself never pauses — only writing to the stream does.
+const DEFAULT_STREAM_HIGH_WATER_MARK = 65536;
+
+// 0 would deadlock: desiredSize never goes positive, and read requests alone
+// do not make it so. 1 byte is the honest pure-pull minimum.
+export function streamHighWaterMark(option: number | undefined): number {
+  return Math.max(1, option ?? DEFAULT_STREAM_HIGH_WATER_MARK);
+}
+
+// Blocked means the stream's internal queue is at or past its high-water
+// mark; completed work then waits un-enqueued until the consumer pulls.
+// desiredSize is null on an errored stream — never blocked, because fatal
+// paths close the request before any further writes.
+export function streamFlowBlocked(
+  controller: ReadableStreamDefaultController<Uint8Array> | null,
+): boolean {
+  const desiredSize = controller?.desiredSize;
+  return typeof desiredSize === "number" && desiredSize <= 0;
+}
+
 function resolveInitialState<S>(initialState: S | (() => S)): S {
   return typeof initialState === "function"
     ? (initialState as () => S)()

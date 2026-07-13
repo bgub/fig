@@ -75,6 +75,8 @@ import {
   createStaticDispatcher,
   type Deferred,
   deferred,
+  streamFlowBlocked,
+  streamHighWaterMark,
   withContextValue,
 } from "./shared.ts";
 import type { RenderTreeNode } from "./render-tree.ts";
@@ -129,6 +131,11 @@ interface Request {
   assetRegistry: AssetResourceRegistry;
   resolveAssetKey?: ServerRenderOptions["resolveAssetKey"];
   workScheduled: boolean;
+  // Reentrancy guard: enqueueing inside a flush pass can synchronously invoke
+  // the stream's pull handler, which must not restart the pass — a boundary
+  // stays in its queue while it flushes, so a reentrant drain would emit it
+  // twice.
+  flushing: boolean;
   // Chunks accumulate here per flush pass and leave as one encoded enqueue,
   // instead of one tiny Uint8Array per attribute/text write.
   writeBuffer: string[];
@@ -311,6 +318,7 @@ export function createServerRenderRequest(
     assetRegistry: new AssetResourceRegistry(options.identifierPrefix ?? ""),
     resolveAssetKey: options.resolveAssetKey,
     workScheduled: false,
+    flushing: false,
     writeBuffer: [],
   };
   request.assetSink = {
@@ -318,15 +326,30 @@ export function createServerRenderRequest(
     write: (chunk) => write(request, chunk),
   };
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(streamController) {
-      request.controller = streamController;
-      flushCompletedQueues(request);
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(streamController) {
+        request.controller = streamController;
+        flushCompletedQueues(request);
+      },
+      pull() {
+        // The consumer drained below the high-water mark: resume flushing
+        // whatever completed while the flow was blocked.
+        flushCompletedQueues(request);
+      },
+      cancel(reason) {
+        // The consumer is gone: drop the sink before aborting so the abort
+        // pass does not enqueue into (or close) a cancelled stream.
+        request.controller = null;
+        request.writeBuffer = [];
+        abort(request, reason);
+        request.status = "closed";
+      },
     },
-    cancel(reason) {
-      abort(request, reason);
-    },
-  });
+    new ByteLengthQueuingStrategy({
+      highWaterMark: streamHighWaterMark(options.highWaterMark),
+    }),
+  );
   request.stream = stream;
 
   rootSegment.parentFlushed = true;
@@ -1357,29 +1380,48 @@ function flushCompletedQueues(request: Request): void {
   if (request.status === "opening") return;
   if (request.pendingRootTasks > 0) return;
   if (request.prerender && request.pendingTasks > 0) return;
+  if (request.flushing) return;
 
-  sealHead(request);
+  request.flushing = true;
+  try {
+    sealHead(request);
 
-  if (request.completedRootSegment !== null) {
-    flushSegment(request, request.completedRootSegment);
-    request.completedRootSegment = null;
+    // The shell flushes ungated: the queue is empty before the first enqueue,
+    // and shell latency outranks flow control.
+    if (request.completedRootSegment !== null) {
+      flushSegment(request, request.completedRootSegment);
+      request.completedRootSegment = null;
+      flushWriteBuffer(request);
+    }
+
+    // Stop at the first blocked drain; the stream's pull handler re-enters
+    // here when the consumer makes room.
+    if (
+      !drainBoundaryQueue(
+        request,
+        request.clientRenderedBoundaries,
+        flushClientRenderedBoundary,
+      ) &&
+      !drainBoundaryQueue(
+        request,
+        request.completedBoundaries,
+        flushCompletedBoundary,
+      )
+    ) {
+      drainBoundaryQueue(
+        request,
+        request.partialBoundaries,
+        flushPartialBoundary,
+      );
+    }
+
     flushWriteBuffer(request);
+  } finally {
+    request.flushing = false;
   }
 
-  drainBoundaryQueue(
-    request,
-    request.clientRenderedBoundaries,
-    flushClientRenderedBoundary,
-  );
-  drainBoundaryQueue(
-    request,
-    request.completedBoundaries,
-    flushCompletedBoundary,
-  );
-  drainBoundaryQueue(request, request.partialBoundaries, flushPartialBoundary);
-
-  flushWriteBuffer(request);
-
+  // Deliberately not conditioned on flow: close() only marks the end of the
+  // queue, so a full queue with nothing left to write still closes here.
   if (
     request.pendingTasks === 0 &&
     request.completedBoundaries.size === 0 &&
@@ -1391,6 +1433,12 @@ function flushCompletedQueues(request: Request): void {
     request.dataStore.dispose();
     request.controller.close();
   }
+}
+
+// Blocked flushing keeps completed work in segment form until the consumer
+// pulls (see streamFlowBlocked in shared.ts).
+function flowBlocked(request: Request): boolean {
+  return streamFlowBlocked(request.controller);
 }
 
 function flushSegment(request: Request, segment: Segment): void {
@@ -1662,14 +1710,19 @@ function flushClientRenderedBoundary(
 
 // A boundary deliberately stays in the queue while it flushes so a re-add
 // during its own flush is a no-op (Set semantics), then leaves afterwards.
+// Returns true when the drain stopped because the flow is blocked; blocked
+// boundaries stay queued for the next pull-driven pass. Gating sits between
+// boundaries — never mid-buffer — so every chunk still ends on complete
+// markup.
 function drainBoundaryQueue(
   request: Request,
   queue: Set<SuspenseBoundary>,
   flush: (request: Request, boundary: SuspenseBoundary) => void,
-): void {
+): boolean {
   for (;;) {
+    if (flowBlocked(request)) return true;
     const first = queue.values().next();
-    if (first.done === true) return;
+    if (first.done === true) return false;
     flush(request, first.value);
     queue.delete(first.value);
     // One encoded enqueue per drained boundary: keeps chunk boundaries at
