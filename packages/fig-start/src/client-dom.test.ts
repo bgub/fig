@@ -13,10 +13,7 @@ import {
 import { serverDataResource } from "@bgub/fig/server";
 import { act } from "@bgub/fig-dom/test-utils";
 import { describe, expect, it } from "vitest";
-import {
-  CLIENT_REFERENCE_MODULES_GLOBAL,
-  PAYLOAD_BOUNDARY_HEADER,
-} from "./bootstrap.ts";
+import { CLIENT_REFERENCE_MODULES_GLOBAL } from "./bootstrap.ts";
 import { hydrateStart, remoteDataLoader } from "./client.ts";
 import { Outlet } from "./components.tsx";
 import { markServerRoute, serverClientReference } from "./internal.ts";
@@ -266,7 +263,8 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
       const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
       expect(slot?.querySelector(".static")?.textContent).toBe("static markup");
       expect(slot?.querySelector(".island")?.textContent).toBe("island!");
-      expect(requests.at(-1)?.headers.get(PAYLOAD_BOUNDARY_HEADER)).toBeNull();
+      // The resource model sends no targeted-refresh header.
+      expect(requests.at(-1)?.headers.get("x-fig-payload-boundary")).toBeNull();
     } finally {
       globalThis.fetch = previousFetch;
       restoreFetch();
@@ -453,8 +451,10 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
 
       const link = document.head.querySelector('link[rel="stylesheet"]');
       expect(link?.getAttribute("href")).toBe(styledIslandHref);
-      expect(requests.at(-1)?.headers.get(PAYLOAD_BOUNDARY_HEADER)).toBe(
-        "/payload-layout",
+      // Same-segment child navigation re-requests the segment as a plain
+      // payload stream (no targeted-refresh header on the wire).
+      expect(requests.at(-1)?.headers.get("accept")).toContain(
+        "text/x-fig-payload",
       );
       expect(document.querySelector(".child")?.textContent).toBe("Child A");
       expect(document.querySelector(".styled-island")).toBeNull();

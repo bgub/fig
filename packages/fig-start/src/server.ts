@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import {
   assets,
   createElement,
+  readPromise,
   type DataResource,
   type DataResourceKey,
   type DataResourceKeyInput,
@@ -12,7 +13,6 @@ import {
   type FigClientReference,
   type FigDataHydrationEntry,
   type FigNode,
-  Fragment,
   type Props,
 } from "@bgub/fig";
 import { assetResourceKey, normalizeDataResourceKey } from "@bgub/fig/internal";
@@ -36,6 +36,7 @@ import {
   devtoolsOpenFromRequest,
 } from "./devtools.ts";
 import {
+  decodePayloadStream,
   decodePayloadValue,
   encodePayloadDataEntries,
   encodePayloadValue,
@@ -43,9 +44,6 @@ import {
   type PayloadModel,
 } from "@bgub/fig/payload";
 import {
-  createPayloadConsumer,
-  PayloadBoundary,
-  type PayloadClientReferenceRecord,
   payloadFrameBootstrapScript,
   payloadFrameScript,
   renderToPayloadStream,
@@ -56,7 +54,6 @@ import {
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
   DATA_STREAM_GLOBAL,
-  PAYLOAD_BOUNDARY_HEADER,
   PAYLOAD_FRAME_TRANSPORT,
   PAYLOAD_ROUTE_ID_HEADER,
   PAYLOAD_SEGMENT_ID_HEADER,
@@ -187,34 +184,20 @@ export function createRequestHandler(
     const status = result.status === "notFound" ? 404 : 200;
     const nonce = options.nonce?.(request);
     const isPayloadRequest = isPayloadRouteRequest(request);
-    const refreshBoundary = isPayloadRequest
-      ? payloadBoundaryHeader(request)
-      : undefined;
     // A `.server.tsx` route segment renders through the payload stream. The document
-    // render can stream server-renderable HTML into the same slot, then the client
-    // mounts and refreshes the payload for that segment.
+    // render can stream server-renderable HTML into the same slot; the client
+    // consumes the same stream as an ordinary data resource keyed by route+URL,
+    // so a refresh is just refreshData — no boundary protocol.
     const payloadSegment = renderServerRouteSegment(
       result,
       router,
       options.clientReferenceAssets,
       options.serverRouteAssets,
-      refreshBoundary,
     );
 
     if (isPayloadRequest) {
       if (payloadSegment === undefined) {
         return new Response("No payload segment for route.", { status: 404 });
-      }
-      if (
-        refreshBoundary !== undefined &&
-        refreshBoundary !== payloadSegment.metadata.routeId
-      ) {
-        return new Response(
-          "Payload boundary does not match the route segment.",
-          {
-            status: 400,
-          },
-        );
       }
 
       return new Response(streamPayloadSegmentRows(payloadSegment), {
@@ -449,9 +432,16 @@ interface ServerPayloadSegment {
   stream: ReadableStream<Uint8Array>;
 }
 
+interface DocumentClientReference {
+  assets?: readonly FigAssetResource[];
+  exportName?: string;
+  id: string;
+  ssr?: boolean;
+}
+
 interface DocumentPayloadSegment {
   assetResources(): readonly FigAssetResource[];
-  clientReferences(): readonly PayloadClientReferenceRecord[];
+  clientReferences(): readonly DocumentClientReference[];
   frames: ServerPayloadSegment;
   initialRootReady: Promise<void>;
   store: ServerRouteContentStore;
@@ -466,39 +456,60 @@ function createDocumentPayloadSegment(
   segment: ServerPayloadSegment,
 ): DocumentPayloadSegment {
   const [decodeStream, frameStream] = segment.stream.tee();
-  const consumer = createPayloadConsumer({
+  const assetResources: FigAssetResource[] = [];
+  const clientReferences: DocumentClientReference[] = [];
+  // The renderer-neutral decoder runs server-side too: ssr-capable references
+  // resolve to their ssr components, everything else renders the same
+  // placeholder template the client hydrates against; streamed holes suspend
+  // the document render and stream in as Suspense reveals.
+  const decode = decodePayloadStream(decodeStream, {
+    onClientReference: (reference) => clientReferences.push(reference),
+    prepareAssets: (streamed) => {
+      assetResources.push(...streamed);
+    },
     resolveClientReference: (metadata) =>
       metadata.ssr === true
         ? resolveServerClientReference(metadata)
-        : undefined,
+        : createDocumentClientReferencePlaceholder(metadata.id),
   });
-  const initialRootReady = decodeDocumentPayloadStream(consumer, decodeStream);
+  const value = decode.value;
+  void value.catch(() => undefined);
 
   return {
-    assetResources: () => consumer.getAssetResources(),
-    clientReferences: () => consumer.getClientReferences(),
+    assetResources: () => assetResources,
+    clientReferences: () => clientReferences,
     frames: { ...segment, stream: frameStream },
-    initialRootReady,
+    // The root row (or one tick, whichever first) so the document render can
+    // include buffered payload markup without blocking the shell on slow
+    // segments — a not-yet-decoded root suspends through the reader below.
+    initialRootReady: Promise.race([
+      value.then(
+        () => undefined,
+        () => undefined,
+      ),
+      new Promise<void>((resolve) => setTimeout(resolve, 0)),
+    ]),
     store: createDocumentServerRouteContentStore(
       segment.metadata.routeId,
-      consumer.getRoot(),
+      createElement(DocumentPayloadRoot, { value }),
     ),
   };
 }
 
-// Waits for the initial root row (or one tick, whichever is first) so the
-// document render can include server-renderable payload markup when the payload
-// is already buffered, without blocking the shell on slow segments.
-function decodeDocumentPayloadStream(
-  consumer: ReturnType<typeof createPayloadConsumer>,
-  stream: ReadableStream<Uint8Array>,
-): Promise<void> {
-  void consumer.processStream(stream).catch(() => undefined);
+function DocumentPayloadRoot(props: { value: Promise<FigNode> }): FigNode {
+  return readPromise(props.value);
+}
 
-  return Promise.race([
-    consumer.rootReady,
-    new Promise<void>((resolve) => setTimeout(resolve, 0)),
-  ]);
+function createDocumentClientReferencePlaceholder(id: string): () => FigNode {
+  return function StartDocumentClientReferencePlaceholder(): FigNode {
+    return clientReferencePlaceholderTemplate(id);
+  };
+}
+
+function clientReferencePlaceholderTemplate(id: string): FigNode {
+  return createElement("template", {
+    "data-fig-client-reference": id,
+  });
 }
 
 function createDocumentServerRouteContentStore(
@@ -515,7 +526,7 @@ function createDocumentServerRouteContentStore(
 }
 
 function initialClientReferenceModules(
-  references: readonly PayloadClientReferenceRecord[],
+  references: readonly DocumentClientReference[],
 ): ClientReferenceModule[] {
   const seen = new Set<string>();
   const modules: ClientReferenceModule[] = [];
@@ -542,7 +553,6 @@ function renderServerRouteSegment(
   serverRouteAssets:
     | ((metadata: { id: string }) => FigAssetResourceList)
     | undefined,
-  refreshBoundary: string | undefined,
 ): ServerPayloadSegment | undefined {
   if (result.status !== "match") return undefined;
   const segment = firstServerRouteSegment(result.matches);
@@ -564,31 +574,20 @@ function renderServerRouteSegment(
   const routeId = segment.match.routeId;
   const routeContent =
     routeAssets.length === 0 ? routeNode : assets(routeAssets, routeNode);
-  const refreshesSegment = refreshBoundary === routeId;
-  const payload = renderToPayloadStream(
-    refreshesSegment
-      ? routeContent
-      : createElement(
-          Fragment,
-          null,
-          createElement(PayloadBoundary, { id: routeId }, routeContent),
-        ),
-    {
-      clientReferenceAssets,
-      // A throw inside a server component becomes a payload "error" row (it
-      // doesn't reject allReady), so the request would otherwise return 200
-      // with no server log. Log it here; only the digest crosses the wire and
-      // the client error boundary renders on its side.
-      onError(error) {
-        console.error(
-          `[fig-start] server route "${routeId}" failed to render:`,
-          error,
-        );
-        return { digest: "fig-start-error" };
-      },
-      refreshBoundary: refreshesSegment ? refreshBoundary : undefined,
+  const payload = renderToPayloadStream(routeContent, {
+    clientReferenceAssets,
+    // A throw inside a server component becomes a payload "error" row (it
+    // doesn't reject allReady), so the request would otherwise return 200
+    // with no server log. Log it here; only the digest crosses the wire and
+    // the client error boundary renders on its side.
+    onError(error) {
+      console.error(
+        `[fig-start] server route "${routeId}" failed to render:`,
+        error,
+      );
+      return { digest: "fig-start-error" };
     },
-  );
+  });
   void payload.allReady.catch(() => undefined);
   return {
     contentType: payload.contentType,
@@ -626,9 +625,7 @@ function clientReferencePlaceholder(
 ): FigNode {
   if (reference.ssr !== undefined) return createElement(reference.ssr, props);
 
-  return createElement("template", {
-    "data-fig-client-reference": reference.id,
-  });
+  return clientReferencePlaceholderTemplate(reference.id);
 }
 
 function serverRouteAssetList(
@@ -657,11 +654,6 @@ function isResourceArray(
 
 function isPayloadRouteRequest(request: Request): boolean {
   return request.headers.get("accept")?.includes("text/x-fig-payload") === true;
-}
-
-function payloadBoundaryHeader(request: Request): string | undefined {
-  const value = request.headers.get(PAYLOAD_BOUNDARY_HEADER);
-  return value === null || value === "" ? undefined : value;
 }
 
 interface DataResourceRequestBody {
@@ -745,16 +737,37 @@ function streamPayloadSegmentFrames(
   nonce: string | undefined,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return streamPayloadSegment(segment, (chunk) =>
-    chunk.length === 0
-      ? undefined
-      : encoder.encode(
-          payloadFrameScript(
-            { chunk, id: segment.metadata.id } satisfies SerializedPayloadFrame,
-            { ...PAYLOAD_FRAME_TRANSPORT, nonce },
-          ),
-        ),
-  );
+  const frameScript = (frame: SerializedPayloadFrame): Uint8Array =>
+    encoder.encode(
+      payloadFrameScript(frame, { ...PAYLOAD_FRAME_TRANSPORT, nonce }),
+    );
+  return streamPayloadSegment(segment, (chunk, _value, done) => {
+    const parts: Uint8Array[] = [];
+    if (chunk.length > 0) {
+      parts.push(frameScript({ chunk, id: segment.metadata.id }));
+    }
+    // The end frame lets the client close the byte stream it feeds its
+    // decoder from, so completion and truncation semantics work over frames
+    // exactly as over a network response.
+    if (done) {
+      parts.push(
+        frameScript({ chunk: "", end: true, id: segment.metadata.id }),
+      );
+    }
+    return parts.length === 0 ? undefined : concatBytes(parts);
+  });
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  if (parts.length === 1) return parts[0] as Uint8Array;
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    merged.set(part, offset);
+    offset += part.length;
+  }
+  return merged;
 }
 
 function streamPayloadSegmentRows(
@@ -768,6 +781,7 @@ function streamPayloadSegment(
   emit: (
     chunk: string,
     value: Uint8Array | undefined,
+    done: boolean,
   ) => Uint8Array | undefined,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
@@ -782,7 +796,7 @@ function streamPayloadSegment(
             ? decoder.decode()
             : decoder.decode(value, { stream: !done });
 
-        const output = emit(chunk, value);
+        const output = emit(chunk, value, done);
         if (output !== undefined) controller.enqueue(output);
 
         if (done) {

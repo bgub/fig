@@ -1,8 +1,6 @@
 // Shared contract between the server handler (which serializes) and the client
 // bootstrap (which reads) so router + data hydration stay in lockstep.
 
-export { PAYLOAD_BOUNDARY_HEADER } from "@bgub/fig-server/payload";
-
 export const ROUTER_STATE_SCRIPT_ID = "__fig_start_state__";
 export const DATA_SCRIPT_ID = "__fig_start_data__";
 export const DATA_ENDPOINT_PATH = "/__fig/data";
@@ -43,6 +41,10 @@ export interface SerializedPayloadSegment {
 
 export interface SerializedPayloadFrame {
   chunk: string;
+  // Marks the segment's final frame: the client closes the byte stream it
+  // feeds its payload decoder from, so end-of-stream semantics over frames
+  // match a network response.
+  end?: true;
   id: string;
 }
 

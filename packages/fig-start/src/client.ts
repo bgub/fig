@@ -1,5 +1,6 @@
 import {
   createElement,
+  dataResource,
   type DataResourceLoadContext,
   type ElementType,
   ErrorBoundary,
@@ -7,12 +8,17 @@ import {
   type FigDataStoreHandle,
   type FigNode,
   type Props,
+  readData,
   readPromise,
   Suspense,
+  useReactive,
   useSyncExternalStore,
 } from "@bgub/fig";
-import { assetResourceKey } from "@bgub/fig/internal";
-import { hydrateRoot, insertAssetResources } from "@bgub/fig-dom";
+import {
+  hydrateRoot,
+  insertAssetResources,
+  payloadDataLoader,
+} from "@bgub/fig-dom";
 import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
 import {
   DEVTOOLS_PANE_ID,
@@ -23,14 +29,12 @@ import {
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadValue,
+  jsonPayloadCodec,
   type PayloadClientReferenceMetadata,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/payload";
 import {
-  createPayloadConsumer,
   getPayloadFrameStream,
-  isPayloadRequestCancelled,
-  type PayloadConsumer,
   type PayloadFrameStream,
 } from "@bgub/fig-server/payload";
 import {
@@ -54,13 +58,11 @@ import {
   ServerRouteContentProvider,
   type ServerRouteContentStore,
 } from "./components.tsx";
-import type { RouteMatch, Router } from "./core.ts";
+import type { RouteMatch } from "./core.ts";
 import { isServerRoute } from "./internal.ts";
 import type { AnyRoute } from "./route.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { RouterLocation } from "./types.ts";
-
-type ServerRouteConsumer = ReturnType<typeof createPayloadConsumer>;
 
 interface ViteHotContext {
   on(
@@ -207,30 +209,6 @@ interface DataStream {
   s(listener: (entries: readonly FigDataHydrationEntry[]) => void): () => void;
 }
 
-function createServerRouteConsumer(
-  options: StartClientOptions,
-  clientReferenceTypes: ClientReferenceTypeCache,
-  clientReferenceHydrationGate?: ClientReferenceHydrationGate,
-): ServerRouteConsumer {
-  if (clientReferenceHydrationGate !== undefined) {
-    return createPayloadConsumer({
-      resolveClientReference: (metadata) =>
-        createHydratableClientReference(
-          options,
-          metadata,
-          clientReferenceTypes,
-          clientReferenceHydrationGate,
-        ),
-    });
-  }
-
-  return createPayloadConsumer({
-    loadClientReference: options.loadClientReference,
-    resolveClientReference: (metadata) =>
-      resolveStableSyncClientReference(options, metadata, clientReferenceTypes),
-  });
-}
-
 function createHydratableClientReference(
   options: StartClientOptions,
   metadata: PayloadClientReferenceMetadata,
@@ -327,28 +305,6 @@ function resolveStableClientReference(
   return type;
 }
 
-function resolveStableSyncClientReference(
-  options: StartClientOptions,
-  metadata: PayloadClientReferenceMetadata,
-  clientReferenceTypes: ClientReferenceTypeCache,
-): ElementType | undefined {
-  const cached = clientReferenceTypes.types.get(metadata.id);
-  if (cached !== undefined) return cached;
-
-  const resolved =
-    resolvePreloadedClientReference(metadata) ??
-    options.resolveClientReference?.(metadata);
-  if (resolved === undefined) return undefined;
-
-  const type = function StartStableSyncClientReference(
-    props: Props & { children?: FigNode },
-  ): FigNode {
-    return createElement(resolved, props);
-  };
-  clientReferenceTypes.types.set(metadata.id, type);
-  return type;
-}
-
 function requireStableClientReference(
   options: StartClientOptions,
   metadata: PayloadClientReferenceMetadata,
@@ -381,6 +337,13 @@ function resolvePreloadedClientReference(
   const moduleValue = (registry as Record<string, unknown>)[metadata.id];
   if (moduleValue === undefined) return undefined;
   return resolveClientReferenceExport(moduleValue, metadata.id);
+}
+
+interface ClientReferenceHydrationGate {
+  getServerSnapshot(): boolean;
+  getSnapshot(): boolean;
+  reveal(): void;
+  subscribe(listener: () => void): () => void;
 }
 
 function createClientReferenceHydrationGate(): ClientReferenceHydrationGate {
@@ -437,343 +400,294 @@ interface ServerRouteContent extends ServerRouteContentStore {
   renderActiveRoute(): void;
 }
 
-interface ServerRouteEntry {
-  activeRefresh: AbortController | null;
-  assetGate: Promise<void> | null;
-  clientReferenceHydrationGate: ClientReferenceHydrationGate | null;
-  currentUrl: string;
-  dispose: () => void;
-  hydrateWithPendingAssets: boolean;
-  insertedAssetKeys: Set<string>;
-  listeners: Set<() => void>;
-  node: FigNode;
-  onRecoverableError?: (error: unknown) => void;
-  payloadComplete: boolean;
-  consumer: ServerRouteConsumer;
-  revealed: boolean;
-  routeId: string;
-  unsubscribeConsumer: (() => void) | null;
-  version: number;
-  visibleNode: FigNode;
+interface InitialDocumentSegment {
+  consumed: boolean;
+  segment: SerializedPayloadSegment;
+  stream: PayloadStream;
+  url: string;
 }
 
-interface ServerRouteEntryOptions {
-  clientReferenceHydrationGate?: ClientReferenceHydrationGate;
-  dispose?: () => void;
-  hydrateWithPendingAssets?: boolean;
-  payloadComplete?: boolean;
-  url?: string;
-}
-
-interface ServerRouteControl {
-  complete(): void;
-  refresh(url: string, options?: { force?: boolean }): void;
-}
-
-interface ClientReferenceHydrationGate {
-  getServerSnapshot(): boolean;
-  getSnapshot(): boolean;
-  reveal(): void;
-  subscribe(listener: () => void): () => void;
-}
-
+// Server routes are ordinary data resources: the key is [routeId, url], the
+// loader is payloadDataLoader over the framework's payload response for that
+// URL, and refresh/navigation use the existing freshness verbs. The initial
+// document segment binds by serving the inline frame stream as the loader's
+// Response, so pending holes keep filling after the shell flush through the
+// same generation-guarded machinery a fetched payload uses.
 function createServerRouteContent(
   options: StartClientOptions,
   router: FigRouter,
   clientReferenceTypes: ClientReferenceTypeCache,
 ): ServerRouteContent {
-  const entries = new Map<string, ServerRouteEntry>();
-  const pendingListeners = new Map<string, Set<() => void>>();
   let rootData: FigDataStoreHandle | null = null;
+  let initialSegment: InitialDocumentSegment | null = null;
+  // The initial document's assets are already in the SSR head (hoisted at
+  // render time), so its decode inserts/adopts them for dedupe but never
+  // gates reveal on them — the markup on screen is already styled.
+  let ungatedInitialAssets = false;
+  const routeUrls = new Map<string, string>();
+  const versions = new Map<string, number>();
+  const routeListeners = new Map<string, Set<() => void>>();
+  const loadedKeys = new Set<string>();
+  const pendingModuleLoads = new Set<PromiseLike<unknown>>();
+  // Stylesheet gates from streamed assets: prepare() holds the navigation
+  // commit until they settle, so a committed route never reveals unstyled or
+  // blanks its slot while an island waits on CSS.
+  const pendingAssetGates = new Set<PromiseLike<unknown>>();
+  // One gate for the whole app: initial-segment islands render the SSR
+  // placeholder template until the first hydration commit reveals them;
+  // references decoded after that render immediately.
+  const hydrationGate = createClientReferenceHydrationGate();
 
-  function notify(entry: ServerRouteEntry): void {
-    entry.version += 1;
-    for (const listener of entry.listeners) listener();
-  }
+  const trackedOptions: StartClientOptions =
+    options.loadClientReference === undefined
+      ? options
+      : {
+          ...options,
+          loadClientReference: (metadata) => {
+            const load = options.loadClientReference?.(metadata);
+            if (load === undefined) {
+              throw new Error(
+                `Client reference "${metadata.id}" has no loader.`,
+              );
+            }
+            pendingModuleLoads.add(load);
+            const remove = (): void => {
+              pendingModuleLoads.delete(load);
+            };
+            void load.then(remove, remove);
+            return load;
+          },
+        };
 
-  function bindEntry(entry: ServerRouteEntry): void {
-    if (rootData === null || entry.unsubscribeConsumer !== null) return;
+  // Component identity is cached per reference id so island state survives
+  // re-decodes: a refreshed tree reuses the same component function, and the
+  // reconciler updates in place.
+  const reportedMissingResolvers = new Set<string>();
 
-    entry.unsubscribeConsumer = entry.consumer.bindRoot({
-      data: rootData,
-      render: (node) => {
-        entry.node = node;
-        ensureEntryAssets(entry);
-        if (entry.assetGate === null) entry.visibleNode = entry.node;
-        notify(entry);
-      },
-    });
-  }
+  function resolveRouteClientReference(
+    metadata: PayloadClientReferenceMetadata,
+  ): ElementType {
+    const cached = clientReferenceTypes.types.get(metadata.id);
+    if (cached !== undefined) return cached;
 
-  function createEntry(
-    routeId: string,
-    consumer: ServerRouteConsumer,
-    entryOptions: ServerRouteEntryOptions = {},
-  ): ServerRouteEntry {
-    const dispose = entryOptions.dispose ?? (() => undefined);
-    const existing = entries.get(routeId);
-    if (existing !== undefined) {
-      dispose();
-      return existing;
+    // A payload with client references but no resolver would render
+    // placeholders forever; report loudly as soon as the reference row
+    // decodes (the render-time throw still lands in the ErrorBoundary).
+    if (
+      options.loadClientReference === undefined &&
+      options.resolveClientReference === undefined &&
+      resolvePreloadedClientReference(metadata) === undefined &&
+      !reportedMissingResolvers.has(metadata.id)
+    ) {
+      reportedMissingResolvers.add(metadata.id);
+      reportPayloadFetchError(
+        metadata.id,
+        new Error(
+          `Server route content renders client reference "${metadata.id}", ` +
+            `but hydrateStart() received no client-reference resolver. Pass ` +
+            `loadClientReference from "virtual:fig-start/client-manifest" ` +
+            `(the @bgub/fig-start/vite plugin).`,
+        ),
+        options,
+      );
     }
 
-    const listeners = pendingListeners.get(routeId) ?? new Set<() => void>();
-    pendingListeners.delete(routeId);
-
-    const entry: ServerRouteEntry = {
-      activeRefresh: null,
-      assetGate: null,
-      currentUrl: entryOptions.url ?? "",
-      dispose,
-      hydrateWithPendingAssets: entryOptions.hydrateWithPendingAssets ?? false,
-      insertedAssetKeys: new Set(),
-      clientReferenceHydrationGate:
-        entryOptions.clientReferenceHydrationGate ?? null,
-      listeners,
-      node: consumer.getRoot(),
-      onRecoverableError: options.onRecoverableError,
-      payloadComplete: entryOptions.payloadComplete ?? true,
-      consumer,
-      revealed: false,
-      routeId,
-      unsubscribeConsumer: null,
-      version: 0,
-      visibleNode: consumer.getRoot(),
-    };
-    entries.set(routeId, entry);
-    bindEntry(entry);
-
-    watchServerRouteLifetime(router, routeId, () => {
-      entries.delete(routeId);
-      entry.activeRefresh?.abort();
-      entry.dispose();
-      entry.unsubscribeConsumer?.();
-      notify(entry);
-    });
-
-    return entry;
-  }
-
-  function control(entry: ServerRouteEntry): ServerRouteControl {
-    return {
-      complete() {
-        entry.payloadComplete = true;
-        notify(entry);
-      },
-      refresh(url, refreshOptions) {
-        if (url === entry.currentUrl && refreshOptions?.force !== true) return;
-        entry.currentUrl = url;
-        entry.activeRefresh?.abort();
-        const controller = new AbortController();
-        entry.activeRefresh = controller;
-        loadServerRoutePayload(
-          entry.consumer,
-          entry.routeId,
-          url,
-          options,
-          controller.signal,
-          {
-            complete() {
-              if (entry.activeRefresh === controller)
-                entry.activeRefresh = null;
-            },
-            refresh: () => undefined,
-          },
-          entry.routeId,
-        );
-      },
-    };
-  }
-
-  function entryForRoute(routeId: string): ServerRouteEntry | undefined {
-    return entries.get(routeId);
-  }
-
-  function startEntryFetch(routeId: string, url: string): ServerRouteEntry {
-    const consumer = createServerRouteConsumer(options, clientReferenceTypes);
-    const controller = new AbortController();
-    const entry = createEntry(routeId, consumer, {
-      dispose: () => controller.abort(),
-      // Client navigation reveals server routes atomically after the payload fetch;
-      // initial document streams keep their default progressive reveal behavior.
-      payloadComplete: false,
-      url,
-    });
-
-    loadServerRoutePayload(
-      consumer,
-      routeId,
-      url,
-      options,
-      controller.signal,
-      control(entry),
+    const type = createHydratableClientReference(
+      trackedOptions,
+      metadata,
+      clientReferenceTypes,
+      hydrationGate,
     );
-    return entry;
+    clientReferenceTypes.types.set(metadata.id, type);
+    return type;
   }
 
-  function receiveRows(entry: ServerRouteEntry, rows: string): void {
-    entry.consumer.processStringChunk(rows);
-    requireClientReferenceResolver(entry.routeId, entry.consumer, options);
-    ensureEntryAssets(entry);
-    notify(entry);
-  }
-
-  function entryRenderable(entry: ServerRouteEntry): boolean {
-    return (
-      entry.payloadComplete &&
-      (entry.assetGate === null ||
-        entry.revealed ||
-        entry.hydrateWithPendingAssets)
-    );
-  }
-
-  // Loading island modules before the commit lets the payload's client
-  // references render synchronously on reveal instead of suspending the
-  // freshly committed slot to its null fallback for a beat.
-  function preloadEntryClientReferences(
-    entry: ServerRouteEntry,
-  ): Promise<void> | undefined {
-    if (entries.get(entry.routeId) !== entry) return undefined;
-    return entry.consumer.preloadClientReferences();
-  }
-
-  // Resolves when the entry can render (payload complete and assets settled),
-  // or when the entry is torn down by a superseding navigation.
-  function waitForEntryRenderable(
-    entry: ServerRouteEntry,
-  ): Promise<void> | undefined {
-    if (entryRenderable(entry)) return undefined;
-
-    return new Promise((resolve) => {
-      const listener = (): void => {
-        if (entries.get(entry.routeId) === entry && !entryRenderable(entry)) {
-          return;
+  const routeResource = dataResource<[string, string], FigNode>({
+    key: (routeId, url) => ["fig-start", "server-route", routeId, url],
+    load: payloadDataLoader<[string, string]>({
+      prepareAssets: (streamed) => {
+        const gate = insertAssetResources(streamed);
+        if (ungatedInitialAssets) return undefined;
+        pendingAssetGates.add(gate);
+        const remove = (): void => {
+          pendingAssetGates.delete(gate);
+        };
+        void gate.then(remove, remove);
+        return gate;
+      },
+      request: (routeId, url, { signal }) => {
+        const initial = initialSegmentResponse(routeId, url);
+        if (initial !== null) {
+          ungatedInitialAssets = true;
+          return initial;
         }
-        entry.listeners.delete(listener);
-        resolve();
-      };
-      entry.listeners.add(listener);
+        // Navigations gate normally; if one overlaps the still-decoding
+        // initial segment, late initial assets gate too (over-gating an
+        // already-revealed document is harmless).
+        ungatedInitialAssets = false;
+        return fetch(url, {
+          headers: { accept: jsonPayloadCodec.contentType },
+          signal,
+        });
+      },
+      resolveClientReference: resolveRouteClientReference,
+    }),
+  });
+
+  function RouteResourceReader(props: {
+    routeId: string;
+    url: string;
+  }): FigNode {
+    const node = readData(routeResource, props.routeId, props.url);
+    // A passive effect on the content reader: it runs after the commit that
+    // mounted (or hydrated) the decoded content, once island gate
+    // subscriptions are attached — so hydration first matches the SSR
+    // placeholder templates, then every island reveals exactly once.
+    useReactive(() => {
+      hydrationGate.reveal();
+      return undefined;
+    }, []);
+    return node;
+  }
+
+  function initialSegmentResponse(
+    routeId: string,
+    url: string,
+  ): Response | null {
+    const initial = initialSegment;
+    if (
+      initial === null ||
+      initial.consumed ||
+      initial.segment.routeId !== routeId ||
+      initial.url !== url
+    ) {
+      return null;
+    }
+    initial.consumed = true;
+
+    const encoder = new TextEncoder();
+    let unsubscribe: () => void = () => undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        unsubscribe = initial.stream.s((frame) => {
+          if (frame.id !== initial.segment.id) return;
+          if (frame.end === true) {
+            unsubscribe();
+            controller.close();
+            return;
+          }
+          if (frame.chunk.length > 0) {
+            controller.enqueue(encoder.encode(frame.chunk));
+          }
+        });
+      },
+      cancel() {
+        unsubscribe();
+      },
+    });
+    return new Response(stream);
+  }
+
+  function bumpVersion(routeId: string): void {
+    versions.set(routeId, (versions.get(routeId) ?? 0) + 1);
+    for (const listener of routeListeners.get(routeId) ?? []) listener();
+  }
+
+  function loadedKey(routeId: string, url: string): string {
+    return `${routeId}\n${url}`;
+  }
+
+  // Ensure-loaded, not force-refresh: a cached key (back/forward navigation)
+  // resolves immediately; a new key loads and settles before the commit.
+  function ensureRouteLoaded(
+    routeId: string,
+    url: string,
+  ): Promise<void> | undefined {
+    const key = loadedKey(routeId, url);
+    if (loadedKeys.has(key) || rootData === null) return undefined;
+    return rootData.refreshData(routeResource, routeId, url).then((result) => {
+      if (result.status === "fulfilled") loadedKeys.add(key);
+      else if (result.status === "rejected") {
+        reportPayloadFetchError(routeId, result.error, options);
+      }
     });
   }
 
   return {
     bindRootData(data) {
       rootData = data;
-      for (const entry of entries.values()) bindEntry(entry);
     },
-    commit(routeId) {
-      const entry = entries.get(routeId);
-      if (entry === undefined) return;
-      ensureEntryAssets(entry);
-      revealEntryClientReferences(entry);
-    },
+    // Reveal happens from the content reader's layout effect (below), which
+    // commits together with the islands whose gate subscriptions it flips —
+    // this commit callback fires on shell commits too, before any island has
+    // subscribed, so revealing here would be lost.
+    commit() {},
     getSnapshot(routeId) {
-      return entries.get(routeId)?.version ?? 0;
+      return versions.get(routeId) ?? 0;
     },
     receiveSegment(segment, stream, url) {
-      const clientReferenceHydrationGate = createClientReferenceHydrationGate();
-      const entry = createEntry(
-        segment.routeId,
-        createServerRouteConsumer(
-          options,
-          clientReferenceTypes,
-          clientReferenceHydrationGate,
-        ),
-        {
-          clientReferenceHydrationGate,
-          hydrateWithPendingAssets: true,
-          url,
-        },
-      );
-      const unsubscribe = stream.s((frame) => {
-        if (frame.id !== segment.id) return;
-        receiveRows(entry, frame.chunk);
-      });
-      entry.dispose = combineDisposers(entry.dispose, unsubscribe);
+      routeUrls.set(segment.routeId, url);
+      initialSegment = { consumed: false, segment, stream, url };
     },
-    // Pre-commit gate for navigations that mount a NEW server route: without
-    // a renderable entry, committing would swap the old page for an empty
-    // slot. Same-route URL changes keep the entry mounted; a gated refresh
-    // renders the last visible node until the newly decoded node's assets are
-    // ready.
+    // Pre-commit gate for navigations: the incoming route's payload settles
+    // (and its island modules finish — loads began at reference-row arrival)
+    // before the router commits, so the previous page stays visible until the
+    // next server route can render.
     async prepare(location, matches) {
       const match = firstServerRouteMatch(matches);
       if (match === undefined) return;
-
-      const entry =
-        entries.get(match.routeId) ??
-        startEntryFetch(match.routeId, payloadRouteUrl(location));
-      await waitForEntryRenderable(entry);
-      await preloadEntryClientReferences(entry);
+      const url = payloadRouteUrl(location);
+      routeUrls.set(match.routeId, url);
+      await ensureRouteLoaded(match.routeId, url);
+      await Promise.allSettled([...pendingModuleLoads, ...pendingAssetGates]);
+      bumpVersion(match.routeId);
     },
     render(routeId) {
-      const entry = entries.get(routeId);
-      if (entry === undefined) return null;
-      if (!entryRenderable(entry)) return null;
-      entry.revealed = true;
-      return serverRouteNode(entry.visibleNode);
+      const url = routeUrls.get(routeId);
+      if (url === undefined) return null;
+      return serverRouteNode(
+        createElement(RouteResourceReader, { routeId, url }),
+      );
     },
     refreshActiveRoute() {
-      refreshActiveServerRoute(
-        router,
-        entryForRoute,
-        startEntryFetch,
-        (entry) =>
-          control(entry).refresh(payloadRouteUrl(router.getState().location), {
-            force: true,
-          }),
-      );
+      const state = router.getState();
+      if (state.status !== "idle" || rootData === null) return;
+      const match = firstServerRouteMatch(state.matches);
+      if (match === undefined) return;
+      const url = payloadRouteUrl(state.location);
+      routeUrls.set(match.routeId, url);
+      void rootData
+        .refreshData(routeResource, match.routeId, url)
+        .then((result) => {
+          if (result.status === "rejected") {
+            reportPayloadFetchError(match.routeId, result.error, options);
+          } else if (result.status === "fulfilled") {
+            loadedKeys.add(loadedKey(match.routeId, url));
+          }
+        });
     },
     renderActiveRoute() {
-      refreshActiveServerRoute(
-        router,
-        entryForRoute,
-        startEntryFetch,
-        (entry) =>
-          control(entry).refresh(payloadRouteUrl(router.getState().location)),
-      );
+      const state = router.getState();
+      if (state.status !== "idle") return;
+      const match = firstServerRouteMatch(state.matches);
+      if (match === undefined) return;
+      const url = payloadRouteUrl(state.location);
+      routeUrls.set(match.routeId, url);
+      void ensureRouteLoaded(match.routeId, url);
     },
     subscribe(routeId, listener) {
-      const entry = entries.get(routeId);
-      if (entry !== undefined) {
-        entry.listeners.add(listener);
-        return () => {
-          entry.listeners.delete(listener);
-        };
-      }
-
-      let listeners = pendingListeners.get(routeId);
+      let listeners = routeListeners.get(routeId);
       if (listeners === undefined) {
         listeners = new Set();
-        pendingListeners.set(routeId, listeners);
+        routeListeners.set(routeId, listeners);
       }
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
-        if (listeners.size === 0) pendingListeners.delete(routeId);
+        if (listeners.size === 0) routeListeners.delete(routeId);
       };
     },
   };
-}
-
-function refreshActiveServerRoute(
-  router: FigRouter,
-  entryForRoute: (routeId: string) => ServerRouteEntry | undefined,
-  startEntryFetch: (routeId: string, url: string) => ServerRouteEntry,
-  refreshEntry: (entry: ServerRouteEntry) => void,
-): void {
-  const state = router.getState();
-  if (state.status !== "idle") return;
-  const match = firstServerRouteMatch(state.matches);
-  if (match === undefined) return;
-  const url = payloadRouteUrl(state.location);
-  const existing = entryForRoute(match.routeId);
-  if (existing !== undefined) {
-    refreshEntry(existing);
-    return;
-  }
-
-  startEntryFetch(match.routeId, url);
 }
 
 function serverRouteNode(node: FigNode): FigNode {
@@ -782,72 +696,6 @@ function serverRouteNode(node: FigNode): FigNode {
     { fallback: createElement("div", { "data-fig-payload-error": "" }) },
     createElement(Suspense, { fallback: null }, node),
   );
-}
-
-function combineDisposers(first: () => void, second: () => void): () => void {
-  return () => {
-    first();
-    second();
-  };
-}
-
-function ensureEntryAssets(entry: ServerRouteEntry): void {
-  const nextGate = insertNewServerRouteAssets(
-    entry.consumer,
-    entry.insertedAssetKeys,
-  );
-  if (nextGate !== null) armEntryGate(entry, nextGate);
-}
-
-function armEntryGate(entry: ServerRouteEntry, nextGate: Promise<void>): void {
-  entry.assetGate = combineAssetGates(entry.assetGate, nextGate);
-  const currentGate = entry.assetGate;
-  void currentGate.then(
-    () => settleEntryGate(entry, currentGate),
-    (error: unknown) => settleEntryGate(entry, currentGate, error),
-  );
-}
-
-function settleEntryGate(
-  entry: ServerRouteEntry,
-  currentGate: Promise<void>,
-  error?: unknown,
-): void {
-  if (error !== undefined) entry.onRecoverableError?.(error);
-  if (entry.assetGate !== currentGate) return;
-  entry.assetGate = null;
-  revealEntryClientReferences(entry);
-  entry.visibleNode = entry.node;
-  entry.version += 1;
-  for (const listener of entry.listeners) listener();
-}
-
-function revealEntryClientReferences(entry: ServerRouteEntry): void {
-  if (entry.assetGate !== null && !entry.hydrateWithPendingAssets) return;
-  entry.clientReferenceHydrationGate?.reveal();
-}
-
-function insertNewServerRouteAssets(
-  consumer: ServerRouteConsumer,
-  insertedAssetKeys: Set<string>,
-): Promise<void> | null {
-  const newAssets = consumer.getAssetResources().filter((resource) => {
-    const key = assetResourceKey(resource);
-    if (insertedAssetKeys.has(key)) return false;
-    insertedAssetKeys.add(key);
-    return true;
-  });
-
-  return newAssets.length === 0 ? null : insertAssetResources(newAssets);
-}
-
-function combineAssetGates(
-  current: Promise<void> | null,
-  next: Promise<void>,
-): Promise<void> {
-  return current === null
-    ? next
-    : Promise.all([current, next]).then(() => undefined);
 }
 
 function installServerRouteFetcher(
@@ -901,60 +749,6 @@ function firstServerRouteMatch(
   matches: readonly RouteMatch[],
 ): RouteMatch | undefined {
   return matches.find((match) => isServerRoute(match.node.route));
-}
-
-function loadServerRoutePayload(
-  consumer: ServerRouteConsumer,
-  routeId: string,
-  url: string,
-  options: StartClientOptions,
-  signal: AbortSignal,
-  control: ServerRouteControl,
-  refreshBoundary?: string,
-): void {
-  void fetchServerRoutePayload(
-    consumer,
-    routeId,
-    url,
-    options,
-    signal,
-    refreshBoundary,
-  ).then(
-    () => control.complete(),
-    (error: unknown) => {
-      if (isPayloadRequestCancelled(error)) return;
-      reportPayloadFetchError(routeId, error, options);
-      control.complete();
-    },
-  );
-}
-
-async function fetchServerRoutePayload(
-  consumer: ServerRouteConsumer,
-  routeId: string,
-  url: string,
-  options: StartClientOptions,
-  signal: AbortSignal,
-  refreshBoundary?: string,
-): Promise<Response> {
-  const result = await consumer.fetch(url, { refreshBoundary, signal });
-  // The consumer has decoded the full payload; a payload with client
-  // references but no configured resolver would render placeholders forever,
-  // so fail loudly instead.
-  requireClientReferenceResolver(routeId, consumer, options);
-  return result;
-}
-
-function hasClientReferenceResolver(
-  options: Pick<
-    StartClientOptions,
-    "loadClientReference" | "resolveClientReference"
-  >,
-): boolean {
-  return (
-    options.loadClientReference !== undefined ||
-    options.resolveClientReference !== undefined
-  );
 }
 
 function payloadRouteUrl(location: RouterLocation): string {
@@ -1020,43 +814,6 @@ function reportPayloadFetchError(
     `[fig-start] server route "${routeId}" payload fetch failed:`,
     error,
   );
-}
-
-// Exported for testing: the missing-resolver guard and the navigation-teardown
-// watcher are pure logic, so they're verified without a DOM.
-export function requireClientReferenceResolver(
-  routeId: string,
-  consumer: Pick<PayloadConsumer, "getClientReferences">,
-  options: Pick<
-    StartClientOptions,
-    "loadClientReference" | "resolveClientReference"
-  >,
-): void {
-  if (
-    !hasClientReferenceResolver(options) &&
-    consumer.getClientReferences().length > 0
-  ) {
-    throw new Error(
-      `Server route "${routeId}" renders client components, but ` +
-        `hydrateStart() received no client-reference resolver. Pass ` +
-        `loadClientReference from "virtual:fig-start/client-manifest" (the ` +
-        `@bgub/fig-start/vite plugin).`,
-    );
-  }
-}
-
-export function watchServerRouteLifetime(
-  router: Pick<Router, "getState" | "subscribe">,
-  routeId: string,
-  dispose: () => void,
-): void {
-  const unsubscribe = router.subscribe(() => {
-    if (router.getState().matches.some((match) => match.routeId === routeId)) {
-      return;
-    }
-    unsubscribe();
-    dispose();
-  });
 }
 
 function readDataStream(): DataStream | null {

@@ -20,7 +20,6 @@ import {
   DATA_ENDPOINT_PATH,
   DATA_FRAME_ATTR,
   DATA_SCRIPT_ID,
-  PAYLOAD_BOUNDARY_HEADER,
   PAYLOAD_FRAME_ATTR,
   PAYLOAD_ROUTE_ID_HEADER,
   PAYLOAD_SEGMENT_ID_HEADER,
@@ -323,7 +322,7 @@ describe("@bgub/fig-start server handler", () => {
     expect(rows).toContain("Nested child");
   });
 
-  it("renders same-segment payload refreshes as boundary rows", async () => {
+  it("serves nested child navigations as plain payload streams", async () => {
     const nestedRoutes = [
       createRootRoute({
         component: () => createElement("main", null, createElement(Outlet)),
@@ -355,7 +354,6 @@ describe("@bgub/fig-start server handler", () => {
       new Request("http://localhost/payload-layout/b", {
         headers: {
           accept: "text/x-fig-payload; charset=utf-8",
-          [PAYLOAD_BOUNDARY_HEADER]: "/payload-layout",
         },
       }),
     );
@@ -364,10 +362,12 @@ describe("@bgub/fig-start server handler", () => {
     expect(response.headers.get(PAYLOAD_ROUTE_ID_HEADER)).toBe(
       "/payload-layout",
     );
-    expect(rows).toContain('"tag":"refresh"');
-    expect(rows).toContain('"boundary":"/payload-layout"');
+    // The resource model has no targeted-refresh protocol: navigating between
+    // a server layout's children re-requests the segment as an ordinary
+    // payload stream, and the client swaps it by resource key.
+    expect(rows).not.toContain('"tag":"refresh"');
+    expect(rows).toContain('"tag":"model"');
     expect(rows).toContain('"type":"section"');
-    expect(rows).not.toContain('"type":{"$fig":"fragment"}');
     expect(rows).toContain("Child B");
   });
 

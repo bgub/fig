@@ -94,6 +94,18 @@ export interface PayloadDecodeOptions {
   hydrate?: (entries: FigDataHydrationEntry[]) => boolean;
   loadClientReference?: LoadClientReference;
   /**
+   * Observes every client-reference row as it arrives (metadata plus its
+   * declared assets), before the referencing content decodes. Frameworks use
+   * it to track which modules a stream depends on (e.g. SSR module
+   * bootstrapping); it does not affect resolution.
+   */
+  onClientReference?: (reference: {
+    assets?: readonly FigAssetResource[];
+    exportName?: string;
+    id: string;
+    ssr?: boolean;
+  }) => void;
+  /**
    * Called with stream-safe asset resources as soon as their rows arrive
    * (e.g. fig-dom's insertAssetResources). A returned promise gates the
    * reveal of only the content that declared a dependency on those assets;
@@ -305,6 +317,7 @@ class PayloadStreamDecode {
       }
       case "client": {
         const chunk = this.getChunk(row.id);
+        this.observeClientReference(row.value);
         const gate = this.prepareAssets(row.value.assets);
         const component = this.clientReferenceComponent(row.value, gate);
         chunk.arrived = true;
@@ -341,6 +354,21 @@ class PayloadStreamDecode {
           "decodePayloadStream does not support targeted-refresh rows; refresh a serialized component by refreshing the data resource that delivers it.",
         );
     }
+  }
+
+  private observeClientReference(
+    value: Extract<PayloadRow, { tag: "client" }>["value"],
+  ): void {
+    const observe = this.options.onClientReference;
+    if (observe === undefined) return;
+    const reference: Parameters<
+      NonNullable<PayloadDecodeOptions["onClientReference"]>
+    >[0] = { id: value.id };
+    if (value.exportName !== undefined) reference.exportName = value.exportName;
+    if (value.ssr === true) reference.ssr = true;
+    const assets = value.assets?.filter(isFigAssetResource);
+    if (assets !== undefined && assets.length > 0) reference.assets = assets;
+    observe(reference);
   }
 
   // Never rejects and never blocks content on a failed asset: a rejected

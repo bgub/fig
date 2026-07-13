@@ -1,4 +1,5 @@
 import type { DataResourceLoadContext, FigNode } from "@bgub/fig";
+import type { FigAssetResource } from "@bgub/fig";
 import { loadContextHydrate } from "@bgub/fig/internal";
 import {
   assertPayloadCodecMatches,
@@ -18,6 +19,14 @@ const noop = (): void => undefined;
 export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
   codec?: PayloadCodec;
   loadClientReference?: LoadClientReference;
+  /**
+   * Overrides the asset-preparation step (default: insertAssetResources).
+   * Frameworks wrap the default to observe stylesheet gates — e.g. holding a
+   * navigation commit until the incoming route's assets settle.
+   */
+  prepareAssets?: (
+    assets: readonly FigAssetResource[],
+  ) => void | PromiseLike<void>;
   /**
    * Produces the payload response — typically a fetch of the framework's
    * serialized-component endpoint. Receives the resource arguments and the
@@ -79,7 +88,8 @@ export function payloadDataLoader<TArgs extends unknown[]>(
       // are then ignored rather than hydrated.
       hydrate: loadContextHydrate(context),
       loadClientReference: options.loadClientReference,
-      prepareAssets: (assets) => insertAssetResources(assets),
+      prepareAssets:
+        options.prepareAssets ?? ((assets) => insertAssetResources(assets)),
       resolveClientReference: options.resolveClientReference,
       signal,
     });

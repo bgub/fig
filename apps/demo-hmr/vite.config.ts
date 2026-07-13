@@ -29,6 +29,7 @@ export default defineConfig({
         replacement: pkg("fig/src/jsx-runtime.ts"),
       },
       { find: "@bgub/fig/internal", replacement: pkg("fig/src/internal.ts") },
+      { find: "@bgub/fig/payload", replacement: pkg("fig/src/payload.ts") },
       {
         find: "@bgub/fig-dom/refresh",
         replacement: pkg("fig-dom/src/refresh.ts"),
