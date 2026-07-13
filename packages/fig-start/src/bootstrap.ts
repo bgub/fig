@@ -15,6 +15,12 @@ export const PAYLOAD_FRAME_TRANSPORT = {
   attribute: PAYLOAD_FRAME_ATTR,
   globalName: PAYLOAD_STREAM_GLOBAL,
 } as const;
+// The document data stream rides the same generic frame transport under its
+// own queue global: each frame is one encoded PayloadDataHydrationEntry[].
+export const DATA_FRAME_TRANSPORT = {
+  attribute: DATA_FRAME_ATTR,
+  globalName: DATA_STREAM_GLOBAL,
+} as const;
 export const CLIENT_REFERENCE_MODULES_GLOBAL = "__figStartClientReferences";
 export const DEV_SERVER_UPDATE_EVENT = "fig-start:server-update";
 export const PAYLOAD_ROUTE_ID_HEADER = "x-fig-payload-route-id";
@@ -52,6 +58,3 @@ export interface DevServerUpdateMessage {
   kind: "server";
   path: string;
 }
-
-// Whether a payload contains any client references (needs a client-reference
-// resolver to render on the client).

@@ -1,5 +1,6 @@
 import {
   createElement,
+  type DataRefreshResult,
   dataResource,
   type DataResourceLoadContext,
   type ElementType,
@@ -14,6 +15,7 @@ import {
   useReactive,
   useSyncExternalStore,
 } from "@bgub/fig";
+import { resolveClientReferenceExport } from "@bgub/fig/internal";
 import {
   hydrateRoot,
   insertAssetResources,
@@ -40,9 +42,8 @@ import {
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
-  DATA_FRAME_ATTR,
+  DATA_FRAME_TRANSPORT,
   DATA_SCRIPT_ID,
-  DATA_STREAM_GLOBAL,
   DEV_SERVER_UPDATE_EVENT,
   type DevServerUpdateMessage,
   PAYLOAD_FRAME_TRANSPORT,
@@ -54,6 +55,7 @@ import {
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import {
+  clientReferencePlaceholder,
   RouterProvider,
   ServerRouteContentProvider,
   type ServerRouteContentStore,
@@ -130,11 +132,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
 
   router.hydrate(router.buildLocation(state.href), state.loaderData);
 
-  const serverRouteContent = createServerRouteContent(
-    options,
-    router,
-    createClientReferenceTypeCache(),
-  );
+  const serverRouteContent = createServerRouteContent(options, router);
 
   // If the matched route was a `.server.tsx`, the document carries its payload
   // payload as streamed segment frames.
@@ -166,7 +164,7 @@ export function hydrateStart(options: StartClientOptions): FigRouter {
     },
   );
   serverRouteContent.bindRootData(root.data);
-  getDataStream().s((entries) => root.data.hydrate(entries));
+  subscribeDocumentDataFrames((entries) => root.data.hydrate(entries));
 
   installServerRouteFetcher(router, serverRouteContent);
   installDevServerUpdateHandler(serverRouteContent);
@@ -202,27 +200,16 @@ async function hydrateDevtoolsPanel(container: HTMLElement): Promise<void> {
 
 type PayloadStream = PayloadFrameStream<SerializedPayloadFrame>;
 
-interface DataStream {
-  decoded?: true;
-  p(entries: readonly PayloadDataHydrationEntry[]): void;
-  q: FigDataHydrationEntry[];
-  s(listener: (entries: readonly FigDataHydrationEntry[]) => void): () => void;
-}
-
-function createHydratableClientReference(
+// One wrapper covers every decoded client reference. Non-ssr references
+// hydrate against the SSR placeholder template until the gate reveals; ssr
+// references rendered real markup on the server and skip the gate. The
+// component identity is cached per reference id by the caller, so island
+// state survives re-decodes.
+function createRouteClientReference(
   options: StartClientOptions,
   metadata: PayloadClientReferenceMetadata,
-  clientReferenceTypes: ClientReferenceTypeCache,
   hydrationGate: ClientReferenceHydrationGate,
 ): ElementType {
-  if (metadata.ssr === true) {
-    return requireStableClientReference(
-      options,
-      metadata,
-      clientReferenceTypes,
-    );
-  }
-
   const resolved =
     resolvePreloadedClientReference(metadata) ??
     options.resolveClientReference?.(metadata);
@@ -230,100 +217,34 @@ function createHydratableClientReference(
     resolved === undefined
       ? options.loadClientReference?.(metadata)
       : undefined;
+  const ssr = metadata.ssr === true;
 
-  return function StartHydratableClientReference(
+  return function StartClientReference(
     props: Props & { children?: FigNode },
   ): FigNode {
-    const hydrated = useSyncExternalStore(
-      (listener) => hydrationGate.subscribe(listener),
-      () => hydrationGate.getSnapshot(),
-      () => hydrationGate.getServerSnapshot(),
-    );
-    if (!hydrated) return clientReferencePlaceholder(metadata);
+    // Hook stability: `ssr` is constant per component instance, so each
+    // instance always takes the same branch.
+    if (!ssr) {
+      const hydrated = useSyncExternalStore(
+        (listener) => hydrationGate.subscribe(listener),
+        () => hydrationGate.getSnapshot(),
+        () => hydrationGate.getServerSnapshot(),
+      );
+      if (!hydrated) return clientReferencePlaceholder(metadata.id);
+    }
 
     if (resolved !== undefined) return createElement(resolved, props);
     if (loaded !== undefined) {
-      const type = resolveClientReferenceExport(
-        readPromise(loaded),
-        metadata.id,
-      );
+      const type = resolveClientReferenceExport(readPromise(loaded), metadata);
       return createElement(type, props);
     }
 
     throw new Error(
-      `Cannot render client reference "${metadata.id}" without a client-reference resolver.`,
+      ssr
+        ? `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`
+        : `Cannot render client reference "${metadata.id}" without a client-reference resolver.`,
     );
   };
-}
-
-interface ClientReferenceTypeCache {
-  types: Map<string, ElementType>;
-}
-
-function createClientReferenceTypeCache(): ClientReferenceTypeCache {
-  return { types: new Map() };
-}
-
-function resolveStableClientReference(
-  options: StartClientOptions,
-  metadata: PayloadClientReferenceMetadata,
-  clientReferenceTypes: ClientReferenceTypeCache,
-): ElementType | undefined {
-  const cached = clientReferenceTypes.types.get(metadata.id);
-  if (cached !== undefined) return cached;
-
-  const resolved =
-    resolvePreloadedClientReference(metadata) ??
-    options.resolveClientReference?.(metadata);
-  const loaded =
-    resolved === undefined
-      ? options.loadClientReference?.(metadata)
-      : undefined;
-
-  if (resolved !== undefined) {
-    const type = function StartStableResolvedClientReference(
-      props: Props & { children?: FigNode },
-    ): FigNode {
-      return createElement(resolved, props);
-    };
-    clientReferenceTypes.types.set(metadata.id, type);
-    return type;
-  }
-
-  if (loaded === undefined) return undefined;
-
-  const type = function StartStableLoadedClientReference(
-    props: Props & { children?: FigNode },
-  ): FigNode {
-    const loadedType = resolveClientReferenceExport(
-      readPromise(loaded),
-      metadata.id,
-    );
-    return createElement(loadedType, props);
-  };
-  clientReferenceTypes.types.set(metadata.id, type);
-  return type;
-}
-
-function requireStableClientReference(
-  options: StartClientOptions,
-  metadata: PayloadClientReferenceMetadata,
-  clientReferenceTypes: ClientReferenceTypeCache,
-): ElementType {
-  return (
-    resolveStableClientReference(options, metadata, clientReferenceTypes) ??
-    function MissingStableClientReference(): FigNode {
-      throw new Error(
-        `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`,
-      );
-    }
-  );
-}
-
-function clientReferencePlaceholder(metadata: { id: string }): FigNode {
-  return createElement("template", {
-    "data-fig-client-reference": metadata.id,
-  });
 }
 
 function resolvePreloadedClientReference(
@@ -336,7 +257,7 @@ function resolvePreloadedClientReference(
 
   const moduleValue = (registry as Record<string, unknown>)[metadata.id];
   if (moduleValue === undefined) return undefined;
-  return resolveClientReferenceExport(moduleValue, metadata.id);
+  return resolveClientReferenceExport(moduleValue, metadata);
 }
 
 interface ClientReferenceHydrationGate {
@@ -363,26 +284,6 @@ function createClientReferenceHydrationGate(): ClientReferenceHydrationGate {
       return () => listeners.delete(listener);
     },
   };
-}
-
-function resolveClientReferenceExport(
-  moduleValue: unknown,
-  id: string,
-): ElementType {
-  if (typeof moduleValue === "function") return moduleValue as ElementType;
-
-  if (typeof moduleValue === "object" && moduleValue !== null) {
-    const exportName = id.includes("#")
-      ? id.slice(id.lastIndexOf("#") + 1)
-      : "";
-    const candidate =
-      exportName === ""
-        ? undefined
-        : (moduleValue as Record<string, unknown>)[exportName];
-    if (typeof candidate === "function") return candidate as ElementType;
-  }
-
-  throw new Error(`Client reference "${id}" did not resolve to a component.`);
 }
 
 interface ServerRouteContent extends ServerRouteContentStore {
@@ -416,8 +317,10 @@ interface InitialDocumentSegment {
 function createServerRouteContent(
   options: StartClientOptions,
   router: FigRouter,
-  clientReferenceTypes: ClientReferenceTypeCache,
 ): ServerRouteContent {
+  // Component identity per reference id: island state survives re-decodes
+  // because a refreshed tree reuses the same component function.
+  const clientReferenceTypes = new Map<string, ElementType>();
   let rootData: FigDataStoreHandle | null = null;
   let initialSegment: InitialDocumentSegment | null = null;
   // The initial document's assets are already in the SSR head (hoisted at
@@ -425,8 +328,6 @@ function createServerRouteContent(
   // gates reveal on them — the markup on screen is already styled.
   let ungatedInitialAssets = false;
   const routeUrls = new Map<string, string>();
-  const versions = new Map<string, number>();
-  const routeListeners = new Map<string, Set<() => void>>();
   const loadedKeys = new Set<string>();
   const pendingModuleLoads = new Set<PromiseLike<unknown>>();
   // Stylesheet gates from streamed assets: prepare() holds the navigation
@@ -467,7 +368,7 @@ function createServerRouteContent(
   function resolveRouteClientReference(
     metadata: PayloadClientReferenceMetadata,
   ): ElementType {
-    const cached = clientReferenceTypes.types.get(metadata.id);
+    const cached = clientReferenceTypes.get(metadata.id);
     if (cached !== undefined) return cached;
 
     // A payload with client references but no resolver would render
@@ -492,13 +393,12 @@ function createServerRouteContent(
       );
     }
 
-    const type = createHydratableClientReference(
+    const type = createRouteClientReference(
       trackedOptions,
       metadata,
-      clientReferenceTypes,
       hydrationGate,
     );
-    clientReferenceTypes.types.set(metadata.id, type);
+    clientReferenceTypes.set(metadata.id, type);
     return type;
   }
 
@@ -588,13 +488,21 @@ function createServerRouteContent(
     return new Response(stream);
   }
 
-  function bumpVersion(routeId: string): void {
-    versions.set(routeId, (versions.get(routeId) ?? 0) + 1);
-    for (const listener of routeListeners.get(routeId) ?? []) listener();
-  }
-
   function loadedKey(routeId: string, url: string): string {
     return `${routeId}\n${url}`;
+  }
+
+  function settleRouteLoad(
+    routeId: string,
+    url: string,
+  ): (result: DataRefreshResult<FigNode>) => void {
+    return (result) => {
+      if (result.status === "fulfilled") {
+        loadedKeys.add(loadedKey(routeId, url));
+      } else if (result.status === "rejected") {
+        reportPayloadFetchError(routeId, result.error, options);
+      }
+    };
   }
 
   // Ensure-loaded, not force-refresh: a cached key (back/forward navigation)
@@ -603,27 +511,29 @@ function createServerRouteContent(
     routeId: string,
     url: string,
   ): Promise<void> | undefined {
-    const key = loadedKey(routeId, url);
-    if (loadedKeys.has(key) || rootData === null) return undefined;
-    return rootData.refreshData(routeResource, routeId, url).then((result) => {
-      if (result.status === "fulfilled") loadedKeys.add(key);
-      else if (result.status === "rejected") {
-        reportPayloadFetchError(routeId, result.error, options);
-      }
-    });
+    if (loadedKeys.has(loadedKey(routeId, url)) || rootData === null) {
+      return undefined;
+    }
+    return rootData
+      .refreshData(routeResource, routeId, url)
+      .then(settleRouteLoad(routeId, url));
+  }
+
+  // The idle-router preamble shared by refresh/render of the active route:
+  // resolves the current server-route match and records its URL.
+  function activeServerRoute(): { routeId: string; url: string } | null {
+    const state = router.getState();
+    if (state.status !== "idle") return null;
+    const match = firstServerRouteMatch(state.matches);
+    if (match === undefined) return null;
+    const url = payloadRouteUrl(state.location);
+    routeUrls.set(match.routeId, url);
+    return { routeId: match.routeId, url };
   }
 
   return {
     bindRootData(data) {
       rootData = data;
-    },
-    // Reveal happens from the content reader's layout effect (below), which
-    // commits together with the islands whose gate subscriptions it flips —
-    // this commit callback fires on shell commits too, before any island has
-    // subscribed, so revealing here would be lost.
-    commit() {},
-    getSnapshot(routeId) {
-      return versions.get(routeId) ?? 0;
     },
     receiveSegment(segment, stream, url) {
       routeUrls.set(segment.routeId, url);
@@ -640,7 +550,6 @@ function createServerRouteContent(
       routeUrls.set(match.routeId, url);
       await ensureRouteLoaded(match.routeId, url);
       await Promise.allSettled([...pendingModuleLoads, ...pendingAssetGates]);
-      bumpVersion(match.routeId);
     },
     render(routeId) {
       const url = routeUrls.get(routeId);
@@ -650,42 +559,16 @@ function createServerRouteContent(
       );
     },
     refreshActiveRoute() {
-      const state = router.getState();
-      if (state.status !== "idle" || rootData === null) return;
-      const match = firstServerRouteMatch(state.matches);
-      if (match === undefined) return;
-      const url = payloadRouteUrl(state.location);
-      routeUrls.set(match.routeId, url);
+      const active = activeServerRoute();
+      if (active === null || rootData === null) return;
       void rootData
-        .refreshData(routeResource, match.routeId, url)
-        .then((result) => {
-          if (result.status === "rejected") {
-            reportPayloadFetchError(match.routeId, result.error, options);
-          } else if (result.status === "fulfilled") {
-            loadedKeys.add(loadedKey(match.routeId, url));
-          }
-        });
+        .refreshData(routeResource, active.routeId, active.url)
+        .then(settleRouteLoad(active.routeId, active.url));
     },
     renderActiveRoute() {
-      const state = router.getState();
-      if (state.status !== "idle") return;
-      const match = firstServerRouteMatch(state.matches);
-      if (match === undefined) return;
-      const url = payloadRouteUrl(state.location);
-      routeUrls.set(match.routeId, url);
-      void ensureRouteLoaded(match.routeId, url);
-    },
-    subscribe(routeId, listener) {
-      let listeners = routeListeners.get(routeId);
-      if (listeners === undefined) {
-        listeners = new Set();
-        routeListeners.set(routeId, listeners);
-      }
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) routeListeners.delete(routeId);
-      };
+      const active = activeServerRoute();
+      if (active === null) return;
+      void ensureRouteLoaded(active.routeId, active.url);
     },
   };
 }
@@ -816,98 +699,6 @@ function reportPayloadFetchError(
   );
 }
 
-function readDataStream(): DataStream | null {
-  const value = (globalThis as Record<string, unknown>)[DATA_STREAM_GLOBAL];
-  return isDataStream(value) ? value : null;
-}
-
-function getDataStream(): DataStream {
-  const current = readDataStream();
-  if (current?.decoded === true) {
-    appendMissingDataEntries(current, readDataFramesFromDocument());
-    return current;
-  }
-
-  const stream = createDataStream(
-    current === null
-      ? readDataFramesFromDocument()
-      : queuedPayloadDataEntries(current),
-  );
-  (globalThis as Record<string, unknown>)[DATA_STREAM_GLOBAL] = stream;
-  if (current !== null) {
-    appendMissingDataEntries(stream, readDataFramesFromDocument());
-  }
-  return stream;
-}
-
-function createDataStream(
-  initialEntries: readonly PayloadDataHydrationEntry[],
-): DataStream {
-  let listeners: Array<(entries: readonly FigDataHydrationEntry[]) => void> =
-    [];
-  const seenEntries = new Set<string>();
-
-  function decodeNewEntries(
-    entries: readonly PayloadDataHydrationEntry[],
-  ): FigDataHydrationEntry[] {
-    // Dedup is per entry because Fig Start's server emits each data entry once
-    // per stream, and re-read document frames are re-fed as whole encoded
-    // frames. If data frames ever allow a new entry to ref a repeated entry
-    // from another frame, this must move to frame-level dedupe before decode.
-    const next: PayloadDataHydrationEntry[] = [];
-    for (const entry of entries) {
-      const key = JSON.stringify(entry);
-      if (seenEntries.has(key)) continue;
-      seenEntries.add(key);
-      next.push(entry);
-    }
-    return decodePayloadDataEntries(next);
-  }
-
-  const stream: DataStream = {
-    decoded: true,
-    q: decodeNewEntries(initialEntries),
-    p(entries) {
-      const next = decodeNewEntries(entries);
-      if (next.length === 0) return;
-      stream.q.push(...next);
-      for (const listener of listeners) listener(next);
-    },
-    s(listener) {
-      listeners.push(listener);
-      if (stream.q.length > 0) listener([...stream.q]);
-      return () => {
-        listeners = listeners.filter((item) => item !== listener);
-      };
-    },
-  };
-  return stream;
-}
-
-function queuedPayloadDataEntries(
-  stream: DataStream,
-): PayloadDataHydrationEntry[] {
-  return stream.q as unknown as PayloadDataHydrationEntry[];
-}
-
-function isDataStream(value: unknown): value is DataStream {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { q?: unknown }).q) &&
-    typeof (value as { p?: unknown }).p === "function" &&
-    typeof (value as { s?: unknown }).s === "function"
-  );
-}
-
-function readDataFramesFromDocument(): PayloadDataHydrationEntry[] {
-  return Array.from(
-    document.querySelectorAll(`script[${DATA_FRAME_ATTR}]`),
-    (element) =>
-      JSON.parse(element.textContent ?? "[]") as PayloadDataHydrationEntry[],
-  ).flat();
-}
-
 // The shared transport getter reads-or-installs the queue global and replays
 // document frames the queue missed (a bundle that executed mid-stream or
 // without the bootstrap).
@@ -915,11 +706,19 @@ function getPayloadStream(): PayloadStream {
   return getPayloadFrameStream<SerializedPayloadFrame>(PAYLOAD_FRAME_TRANSPORT);
 }
 
-function appendMissingDataEntries(
-  stream: DataStream,
-  entries: readonly PayloadDataHydrationEntry[],
+// The document data stream is the same generic frame transport under its own
+// global; each frame carries one encoded entry batch. Replay/dedupe of
+// document frames is the transport's job — entries themselves need no second
+// dedupe because the server sends each key at most once per document.
+function subscribeDocumentDataFrames(
+  onEntries: (entries: FigDataHydrationEntry[]) => void,
 ): void {
-  if (entries.length > 0) stream.p(entries);
+  getPayloadFrameStream<PayloadDataHydrationEntry[]>(DATA_FRAME_TRANSPORT).s(
+    (frame) => {
+      const entries = decodePayloadDataEntries(frame);
+      if (entries.length > 0) onEntries(entries);
+    },
+  );
 }
 
 function browserHistory(): RouterHistory {

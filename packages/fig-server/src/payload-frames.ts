@@ -1,4 +1,4 @@
-import { escapeAttribute } from "./html.ts";
+import { escapeScriptJson, nonceAttribute } from "./shared.ts";
 
 // The inline payload-frame transport: how a document render carries payload
 // rows to the client as inline scripts interleaved between HTML chunks (the
@@ -82,7 +82,7 @@ export function payloadFrameBootstrapCode(
 export function payloadFrameBootstrapScript(
   options: PayloadFrameTransportOptions = {},
 ): string {
-  return `<script${nonceAttr(options)}>${payloadFrameBootstrapCode(options)}</script>`;
+  return `<script${nonceAttribute(options.nonce)}>${payloadFrameBootstrapCode(options)}</script>`;
 }
 
 /**
@@ -96,9 +96,9 @@ export function payloadFrameScript(
 ): string {
   const name = resolveGlobalName(options);
   const attribute = resolveFrameAttribute(options);
-  const nonce = nonceAttr(options);
+  const nonce = nonceAttribute(options.nonce);
   return (
-    `<script type="application/json" ${attribute}=""${nonce}>${escapeFrameJson(frame)}</script>` +
+    `<script type="application/json" ${attribute}=""${nonce}>${escapeScriptJson(frame)}</script>` +
     `<script${nonce}>globalThis.${name}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
   );
 }
@@ -184,16 +184,4 @@ function readFramesFromDocument<TFrame>(
     document.querySelectorAll(`script[${attribute}]`),
     (element) => JSON.parse(element.textContent ?? "") as TFrame,
   );
-}
-
-function nonceAttr(
-  options: Pick<PayloadFrameTransportOptions, "nonce">,
-): string {
-  return options.nonce === undefined
-    ? ""
-    : ` nonce="${escapeAttribute(options.nonce)}"`;
-}
-
-function escapeFrameJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, "\\u003C");
 }

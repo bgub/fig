@@ -34,7 +34,6 @@ import {
   isThenable,
   isValidElement,
   isViewTransition,
-  normalizeDataResourceKey,
   type PayloadGraphEncodeContext,
   type RenderDispatcher,
   readThenable,
@@ -49,7 +48,6 @@ import {
 } from "@bgub/fig/internal";
 import {
   encodePayloadDataEntries,
-  encodePayloadValue,
   jsonPayloadCodec,
   type PayloadCodec,
   type PayloadElementModel,
@@ -64,6 +62,7 @@ import {
   createStaticDispatcher,
   type Deferred,
   deferred,
+  errorMessage,
   streamFlowBlocked,
   streamHighWaterMark,
   withContextValue,
@@ -372,7 +371,7 @@ function emitDataRows(request: PayloadRequest): void {
     // lets the entry stream once its refresh settles.
     if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
 
-    const key = normalizeDataResourceKey(snapshot.key);
+    const key = snapshot.canonicalKey;
     if (request.emittedDataKeys.has(key)) {
       request.pendingDataSnapshots.delete(snapshot.canonicalKey);
       continue;
@@ -581,13 +580,14 @@ function serializeElementModel(
     ? definePayloadGraphElement(frame.request.graph, element)
     : undefined;
   if (typeof id === "object") return id;
-  return {
+  const model: PayloadElementModel = {
     $fig: "element",
-    ...(id === undefined ? null : { id }),
     key: element.key,
     props: serializeProps(element.props, frame, treeProps),
     type,
   };
+  if (id !== undefined) model.id = id;
+  return model;
 }
 
 function serializeFunctionComponent(
@@ -641,7 +641,8 @@ function serializeProps(
   treeProps: ReadonlySet<string>,
 ): PayloadModel {
   const value: Record<string, PayloadModel> = {};
-  for (const [name, child] of Object.entries(props)) {
+  for (const name of Object.keys(props)) {
+    const child = props[name];
     value[name] = treeProps.has(name)
       ? serializeTreeProp(child as FigNode, frame)
       : serializeValue(child, frame);
@@ -662,7 +663,11 @@ function serializeTreeProp(value: FigNode, frame: RenderFrame): PayloadModel {
 }
 
 function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
-  if (isPlainPayloadValue(value)) return encodePayloadValue(value);
+  // Scalar values return from the shared encoder before any graph access, so
+  // reusing the request graph here is free (no per-value context allocation).
+  if (isPlainPayloadValue(value)) {
+    return encodePayloadValueWithGraph(value, frame.request.graph);
+  }
 
   if (typeof value === "function") {
     if (isClientReference(value)) {
@@ -744,7 +749,7 @@ function outlineError(
   frame: RenderFrame,
   error: unknown,
   referenceKind: "lazy" | "promise",
-  scopedAssets: SerializedAssetResource[] = [],
+  scopedAssets: SerializedAssetResource[],
 ): PayloadSpecialModel {
   const request = frame.request;
   const id = request.nextRowId++;
@@ -899,87 +904,85 @@ function serializeAssetResource(
 ): SerializedAssetResource {
   // The payload asset wire format is descriptor-only and intentionally does not
   // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
-  // SSR/head resources still round-trip keys through data-fig-resource-key.
+  // Omitted `undefined` optionals are part of the wire contract, hence the
+  // assign-if-defined shape. SSR/head resources still round-trip keys through
+  // data-fig-resource-key.
   switch (resource.kind) {
-    case "stylesheet":
-      return {
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
+    case "stylesheet": {
+      const model: SerializedAssetResource = {
         href: resource.href,
         kind: resource.kind,
-        ...(resource.media === undefined ? {} : { media: resource.media }),
-        ...(resource.precedence === undefined
-          ? {}
-          : { precedence: resource.precedence }),
       };
-    case "preload":
-      return {
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "media", resource.media);
+      assignDefined(model, "precedence", resource.precedence);
+      return model;
+    }
+    case "preload": {
+      const model: SerializedAssetResource = {
         as: resource.as,
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
-        ...(resource.fetchPriority === undefined
-          ? {}
-          : { fetchPriority: resource.fetchPriority }),
-        href: resource.href,
-        kind: resource.kind,
-        ...(resource.type === undefined ? {} : { type: resource.type }),
-      };
-    case "modulepreload":
-      return {
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
-        ...(resource.fetchPriority === undefined
-          ? {}
-          : { fetchPriority: resource.fetchPriority }),
         href: resource.href,
         kind: resource.kind,
       };
-    case "script":
-      return {
-        ...(resource.async === undefined ? {} : { async: resource.async }),
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
-        ...(resource.defer === undefined ? {} : { defer: resource.defer }),
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      assignDefined(model, "type", resource.type);
+      return model;
+    }
+    case "modulepreload": {
+      const model: SerializedAssetResource = {
+        href: resource.href,
         kind: resource.kind,
-        ...(resource.module === undefined ? {} : { module: resource.module }),
+      };
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      return model;
+    }
+    case "script": {
+      const model: SerializedAssetResource = {
+        kind: resource.kind,
         src: resource.src,
       };
-    case "font":
-      return {
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
-        ...(resource.fetchPriority === undefined
-          ? {}
-          : { fetchPriority: resource.fetchPriority }),
+      assignDefined(model, "async", resource.async);
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "defer", resource.defer);
+      assignDefined(model, "module", resource.module);
+      return model;
+    }
+    case "font": {
+      const model: SerializedAssetResource = {
         href: resource.href,
         kind: resource.kind,
         type: resource.type,
       };
-    case "preconnect":
-      return {
-        ...(resource.crossOrigin === undefined
-          ? {}
-          : { crossOrigin: resource.crossOrigin }),
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      return model;
+    }
+    case "preconnect": {
+      const model: SerializedAssetResource = {
         href: resource.href,
         kind: resource.kind,
       };
+      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      return model;
+    }
     case "title":
     case "meta":
       throw new Error(
         "Head-only resources cannot be serialized into the payload.",
       );
   }
-
-  return unsupportedSerializedAssetResource(resource);
 }
 
-function unsupportedSerializedAssetResource(resource: FigAssetResource): never {
-  throw new Error(`Unsupported asset resource kind: ${resource.kind}`);
+function assignDefined(
+  target: SerializedAssetResource,
+  name: string,
+  value: unknown,
+): void {
+  if (value !== undefined) {
+    (target as Record<string, unknown>)[name] = value;
+  }
 }
 
 function emitRow(request: PayloadRequest, row: PayloadRow): void {
@@ -1018,7 +1021,10 @@ function flushRows(request: PayloadRequest): void {
       request.controller.enqueue(request.queuedRows[flushed]);
       flushed += 1;
     }
-    if (flushed > 0) request.queuedRows = request.queuedRows.slice(flushed);
+    if (flushed === request.queuedRows.length) request.queuedRows.length = 0;
+    else if (flushed > 0) {
+      request.queuedRows = request.queuedRows.slice(flushed);
+    }
   } finally {
     request.flushingRows = false;
   }
@@ -1055,15 +1061,19 @@ function cleanupPayloadAbortListener(request: PayloadRequest): void {
 
 // Wire-format flattening only: unlike the shared collectChildren, this keeps
 // empty children and does NOT merge adjacent text — the client decodes rows
-// and re-collects children itself, so merging here would double-apply.
+// and re-collects children itself, so merging here would double-apply. Flat
+// input (the common case) is returned untouched.
 function flattenChildArrays(children: FigNode[]): FigNode[] {
+  if (!children.some(Array.isArray)) return children;
+
   const collected: FigNode[] = [];
-
   for (const child of children) {
-    if (Array.isArray(child)) collected.push(...flattenChildArrays(child));
-    else collected.push(child);
+    if (Array.isArray(child)) {
+      for (const nested of flattenChildArrays(child)) collected.push(nested);
+    } else {
+      collected.push(child);
+    }
   }
-
   return collected;
 }
 
@@ -1071,10 +1081,6 @@ function invalidChildError(value: unknown): Error {
   return new Error(
     `Invalid Fig child in payload render: ${describeInvalidChild(value)}.`,
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function throwIfAborted(signal?: AbortSignal | null): void {

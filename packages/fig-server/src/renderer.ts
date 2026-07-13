@@ -78,6 +78,7 @@ import {
   streamFlowBlocked,
   streamHighWaterMark,
   withContextValue,
+  errorMessage,
 } from "./shared.ts";
 import type { RenderTreeNode } from "./render-tree.ts";
 import type {
@@ -1751,10 +1752,6 @@ function reportBoundaryError(
   } catch {
     return {};
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function recordErrorStack(error: unknown, stack: StackFrame | null): void {

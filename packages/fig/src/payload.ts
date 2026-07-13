@@ -14,18 +14,20 @@ import {
 import { readPromise } from "./hooks.ts";
 import {
   decodePayloadDataEntries,
-  decodePayloadNumber,
-  definePayloadProperty,
+  decodePayloadRecord,
+  decodePayloadValueTag,
   errorFromPayloadValue,
   isPayloadSpecialModel,
   jsonPayloadCodec,
   type PayloadClientReferenceMetadata,
   type PayloadCodec,
+  type PayloadDecodeRefs,
   type PayloadElementModel,
   type PayloadModel,
   type PayloadRow,
   type PayloadRowDecoder,
   type PayloadSpecialModel,
+  type PayloadValueSpecialModel,
   type SerializedAssetResource,
 } from "./payload-format.ts";
 import { type FigAssetResource, isFigAssetResource } from "./resource.ts";
@@ -168,14 +170,33 @@ type DecodeChunk = {
   // be waiting on an asset gate. Truncation and abort reject only chunks
   // whose rows never arrived.
   arrived: boolean;
-  promise: Promise<unknown>;
-  reject(reason: unknown): void;
-  resolve(value: unknown): void;
+  // Materialized lazily: most rows settle synchronously at arrival and are
+  // only ever read through status/value, so eagerly allocating a promise,
+  // its resolvers, and a thenable-registry entry per row would be waste.
+  promise: Promise<unknown> | null;
+  reject: ((reason: unknown) => void) | null;
+  resolve: ((value: unknown) => void) | null;
   status: "pending" | "fulfilled" | "rejected";
   value: unknown;
 };
 
 const noop = (): void => undefined;
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  reject: (reason: unknown) => void;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: Deferred<T>["resolve"] = noop;
+  let reject: Deferred<T>["reject"] = noop;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, reject, resolve };
+}
 
 class PayloadStreamDecode {
   readonly completion: Promise<PayloadDecodeCompletion>;
@@ -189,28 +210,42 @@ class PayloadStreamDecode {
   private readonly rowDecoder: PayloadRowDecoder;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private done = false;
-  private resolveCompletion: (completion: PayloadDecodeCompletion) => void =
-    noop;
+  private readonly resolveCompletion: (
+    completion: PayloadDecodeCompletion,
+  ) => void;
   // Resolved on abort so arrived-but-gated chunks reveal instead of waiting
   // for asset gates that may never settle.
-  private releaseGates: () => void = noop;
+  private readonly releaseGates: () => void;
   private readonly gatesReleased: Promise<void>;
   private removeAbortListener: () => void = noop;
+  // One closure and one refs adapter reused across every decoded model, so
+  // the per-node decode loop allocates only the decoded values themselves.
+  private readonly decodeChild = (model: PayloadModel): unknown =>
+    this.decodeModel(model);
+  private readonly valueRefs: PayloadDecodeRefs = {
+    define: (id, create, fill) => this.defineObjectRef(id, create, fill),
+    read: (id) => {
+      if (!this.objectRefs.has(id)) {
+        throw new Error(`Payload referenced unknown object id ${id}.`);
+      }
+      return this.objectRefs.get(id);
+    },
+  };
 
   constructor(
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
-    this.completion = new Promise((resolve) => {
-      this.resolveCompletion = resolve;
-    });
-    this.gatesReleased = new Promise((resolve) => {
-      this.releaseGates = resolve;
-    });
+    const completion = deferred<PayloadDecodeCompletion>();
+    this.completion = completion.promise;
+    this.resolveCompletion = completion.resolve;
+    const gates = deferred<void>();
+    this.gatesReleased = gates.promise;
+    this.releaseGates = () => gates.resolve(undefined);
     this.rowDecoder = (options.codec ?? jsonPayloadCodec).createDecoder((row) =>
       this.handleRow(row),
     );
-    this.value = this.getChunk(0).promise as Promise<FigNode>;
+    this.value = this.chunkPromise(this.getChunk(0)) as Promise<FigNode>;
 
     void this.ingest(stream);
 
@@ -317,9 +352,14 @@ class PayloadStreamDecode {
       }
       case "client": {
         const chunk = this.getChunk(row.id);
-        this.observeClientReference(row.value);
+        const metadata: PayloadClientReferenceMetadata = { id: row.value.id };
+        if (row.value.exportName !== undefined) {
+          metadata.exportName = row.value.exportName;
+        }
+        if (row.value.ssr === true) metadata.ssr = true;
+        this.observeClientReference(metadata, row.value.assets);
         const gate = this.prepareAssets(row.value.assets);
-        const component = this.clientReferenceComponent(row.value, gate);
+        const component = this.clientReferenceComponent(metadata, gate);
         chunk.arrived = true;
         this.fulfillChunk(chunk, component);
         return;
@@ -352,16 +392,15 @@ class PayloadStreamDecode {
   }
 
   private observeClientReference(
-    value: Extract<PayloadRow, { tag: "client" }>["value"],
+    metadata: PayloadClientReferenceMetadata,
+    serializedAssets: readonly SerializedAssetResource[] | undefined,
   ): void {
     const observe = this.options.onClientReference;
     if (observe === undefined) return;
     const reference: Parameters<
       NonNullable<PayloadDecodeOptions["onClientReference"]>
-    >[0] = { id: value.id };
-    if (value.exportName !== undefined) reference.exportName = value.exportName;
-    if (value.ssr === true) reference.ssr = true;
-    const assets = value.assets?.filter(isFigAssetResource);
+    >[0] = { ...metadata };
+    const assets = serializedAssets?.filter(isFigAssetResource);
     if (assets !== undefined && assets.length > 0) reference.assets = assets;
     observe(reference);
   }
@@ -389,13 +428,9 @@ class PayloadStreamDecode {
   }
 
   private clientReferenceComponent(
-    value: Extract<PayloadRow, { tag: "client" }>["value"],
+    metadata: PayloadClientReferenceMetadata,
     gate: Promise<void> | null,
   ): ElementType<any> {
-    const metadata: PayloadClientReferenceMetadata = { id: value.id };
-    if (value.exportName !== undefined) metadata.exportName = value.exportName;
-    if (value.ssr === true) metadata.ssr = true;
-
     const resolved = this.options.resolveClientReference?.(metadata);
     if (resolved !== undefined) {
       return function PayloadResolvedClientComponent(props: Props): FigNode {
@@ -433,18 +468,11 @@ class PayloadStreamDecode {
     const existing = this.chunks.get(id);
     if (existing !== undefined) return existing;
 
-    let resolve: DecodeChunk["resolve"] = noop;
-    let reject: DecodeChunk["reject"] = noop;
-    const promise = new Promise<unknown>((innerResolve, innerReject) => {
-      resolve = innerResolve;
-      reject = innerReject;
-    });
-    trackThenable(promise);
     const chunk: DecodeChunk = {
       arrived: false,
-      promise,
-      reject,
-      resolve,
+      promise: null,
+      reject: null,
+      resolve: null,
       status: "pending",
       value: undefined,
     };
@@ -452,115 +480,71 @@ class PayloadStreamDecode {
     return chunk;
   }
 
+  // Materializes (and registers with the thenable registry) on first access:
+  // a settled chunk becomes an already-settled promise, a pending one gets
+  // live resolvers that fulfillChunk/rejectChunk drive.
+  private chunkPromise(chunk: DecodeChunk): Promise<unknown> {
+    if (chunk.promise !== null) return chunk.promise;
+
+    if (chunk.status === "fulfilled") {
+      chunk.promise = Promise.resolve(chunk.value);
+    } else if (chunk.status === "rejected") {
+      chunk.promise = Promise.reject(chunk.value);
+      // Holes nobody awaits must not become unhandled rejections; readers
+      // still observe the stored error.
+      void chunk.promise.catch(noop);
+    } else {
+      const settled = deferred<unknown>();
+      chunk.promise = settled.promise;
+      chunk.resolve = settled.resolve;
+      chunk.reject = settled.reject;
+    }
+    trackThenable(chunk.promise);
+    return chunk.promise;
+  }
+
   private fulfillChunk(chunk: DecodeChunk, value: unknown): void {
     if (chunk.status !== "pending") return;
     chunk.status = "fulfilled";
     chunk.value = value;
-    chunk.resolve(value);
+    chunk.resolve?.(value);
   }
 
   private rejectChunk(chunk: DecodeChunk, error: unknown): void {
     if (chunk.status !== "pending") return;
     chunk.status = "rejected";
     chunk.value = error;
-    chunk.reject(error);
-    // Holes nobody reads (aborted decodes, unread promise props) must not
-    // become unhandled rejections; readers still observe the stored error.
-    void chunk.promise.catch(noop);
+    if (chunk.reject !== null) {
+      chunk.reject(error);
+      void chunk.promise?.catch(noop);
+    }
   }
 
   readChunkForRender(id: number): unknown {
     const chunk = this.getChunk(id);
     if (chunk.status === "rejected") throw chunk.value;
-    if (chunk.status === "pending") return readPromise(chunk.promise);
+    if (chunk.status === "pending")
+      return readPromise(this.chunkPromise(chunk));
     return chunk.value;
   }
 
   private decodeModel(model: PayloadModel): unknown {
     if (model === null) return null;
-    if (Array.isArray(model)) {
-      return model.map((item) => this.decodeModel(item));
-    }
+    if (Array.isArray(model)) return model.map(this.decodeChild);
     if (typeof model !== "object") return model;
 
     if (isPayloadSpecialModel(model)) return this.decodeSpecialModel(model);
 
-    const decoded: Record<string, unknown> = {};
-    for (const [name, value] of Object.entries(model)) {
-      definePayloadProperty(decoded, name, this.decodeModel(value));
-    }
-    return decoded;
+    return decodePayloadRecord(
+      model as Record<string, PayloadModel>,
+      this.decodeChild,
+    );
   }
 
   private decodeSpecialModel(
     model: PayloadElementModel | PayloadSpecialModel,
   ): unknown {
     switch (model.$fig) {
-      case "array": {
-        return this.defineObjectRef(
-          model.id,
-          () => [] as unknown[],
-          (value) => {
-            value.push(...model.value.map((item) => this.decodeModel(item)));
-          },
-        );
-      }
-      case "bigint":
-        return BigInt(model.value);
-      case "date":
-        return new Date(model.value);
-      case "map": {
-        return this.defineObjectRef(
-          model.id,
-          () => new Map(),
-          (value) => {
-            for (const [key, item] of model.entries) {
-              value.set(this.decodeModel(key), this.decodeModel(item));
-            }
-          },
-        );
-      }
-      case "number":
-        return decodePayloadNumber(model.value);
-      case "object": {
-        if (model.id === undefined) {
-          const value: Record<string, unknown> = {};
-          for (const [name, child] of Object.entries(model.value)) {
-            definePayloadProperty(value, name, this.decodeModel(child));
-          }
-          return value;
-        }
-        return this.defineObjectRef(
-          model.id,
-          () => ({}) as Record<string, unknown>,
-          (value) => {
-            for (const [name, child] of Object.entries(model.value)) {
-              definePayloadProperty(value, name, this.decodeModel(child));
-            }
-          },
-        );
-      }
-      case "ref": {
-        if (!this.objectRefs.has(model.id)) {
-          throw new Error(`Payload referenced unknown object id ${model.id}.`);
-        }
-        return this.objectRefs.get(model.id);
-      }
-      case "set": {
-        return this.defineObjectRef(
-          model.id,
-          () => new Set(),
-          (value) => {
-            for (const item of model.values) {
-              value.add(this.decodeModel(item));
-            }
-          },
-        );
-      }
-      case "symbol":
-        return Symbol.for(model.key);
-      case "undefined":
-        return undefined;
       case "element": {
         if (model.id !== undefined) {
           return this.defineObjectRef(
@@ -606,11 +590,21 @@ class PayloadStreamDecode {
         this.getChunk(model.id);
         return createElement(PayloadStreamHole, { decode: this, id: model.id });
       case "promise":
-        return this.getChunk(model.id).promise;
+        // Promise props are handed straight to consumers, so the promise
+        // (and its thenable-registry tracking) materializes here.
+        return this.chunkPromise(this.getChunk(model.id));
       case "suspense":
         return Suspense;
       case "view-transition":
         return ViewTransition;
+      default:
+        // Every remaining tag is an ordinary value tag; the shared codec
+        // decoder handles it against this decode's request-wide ref store.
+        return decodePayloadValueTag(
+          model as PayloadValueSpecialModel,
+          this.valueRefs,
+          this.decodeChild,
+        );
     }
   }
 
@@ -647,7 +641,7 @@ function PayloadStreamHole(props: {
   return props.decode.readChunkForRender(props.id) as FigNode;
 }
 
-function resolveClientReferenceExport(
+export function resolveClientReferenceExport(
   moduleValue: unknown,
   metadata: PayloadClientReferenceMetadata,
 ): ElementType<any> {

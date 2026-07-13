@@ -4,9 +4,7 @@ import {
   type FigNode,
   readContext,
   Suspense,
-  useBeforeLayout,
   useCallback,
-  useSyncExternalStore,
 } from "@bgub/fig";
 import { PAYLOAD_SLOT_ATTR } from "./bootstrap.ts";
 import type { NavigateOptions, Router } from "./core.ts";
@@ -21,11 +19,21 @@ const MatchDepthContext = createContext(0);
 type ServerRouteRenderMode = "content" | "document" | "placeholder";
 const ServerRouteRenderModeContext =
   createContext<ServerRouteRenderMode>("placeholder");
+// The SSR document and client hydration must produce byte-identical
+// placeholder markup for unreveal-ed client references, so the template has
+// exactly one factory, shared by both sides.
+export function clientReferencePlaceholder(id: string): FigNode {
+  return createElement("template", {
+    "data-fig-client-reference": id,
+  });
+}
+
+// Route content re-renders through the two channels that already exist —
+// router state (useRouterState in Outlet) for navigations and the data
+// store's readData subscription for content changes — so the store is just
+// a render seam, not another pub/sub.
 export interface ServerRouteContentStore {
-  commit(routeId: string): void;
-  getSnapshot(routeId: string): number;
   render(routeId: string): FigNode;
-  subscribe(routeId: string, listener: () => void): () => void;
 }
 
 const ServerRouteContentContext = createContext<ServerRouteContentStore | null>(
@@ -126,20 +134,6 @@ function ServerRouteContent(props: {
   routeId: string;
 }): FigNode {
   const store = readContext(ServerRouteContentContext);
-  const getSnapshot = () => store?.getSnapshot(props.routeId) ?? 0;
-  const snapshot = useSyncExternalStore(
-    (listener) =>
-      store === null
-        ? () => undefined
-        : store.subscribe(props.routeId, listener),
-    getSnapshot,
-    getSnapshot,
-  );
-  useBeforeLayout(() => {
-    store?.commit(props.routeId);
-    return undefined;
-  }, [props.routeId, snapshot, store]);
-
   return store?.render(props.routeId) ?? props.fallback ?? null;
 }
 

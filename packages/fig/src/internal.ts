@@ -81,9 +81,7 @@ export { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
 export {
   checkpointPayloadGraph,
   createPayloadGraphEncodeContext,
-  decodePayloadNumber,
   definePayloadGraphElement,
-  definePayloadProperty,
   encodePayloadValueWithGraph,
   isPayloadSpecialModel,
   isPlainPayloadValue,
@@ -94,6 +92,9 @@ export {
   serializePayloadPlainObject,
   serializePayloadSet,
 } from "./payload-format.ts";
+// Client-reference module→component resolution: the wire supplies
+// exportName, so consumers never string-parse reference ids.
+export { resolveClientReferenceExport } from "./payload.ts";
 export {
   type AssetResourceDestination,
   type AssetResourceHostAttribute,

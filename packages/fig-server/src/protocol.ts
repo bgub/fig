@@ -11,6 +11,7 @@ import {
   VIEW_TRANSITION_PENDING_PROPERTY,
 } from "@bgub/fig/internal";
 import { escapeAttribute } from "./html.ts";
+import { escapeScriptJson, nonceAttribute } from "./shared.ts";
 
 interface ProtocolRequest {
   identifierPrefix: string;
@@ -46,9 +47,7 @@ export function writeScript(
   code: string,
   write: WriteChunk,
 ): void {
-  write(
-    `<script${request.nonce === undefined ? "" : ` nonce="${escapeAttribute(request.nonce)}"`}>${code}</script>`,
-  );
+  write(`<script${nonceAttribute(request.nonce)}>${code}</script>`);
 }
 
 // Queues replayable events that fire before the client bundle executes so
@@ -115,7 +114,7 @@ export function boundaryId(request: IdentifierRequest, id: number): string {
 }
 
 export function jsString(value: string): string {
-  return JSON.stringify(value).replace(/</g, "\\u003C");
+  return escapeScriptJson(value);
 }
 
 function prefixedId(

@@ -10,6 +10,7 @@ import type {
   StartTransition,
 } from "@bgub/fig";
 import type { DataResource, RenderDispatcher } from "@bgub/fig/internal";
+import { escapeAttribute } from "./html.ts";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
@@ -201,4 +202,18 @@ export function createStaticDispatcher(
       return options.readPromise(promise);
     },
   };
+}
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// JSON serialization safe to inline inside <script> content: "<" is escaped
+// so a value containing "</script>" cannot terminate the element early.
+export function escapeScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003C");
+}
+
+export function nonceAttribute(nonce: string | undefined): string {
+  return nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
 }

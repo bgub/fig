@@ -122,7 +122,7 @@ export type PayloadSpecialModel =
   | { $fig: "undefined" }
   | { $fig: "view-transition" };
 
-type PayloadValueSpecialModel = Extract<
+export type PayloadValueSpecialModel = Extract<
   PayloadSpecialModel,
   {
     $fig:
@@ -301,17 +301,41 @@ export function errorFromPayloadValue(value: PayloadErrorValue): Error & {
 }
 
 export interface PayloadGraphEncodeContext {
+  // Ids are dense and monotonic: id = position in `defined` + 1, so rollback
+  // is popping the stack. A reverse id→object map would be redundant state.
+  defined: object[];
   ids: WeakMap<object, number>;
-  nextId: number;
-  objects: Map<number, object>;
 }
 
 interface PayloadGraphDecodeContext {
-  refs: Map<number, unknown>;
+  decodeChild: (model: PayloadModel) => unknown;
+  refs: PayloadDecodeRefs;
+}
+
+function createPayloadGraphDecodeContext(): PayloadGraphDecodeContext {
+  const refs = new Map<number, unknown>();
+  const context: PayloadGraphDecodeContext = {
+    decodeChild: (model) => decodeModelValue(model, context),
+    refs: {
+      define(id, create, fill) {
+        const value = create();
+        refs.set(id, value);
+        fill(value);
+        return value;
+      },
+      read(id) {
+        if (!refs.has(id)) {
+          throw new Error(`Payload referenced unknown object id ${id}.`);
+        }
+        return refs.get(id);
+      },
+    },
+  };
+  return context;
 }
 
 export function createPayloadGraphEncodeContext(): PayloadGraphEncodeContext {
-  return { ids: new WeakMap(), nextId: 1, objects: new Map() };
+  return { defined: [], ids: new WeakMap() };
 }
 
 export function isPlainPayloadValue(value: unknown): boolean {
@@ -402,11 +426,9 @@ export function serializePayloadMap(
   const existing = payloadGraphReference(graph, value);
   if (existing !== null) return existing;
   const id = definePayloadGraphObject(graph, value);
-  return {
-    $fig: "map",
-    id,
-    entries: [...value.entries()].map(encodeEntry),
-  };
+  const entries: Array<[PayloadModel, PayloadModel]> = [];
+  for (const entry of value) entries.push(encodeEntry(entry));
+  return { $fig: "map", id, entries };
 }
 
 export function serializePayloadSet(
@@ -417,11 +439,9 @@ export function serializePayloadSet(
   const existing = payloadGraphReference(graph, value);
   if (existing !== null) return existing;
   const id = definePayloadGraphObject(graph, value);
-  return {
-    $fig: "set",
-    id,
-    values: [...value.values()].map(encodeItem),
-  };
+  const values: PayloadModel[] = [];
+  for (const item of value) values.push(encodeItem(item));
+  return { $fig: "set", id, values };
 }
 
 function payloadGraphReference(
@@ -436,29 +456,25 @@ function definePayloadGraphObject(
   graph: PayloadGraphEncodeContext,
   value: object,
 ): number {
-  const id = graph.nextId;
-  graph.nextId += 1;
+  graph.defined.push(value);
+  const id = graph.defined.length;
   graph.ids.set(value, id);
-  graph.objects.set(id, value);
   return id;
 }
 
 export function checkpointPayloadGraph(
   graph: PayloadGraphEncodeContext,
 ): number {
-  return graph.nextId;
+  return graph.defined.length;
 }
 
 export function rollbackPayloadGraph(
   graph: PayloadGraphEncodeContext,
   checkpoint: number,
 ): void {
-  for (let id = graph.nextId - 1; id >= checkpoint; id -= 1) {
-    const value = graph.objects.get(id);
-    if (value !== undefined) graph.ids.delete(value);
-    graph.objects.delete(id);
+  while (graph.defined.length > checkpoint) {
+    graph.ids.delete(graph.defined.pop() as object);
   }
-  graph.nextId = checkpoint;
 }
 
 export function definePayloadGraphElement(
@@ -518,9 +534,7 @@ function encodePayloadRecord(
   return encoded;
 }
 
-export function encodePayloadNumber(
-  value: number,
-): number | PayloadSpecialModel {
+function encodePayloadNumber(value: number): number | PayloadSpecialModel {
   if (Number.isNaN(value)) return { $fig: "number", value: "NaN" };
   if (value === Infinity) return { $fig: "number", value: "Infinity" };
   if (value === -Infinity) return { $fig: "number", value: "-Infinity" };
@@ -530,7 +544,7 @@ export function encodePayloadNumber(
 
 /** Decode values produced by encodePayloadValue. */
 export function decodePayloadValue(model: PayloadModel): unknown {
-  return decodeModelValue(model, { refs: new Map() });
+  return decodeModelValue(model, createPayloadGraphDecodeContext());
 }
 
 function decodeModelValue(
@@ -543,15 +557,16 @@ function decodeModelValue(
   if (typeof model !== "object") return model;
 
   if (isPayloadValueSpecialModel(model)) {
-    return decodePayloadSpecialValue(model, graph);
+    return decodePayloadValueTag(model, graph.refs, graph.decodeChild);
   }
 
-  return decodePayloadRecord(model as Record<string, PayloadModel>, (child) =>
-    decodeModelValue(child, graph),
+  return decodePayloadRecord(
+    model as Record<string, PayloadModel>,
+    graph.decodeChild,
   );
 }
 
-function isPayloadValueSpecialModel(
+export function isPayloadValueSpecialModel(
   model: object,
 ): model is PayloadValueSpecialModel {
   if (!("$fig" in model)) return false;
@@ -570,43 +585,72 @@ function isPayloadValueSpecialModel(
   );
 }
 
-function decodePayloadSpecialValue(
+// The ref-store seam shared by the two decode entry points: the value codec
+// registers into a per-call refs map, while the stream decoder registers into
+// its request-wide chunk-adjacent store (with rollback on failed fills).
+export interface PayloadDecodeRefs {
+  define<T>(id: number, create: () => T, fill: (value: T) => void): T;
+  read(id: number): unknown;
+}
+
+export function decodePayloadValueTag(
   model: PayloadValueSpecialModel,
-  graph: PayloadGraphDecodeContext,
+  refs: PayloadDecodeRefs,
+  decodeChild: (model: PayloadModel) => unknown,
 ): unknown {
   switch (model.$fig) {
-    case "array": {
-      const value: unknown[] = [];
-      graph.refs.set(model.id, value);
-      value.push(...model.value.map((item) => decodeModelValue(item, graph)));
-      return value;
-    }
+    case "array":
+      return refs.define(
+        model.id,
+        () => [] as unknown[],
+        (value) => {
+          for (const item of model.value) value.push(decodeChild(item));
+        },
+      );
     case "bigint":
       return BigInt(model.value);
     case "date":
       return new Date(model.value);
-    case "map": {
-      const value = new Map();
-      graph.refs.set(model.id, value);
-      for (const [key, item] of model.entries) {
-        value.set(decodeModelValue(key, graph), decodeModelValue(item, graph));
-      }
-      return value;
-    }
+    case "map":
+      return refs.define(
+        model.id,
+        () => new Map(),
+        (value) => {
+          for (const [key, item] of model.entries) {
+            value.set(decodeChild(key), decodeChild(item));
+          }
+        },
+      );
     case "number":
       return decodePayloadNumber(model.value);
-    case "object":
-      return decodePayloadPlainObject(model, graph);
-    case "ref":
-      return readGraphRef(graph, model.id);
-    case "set": {
-      const value = new Set();
-      graph.refs.set(model.id, value);
-      for (const item of model.values) {
-        value.add(decodeModelValue(item, graph));
+    case "object": {
+      if (model.id === undefined) {
+        return decodePayloadRecord(model.value, decodeChild);
       }
-      return value;
+      return refs.define(
+        model.id,
+        () => ({}) as Record<string, unknown>,
+        (value) => {
+          for (const name of Object.keys(model.value)) {
+            definePayloadProperty(
+              value,
+              name,
+              decodeChild(model.value[name] as PayloadModel),
+            );
+          }
+        },
+      );
     }
+    case "ref":
+      return refs.read(model.id);
+    case "set":
+      return refs.define(
+        model.id,
+        () => new Set(),
+        (value) => {
+          for (const item of model.values) value.add(decodeChild(item));
+        },
+      );
     case "symbol":
       return Symbol.for(model.key);
     case "undefined":
@@ -614,50 +658,40 @@ function decodePayloadSpecialValue(
   }
 }
 
-function decodePayloadPlainObject(
-  model: Extract<PayloadValueSpecialModel, { $fig: "object" }>,
-  graph: PayloadGraphDecodeContext,
-): Record<string, unknown> {
-  const decoded: Record<string, unknown> = {};
-  if (model.id !== undefined) graph.refs.set(model.id, decoded);
-  for (const [name, value] of Object.entries(model.value)) {
-    definePayloadProperty(decoded, name, decodeModelValue(value, graph));
-  }
-  return decoded;
-}
-
-function decodePayloadRecord(
+export function decodePayloadRecord(
   value: Record<string, PayloadModel>,
   decodeChild: (model: PayloadModel) => unknown,
 ): Record<string, unknown> {
   const decoded: Record<string, unknown> = {};
-  for (const [name, child] of Object.entries(value)) {
-    definePayloadProperty(decoded, name, decodeChild(child));
+  for (const name of Object.keys(value)) {
+    definePayloadProperty(
+      decoded,
+      name,
+      decodeChild(value[name] as PayloadModel),
+    );
   }
   return decoded;
 }
 
-// Assigning through defineProperty keeps decoded objects inert: a hostile
-// payload key like "__proto__" defines an own property instead of mutating
-// the prototype chain via the setter path.
+// "__proto__" must go through defineProperty so a hostile payload key defines
+// an own property instead of mutating the prototype chain via the setter
+// path; every other key gets the identical own data property from plain
+// assignment at a fraction of the cost (this is the decode inner loop).
 export function definePayloadProperty(
   target: Record<string, unknown>,
   name: string,
   value: unknown,
 ): void {
-  Object.defineProperty(target, name, {
-    configurable: true,
-    enumerable: true,
-    value,
-    writable: true,
-  });
-}
-
-function readGraphRef(graph: PayloadGraphDecodeContext, id: number): unknown {
-  if (!graph.refs.has(id)) {
-    throw new Error(`Payload referenced unknown object id ${id}.`);
+  if (name === "__proto__") {
+    Object.defineProperty(target, name, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
+    return;
   }
-  return graph.refs.get(id);
+  target[name] = value;
 }
 
 export function decodePayloadNumber(
@@ -688,7 +722,7 @@ export function encodePayloadDataEntries(
 export function decodePayloadDataEntries(
   entries: readonly PayloadDataHydrationEntry[],
 ): FigDataHydrationEntry[] {
-  const graph: PayloadGraphDecodeContext = { refs: new Map() };
+  const graph = createPayloadGraphDecodeContext();
   return entries.map((entry) => ({
     ...entry,
     value: decodeModelValue(entry.value, graph),

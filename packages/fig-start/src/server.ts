@@ -51,9 +51,8 @@ import {
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
-  DATA_FRAME_ATTR,
+  DATA_FRAME_TRANSPORT,
   DATA_SCRIPT_ID,
-  DATA_STREAM_GLOBAL,
   PAYLOAD_FRAME_TRANSPORT,
   PAYLOAD_ROUTE_ID_HEADER,
   PAYLOAD_SEGMENT_ID_HEADER,
@@ -65,6 +64,7 @@ import {
   type SerializedRouterState,
 } from "./bootstrap.ts";
 import {
+  clientReferencePlaceholder,
   Outlet,
   RouterProvider,
   ServerRouteContentProvider,
@@ -200,7 +200,7 @@ export function createRequestHandler(
         return new Response("No payload segment for route.", { status: 404 });
       }
 
-      return new Response(streamPayloadSegmentRows(payloadSegment), {
+      return new Response(payloadSegment.stream, {
         headers: {
           "content-type": payloadSegment.contentType,
           [PAYLOAD_ROUTE_ID_HEADER]: payloadSegment.metadata.routeId,
@@ -293,7 +293,7 @@ export function createRequestHandler(
     );
 
     const render = renderToDocumentStream(document, {
-      clientReferenceFallback: clientReferencePlaceholder,
+      clientReferenceFallback: clientReferenceDocumentFallback,
       nonce,
       onError: () => ({ digest: "fig-start-error" }),
       renderTree,
@@ -502,14 +502,8 @@ function DocumentPayloadRoot(props: { value: Promise<FigNode> }): FigNode {
 
 function createDocumentClientReferencePlaceholder(id: string): () => FigNode {
   return function StartDocumentClientReferencePlaceholder(): FigNode {
-    return clientReferencePlaceholderTemplate(id);
+    return clientReferencePlaceholder(id);
   };
-}
-
-function clientReferencePlaceholderTemplate(id: string): FigNode {
-  return createElement("template", {
-    "data-fig-client-reference": id,
-  });
 }
 
 function createDocumentServerRouteContentStore(
@@ -517,11 +511,8 @@ function createDocumentServerRouteContentStore(
   node: FigNode,
 ): ServerRouteContentStore {
   return {
-    commit: () => undefined,
-    getSnapshot: () => 0,
     render: (requestedRouteId) =>
       requestedRouteId === routeId ? node : undefined,
-    subscribe: () => () => undefined,
   };
 }
 
@@ -619,13 +610,13 @@ function firstServerRouteSegment(
   return match === undefined ? undefined : { index, match };
 }
 
-function clientReferencePlaceholder(
+function clientReferenceDocumentFallback(
   reference: FigClientReference,
   props: Props,
 ): FigNode {
   if (reference.ssr !== undefined) return createElement(reference.ssr, props);
 
-  return clientReferencePlaceholderTemplate(reference.id);
+  return clientReferencePlaceholder(reference.id);
 }
 
 function serverRouteAssetList(
@@ -736,12 +727,10 @@ function streamPayloadSegmentFrames(
   segment: ServerPayloadSegment,
   nonce: string | undefined,
 ): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
+  const transport = { ...PAYLOAD_FRAME_TRANSPORT, nonce };
   const frameScript = (frame: SerializedPayloadFrame): Uint8Array =>
-    encoder.encode(
-      payloadFrameScript(frame, { ...PAYLOAD_FRAME_TRANSPORT, nonce }),
-    );
-  return streamPayloadSegment(segment, (chunk, _value, done) => {
+    frameScriptEncoder.encode(payloadFrameScript(frame, transport));
+  return streamPayloadSegment(segment, (chunk, done) => {
     const parts: Uint8Array[] = [];
     if (chunk.length > 0) {
       parts.push(frameScript({ chunk, id: segment.metadata.id }));
@@ -758,6 +747,8 @@ function streamPayloadSegmentFrames(
   });
 }
 
+const frameScriptEncoder = new TextEncoder();
+
 function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   if (parts.length === 1) return parts[0] as Uint8Array;
   const total = parts.reduce((sum, part) => sum + part.length, 0);
@@ -770,19 +761,9 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return merged;
 }
 
-function streamPayloadSegmentRows(
-  segment: ServerPayloadSegment,
-): ReadableStream<Uint8Array> {
-  return streamPayloadSegment(segment, (_chunk, value) => value);
-}
-
 function streamPayloadSegment(
   segment: ServerPayloadSegment,
-  emit: (
-    chunk: string,
-    value: Uint8Array | undefined,
-    done: boolean,
-  ) => Uint8Array | undefined,
+  emit: (chunk: string, done: boolean) => Uint8Array | undefined,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -796,7 +777,7 @@ function streamPayloadSegment(
             ? decoder.decode()
             : decoder.decode(value, { stream: !done });
 
-        const output = emit(chunk, value, done);
+        const output = emit(chunk, done);
         if (output !== undefined) controller.enqueue(output);
 
         if (done) {
@@ -816,7 +797,10 @@ function renderStreamPrelude(input: {
   nonce: string | undefined;
 }): string {
   return [
-    dataStreamBootstrapScript(input.nonce),
+    payloadFrameBootstrapScript({
+      ...DATA_FRAME_TRANSPORT,
+      nonce: input.nonce,
+    }),
     ...(input.hasPayloadSegments
       ? [
           payloadFrameBootstrapScript({
@@ -903,13 +887,21 @@ function createDocumentDataStream(
   nonce: string | undefined,
 ): DocumentDataStream {
   const sentKeys = new Set<string>();
+  // flush() runs per streamed HTML chunk over a freshly rebuilt snapshot, so
+  // canonicalization is cached by key-array identity (stable across
+  // snapshots — the store reuses the entry's key array).
+  const canonicalKeys = new WeakMap<FigDataHydrationEntry["key"], string>();
 
   function unsent(
     entries: readonly FigDataHydrationEntry[],
   ): FigDataHydrationEntry[] {
     const next: FigDataHydrationEntry[] = [];
     for (const entry of entries) {
-      const key = normalizeDataResourceKey(entry.key);
+      let key = canonicalKeys.get(entry.key);
+      if (key === undefined) {
+        key = normalizeDataResourceKey(entry.key);
+        canonicalKeys.set(entry.key, key);
+      }
       if (sentKeys.has(key)) continue;
       sentKeys.add(key);
       next.push(entry);
@@ -920,7 +912,12 @@ function createDocumentDataStream(
   return {
     flush(entries) {
       const next = unsent(entries);
-      return next.length === 0 ? "" : dataFrameScript(next, nonce);
+      return next.length === 0
+        ? ""
+        : payloadFrameScript(encodePayloadDataEntries(next), {
+            ...DATA_FRAME_TRANSPORT,
+            nonce,
+          });
     },
     initial: (entries) => encodePayloadDataEntries(unsent(entries)),
   };
@@ -1161,26 +1158,6 @@ function createBufferedByteStream(
     },
     flush,
   };
-}
-
-function dataStreamBootstrapScript(nonce: string | undefined): string {
-  const nonceAttr =
-    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  return `<script${nonceAttr}>(function(){var g=globalThis;var r=g.${DATA_STREAM_GLOBAL};if(r)return;var q=[];var l=[];g.${DATA_STREAM_GLOBAL}={q:q,p:function(e){for(var i=0;i<e.length;i++)q.push(e[i]);for(var j=0;j<l.length;j++)l[j](e)},s:function(fn){l.push(fn);if(q.length>0)fn(q);return function(){var n=[];for(var k=0;k<l.length;k++)if(l[k]!==fn)n.push(l[k]);l=n}}};})();</script>`;
-}
-
-function dataFrameScript(
-  entries: readonly FigDataHydrationEntry[],
-  nonce: string | undefined,
-): string {
-  const nonceAttr =
-    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  return (
-    `<script type="application/json" ${DATA_FRAME_ATTR}=""${nonceAttr}>${escapeJson(
-      encodePayloadDataEntries(entries),
-    )}</script>` +
-    `<script${nonceAttr}>globalThis.${DATA_STREAM_GLOBAL}.p(JSON.parse(document.currentScript.previousElementSibling.textContent));</script>`
-  );
 }
 
 function shellErrorHtml(error: unknown): string {
