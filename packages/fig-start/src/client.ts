@@ -20,15 +20,14 @@ import {
   storeDevtoolsOpen,
 } from "./devtools.ts";
 import {
-  createPayloadResponse,
+  createPayloadConsumer,
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadValue,
-  fetchPayload,
   isPayloadRequestCancelled,
   type PayloadClientReferenceMetadata,
   type PayloadDataHydrationEntry,
-  type PayloadResponse,
+  type PayloadConsumer,
 } from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -58,7 +57,7 @@ import type { AnyRoute } from "./route.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { RouterLocation } from "./types.ts";
 
-type ServerRouteResponse = ReturnType<typeof createPayloadResponse>;
+type ServerRouteConsumer = ReturnType<typeof createPayloadConsumer>;
 
 interface ViteHotContext {
   on(
@@ -209,13 +208,13 @@ interface DataStream {
   s(listener: (entries: readonly FigDataHydrationEntry[]) => void): () => void;
 }
 
-function createServerRouteResponse(
+function createServerRouteConsumer(
   options: StartClientOptions,
   clientReferenceTypes: ClientReferenceTypeCache,
   clientReferenceHydrationGate?: ClientReferenceHydrationGate,
-): ServerRouteResponse {
+): ServerRouteConsumer {
   if (clientReferenceHydrationGate !== undefined) {
-    return createPayloadResponse({
+    return createPayloadConsumer({
       resolveClientReference: (metadata) =>
         createHydratableClientReference(
           options,
@@ -226,7 +225,7 @@ function createServerRouteResponse(
     });
   }
 
-  return createPayloadResponse({
+  return createPayloadConsumer({
     loadClientReference: options.loadClientReference,
     resolveClientReference: (metadata) =>
       resolveStableSyncClientReference(options, metadata, clientReferenceTypes),
@@ -451,10 +450,10 @@ interface ServerRouteEntry {
   node: FigNode;
   onRecoverableError?: (error: unknown) => void;
   payloadComplete: boolean;
-  response: ServerRouteResponse;
+  consumer: ServerRouteConsumer;
   revealed: boolean;
   routeId: string;
-  unsubscribeResponse: (() => void) | null;
+  unsubscribeConsumer: (() => void) | null;
   version: number;
   visibleNode: FigNode;
 }
@@ -494,9 +493,9 @@ function createServerRouteContent(
   }
 
   function bindEntry(entry: ServerRouteEntry): void {
-    if (rootData === null || entry.unsubscribeResponse !== null) return;
+    if (rootData === null || entry.unsubscribeConsumer !== null) return;
 
-    entry.unsubscribeResponse = entry.response.bindRoot({
+    entry.unsubscribeConsumer = entry.consumer.bindRoot({
       data: rootData,
       render: (node) => {
         entry.node = node;
@@ -509,7 +508,7 @@ function createServerRouteContent(
 
   function createEntry(
     routeId: string,
-    response: ServerRouteResponse,
+    consumer: ServerRouteConsumer,
     entryOptions: ServerRouteEntryOptions = {},
   ): ServerRouteEntry {
     const dispose = entryOptions.dispose ?? (() => undefined);
@@ -532,15 +531,15 @@ function createServerRouteContent(
       clientReferenceHydrationGate:
         entryOptions.clientReferenceHydrationGate ?? null,
       listeners,
-      node: response.getRoot(),
+      node: consumer.getRoot(),
       onRecoverableError: options.onRecoverableError,
       payloadComplete: entryOptions.payloadComplete ?? true,
-      response,
+      consumer,
       revealed: false,
       routeId,
-      unsubscribeResponse: null,
+      unsubscribeConsumer: null,
       version: 0,
-      visibleNode: response.getRoot(),
+      visibleNode: consumer.getRoot(),
     };
     entries.set(routeId, entry);
     bindEntry(entry);
@@ -549,7 +548,7 @@ function createServerRouteContent(
       entries.delete(routeId);
       entry.activeRefresh?.abort();
       entry.dispose();
-      entry.unsubscribeResponse?.();
+      entry.unsubscribeConsumer?.();
       notify(entry);
     });
 
@@ -569,7 +568,7 @@ function createServerRouteContent(
         const controller = new AbortController();
         entry.activeRefresh = controller;
         loadServerRoutePayload(
-          entry.response,
+          entry.consumer,
           entry.routeId,
           url,
           options,
@@ -592,9 +591,9 @@ function createServerRouteContent(
   }
 
   function startEntryFetch(routeId: string, url: string): ServerRouteEntry {
-    const response = createServerRouteResponse(options, clientReferenceTypes);
+    const consumer = createServerRouteConsumer(options, clientReferenceTypes);
     const controller = new AbortController();
-    const entry = createEntry(routeId, response, {
+    const entry = createEntry(routeId, consumer, {
       dispose: () => controller.abort(),
       // Client navigation reveals server routes atomically after the payload fetch;
       // initial document streams keep their default progressive reveal behavior.
@@ -603,7 +602,7 @@ function createServerRouteContent(
     });
 
     loadServerRoutePayload(
-      response,
+      consumer,
       routeId,
       url,
       options,
@@ -614,8 +613,8 @@ function createServerRouteContent(
   }
 
   function receiveRows(entry: ServerRouteEntry, rows: string): void {
-    entry.response.processStringChunk(rows);
-    requireClientReferenceResolver(entry.routeId, entry.response, options);
+    entry.consumer.processStringChunk(rows);
+    requireClientReferenceResolver(entry.routeId, entry.consumer, options);
     ensureEntryAssets(entry);
     notify(entry);
   }
@@ -636,7 +635,7 @@ function createServerRouteContent(
     entry: ServerRouteEntry,
   ): Promise<void> | undefined {
     if (entries.get(entry.routeId) !== entry) return undefined;
-    return entry.response.preloadClientReferences();
+    return entry.consumer.preloadClientReferences();
   }
 
   // Resolves when the entry can render (payload complete and assets settled),
@@ -676,7 +675,7 @@ function createServerRouteContent(
       const clientReferenceHydrationGate = createClientReferenceHydrationGate();
       const entry = createEntry(
         segment.routeId,
-        createServerRouteResponse(
+        createServerRouteConsumer(
           options,
           clientReferenceTypes,
           clientReferenceHydrationGate,
@@ -795,7 +794,7 @@ function combineDisposers(first: () => void, second: () => void): () => void {
 
 function ensureEntryAssets(entry: ServerRouteEntry): void {
   const nextGate = insertNewServerRouteAssets(
-    entry.response,
+    entry.consumer,
     entry.insertedAssetKeys,
   );
   if (nextGate !== null) armEntryGate(entry, nextGate);
@@ -830,10 +829,10 @@ function revealEntryClientReferences(entry: ServerRouteEntry): void {
 }
 
 function insertNewServerRouteAssets(
-  response: ServerRouteResponse,
+  consumer: ServerRouteConsumer,
   insertedAssetKeys: Set<string>,
 ): Promise<void> | null {
-  const newAssets = response.getAssetResources().filter((resource) => {
+  const newAssets = consumer.getAssetResources().filter((resource) => {
     const key = assetResourceKey(resource);
     if (insertedAssetKeys.has(key)) return false;
     insertedAssetKeys.add(key);
@@ -906,7 +905,7 @@ function firstServerRouteMatch(
 }
 
 function loadServerRoutePayload(
-  response: ServerRouteResponse,
+  consumer: ServerRouteConsumer,
   routeId: string,
   url: string,
   options: StartClientOptions,
@@ -915,7 +914,7 @@ function loadServerRoutePayload(
   refreshBoundary?: string,
 ): void {
   void fetchServerRoutePayload(
-    response,
+    consumer,
     routeId,
     url,
     options,
@@ -932,18 +931,18 @@ function loadServerRoutePayload(
 }
 
 async function fetchServerRoutePayload(
-  response: ServerRouteResponse,
+  consumer: ServerRouteConsumer,
   routeId: string,
   url: string,
   options: StartClientOptions,
   signal: AbortSignal,
   refreshBoundary?: string,
 ): Promise<Response> {
-  const result = await fetchPayload(response, url, { refreshBoundary, signal });
-  // The response has decoded the full payload; a payload with client
+  const result = await consumer.fetch(url, { refreshBoundary, signal });
+  // The consumer has decoded the full payload; a payload with client
   // references but no configured resolver would render placeholders forever,
   // so fail loudly instead.
-  requireClientReferenceResolver(routeId, response, options);
+  requireClientReferenceResolver(routeId, consumer, options);
   return result;
 }
 
@@ -1028,7 +1027,7 @@ function reportPayloadFetchError(
 // watcher are pure logic, so they're verified without a DOM.
 export function requireClientReferenceResolver(
   routeId: string,
-  response: Pick<PayloadResponse, "getClientReferences">,
+  consumer: Pick<PayloadConsumer, "getClientReferences">,
   options: Pick<
     StartClientOptions,
     "loadClientReference" | "resolveClientReference"
@@ -1036,7 +1035,7 @@ export function requireClientReferenceResolver(
 ): void {
   if (
     !hasClientReferenceResolver(options) &&
-    response.getClientReferences().length > 0
+    consumer.getClientReferences().length > 0
   ) {
     throw new Error(
       `Server route "${routeId}" renders client components, but ` +

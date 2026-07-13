@@ -98,20 +98,20 @@ Suppose `userResource` isn't loaded when `ProfilePage` renders. Same trick as ev
 ## The client side
 
 ```ts
-import { createPayloadResponse } from "@bgub/fig-server/payload";
+import { createPayloadConsumer } from "@bgub/fig-server/payload";
 import { createRoot } from "@bgub/fig-dom";
 
-const response = createPayloadResponse({
+const consumer = createPayloadConsumer({
   loadClientReference: (metadata) => manifest[metadata.id](),
 });
 
-response.processStream(payloadStream);
-await response.rootReady;
-response.bindRoot(createRoot(container));
+consumer.processStream(payloadStream);
+await consumer.rootReady;
+consumer.bindRoot(createRoot(container));
 ```
 
-- `processStream(stream)` is the blessed ingestion seam (`processStringChunk` is the low-level escape hatch).
-- `renderToPayloadStream(node, { codec })` and `createPayloadResponse({ codec })` must agree on the codec implementation. `fetchPayload` sends the response codec in `Accept` and checks the response `codec=` content-type parameter before decoding.
+- `consumer.fetch(input, options?)` fetches a payload endpoint and ingests the body; `processStream(stream)` is the ingestion seam under it for streams you obtained yourself (`processStringChunk` is the low-level escape hatch).
+- `renderToPayloadStream(node, { codec })` and `createPayloadConsumer({ codec })` must agree on the codec implementation. `consumer.fetch` sends the consumer's codec in `Accept` and checks the response `codec=` content-type parameter before decoding.
 - Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it. `preloadClientReferences()` awaits whatever is in flight.
 - `rootReady` resolves when the root row decodes. It never rejects — race it against your own timeout or error UI.
 - `bindRoot(root)` renders the decoded tree into a Fig root and replays streamed `data` rows into `root.data` — the doc 5 handoff, completed.
@@ -132,18 +132,16 @@ import { PayloadBoundary } from "@bgub/fig-server/payload";
 (Dev throws on duplicate boundary ids.) The client asks for just that boundary:
 
 ```ts
-import { fetchPayload } from "@bgub/fig-server/payload";
-
-await fetchPayload(response, "/profile/42", { refreshBoundary: "profile" });
+await consumer.fetch("/profile/42", { refreshBoundary: "profile" });
 ```
 
-`fetchPayload` sends the boundary id in the `x-fig-payload-boundary` request header (`PAYLOAD_BOUNDARY_HEADER`); the server passes it to `renderToPayloadStream` as `refreshBoundary` and emits a `refresh` row:
+`consumer.fetch` sends the boundary id in the `x-fig-payload-boundary` request header (`PAYLOAD_BOUNDARY_HEADER`); the server passes it to `renderToPayloadStream` as `refreshBoundary` and emits a `refresh` row:
 
 ```
 {"boundary":"profile","tag":"refresh","value":{...new content...}}
 ```
 
-Ingesting it replaces that `PayloadBoundary`'s content by id without touching the app shell — no remount of everything around it. Two details make this safe: refresh row ids are namespaced past every id the response has already seen, so outlined rows can't collide with mounted chunks, and the refresh drops the decode caches for that boundary so refreshed content gets fresh identities instead of bailing out as "unchanged".
+Ingesting it replaces that `PayloadBoundary`'s content by id without touching the app shell — no remount of everything around it. Two details make this safe: refresh row ids are namespaced past every id the consumer has already seen, so outlined rows can't collide with mounted chunks, and the refresh drops the decode caches for that boundary so refreshed content gets fresh identities instead of bailing out as "unchanged".
 
 ## Errors
 

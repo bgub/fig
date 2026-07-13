@@ -10,7 +10,7 @@ import {
   renderToDocumentStream,
 } from "@bgub/fig-server";
 import {
-  createPayloadResponse,
+  createPayloadConsumer,
   PAYLOAD_BOUNDARY_HEADER,
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
@@ -140,7 +140,7 @@ function boundaryReplacement(boundary: string | null, data: DemoData) {
 
 // The initial document is server-rendered FROM the payload: one
 // renderToPayloadStream call is teed — one branch decodes into a server-side
-// payload response whose root renders (and streams Suspense reveals) through
+// payload consumer whose root renders (and streams Suspense reveals) through
 // renderToDocumentStream, the other is forwarded to the browser as inline
 // frame scripts for hydration. HTML and payload come from the same render,
 // so the hydrated client tree matches the streamed markup byte for byte.
@@ -157,7 +157,7 @@ async function sendDocument(
   void payload.allReady.catch(() => undefined);
   const [ssrRows, clientRows] = payload.stream.tee();
 
-  const ssrPayload = createPayloadResponse({
+  const ssrPayload = createPayloadConsumer({
     resolveClientReference(metadata) {
       if (metadata.id === appRefreshButtonReferenceId) return AppRefreshButton;
       if (metadata.id === refreshButtonReferenceId) return RefreshButton;

@@ -36,7 +36,7 @@ import {
   devtoolsOpenFromRequest,
 } from "./devtools.ts";
 import {
-  createPayloadResponse,
+  createPayloadConsumer,
   decodePayloadValue,
   encodePayloadDataEntries,
   encodePayloadValue,
@@ -463,22 +463,22 @@ function createDocumentPayloadSegment(
   segment: ServerPayloadSegment,
 ): DocumentPayloadSegment {
   const [decodeStream, frameStream] = segment.stream.tee();
-  const response = createPayloadResponse({
+  const consumer = createPayloadConsumer({
     resolveClientReference: (metadata) =>
       metadata.ssr === true
         ? resolveServerClientReference(metadata)
         : undefined,
   });
-  const initialRootReady = decodeDocumentPayloadStream(response, decodeStream);
+  const initialRootReady = decodeDocumentPayloadStream(consumer, decodeStream);
 
   return {
-    assetResources: () => response.getAssetResources(),
-    clientReferences: () => response.getClientReferences(),
+    assetResources: () => consumer.getAssetResources(),
+    clientReferences: () => consumer.getClientReferences(),
     frames: { ...segment, stream: frameStream },
     initialRootReady,
     store: createDocumentServerRouteContentStore(
       segment.metadata.routeId,
-      response.getRoot(),
+      consumer.getRoot(),
     ),
   };
 }
@@ -487,13 +487,13 @@ function createDocumentPayloadSegment(
 // document render can include server-renderable payload markup when the payload
 // is already buffered, without blocking the shell on slow segments.
 function decodeDocumentPayloadStream(
-  response: ReturnType<typeof createPayloadResponse>,
+  consumer: ReturnType<typeof createPayloadConsumer>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
-  void response.processStream(stream).catch(() => undefined);
+  void consumer.processStream(stream).catch(() => undefined);
 
   return Promise.race([
-    response.rootReady,
+    consumer.rootReady,
     new Promise<void>((resolve) => setTimeout(resolve, 0)),
   ]);
 }

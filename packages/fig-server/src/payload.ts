@@ -241,7 +241,7 @@ export interface PayloadClientReferenceRecord extends PayloadClientReferenceMeta
   assets?: readonly FigAssetResource[];
 }
 
-export interface PayloadResponseOptions {
+export interface PayloadConsumerOptions {
   codec?: PayloadCodec;
   loadClientReference?: (
     metadata: PayloadClientReferenceMetadata,
@@ -251,9 +251,13 @@ export interface PayloadResponseOptions {
   ) => ElementType<any> | undefined;
 }
 
-export interface PayloadResponse {
+export interface PayloadConsumer {
   bindRoot(root: PayloadRootLike): () => void;
   readonly codec: PayloadCodec;
+  fetch(
+    input: RequestInfo | URL,
+    options?: PayloadFetchOptions,
+  ): Promise<Response>;
   getAssetResources(): readonly FigAssetResource[];
   getClientReferences(): readonly PayloadClientReferenceRecord[];
   getRoot(): FigNode;
@@ -534,18 +538,10 @@ export function renderToPayloadStream(
   };
 }
 
-export function createPayloadResponse(
-  options: PayloadResponseOptions = {},
-): PayloadResponse {
-  return new PayloadResponseImpl(options);
-}
-
-async function processPayloadStream(
-  response: PayloadResponse,
-  stream: ReadableStream<Uint8Array>,
-  signal?: AbortSignal | null,
-): Promise<void> {
-  await response.processStream(stream, signal);
+export function createPayloadConsumer(
+  options: PayloadConsumerOptions = {},
+): PayloadConsumer {
+  return new PayloadConsumerImpl(options);
 }
 
 export function isPayloadRequestCancelled(error: unknown): boolean {
@@ -555,48 +551,6 @@ export function isPayloadRequestCancelled(error: unknown): boolean {
       error instanceof DOMException &&
       error.name === "AbortError")
   );
-}
-
-export async function fetchPayload(
-  response: PayloadResponse,
-  input: RequestInfo | URL,
-  options: PayloadFetchOptions = {},
-): Promise<Response> {
-  const {
-    fetch: fetchImpl = globalThis.fetch,
-    headers,
-    refreshBoundary,
-    signal,
-    ...init
-  } = options;
-  if (fetchImpl === undefined) {
-    throw new Error("fetchPayload requires a fetch implementation.");
-  }
-  throwIfAborted(signal);
-
-  const result = await fetchImpl(input, {
-    ...init,
-    headers: appendPayloadHeaders(response.codec, headers, refreshBoundary),
-    signal,
-  });
-  throwIfAborted(signal);
-  if (!result.ok) {
-    await result.body?.cancel().catch(() => undefined);
-    throw new PayloadFetchError(result);
-  }
-  if (result.body === null) {
-    throw new Error("Payload response did not include a body.");
-  }
-  assertPayloadCodecMatches(response.codec, result.headers.get("content-type"));
-
-  // A refresh reuses this response's chunks Map but its row ids restart at 1 on
-  // the server; namespace them past existing chunks before decoding the stream.
-  if (refreshBoundary !== undefined) {
-    (response as PayloadResponseImpl).beginRefreshPayload();
-  }
-
-  await processPayloadStream(response, result.body, signal);
-  return result;
 }
 
 function createPayloadRequest(
@@ -681,7 +635,7 @@ interface PayloadClientReferenceEntry {
   load: Promise<unknown>;
 }
 
-class PayloadResponseImpl implements PayloadResponse {
+class PayloadConsumerImpl implements PayloadConsumer {
   private readonly assetResources = new Map<string, FigAssetResource>();
   private readonly boundaries = new Map<string, BoundaryModelEntry>();
   private readonly decodedBoundaries = new Map<string, FigNode>();
@@ -721,7 +675,7 @@ class PayloadResponseImpl implements PayloadResponse {
   private maxObjectIdScanDirty = false;
   readonly codec: PayloadCodec;
 
-  constructor(private readonly options: PayloadResponseOptions) {
+  constructor(private readonly options: PayloadConsumerOptions) {
     this.codec = options.codec ?? jsonPayloadCodec;
     this.stringDecoder = this.createDecoder(this.rowIdBase, this.objectIdBase);
   }
@@ -803,9 +757,49 @@ class PayloadResponseImpl implements PayloadResponse {
     return unsubscribe;
   }
 
+  async fetch(
+    input: RequestInfo | URL,
+    options: PayloadFetchOptions = {},
+  ): Promise<Response> {
+    const {
+      fetch: fetchImpl = globalThis.fetch,
+      headers,
+      refreshBoundary,
+      signal,
+      ...init
+    } = options;
+    if (fetchImpl === undefined) {
+      throw new Error("PayloadConsumer.fetch requires a fetch implementation.");
+    }
+    throwIfAborted(signal);
+
+    const response = await fetchImpl(input, {
+      ...init,
+      headers: appendPayloadHeaders(this.codec, headers, refreshBoundary),
+      signal,
+    });
+    throwIfAborted(signal);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new PayloadFetchError(response);
+    }
+    if (response.body === null) {
+      throw new Error("Payload response did not include a body.");
+    }
+    assertPayloadCodecMatches(this.codec, response.headers.get("content-type"));
+
+    // A refresh reuses this consumer's chunks Map but its row ids restart at
+    // 1 on the server; namespace them past existing chunks before decoding
+    // the stream.
+    if (refreshBoundary !== undefined) this.beginRefreshPayload();
+
+    await this.processStream(response.body, signal);
+    return response;
+  }
+
   getRoot(): FigNode {
-    return createElement(PayloadResponseRoot, {
-      response: this,
+    return createElement(PayloadConsumerRoot, {
+      consumer: this,
     });
   }
 
@@ -1059,7 +1053,7 @@ class PayloadResponseImpl implements PayloadResponse {
 
     return function PayloadUnresolvedClientComponent(): never {
       throw new Error(
-        `Cannot render client reference "${metadata.id}" because createPayloadResponse was not configured with loadClientReference or a matching resolveClientReference.`,
+        `Cannot render client reference "${metadata.id}" because createPayloadConsumer was not configured with loadClientReference or a matching resolveClientReference.`,
       );
     };
   }
@@ -2464,11 +2458,11 @@ function throwIfAborted(signal?: AbortSignal | null): void {
 }
 
 function resolveDecodedRow(
-  response: PayloadResponseImpl,
+  consumer: PayloadConsumerImpl,
   row: Extract<PayloadRow, { id: number }>,
   revision: number,
 ): void {
-  const chunk = response.getChunk(row.id);
+  const chunk = consumer.getChunk(row.id);
 
   if (row.tag === "error") {
     const error = errorFromPayload(row.value);
@@ -2482,11 +2476,11 @@ function resolveDecodedRow(
 
   let value: unknown;
   if (row.tag === "client") {
-    response.recordClientReference(row.value);
-    response.recordAssetResources(row.value.assets);
-    value = response.decodeClientReference(clientRowMetadata(row.value));
+    consumer.recordClientReference(row.value);
+    consumer.recordAssetResources(row.value.assets);
+    value = consumer.decodeClientReference(clientRowMetadata(row.value));
   } else {
-    value = response.decodeModelAtRevision(row.value, revision);
+    value = consumer.decodeModelAtRevision(row.value, revision);
   }
 
   chunk.model = row.tag === "model" ? row.value : null;
@@ -2598,56 +2592,56 @@ function shiftModelIds(
 }
 
 function noteMaxObjectIds(
-  response: PayloadResponseImpl,
+  consumer: PayloadConsumerImpl,
   model: PayloadModel,
 ): void {
   if (model === null || typeof model !== "object") return;
 
   if (Array.isArray(model)) {
-    for (const item of model) noteMaxObjectIds(response, item);
+    for (const item of model) noteMaxObjectIds(consumer, item);
     return;
   }
 
   if (isPayloadSpecialModel(model)) {
     switch (model.$fig) {
       case "array":
-        response.noteObjectId(model.id);
-        for (const value of model.value) noteMaxObjectIds(response, value);
+        consumer.noteObjectId(model.id);
+        for (const value of model.value) noteMaxObjectIds(consumer, value);
         return;
       case "element":
-        if (model.id !== undefined) response.noteObjectId(model.id);
-        noteMaxObjectIds(response, model.type);
-        noteMaxObjectIds(response, model.props);
+        if (model.id !== undefined) consumer.noteObjectId(model.id);
+        noteMaxObjectIds(consumer, model.type);
+        noteMaxObjectIds(consumer, model.props);
         return;
       case "map":
-        response.noteObjectId(model.id);
+        consumer.noteObjectId(model.id);
         for (const [key, value] of model.entries) {
-          noteMaxObjectIds(response, key);
-          noteMaxObjectIds(response, value);
+          noteMaxObjectIds(consumer, key);
+          noteMaxObjectIds(consumer, value);
         }
         return;
       case "object":
-        if (model.id !== undefined) response.noteObjectId(model.id);
+        if (model.id !== undefined) consumer.noteObjectId(model.id);
         for (const value of Object.values(model.value)) {
-          noteMaxObjectIds(response, value);
+          noteMaxObjectIds(consumer, value);
         }
         return;
       case "ref":
       case "set":
-        response.noteObjectId(model.id);
+        consumer.noteObjectId(model.id);
         if (model.$fig === "set") {
-          for (const value of model.values) noteMaxObjectIds(response, value);
+          for (const value of model.values) noteMaxObjectIds(consumer, value);
         }
         return;
       case "boundary":
-        noteMaxObjectIds(response, model.child);
+        noteMaxObjectIds(consumer, model.child);
         return;
       default:
         return;
     }
   }
 
-  for (const value of Object.values(model)) noteMaxObjectIds(response, value);
+  for (const value of Object.values(model)) noteMaxObjectIds(consumer, value);
 }
 
 function collectObjectIds(model: PayloadModel, ids: Set<number>): void {
@@ -2850,37 +2844,37 @@ function isPayloadSpecialModel(
 }
 
 function decodeModel(
-  response: PayloadResponseImpl,
+  consumer: PayloadConsumerImpl,
   model: PayloadModel,
 ): unknown {
   if (model === null) return null;
   if (Array.isArray(model))
-    return model.map((item) => decodeModel(response, item));
+    return model.map((item) => decodeModel(consumer, item));
 
   if (typeof model !== "object") return model;
 
   if (isPayloadSpecialModel(model)) {
-    return decodeSpecialModel(response, model);
+    return decodeSpecialModel(consumer, model);
   }
 
   const decoded: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(model)) {
-    definePayloadProperty(decoded, name, decodeModel(response, value));
+    definePayloadProperty(decoded, name, decodeModel(consumer, value));
   }
   return decoded;
 }
 
 function decodeSpecialModel(
-  response: PayloadResponseImpl,
+  consumer: PayloadConsumerImpl,
   model: PayloadElementModel | PayloadSpecialModel,
 ): unknown {
   switch (model.$fig) {
     case "array": {
-      return response.defineObjectRef(
+      return consumer.defineObjectRef(
         model.id,
         () => [] as unknown[],
         (value) => {
-          value.push(...model.value.map((item) => decodeModel(response, item)));
+          value.push(...model.value.map((item) => decodeModel(consumer, item)));
         },
       );
     }
@@ -2889,12 +2883,12 @@ function decodeSpecialModel(
     case "date":
       return new Date(model.value);
     case "map": {
-      return response.defineObjectRef(
+      return consumer.defineObjectRef(
         model.id,
         () => new Map(),
         (value) => {
           for (const [key, item] of model.entries) {
-            value.set(decodeModel(response, key), decodeModel(response, item));
+            value.set(decodeModel(consumer, key), decodeModel(consumer, item));
           }
         },
       );
@@ -2905,29 +2899,29 @@ function decodeSpecialModel(
       if (model.id === undefined) {
         const value: Record<string, unknown> = {};
         for (const [name, child] of Object.entries(model.value)) {
-          definePayloadProperty(value, name, decodeModel(response, child));
+          definePayloadProperty(value, name, decodeModel(consumer, child));
         }
         return value;
       }
-      return response.defineObjectRef(
+      return consumer.defineObjectRef(
         model.id,
         () => ({}) as Record<string, unknown>,
         (value) => {
           for (const [name, child] of Object.entries(model.value)) {
-            definePayloadProperty(value, name, decodeModel(response, child));
+            definePayloadProperty(value, name, decodeModel(consumer, child));
           }
         },
       );
     }
     case "ref":
-      return response.readObjectRef(model.id);
+      return consumer.readObjectRef(model.id);
     case "set": {
-      return response.defineObjectRef(
+      return consumer.defineObjectRef(
         model.id,
         () => new Set(),
         (value) => {
           for (const item of model.values) {
-            value.add(decodeModel(response, item));
+            value.add(decodeModel(consumer, item));
           }
         },
       );
@@ -2937,15 +2931,15 @@ function decodeSpecialModel(
     case "undefined":
       return undefined;
     case "boundary":
-      response.prepareBoundaryInitial(model.id, model.child);
+      consumer.prepareBoundaryInitial(model.id, model.child);
       return createElement(PayloadBoundarySlot, {
         id: model.id,
         initial: model.child,
-        response,
+        consumer,
       });
     case "element": {
       if (model.id !== undefined) {
-        return response.defineObjectRef(
+        return consumer.defineObjectRef(
           model.id,
           () =>
             ({
@@ -2956,31 +2950,31 @@ function decodeSpecialModel(
             }) as FigElement,
           (element) => {
             (element as { type: ElementType<any> }).type = decodeElementType(
-              response,
+              consumer,
               model.type,
             );
             (element as { props: Props }).props = decodeModel(
-              response,
+              consumer,
               model.props,
             ) as Props;
           },
         );
       }
-      const type = decodeElementType(response, model.type);
-      const props = decodeModel(response, model.props) as Props & {
+      const type = decodeElementType(consumer, model.type);
+      const props = decodeModel(consumer, model.props) as Props & {
         key?: Key | null;
       };
       if (model.key !== null) props.key = model.key;
       return createElement(type, props);
     }
     case "client":
-      return response.readChunk(model.id);
+      return consumer.readChunk(model.id);
     case "fragment":
       return Fragment;
     case "lazy":
-      return createElement(PayloadLazyNode, { id: model.id, response });
+      return createElement(PayloadLazyNode, { id: model.id, consumer });
     case "promise":
-      return response.getChunk(model.id).promise;
+      return consumer.getChunk(model.id).promise;
     case "suspense":
       return Suspense;
     case "view-transition":
@@ -2989,32 +2983,32 @@ function decodeSpecialModel(
 }
 
 function decodeElementType(
-  response: PayloadResponseImpl,
+  consumer: PayloadConsumerImpl,
   type: string | PayloadSpecialModel,
 ): ElementType<any> {
   if (typeof type === "string") return type;
-  return decodeSpecialModel(response, type) as ElementType<any>;
+  return decodeSpecialModel(consumer, type) as ElementType<any>;
 }
 
-function PayloadResponseRoot(props: {
-  response: PayloadResponseImpl;
+function PayloadConsumerRoot(props: {
+  consumer: PayloadConsumerImpl;
 }): FigNode {
-  return props.response.readChunk(0);
+  return props.consumer.readChunk(0);
 }
 
 function PayloadBoundarySlot(props: {
   id: string;
   initial: PayloadModel;
-  response: PayloadResponseImpl;
+  consumer: PayloadConsumerImpl;
 }): FigNode {
-  return props.response.readBoundary(props.id, props.initial);
+  return props.consumer.readBoundary(props.id, props.initial);
 }
 
 function PayloadLazyNode(props: {
   id: number;
-  response: PayloadResponseImpl;
+  consumer: PayloadConsumerImpl;
 }): FigNode {
-  return props.response.readChunk(props.id);
+  return props.consumer.readChunk(props.id);
 }
 
 function resolveClientReferenceExport(
@@ -3058,7 +3052,7 @@ function assertPayloadCodecMatches(
   const received = payloadCodecIdFromContentType(contentTypeHeader);
   if (received === null || received === codec.id) return;
   throw new Error(
-    `Payload codec mismatch: response used "${received}" but this client expects "${codec.id}".`,
+    `Payload codec mismatch: consumer used "${received}" but this client expects "${codec.id}".`,
   );
 }
 

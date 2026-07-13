@@ -232,10 +232,9 @@ Suspense reveal gating as explicit `assets(...)` wrappers.
 
 ```ts
 import {
-  createPayloadResponse,
+  createPayloadConsumer,
   decodePayloadValue,
   encodePayloadValue,
-  fetchPayload,
   jsonPayloadCodec,
   PAYLOAD_BOUNDARY_HEADER,
   renderToPayloadStream,
@@ -251,7 +250,7 @@ both paths reject `allReady`. The default `jsonPayloadCodec` writes one
 readable JSON row per newline and identifies itself with
 `text/x-fig-payload; codec=json; charset=utf-8`. Pass a custom `PayloadCodec`
 to both `renderToPayloadStream(node, { codec })` and
-`createPayloadResponse({ codec })` when both ends should use a different byte
+`createPayloadConsumer({ codec })` when both ends should use a different byte
 encoding. Codec ids are implementation ids, not stable public wire formats.
 
 Pass `refreshBoundary` to render a targeted boundary refresh:
@@ -263,10 +262,10 @@ renderToPayloadStream(<FeedItems />, { refreshBoundary: "feed" });
 The rendered node must be the replacement content for that boundary. Do not
 include a nested `<PayloadBoundary id="feed">` wrapper in the refresh payload.
 
-`createPayloadResponse()` decodes streamed rows on the client, and
-`fetchPayload(response, input, options?)` fetches and processes a payload. Pass
-`refreshBoundary` to `fetchPayload` to request and apply a boundary refresh.
-`fetchPayload` sends the response codec in `Accept` and checks the response
+`createPayloadConsumer()` creates the decoding end of the wire, and
+`consumer.fetch(input, options?)` fetches and processes a payload. Pass
+`refreshBoundary` to `consumer.fetch` to request and apply a boundary refresh.
+`consumer.fetch` sends the consumer codec in `Accept` and checks the response
 `codec=` content-type parameter before decoding. Server integrations can read
 the exported `PAYLOAD_BOUNDARY_HEADER` constant for targeted refresh requests.
 Non-2xx responses reject with `PayloadFetchError`, which exposes `status` and

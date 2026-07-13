@@ -25,12 +25,11 @@ import {
 } from "@bgub/fig/internal";
 import { describe, expect, it } from "vitest";
 import {
-  createPayloadResponse,
+  createPayloadConsumer,
   decodePayloadDataEntries,
   decodePayloadValue,
   encodePayloadDataEntries,
   encodePayloadValue,
-  fetchPayload,
   isPayloadRequestCancelled,
   jsonPayloadCodec,
   PAYLOAD_BOUNDARY_HEADER,
@@ -39,7 +38,7 @@ import {
   type PayloadRow,
   type PayloadClientReferenceMetadata,
   type PayloadFetch,
-  type PayloadResponse,
+  type PayloadConsumer,
   renderToPayloadStream,
 } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
@@ -56,12 +55,12 @@ declare const process: {
   off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
 };
 
-// beginRefreshPayload is not part of the public PayloadResponse interface
-// (fetchPayload calls it internally); these tests feed refresh streams by
-// hand, so reach through to the implementation.
-function beginRefreshPayload(response: PayloadResponse): void {
+// beginRefreshPayload is not part of the public PayloadConsumer interface
+// (PayloadConsumer.fetch calls it internally); these tests feed refresh
+// streams by hand, so reach through to the implementation.
+function beginRefreshPayload(consumer: PayloadConsumer): void {
   (
-    response as PayloadResponse & { beginRefreshPayload(): void }
+    consumer as PayloadConsumer & { beginRefreshPayload(): void }
   ).beginRefreshPayload();
 }
 
@@ -162,25 +161,25 @@ function parseTestPayloadRows(input: string): TestPayloadRow[] {
 
 function decodeTestPayloadRows(
   rows: TestPayloadRow[],
-  options?: Parameters<typeof createPayloadResponse>[0],
+  options?: Parameters<typeof createPayloadConsumer>[0],
 ): FigNode {
-  const response = createPayloadResponse(options);
-  processTestPayloadRows(response, rows);
-  return response.getRoot();
+  const consumer = createPayloadConsumer(options);
+  processTestPayloadRows(consumer, rows);
+  return consumer.getRoot();
 }
 
 function processStreamInto(
-  response: ReturnType<typeof createPayloadResponse>,
+  consumer: ReturnType<typeof createPayloadConsumer>,
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
-  return response.processStream(stream);
+  return consumer.processStream(stream);
 }
 
 function processTestPayloadRows(
-  response: ReturnType<typeof createPayloadResponse>,
+  consumer: ReturnType<typeof createPayloadConsumer>,
   rows: TestPayloadRow[],
 ): void {
-  response.processStringChunk(
+  consumer.processStringChunk(
     `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
   );
 }
@@ -208,10 +207,10 @@ function evaluatePayloadNode(node: FigNode): FigNode {
   };
 }
 
-function readPayloadRoot(response: ReturnType<typeof createPayloadResponse>) {
-  const root = response.getRoot();
+function readPayloadRoot(consumer: ReturnType<typeof createPayloadConsumer>) {
+  const root = consumer.getRoot();
   if (!isValidElement(root) || typeof root.type !== "function") {
-    throw new Error("Expected payload response root.");
+    throw new Error("Expected payload consumer root.");
   }
   return (root.type as ElementType & ((props: FigElement["props"]) => FigNode))(
     root.props,
@@ -354,13 +353,13 @@ describe("payload rendering", () => {
 
     const rows = await renderToPayloadRows(createElement(Counter, {}));
     const seen: PayloadClientReferenceMetadata[] = [];
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference(metadata) {
         seen.push(metadata);
         return () => null;
       },
     });
-    processTestPayloadRows(response, rows);
+    processTestPayloadRows(consumer, rows);
 
     // The wire row carries assets, but resolver hooks see the documented
     // metadata shape only.
@@ -375,11 +374,11 @@ describe("payload rendering", () => {
       load: () => Promise.resolve({}),
     });
     const rows = await renderToPayloadRows(createElement(Widget, {}));
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, rows);
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, rows);
 
-    expect(() => evaluatePayloadNode(response.getRoot())).toThrow(
-      'Cannot render client reference "app/Widget.client.tsx#Widget" because createPayloadResponse was not configured with loadClientReference or a matching resolveClientReference.',
+    expect(() => evaluatePayloadNode(consumer.getRoot())).toThrow(
+      'Cannot render client reference "app/Widget.client.tsx#Widget" because createPayloadConsumer was not configured with loadClientReference or a matching resolveClientReference.',
     );
   });
 
@@ -413,7 +412,7 @@ describe("payload rendering", () => {
     setCurrentDispatcher(dispatcher);
     try {
       // Before the module settles, the first render read suspends.
-      const cold = createPayloadResponse({
+      const cold = createPayloadConsumer({
         loadClientReference: () => Promise.resolve(widgetModule),
       });
       processTestPayloadRows(cold, rows);
@@ -427,19 +426,19 @@ describe("payload rendering", () => {
 
       // Preloading dedupes the module load and makes the render synchronous.
       let loads = 0;
-      const response = createPayloadResponse({
+      const consumer = createPayloadConsumer({
         loadClientReference: () => {
           loads += 1;
           return Promise.resolve(widgetModule);
         },
       });
-      processTestPayloadRows(response, rows);
+      processTestPayloadRows(consumer, rows);
 
-      await response.preloadClientReferences();
-      await response.preloadClientReferences();
+      await consumer.preloadClientReferences();
+      await consumer.preloadClientReferences();
       expect(loads).toBe(1);
 
-      const rendered = evaluatePayloadNode(response.getRoot()) as FigElement;
+      const rendered = evaluatePayloadNode(consumer.getRoot()) as FigElement;
       expect(isValidElement(rendered)).toBe(true);
       expect(rendered.type).toBe("span");
       expect(rendered.props.children).toBe("widget:hi");
@@ -449,9 +448,9 @@ describe("payload rendering", () => {
   });
 
   it("ignores invalid asset descriptors while decoding client rows", () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
 
-    response.processStringChunk(
+    consumer.processStringChunk(
       `${JSON.stringify({
         id: 1,
         tag: "client",
@@ -465,7 +464,7 @@ describe("payload rendering", () => {
       })}\n`,
     );
 
-    expect(response.getAssetResources()).toEqual([
+    expect(consumer.getAssetResources()).toEqual([
       { href: "/assets/Counter.css", kind: "stylesheet" },
     ]);
   });
@@ -477,10 +476,10 @@ describe("payload rendering", () => {
         createElement("article", null, "Server route"),
       ),
     );
-    const response = createPayloadResponse();
-    response.processStringChunk(rows);
+    const consumer = createPayloadConsumer();
+    consumer.processStringChunk(rows);
 
-    expect(response.getAssetResources()).toEqual([
+    expect(consumer.getAssetResources()).toEqual([
       { href: "/assets/ServerRoute.css", kind: "stylesheet" },
       { as: "image", href: "/mark.svg", kind: "preload" },
     ]);
@@ -516,11 +515,11 @@ describe("payload rendering", () => {
 
     expect(text).not.toContain("Unused.css");
 
-    const response = createPayloadResponse();
-    response.processStringChunk(text);
+    const consumer = createPayloadConsumer();
+    consumer.processStringChunk(text);
 
     // Shared asset deduped across the two references that rendered.
-    expect(response.getAssetResources()).toEqual([
+    expect(consumer.getAssetResources()).toEqual([
       { href: "/assets/shared.css", kind: "stylesheet" },
       { href: "/assets/Header.css", kind: "stylesheet" },
       { href: "/assets/Footer.css", kind: "stylesheet" },
@@ -728,12 +727,12 @@ describe("payload rendering", () => {
     const rows = await renderToPayloadRows(
       createElement(Viewer, { value: payload }),
     );
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
-    processTestPayloadRows(response, rows);
+    processTestPayloadRows(consumer, rows);
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
     const value = decoded.props.value as typeof payload;
 
@@ -768,16 +767,16 @@ describe("payload rendering", () => {
       ["set", new Set([createElement("em", null, "Set child")])],
     ]);
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: ({ id }) =>
         id.includes("Viewer") ? "fig-viewer" : "fig-nested",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement(Viewer, { value: payload })),
     );
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
     const value = decoded.props.value as Map<string, unknown>;
 
@@ -869,12 +868,12 @@ describe("payload rendering", () => {
     await result.allReady;
     const rows = parseTestPayloadRows(await readStream(result.stream));
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
-    processTestPayloadRows(response, rows);
+    processTestPayloadRows(consumer, rows);
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     await expect(decoded.props.later).resolves.toBe(decoded.props.value);
@@ -907,15 +906,15 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       parseTestPayloadRows(await readStream(result.stream)),
     );
 
-    const root = readPayloadRoot(response);
+    const root = readPayloadRoot(consumer);
     if (!isValidElement(root) || !Array.isArray(root.props.children)) {
       throw new Error("Expected decoded root children.");
     }
@@ -940,11 +939,11 @@ describe("payload rendering", () => {
       return createElement(Viewer, { value: readPromise(pending.promise) });
     }
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(PayloadBoundary, { id: "slot" }, "initial"),
       ),
@@ -962,13 +961,13 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       parseTestPayloadRows(await readStream(result.stream)),
     );
 
-    const refreshed = unwrapFunctionComponent(readPayloadRoot(response));
+    const refreshed = unwrapFunctionComponent(readPayloadRoot(consumer));
     if (
       !isValidElement(refreshed) ||
       !Array.isArray(refreshed.props.children)
@@ -1006,21 +1005,21 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       parseTestPayloadRows(await readStream(result.stream)),
     );
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows("refreshed", { refreshBoundary: "slot" }),
     );
 
-    const root = readPayloadRoot(response);
+    const root = readPayloadRoot(consumer);
     if (!isValidElement(root) || !Array.isArray(root.props.children)) {
       throw new Error("Expected decoded root children.");
     }
@@ -1031,8 +1030,8 @@ describe("payload rendering", () => {
   });
 
   it("keeps object refs from transitive lazy chunks after unrelated refreshes", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -1069,7 +1068,7 @@ describe("payload rendering", () => {
       },
     ]);
 
-    const initial = evaluatePayloadNode(response.getRoot());
+    const initial = evaluatePayloadNode(consumer.getRoot());
     expect(initial).toMatchObject({
       props: {
         children: [
@@ -1088,12 +1087,12 @@ describe("payload rendering", () => {
       type: "main",
     });
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
-    const refreshed = evaluatePayloadNode(response.getRoot());
+    const refreshed = evaluatePayloadNode(consumer.getRoot());
     expect(refreshed).toMatchObject({
       props: {
         children: [
@@ -1130,8 +1129,8 @@ describe("payload rendering", () => {
   });
 
   it("keeps decoded unrelated lazy chunks cached after boundary refreshes", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -1149,7 +1148,7 @@ describe("payload rendering", () => {
       },
     ]);
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: [
           { props: { children: "Unrelated" }, type: "aside" },
@@ -1160,19 +1159,19 @@ describe("payload rendering", () => {
     });
 
     const chunks = (
-      response as unknown as {
+      consumer as unknown as {
         chunks: Map<number, { hasDecoded: boolean }>;
       }
     ).chunks;
     expect(chunks.get(1)?.hasDecoded).toBe(true);
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
     expect(chunks.get(1)?.hasDecoded).toBe(true);
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: [
           { props: { children: "Unrelated" }, type: "aside" },
@@ -1184,8 +1183,8 @@ describe("payload rendering", () => {
   });
 
   it("invalidates decoded ancestor boundaries when a nested boundary refreshes", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -1199,25 +1198,25 @@ describe("payload rendering", () => {
       },
     ]);
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "initial" },
       type: "main",
     });
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "refreshed" },
       type: "main",
     });
   });
 
   it("refreshes boundaries discovered inside retained lazy chunks", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -1236,17 +1235,17 @@ describe("payload rendering", () => {
       },
     ]);
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "initial" },
       type: "main",
     });
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "refreshed" },
       type: "main",
     });
@@ -1260,15 +1259,15 @@ describe("payload rendering", () => {
     const value: Record<string, unknown> = { label: "cycle" };
     value.self = value;
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement(Viewer, { value })),
     );
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.value.self).toBe(decoded.props.value);
@@ -1290,13 +1289,13 @@ describe("payload rendering", () => {
       }),
       createElement(Viewer, { shared }),
     ]);
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
 
-    expect(() => processTestPayloadRows(response, rows)).not.toThrow();
+    expect(() => processTestPayloadRows(consumer, rows)).not.toThrow();
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!Array.isArray(decoded) || !isValidElement(decoded[1])) {
       throw new Error("Expected decoded sibling client element.");
     }
@@ -1316,11 +1315,11 @@ describe("payload rendering", () => {
     const child = createElement("span", null, "shared child");
     const fallback = new Map<unknown, unknown>([["state", "ready"]]);
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(Viewer, {
           children: child,
@@ -1330,7 +1329,7 @@ describe("payload rendering", () => {
       ),
     );
 
-    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    const decoded = unwrapFunctionComponent(readPayloadRoot(consumer));
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.children).toBe(decoded.props.mirror);
@@ -1348,17 +1347,17 @@ describe("payload rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(Viewer, { children: { custom: "data" } }),
       ),
     );
 
-    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    const decoded = unwrapFunctionComponent(readPayloadRoot(consumer));
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.children).toEqual({ custom: "data" });
@@ -1369,14 +1368,14 @@ describe("payload rendering", () => {
       id: "app/Viewer.client.tsx#Viewer",
       load: () => Promise.resolve({}),
     });
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
 
     const first: Record<string, unknown> = { label: "first" };
     first.self = first;
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           PayloadBoundary,
@@ -1388,15 +1387,15 @@ describe("payload rendering", () => {
 
     const second: Record<string, unknown> = { label: "second" };
     second.self = second;
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement(Viewer, { value: second }), {
         refreshBoundary: "slot",
       }),
     );
 
-    const decoded = unwrapFunctionComponent(readPayloadRoot(response));
+    const decoded = unwrapFunctionComponent(readPayloadRoot(consumer));
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.value.label).toBe("second");
@@ -1445,12 +1444,12 @@ describe("payload rendering", () => {
         promise: value,
       }),
     );
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-viewer",
     });
-    processTestPayloadRows(response, rows);
+    processTestPayloadRows(consumer, rows);
 
-    const decoded = readPayloadRoot(response);
+    const decoded = readPayloadRoot(consumer);
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.$fig).toBe("literal");
@@ -1462,7 +1461,7 @@ describe("payload rendering", () => {
   });
 
   it("rejects payload codec mismatches during fetch", async () => {
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       codec: {
         ...jsonPayloadCodec,
         contentType: "text/x-fig-payload; codec=custom; charset=utf-8",
@@ -1471,7 +1470,7 @@ describe("payload rendering", () => {
     });
 
     await expect(
-      fetchPayload(response, "/payload", {
+      consumer.fetch("/payload", {
         fetch: async () =>
           new Response(
             await renderToPayloadText(createElement("p", null, "Fetched")),
@@ -1479,7 +1478,7 @@ describe("payload rendering", () => {
           ),
       }),
     ).rejects.toThrow(
-      'Payload codec mismatch: response used "json" but this client expects "custom".',
+      'Payload codec mismatch: consumer used "json" but this client expects "custom".',
     );
   });
 
@@ -1574,9 +1573,9 @@ describe("payload rendering", () => {
       ),
     });
 
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, rows);
-    const decoded = readPayloadRoot(response);
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, rows);
+    const decoded = readPayloadRoot(consumer);
 
     expect(isValidElement(decoded)).toBe(true);
     if (!isValidElement(decoded)) return;
@@ -1622,14 +1621,14 @@ describe("payload rendering", () => {
       return null;
     }
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference() {
         return ClientLikeButton;
       },
     });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           PayloadBoundary,
@@ -1638,17 +1637,17 @@ describe("payload rendering", () => {
         ),
       ),
     );
-    const first = unwrapFunctionComponent(readPayloadRoot(response));
+    const first = unwrapFunctionComponent(readPayloadRoot(consumer));
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(LikeButton, { initialCount: 2 }),
         { refreshBoundary: "slot" },
       ),
     );
-    const refreshed = unwrapFunctionComponent(readPayloadRoot(response));
+    const refreshed = unwrapFunctionComponent(readPayloadRoot(consumer));
 
     expect(first).toMatchObject({
       key: null,
@@ -1843,31 +1842,31 @@ describe("payload rendering", () => {
   });
 
   it("processes streamed rows incrementally", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     let notifications = 0;
-    response.subscribe(() => {
+    consumer.subscribe(() => {
       notifications += 1;
     });
 
-    response.processStringChunk('{"id":0,"tag":"model"');
+    consumer.processStringChunk('{"id":0,"tag":"model"');
     expect(notifications).toBe(0);
 
-    response.processStringChunk(',"value":"Ready"}\n');
+    consumer.processStringChunk(',"value":"Ready"}\n');
     expect(notifications).toBe(1);
-    expect(evaluatePayloadNode(response.getRoot())).toBe("Ready");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("Ready");
   });
 
   it("binds refresh rows to a normal Fig root render handle", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const rendered: FigNode[] = [];
-    const unsubscribe = response.bindRoot({
+    const unsubscribe = consumer.bindRoot({
       render(node) {
         rendered.push(node);
       },
     });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -1880,9 +1879,9 @@ describe("payload rendering", () => {
         ),
       ),
     );
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement("p", null, "Updated"), {
         refreshBoundary: "post",
       }),
@@ -1905,9 +1904,9 @@ describe("payload rendering", () => {
   });
 
   it("uses the latest initial model for boundaries nested inside refreshed content", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           PayloadBoundary,
@@ -1917,22 +1916,22 @@ describe("payload rendering", () => {
       ),
     );
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(PayloadBoundary, { id: "inner" }, "new inner"),
         { refreshBoundary: "outer" },
       ),
     );
 
-    expect(evaluatePayloadNode(response.getRoot())).toBe("new inner");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("new inner");
   });
 
   it("lets a newer parent refresh supersede an older targeted child refresh", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           PayloadBoundary,
@@ -1942,31 +1941,31 @@ describe("payload rendering", () => {
       ),
     );
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows("targeted inner", {
         refreshBoundary: "inner",
       }),
     );
-    expect(evaluatePayloadNode(response.getRoot())).toBe("targeted inner");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("targeted inner");
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(PayloadBoundary, { id: "inner" }, "new parent inner"),
         { refreshBoundary: "outer" },
       ),
     );
 
-    expect(evaluatePayloadNode(response.getRoot())).toBe("new parent inner");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("new parent inner");
   });
 
   it("preserves decoded unrelated boundary initials after targeted refreshes", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -1985,7 +1984,7 @@ describe("payload rendering", () => {
       ),
     );
 
-    const initialRoot = readPayloadRoot(response);
+    const initialRoot = readPayloadRoot(consumer);
     if (
       !isValidElement(initialRoot) ||
       !Array.isArray(initialRoot.props.children)
@@ -1995,15 +1994,15 @@ describe("payload rendering", () => {
     const initialFeed = unwrapFunctionComponent(initialRoot.props.children[0]);
     const initialNote = unwrapFunctionComponent(initialRoot.props.children[1]);
 
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement("p", null, "feed 1"), {
         refreshBoundary: "feed",
       }),
     );
 
-    const refreshedRoot = readPayloadRoot(response);
+    const refreshedRoot = readPayloadRoot(consumer);
     if (
       !isValidElement(refreshedRoot) ||
       !Array.isArray(refreshedRoot.props.children)
@@ -2022,16 +2021,16 @@ describe("payload rendering", () => {
   });
 
   it("rejects failed boundary refresh streams without replacing existing content", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const rendered: FigNode[] = [];
-    response.bindRoot({
+    consumer.bindRoot({
       render(node) {
         rendered.push(node);
       },
     });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -2046,7 +2045,7 @@ describe("payload rendering", () => {
     );
 
     await expect(
-      fetchPayload(response, "/payload", {
+      consumer.fetch("/payload", {
         fetch: async () =>
           new Response(
             await renderToPayloadText(createElement(BrokenRefresh, null), {
@@ -2068,7 +2067,7 @@ describe("payload rendering", () => {
       type: "section",
     });
 
-    await fetchPayload(response, "/payload", {
+    await consumer.fetch("/payload", {
       fetch: async () =>
         new Response(
           await renderToPayloadText(createElement("p", null, "Recovered"), {
@@ -2104,7 +2103,7 @@ describe("payload rendering", () => {
       load: () => Promise.resolve({}),
     });
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: ({ id }) =>
         function Resolved() {
           return id;
@@ -2112,7 +2111,7 @@ describe("payload rendering", () => {
     });
 
     const rendered: FigNode[] = [];
-    response.bindRoot({
+    consumer.bindRoot({
       render(node) {
         rendered.push(node);
       },
@@ -2121,7 +2120,7 @@ describe("payload rendering", () => {
     // Initial payload: a client reference outlined to chunk 1, beside a
     // refreshable boundary.
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -2135,9 +2134,9 @@ describe("payload rendering", () => {
     // Refresh the boundary with a DIFFERENT client reference. Its outlined row
     // restarts at id 1 on the server and would overwrite chunk 1 (First) in the
     // shared chunks Map without per-payload namespacing.
-    beginRefreshPayload(response);
+    beginRefreshPayload(consumer);
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement(Second, {}), {
         refreshBoundary: "slot",
       }),
@@ -2152,21 +2151,21 @@ describe("payload rendering", () => {
   });
 
   it("does not rebase late rows from an overlapping initial stream", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const initial = controlledTextStream();
-    const initialDone = processStreamInto(response, initial.stream);
+    const initialDone = processStreamInto(consumer, initial.stream);
 
     initial.write('{"id":5,"tag":"model","value":"unreferenced"}\n');
     initial.write('{"id":0,"tag":"model","value":{"$fig":"lazy","id":1}}\n');
-    await response.rootReady;
+    await consumer.rootReady;
     try {
-      evaluatePayloadNode(response.getRoot());
+      evaluatePayloadNode(consumer.getRoot());
     } catch {
       // The lazy root is intentionally pending while a refresh starts.
     }
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "ignored" },
     ]);
 
@@ -2175,19 +2174,19 @@ describe("payload rendering", () => {
     await initialDone;
 
     const chunks = (
-      response as unknown as {
+      consumer as unknown as {
         chunks: Map<number, { status: string; value: unknown }>;
       }
     ).chunks;
     expect(chunks.get(1)?.status).toBe("fulfilled");
     expect(chunks.get(1)?.value).toBe("late");
     expect(chunks.has(6)).toBe(false);
-    expect(evaluatePayloadNode(response.getRoot())).toBe("late");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("late");
   });
 
   it("retains transitive chunks referenced from live lazy chunks", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -2211,11 +2210,11 @@ describe("payload rendering", () => {
       },
     ]);
 
-    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+    const chunks = (consumer as unknown as { chunks: Map<number, unknown> })
       .chunks;
     expect(chunks.has(1)).toBe(true);
     expect(chunks.has(2)).toBe(true);
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: {
           props: { children: "Nested" },
@@ -2227,8 +2226,8 @@ describe("payload rendering", () => {
   });
 
   it("retains chunks while a pending lazy chunk may still reference them", async () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -2242,12 +2241,12 @@ describe("payload rendering", () => {
     ]);
 
     try {
-      evaluatePayloadNode(response.getRoot());
+      evaluatePayloadNode(consumer.getRoot());
     } catch {
       // The lazy child is intentionally still pending.
     }
 
-    processTestPayloadRows(response, [
+    processTestPayloadRows(consumer, [
       {
         id: 5,
         tag: "model",
@@ -2256,14 +2255,14 @@ describe("payload rendering", () => {
     ]);
 
     const initial = controlledTextStream();
-    const initialDone = processStreamInto(response, initial.stream);
+    const initialDone = processStreamInto(consumer, initial.stream);
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
-    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+    const chunks = (consumer as unknown as { chunks: Map<number, unknown> })
       .chunks;
     expect(chunks.has(5)).toBe(true);
 
@@ -2271,7 +2270,7 @@ describe("payload rendering", () => {
     initial.close();
     await initialDone;
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: [
           { props: { children: "Retained" }, type: "span" },
@@ -2283,8 +2282,8 @@ describe("payload rendering", () => {
   });
 
   it("releases transitive chunks from superseded boundary refresh payloads", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -2310,24 +2309,24 @@ describe("payload rendering", () => {
       },
     ]);
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "slot", tag: "refresh", value: "refreshed" },
     ]);
 
-    const state = response as unknown as {
+    const state = consumer as unknown as {
       chunks: Map<number, unknown>;
       objectRefs: Map<number, unknown>;
     };
     expect(state.chunks.has(1)).toBe(false);
     expect(state.chunks.has(2)).toBe(false);
     expect(state.objectRefs.has(1)).toBe(false);
-    expect(evaluatePayloadNode(response.getRoot())).toBe("refreshed");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("refreshed");
   });
 
   it("releases chunks from refreshed boundaries dropped by parent refreshes", () => {
-    const response = createPayloadResponse();
-    processTestPayloadRows(response, [
+    const consumer = createPayloadConsumer();
+    processTestPayloadRows(consumer, [
       {
         id: 0,
         tag: "model",
@@ -2343,8 +2342,8 @@ describe("payload rendering", () => {
       },
     ]);
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "inner", tag: "refresh", value: { $fig: "lazy", id: 1 } },
       {
         id: 1,
@@ -2354,17 +2353,17 @@ describe("payload rendering", () => {
         }),
       },
     ]);
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { value: { label: "inner" } },
       type: "span",
     });
 
-    beginRefreshPayload(response);
-    processTestPayloadRows(response, [
+    beginRefreshPayload(consumer);
+    processTestPayloadRows(consumer, [
       { boundary: "outer", tag: "refresh", value: "outer only" },
     ]);
 
-    const state = response as unknown as {
+    const state = consumer as unknown as {
       boundaries: Map<string, unknown>;
       chunks: Map<number, unknown>;
       decodedBoundaries: Map<string, unknown>;
@@ -2376,20 +2375,20 @@ describe("payload rendering", () => {
     expect(state.boundaries.has("inner")).toBe(false);
     expect(state.initialBoundaries.has("inner")).toBe(false);
     expect(state.decodedBoundaries.has("inner")).toBe(false);
-    expect(evaluatePayloadNode(response.getRoot())).toBe("outer only");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("outer only");
   });
 
   it("releases chunks from superseded boundary refresh payloads", async () => {
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: ({ id }) =>
         function Resolved() {
           return id;
         },
     });
-    response.bindRoot({ render: () => undefined });
+    consumer.bindRoot({ render: () => undefined });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(PayloadBoundary, { id: "slot" }, "before"),
       ),
@@ -2401,48 +2400,48 @@ describe("payload rendering", () => {
         load: () => Promise.resolve({}),
       });
 
-      beginRefreshPayload(response);
+      beginRefreshPayload(consumer);
       processTestPayloadRows(
-        response,
+        consumer,
         await renderToPayloadRows(createElement(Client, {}), {
           refreshBoundary: "slot",
         }),
       );
     }
 
-    const chunks = (response as unknown as { chunks: Map<number, unknown> })
+    const chunks = (consumer as unknown as { chunks: Map<number, unknown> })
       .chunks;
     expect(chunks.size).toBe(2);
-    expect(evaluatePayloadNode(response.getRoot())).toBe("third");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("third");
   });
 
-  it("pipes readable streams into a payload response", async () => {
-    const response = createPayloadResponse();
+  it("pipes readable streams into a payload consumer", async () => {
+    const consumer = createPayloadConsumer();
     await processStreamInto(
-      response,
+      consumer,
       streamFromString(
         await renderToPayloadText(createElement("p", null, "Hi")),
       ),
     );
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "Hi" },
       type: "p",
     });
   });
 
   it("flushes a final payload row without a trailing newline", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     await processStreamInto(
-      response,
+      consumer,
       streamFromString('{"id":0,"tag":"model","value":"Done"}'),
     );
 
-    expect(evaluatePayloadNode(response.getRoot())).toBe("Done");
+    expect(evaluatePayloadNode(consumer.getRoot())).toBe("Done");
   });
 
   it("fetches initial payload streams with a payload accept header", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     let requestHeaders: Headers | null = null;
     let requestSignal: AbortSignal | null = null;
     const controller = new AbortController();
@@ -2457,7 +2456,7 @@ describe("payload rendering", () => {
       );
     };
 
-    await fetchPayload(response, "/payload", {
+    await consumer.fetch("/payload", {
       fetch: fetchImpl,
       signal: controller.signal,
     });
@@ -2466,18 +2465,18 @@ describe("payload rendering", () => {
       jsonPayloadCodec.contentType,
     );
     expect(requestSignal).toBe(controller.signal);
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: { children: "Fetched" },
       type: "p",
     });
   });
 
-  it("cancels initial payload fetches before mutating the response", async () => {
-    const response = createPayloadResponse();
+  it("cancels initial payload fetches before mutating the consumer", async () => {
+    const consumer = createPayloadConsumer();
     const controller = new AbortController();
     let fetches = 0;
     let notifications = 0;
-    response.subscribe(() => {
+    consumer.subscribe(() => {
       notifications += 1;
     });
 
@@ -2485,7 +2484,7 @@ describe("payload rendering", () => {
 
     let error: unknown;
     try {
-      await fetchPayload(response, "/payload", {
+      await consumer.fetch("/payload", {
         fetch: async () => {
           fetches += 1;
           return new Response("unreachable");
@@ -2502,15 +2501,15 @@ describe("payload rendering", () => {
   });
 
   it("cancels partial payload streams without flushing buffered rows", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const stream = controlledTextStream();
     const controller = new AbortController();
     let notifications = 0;
-    response.subscribe(() => {
+    consumer.subscribe(() => {
       notifications += 1;
     });
 
-    const request = fetchPayload(response, "/payload", {
+    const request = consumer.fetch("/payload", {
       fetch: async () => new Response(stream.stream),
       signal: controller.signal,
     });
@@ -2593,7 +2592,7 @@ describe("payload rendering", () => {
   });
 
   it("fetches boundary refresh streams with the boundary header", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     let requestHeaders: Headers | null = null;
     const fetchImpl: PayloadFetch = async (_input, init) => {
       requestHeaders = new Headers(init?.headers);
@@ -2604,14 +2603,14 @@ describe("payload rendering", () => {
       );
     };
     const rendered: FigNode[] = [];
-    response.bindRoot({
+    consumer.bindRoot({
       render(node) {
         rendered.push(node);
       },
     });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -2624,7 +2623,7 @@ describe("payload rendering", () => {
         ),
       ),
     );
-    await fetchPayload(response, "/payload/post", {
+    await consumer.fetch("/payload/post", {
       fetch: fetchImpl,
       headers: { accept: "custom/payload" },
       refreshBoundary: "post",
@@ -2668,15 +2667,15 @@ describe("payload rendering", () => {
       );
     }
 
-    const response = createPayloadResponse({
+    const consumer = createPayloadConsumer({
       resolveClientReference: () => "fig-button",
     });
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(createElement(App, { seed: 0 })),
     );
 
-    await fetchPayload(response, "/payload/feed", {
+    await consumer.fetch("/payload/feed", {
       fetch: async () =>
         new Response(
           await renderToPayloadText(createElement("p", null, "feed 1"), {
@@ -2687,7 +2686,7 @@ describe("payload rendering", () => {
       refreshBoundary: "feed",
     });
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: [
           { props: { label: "button 0" }, type: "fig-button" },
@@ -2698,7 +2697,7 @@ describe("payload rendering", () => {
       type: "section",
     });
 
-    await fetchPayload(response, "/payload", {
+    await consumer.fetch("/payload", {
       fetch: async () =>
         new Response(
           await renderToPayloadText(createElement(App, { seed: 2 })),
@@ -2708,7 +2707,7 @@ describe("payload rendering", () => {
         ),
     });
 
-    expect(evaluatePayloadNode(response.getRoot())).toMatchObject({
+    expect(evaluatePayloadNode(consumer.getRoot())).toMatchObject({
       props: {
         children: [
           { props: { label: "button 2" }, type: "fig-button" },
@@ -2721,18 +2720,18 @@ describe("payload rendering", () => {
   });
 
   it("cancels boundary refresh streams without replacing existing content", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const stream = controlledTextStream();
     const controller = new AbortController();
     const rendered: FigNode[] = [];
-    response.bindRoot({
+    consumer.bindRoot({
       render(node) {
         rendered.push(node);
       },
     });
 
     processTestPayloadRows(
-      response,
+      consumer,
       await renderToPayloadRows(
         createElement(
           "section",
@@ -2746,7 +2745,7 @@ describe("payload rendering", () => {
       ),
     );
 
-    const request = fetchPayload(response, "/payload/post", {
+    const request = consumer.fetch("/payload/post", {
       fetch: async () => new Response(stream.stream),
       refreshBoundary: "post",
       signal: controller.signal,
@@ -2774,7 +2773,7 @@ describe("payload rendering", () => {
       type: "section",
     });
 
-    await fetchPayload(response, "/payload/post", {
+    await consumer.fetch("/payload/post", {
       fetch: async () =>
         new Response(
           await renderToPayloadText(createElement("p", null, "Recovered"), {
@@ -2796,8 +2795,8 @@ describe("payload rendering", () => {
     });
   });
 
-  it("rejects failed payload fetches before mutating the response", async () => {
-    const response = createPayloadResponse();
+  it("rejects failed payload fetches before mutating the consumer", async () => {
+    const consumer = createPayloadConsumer();
     let cancelReason: unknown = null;
     const body = new ReadableStream<Uint8Array>({
       cancel(reason) {
@@ -2808,13 +2807,13 @@ describe("payload rendering", () => {
       },
     });
     let notifications = 0;
-    response.subscribe(() => {
+    consumer.subscribe(() => {
       notifications += 1;
     });
 
     let error: unknown;
     try {
-      await fetchPayload(response, "/payload", {
+      await consumer.fetch("/payload", {
         fetch: async () => new Response(body, { status: 500 }),
       });
     } catch (caught) {
@@ -2833,17 +2832,17 @@ describe("payload rendering", () => {
   });
 
   it("rejects malformed payload streams as real failures", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
 
     await expect(
-      fetchPayload(response, "/payload", {
+      consumer.fetch("/payload", {
         fetch: async () => new Response(streamFromString("{not-json}\n")),
       }),
     ).rejects.toThrow(SyntaxError);
   });
 
   it("cancels payload streams when row decoding throws", async () => {
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     let cancelReason: unknown;
     const stream = new ReadableStream<Uint8Array>({
       cancel(reason) {
@@ -2854,9 +2853,10 @@ describe("payload rendering", () => {
       },
     });
 
-    await expect(processStreamInto(response, stream)).rejects.toThrow(
+    await expect(processStreamInto(consumer, stream)).rejects.toThrow(
       SyntaxError,
     );
     expect(cancelReason).toBeInstanceOf(SyntaxError);
   });
 });
+

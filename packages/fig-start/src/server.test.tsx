@@ -13,7 +13,7 @@ import {
   stylesheet,
 } from "@bgub/fig";
 import { serverDataResource } from "@bgub/fig/server";
-import { createPayloadResponse } from "@bgub/fig-server/payload";
+import { createPayloadConsumer } from "@bgub/fig-server/payload";
 import { describe, expect, it } from "vitest";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
@@ -517,7 +517,7 @@ describe("@bgub/fig-start server handler", () => {
       }),
     );
     const rows = await response.text();
-    const payload = createPayloadResponse();
+    const payload = createPayloadConsumer();
     payload.processStringChunk(rows);
 
     expect(rows).toContain("/assets/dashboard.css");

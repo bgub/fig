@@ -3,7 +3,7 @@ import { createDataStore } from "@bgub/fig/internal";
 import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
-import { createPayloadResponse, renderToPayloadStream } from "./payload.ts";
+import { createPayloadConsumer, renderToPayloadStream } from "./payload.ts";
 import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
@@ -67,17 +67,17 @@ describe("@bgub/fig-server data resources", () => {
     expect(dataIndex).toBeGreaterThanOrEqual(0);
     expect(modelIndex).toBeGreaterThan(dataIndex);
 
-    const response = createPayloadResponse();
+    const consumer = createPayloadConsumer();
     const store = createDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
 
-    response.bindRoot({
+    consumer.bindRoot({
       data: store,
       render: () => undefined,
     });
-    response.processStringChunk(streamText);
+    consumer.processStringChunk(streamText);
 
     expect(store.snapshot()).toEqual([
       { key: ["payload-user", "one"], value: { name: "Grace" } },
