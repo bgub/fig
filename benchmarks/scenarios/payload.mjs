@@ -1,11 +1,23 @@
 import {
+  decodePayloadStream,
   decodePayloadValue,
   encodePayloadValue,
 } from "../../packages/fig/dist/payload.js";
-import { figOnlyRuntime } from "../lib/host-runtimes.mjs";
+import {
+  createPayloadConsumer,
+  PayloadBoundary,
+  renderToPayloadStream,
+} from "../../packages/fig-server/dist/payload.js";
+import {
+  BenchElement,
+  clientRuntimes,
+  createFigElement,
+  figOnlyRuntime,
+} from "../lib/host-runtimes.mjs";
 import {
   createOperationCounts,
   createScenarioMetrics,
+  measureAsync,
   measureSync,
 } from "../lib/timing.mjs";
 
@@ -54,6 +66,188 @@ function createPayloadFixture(rows, metrics) {
   return root;
 }
 
+// ---------------------------------------------------------------------------
+// Refresh reconciliation: the decision input for cross-refresh identity
+// (docs/plans/serialized-components.md, phase 3). The legacy consumer refresh
+// re-decodes only the changed boundary and memoizes every other chunk, so
+// unchanged subtrees bail out of re-renders by element identity. The
+// resource model re-decodes the whole value into fresh element objects, so
+// the reconciler runs ordinary keyed diffing over the full document.
+
+// A "document": `rows` static article sections plus one small dynamic note
+// that a refresh replaces. Legacy wraps the note in a PayloadBoundary; the
+// resource-model decoder treats the boundary as transparent, so both paths
+// render the identical tree.
+function documentNode(rows, revision) {
+  return createFigElement(
+    "main",
+    null,
+    Array.from({ length: rows }, (_, index) =>
+      createFigElement(
+        "article",
+        { key: `section-${index}`, class: "section" },
+        createFigElement("h2", null, `Section ${index}`),
+        createFigElement(
+          "ul",
+          null,
+          Array.from({ length: 10 }, (_, item) =>
+            createFigElement(
+              "li",
+              {
+                key: `item-${item}`,
+                class: item % 2 === 0 ? "even" : "odd",
+                "data-index": String(item),
+              },
+              `Item ${index}.${item}`,
+            ),
+          ),
+        ),
+      ),
+    ),
+    createFigElement(
+      PayloadBoundary,
+      { id: "note" },
+      createFigElement("p", { class: "note" }, `revision ${revision}`),
+    ),
+  );
+}
+
+function noteNode(revision) {
+  return createFigElement("p", { class: "note" }, `revision ${revision}`);
+}
+
+async function streamToText(stream) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+async function renderToPayloadText(node, options) {
+  const result = renderToPayloadStream(node, options);
+  await result.allReady;
+  return streamToText(result.stream);
+}
+
+function streamFromText(text) {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+// Legacy: one boundary refresh per iteration. The wire carries only the
+// note's replacement content; every static chunk stays memoized.
+async function measureConsumerRefresh(runtime, rows, iterations) {
+  const metrics = createScenarioMetrics();
+  const initialText = await renderToPayloadText(documentNode(rows, 0));
+  const refreshTexts = [
+    await renderToPayloadText(noteNode(1), { refreshBoundary: "note" }),
+    await renderToPayloadText(noteNode(2), { refreshBoundary: "note" }),
+  ];
+
+  const { flushSync, operations, createRoot, container } =
+    createFigBenchRootFor(runtime);
+  const consumer = createPayloadConsumer();
+  consumer.processStringChunk(initialText);
+  const root = createRoot(container);
+  consumer.bindRoot({
+    render: (node) => flushSync(() => root.render(node)),
+  });
+  assertRendered(container, "revision 0");
+
+  const elapsed = await measureAsync(async () => {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      consumer.beginRefreshPayload();
+      consumer.processStringChunk(refreshTexts[iteration % 2]);
+      metrics.payloadNodes += 1;
+    }
+  });
+  assertRendered(container, "revision ");
+
+  return { elapsed, metrics, operations };
+}
+
+// Resource model: each refresh re-decodes the whole document into fresh
+// elements and renders the new root over the old — ordinary keyed
+// reconciliation with no identity bailouts.
+async function measureResourceRefresh(runtime, rows, iterations) {
+  const metrics = createScenarioMetrics();
+  const texts = [
+    await renderToPayloadText(documentNode(rows, 1)),
+    await renderToPayloadText(documentNode(rows, 2)),
+  ];
+  const initial = decodePayloadStream(
+    streamFromText(await renderToPayloadText(documentNode(rows, 0))),
+  );
+  const initialValue = await initial.value;
+
+  const { flushSync, operations, createRoot, container } =
+    createFigBenchRootFor(runtime);
+  const root = createRoot(container);
+  flushSync(() => root.render(initialValue));
+  assertRendered(container, "revision 0");
+
+  const elapsed = await measureAsync(async () => {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      const decode = decodePayloadStream(streamFromText(texts[iteration % 2]));
+      const value = await decode.value;
+      flushSync(() => root.render(value));
+      metrics.payloadNodes += 1;
+    }
+  });
+  assertRendered(container, "revision ");
+
+  return { elapsed, metrics, operations };
+}
+
+// Decode-only decomposition: the resource-model iteration cost minus this is
+// the pure reconciliation cost of fresh-element keyed diffing.
+async function measureResourceDecodeOnly(_runtime, rows, iterations) {
+  const metrics = createScenarioMetrics();
+  const texts = [
+    await renderToPayloadText(documentNode(rows, 1)),
+    await renderToPayloadText(documentNode(rows, 2)),
+  ];
+
+  const elapsed = await measureAsync(async () => {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      const decode = decodePayloadStream(streamFromText(texts[iteration % 2]));
+      const value = await decode.value;
+      if (value === null) throw new Error("Payload decode produced no root.");
+      metrics.payloadNodes += 1;
+    }
+  });
+
+  return { elapsed, metrics, operations: createOperationCounts() };
+}
+
+const figClientRuntime = clientRuntimes.find((entry) => entry.id === "fig");
+
+function createFigBenchRootFor(runtime) {
+  const renderer = runtime.createRenderer();
+  return {
+    container: new BenchElement("root"),
+    createRoot: renderer.createRoot,
+    flushSync: renderer.flushSync,
+    operations: renderer.operations,
+  };
+}
+
+function assertRendered(container, needle) {
+  if (!container.textContent.includes(needle)) {
+    throw new Error(`Payload refresh benchmark did not render "${needle}".`);
+  }
+}
+
 export function payloadScenariosForRows(rows) {
   return [
     {
@@ -62,6 +256,30 @@ export function payloadScenariosForRows(rows) {
       rows,
       measure: (runtime, iterations) =>
         measurePayloadNestedContainers(runtime, rows, iterations),
+      runtimes: [figOnlyRuntime],
+    },
+    {
+      group: "payload",
+      name: "payload.refresh-consumer",
+      rows,
+      measure: (runtime, iterations) =>
+        measureConsumerRefresh(runtime, rows, iterations),
+      runtimes: [figClientRuntime],
+    },
+    {
+      group: "payload",
+      name: "payload.refresh-resource",
+      rows,
+      measure: (runtime, iterations) =>
+        measureResourceRefresh(runtime, rows, iterations),
+      runtimes: [figClientRuntime],
+    },
+    {
+      group: "payload",
+      name: "payload.refresh-resource-decode-only",
+      rows,
+      measure: (runtime, iterations) =>
+        measureResourceDecodeOnly(runtime, rows, iterations),
       runtimes: [figOnlyRuntime],
     },
   ];

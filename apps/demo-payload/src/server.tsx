@@ -17,6 +17,8 @@ import {
   renderToPayloadStream,
 } from "@bgub/fig-server/payload";
 import { AppRefreshButton, RefreshButton } from "./client-components.tsx";
+import { ResourcePost, resourceComments } from "./resource-app.tsx";
+import { brokenResourceSeed, resourceRootId } from "./resource-shared.ts";
 import {
   createDemoData,
   Dashboard,
@@ -53,6 +55,10 @@ const textJs = {
   "content-type": "text/javascript; charset=utf-8",
 };
 const textPlain = { "content-type": "text/plain; charset=utf-8" };
+const textHtml = {
+  ...noStore,
+  "content-type": "text/html; charset=utf-8",
+};
 const textEncoder = new TextEncoder();
 const devReloadScriptBytes = textEncoder.encode(devReloadScript());
 
@@ -93,6 +99,12 @@ async function handleRequest(
     case "/payload":
       await sendPayload(request, response, url);
       return;
+    case "/resource":
+      send(response, 200, resourceDocument(), textHtml);
+      return;
+    case "/resource-payload":
+      await sendResourcePayload(response, url);
+      return;
     case "/style.css":
       send(response, 200, styles, textCss);
       return;
@@ -125,6 +137,55 @@ async function sendPayload(
     "x-accel-buffering": "no",
   });
   await pipeStream(result.stream, response);
+}
+
+// The resource-model endpoint (docs/plans/serialized-components.md): a plain
+// payload stream per post, no boundary options — the client refreshes it as
+// an ordinary data resource. Seed 500 fails so the demo covers pre-root
+// failure and recovery.
+async function sendResourcePayload(
+  response: ServerResponse,
+  url: URL,
+): Promise<void> {
+  const seed = seedFor(url);
+  if (seed === brokenResourceSeed) {
+    send(response, 500, "Resource payload unavailable", textPlain);
+    return;
+  }
+
+  const result = renderToPayloadStream(
+    <ResourcePost comments={resourceComments(seed)} seed={seed} />,
+    {
+      onError() {
+        return { digest: "resource-payload" };
+      },
+    },
+  );
+
+  response.writeHead(200, {
+    ...noStore,
+    "content-type": result.contentType,
+    "x-accel-buffering": "no",
+  });
+  await pipeStream(result.stream, response);
+}
+
+// The /resource page is deliberately client-mounted (no SSR/hydration): the
+// non-authoritative demo path proves the resource model on its own before
+// fig-start's document integration.
+function resourceDocument(): string {
+  return (
+    '<!doctype html><html lang="en"><head>' +
+    '<meta charset="utf-8" />' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+    "<title>Fig serialized components</title>" +
+    '<link rel="stylesheet" href="/style.css" />' +
+    "</head><body>" +
+    `<div id="${resourceRootId}"></div>` +
+    devReloadScript() +
+    '<script src="/client.js" type="module"></script>' +
+    "</body></html>"
+  );
 }
 
 function boundaryReplacement(boundary: string | null, data: DemoData) {
