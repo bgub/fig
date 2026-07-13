@@ -115,6 +115,33 @@ waits in segment form and flushes as the consumer reads. Rendering itself
 never pauses, so `shellReady`/`allReady` settle at the same time regardless of
 how fast the stream is consumed.
 
+## Content Security Policy
+
+Every script Fig streams is inline: the Suspense reveal runtime, the
+per-boundary reveal ops, and the early event-capture script that opens a
+document `<head>`. Under a CSP that restricts `script-src`, generate a
+per-request nonce, pass it as the `nonce` option, and allow it in the header —
+Fig adds it to every inline script and to emitted `<script>`/`<link>` resource
+tags:
+
+```ts
+const nonce = crypto.randomUUID();
+const result = renderToDocumentStream(<App />, { nonce });
+
+return new Response(result.stream, {
+  headers: {
+    "content-type": result.contentType,
+    "content-security-policy": `script-src 'self' 'nonce-${nonce}'`,
+  },
+});
+```
+
+The nonce is the whole CSP story. Fig intentionally ships no external-runtime
+alternative for nonce-less strict CSP (per-render op scripts also rule out
+static `script-src` hashes), so streamed Suspense requires the nonce. If you
+cannot attach one, use `prerender`: fragment mode emits no scripts at all, and
+document mode emits only the nonce-carrying early event-capture script.
+
 ## Data Resources
 
 Server render requests have their own data-resource store. Reads through
