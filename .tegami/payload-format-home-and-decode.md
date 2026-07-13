@@ -22,9 +22,13 @@ data-row hydration (`hydrate`), client-reference loading, and asset
 preparation with reveal gating (`prepareAssets`).
 
 Wire change: `assets` rows now carry an optional `for` — the row id whose
-reveal depends on those assets — so the decoder gates exactly the dependent
-content. Renames: the codec's row decoder interface is `PayloadRowDecoder`,
-and error-row decoding is exported as `errorFromPayloadValue`.
+reveal depends on those assets, decided at serialization scope exit so a
+suspended subtree's assets gate its outlined row rather than the enclosing
+tree. Renames: the codec's row decoder interface is `PayloadRowDecoder`,
+and error-row decoding is exported as `errorFromPayloadValue`. The inline
+frame transport now validates `globalName` (JavaScript identifier) and
+`attribute` (letter, then letters/digits/hyphens) instead of interpolating
+them unchecked into emitted script and markup.
 
 Dev-time enforcement: serialized components are render-only. During
 `renderToPayloadStream`, `useState`, `useActionState`, `useTransition`,

@@ -33,6 +33,36 @@ export interface PayloadFrameStream<TFrame = unknown> {
 const DEFAULT_GLOBAL_NAME = "__figPayloadFrames";
 const DEFAULT_FRAME_ATTRIBUTE = "data-fig-payload-frame";
 
+// globalName is interpolated into emitted JS as a property expression and
+// attribute into raw markup and a CSS selector; both must be validated, not
+// escaped, or a hostile/typo'd option becomes script or selector injection.
+const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const ATTRIBUTE_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9-]*$/;
+
+function resolveGlobalName(
+  options: Pick<PayloadFrameTransportOptions, "globalName">,
+): string {
+  const name = options.globalName ?? DEFAULT_GLOBAL_NAME;
+  if (!IDENTIFIER_PATTERN.test(name)) {
+    throw new Error(
+      `Payload frame globalName must be a JavaScript identifier; got ${JSON.stringify(name)}.`,
+    );
+  }
+  return name;
+}
+
+function resolveFrameAttribute(
+  options: Pick<PayloadFrameTransportOptions, "attribute">,
+): string {
+  const attribute = options.attribute ?? DEFAULT_FRAME_ATTRIBUTE;
+  if (!ATTRIBUTE_NAME_PATTERN.test(attribute)) {
+    throw new Error(
+      `Payload frame attribute must be a letter followed by letters, digits, or hyphens; got ${JSON.stringify(attribute)}.`,
+    );
+  }
+  return attribute;
+}
+
 /**
  * Raw JS for the queue-global bootstrap, for callers that author the script
  * element themselves (e.g. `<script unsafeHTML={...} />` in a JSX head).
@@ -41,7 +71,7 @@ const DEFAULT_FRAME_ATTRIBUTE = "data-fig-payload-frame";
 export function payloadFrameBootstrapCode(
   options: Pick<PayloadFrameTransportOptions, "globalName"> = {},
 ): string {
-  const name = options.globalName ?? DEFAULT_GLOBAL_NAME;
+  const name = resolveGlobalName(options);
   return `(function(){var g=globalThis;if(g.${name})return;var q=[],l=[];g.${name}={q:q,p:function(f){q.push(f);for(var i=0;i<l.length;i++)l[i](f)},s:function(fn){l.push(fn);for(var i=0;i<q.length;i++)fn(q[i]);return function(){var n=[];for(var j=0;j<l.length;j++)if(l[j]!==fn)n.push(l[j]);l=n}}};})();`;
 }
 
@@ -64,8 +94,8 @@ export function payloadFrameScript(
   frame: unknown,
   options: PayloadFrameTransportOptions = {},
 ): string {
-  const name = options.globalName ?? DEFAULT_GLOBAL_NAME;
-  const attribute = options.attribute ?? DEFAULT_FRAME_ATTRIBUTE;
+  const name = resolveGlobalName(options);
+  const attribute = resolveFrameAttribute(options);
   const nonce = nonceAttr(options);
   return (
     `<script type="application/json" ${attribute}=""${nonce}>${escapeFrameJson(frame)}</script>` +
@@ -82,7 +112,7 @@ export function payloadFrameScript(
 export function getPayloadFrameStream<TFrame = unknown>(
   options: PayloadFrameTransportOptions = {},
 ): PayloadFrameStream<TFrame> {
-  const name = options.globalName ?? DEFAULT_GLOBAL_NAME;
+  const name = resolveGlobalName(options);
   const scope = globalThis as Record<string, unknown>;
   const current = scope[name];
 
@@ -149,7 +179,7 @@ function readFramesFromDocument<TFrame>(
   options: PayloadFrameTransportOptions,
 ): TFrame[] {
   if (typeof document === "undefined") return [];
-  const attribute = options.attribute ?? DEFAULT_FRAME_ATTRIBUTE;
+  const attribute = resolveFrameAttribute(options);
   return Array.from(
     document.querySelectorAll(`script[${attribute}]`),
     (element) => JSON.parse(element.textContent ?? "") as TFrame,

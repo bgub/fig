@@ -521,10 +521,16 @@ describe("@bgub/fig-start server handler", () => {
     payload.processStringChunk(rows);
 
     expect(rows).toContain("/assets/dashboard.css");
-    expect(payload.getAssetResources()).toEqual([
-      stylesheet("/assets/dashboard.css"),
-      stylesheet("/assets/island.css"),
-    ]);
+    // Row arrival order is settlement order, not tree order: `assets` rows
+    // flush when their owning row is known (payload.md), so only presence is
+    // asserted here.
+    expect(payload.getAssetResources()).toHaveLength(2);
+    expect(payload.getAssetResources()).toEqual(
+      expect.arrayContaining([
+        stylesheet("/assets/dashboard.css"),
+        stylesheet("/assets/island.css"),
+      ]),
+    );
   });
 
   it("hoists initial server-route assets into the document head", async () => {

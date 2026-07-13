@@ -74,6 +74,23 @@ describe("payload frame transport", () => {
     expect(payloadFrameBootstrapCode({ globalName })).not.toContain("<script");
   });
 
+  it("rejects global names and attributes that would inject into emitted code", () => {
+    // globalName lands in emitted JS as a property expression; attribute in
+    // raw markup and a CSS selector. Both validate instead of escaping.
+    expect(() =>
+      payloadFrameBootstrapCode({ globalName: "a;fetch('/x')//" }),
+    ).toThrow("globalName must be a JavaScript identifier");
+    expect(() =>
+      payloadFrameScript("chunk", { globalName: "bad name" }),
+    ).toThrow("globalName must be a JavaScript identifier");
+    expect(() =>
+      payloadFrameScript("chunk", { attribute: 'x="1" onload="hack()"' }),
+    ).toThrow("attribute must be a letter followed by");
+    expect(() =>
+      payloadFrameScript("chunk", { attribute: "data-fine-name" }),
+    ).not.toThrow();
+  });
+
   it("pushes document frames through the installed global", () => {
     const globalName = uniqueGlobalName();
     const attribute = "data-test-live-frame";

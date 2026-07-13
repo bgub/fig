@@ -29,7 +29,7 @@ Ids minted by `useId` during payload render use the `fig-pl-` prefix. Row tags:
 - `model` — a serialized tree chunk (id 0 is the root). Trees serialize as `$fig`-tagged nodes: elements, fragments, suspense, and outlined `lazy`/`promise` references that suspend-and-fill by row id.
 - `client` — a client reference: `{ id, exportName?, assets?, ssr? }`.
 - `data` — settled data-resource hydration entries encoded with the payload value codec (see data.md).
-- `assets` — stream-safe asset descriptors (see assets.md), plus an optional `for`: the row id whose reveal depends on these assets. The server stamps the emitting task's row id; if the declaring subtree later suspends and outlines, the assets gate the enclosing row instead of the hole — the assets are already loading by the time the hole's row arrives, so the skew only ever over-gates, never blocks.
+- `assets` — stream-safe asset descriptors (see assets.md), plus an optional `for`: the row id whose reveal depends on these assets. The owning row is decided at serialization scope exit: a subtree that completes keeps its assets with the row it inlines into, while one that suspends or fails takes the assets discovered inside it to its outlined row — so a stylesheet belonging to a streamed hole never gates the enclosing tree's reveal. Scope exits happen within the same synchronous serialization attempt, so association costs no preload latency.
 - `error` — `{ digest?, message? }` under the server `onError` contract; the referenced chunk rejects with a digest-carrying error (`errorFromPayloadValue`).
 - `refresh` / `refresh-error` — legacy targeted-refresh rows (see Legacy); `decodePayloadStream` rejects them as protocol errors.
 

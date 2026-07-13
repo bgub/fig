@@ -254,11 +254,15 @@ type RenderFrame = {
   // Built lazily on the first function component; reused for the whole task
   // (the dispatcher reads context through the frame, so it stays current).
   dispatcher: RenderDispatcher | null;
+  // Assets discovered during this attempt whose owning row is not yet known.
+  // Assets rows carry `for` — the row id whose reveal depends on them — and
+  // the owner is only decided at scope exit: a subtree that completes keeps
+  // its assets with the enclosing row, while one that suspends or fails takes
+  // the assets discovered inside it to its outlined row. Scope exits happen
+  // within the same synchronous attempt, so buffering costs no wire latency.
+  pendingAssets: SerializedAssetResource[];
   request: PayloadRequest;
   stack: StackFrame | null;
-  // The row id this frame's serialization will settle into. Assets rows carry
-  // it as `for` so the client gates exactly that row's reveal on the assets.
-  taskId: number;
 };
 
 interface PayloadObjectRef {
@@ -1083,7 +1087,6 @@ function retryTask(request: PayloadRequest, task: Task): void {
     request,
     cloneContextValues(task.contextValues),
     task.stack,
-    task.id,
   );
 
   try {
@@ -1091,6 +1094,7 @@ function retryTask(request: PayloadRequest, task: Task): void {
       task.kind === "node"
         ? serializeNode(task.value as FigNode, frame)
         : serializeValue(readThenable(task.value as Thenable), frame);
+    flushFrameAssets(frame, task.id);
     emitDataRows(request);
     if (request.refreshBoundary !== null && task.id === 0) {
       emitRow(request, {
@@ -1104,6 +1108,9 @@ function retryTask(request: PayloadRequest, task: Task): void {
     finishTask(request);
   } catch (error) {
     if (isThenable(error)) {
+      // The retry re-discovers nothing already in emittedAssetKeys, so this
+      // attempt's assets must ship now; the task still settles into task.id.
+      flushFrameAssets(frame, task.id);
       error.then(
         () => pingTask(request, task),
         () => pingTask(request, task),
@@ -1111,6 +1118,7 @@ function retryTask(request: PayloadRequest, task: Task): void {
       return;
     }
 
+    flushFrameAssets(frame, task.id);
     if (request.refreshBoundary !== null && task.id === 0) {
       emitRow(request, {
         boundary: request.refreshBoundary,
@@ -1163,9 +1171,14 @@ function createRenderFrame(
   request: PayloadRequest,
   contextValues: ContextValues,
   stack: StackFrame | null,
-  taskId: number,
 ): RenderFrame {
-  return { contextValues, dispatcher: null, request, stack, taskId };
+  return { contextValues, dispatcher: null, pendingAssets: [], request, stack };
+}
+
+function flushFrameAssets(frame: RenderFrame, rowId: number): void {
+  if (frame.pendingAssets.length === 0) return;
+  const value = frame.pendingAssets.splice(0);
+  emitRow(frame.request, { for: rowId, tag: "assets", value });
 }
 
 function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
@@ -1239,15 +1252,20 @@ function serializeNodeOrLazy(
   preserveElementIdentity = false,
 ): PayloadModel {
   const graphCheckpoint = checkpointPayloadGraph(frame.request.graph);
+  const assetCheckpoint = frame.pendingAssets.length;
   try {
     if (!isValidElement(node)) return serializeNode(node, frame);
     return serializeElement(node, frame, preserveElementIdentity);
   } catch (error) {
     rollbackPayloadGraph(frame.request.graph, graphCheckpoint);
+    // Assets discovered inside this subtree belong to the outlined row, not
+    // the enclosing one: gating the enclosing row would hold the whole tree's
+    // reveal on stylesheets only the hole's content needs.
+    const scopedAssets = frame.pendingAssets.splice(assetCheckpoint);
     if (isThenable(error)) {
-      return outlineTask(frame, "node", node, "lazy", error);
+      return outlineTask(frame, "node", node, "lazy", error, scopedAssets);
     }
-    return outlineError(frame, error, "lazy");
+    return outlineError(frame, error, "lazy", scopedAssets);
   }
 }
 
@@ -1411,18 +1429,12 @@ function serializeContextProvider(
 }
 
 function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
-  const serialized = serializeAssetResources(frame.request, props.assets);
-  if (serialized.length > 0) {
-    // `for` declares the dependent row. If this subtree later suspends and
-    // outlines, the assets gate the enclosing row instead of the hole — the
-    // stylesheets are already loading by the time the hole's row arrives, so
-    // the skew only ever over-gates, never blocks.
-    emitRow(frame.request, {
-      for: frame.taskId,
-      tag: "assets",
-      value: serialized,
-    });
-  }
+  // Buffered, not emitted: the owning row id is decided at scope exit (see
+  // RenderFrame.pendingAssets). Dedupe happens here, so a retried subtree
+  // does not re-buffer assets an earlier attempt already shipped.
+  frame.pendingAssets.push(
+    ...serializeAssetResources(frame.request, props.assets),
+  );
   return serializeNode(props.children, frame);
 }
 
@@ -1507,9 +1519,13 @@ function outlineTask(
   value: unknown,
   referenceKind: "lazy" | "promise",
   wakeable: Thenable,
+  scopedAssets: SerializedAssetResource[] = [],
 ): PayloadSpecialModel {
   const request = frame.request;
   const id = request.nextRowId++;
+  if (scopedAssets.length > 0) {
+    emitRow(request, { for: id, tag: "assets", value: scopedAssets });
+  }
   const task = createTask(
     request,
     id,
@@ -1531,9 +1547,15 @@ function outlineError(
   frame: RenderFrame,
   error: unknown,
   referenceKind: "lazy" | "promise",
+  scopedAssets: SerializedAssetResource[] = [],
 ): PayloadSpecialModel {
   const request = frame.request;
   const id = request.nextRowId++;
+  // Assets first so a decoder that drops gates on error rows sees the row
+  // order it expects; the assets still preload even though the row failed.
+  if (scopedAssets.length > 0) {
+    emitRow(request, { for: id, tag: "assets", value: scopedAssets });
+  }
   emitRow(request, {
     id,
     tag: "error",

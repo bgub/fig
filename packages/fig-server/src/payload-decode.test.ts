@@ -303,6 +303,68 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     expect(root.type).toBe("section");
   });
 
+  it("gates the outlined hole — not the enclosing tree — on assets discovered in a suspended subtree", async () => {
+    const gate = deferred<void>();
+    const content = deferred<string>();
+    const prepared: unknown[] = [];
+
+    function Inner(): FigNode {
+      return createElement("p", null, readPromise(content.promise));
+    }
+
+    function Styled() {
+      return assets([stylesheet("/hole.css")], createElement(Inner, null));
+    }
+
+    function Page() {
+      return createElement(
+        "div",
+        null,
+        createElement(
+          Suspense,
+          { fallback: "loading" },
+          createElement(Styled, null),
+        ),
+      );
+    }
+
+    const { decode, result } = decodeRender(createElement(Page, null), {
+      prepareAssets: (list) => {
+        prepared.push(...list);
+        return gate.promise;
+      },
+    });
+
+    // The root reveals ungated, yet the assets row is already on the wire —
+    // preload starts before the hole's content settles.
+    const root = (await decode.value) as FigElement;
+    expect(root.type).toBe("div");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(prepared).toMatchObject([{ href: "/hole.css", kind: "stylesheet" }]);
+
+    content.resolve("styled");
+    await result.allReady;
+    // Ingestion completes while the gate is still held: gates delay reveal,
+    // not arrival.
+    expect(await decode.completion).toEqual({ status: "complete" });
+
+    const suspense = root.props.children as FigElement;
+    const hole = suspense.props.children as FigElement;
+    let thrown: unknown;
+    try {
+      renderNode(hole);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(typeof (thrown as PromiseLike<unknown>)?.then).toBe("function");
+
+    gate.resolve(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const filled = renderNode(hole) as FigElement;
+    expect(filled.type).toBe("p");
+    expect(filled.props.children).toBe("styled");
+  });
+
   it("rejects unresolved holes when the decode aborts mid-stream", async () => {
     const never = deferred<string>();
 
