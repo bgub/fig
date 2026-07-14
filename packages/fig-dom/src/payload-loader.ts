@@ -11,6 +11,7 @@ import {
 } from "@bgub/fig/internal";
 import {
   decodePayloadStream,
+  type PayloadClientReferenceCache,
   type ResolveClientReference,
 } from "@bgub/fig/payload";
 import { insertAssetResources } from "./asset-resources.ts";
@@ -21,6 +22,13 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 const noop = (): void => undefined;
 
 export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
+  /**
+   * Keeps client-reference identity stable across the loader's decodes
+   * (refreshes, navigations): create one cache per resolver with
+   * `createPayloadClientReferenceCache` and share it across loaders that
+   * resolve the same references.
+   */
+  clientReferenceCache?: PayloadClientReferenceCache;
   /**
    * Overrides the asset-preparation step (default: insertAssetResources).
    * Frameworks wrap the default to observe stylesheet gates — e.g. holding a
@@ -82,6 +90,7 @@ export function payloadDataLoader<TArgs extends unknown[]>(
     }
 
     const decode = decodePayloadStream(body, {
+      clientReferenceCache: options.clientReferenceCache,
       // Absent outside a data store (the loader called directly): data rows
       // are then ignored rather than hydrated.
       hydrate: loadContextHydrate(context),

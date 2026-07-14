@@ -398,6 +398,74 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     }
   });
 
+  it("keeps an asset-carrying island's identity across a segment re-decode", async () => {
+    const nestedRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => createElement("h1", null, "Home"),
+      }),
+      markServerRoute(
+        createFileRoute("/island-layout")({
+          component: () =>
+            createElement(
+              "section",
+              null,
+              createElement(StyledIsland, {}),
+              createElement(Outlet),
+            ),
+        }),
+      ),
+      createFileRoute("/island-layout/a")({
+        component: () => createElement("p", { class: "child" }, "Child A"),
+      }),
+      createFileRoute("/island-layout/b")({
+        component: () => createElement("p", { class: "child" }, "Child B"),
+      }),
+    ];
+    await installServerRenderedDocument("/", nestedRoutes);
+    const restoreFetch = installHandlerFetch(nestedRoutes);
+
+    try {
+      const router = hydrateStart({
+        routes: nestedRoutes,
+        resolveClientReference,
+      });
+      const navigation = router.navigate("/island-layout/a");
+      await flush();
+      document.head
+        .querySelector('link[rel="stylesheet"]')
+        ?.dispatchEvent(new Event("load"));
+      await navigation;
+      await flush();
+      const island = document.querySelector(".styled-island");
+      expect(island?.textContent).toBe("styled!");
+      expect(document.querySelector(".child")?.textContent).toBe("Child A");
+
+      // Child navigation re-requests and re-decodes the whole segment. The
+      // island's client row carries assets, so before the decoder-owned
+      // reference cache this minted a fresh gate wrapper per decode and the
+      // island remounted, dropping its state.
+      const second = router.navigate("/island-layout/b");
+      await flush();
+      for (const link of Array.from(
+        document.head.querySelectorAll('link[rel="stylesheet"]'),
+      )) {
+        link.dispatchEvent(new Event("load"));
+      }
+      await second;
+      await flush();
+
+      expect(document.querySelector(".child")?.textContent).toBe("Child B");
+      // Same DOM node: the re-decoded segment updated the island in place.
+      expect(document.querySelector(".styled-island")).toBe(island);
+    } finally {
+      restoreFetch();
+    }
+  });
+
   it("keeps refreshed server route content visible until new stylesheets load", async () => {
     const nestedRoutes = [
       createRootRoute({

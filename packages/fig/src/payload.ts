@@ -42,6 +42,50 @@ export type ResolveClientReference = (
   reference: PayloadClientReference,
 ) => ElementType<any> | PromiseLike<ElementType<any>> | undefined;
 
+/**
+ * A caller-owned client-reference component cache. Passing one to
+ * `decodePayloadStream` makes every client reference decode to a single
+ * cache-owned wrapper per reference id, so re-decoding a payload updates
+ * islands in place instead of remounting them. The caller owns the lifetime:
+ * drop entries when their modules change (HMR) or the manifest swaps.
+ */
+export interface PayloadClientReferenceCache {
+  clear(): void;
+  delete(id: string): boolean;
+}
+
+const clientReferenceCacheEntries = new WeakMap<
+  PayloadClientReferenceCache,
+  Map<string, ElementType<any>>
+>();
+
+export function createPayloadClientReferenceCache(): PayloadClientReferenceCache {
+  const entries = new Map<string, ElementType<any>>();
+  const cache: PayloadClientReferenceCache = {
+    clear: () => entries.clear(),
+    delete: (id: string) => entries.delete(id),
+  };
+  clientReferenceCacheEntries.set(cache, entries);
+  return cache;
+}
+
+// Reveal gates ride the decoded element instances, not the reference
+// wrapper: each decode attaches its own gate to the elements it
+// materializes. Identity lives on the component type; the asset dependency
+// lives on the element — so a mounted island (a previous decode's elements)
+// can never be re-suspended by a newer decode's pending assets, while the
+// newer decode's elements gate on exactly the assets they declared.
+// Elements minted outside a decode from a cached component carry no gate
+// and render ungated: they declared no dependency.
+const elementGates = new WeakMap<Props, Promise<void>>();
+
+function readElementGate(props: Props): void {
+  const gate = elementGates.get(props);
+  // Suspends while pending; gates never reject (prepareAssets results
+  // settle through noop handlers).
+  if (gate !== undefined) readPromise(gate);
+}
+
 export type PayloadDecodeCompletion =
   | { status: "aborted" }
   | { status: "complete" }
@@ -64,6 +108,13 @@ export interface PayloadDecode {
 }
 
 export interface PayloadDecodeOptions {
+  /**
+   * Stabilizes client-reference identity across decodes that share the
+   * cache (created by `createPayloadClientReferenceCache`). Without one,
+   * gated and asynchronously resolved references decode to per-decode
+   * wrappers and remount on re-decode. Use one cache per resolver.
+   */
+  clientReferenceCache?: PayloadClientReferenceCache;
   /**
    * Receives decoded `data` rows for hydration into a data store. The
    * capability itself is expected to be generation-guarded and to ignore
@@ -105,6 +156,15 @@ export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
   options: PayloadDecodeOptions = {},
 ): PayloadDecode {
+  if (
+    options.clientReferenceCache !== undefined &&
+    !clientReferenceCacheEntries.has(options.clientReferenceCache)
+  ) {
+    throw new TypeError(
+      "options.clientReferenceCache must be created by " +
+        "createPayloadClientReferenceCache().",
+    );
+  }
   const decode = new PayloadStreamDecode(stream, options);
   return {
     abort: (reason?: unknown) => decode.abort(reason),
@@ -155,6 +215,9 @@ class PayloadStreamDecode {
   // Asset gates registered for a row id (assets rows carry `for`); consumed
   // when that row arrives.
   private readonly rowGates = new Map<number, Array<PromiseLike<void>>>();
+  // Unsettled reveal gates for arrived client rows, attached per element as
+  // models referencing the row materialize (see elementGates).
+  private readonly clientRowGates = new Map<number, Promise<void>>();
   private readonly rowDecoder: PayloadRowDecoder;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private done = false;
@@ -310,6 +373,15 @@ class PayloadStreamDecode {
           reference.assets = assets;
         }
         const gate = this.prepareAssets(row.value.assets);
+        if (gate !== null) {
+          // Elements referencing this row inherit the gate as they
+          // materialize; once it settles there is nothing left to gate.
+          this.clientRowGates.set(row.id, gate);
+          const settled = (): void => {
+            this.clientRowGates.delete(row.id);
+          };
+          void gate.then(settled, settled);
+        }
         const component = this.clientReferenceComponent(reference, gate);
         chunk.arrived = true;
         this.fulfillChunk(chunk, component);
@@ -366,6 +438,12 @@ class PayloadStreamDecode {
     reference: PayloadClientReference,
     gate: Promise<void> | null,
   ): ElementType<any> {
+    const cache = this.options.clientReferenceCache;
+    const entries =
+      cache === undefined ? undefined : clientReferenceCacheEntries.get(cache);
+    const existing = entries?.get(reference.id);
+    if (existing !== undefined) return existing;
+
     let resolved: ReturnType<ResolveClientReference>;
     try {
       resolved = this.options.resolveClientReference?.(reference);
@@ -373,40 +451,27 @@ class PayloadStreamDecode {
       resolved = Promise.reject(error);
     }
 
-    if (resolved !== undefined && !isThenable(resolved)) {
-      // Ungated references decode to the resolved component itself, so the
-      // element type is stable across decodes and re-decoding a surrounding
-      // payload (e.g. a refresh) updates the component instead of
-      // remounting it — client state inside survives.
-      if (gate === null) return resolved;
-      return function PayloadResolvedClientComponent(props: Props): FigNode {
-        readPromise(gate);
-        return createElement(resolved, props);
+    if (resolved === undefined) {
+      // Never cached: a decode configured without a resolver must not
+      // poison a shared cache for later, properly configured decodes.
+      return function PayloadUnresolvedClientComponent(): never {
+        throw new Error(
+          `Cannot render client reference "${reference.id}" because decodePayloadStream was not configured with a matching resolveClientReference.`,
+        );
       };
     }
 
-    if (resolved !== undefined) {
-      // Start asynchronous resolution as soon as the reference row arrives so it
-      // overlaps the rest of the stream instead of serializing behind it;
-      // tracking lets a resolution settled before its first render read resolve
-      // synchronously instead of suspending for a retry beat.
-      const pending = Promise.resolve(resolved);
-      trackThenable(pending);
-      let type: ElementType<any> | null = null;
-      return function PayloadClientComponent(props: Props): FigNode {
-        if (gate !== null) readPromise(gate);
-        if (type === null) {
-          type = clientReferenceType(readPromise(pending), reference.id);
-        }
-        return createElement(type, props);
-      };
+    // Without a cache, an ungated synchronously resolved reference decodes
+    // to the component itself, so its element type is stable across decodes
+    // whenever the resolver's answer is — re-decoding updates the client
+    // component in place and its state survives.
+    if (entries === undefined && gate === null && !isThenable(resolved)) {
+      return resolved;
     }
 
-    return function PayloadUnresolvedClientComponent(): never {
-      throw new Error(
-        `Cannot render client reference "${reference.id}" because decodePayloadStream was not configured with a matching resolveClientReference.`,
-      );
-    };
+    const component = clientReferenceWrapper(resolved, reference.id);
+    entries?.set(reference.id, component);
+    return component;
   }
 
   private getChunk(id: number): DecodeChunk {
@@ -504,9 +569,9 @@ class PayloadStreamDecode {
             (element) => {
               (element as { type: ElementType<any> }).type =
                 this.decodeElementType(model.type);
-              (element as { props: Props }).props = this.decodeModel(
-                model.props,
-              ) as Props;
+              const props = this.decodeModel(model.props) as Props;
+              (element as { props: Props }).props = props;
+              this.attachElementGate(model.type, props);
             },
           );
         }
@@ -515,7 +580,11 @@ class PayloadStreamDecode {
           key?: Key | null;
         };
         if (model.key !== null) props.key = model.key;
-        return createElement(type, props);
+        const element = createElement(type, props);
+        // createElement copies props, so the gate keys the element's own
+        // props object — the one the component will receive.
+        this.attachElementGate(model.type, element.props);
+        return element;
       }
       case "client": {
         const chunk = this.chunks.get(model.id);
@@ -560,6 +629,17 @@ class PayloadStreamDecode {
     return this.decodeSpecialModel(type) as ElementType<any>;
   }
 
+  // A client-referencing element inherits its decode's unsettled row gate;
+  // the reference wrapper reads it per element instance at render.
+  private attachElementGate(
+    typeModel: string | PayloadSpecialModel,
+    props: Props,
+  ): void {
+    if (typeof typeModel === "string" || typeModel.$fig !== "client") return;
+    const gate = this.clientRowGates.get(typeModel.id);
+    if (gate !== undefined) elementGates.set(props, gate);
+  }
+
   private defineObjectRef<T>(
     id: number,
     create: () => T,
@@ -584,6 +664,38 @@ function PayloadStreamHole(props: {
   id: number;
 }): FigNode {
   return props.decode.readChunkForRender(props.id) as FigNode;
+}
+
+// The one client-reference wrapper: reads the per-element reveal gate
+// (elementGates), resolves the component, renders it. Cached in a
+// clientReferenceCache it is reused across decodes, so island identity
+// survives re-decodes whether a given decode arrives gated or not; without
+// a cache it lives for a single decode. Asynchronous resolution starts at
+// row arrival — overlapping the rest of the stream instead of serializing
+// behind it — and latches its type; thenable tracking lets a resolution
+// settled before its first render read synchronously instead of suspending
+// for a retry beat.
+function clientReferenceWrapper(
+  resolved: ElementType<any> | PromiseLike<ElementType<any>>,
+  referenceId: string,
+): ElementType<any> {
+  if (!isThenable(resolved)) {
+    return function PayloadClientComponent(props: Props): FigNode {
+      readElementGate(props);
+      return createElement(resolved, props);
+    };
+  }
+
+  const pending = Promise.resolve(resolved);
+  trackThenable(pending);
+  let type: ElementType<any> | null = null;
+  return function PayloadClientComponent(props: Props): FigNode {
+    readElementGate(props);
+    if (type === null) {
+      type = clientReferenceType(readPromise(pending), referenceId);
+    }
+    return createElement(type, props);
+  };
 }
 
 function clientReferenceType(value: unknown, id: string): ElementType<any> {

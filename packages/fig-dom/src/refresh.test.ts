@@ -1,4 +1,14 @@
-import { createElement, type FigNode, useState } from "@bgub/fig";
+import {
+  clientReference,
+  createElement,
+  type FigNode,
+  useState,
+} from "@bgub/fig";
+import {
+  createPayloadClientReferenceCache,
+  decodePayloadStream,
+} from "@bgub/fig/payload";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { setRefreshHandler } from "@bgub/fig-reconciler/refresh";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
@@ -127,6 +137,52 @@ describe("@bgub/fig-dom fast refresh", () => {
     });
 
     expect(container.textContent).toBe("parent:3 child-v2");
+  });
+
+  it("hot-updates a client reference latched by the payload reference cache", async () => {
+    // The decoder's clientReferenceCache latches the first resolution per
+    // reference id for the life of the cache. That latch must not defeat
+    // fast refresh: the family remap resolves the latched function to its
+    // newest version at render, and updates a bundler cannot accept escalate
+    // to a full reload (which resets the cache with the page) — so the cache
+    // needs no manual invalidation under the accept-or-reload HMR contract.
+    let setCount: (next: number) => void = () => undefined;
+
+    function IslandV1(): FigNode {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("div", null, `v1:${count}`);
+    }
+    function IslandV2(): FigNode {
+      const [count, set] = useState(0);
+      setCount = set;
+      return createElement("div", null, `v2:${count}`);
+    }
+
+    const Island = clientReference<Record<string, never>>({
+      id: "app/Island.tsx#Island",
+    });
+    const family = familyOf(IslandV1, IslandV2);
+    const cache = createPayloadClientReferenceCache();
+    const result = renderToPayloadStream(createElement(Island, {}));
+    const decode = decodePayloadStream(result.stream, {
+      clientReferenceCache: cache,
+      resolveClientReference: () => IslandV1,
+    });
+
+    const container = mount((await decode.value) as FigNode);
+    expect(container.textContent).toBe("v1:0");
+    flushSync(() => setCount(5));
+    expect(container.textContent).toBe("v1:5");
+
+    // A hot island edit: the cached wrapper still holds IslandV1, but the
+    // family renders the new version in place with hook state preserved.
+    family.current = IslandV2;
+    scheduleRefresh({
+      staleFamilies: new Set(),
+      updatedFamilies: new Set([family]),
+    });
+    expect(container.textContent).toBe("v2:5");
   });
 
   it("is a no-op when no refresh handler is installed", () => {
