@@ -1,6 +1,7 @@
 import {
   type ClientReferenceOptions,
   clientReference,
+  type ComponentType,
   type ElementType,
   type FigClientReference,
   type Props,
@@ -8,7 +9,7 @@ import {
 import type { AnyRoute } from "./route.ts";
 
 const serverRoutes = new WeakSet<AnyRoute>();
-const serverClientReferences = new Map<string, ElementType>();
+const serverClientReferences = new Map<string, ComponentType<any>>();
 
 export function markServerRoute<T extends AnyRoute>(route: T): T {
   serverRoutes.add(route);
@@ -20,7 +21,7 @@ export function isServerRoute(route: AnyRoute): boolean {
 }
 
 export function serverClientReference<P extends Props>(
-  options: ClientReferenceOptions,
+  options: ClientReferenceOptions<P>,
 ): FigClientReference<P> {
   if (options.ssr !== undefined) {
     serverClientReferences.set(options.id, options.ssr);

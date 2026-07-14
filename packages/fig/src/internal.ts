@@ -75,7 +75,11 @@ export {
   type ViewTransitionClass,
   type ViewTransitionProps,
 } from "./element.ts";
-export { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
+export {
+  type RenderDispatcher,
+  setCurrentDispatcher,
+  type StableEventCallerArgs,
+} from "./hooks.ts";
 // The private payload-format seam shared by fig-server, fig-dom, and Fig Start.
 export {
   assertPayloadCodecMatches,

@@ -7,7 +7,7 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 export type Bind<T extends Element = Element> = (
   node: T,
   signal: AbortSignal,
-) => void;
+) => undefined;
 
 interface BindSlot {
   callback: Bind;

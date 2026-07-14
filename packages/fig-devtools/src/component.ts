@@ -102,7 +102,7 @@ export function FigDevtools({
   useSyncExternalStore(subscribe, getSnapshot, () => 0);
 
   const treePaneRef = useMemo(() => ({ current: null as Element | null }), []);
-  const bindTreePane = useMemo(
+  const bindTreePane = useMemo<Bind>(
     () => (node: Element, signal: AbortSignal) => {
       treePaneRef.current = node;
       signal.addEventListener("abort", () => {

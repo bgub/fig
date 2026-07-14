@@ -1,4 +1,8 @@
-import type { DataResourceLoadContext, FigNode } from "@bgub/fig";
+import type {
+  DataResourceLoadContext,
+  DataResourceLoader,
+  FigNode,
+} from "@bgub/fig";
 import type { FigAssetResource } from "@bgub/fig";
 import {
   assertPayloadCodecMatches,
@@ -32,9 +36,7 @@ export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
    * publishes and aborts when the entry is superseded, hydrated over,
    * evicted, or the store is disposed, cancelling background decoding.
    */
-  request: (
-    ...argsAndContext: [...TArgs, { signal: AbortSignal }]
-  ) => Response | PromiseLike<Response>;
+  request: DataResourceLoader<TArgs, Response>;
   resolveClientReference?: ResolveClientReference;
 }
 
@@ -48,9 +50,7 @@ export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
  */
 export function payloadDataLoader<TArgs extends unknown[]>(
   options: PayloadDataLoaderOptions<TArgs>,
-): (
-  ...argsAndContext: [...TArgs, DataResourceLoadContext]
-) => Promise<FigNode> {
+): DataResourceLoader<TArgs, FigNode> {
   return async (...argsAndContext) => {
     const context = argsAndContext[
       argsAndContext.length - 1

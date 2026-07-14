@@ -85,7 +85,7 @@ describe("@bgub/fig-dom suspense", () => {
     }
 
     const pending = deferred<typeof Message>();
-    const LazyMessage = lazy<{ label: string }>(() => {
+    const LazyMessage = lazy(() => {
       loads += 1;
       return pending.promise;
     });
@@ -135,7 +135,7 @@ describe("@bgub/fig-dom suspense", () => {
 
     const first = deferred<typeof Message>();
     const second = deferred<typeof Message>();
-    const LazyMessage = lazy<{ label: string }>(() => {
+    const LazyMessage = lazy(() => {
       loads += 1;
       return loads === 1 ? first.promise : second.promise;
     });

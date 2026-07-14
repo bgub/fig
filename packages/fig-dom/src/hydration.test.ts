@@ -456,8 +456,9 @@ describe("@bgub/fig-dom hydration", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
     const calls: Array<[FakeElement, AbortSignal]> = [];
-    const bind: Bind = (node, signal) =>
+    const bind: Bind = (node, signal) => {
       calls.push([node as unknown as FakeElement, signal]);
+    };
     container.appendChild(input);
 
     flushSync(() =>

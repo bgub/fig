@@ -14,7 +14,6 @@ import {
   type FigNode,
   type FigPortal,
   type Props,
-  type StableEventArgs,
   type StartTransition,
   type StateSetter,
   type ViewTransitionClass,
@@ -28,6 +27,7 @@ import {
   isPortal,
   isThenable,
   isValidElement,
+  type StableEventCallerArgs,
   type NormalizedChild,
   type RenderDispatcher,
   readThenable,
@@ -2941,7 +2941,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateStableEventHook<Args extends unknown[], Result>(
     handler: (...args: Args) => Result,
-  ): (...args: StableEventArgs<Args>) => Result {
+  ): (...args: StableEventCallerArgs<Args>) => Result {
     requireRenderingFiber();
     const oldHook = updateHook(
       StableEventHook,
@@ -2955,7 +2955,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         next: handler as StableEventHandler,
       }),
     );
-    return instance.stable as (...args: StableEventArgs<Args>) => Result;
+    return instance.stable as (...args: StableEventCallerArgs<Args>) => Result;
   }
 
   function createStableEventInstance(): StableEventInstance {

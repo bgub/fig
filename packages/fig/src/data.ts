@@ -12,6 +12,10 @@ export interface DataResourceLoadContext {
   signal: AbortSignal;
 }
 
+export type DataResourceLoader<TArgs extends unknown[], TValue> = (
+  ...argsAndContext: [...TArgs, DataResourceLoadContext]
+) => TValue | PromiseLike<TValue>;
+
 export interface DataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
@@ -19,9 +23,7 @@ export interface DataResource<
   readonly $$typeof: symbol;
   readonly debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   readonly key: (...args: TArgs) => DataResourceKey;
-  readonly load?: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext]
-  ) => TValue | PromiseLike<TValue>;
+  readonly load?: DataResourceLoader<TArgs, TValue>;
 }
 
 export type DataRefreshResult<T> =

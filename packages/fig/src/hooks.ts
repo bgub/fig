@@ -57,7 +57,7 @@ export interface RenderDispatcher {
   ): T;
   useStableEvent<Args extends unknown[], Result>(
     handler: (...args: Args) => Result,
-  ): (...args: StableEventArgs<Args>) => Result;
+  ): (...args: StableEventCallerArgs<Args>) => Result;
   readContext<T>(context: FigContext<T>): T;
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
@@ -73,15 +73,15 @@ export interface RenderDispatcher {
 export type EffectCallback = (signal: AbortSignal) => undefined;
 export type DependencyList = readonly unknown[];
 
-// Fig appends the AbortSignal when invoking the handler; callers never pass
-// it, so a declared trailing signal is stripped from the callable signature.
-export type StableEventArgs<Args extends unknown[]> = Args extends [
-  ...infer Rest,
+export type StableEventCallerArgs<Args extends unknown[]> = Args extends [
+  ...infer CallerArgs,
   AbortSignal,
 ]
-  ? Rest
+  ? CallerArgs
   : Args;
 
+// Fig appends the AbortSignal when invoking the handler; callers never pass
+// it, so a declared trailing signal is stripped from the callable signature.
 let currentDispatcher: RenderDispatcher | null = null;
 
 export function useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
@@ -168,8 +168,14 @@ export function useSyncExternalStore<T>(
 }
 
 export function useStableEvent<Args extends unknown[], Result>(
+  handler: (...args: [...Args, signal: AbortSignal]) => Result,
+): (...args: Args) => Result;
+export function useStableEvent<Args extends unknown[], Result>(
   handler: (...args: Args) => Result,
-): (...args: StableEventArgs<Args>) => Result {
+): (...args: Args) => Result;
+export function useStableEvent<Args extends unknown[], Result>(
+  handler: (...args: Args) => Result,
+): (...args: StableEventCallerArgs<Args>) => Result {
   return resolveDispatcher().useStableEvent(handler);
 }
 

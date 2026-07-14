@@ -5,11 +5,14 @@ import type {
   EffectCallback,
   ExternalStoreSubscribe,
   FigContext,
-  StableEventArgs,
   StateSetter,
   StartTransition,
 } from "@bgub/fig";
-import type { DataResource, RenderDispatcher } from "@bgub/fig/internal";
+import type {
+  DataResource,
+  RenderDispatcher,
+  StableEventCallerArgs,
+} from "@bgub/fig/internal";
 import { escapeAttribute } from "./html.ts";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
@@ -178,10 +181,10 @@ export function createStaticDispatcher(
     },
     useStableEvent<Args extends unknown[], Result>(
       _handler: (...args: Args) => Result,
-    ): (...args: StableEventArgs<Args>) => Result {
+    ): (...args: StableEventCallerArgs<Args>) => Result {
       return (() => {
         throw new Error("Stable events cannot be called during server render.");
-      }) as (...args: StableEventArgs<Args>) => Result;
+      }) as (...args: StableEventCallerArgs<Args>) => Result;
     },
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);

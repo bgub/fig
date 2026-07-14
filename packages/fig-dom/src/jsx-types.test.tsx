@@ -1,6 +1,6 @@
 import type { FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
-import { on } from "./index.ts";
+import { type Bind, on } from "./index.ts";
 
 // Type-level tests for the stage-1 JSX host-prop types: oxlint enforces
 // every @ts-expect-error below (an unused one is itself an error), so this
@@ -12,6 +12,10 @@ function expectNode(node: FigNode): FigNode {
 }
 
 function typeChecks(): FigNode[] {
+  // @ts-expect-error bind cleanup is signal-driven; returned cleanup is invalid.
+  const invalidBind: Bind = () => () => undefined;
+  void invalidBind;
+
   return [
     // Fig props typecheck, and bind infers the per-tag element type.
     expectNode(

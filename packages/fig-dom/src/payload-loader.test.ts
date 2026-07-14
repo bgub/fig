@@ -43,6 +43,26 @@ function loaderContext(): { signal: AbortSignal } {
 }
 
 describe("payloadDataLoader", () => {
+  it("passes request callbacks only the public load context", async () => {
+    const privateCapability = Symbol("private capability");
+    const context = loaderContext() as ReturnType<typeof loaderContext> &
+      Record<symbol, unknown>;
+    context[privateCapability] = () => undefined;
+    let requestContext: { signal: AbortSignal } | null = null;
+    const load = payloadDataLoader<[]>({
+      request: (received) => {
+        requestContext = received;
+        return new Response(null, { status: 503 });
+      },
+    });
+
+    await expect(load(context)).rejects.toThrow(
+      "Payload request failed with status 503.",
+    );
+    expect(requestContext).not.toBe(context);
+    expect(Reflect.ownKeys(requestContext ?? {})).toEqual(["signal"]);
+  });
+
   it("rejects non-2xx responses and cancels the body", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({

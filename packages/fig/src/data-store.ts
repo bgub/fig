@@ -4,6 +4,7 @@ import {
   type DataResourceKey,
   type DataResourceKeyInput,
   type DataResourceLoadContext,
+  type DataResourceLoader,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
   defineLoadContextHydrate,
@@ -22,9 +23,7 @@ declare const __FIG_DEV__: boolean | undefined;
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  load?: (
-    ...argsAndContext: [...TArgs, DataResourceLoadContext]
-  ) => TValue | PromiseLike<TValue>;
+  load?: DataResourceLoader<TArgs, TValue>;
 }
 
 export interface DataStoreHost<Owner extends object, Lane> {

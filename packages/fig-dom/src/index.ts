@@ -329,7 +329,7 @@ export function createPortal(
   children: FigNode,
   container: Container,
   key: Key | null = null,
-): FigPortal {
+): FigPortal<Container> {
   return createPortalNode(children, container, key);
 }
 

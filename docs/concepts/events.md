@@ -28,7 +28,7 @@ Server-rendered documents open `<head>` with a tiny inline script that queues re
 
 ## bind
 
-DOM node access is `bind={(node, signal) => ...}`, forwarded as a normal prop — no `forwardRef`, no ref objects. The signal aborts on identity change and unmount; DOM _moves_ do not re-fire it. `composeBind` merges binds and accepts falsy entries. Strict dev runs first-time binds through the run/abort/re-run cycle like effects. (Note: binds fire during insertion; use `useBeforePaint` for layout measurement.)
+DOM node access is `bind={(node, signal) => ...}`, forwarded as a normal prop — no `forwardRef`, no ref objects. Bind callbacks return `undefined`: cleanup belongs on the signal, and returned cleanup functions or promises are type errors. The signal aborts on identity change and unmount; DOM _moves_ do not re-fire it. `composeBind` merges binds and accepts falsy entries. Strict dev runs first-time binds through the run/abort/re-run cycle like effects. (Note: binds fire during insertion; use `useBeforePaint` for layout measurement.)
 
 ## Styling Stays Separate
 

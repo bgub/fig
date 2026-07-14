@@ -4,6 +4,15 @@ import type { ClientReferenceAssets } from "./resource.ts";
 
 export type Key = string | number;
 export type Props = Record<string, any>;
+export type ComponentType<P = Props> = (
+  props: P & { children?: FigNode },
+) => FigNode;
+export type ComponentProps<T extends ComponentType<any>> =
+  Parameters<T> extends [infer P, ...unknown[]]
+    ? P extends Props
+      ? P
+      : Props
+    : {};
 export type ElementType<P = Props> =
   | string
   | typeof Fragment
@@ -13,7 +22,7 @@ export type ElementType<P = Props> =
   | FigSuspense
   | FigActivity
   | FigViewTransition
-  | ((props: P & { children?: FigNode }) => FigNode);
+  | ComponentType<P>;
 export type FigText = string | number;
 export type FigNode =
   | FigElement<any>
@@ -38,10 +47,10 @@ export interface FigPortal<Target = unknown> {
   readonly target: Target;
 }
 
-export interface ClientReferenceOptions {
+export interface ClientReferenceOptions<P extends Props = Props> {
   assets?: ClientReferenceAssets;
   id: string;
-  ssr?: ElementType;
+  ssr?: ComponentType<P>;
 }
 
 export interface FigClientReference<P = Props> {
@@ -49,10 +58,11 @@ export interface FigClientReference<P = Props> {
   readonly $$typeof: symbol;
   readonly assets?: ClientReferenceAssets;
   readonly id: string;
-  readonly ssr?: ElementType;
+  readonly ssr?: ComponentType<P>;
 }
 
-export type LazyLoader<P = Props> = () => PromiseLike<ElementType<P>>;
+export type LazyLoader<T extends ComponentType<any> = ComponentType<any>> =
+  () => PromiseLike<T>;
 
 export interface SuspenseProps {
   fallback?: FigNode;
@@ -195,8 +205,8 @@ export function isPortal(value: unknown): value is FigPortal {
   );
 }
 
-export function clientReference<P extends Props>(
-  options: ClientReferenceOptions,
+export function clientReference<P extends Props = Props>(
+  options: ClientReferenceOptions<P>,
 ): FigClientReference<P> {
   const reference = (() => {
     throw new Error(
@@ -212,13 +222,13 @@ export function clientReference<P extends Props>(
   });
 }
 
-export function lazy<P extends Props>(
-  load: LazyLoader<P>,
-): (props: P & { children?: FigNode }) => FigNode {
-  let promise: PromiseLike<ElementType<P>> | null = null;
+export function lazy<T extends ComponentType<any>>(
+  load: LazyLoader<T>,
+): ComponentType<ComponentProps<T>> {
+  let promise: PromiseLike<T> | null = null;
   let rejected = false;
 
-  return function Lazy(props: P & { children?: FigNode }) {
+  const Lazy = (props: Props & { children?: FigNode }): FigNode => {
     if (promise === null) {
       rejected = false;
       const next = Promise.resolve(load()).then(
@@ -232,7 +242,7 @@ export function lazy<P extends Props>(
     }
 
     try {
-      return createElement(readPromise(promise), props);
+      return createElement(readPromise(promise) as ElementType, props);
     } catch (error) {
       if (rejected) {
         promise = null;
@@ -241,6 +251,8 @@ export function lazy<P extends Props>(
       throw error;
     }
   };
+
+  return Lazy as ComponentType<ComponentProps<T>>;
 }
 
 export function isClientReference(value: unknown): value is FigClientReference {

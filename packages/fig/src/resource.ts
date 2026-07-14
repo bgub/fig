@@ -79,14 +79,45 @@ export interface TitleResource extends ResourceBase {
   value: string;
 }
 
-export interface MetaResource extends ResourceBase {
-  charset?: string;
-  content?: string;
-  "http-equiv"?: string;
+interface MetaResourceBase extends ResourceBase {
   kind: "meta";
-  name?: string;
-  property?: string;
 }
+
+type DistributiveOmit<Value, Key extends PropertyKey> = Value extends unknown
+  ? Omit<Value, Key>
+  : never;
+
+export type MetaResource =
+  | (MetaResourceBase & {
+      charset: string;
+      content?: never;
+      "http-equiv"?: never;
+      name?: never;
+      property?: never;
+    })
+  | (MetaResourceBase & {
+      charset?: never;
+      content: string;
+      "http-equiv"?: never;
+      name: string;
+      property?: never;
+    })
+  | (MetaResourceBase & {
+      charset?: never;
+      content: string;
+      "http-equiv"?: never;
+      name?: never;
+      property: string;
+    })
+  | (MetaResourceBase & {
+      charset?: never;
+      content: string;
+      "http-equiv": string;
+      name?: never;
+      property?: never;
+    });
+
+export type MetaResourceOptions = DistributiveOmit<MetaResource, "kind">;
 
 export type FigAssetResourceList =
   | FigAssetResource
@@ -159,8 +190,8 @@ export function title(value: string): TitleResource {
   return { kind: "title", value };
 }
 
-export function meta(options: Omit<MetaResource, "kind">): MetaResource {
-  return { ...options, kind: "meta" };
+export function meta(options: MetaResourceOptions): MetaResource {
+  return { ...options, kind: "meta" } as MetaResource;
 }
 
 export function isFigAssetResource(value: unknown): value is FigAssetResource {
@@ -362,14 +393,7 @@ function resourceFromHost(
       return withKey({ kind: "title", value: textResourceValue(children) });
     case "meta":
       if (readProp(prop, "itemprop") !== undefined) return null;
-      return withKey({
-        charset: readProp(prop, "charset"),
-        content: readProp(prop, "content"),
-        "http-equiv": readProp(prop, "http-equiv"),
-        kind: "meta",
-        name: readProp(prop, "name"),
-        property: readProp(prop, "property"),
-      });
+      return withNullableKey(metaResourceFromHost(prop), withKey);
     case "link":
       return withNullableKey(linkResourceFromHost(prop), withKey);
     case "script": {
@@ -391,6 +415,30 @@ function resourceFromHost(
     default:
       return null;
   }
+}
+
+function metaResourceFromHost(
+  prop: (name: string) => unknown,
+): MetaResource | null {
+  const charset = readProp(prop, "charset");
+  const httpEquiv = readProp(prop, "http-equiv");
+  const name = readProp(prop, "name");
+  const property = readProp(prop, "property");
+  const identities = [charset, httpEquiv, name, property].filter(
+    (value) => value !== undefined,
+  );
+
+  if (identities.length !== 1) return null;
+  if (charset !== undefined) return { charset, kind: "meta" };
+
+  const content = readProp(prop, "content");
+  if (content === undefined) return null;
+  if (httpEquiv !== undefined) {
+    return { content, "http-equiv": httpEquiv, kind: "meta" };
+  }
+  if (name !== undefined) return { content, kind: "meta", name };
+  if (property !== undefined) return { content, kind: "meta", property };
+  return null;
 }
 
 function hasBooleanAttribute(value: unknown): boolean {
@@ -525,9 +573,5 @@ function metaResourceKey(resource: MetaResource): string {
   if (resource.name !== undefined) return `meta:name:${resource.name}`;
   if (resource.property !== undefined)
     return `meta:property:${resource.property}`;
-  if (resource["http-equiv"] !== undefined) {
-    return `meta:http-equiv:${resource["http-equiv"]}`;
-  }
-
-  return `meta:${resource.content ?? ""}`;
+  return `meta:http-equiv:${resource["http-equiv"]}`;
 }

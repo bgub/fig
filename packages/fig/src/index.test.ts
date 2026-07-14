@@ -144,6 +144,39 @@ describe("@bgub/fig", () => {
     expect(element.props).toEqual({ label: "Ready" });
   });
 
+  it("keeps lazy loaders and client-reference SSR props component-shaped", () => {
+    function Message({ label }: { label: string }) {
+      return createElement("span", null, label);
+    }
+    const MarkedMessage = Object.assign(Message, { marker: "implementation" });
+    const LazyMarkedMessage = lazy(() => Promise.resolve(MarkedMessage));
+
+    const Reference = clientReference<{ label: string }>({
+      id: "./Message.tsx",
+      ssr: Message,
+    });
+    const InferredReference = clientReference({
+      id: "./InferredMessage.tsx",
+      ssr: Message,
+    });
+
+    expect(Reference.ssr).toBe(Message);
+    expect(createElement(InferredReference, { label: "Ready" }).props).toEqual({
+      label: "Ready",
+    });
+    expect("marker" in LazyMarkedMessage).toBe(false);
+    // @ts-expect-error lazy wrappers preserve props, not implementation statics.
+    void LazyMarkedMessage.marker;
+
+    // @ts-expect-error lazy loaders must resolve to components, not host types.
+    lazy(() => Promise.resolve("span"));
+    clientReference<{ label: string }>({
+      id: "./InvalidMessage.tsx",
+      // @ts-expect-error the SSR implementation must accept the reference props.
+      ssr: (_props: { count: number }) => null,
+    });
+  });
+
   it("creates resource wrappers", () => {
     const style = stylesheet("/app.css", { precedence: "app" });
     const element = assets(style, "child");
@@ -175,6 +208,13 @@ describe("@bgub/fig", () => {
       content: "30",
       kind: "meta",
     });
+
+    // @ts-expect-error metadata needs exactly one identity.
+    meta({});
+    // @ts-expect-error named metadata requires content.
+    meta({ name: "description" });
+    // @ts-expect-error metadata identities are mutually exclusive.
+    meta({ charset: "utf-8", content: "x", name: "description" });
   });
 
   it("retains eager asset resources on a client reference", () => {
@@ -264,7 +304,9 @@ describe("@bgub/fig", () => {
   it("collapses every title to the singleton key", () => {
     expect(assetResourceKey(title("A"))).toBe("title");
     // Other kinds still honor an explicit key.
-    expect(assetResourceKey(meta({ name: "robots", key: "r" }))).toBe("meta:r");
+    expect(
+      assetResourceKey(meta({ name: "robots", content: "", key: "r" })),
+    ).toBe("meta:r");
   });
 
   it("classifies resource destinations", () => {
@@ -292,6 +334,19 @@ describe("@bgub/fig", () => {
       assetResourceFromHostProps("title", {
         children: "Structured name",
         itemprop: "name",
+      }),
+    ).toBeNull();
+    expect(
+      assetResourceFromHostProps("meta", {
+        content: "Fig",
+        name: "description",
+      }),
+    ).toEqual({ content: "Fig", kind: "meta", name: "description" });
+    expect(
+      assetResourceFromHostProps("meta", {
+        charset: "utf-8",
+        content: "Fig",
+        name: "description",
       }),
     ).toBeNull();
     expect(

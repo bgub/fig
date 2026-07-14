@@ -30,7 +30,7 @@ In development, scheduling state from `useBeforeLayout` throws a diagnostic beca
 
 ## Stable Events
 
-`useStableEvent(handler)` is the general escape-from-reactivity primitive (React's `useEffectEvent` shape with the Fig signal contract; "stable" names the identity guarantee). The returned function's identity never changes; the handler always sees the latest committed render. Handlers swap at commit before the before-layout effect phase; calls after unmount run the last committed handler with an already-aborted signal; calling one during render or server render throws; the strict shadow pass never publishes. Unlike React's, it is not restricted to effects — handlers, timers, and subscriptions are all valid callers.
+`useStableEvent(handler)` is the general escape-from-reactivity primitive (React's `useEffectEvent` shape with the Fig signal contract; "stable" names the identity guarantee). Its signature treats the handler's trailing `AbortSignal` separately from the returned function's caller-supplied argument tuple: `(...args: [...Args, AbortSignal]) => Result` becomes `(...args: Args) => Result`. The returned function's identity never changes; the handler always sees the latest committed render. Handlers swap at commit before the before-layout effect phase; calls after unmount run the last committed handler with an already-aborted signal; calling one during render or server render throws; the strict shadow pass never publishes. Unlike React's, it is not restricted to effects — handlers, timers, and subscriptions are all valid callers.
 
 ## Transitions And Actions
 
