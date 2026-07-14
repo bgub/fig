@@ -22,7 +22,7 @@ test("streams a serialized post as a data resource with progressive holes and is
   );
 
   // Root row reveals the post while the comments hole is still streaming.
-  const post = page.locator(".resource-post");
+  const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
   await expect(
     page.locator('[data-resource-comments="pending"]'),
@@ -58,7 +58,7 @@ test("refreshes the post resource in a transition, keeping previous content visi
   const errors = collectBrowserErrors(page);
 
   await page.goto("/", { waitUntil: "commit" });
-  const post = page.locator(".resource-post");
+  const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
   await expect(page.locator('[data-resource-comments="ready"]')).toBeVisible();
   const summaryBefore = await page
@@ -100,7 +100,7 @@ test("refreshing while comments are still streaming shows no error", async ({
   // the previously reported repro for "Payload decode aborted" in the
   // error boundary.
   await page.locator('[data-resource-nav="next"]').click();
-  const post = page.locator(".resource-post");
+  const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "2");
   await expect(
     page.locator('[data-resource-comments="pending"]'),
@@ -128,7 +128,7 @@ test("navigates between posts by key and recovers from a failed post", async ({
   const errors = collectBrowserErrors(page);
 
   await page.goto("/", { waitUntil: "commit" });
-  const post = page.locator(".resource-post");
+  const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
 
   // A new key is a new resource entry: ordinary suspend-then-reveal.

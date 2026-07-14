@@ -20,25 +20,36 @@ export function ResourcePost({ comments, seed }: ResourcePostProps) {
   readData(payloadSummaryResource, seed);
 
   return (
-    <article class="panel resource-post" data-resource-seed={seed}>
-      <div class="panel-header">
-        <div>
-          <h2>Serialized post #{seed}</h2>
-          <p class="muted" data-resource-audit>
-            {audit.source} · request {audit.requestId}
-          </p>
-        </div>
-        <span class="tag ok">resource</span>
-      </div>
-      <div class="panel-actions">
+    <article class="frame frame-payload" data-resource-seed={seed}>
+      <span class="tag">payload shell</span>
+      <h2>Post #{seed}</h2>
+      <p class="muted" data-resource-audit>
+        {audit.source} · request {audit.requestId} · rendered on the server
+      </p>
+      <div>
         <LikeButtonRef label={`post-${seed}`} />
       </div>
-      <Suspense
-        fallback={<p data-resource-comments="pending">Loading comments…</p>}
-      >
+      <Suspense fallback={<CommentsPending />}>
         <Comments comments={comments} seed={seed} />
       </Suspense>
     </article>
+  );
+}
+
+// The streamed hole while its row is still on the wire: same frame, dashed.
+function CommentsPending() {
+  return (
+    <div
+      class="frame frame-streamed slot-pending"
+      data-resource-comments="pending"
+    >
+      <span class="tag">streamed hole</span>
+      <p class="slot-note">comments streaming…</p>
+      <div class="skeleton">
+        <i />
+        <i />
+      </div>
+    </div>
   );
 }
 
@@ -51,13 +62,16 @@ function Comments({
 }) {
   const items = readPromise(comments);
   return (
-    <ul data-resource-comments="ready">
-      {items.map((comment) => (
-        <li key={comment}>
-          {comment} (post {seed})
-        </li>
-      ))}
-    </ul>
+    <div class="frame frame-streamed" data-resource-comments="ready">
+      <span class="tag">streamed hole</span>
+      <ul class="comments">
+        {items.map((comment) => (
+          <li key={comment}>
+            {comment} (post {seed})
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -29,22 +29,38 @@ const postResource = dataResource<[number], FigNode>({
   }),
 });
 
+// The page is a visible template: every delivery layer renders inside a
+// color-coded frame, and pending slots show as dashed outlines that fill in
+// as their bytes arrive — app shell first, then the payload's own shell,
+// then streamed holes, with client islands hydrating inside it all.
 function ResourcePage() {
   const [seed, setSeed] = useState(1);
 
   return (
-    <main class="app-frame">
-      <header class="app-header">
-        <div>
-          <h1>Serialized components as data resources</h1>
-          <p class="muted">
-            One payload stream per post, delivered through readData; refresh and
-            navigation are ordinary data-resource operations.
-          </p>
+    <main class="app frame frame-shell">
+      <span class="tag">app shell</span>
+      <header>
+        <h1>Serialized components, layer by layer</h1>
+        <p class="muted">
+          The gray shell renders instantly in the browser. Everything below it
+          streams from one payload request and fills its slot when it lands.
+        </p>
+        <div class="legend">
+          <span>
+            <i class="swatch-shell" /> app shell
+          </span>
+          <span>
+            <i class="swatch-payload" /> payload shell
+          </span>
+          <span>
+            <i class="swatch-streamed" /> streamed hole
+          </span>
+          <span>
+            <i class="swatch-island" /> client island
+          </span>
         </div>
-        <div class="actions">
+        <div class="controls">
           <button
-            class="button"
             data-resource-nav="next"
             events={[on("click", () => setSeed((value) => value + 1))]}
             type="button"
@@ -53,7 +69,6 @@ function ResourcePage() {
           </button>
           <RefreshPostButton seed={seed} />
           <button
-            class="button"
             data-resource-nav="broken"
             events={[on("click", () => setSeed(brokenResourceSeed))]}
             type="button"
@@ -61,7 +76,6 @@ function ResourcePage() {
             Load broken post
           </button>
           <button
-            class="button"
             data-resource-nav="first"
             events={[on("click", () => setSeed(1))]}
             type="button"
@@ -70,27 +84,42 @@ function ResourcePage() {
           </button>
         </div>
       </header>
-      <section class="grid">
-        <ErrorBoundary
-          fallback={(error) => (
-            <section class="panel tone-warn" data-resource-error>
-              <h2>Post failed to load</h2>
-              <p class="muted">
-                {error instanceof Error ? error.message : String(error)}
-              </p>
-              <p class="muted">Use “First post” to recover.</p>
-            </section>
-          )}
-          key={seed}
-        >
-          <Suspense
-            fallback={<p data-resource-state="loading">Loading post…</p>}
-          >
-            <PostView seed={seed} />
-          </Suspense>
-        </ErrorBoundary>
-      </section>
+      <ErrorBoundary
+        fallback={(error) => (
+          <section class="frame frame-danger payload-slot" data-resource-error>
+            <span class="tag">payload failed</span>
+            <h2>Post failed to load</h2>
+            <p class="muted">
+              {error instanceof Error ? error.message : String(error)}
+            </p>
+            <p class="muted">Use “First post” to recover.</p>
+          </section>
+        )}
+        key={seed}
+      >
+        <Suspense fallback={<PayloadSlotPending />}>
+          <PostView seed={seed} />
+        </Suspense>
+      </ErrorBoundary>
     </main>
+  );
+}
+
+// The empty payload slot: the wireframe of the post that has not arrived.
+function PayloadSlotPending() {
+  return (
+    <section
+      class="frame frame-payload payload-slot slot-pending"
+      data-resource-state="loading"
+    >
+      <span class="tag">payload shell</span>
+      <p class="slot-note">streaming payload…</p>
+      <div class="skeleton">
+        <i />
+        <i />
+        <i />
+      </div>
+    </section>
   );
 }
 
@@ -103,9 +132,10 @@ function PostView({ seed }: { seed: number }) {
   const summary = readData(payloadSummaryResource, seed);
 
   return (
-    <div class="resource-view">
+    <div class="payload-slot">
       {post}
-      <p class="muted" data-resource-summary>
+      <p class="data-strip" data-resource-summary>
+        <span class="tag">hydrated data</span>
         summary: {summary.source} · {summary.bucket} · load {summary.reads}
       </p>
     </div>
@@ -117,7 +147,6 @@ function RefreshPostButton({ seed }: { seed: number }) {
 
   return (
     <button
-      class="button"
       data-refresh-state={isPending ? "pending" : "idle"}
       data-resource-refresh
       events={[
@@ -129,7 +158,7 @@ function RefreshPostButton({ seed }: { seed: number }) {
       ]}
       type="button"
     >
-      {isPending ? "Refreshing post..." : "Refresh post"}
+      {isPending ? "Refreshing post…" : "Refresh post"}
     </button>
   );
 }

@@ -79,12 +79,20 @@ async function handleRequest(
 
 // The serialized-components endpoint: a plain payload stream per post. The
 // client refreshes it with refreshData and navigates by resource key. Seed
-// 500 fails so the demo covers pre-root failure and recovery.
+// 500 fails so the demo covers pre-root failure and recovery. The response
+// is deliberately delayed so the template's slots visibly fill in sequence:
+// app shell instantly, payload shell after the delay, streamed holes after
+// their own reads settle.
+const RESOURCE_PAYLOAD_DELAY_MS = 500;
+
 async function sendResourcePayload(
   response: ServerResponse,
   url: URL,
 ): Promise<void> {
   const seed = seedFor(url);
+  await new Promise((resolve) =>
+    setTimeout(resolve, RESOURCE_PAYLOAD_DELAY_MS),
+  );
   if (seed === brokenResourceSeed) {
     send(response, 500, "Resource payload unavailable", textPlain);
     return;
