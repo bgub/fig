@@ -8,7 +8,7 @@ import { LikeButtonRef } from "./resource-shared.ts";
 // serves the whole value, and the client refreshes it as an ordinary data
 // resource. The comments promise is created by the route handler and passed
 // as a prop so its identity is stable across serialization retries.
-export interface ResourcePostProps {
+interface ResourcePostProps {
   comments: Promise<string[]>;
   seed: number;
 }

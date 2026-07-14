@@ -48,11 +48,12 @@ body {
 
 /* --- Layer frames -------------------------------------------------------
    Every delivery layer renders inside a labeled frame. Solid border = the
-   slot has content; dashed = the slot is still streaming. */
+   slot has content; dashed = the slot is still streaming. A variant class
+   names its layer via --layer/--layer-tint; the shared rules consume them. */
 
 .frame {
-  background: rgba(255, 255, 255, 0.82);
-  border: 1.5px solid var(--line);
+  background: var(--layer-tint);
+  border: 1.5px solid var(--layer);
   border-radius: 8px;
   padding: 22px 22px 18px;
   position: relative;
@@ -65,7 +66,7 @@ body {
 .frame > .tag {
   background: var(--bg);
   border-radius: 3px;
-  color: var(--muted);
+  color: var(--layer);
   font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   left: 14px;
   letter-spacing: 0.14em;
@@ -77,48 +78,33 @@ body {
 }
 
 .frame-shell {
-  background: var(--shell-tint);
-  border-color: var(--shell);
-}
-.frame-shell > .tag {
-  color: var(--shell);
+  --layer: var(--shell);
+  --layer-tint: var(--shell-tint);
 }
 
 .frame-payload {
-  background: var(--payload-tint);
-  border-color: var(--payload);
-}
-.frame-payload > .tag {
-  color: var(--payload);
+  --layer: var(--payload);
+  --layer-tint: var(--payload-tint);
 }
 
 .frame-streamed {
-  background: var(--streamed-tint);
-  border-color: var(--streamed);
+  --layer: var(--streamed);
+  --layer-tint: var(--streamed-tint);
   margin-top: 22px;
   min-height: 128px;
 }
-.frame-streamed > .tag {
-  color: var(--streamed);
-}
 
 .frame-island {
-  background: var(--island-tint);
-  border-color: var(--island);
+  --layer: var(--island);
+  --layer-tint: var(--island-tint);
   display: inline-block;
   margin-top: 18px;
   padding: 14px 16px 12px;
 }
-.frame-island > .tag {
-  color: var(--island);
-}
 
 .frame-danger {
-  background: var(--danger-tint);
-  border-color: var(--danger);
-}
-.frame-danger > .tag {
-  color: var(--danger);
+  --layer: var(--danger);
+  --layer-tint: var(--danger-tint);
 }
 
 /* A slot whose content has not arrived yet: dashed outline + pulsing

@@ -45,7 +45,7 @@ createServer((request, response) => {
     response.end(error instanceof Error ? error.message : String(error));
   });
 }).listen(port, "127.0.0.1", () => {
-  console.log(`Fig payload demo: ${publicUrl(port)}`);
+  console.log(`Fig payload demo: ${publicUrl()}`);
 });
 
 async function handleRequest(
@@ -57,7 +57,7 @@ async function handleRequest(
 
   switch (url.pathname) {
     case "/":
-      send(response, 200, resourceDocument(), textHtml);
+      send(response, 200, resourceDocument, textHtml);
       return;
     case "/client.js":
       await sendFile(response, clientScriptUrl, textJs);
@@ -115,20 +115,17 @@ async function sendResourcePayload(
   await pipeStream(result.stream, response);
 }
 
-function resourceDocument(): string {
-  return (
-    '<!doctype html><html lang="en"><head>' +
-    '<meta charset="utf-8" />' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
-    "<title>Fig serialized components</title>" +
-    '<link rel="stylesheet" href="/style.css" />' +
-    "</head><body>" +
-    `<div id="${resourceRootId}"></div>` +
-    devReloadScript() +
-    '<script src="/client.js" type="module"></script>' +
-    "</body></html>"
-  );
-}
+const resourceDocument =
+  '<!doctype html><html lang="en"><head>' +
+  '<meta charset="utf-8" />' +
+  '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+  "<title>Fig serialized components</title>" +
+  '<link rel="stylesheet" href="/style.css" />' +
+  "</head><body>" +
+  `<div id="${resourceRootId}"></div>` +
+  devReloadScript() +
+  '<script src="/client.js" type="module"></script>' +
+  "</body></html>";
 
 function requestUrl(request: IncomingMessage): URL {
   const host = Array.isArray(request.headers.host)
@@ -138,7 +135,7 @@ function requestUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? "/", `http://${host}`);
 }
 
-function publicUrl(port: number): string {
+function publicUrl(): string {
   return process.env.PORTLESS_URL ?? `http://127.0.0.1:${port}/`;
 }
 
