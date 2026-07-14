@@ -11,6 +11,7 @@ Every open design question and planned piece of work, in one place. Each item li
 ## Data Resources
 
 - **ErrorBoundary reset ergonomics** — data-key attribution and invalidation now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still open: whether `ErrorBoundary` should expose a first-class reset/retry affordance instead of making userland remount the boundary by key.
+- **Prefetch verb** — loads start on first `readData` or a forcing `refreshData`; there is no "start the load if the entry is absent or stale, otherwise do nothing" verb. Router prefetching (link hover/viewport, eager segment loads on navigation) wants exactly that: `refreshData` on a warm entry refetches, which prefetch must not do. A small data-store addition, prerequisite for any segment-router built on payload resources. → `docs/concepts/data.md`
 
 ## Serialized Components
 
@@ -37,6 +38,7 @@ Adopted plan: `docs/plans/serialized-components.md` — payload trees delivered 
 
 - **Server action transport** — deliberately left out of `useActionState` core; the framework layer owns the wire (`docs/concepts/hooks.md`).
 - **Request state for remote data loaders** — `remoteDataResource` loaders run inside fig-start's data endpoint, which owns the request; loaders receive only `(...args, { signal })`. Open: whether fig-start provides an ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those loaders, or keeps auth and services in module scope. → `docs/concepts/data.md`
+- **Nested-segment routing (Next-style parallel segments)** — a segment router mostly falls out of shipped primitives: segments as keyed payload resources, composition via client-reference outlets, manifest-driven eager loads on navigation (needs the prefetch verb above), transitions for atomic commits. The open design piece is cold-load composition — one request delivering several segment entries. `data` rows deliberately use the value codec (no `element`/`client` models, no holes), so sibling segments cannot ride one stream today; candidate shapes are element-valued data rows (heavy: holes and asset gates span the whole stream), multi-root streams whose loader publishes each addressable root into its own entry, or serving initial segments over the existing document frame path and reserving per-segment requests for navigations. Also prerequisite: gated and `loadClientReference`-loaded references decode to per-decode wrappers and remount on re-decode; a router leaning on outlet identity needs those cached by reference id (`docs/concepts/payload.md`). Nothing shipped depends on any of this — address when a segment router is planned.
 
 ## View Transitions
 
