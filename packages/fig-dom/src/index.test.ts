@@ -276,6 +276,40 @@ describe("@bgub/fig-dom", () => {
     });
   });
 
+  it("groups host stylesheets by first-discovered precedence", () => {
+    const { head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("link", {
+            href: "/reset.css",
+            precedence: "reset",
+            rel: "stylesheet",
+          }),
+          createElement("link", {
+            href: "/theme.css",
+            precedence: "theme",
+            rel: "stylesheet",
+          }),
+          createElement("link", {
+            href: "/forms.css",
+            precedence: "reset",
+            rel: "stylesheet",
+          }),
+        ),
+      ),
+    );
+
+    expect(
+      head.childNodes.map((child) =>
+        (child as FakeElement).getAttribute("href"),
+      ),
+    ).toEqual(["/reset.css", "/forms.css", "/theme.css"]);
+  });
+
   it("updates the singleton title head slot in place", () => {
     const { head, root } = documentResourceRoot();
 

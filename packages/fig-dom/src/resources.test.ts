@@ -54,6 +54,22 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(inserted[2]?.getAttribute("href")).toBe("/b.js");
   });
 
+  it("keeps later stylesheets in their first-discovered precedence bucket", () => {
+    void insertAssetResources([
+      stylesheet("/reset.css", { precedence: "reset" }),
+      stylesheet("/theme.css", { precedence: "theme" }),
+    ]);
+    void insertAssetResources([
+      stylesheet("/forms.css", { precedence: "reset" }),
+    ]);
+
+    expect(links().map((link) => link.getAttribute("href"))).toEqual([
+      "/reset.css",
+      "/forms.css",
+      "/theme.css",
+    ]);
+  });
+
   it("dedupes by key within a call and across calls", () => {
     void insertAssetResources([stylesheet("/a.css"), stylesheet("/a.css")]);
     void insertAssetResources([stylesheet("/a.css")]);

@@ -99,9 +99,49 @@ export function acquireDocumentResource(element: Element): Element {
 }
 
 function attachDocumentResource(head: Element, element: Element): Element {
-  if (element.parentNode !== head) head.appendChild(element);
+  if (element.parentNode !== head) insertDocumentResource(head, element);
   attachSubtree(element);
   return element;
+}
+
+// A precedence value names an ordered stylesheet bucket. Bucket order is set
+// by first discovery; a stylesheet discovered later for an existing bucket is
+// inserted before the next bucket rather than appended after it. This keeps
+// lazy and payload-discovered styles in the same cascade position as their
+// eagerly discovered peers.
+function insertDocumentResource(head: Element, element: Element): void {
+  const precedence = stylesheetPrecedence(element);
+  if (precedence === null) {
+    head.appendChild(element);
+    return;
+  }
+
+  let foundBucket = false;
+
+  for (const child of Array.from(head.childNodes)) {
+    const current = isElementNode(child) ? stylesheetPrecedence(child) : null;
+    if (current === null) continue;
+
+    if (current === precedence) {
+      foundBucket = true;
+    } else if (foundBucket) {
+      head.insertBefore(element, child);
+      return;
+    }
+  }
+
+  head.appendChild(element);
+}
+
+// Only <link rel="stylesheet"> participates in precedence bucketing; the
+// element-name check keeps the attribute parse off every other head child.
+function stylesheetPrecedence(element: Element): string | null {
+  if (elementName(element) !== "link") return null;
+
+  const resource = assetResourceFromHostAttributes("link", (name: string) =>
+    element.getAttribute(name),
+  );
+  return resource?.kind === "stylesheet" ? (resource.precedence ?? "") : null;
 }
 
 function documentResourceRegistry(
@@ -299,7 +339,7 @@ export function insertAssetResources(
     entry.ready = gate;
     registry.set(key, entry);
     documentResourceMeta.set(element, { key, kind: asset.kind });
-    head.appendChild(element);
+    insertDocumentResource(head, element);
 
     if (gate !== null) gates.push(gate);
   }

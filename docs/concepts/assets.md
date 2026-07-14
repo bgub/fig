@@ -20,6 +20,10 @@ Each kind has a destination: **head** (title, meta — document state, sealed wi
 
 On the client, `insertAssetResources` inserts descriptors idempotently (by key) and returns load tracking. Suspense reveal gates on blocking assets: streamed boundary completions wait for their stylesheets to load before the reveal op runs (the inline runtime's `r()` helper), so content never flashes unstyled. Payload boundary refreshes follow the same rule: refreshed content keeps the last revealed tree visible until newly required stylesheets load. If a later payload depends on a stylesheet Fig already inserted and that sheet is still loading, it joins the existing gate. Non-blocking kinds (preloads, preconnects, scripts, and fonts) never gate, and a stylesheet may opt out with `blocking: "none"` when inserted directly. Payload asset descriptors omit this authoring hint, so payload-delivered stylesheets conservatively gate.
 
+## Stylesheet Precedence
+
+Each `precedence` value names a stylesheet bucket. Bucket order is fixed by the order in which distinct values are first discovered, and discovery order is preserved within a bucket. When a host render or `insertAssetResources` discovers another stylesheet for an existing bucket, Fig inserts it before the next bucket in the document head. An omitted value forms the default bucket. Independently streamed server segments preserve discovery order; defining a stronger cross-segment ordering policy remains an open question.
+
 ## Diagnostics
 
 `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode; no handler means no automatic warning. Prerender mode avoids the class entirely by sealing late. The HTML server registry throws `AssetResourceConflictError` for conflicting same-key definitions, except `title`, whose singleton slot uses the latest value. Payload and DOM insertion instead treat the first live definition for a key as authoritative and dedupe later definitions without signature comparison.
