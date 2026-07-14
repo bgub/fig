@@ -546,6 +546,31 @@ describe("decodePayloadStream", () => {
     expect(loaded).toBe(false);
   });
 
+  it("keeps ungated resolved references identity-stable across decodes", async () => {
+    const Widget = (props: { label: string }) =>
+      createElement("em", null, props.label);
+    const rows: PayloadRow[] = [
+      {
+        id: 1,
+        tag: "client",
+        value: { id: "src/Widget.tsx#Widget", exportName: "Widget" },
+      },
+      model(0, element({ $fig: "client", id: 1 }, { label: "solid" })),
+    ];
+
+    // Re-decoding the same reference (a payload refresh) must produce the
+    // same element type, so reconciliation updates the client component
+    // instead of remounting it and dropping its state.
+    const first = (await decodeRows(rows, {
+      resolveClientReference: () => Widget,
+    }).value) as FigElement;
+    const second = (await decodeRows(rows, {
+      resolveClientReference: () => Widget,
+    }).value) as FigElement;
+    expect(first.type).toBe(Widget);
+    expect(second.type).toBe(Widget);
+  });
+
   it("surfaces client reference load failures when the island renders", async () => {
     const failure = new Error("module fetch failed");
     const decode = decodeRows(

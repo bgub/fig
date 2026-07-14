@@ -433,8 +433,13 @@ class PayloadStreamDecode {
   ): ElementType<any> {
     const resolved = this.options.resolveClientReference?.(metadata);
     if (resolved !== undefined) {
+      // Ungated references decode to the resolved component itself, so the
+      // element type is stable across decodes and re-decoding a surrounding
+      // payload (e.g. a refresh) updates the component instead of
+      // remounting it — client state inside survives.
+      if (gate === null) return resolved;
       return function PayloadResolvedClientComponent(props: Props): FigNode {
-        if (gate !== null) readPromise(gate);
+        readPromise(gate);
         return createElement(resolved, props);
       };
     }
