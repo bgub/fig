@@ -5807,10 +5807,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.child = null;
     next.sibling = null;
     next.index = current.index;
-    // Hoisted placement is resolved once per fiber and must survive the
-    // clone; ViewTransitionStaticFlag must not — complete() re-derives it,
-    // and a clone that never completes (suspended or hidden work) would
-    // otherwise feed a stale bit into the next subtree summary.
+    // Exactly the hoisted bit survives the clone, in both directions:
+    // - HoistedStaticFlag MUST carry. It is set once, when the instance is
+    //   resolved, and never re-derived; a clone without it would misroute
+    //   commit work — most dangerously deletion, where host.removeChild at
+    //   the fiber position targets an instance that lives in <head>
+    //   (NotFoundError in a real DOM).
+    // - ViewTransitionStaticFlag MUST NOT carry. complete() re-derives it
+    //   for every fiber a render visits, so carrying it only matters for
+    //   clones that never complete (cloneSuspendedPrimary's captured hidden
+    //   trees): their stale bit would survive into the hidden Activity's
+    //   subtree summary and advertise view-transition boundaries in commits
+    //   that have no live view-transition work.
     next.flags = current.flags & HoistedStaticFlag;
     next.subtreeFlags = NoFlags;
     next.deletions = null;

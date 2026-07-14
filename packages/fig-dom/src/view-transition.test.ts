@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+// @vitest-environment-options { "settings": { "disableCSSFileLoading": true } }
 import {
   createElement,
   readPromise,
@@ -1797,6 +1798,73 @@ describe("ViewTransition", () => {
       expect(container.textContent).toBe("Transition");
     } finally {
       ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("deletes hoisted assets cloned across transition commits", async () => {
+    // Regression guard for the clone flag mask in createWorkInProgress:
+    // hoisted placement is resolved once per fiber, so a clone that drops
+    // HoistedStaticFlag sends the deletion through host.removeChild at the
+    // fiber position — a NotFoundError in a real DOM, because the instance
+    // lives in <head>. The re-render between mount and deletion is what
+    // forces the link fiber through the clone path.
+    const container = document.createElement("div");
+    document.body.append(container);
+    let starts = 0;
+    let setStep: StateSetter<number> | null = null;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      starts += 1;
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [step, set] = useState(0);
+      setStep = set;
+      return createElement(
+        ViewTransition,
+        { default: "fade", name: "panel" },
+        createElement(
+          "section",
+          null,
+          step < 2
+            ? [
+                createElement("link", {
+                  href: "/panel.css",
+                  key: "panel-css",
+                  rel: "stylesheet",
+                }),
+                createElement("p", { key: "label" }, `Panel ${step}`),
+              ]
+            : "Emptied",
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      expect(
+        document.head.querySelectorAll('link[href="/panel.css"]'),
+      ).toHaveLength(1);
+
+      await act(() => transition(() => setStep?.(1)));
+      await act(() => transition(() => setStep?.(2)));
+
+      expect(starts).toBe(2);
+      expect(container.textContent).toBe("Emptied");
+      // Stylesheets persist once inserted; the deletion releases the
+      // registry share instead of touching the fiber-position parent.
+      expect(
+        document.head.querySelectorAll('link[href="/panel.css"]'),
+      ).toHaveLength(1);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      document.head.querySelector('link[href="/panel.css"]')?.remove();
       container.remove();
     }
   });
