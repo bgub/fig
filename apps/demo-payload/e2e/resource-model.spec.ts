@@ -22,11 +22,11 @@ test("streams a serialized post as a data resource with progressive holes and is
   );
 
   // Root row reveals the post while the comments hole is still streaming.
+  // waitFor is event-driven where expect polls on fixed intervals; the
+  // pending phase is a ~400ms window that interval polling can straddle.
+  await page.locator('[data-resource-comments="pending"]').waitFor();
   const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
-  await expect(
-    page.locator('[data-resource-comments="pending"]'),
-  ).toBeVisible();
   await expect(page.locator("[data-resource-audit]")).toContainText(
     "read on the server",
   );
@@ -65,7 +65,7 @@ test("refreshes the post resource in a transition, keeping previous content visi
     .locator("[data-resource-summary]")
     .textContent();
 
-  const refresh = page.locator("[data-resource-refresh]");
+  const refresh = page.locator('[data-resource-refresh="post"]');
   await refresh.click();
 
   // While the refresh is pending the previous tree stays visible — the
@@ -100,18 +100,16 @@ test("refreshing while comments are still streaming shows no error", async ({
   // the previously reported repro for "Payload decode aborted" in the
   // error boundary.
   await page.locator('[data-resource-nav="next"]').click();
+  await page.locator('[data-resource-comments="pending"]').waitFor();
   const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "2");
-  await expect(
-    page.locator('[data-resource-comments="pending"]'),
-  ).toBeVisible();
-  await page.locator("[data-resource-refresh]").click();
+  await page.locator('[data-resource-refresh="post"]').click();
 
   // The visible tree stays alive through the refresh; no error boundary.
   await expect(page.locator("[data-resource-error]")).toHaveCount(0);
   await expect(post).toBeVisible();
 
-  await expect(page.locator("[data-resource-refresh]")).toHaveAttribute(
+  await expect(page.locator('[data-resource-refresh="post"]')).toHaveAttribute(
     "data-refresh-state",
     "idle",
   );
@@ -119,6 +117,93 @@ test("refreshing while comments are still streaming shows no error", async ({
     "First comment 2",
   );
   await expect(page.locator("[data-resource-error]")).toHaveCount(0);
+  expect(errors()).toEqual([]);
+});
+
+test("refreshes each payload slot independently", async ({ page }) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.goto("/", { waitUntil: "commit" });
+  await expect(page.locator('[data-resource-comments="ready"]')).toBeVisible();
+  const weather = page.locator("[data-weather-reading]");
+  await expect(weather).toBeVisible();
+
+  const summary = page.locator("[data-resource-summary]");
+  const summaryBefore = await summary.textContent();
+  const readingBefore = await weather.getAttribute("data-weather-reading");
+
+  // Refreshing the weather resource re-requests only its stream: the
+  // reading counter moves while the post's summary stays untouched.
+  const refreshWeather = page.locator('[data-resource-refresh="weather"]');
+  await refreshWeather.click();
+  await expect(refreshWeather).toHaveAttribute("data-refresh-state", "idle");
+  await expect(weather).not.toHaveAttribute(
+    "data-weather-reading",
+    readingBefore ?? "",
+  );
+  await expect(summary).toHaveText(summaryBefore ?? "");
+
+  // And the other way around: refreshing the post leaves weather alone.
+  const readingAfter = await weather.getAttribute("data-weather-reading");
+  const refreshPost = page.locator('[data-resource-refresh="post"]');
+  await refreshPost.click();
+  await expect(refreshPost).toHaveAttribute("data-refresh-state", "idle");
+  await expect(summary).not.toHaveText(summaryBefore ?? "");
+  await expect(weather).toHaveAttribute(
+    "data-weather-reading",
+    readingAfter ?? "",
+  );
+  expect(errors()).toEqual([]);
+});
+
+test("refreshes the surrounding server component without touching the slots inside", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.goto("/", { waitUntil: "commit" });
+  await expect(page.locator('[data-resource-comments="ready"]')).toBeVisible();
+  const dashboard = page.locator("[data-dashboard-render]");
+  const weather = page.locator("[data-weather-reading]");
+  await expect(weather).toBeVisible();
+
+  const renderBefore = await dashboard.getAttribute("data-dashboard-render");
+  const summaryBefore = await page
+    .locator("[data-resource-summary]")
+    .textContent();
+  const readingBefore = await weather.getAttribute("data-weather-reading");
+
+  // The island's state marks whether the slots inside survived the wrapper's
+  // refresh as live client components.
+  const island = page.locator('[data-like-island="post-1"]');
+  await island.click();
+  await expect(island).toHaveText("Like (1)");
+
+  // Refreshing the dashboard re-streams only the wrapper: its server render
+  // counter moves while both inner resources keep their entries.
+  const refresh = page.locator('[data-resource-refresh="dashboard"]');
+  await refresh.click();
+  await expect(refresh).toHaveAttribute("data-refresh-state", "idle");
+  await expect(dashboard).not.toHaveAttribute(
+    "data-dashboard-render",
+    renderBefore ?? "",
+  );
+  await expect(page.locator("[data-resource-summary]")).toHaveText(
+    summaryBefore ?? "",
+  );
+  await expect(weather).toHaveAttribute(
+    "data-weather-reading",
+    readingBefore ?? "",
+  );
+  await expect(island).toHaveText("Like (1)");
+
+  // The inner refresh verbs still work inside the refreshed wrapper.
+  const refreshPost = page.locator('[data-resource-refresh="post"]');
+  await refreshPost.click();
+  await expect(refreshPost).toHaveAttribute("data-refresh-state", "idle");
+  await expect(page.locator("[data-resource-summary]")).not.toHaveText(
+    summaryBefore ?? "",
+  );
   expect(errors()).toEqual([]);
 });
 

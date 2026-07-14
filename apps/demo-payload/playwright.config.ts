@@ -6,7 +6,10 @@ export default defineConfig({
   expect: {
     timeout: 7_000,
   },
-  fullyParallel: true,
+  // Serial on purpose: the specs assert transient streaming phases (pending
+  // slots between payload rows) that get batched away when parallel browser
+  // instances starve the client of CPU.
+  workers: 1,
   outputDir: "test-results",
   reporter: process.env.CI === "true" ? "github" : "list",
   testDir: "./e2e",

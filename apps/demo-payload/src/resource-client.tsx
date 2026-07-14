@@ -1,21 +1,35 @@
 import {
+  createContext,
   dataResource,
   ErrorBoundary,
   type FigNode,
+  readContext,
   readData,
   refreshData,
   Suspense,
   useState,
   useTransition,
 } from "@bgub/fig";
+import type { ResolveClientReference } from "@bgub/fig/payload";
 import { createRoot, on, payloadDataLoader } from "@bgub/fig-dom";
 import { LikeButton } from "./client-components.tsx";
 import {
   brokenResourceSeed,
   likeButtonReferenceId,
+  postSlotReferenceId,
+  weatherSlotReferenceId,
 } from "./resource-shared.ts";
 
-// The plan's client half, verbatim in shape: the serialized post travels as
+// Every client component the payload streams can reference, shared by all
+// three loaders: the wire carries ids, the client owns the components.
+const resolveClientReference: ResolveClientReference = (metadata) =>
+  ({
+    [likeButtonReferenceId]: LikeButton,
+    [postSlotReferenceId]: PostSlot,
+    [weatherSlotReferenceId]: WeatherSlot,
+  })[metadata.id];
+
+// The plan's client half, verbatim in shape: each serialized tree travels as
 // an ordinary data resource; the key is the refresh boundary; freshness uses
 // the existing verbs. No consumer, no boundary protocol, no refresh header.
 const postResource = dataResource<[number], FigNode>({
@@ -23,10 +37,36 @@ const postResource = dataResource<[number], FigNode>({
   load: payloadDataLoader<[number]>({
     request: (seed, { signal }) =>
       fetch(`/resource-payload?seed=${seed}`, { signal }),
-    resolveClientReference: (metadata) =>
-      metadata.id === likeButtonReferenceId ? LikeButton : undefined,
+    resolveClientReference,
   }),
 });
+
+// A second serialized slot with its own key: refreshing one resource leaves
+// the other's entry untouched, which is the whole refresh story — the unit
+// of refresh is the data-resource key.
+const weatherResource = dataResource<[], FigNode>({
+  key: () => ["resource-weather"],
+  load: payloadDataLoader<[]>({
+    request: ({ signal }) => fetch("/weather-payload", { signal }),
+    resolveClientReference,
+  }),
+});
+
+// The surrounding server component: its stream carries the dashboard frame
+// with PostSlot/WeatherSlot as client references, so refreshing it re-renders
+// the wrapper on the server without touching the slots' own entries.
+const dashboardResource = dataResource<[], FigNode>({
+  key: () => ["resource-dashboard"],
+  load: payloadDataLoader<[]>({
+    request: ({ signal }) => fetch("/dashboard-payload", { signal }),
+    resolveClientReference,
+  }),
+});
+
+// The current post's seed reaches PostSlot through context: the slot mounts
+// inside the decoded dashboard tree, where props can't come from the server
+// (the server doesn't know client navigation state).
+const SeedContext = createContext(1);
 
 // The page is a visible template: every delivery layer renders inside a
 // color-coded frame, and pending slots show as dashed outlines that fill in
@@ -41,8 +81,9 @@ function ResourcePage() {
       <header>
         <h1>Serialized components, layer by layer</h1>
         <p class="muted">
-          The gray shell renders instantly in the browser. Everything below it
-          streams from one payload request and fills its slot when it lands.
+          The gray shell renders instantly in the browser. Each slot below
+          streams from its own payload request, fills in when it lands, and
+          refreshes independently — the resource key is the refresh unit.
         </p>
         <div class="legend">
           <span>
@@ -66,7 +107,21 @@ function ResourcePage() {
           >
             Next post
           </button>
-          <RefreshPostButton seed={seed} />
+          <RefreshButton
+            label="Refresh dashboard"
+            name="dashboard"
+            refresh={() => refreshData(dashboardResource)}
+          />
+          <RefreshButton
+            label="Refresh post"
+            name="post"
+            refresh={() => refreshData(postResource, seed)}
+          />
+          <RefreshButton
+            label="Refresh weather"
+            name="weather"
+            refresh={() => refreshData(weatherResource)}
+          />
           <button
             data-resource-nav="broken"
             events={[on("click", () => setSeed(brokenResourceSeed))]}
@@ -83,24 +138,69 @@ function ResourcePage() {
           </button>
         </div>
       </header>
-      <ErrorBoundary
-        fallback={(error) => (
-          <section class="frame frame-danger payload-slot" data-resource-error>
-            <span class="tag">payload failed</span>
-            <h2>Post failed to load</h2>
-            <p class="muted">
-              {error instanceof Error ? error.message : String(error)}
-            </p>
-            <p class="muted">Use “First post” to recover.</p>
-          </section>
-        )}
-        key={seed}
-      >
-        <Suspense fallback={<PayloadSlotPending />}>
-          <PostView seed={seed} />
+      <SeedContext value={seed}>
+        <Suspense fallback={<DashboardSlotPending />}>
+          <DashboardView />
         </Suspense>
-      </ErrorBoundary>
+      </SeedContext>
     </main>
+  );
+}
+
+function DashboardView() {
+  return <div class="dashboard-slot">{readData(dashboardResource)}</div>;
+}
+
+// The dashboard's wireframe while the surrounding server component streams.
+function DashboardSlotPending() {
+  return (
+    <section
+      class="frame frame-payload dashboard-slot slot-pending"
+      data-dashboard-state="loading"
+    >
+      <span class="tag">payload shell</span>
+      <p class="slot-note">streaming payload…</p>
+      <div class="skeleton">
+        <i />
+        <i />
+        <i />
+      </div>
+    </section>
+  );
+}
+
+// The post slot: a client component the dashboard payload references. It
+// reads the navigation seed from context and its serialized post from the
+// post resource — both are client state the server never sees.
+function PostSlot() {
+  const seed = readContext(SeedContext);
+
+  return (
+    <ErrorBoundary
+      fallback={(error) => (
+        <section class="frame frame-danger payload-slot" data-resource-error>
+          <span class="tag">payload failed</span>
+          <h2>Post failed to load</h2>
+          <p class="muted">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+          <p class="muted">Use “First post” to recover.</p>
+        </section>
+      )}
+      key={seed}
+    >
+      <Suspense fallback={<PayloadSlotPending />}>
+        <PostView seed={seed} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function WeatherSlot() {
+  return (
+    <Suspense fallback={<WeatherSlotPending />}>
+      <WeatherView />
+    </Suspense>
   );
 }
 
@@ -122,29 +222,57 @@ function PayloadSlotPending() {
   );
 }
 
+// The weather slot's wireframe while its stream is in flight.
+function WeatherSlotPending() {
+  return (
+    <section
+      class="frame frame-payload weather-slot slot-pending"
+      data-weather-state="loading"
+    >
+      <span class="tag">payload shell</span>
+      <p class="slot-note">streaming payload…</p>
+      <div class="skeleton">
+        <i />
+      </div>
+    </section>
+  );
+}
+
 function PostView({ seed }: { seed: number }) {
   // Suspends until the payload's root row decodes; holes inside keep
   // streaming afterwards.
   return <div class="payload-slot">{readData(postResource, seed)}</div>;
 }
 
-function RefreshPostButton({ seed }: { seed: number }) {
+function WeatherView() {
+  return <div class="weather-slot">{readData(weatherResource)}</div>;
+}
+
+function RefreshButton({
+  label,
+  name,
+  refresh,
+}: {
+  label: string;
+  name: string;
+  refresh: () => Promise<unknown>;
+}) {
   const [isPending, startTransition] = useTransition();
 
   return (
     <button
       data-refresh-state={isPending ? "pending" : "idle"}
-      data-resource-refresh
+      data-resource-refresh={name}
       events={[
         on("click", () => {
           startTransition(async () => {
-            await refreshData(postResource, seed);
+            await refresh();
           });
         }),
       ]}
       type="button"
     >
-      {isPending ? "Refreshing…" : "Refresh post"}
+      {isPending ? "Refreshing…" : label}
     </button>
   );
 }

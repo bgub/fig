@@ -231,7 +231,8 @@ button:hover {
 }
 
 button[data-resource-refresh] {
-  min-width: 138px;
+  /* Wide enough for the longest label so the pending swap never shifts. */
+  min-width: 168px;
 }
 
 button[data-refresh-state="pending"] {
@@ -243,10 +244,21 @@ button[data-refresh-state="pending"] {
 
 /* --- Layer content ------------------------------------------------------ */
 
+/* Every slot pins the height of its filled content so the wireframe fills
+   in without layout shift. */
+.dashboard-slot {
+  margin-top: 24px;
+  min-height: 605px;
+}
+
 .payload-slot {
   margin-top: 24px;
-  /* Matches the filled post's height so slots fill without layout shift. */
   min-height: 344px;
+}
+
+.weather-slot {
+  margin-top: 24px;
+  min-height: 96px;
 }
 
 ul.comments {

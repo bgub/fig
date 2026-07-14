@@ -1,7 +1,11 @@
 import { readData, readPromise, Suspense } from "@bgub/fig";
 import { payloadAuditResource } from "./data.server.ts";
 import { payloadSummaryResource } from "./data.ts";
-import { LikeButtonRef } from "./resource-shared.ts";
+import {
+  LikeButtonRef,
+  PostSlotRef,
+  WeatherSlotRef,
+} from "./resource-shared.ts";
 
 // The resource-model server tree (docs/plans/serialized-components.md): no
 // PayloadBoundary, no refresh protocol — one renderToPayloadStream call
@@ -77,6 +81,50 @@ function Comments({
         ))}
       </ul>
     </div>
+  );
+}
+
+// The outermost payload slot: a server component surrounding the other
+// serialized slots. It streams only its own frame — the post and weather
+// inside are client references whose components keep reading their own
+// resources — so refreshing the dashboard re-renders the wrapper on the
+// server while the inner entries stay untouched.
+export function Dashboard({ render }: { render: number }) {
+  return (
+    <section class="frame frame-payload" data-dashboard-render={render}>
+      <span class="tag">payload shell</span>
+      <h2>Dashboard</h2>
+      <p class="muted" data-dashboard-note>
+        A server component wrapping the slots below (server render #{render}).
+        Refreshing it re-streams this frame; the slots keep their own resource
+        entries.
+      </p>
+      <PostSlotRef />
+      <WeatherSlotRef />
+    </section>
+  );
+}
+
+// The second payload slot: an independent resource with its own key, so the
+// demo can refresh one slot without touching the other. The reading is
+// random per server render, and the counter makes each refresh deterministic
+// to assert on.
+export interface WeatherReading {
+  condition: string;
+  reading: number;
+  temperatureC: number;
+}
+
+export function WeatherReport({ weather }: { weather: WeatherReading }) {
+  return (
+    <article class="frame frame-payload" data-weather-reading={weather.reading}>
+      <span class="tag">payload shell</span>
+      <h2>Current weather</h2>
+      <p class="muted" data-weather-report>
+        {weather.temperatureC}°C and {weather.condition} — regenerated on every
+        server render (reading #{weather.reading})
+      </p>
+    </article>
   );
 }
 
