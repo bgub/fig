@@ -2,6 +2,7 @@ import {
   assets,
   createElement,
   dataResource,
+  ErrorBoundary,
   type FigNode,
   readData,
   readPromise,
@@ -216,6 +217,98 @@ describe("payloadDataLoader", () => {
     await refresh;
     await delay();
     expect(container.textContent).toBe("note v2");
+  });
+
+  it("refreshing while holes stream neither errors nor kills the visible tree", async () => {
+    // The demo-payload regression: click refresh while comments are still
+    // streaming. The visible generation keeps its authority (and its live
+    // holes) until the successor's value publishes, so no abort rejection
+    // ever reaches the page's ErrorBoundary.
+    let requests = 0;
+    const gates = [deferred<string>(), deferred<string>()];
+    const secondResponse = deferred<void>();
+
+    function Comments(props: { revision: number }): FigNode {
+      return createElement(
+        "ul",
+        null,
+        readPromise(gates[props.revision - 1]?.promise ?? Promise.resolve("")),
+      );
+    }
+
+    function ServerPost(props: { revision: number }): FigNode {
+      return createElement(
+        "div",
+        null,
+        createElement("p", null, `body v${props.revision}`),
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "comments pending") },
+          createElement(Comments, { revision: props.revision }),
+        ),
+      );
+    }
+
+    const postResource = dataResource<[], FigNode>({
+      key: () => ["loader-streaming-refresh"],
+      load: payloadDataLoader<[]>({
+        request: async () => {
+          requests += 1;
+          const revision = requests;
+          // Hold the refresh's response so the mid-refresh window is
+          // observable: the visible tree must stay alive throughout it.
+          if (revision === 2) await secondResponse.promise;
+          return payloadResponse(createElement(ServerPost, { revision }));
+        },
+      }),
+    });
+
+    function Page() {
+      return readData(postResource);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("p", { "data-refresh-error": "" }, "boom"),
+          },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Loading") },
+            createElement(Page, null),
+          ),
+        ),
+      ),
+    );
+    await delay();
+    expect(container.textContent).toContain("body v1");
+    expect(container.textContent).toContain("comments pending");
+
+    // Refresh while the comments hole is still streaming.
+    const refresh = root.data.refreshData(postResource);
+    await delay();
+    expect(container.textContent).not.toContain("boom");
+    expect(container.textContent).toContain("body v1");
+
+    // The superseded-but-still-authoritative generation keeps streaming:
+    // its hole fills into the visible stale tree during the refresh window.
+    gates[0]?.resolve("first comments");
+    await delay();
+    expect(container.textContent).toContain("first comments");
+    expect(container.textContent).not.toContain("boom");
+
+    // The successor publishes; the old generation retires silently.
+    secondResponse.resolve(undefined);
+    gates[1]?.resolve("second comments");
+    await refresh;
+    await delay();
+    expect(container.textContent).toContain("body v2");
+    expect(container.textContent).toContain("second comments");
+    expect(container.textContent).not.toContain("boom");
   });
 
   it("aborts the superseded generation's decode on refresh", async () => {

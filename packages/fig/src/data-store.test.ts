@@ -864,13 +864,16 @@ describe("generation-lifetime loader signals", () => {
     });
   }
 
-  it("keeps the signal live after fulfillment and aborts it on supersession", async () => {
+  it("keeps the signal live until a successor becomes authoritative", async () => {
     const signals: AbortSignal[] = [];
-    const resource = dataResource({
+    const gate = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[string], string>({
       key: (id: string) => ["gen", id],
-      load: (_id: string, { signal }) => {
+      load: (_id, { signal }) => {
         signals.push(signal);
-        return `value-${signals.length}`;
+        loads += 1;
+        return loads === 1 ? "initial" : gate.promise;
       },
     });
     const store = signalStore();
@@ -880,7 +883,14 @@ describe("generation-lifetime loader signals", () => {
     // (a payload decode filling holes) keeps running after the value lands.
     expect(signals[0]?.aborted).toBe(false);
 
-    await store.refreshData(resource, "one");
+    // A superseding refresh STARTING does not revoke authority — the stale
+    // value stays fully alive (holes included) through the refresh window.
+    const refresh = store.refreshData(resource, "one");
+    expect(signals[0]?.aborted).toBe(false);
+
+    // Authority transfers when the successor's value publishes.
+    gate.resolve("refreshed");
+    await refresh;
     expect(signals[0]?.aborted).toBe(true);
     expect(signals[1]?.aborted).toBe(false);
   });
@@ -983,7 +993,7 @@ describe("generation-lifetime loader signals", () => {
     expect(signals[1]?.aborted).toBe(false);
   });
 
-  it("aborts a failed refresh's signal while the stale generation stays aborted", async () => {
+  it("keeps the stale generation alive when a refresh fails", async () => {
     const signals: AbortSignal[] = [];
     const resource = dataResource<[string], string>({
       key: (id: string) => ["gen-refresh-fail", id],
@@ -1003,8 +1013,34 @@ describe("generation-lifetime loader signals", () => {
       status: "rejected",
       staleValue: "initial",
     });
-    expect(signals[0]?.aborted).toBe(true);
+    // The failed generation aborts its own work; the previous generation
+    // remains authoritative — its stale value and live holes stay usable.
+    expect(signals[0]?.aborted).toBe(false);
     expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it("aborts a pending cache-miss load when superseded at start", async () => {
+    const signals: AbortSignal[] = [];
+    const never = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["gen-pending", id],
+      load: (_id, { signal }) => {
+        signals.push(signal);
+        loads += 1;
+        return loads === 1 ? never.promise : "second";
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    void store.refreshData(resource, "one");
+    store.hydrate([{ key: ["gen-pending", "one"], value: "pushed" }]);
+
+    // A value-less pending load has no authority to defer: it dies at once.
+    expect(signals[0]?.aborted).toBe(true);
   });
 });
 

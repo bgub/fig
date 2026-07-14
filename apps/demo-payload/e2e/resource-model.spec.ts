@@ -88,6 +88,40 @@ test("refreshes the post resource in a transition, keeping previous content visi
   expect(errors()).toEqual([]);
 });
 
+test("refreshing while comments are still streaming shows no error", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+
+  await page.goto("/", { waitUntil: "commit" });
+  await expect(page.locator('[data-resource-comments="ready"]')).toBeVisible();
+
+  // Navigate, then refresh while the new post's comments hole is streaming —
+  // the previously reported repro for "Payload decode aborted" in the
+  // error boundary.
+  await page.locator('[data-resource-nav="next"]').click();
+  const post = page.locator(".resource-post");
+  await expect(post).toHaveAttribute("data-resource-seed", "2");
+  await expect(
+    page.locator('[data-resource-comments="pending"]'),
+  ).toBeVisible();
+  await page.locator("[data-resource-refresh]").click();
+
+  // The visible tree stays alive through the refresh; no error boundary.
+  await expect(page.locator("[data-resource-error]")).toHaveCount(0);
+  await expect(post).toBeVisible();
+
+  await expect(page.locator("[data-resource-refresh]")).toHaveAttribute(
+    "data-refresh-state",
+    "idle",
+  );
+  await expect(page.locator('[data-resource-comments="ready"]')).toContainText(
+    "First comment 2",
+  );
+  await expect(page.locator("[data-resource-error]")).toHaveCount(0);
+  expect(errors()).toEqual([]);
+});
+
 test("navigates between posts by key and recovers from a failed post", async ({
   page,
 }) => {

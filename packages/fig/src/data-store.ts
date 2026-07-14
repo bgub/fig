@@ -46,12 +46,18 @@ export interface DataStore<
 
 interface Entry<Owner extends object, Lane> {
   canonicalKey: string;
-  // The authoritative generation's controller. Deliberately retained after
-  // the loader settles: the signal's lifetime is the generation's, not the
-  // pending promise's, so loaders that keep streaming into their value
-  // (payload decodes filling holes) learn when their generation is
-  // superseded, hydrated over, evicted, or the store is disposed.
+  // The in-flight load's controller (null when no load is pending).
   controller: AbortController | null;
+  // The authoritative generation's controller — the load whose value the
+  // entry holds. Deliberately retained after that loader settles: the
+  // signal's lifetime is the generation's authority, not the pending
+  // promise's, so loaders that keep streaming into their value (payload
+  // decodes filling holes) learn when a SUCCESSOR becomes authoritative, a
+  // server push hydrates over them, the entry evicts, or the store is
+  // disposed. A superseding load that starts does not abort it — a visible
+  // stale value keeps streaming through the refresh window, and a failed
+  // refresh leaves it fully alive.
+  valueController: AbortController | null;
   error: unknown;
   fingerprint: string | null;
   generation: number;
@@ -341,7 +347,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     for (const entry of this.entries.values()) {
       this.clearInactiveTimer(entry);
       this.clearPreloadTimer(entry);
-      this.abortActiveLoad(entry, "store-disposed");
+      this.abortEntryGenerations(entry, "store-disposed");
       this.notifyEntryChange(entry);
     }
   }
@@ -635,6 +641,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       storeKey,
       subscribers: new Set(),
       value,
+      valueController: null,
     };
   }
 
@@ -644,7 +651,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     value: unknown,
   ): void {
     this.clearInactiveTimer(entry);
-    this.abortActiveLoad(entry, "superseded");
+    this.abortEntryGenerations(entry, "superseded");
     entry.error = undefined;
     entry.generation += 1;
     entry.invalidationVersion = 0;
@@ -686,7 +693,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
-    this.abortActiveLoad(entry, "superseded");
+    this.abortPendingLoad(entry, "superseded");
     const controller = new AbortController();
     const generation = entry.generation + 1;
     const invalidationVersion = entry.invalidationVersion;
@@ -722,8 +729,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         return settleAborted();
       }
 
-      // The controller stays on the entry: the signal is generation-lifetime,
-      // and this generation is now the authoritative value.
+      const superseded = entry.valueController;
+      // This generation is now the authoritative value; its controller stays
+      // live for the background work still streaming into the value.
+      entry.controller = null;
+      entry.valueController = controller;
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
@@ -731,6 +741,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.status = "fulfilled";
       entry.value = value;
       this.publish(entry);
+      // The predecessor loses authority only now that the successor's value
+      // has published: subscribers re-render top-down onto the new tree in
+      // the same pass, so the old generation's retired holes unmount before
+      // their abort rejections could reach a mounted reader.
+      superseded?.abort();
       const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
       pending.resolve(result);
       return result;
@@ -741,7 +756,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       }
 
       // A rejected load's generation never becomes authoritative; abort its
-      // signal so background work it started stops.
+      // signal so background work it started stops. The previous
+      // generation's valueController is deliberately untouched: a failed
+      // refresh keeps the stale value fully alive, live holes included.
       entry.controller = null;
       controller.abort();
       entry.pending = null;
@@ -829,13 +846,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  private abortActiveLoad(
+  // Aborts only the in-flight load: supersession-at-start cancels a wasted
+  // request without revoking the authoritative generation's signal.
+  private abortPendingLoad(
     entry: Entry<Owner, Lane>,
     reason: AbortReason,
   ): void {
-    // Aborts the generation, not just an in-flight promise: a fulfilled
-    // entry's retained controller aborts here too, ending any background
-    // work still tied to that load's signal.
     entry.controller?.abort();
     entry.controller = null;
 
@@ -844,6 +860,17 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     entry.pending = null;
     pending.resolve(abortedRefreshResult(entry, reason));
+  }
+
+  // Terminal paths (hydrate-over, eviction, disposal) end every generation:
+  // the pending load and the authoritative value's background work.
+  private abortEntryGenerations(
+    entry: Entry<Owner, Lane>,
+    reason: AbortReason,
+  ): void {
+    this.abortPendingLoad(entry, reason);
+    entry.valueController?.abort();
+    entry.valueController = null;
   }
 
   private retainPreload(entry: Entry<Owner, Lane>): void {
@@ -900,7 +927,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    this.abortActiveLoad(entry, reason);
+    this.abortEntryGenerations(entry, reason);
     this.entries.delete(entry.storeKey);
     this.host.onEntryEvict?.(this.snapshotEntry(entry));
   }
