@@ -416,6 +416,17 @@ function createServerRouteContent(
         return gate;
       },
       request: (routeId, url, { signal }) => {
+        // loadedKeys must not outlive the store entry it stands for: the
+        // generation-lifetime signal aborts on supersession, hydrate-over,
+        // eviction, and disposal, so unmarking here keeps the pre-commit
+        // ensure honest — a post-eviction back navigation reloads before the
+        // commit instead of committing into a suspended slot. A superseding
+        // refresh transiently unmarks and re-marks on its own fulfillment.
+        signal.addEventListener(
+          "abort",
+          () => loadedKeys.delete(loadedKey(routeId, url)),
+          { once: true },
+        );
         const initial = initialSegmentResponse(routeId, url);
         if (initial !== null) {
           ungatedInitialAssets = true;

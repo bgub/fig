@@ -3,9 +3,11 @@ import {
   clientReference,
   createElement,
   dataResource,
+  type FigDataStoreHandle,
   type FigNode,
   modulepreload,
   readData,
+  readDataStore,
   readPromise,
   Suspense,
   stylesheet,
@@ -652,6 +654,76 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     expect(document.querySelector(".shared-data")?.textContent).toBe("same");
   });
 
+  it("reloads a server route whose entry lost authority before committing back-navigation", async () => {
+    // Stands in for inactivity eviction: hydrate-over aborts the fulfilled
+    // load generation through the same signal, so the route store must
+    // unlearn its "already loaded" mark and re-request before the commit.
+    let dataHandle: FigDataStoreHandle | null = null;
+    const evictionRoutes = [
+      createRootRoute({
+        component: () =>
+          createElement("div", { id: "app" }, createElement(Outlet)),
+      }),
+      createFileRoute("/")({
+        component: () => {
+          dataHandle = readDataStore();
+          return createElement("h1", null, "Home");
+        },
+      }),
+      markServerRoute(
+        createFileRoute("/dash")({
+          component: () =>
+            createElement("p", { class: "static" }, "static markup"),
+        }),
+      ),
+    ];
+    await installServerRenderedDocument("/", evictionRoutes);
+    const restoreFetch = installHandlerFetch(evictionRoutes);
+    const previousFetch = globalThis.fetch;
+    let dashRequests = 0;
+    globalThis.fetch = async (input, init) => {
+      const request = toRequest(input, init);
+      if (new URL(request.url).pathname === "/dash") dashRequests += 1;
+      return previousFetch(request);
+    };
+
+    try {
+      const router = hydrateStart({ routes: evictionRoutes });
+      await flush();
+      expect(dataHandle).not.toBeNull();
+
+      await router.navigate("/dash");
+      await flush();
+      expect(document.querySelector(".static")?.textContent).toBe(
+        "static markup",
+      );
+      expect(dashRequests).toBe(1);
+
+      await router.navigate("/");
+      await flush();
+
+      // Revoke the entry's generation (the eviction/hydrate-over channel).
+      // (Cast: TS cannot see the render-callback assignment above.)
+      (dataHandle as FigDataStoreHandle | null)?.hydrate([
+        { key: ["fig-start", "server-route", "/dash", "/dash"], value: null },
+      ]);
+
+      await router.navigate("/dash");
+      await flush();
+
+      // Without the signal-tied unmark, the store would trust its stale
+      // "loaded" mark, skip the pre-commit request, and commit the hydrated
+      // null into the slot.
+      expect(dashRequests).toBe(2);
+      expect(document.querySelector(".static")?.textContent).toBe(
+        "static markup",
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreFetch();
+    }
+  });
+
   it("fetches remote data resources for client route cache misses", async () => {
     let loadCalls = 0;
     // Mirrors the browser stub the Fig Start transform emits for a
@@ -663,7 +735,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
         context: { signal: AbortSignal },
       ) => Promise<string>,
     });
-    const serverResource = serverDataResource({
+    const serverResource = serverDataResource<[string], string>({
       key: (id: string) => ["remote-client-user", id],
       load: (id: string) => {
         loadCalls += 1;
