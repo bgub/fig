@@ -280,16 +280,18 @@ ul.comments li:first-child {
   padding-top: 2px;
 }
 
+/* The island's frame is its outline; the button inside stays borderless so
+   the layer doesn't read as a double box. */
 .island-button {
   background: transparent;
-  border: 1.5px solid var(--island);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 5px;
   color: var(--island);
-  font-weight: 600;
+  font-weight: 650;
+  padding: 6px 10px;
 }
 
 .island-button:hover {
-  background: rgba(5, 150, 105, 0.08);
-  border-color: var(--island);
+  background: rgba(5, 150, 105, 0.1);
 }
 `;
