@@ -1,3 +1,13 @@
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startDevServer } from "./dev-server.ts";
 import {
@@ -42,10 +52,6 @@ describe("startDevServer", () => {
 
 describe("linkedDistsChangedSinceLastRun", () => {
   it("forces re-optimization only when a linked dist changes between runs", async () => {
-    const { mkdtemp, mkdir, rm, symlink, utimes, writeFile } =
-      await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
     const { linkedDistsChangedSinceLastRun } =
       await import("./dev-server/vite-runtime.ts");
 
