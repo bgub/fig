@@ -115,6 +115,33 @@ describe("@bgub/fig-dom hydration", () => {
     expect(div.textContent).toBe("Hello");
   });
 
+  it("hydrates an SVG title as an in-tree SVG element", () => {
+    const container = new FakeElement("root");
+    const svg = new FakeElement("svg", "http://www.w3.org/2000/svg");
+    const title = new FakeElement("title", "http://www.w3.org/2000/svg");
+    title.appendChild(new FakeText("Accessible icon"));
+    svg.appendChild(title);
+    container.appendChild(svg);
+    const head = document.head as unknown as FakeElement;
+    const previousHeadChildren = head.childNodes.length;
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          "svg",
+          null,
+          createElement("title", null, "Accessible icon"),
+        ),
+      ),
+    );
+
+    expect(container.childNodes).toEqual([svg]);
+    expect(svg.childNodes).toEqual([title]);
+    expect(title.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(head.childNodes).toHaveLength(previousHeadChildren);
+  });
+
   it("hydrates around hoisted resources with fresh children", () => {
     const container = new FakeElement("root");
     const div = new FakeElement("div");

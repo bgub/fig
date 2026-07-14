@@ -6,6 +6,7 @@ import {
   dataResource,
   ErrorBoundary,
   meta,
+  type Props,
   readContext,
   readData,
   readPromise,
@@ -816,7 +817,8 @@ describe("reconciler", () => {
   it("throws a hoisted asset support diagnostic when the group is incomplete", () => {
     const { createRoot, flushSync } = createRenderer({
       ...host,
-      isHoistedInstance: (type) => type === "asset",
+      resolveHoistedInstance: (type) =>
+        type === "asset" ? new TestElement(type) : null,
     });
     const container = new TestElement("root");
     const root = createRoot(container);
@@ -826,11 +828,17 @@ describe("reconciler", () => {
     ).toThrow("Hoisted assets are not supported by this renderer.");
   });
 
-  it("caches negative hoisting classification within each render", () => {
-    const isHoistedInstance = vi.fn(() => false);
+  it("resolves hoisted placement only for new host fibers", () => {
+    const parents: TestElement[] = [];
+    const resolveHoistedInstance = vi.fn(
+      (_type: string, _props: Props, parent: TestElement) => {
+        parents.push(parent);
+        return null;
+      },
+    );
     const { createRoot, flushSync } = createRenderer({
       ...host,
-      isHoistedInstance,
+      resolveHoistedInstance,
     });
     const container = new TestElement("root");
     const root = createRoot(container);
@@ -845,7 +853,9 @@ describe("reconciler", () => {
       ),
     );
 
-    expect(isHoistedInstance).toHaveBeenCalledTimes(2);
+    expect(resolveHoistedInstance).toHaveBeenCalledTimes(2);
+    expect(parents[0]).toBe(container);
+    expect(parents[1]?.type).toBe("section");
 
     flushSync(() =>
       root.render(
@@ -857,7 +867,7 @@ describe("reconciler", () => {
       ),
     );
 
-    expect(isHoistedInstance).toHaveBeenCalledTimes(4);
+    expect(resolveHoistedInstance).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces adjacent text children into one host text node", () => {

@@ -4,6 +4,7 @@ import {
   clearTransientFlags,
   CommitIndexedFlag,
   EffectFlag,
+  HoistedStaticFlag,
   NoFlags,
   PlacementFlag,
   TextContentFlag,
@@ -19,6 +20,7 @@ describe("fiber work", () => {
         UpdateFlag |
         TextContentFlag |
         CommitIndexedFlag |
+        HoistedStaticFlag |
         ViewTransitionStaticFlag,
       subtreeFlags: EffectFlag,
     });
@@ -28,15 +30,15 @@ describe("fiber work", () => {
 
   it("clears transient work while retaining static capabilities", () => {
     const node = {
-      flags: PlacementFlag | ViewTransitionStaticFlag,
-      subtreeFlags: EffectFlag | ViewTransitionStaticFlag,
+      flags: PlacementFlag | HoistedStaticFlag | ViewTransitionStaticFlag,
+      subtreeFlags: EffectFlag | HoistedStaticFlag | ViewTransitionStaticFlag,
     };
 
     clearTransientFlags(node);
 
     expect(node).toEqual({
-      flags: ViewTransitionStaticFlag,
-      subtreeFlags: ViewTransitionStaticFlag,
+      flags: HoistedStaticFlag | ViewTransitionStaticFlag,
+      subtreeFlags: HoistedStaticFlag | ViewTransitionStaticFlag,
     });
   });
 

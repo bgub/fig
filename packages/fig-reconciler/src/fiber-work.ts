@@ -23,12 +23,12 @@ export const AssembledFlag = 1 << 6;
 export const CommitIndexedFlag = 1 << 8;
 // This render already propagated changed providers through the subtree.
 export const ContextPropagationFlag = 1 << 10;
-// Cached negative result for the overwhelmingly common non-hoisted fiber.
-export const NotHoistedFlag = 1 << 13;
-
 // Static capabilities survive commits and bailouts. A subtree capability is
 // a durable fact about tree shape, unlike transient work owed by this commit.
 export const ViewTransitionStaticFlag = 1 << 12;
+// The host resolved this fiber to an out-of-band instance. Placement is fixed
+// for the fiber's lifetime and survives updates without reclassifying props.
+export const HoistedStaticFlag = 1 << 13;
 
 export type Flag = number;
 
@@ -38,10 +38,11 @@ export const HostUpdateMask = UpdateFlag | TextContentFlag;
 
 // These marks never enter subtreeFlags. Host updates are found through the
 // sparse commit index; membership and cache marks are not descendant work.
-const SubtreeMaskedFlags = CommitIndexedFlag | HostUpdateMask | NotHoistedFlag;
+const SubtreeMaskedFlags =
+  CommitIndexedFlag | HostUpdateMask | HoistedStaticFlag;
 // Static facts survive commits and bailouts so adopted and deleted subtrees
 // remain searchable without rebuilding their summaries.
-export const StaticFlagsMask = ViewTransitionStaticFlag;
+export const StaticFlagsMask = ViewTransitionStaticFlag | HoistedStaticFlag;
 
 export function childSubtreeFlags(node: {
   flags: Flag;

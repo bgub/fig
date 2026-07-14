@@ -72,12 +72,12 @@ import {
   ContextPropagationFlag,
   DeletionFlag,
   EffectFlag,
+  HoistedStaticFlag,
   type Flag,
   HostUpdateMask,
   HydrationFlag,
   MutationMask,
   NoFlags,
-  NotHoistedFlag,
   PlacementFlag,
   StaticFlagsMask,
   StoreConsistencyFlag,
@@ -311,13 +311,16 @@ export interface HostConfig<Container, Instance, TextInstance> {
     text: string,
     suppressHydrationWarning?: boolean,
   ): boolean;
-  // Hoisted instances (asset resources) live out-of-band, not at their
-  // fiber's DOM position: the server emits nothing inline for them, so they
-  // must not consume a node from the hydration cursor and their subtrees
-  // render fresh; commit acquires them via commitHoistedInstance when the
-  // fiber first commits and releases them via removeHoistedInstance when it
-  // is deleted, instead of insertBefore/removeChild.
-  isHoistedInstance?(type: string, props: Props): boolean;
+  // Resolve an out-of-band host instance using the real host parent. Returning
+  // an instance fixes the fiber's placement as hoisted for its lifetime: it
+  // does not consume a hydration cursor node and commit acquires/releases it
+  // through the hooks below instead of insertBefore/removeChild. Returning
+  // null leaves the fiber on the ordinary hydrate/create path.
+  resolveHoistedInstance?(
+    type: string,
+    props: Props,
+    parent: Parent<Container, Instance>,
+  ): Instance | null;
   // May return a different instance when the fiber's identity already
   // resolves to a live shared instance (e.g. one inserted while this render
   // was suspended); the fiber adopts the returned instance.
@@ -463,7 +466,7 @@ export type HostHoistedAssetConfig<Container, Instance, TextInstance> =
   Required<
     Pick<
       HostConfig<Container, Instance, TextInstance>,
-      | "isHoistedInstance"
+      | "resolveHoistedInstance"
       | "commitHoistedInstance"
       | "removeHoistedInstance"
       | "updateHoistedInstance"
@@ -1648,11 +1651,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (node.tag === HostTag) {
       const type = String(node.type);
       const children = hostChildren(node.props);
+      const hoisted = resolveHoistedFiber(node, root);
 
       if (__DEV__) {
         let ancestors: string[] | null = null;
 
-        if (node.alternate === null && host.validateInstanceNesting) {
+        if (
+          !hoisted &&
+          node.alternate === null &&
+          host.validateInstanceNesting
+        ) {
           ancestors = hostAncestorTypes(node);
           host.validateInstanceNesting(type, node.props, ancestors);
         }
@@ -1668,16 +1676,18 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
       }
 
-      if (tryHydrateInstance(node, root)) {
+      if (!hoisted && tryHydrateInstance(node, root)) {
         reconcileCurrentChildren(node, children, root);
         return;
       }
 
-      node.stateNode ??= host.createInstance(
-        type,
-        node.props,
-        hostParent(node),
-      );
+      if (!hoisted) {
+        node.stateNode ??= host.createInstance(
+          type,
+          node.props,
+          hostParent(node),
+        );
+      }
 
       reconcileCurrentChildren(
         node,
@@ -1822,14 +1832,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     const hydrationHost = requireHydrationHostConfig();
     const hydratable = root.nextHydratableInstance;
     const type = String(node.type);
-
-    // Falling through creates the instance out-of-band, leaving the cursor
-    // for the fiber's siblings; the placement flag routes the fiber through
-    // commitHoistedInstance so commit still acquires it.
-    if (isHoistedFiber(node)) {
-      node.flags |= PlacementFlag;
-      return false;
-    }
 
     if (
       hydratable === null ||
@@ -2120,24 +2122,42 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function isHoistedFiber(node: F): boolean {
-    if (node.tag !== HostTag || host.isHoistedInstance === undefined) {
+  function resolveHoistedFiber(node: F, root: R): boolean {
+    if (isHoistedFiber(node)) return true;
+    if (
+      node.tag !== HostTag ||
+      node.stateNode !== null ||
+      host.resolveHoistedInstance === undefined
+    ) {
       return false;
     }
-    if ((node.flags & NotHoistedFlag) !== 0) return false;
-    if (!host.isHoistedInstance(String(node.type), node.props)) {
-      node.flags |= NotHoistedFlag;
-      return false;
-    }
+
+    const hydrating = shouldHydrateFiber(root, node);
+    const instance = host.resolveHoistedInstance(
+      String(node.type),
+      node.props,
+      hostParent(node),
+    );
+    if (instance === null) return false;
+
     requireHoistedAssetHostConfig();
+    node.stateNode = instance;
+    node.flags |= HoistedStaticFlag;
+    // The resource lives out-of-band, so leave the hydration cursor for the
+    // next ordinary sibling and route acquisition through placement commit.
+    if (hydrating) node.flags |= PlacementFlag;
     return true;
+  }
+
+  function isHoistedFiber(node: F): boolean {
+    return node.tag === HostTag && (node.flags & HoistedStaticFlag) !== 0;
   }
 
   function requireHoistedAssetHostConfig(): RequiredHoistedAssetHostConfig {
     if (hoistedAssetHostConfig !== null) return hoistedAssetHostConfig;
 
     if (
-      host.isHoistedInstance === undefined ||
+      host.resolveHoistedInstance === undefined ||
       host.commitHoistedInstance === undefined ||
       host.removeHoistedInstance === undefined ||
       host.updateHoistedInstance === undefined
@@ -5225,7 +5245,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // Hoisted instances are not DOM descendants of the removed host, so the
   // top-node removal above never reaches them; release them explicitly.
   function removeHoistedDescendants(node: F | null): void {
-    if (host.isHoistedInstance === undefined) return;
+    if (host.resolveHoistedInstance === undefined) return;
 
     for (let child = node; child !== null; child = child.sibling) {
       if (child.tag === PortalTag) continue;
@@ -5787,7 +5807,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.child = null;
     next.sibling = null;
     next.index = current.index;
-    next.flags = NoFlags;
+    // Hoisted placement is resolved once per fiber and must survive the
+    // clone; ViewTransitionStaticFlag must not — complete() re-derives it,
+    // and a clone that never completes (suspended or hidden work) would
+    // otherwise feed a stale bit into the next subtree summary.
+    next.flags = current.flags & HoistedStaticFlag;
     next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;

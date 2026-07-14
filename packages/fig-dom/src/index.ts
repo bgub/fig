@@ -7,7 +7,6 @@ import {
 } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
-  assetResourceFromHostProps,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
@@ -117,11 +116,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   // module import) at parse time, before symbol retention is decided; code
   // after an `if (prod) return` keeps the import referenced and ships the
   // whole module in production bundles.
-  validateInstanceNesting: (type, props, ancestors) => {
+  validateInstanceNesting: (type, _props, ancestors) => {
     if (__DEV__) {
-      // Asset resources hoist to <head>, so their fiber position is not
-      // their DOM position; the server exempts them the same way.
-      if (assetResourceFromHostProps(type, props) !== null) return;
       validateInstanceNesting(type, ancestors);
     }
   },
@@ -159,8 +155,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   // (the server registers them and emits nothing inline): hydration must not
   // match them against the DOM cursor, and commit acquires/releases them in
   // the head registry instead of inserting/removing at the fiber position.
-  isHoistedInstance: (type, props) =>
-    assetResourceFromHostProps(type, props) !== null,
+  resolveHoistedInstance: (type, props, parent) => {
+    if (namespaceFor(type, parent) !== htmlNamespace) return null;
+    return adoptDocumentResource(type, props);
+  },
   commitHoistedInstance: (instance) => acquireDocumentResource(instance),
   removeHoistedInstance: (instance) => releaseDocumentResource(instance),
   updateHoistedInstance: (instance, previousProps, nextProps) =>
@@ -363,12 +361,9 @@ function isHydratableElement(
 
 function createDomElement(
   type: string,
-  props: Props,
+  _props: Props,
   parent: Container | Element,
 ): Element {
-  const resource = adoptDocumentResource(type, props);
-  if (resource !== null) return resource;
-
   const namespace = namespaceFor(type, parent);
   return namespace === htmlNamespace
     ? document.createElement(type)

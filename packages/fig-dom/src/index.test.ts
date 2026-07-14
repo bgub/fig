@@ -206,6 +206,36 @@ describe("@bgub/fig-dom", () => {
     expect(mi.namespaceURI).toBe("http://www.w3.org/1998/Math/MathML");
   });
 
+  it("keeps SVG and itemprop titles in their native trees", () => {
+    const { container, head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement(
+            "svg",
+            null,
+            createElement("title", null, "Accessible icon"),
+          ),
+          createElement("title", { itemprop: "name" }, "Structured name"),
+        ),
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const svg = main.childNodes[0] as FakeElement;
+    const svgTitle = svg.childNodes[0] as FakeElement;
+    const itempropTitle = main.childNodes[1] as FakeElement;
+
+    expect(head.childNodes).toHaveLength(0);
+    expect(svgTitle.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svgTitle.textContent).toBe("Accessible icon");
+    expect(itempropTitle.getAttribute("itemprop")).toBe("name");
+    expect(itempropTitle.textContent).toBe("Structured name");
+  });
+
   it("adopts document resources into head without duplicating server tags", () => {
     const { container, head, root } = documentResourceRoot();
     const existing = new FakeElement("link");
