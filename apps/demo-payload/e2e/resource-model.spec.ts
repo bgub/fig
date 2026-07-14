@@ -207,6 +207,36 @@ test("refreshes the surrounding server component without touching the slots insi
   expect(errors()).toEqual([]);
 });
 
+test("keeps the shell height constant while every layer streams in", async ({
+  page,
+}) => {
+  const shellHeight = () =>
+    page
+      .locator("main")
+      .evaluate((element) => element.getBoundingClientRect().height);
+
+  await page.goto("/", { waitUntil: "commit" });
+  await page.locator('[data-dashboard-state="loading"]').waitFor();
+  const height = await shellHeight();
+
+  // Dashboard frame fills its slot.
+  await page.locator("[data-dashboard-render]").waitFor();
+  expect(await shellHeight()).toBe(height);
+
+  // Post and weather fill their side-by-side slots, comments fill their hole.
+  await page.locator("[data-weather-reading]").waitFor();
+  await page.locator('[data-resource-comments="ready"]').waitFor();
+  expect(await shellHeight()).toBe(height);
+
+  // Navigating swaps the post slot back to its pending wireframe and fills
+  // it again; the row is pinned by the slot, not its content.
+  await page.locator('[data-resource-nav="next"]').click();
+  await page.locator('[data-resource-state="loading"]').waitFor();
+  expect(await shellHeight()).toBe(height);
+  await page.locator('[data-resource-comments="ready"]').waitFor();
+  expect(await shellHeight()).toBe(height);
+});
+
 test("navigates between posts by key and recovers from a failed post", async ({
   page,
 }) => {

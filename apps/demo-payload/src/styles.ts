@@ -17,6 +17,11 @@ export const styles = `
   --streamed-tint: #fcf7ef;
   --island-tint: #f1f9f5;
   --danger-tint: #fcf4f3;
+  /* The one designed slot height: post content plus headroom. The weather
+     column stretches to match it, and the dashboard pin derives from it,
+     so slots fill in without layout shift by construction. The e2e suite
+     asserts the shell height stays constant through every phase. */
+  --slot-height: 360px;
 }
 
 * {
@@ -43,7 +48,7 @@ body {
 
 .app {
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 960px;
 }
 
 /* --- Layer frames -------------------------------------------------------
@@ -57,10 +62,6 @@ body {
   border-radius: 8px;
   padding: 22px 22px 18px;
   position: relative;
-}
-
-.frame + .frame {
-  margin-top: 24px;
 }
 
 .frame > .tag {
@@ -244,21 +245,30 @@ button[data-refresh-state="pending"] {
 
 /* --- Layer content ------------------------------------------------------ */
 
-/* Every slot pins the height of its filled content so the wireframe fills
-   in without layout shift. */
-.dashboard-slot {
+/* The two inner slots sit side by side inside the dashboard, post-heavy.
+   The post slot pins the row to --slot-height; the weather column and both
+   frames stretch to fill it, which leaves wrap headroom inside the boxes. */
+.dashboard-grid {
+  column-gap: 20px;
+  display: grid;
+  grid-template-columns: 3fr 1fr;
   margin-top: 24px;
-  min-height: 605px;
 }
 
 .payload-slot {
-  margin-top: 24px;
-  min-height: 344px;
+  min-height: var(--slot-height);
 }
 
-.weather-slot {
+.payload-slot > .frame,
+.weather-slot > .frame {
+  height: 100%;
+}
+
+.dashboard-slot {
   margin-top: 24px;
-  min-height: 96px;
+  /* Slot row plus the dashboard frame's own chrome (padding, heading, note,
+     grid margin), rounded up so the chrome copy has headroom too. */
+  min-height: calc(var(--slot-height) + 145px);
 }
 
 ul.comments {

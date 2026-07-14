@@ -99,8 +99,10 @@ export function Dashboard({ render }: { render: number }) {
         Refreshing it re-streams this frame; the slots keep their own resource
         entries.
       </p>
-      <PostSlotRef />
-      <WeatherSlotRef />
+      <div class="dashboard-grid">
+        <PostSlotRef />
+        <WeatherSlotRef />
+      </div>
     </section>
   );
 }
