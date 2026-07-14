@@ -15,16 +15,21 @@ export interface ResourcePostProps {
 
 export function ResourcePost({ comments, seed }: ResourcePostProps) {
   const audit = readData(payloadAuditResource, seed);
-  // Read but unused directly: streams as a data row so the client's
-  // isomorphic summary entry freshens from the same response.
-  readData(payloadSummaryResource, seed);
+  // Also streams as a data row, so the client store hydrates this entry
+  // from the same response.
+  const summary = readData(payloadSummaryResource, seed);
 
   return (
     <article class="frame frame-payload" data-resource-seed={seed}>
       <span class="tag">payload shell</span>
       <h2>Post #{seed}</h2>
       <p class="muted" data-resource-audit>
-        {audit.source} · request {audit.requestId} · rendered on the server
+        {audit.views.toLocaleString()} views — read on the server, loader never
+        shipped to the browser
+      </p>
+      <p class="muted" data-resource-summary>
+        {summary.likes} likes — streamed as a data row and hydrated into the
+        client store (server render #{summary.renders})
       </p>
       <div>
         <LikeButtonRef label={`post-${seed}`} />

@@ -10,7 +10,6 @@ import {
 } from "@bgub/fig";
 import { createRoot, on, payloadDataLoader } from "@bgub/fig-dom";
 import { LikeButton } from "./client-components.tsx";
-import { payloadSummaryResource } from "./data.ts";
 import {
   brokenResourceSeed,
   likeButtonReferenceId,
@@ -126,20 +125,7 @@ function PayloadSlotPending() {
 function PostView({ seed }: { seed: number }) {
   // Suspends until the payload's root row decodes; holes inside keep
   // streaming afterwards.
-  const post = readData(postResource, seed);
-  // Hydrated from the same response's data rows — the client loader never
-  // runs for this key, and a post refresh freshens it (server wins).
-  const summary = readData(payloadSummaryResource, seed);
-
-  return (
-    <div class="payload-slot">
-      {post}
-      <p class="data-strip" data-resource-summary>
-        <span class="tag">hydrated data</span>
-        summary: {summary.source} · {summary.bucket} · load {summary.reads}
-      </p>
-    </div>
-  );
+  return <div class="payload-slot">{readData(postResource, seed)}</div>;
 }
 
 function RefreshPostButton({ seed }: { seed: number }) {
@@ -158,7 +144,7 @@ function RefreshPostButton({ seed }: { seed: number }) {
       ]}
       type="button"
     >
-      {isPending ? "Refreshing post…" : "Refresh post"}
+      {isPending ? "Refreshing…" : "Refresh post"}
     </button>
   );
 }

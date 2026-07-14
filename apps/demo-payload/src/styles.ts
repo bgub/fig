@@ -12,6 +12,11 @@ export const styles = `
   --streamed: #d97706;
   --island: #059669;
   --danger: #b42318;
+  --shell-tint: #ffffff;
+  --payload-tint: #f3f6fe;
+  --streamed-tint: #fcf7ef;
+  --island-tint: #f1f9f5;
+  --danger-tint: #fcf4f3;
 }
 
 * {
@@ -72,6 +77,7 @@ body {
 }
 
 .frame-shell {
+  background: var(--shell-tint);
   border-color: var(--shell);
 }
 .frame-shell > .tag {
@@ -79,6 +85,7 @@ body {
 }
 
 .frame-payload {
+  background: var(--payload-tint);
   border-color: var(--payload);
 }
 .frame-payload > .tag {
@@ -86,14 +93,17 @@ body {
 }
 
 .frame-streamed {
+  background: var(--streamed-tint);
   border-color: var(--streamed);
   margin-top: 22px;
+  min-height: 128px;
 }
 .frame-streamed > .tag {
   color: var(--streamed);
 }
 
 .frame-island {
+  background: var(--island-tint);
   border-color: var(--island);
   display: inline-block;
   margin-top: 18px;
@@ -104,6 +114,7 @@ body {
 }
 
 .frame-danger {
+  background: var(--danger-tint);
   border-color: var(--danger);
 }
 .frame-danger > .tag {
@@ -113,7 +124,6 @@ body {
 /* A slot whose content has not arrived yet: dashed outline + pulsing
    skeleton lines, so streaming is visible as "the template filling in". */
 .slot-pending {
-  background: transparent;
   border-style: dashed;
 }
 
@@ -234,6 +244,10 @@ button:hover {
   border-color: var(--ink);
 }
 
+button[data-resource-refresh] {
+  min-width: 138px;
+}
+
 button[data-refresh-state="pending"] {
   animation: slot-pulse 0.9s ease-in-out infinite alternate;
   border-style: dashed;
@@ -245,30 +259,8 @@ button[data-refresh-state="pending"] {
 
 .payload-slot {
   margin-top: 24px;
-  min-height: 180px;
-}
-
-.data-strip {
-  border: 1.5px dashed var(--payload);
-  border-radius: 6px;
-  color: var(--muted);
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  margin-top: 16px;
-  padding: 9px 12px;
-  position: relative;
-}
-
-.data-strip > .tag {
-  background: var(--bg);
-  border-radius: 3px;
-  color: var(--payload);
-  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  left: 10px;
-  letter-spacing: 0.14em;
-  padding: 2px 7px 3px;
-  position: absolute;
-  text-transform: uppercase;
-  top: -9px;
+  /* Matches the filled post's height so slots fill without layout shift. */
+  min-height: 344px;
 }
 
 ul.comments {

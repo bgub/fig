@@ -28,7 +28,7 @@ test("streams a serialized post as a data resource with progressive holes and is
     page.locator('[data-resource-comments="pending"]'),
   ).toBeVisible();
   await expect(page.locator("[data-resource-audit]")).toContainText(
-    "server-only · request seed-1",
+    "read on the server",
   );
 
   // The hole fills in the background after the root value published.
@@ -46,7 +46,7 @@ test("streams a serialized post as a data resource with progressive holes and is
   // Data rows from the same response hydrated the isomorphic summary entry:
   // one request served the post, its server data, and the shared summary.
   await expect(page.locator("[data-resource-summary]")).toContainText(
-    "summary: shared · bucket-",
+    "hydrated into the",
   );
   expect(payloadRequests).toHaveLength(1);
   expect(errors()).toEqual([]);
