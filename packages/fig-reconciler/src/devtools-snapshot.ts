@@ -94,6 +94,7 @@ interface DevtoolsFiber {
 interface DevtoolsRoot {
   current: DevtoolsFiber;
   dataStore: {
+    inspectDataDependencyCanonicalKeys(owner: object): string[];
     inspectDataEntries(): DataStoreEntrySnapshot[];
   };
   pendingLanes: Lanes;
@@ -153,13 +154,14 @@ function snapshotDevtoolsRoot(
     suspendedWork: devtoolsWorkLabels(root.suspendedLanes),
     pingedWork: devtoolsWorkLabels(root.pingedLanes),
     expiredWork: devtoolsWorkLabels(root.expiredLanes),
-    tree: snapshotDevtoolsFiber(root.current, null, inspection),
+    tree: snapshotDevtoolsFiber(root.current, null, root.dataStore, inspection),
   };
 }
 
 function snapshotDevtoolsFiber(
   node: DevtoolsFiber,
   parentId: number | null,
+  dataStore: DevtoolsRoot["dataStore"],
   inspection: DevtoolsInspectionState,
 ): FigDevtoolsFiberSnapshot {
   const id = devtoolsFiberId(node);
@@ -169,7 +171,7 @@ function snapshotDevtoolsFiber(
   recordDevtoolsHostFiber(node, id, inspection);
 
   for (let child = node.child; child !== null; child = child.sibling) {
-    appendDevtoolsChildSnapshots(child, id, inspection, children);
+    appendDevtoolsChildSnapshots(child, id, dataStore, inspection, children);
   }
 
   return {
@@ -184,6 +186,7 @@ function snapshotDevtoolsFiber(
     childWork: devtoolsWorkLabels(node.childLanes),
     hooks: devtoolsHooks(node.memoizedState),
     contextDependencies: devtoolsContextDependencies(node),
+    dataResourceCanonicalKeys: devtoolsDataResourceKeys(node, dataStore),
     host: devtoolsHost(node),
     capturedError: errorState?.error,
     componentStack: errorState?.info.componentStack,
@@ -228,20 +231,41 @@ function devtoolsWorkLabels(lanes: Lanes): FigDevtoolsWorkLabel[] {
   return labels;
 }
 
+function devtoolsDataResourceKeys(
+  node: DevtoolsFiber,
+  dataStore: DevtoolsRoot["dataStore"],
+): string[] {
+  const keys = dataStore.inspectDataDependencyCanonicalKeys(node);
+  if (keys.length > 0 || node.alternate === null) return keys;
+  // Committed reads live on whichever generation rendered last: every render
+  // marks the fiber dirty, so commit migrates the keys onto the committing
+  // generation and clears the other. A fiber cloned by a parent update that
+  // then bails out never re-reads, leaving its keys on the previous
+  // generation — at most one of the pair ever holds them.
+  return dataStore.inspectDataDependencyCanonicalKeys(node.alternate);
+}
+
 function appendDevtoolsChildSnapshots(
   node: DevtoolsFiber,
   parentId: number,
+  dataStore: DevtoolsRoot["dataStore"],
   inspection: DevtoolsInspectionState,
   children: FigDevtoolsFiberSnapshot[],
 ): void {
   if (node.tag === ActivityTag && node.type === null) {
     for (let child = node.child; child !== null; child = child.sibling) {
-      appendDevtoolsChildSnapshots(child, parentId, inspection, children);
+      appendDevtoolsChildSnapshots(
+        child,
+        parentId,
+        dataStore,
+        inspection,
+        children,
+      );
     }
     return;
   }
 
-  children.push(snapshotDevtoolsFiber(node, parentId, inspection));
+  children.push(snapshotDevtoolsFiber(node, parentId, dataStore, inspection));
 }
 
 function devtoolsRootId(root: object): number {

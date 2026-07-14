@@ -345,7 +345,7 @@ export const DevtoolsStyle = `
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 7px;
   padding: 5px 8px 5px 0;
@@ -386,6 +386,15 @@ export const DevtoolsStyle = `
   border-radius: 999px;
   background: #eef2ff;
   color: #3730a3;
+  font-size: 11px;
+  padding: 1px 6px;
+  text-align: center;
+}
+.fig-devtools__data-count {
+  min-width: 22px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
   font-size: 11px;
   padding: 1px 6px;
   text-align: center;

@@ -96,6 +96,7 @@ export interface FigDataStore extends FigDataStoreHandle {
   releaseDataOwner(owner: object): void;
   resetDataDependencies(owner: object): void;
   dispose(): void;
+  inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the

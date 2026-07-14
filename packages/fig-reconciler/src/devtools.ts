@@ -72,6 +72,7 @@ export interface FigDevtoolsFiberSnapshot {
   childWork: FigDevtoolsWorkLabel[];
   hooks: FigDevtoolsHookSnapshot[];
   contextDependencies: string[];
+  dataResourceCanonicalKeys: string[];
   host?: FigDevtoolsHostSnapshot;
   capturedError?: unknown;
   componentStack?: string;

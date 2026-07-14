@@ -115,6 +115,9 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     inspectDataEntries() {
       return inner?.inspectDataEntries() ?? [];
     },
+    inspectDataDependencyCanonicalKeys(owner: object) {
+      return inner?.inspectDataDependencyCanonicalKeys(owner) ?? [];
+    },
     snapshot() {
       return inner?.snapshot() ?? buffered?.slice() ?? [];
     },

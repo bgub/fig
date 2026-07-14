@@ -98,6 +98,7 @@ function buildSnapshot(
       childWork: [],
       hooks: [],
       contextDependencies: [],
+      dataResourceCanonicalKeys: [],
       children: node.children.map((child, childIndex) =>
         convert(child, id, childIndex),
       ),
@@ -128,6 +129,7 @@ function buildSnapshot(
       childWork: [],
       hooks: [],
       contextDependencies: [],
+      dataResourceCanonicalKeys: [],
       children: appRoot.children.map((child, index) =>
         convert(child, 1, index),
       ),

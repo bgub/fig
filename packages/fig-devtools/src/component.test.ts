@@ -48,4 +48,127 @@ describe("FigDevtools panel", () => {
       target[FIG_DEVTOOLS_HOOK_KEY] = previous;
     }
   });
+
+  it("shows only the selected fiber's data resources", async () => {
+    const hook = createFigDevtoolsGlobalHook();
+    const rendererId = hook.inject({
+      name: "Fig",
+      packageName: "@bgub/fig-reconciler",
+    });
+    hook.onCommitRoot(rendererId, {
+      id: 1,
+      rendererId,
+      committedAt: 1,
+      dataResources: [
+        {
+          canonicalKey: '["refreshing"]',
+          hasValue: true,
+          key: ["refreshing"],
+          pending: true,
+          stale: false,
+          status: "refreshing",
+          subscriberCount: 1,
+          value: "previous value",
+        },
+        {
+          canonicalKey: '["pending"]',
+          hasValue: false,
+          key: ["pending"],
+          pending: true,
+          stale: false,
+          status: "pending",
+          subscriberCount: 1,
+        },
+      ],
+      pendingWork: [],
+      suspendedWork: [],
+      pingedWork: [],
+      expiredWork: [],
+      tree: {
+        id: 1,
+        parentId: null,
+        name: "Root",
+        kind: "root",
+        key: null,
+        index: 0,
+        props: {},
+        pendingWork: [],
+        childWork: [],
+        hooks: [],
+        contextDependencies: [],
+        // Empty on purpose: the root fiber never reads data itself, yet its
+        // selection must still list the whole store.
+        dataResourceCanonicalKeys: [],
+        children: [
+          {
+            id: 2,
+            parentId: 1,
+            name: "WeatherView",
+            kind: "function",
+            key: null,
+            index: 0,
+            props: {},
+            pendingWork: [],
+            childWork: [],
+            hooks: [],
+            contextDependencies: [],
+            dataResourceCanonicalKeys: ['["refreshing"]'],
+            children: [],
+          },
+          {
+            id: 3,
+            parentId: 1,
+            name: "PostView",
+            kind: "function",
+            key: null,
+            index: 1,
+            props: {},
+            pendingWork: [],
+            childWork: [],
+            hooks: [],
+            contextDependencies: [],
+            dataResourceCanonicalKeys: ['["pending"]'],
+            children: [],
+          },
+        ],
+      },
+    });
+
+    const container = document.createElement("aside");
+    document.body.append(container);
+    await act(() => {
+      createRoot(container, { devtools: false }).render(
+        createElement(FigDevtools, { hook, placement: "sidebar" }),
+      );
+    });
+
+    const entries = container.querySelectorAll(".fig-devtools__data");
+    expect(entries[0]?.textContent).toContain("refreshing");
+    expect(entries[0]?.textContent).not.toContain("Pending");
+    expect(entries[1]?.textContent).toContain("pending");
+    expect(entries[1]?.textContent).toContain("Pendingyes");
+
+    const weatherButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        ".fig-devtools__tree-button",
+      ),
+    ).find((button) => button.textContent?.includes("WeatherView"));
+    expect(weatherButton).toBeDefined();
+    expect(
+      weatherButton?.querySelector(".fig-devtools__data-count")?.textContent,
+    ).toBe("1");
+    const rootButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        ".fig-devtools__tree-button",
+      ),
+    ).find((button) => button.textContent?.includes("Root"));
+    expect(rootButton?.querySelector(".fig-devtools__data-count")).toBeNull();
+    await act(() => weatherButton?.click());
+
+    const selectedEntries = container.querySelectorAll(".fig-devtools__data");
+    expect(selectedEntries).toHaveLength(1);
+    expect(selectedEntries[0]?.textContent).toContain('["refreshing"]');
+    expect(selectedEntries[0]?.textContent).not.toContain('["pending"]');
+    expect(selectedEntries[0]?.textContent).not.toContain("Pending");
+  });
 });

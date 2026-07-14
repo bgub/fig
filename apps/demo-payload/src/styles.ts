@@ -35,7 +35,6 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  padding: 48px 20px 80px;
   background-color: var(--bg);
   /* Graph paper: the wireframe under the wireframe. */
   background-image:
@@ -44,6 +43,36 @@ body {
   background-size: 24px 24px;
   color: var(--ink);
   font: 15px/1.65 ui-sans-serif, system-ui, sans-serif;
+}
+
+.fig-demo-devtools-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.fig-demo-app-pane {
+  min-width: 0;
+  padding: 48px 20px 80px;
+}
+
+.fig-demo-devtools-pane {
+  background: #171923;
+  border-left: 1px solid var(--line);
+  height: 100vh;
+  min-height: 0;
+  min-width: 360px;
+  overflow: hidden;
+  position: sticky;
+  top: 0;
+  width: min(420px, 34vw);
+}
+
+.fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
+  border-left: 0;
+  min-width: 0;
+  overflow: visible;
+  width: 0;
 }
 
 .app {
@@ -216,7 +245,7 @@ h2 {
   padding-top: 16px;
 }
 
-button {
+:where(.fig-demo-app-pane) button {
   background: transparent;
   border: 1.5px solid var(--line);
   border-radius: 6px;
@@ -227,16 +256,16 @@ button {
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-button:hover {
+:where(.fig-demo-app-pane) button:hover {
   border-color: var(--ink);
 }
 
-button[data-resource-refresh] {
+:where(.fig-demo-app-pane) button[data-resource-refresh] {
   /* Wide enough for the longest label so the pending swap never shifts. */
   min-width: 168px;
 }
 
-button[data-refresh-state="pending"] {
+:where(.fig-demo-app-pane) button[data-refresh-state="pending"] {
   animation: slot-pulse 0.9s ease-in-out infinite alternate;
   border-style: dashed;
   color: var(--muted);
@@ -301,5 +330,29 @@ ul.comments li:first-child {
 
 .island-button:hover {
   background: rgba(5, 150, 105, 0.1);
+}
+
+@media (max-width: 780px) {
+  .fig-demo-devtools-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .fig-demo-devtools-pane,
+  .fig-demo-devtools-pane:has(.fig-devtools.is-closed) {
+    border-left: 0;
+    border-top: 0;
+    height: 0;
+    min-width: 0;
+    overflow: visible;
+    position: static;
+    width: 0;
+  }
+
+  .fig-demo-devtools-pane:not(:has(.fig-devtools.is-closed)) {
+    border-top: 1px solid var(--line);
+    height: min(620px, 70vh);
+    overflow: hidden;
+    width: auto;
+  }
 }
 `;

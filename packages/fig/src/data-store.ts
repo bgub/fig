@@ -395,6 +395,22 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     );
   }
 
+  inspectDataDependencyCanonicalKeys(owner: object): string[] {
+    // Inspection surface only (devtools snapshots are dev-gated); returns
+    // empty in prod even though ownerKeys is populated there.
+    if (!__DEV__) return [];
+
+    const keys = this.ownerKeys.get(owner);
+    if (keys === undefined) return [];
+
+    const dependencies: string[] = [];
+    for (const key of keys) {
+      const entry = this.entries.get(key);
+      if (entry !== undefined) dependencies.push(entry.canonicalKey);
+    }
+    return dependencies;
+  }
+
   invalidateData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     ...args: TArgs

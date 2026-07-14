@@ -701,6 +701,13 @@ function fiberTree(
               { class: "fig-devtools__hook-count" },
               fiber.hooks.length,
             ),
+        fiber.dataResourceCanonicalKeys.length === 0
+          ? null
+          : h(
+              "span",
+              { class: "fig-devtools__data-count" },
+              fiber.dataResourceCanonicalKeys.length,
+            ),
       ),
     ),
     visibleChildren(fiber, showHost).map((child) =>
@@ -889,8 +896,22 @@ function detailsTab(
     propsSection(fiber.props),
     hooksSection(fiber.hooks),
     contextSection(fiber.contextDependencies),
-    dataResourcesSection(root?.dataResources ?? []),
+    dataResourcesSection(dataResourcesForFiber(fiber, root)),
   );
+}
+
+function dataResourcesForFiber(
+  fiber: FigDevtoolsFiberSnapshot,
+  root: FigDevtoolsRootSnapshot | null,
+): FigDevtoolsRootSnapshot["dataResources"] {
+  if (root === null) return [];
+  // The root lists the whole store: entries with no committed subscriber
+  // (unclaimed preloads, hydrated-but-unread rows) appear nowhere else.
+  if (fiber.kind === "root") return root.dataResources;
+  if (fiber.dataResourceCanonicalKeys.length === 0) return [];
+
+  const keys = new Set(fiber.dataResourceCanonicalKeys);
+  return root.dataResources.filter((entry) => keys.has(entry.canonicalKey));
 }
 
 // The low-level fiber internals, tucked away from the everyday view.
@@ -1007,7 +1028,9 @@ function dataResourceRows(entry: DataResourceSnapshot): FigNode[] {
     row("Stale", entry.stale ? "yes" : "no"),
   ];
 
-  if (entry.pending) rows.push(row("Pending", "yes"));
+  if (entry.pending && entry.status !== "refreshing") {
+    rows.push(row("Pending", "yes"));
+  }
   if (entry.hasValue) rows.push(kvRow("Value", entry.value));
   if (entry.error !== undefined) rows.push(kvRow("Error", entry.error));
   if (entry.refreshError !== undefined) {

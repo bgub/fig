@@ -51,7 +51,7 @@ Without a framework, the same shape is a one-liner: an isomorphic `dataResource`
 
 ## Reads
 
-`readData(resource, ...args)` is a render-time read (dispatcher-routed, like `readContext`/`readPromise`): it subscribes the reading fiber to the key, starts the load if the entry is pending, throws the pending promise to suspend, and throws the real error on rejection (so `ErrorBoundary` catches it; the thrown promise itself always _resolves_ — rejections settle into the entry). Dependency bookkeeping is owner-keyed and commit-aware: abandoned render attempts and strict shadow passes reset cleanly, and unmounting releases subscriptions (orphaned in-flight loads abort).
+`readData(resource, ...args)` is a render-time read (dispatcher-routed, like `readContext`/`readPromise`): it subscribes the reading fiber to the key, starts the load if the entry is pending, throws the pending promise to suspend, and throws the real error on rejection (so `ErrorBoundary` catches it; the thrown promise itself always _resolves_ — rejections settle into the entry). Dependency bookkeeping is owner-keyed and commit-aware: abandoned render attempts and strict shadow passes reset cleanly, and unmounting releases subscriptions (orphaned in-flight loads abort). DevTools snapshots preserve each committed fiber's directly read keys, so selecting a component shows its data dependencies rather than every entry in the root store; selecting the root still lists the whole store, including entries with no committed subscriber (unclaimed preloads, hydrated-but-unread rows).
 
 `preloadData` starts a load without subscribing; unclaimed preloads abort and evict after a grace window (default 30s). Fulfilled entries with no subscribers evict after an inactivity window (default 5 minutes).
 

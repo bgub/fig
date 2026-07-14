@@ -142,6 +142,9 @@ describe("@bgub/fig", () => {
     );
     expect(byKey.get('["reset","a"]')?.subscriberCount).toBe(0);
     expect(byKey.get('["reset","b"]')?.subscriberCount).toBe(1);
+    expect(store.inspectDataDependencyCanonicalKeys(owner)).toEqual([
+      '["reset","b"]',
+    ]);
 
     // The owner no longer reads "a", so invalidating it must not schedule it.
     store.invalidateData(resource, "a");

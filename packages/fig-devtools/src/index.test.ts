@@ -39,6 +39,7 @@ describe("@bgub/fig-devtools", () => {
         childWork: [],
         hooks: [],
         contextDependencies: [],
+        dataResourceCanonicalKeys: [],
         children: [],
       },
     });
@@ -86,6 +87,7 @@ describe("@bgub/fig-devtools", () => {
           childWork: [],
           hooks: [],
           contextDependencies: [],
+          dataResourceCanonicalKeys: [],
           children: [],
         },
       },
@@ -133,6 +135,7 @@ describe("@bgub/fig-devtools", () => {
           childWork: [],
           hooks: [],
           contextDependencies: [],
+          dataResourceCanonicalKeys: [],
           children: [],
         },
       });

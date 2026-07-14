@@ -29,6 +29,7 @@ import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   FigDevtoolsCommitInspection,
+  FigDevtoolsFiberSnapshot,
   FigDevtoolsGlobalHook,
   FigDevtoolsRootSnapshot,
 } from "./devtools.ts";
@@ -654,7 +655,25 @@ describe("reconciler", () => {
       return createElement("span", null, readData(messageResource, "one"));
     }
 
-    flushSync(() => root.render(createElement(Message, null)));
+    // Hoisted so App re-renders hand Message the same element and it bails
+    // out without re-reading.
+    const message = createElement(Message, null);
+    let bump = () => undefined;
+
+    function App() {
+      const [count, setCount] = useState(0);
+      bump = () => {
+        setCount((value) => value + 1);
+      };
+      return createElement(
+        "main",
+        null,
+        createElement("span", null, `count ${count}`),
+        message,
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
 
     expect(commits.at(-1)?.dataResources).toMatchObject([
       {
@@ -668,6 +687,31 @@ describe("reconciler", () => {
         value: "Loaded",
       },
     ]);
+    expect(commits.at(-1)?.tree.dataResourceCanonicalKeys).toEqual([]);
+    const findByName = (
+      fiber: FigDevtoolsFiberSnapshot,
+      name: string,
+    ): FigDevtoolsFiberSnapshot | undefined => {
+      if (fiber.name === name) return fiber;
+      for (const child of fiber.children) {
+        const found = findByName(child, name);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const messageFiber = (snapshot: FigDevtoolsRootSnapshot | undefined) =>
+      snapshot === undefined ? undefined : findByName(snapshot.tree, "Message");
+    expect(messageFiber(commits.at(-1))).toMatchObject({
+      dataResourceCanonicalKeys: ['["devtools-message","one"]'],
+    });
+
+    // An unrelated parent update clones Message but bails out of rendering
+    // it, so commitDataDependencies never moves the keys to the new
+    // generation — the snapshot must still report them.
+    flushSync(() => bump());
+    expect(messageFiber(commits.at(-1))).toMatchObject({
+      dataResourceCanonicalKeys: ['["devtools-message","one"]'],
+    });
   });
 
   it("publishes resource wrappers as transparent fibers", () => {

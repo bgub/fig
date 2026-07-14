@@ -20,6 +20,8 @@ test("streams a serialized post as a data resource with progressive holes and is
     "data-fig-resource-demo",
     "ready",
   );
+  const devtools = page.locator(".fig-demo-devtools-pane .fig-devtools");
+  await expect(devtools).toBeVisible();
 
   // Root row reveals the post while the comments hole is still streaming.
   // waitFor is event-driven where expect polls on fixed intervals; the
@@ -48,6 +50,44 @@ test("streams a serialized post as a data resource with progressive holes and is
   await expect(page.locator("[data-resource-summary]")).toContainText(
     "hydrated into the",
   );
+  const advancedTab = devtools.getByRole("tab", { name: "Advanced" });
+  await expect(advancedTab).toHaveCSS("border-radius", "0px");
+  await advancedTab.hover();
+  await expect(advancedTab).toHaveCSS(
+    "border-bottom-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  // The default (root) selection lists every store entry, then selecting a
+  // component narrows the Data section to its own reads.
+  const selectedData = devtools.locator(".fig-devtools__data");
+  await expect(
+    selectedData.filter({ hasText: '["resource-post",1]' }),
+  ).toHaveCount(1);
+  await expect(
+    selectedData.filter({ hasText: '["resource-dashboard"]' }),
+  ).toHaveCount(1);
+  await expect(
+    selectedData.filter({ hasText: '["resource-weather"]' }),
+  ).toHaveCount(1);
+  // Every client fiber that reads data keeps its green badge once its layer
+  // has streamed in: PostView, DashboardView, and WeatherView (ResourcePost
+  // reads on the server, so it has no client fiber). Bailed-out clones used
+  // to drop committed reads from the snapshot, flickering badges away as
+  // later layers committed.
+  await expect(devtools.locator(".fig-devtools__data-count")).toHaveCount(3);
+  // The badge count joins the accessible name, so "WeatherView" alone no
+  // longer matches exactly.
+  const weatherRow = devtools.getByRole("button", { name: /^WeatherView\b/ });
+  await expect(weatherRow.locator(".fig-devtools__data-count")).toHaveText("1");
+  await expect(weatherRow.locator(".fig-devtools__data-count")).toHaveCSS(
+    "background-color",
+    "rgb(236, 253, 245)",
+  );
+  await weatherRow.click();
+  await expect(selectedData).toHaveCount(1);
+  await expect(selectedData).toContainText('["resource-weather"]');
+  await expect(selectedData).not.toContainText('["resource-dashboard"]');
+  await expect(selectedData).not.toContainText('["resource-post",1]');
   expect(payloadRequests).toHaveLength(1);
   expect(errors()).toEqual([]);
 });
@@ -212,7 +252,7 @@ test("keeps the shell height constant while every layer streams in", async ({
 }) => {
   const shellHeight = () =>
     page
-      .locator("main")
+      .locator("main.app")
       .evaluate((element) => element.getBoundingClientRect().height);
 
   await page.goto("/", { waitUntil: "commit" });
