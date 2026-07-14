@@ -240,7 +240,7 @@ silently. Conflicting duplicates throw: for example, the same stylesheet `href`
 with a different `media`, the same `title` key with a different value, or the
 same meta `name` with different `content`. Preloads are keyed by `href` plus
 `as`, so the same URL can be preloaded for distinct targets, but behavior fields
-such as `type`, `crossOrigin`, and `fetchPriority` must match for duplicates.
+such as `type`, `crossorigin`, and `fetchpriority` must match for duplicates.
 Conflict errors include the resource key plus the existing and incoming
 resources.
 

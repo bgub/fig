@@ -14,7 +14,7 @@ import type {
 // contract, not a serializer implementation detail.
 export type SerializedAssetResource =
   | {
-      crossOrigin?: StylesheetResource["crossOrigin"];
+      crossorigin?: StylesheetResource["crossorigin"];
       href: string;
       kind: "stylesheet";
       media?: string;
@@ -22,35 +22,35 @@ export type SerializedAssetResource =
     }
   | {
       as: string;
-      crossOrigin?: PreloadResource["crossOrigin"];
-      fetchPriority?: PreloadResource["fetchPriority"];
+      crossorigin?: PreloadResource["crossorigin"];
+      fetchpriority?: PreloadResource["fetchpriority"];
       href: string;
       kind: "preload";
       type?: string;
     }
   | {
-      crossOrigin?: ModulePreloadResource["crossOrigin"];
-      fetchPriority?: ModulePreloadResource["fetchPriority"];
+      crossorigin?: ModulePreloadResource["crossorigin"];
+      fetchpriority?: ModulePreloadResource["fetchpriority"];
       href: string;
       kind: "modulepreload";
     }
   | {
       async?: boolean;
-      crossOrigin?: ScriptResource["crossOrigin"];
+      crossorigin?: ScriptResource["crossorigin"];
       defer?: boolean;
       kind: "script";
       module?: boolean;
       src: string;
     }
   | {
-      crossOrigin?: FontResource["crossOrigin"];
-      fetchPriority?: FontResource["fetchPriority"];
+      crossorigin?: FontResource["crossorigin"];
+      fetchpriority?: FontResource["fetchpriority"];
       href: string;
       kind: "font";
       type: string;
     }
   | {
-      crossOrigin?: PreconnectResource["crossOrigin"];
+      crossorigin?: PreconnectResource["crossorigin"];
       href: string;
       kind: "preconnect";
     };

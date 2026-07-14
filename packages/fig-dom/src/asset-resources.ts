@@ -316,8 +316,8 @@ function asInsertableResource(resource: FigAssetResource): FigAssetResource {
 
   return {
     as: "font",
-    crossOrigin: resource.crossOrigin ?? "anonymous",
-    fetchPriority: resource.fetchPriority,
+    crossorigin: resource.crossorigin ?? "anonymous",
+    fetchpriority: resource.fetchpriority,
     href: resource.href,
     key: resource.key,
     kind: "preload",

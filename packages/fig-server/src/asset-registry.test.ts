@@ -86,6 +86,16 @@ describe("AssetResourceRegistry", () => {
     ).toThrow('Conflicting Fig resource for key "meta:name:description".');
   });
 
+  it("writes native meta descriptor attributes", () => {
+    const registry = new AssetResourceRegistry("");
+
+    registry.register(meta({ "http-equiv": "refresh", content: "30" }));
+
+    expect(registry.headHtml()).toBe(
+      '<meta http-equiv="refresh" content="30">',
+    );
+  });
+
   it("dedupes a font against an equivalent preload-as-font under one key", () => {
     const registry = new AssetResourceRegistry("");
 
@@ -99,7 +109,7 @@ describe("AssetResourceRegistry", () => {
         registry,
         preload("/a.woff2", "font", {
           type: "font/woff2",
-          crossOrigin: "anonymous",
+          crossorigin: "anonymous",
         }),
       ),
     ).toBe("");
@@ -117,7 +127,7 @@ describe("AssetResourceRegistry", () => {
       write(
         registry,
         preload("/brand.woff2", "font", {
-          crossOrigin: "anonymous",
+          crossorigin: "anonymous",
           key: "brand",
           type: "font/woff2",
         }),
@@ -153,8 +163,8 @@ describe("AssetResourceRegistry", () => {
       write(
         registry,
         modulepreload("/chunk.js", {
-          crossOrigin: "anonymous",
-          fetchPriority: "high",
+          crossorigin: "anonymous",
+          fetchpriority: "high",
         }),
       ),
     ).toBe(
@@ -164,8 +174,8 @@ describe("AssetResourceRegistry", () => {
       write(
         registry,
         modulepreload("/chunk.js", {
-          crossOrigin: "anonymous",
-          fetchPriority: "high",
+          crossorigin: "anonymous",
+          fetchpriority: "high",
         }),
       ),
     ).toBe("");
@@ -177,10 +187,10 @@ describe("AssetResourceRegistry", () => {
   it("rejects preloads with the same target and different behavior", () => {
     const registry = new AssetResourceRegistry("");
 
-    write(registry, preload("/asset", "image", { fetchPriority: "high" }));
+    write(registry, preload("/asset", "image", { fetchpriority: "high" }));
 
     expect(() =>
-      write(registry, preload("/asset", "image", { fetchPriority: "low" })),
+      write(registry, preload("/asset", "image", { fetchpriority: "low" })),
     ).toThrow('Conflicting Fig resource for key "preload:image:/asset".');
   });
 });

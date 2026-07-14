@@ -28,7 +28,7 @@ interface ResourceBase {
 
 export interface StylesheetResource extends ResourceBase {
   blocking?: AssetResourceBlocking;
-  crossOrigin?: CrossOrigin;
+  crossorigin?: CrossOrigin;
   href: string;
   kind: "stylesheet";
   media?: string;
@@ -37,23 +37,23 @@ export interface StylesheetResource extends ResourceBase {
 
 export interface PreloadResource extends ResourceBase {
   as: string;
-  crossOrigin?: CrossOrigin;
-  fetchPriority?: FetchPriority;
+  crossorigin?: CrossOrigin;
+  fetchpriority?: FetchPriority;
   href: string;
   kind: "preload";
   type?: string;
 }
 
 export interface ModulePreloadResource extends ResourceBase {
-  crossOrigin?: CrossOrigin;
-  fetchPriority?: FetchPriority;
+  crossorigin?: CrossOrigin;
+  fetchpriority?: FetchPriority;
   href: string;
   kind: "modulepreload";
 }
 
 export interface ScriptResource extends ResourceBase {
   async?: boolean;
-  crossOrigin?: CrossOrigin;
+  crossorigin?: CrossOrigin;
   defer?: boolean;
   kind: "script";
   module?: boolean;
@@ -61,15 +61,15 @@ export interface ScriptResource extends ResourceBase {
 }
 
 export interface FontResource extends ResourceBase {
-  crossOrigin?: CrossOrigin;
-  fetchPriority?: FetchPriority;
+  crossorigin?: CrossOrigin;
+  fetchpriority?: FetchPriority;
   href: string;
   kind: "font";
   type: string;
 }
 
 export interface PreconnectResource extends ResourceBase {
-  crossOrigin?: CrossOrigin;
+  crossorigin?: CrossOrigin;
   href: string;
   kind: "preconnect";
 }
@@ -82,7 +82,7 @@ export interface TitleResource extends ResourceBase {
 export interface MetaResource extends ResourceBase {
   charset?: string;
   content?: string;
-  httpEquiv?: string;
+  "http-equiv"?: string;
   kind: "meta";
   name?: string;
   property?: string;
@@ -244,14 +244,14 @@ export function assetResourceFromHostProps(
   type: string,
   props: Props,
 ): FigAssetResource | null {
-  return resourceFromHost(type, (name) => props[name], props.children);
+  return resourceFromHost(type, (name) => props[name], props.children, true);
 }
 
 export function assetResourceFromHostAttributes(
   type: string,
   getAttribute: (name: string) => unknown,
 ): FigAssetResource | null {
-  return resourceFromHost(type, getAttribute);
+  return resourceFromHost(type, getAttribute, undefined, false);
 }
 
 export type AssetResourceHostAttribute = readonly [
@@ -277,7 +277,7 @@ export function assetResourceHostAttributes(
         ["data-fig-resource-key", resource.key],
         ["data-precedence", resource.precedence],
         ["media", resource.media],
-        ["crossorigin", resource.crossOrigin],
+        ["crossorigin", resource.crossorigin],
       );
       break;
     case "preload":
@@ -287,8 +287,8 @@ export function assetResourceHostAttributes(
         ["as", resource.as],
         ["data-fig-resource-key", resource.key],
         ["type", resource.type],
-        ["crossorigin", resource.crossOrigin],
-        ["fetchpriority", resource.fetchPriority],
+        ["crossorigin", resource.crossorigin],
+        ["fetchpriority", resource.fetchpriority],
       );
       break;
     case "modulepreload":
@@ -296,8 +296,8 @@ export function assetResourceHostAttributes(
         ["rel", "modulepreload"],
         ["href", resource.href],
         ["data-fig-resource-key", resource.key],
-        ["crossorigin", resource.crossOrigin],
-        ["fetchpriority", resource.fetchPriority],
+        ["crossorigin", resource.crossorigin],
+        ["fetchpriority", resource.fetchpriority],
       );
       break;
     case "font":
@@ -307,8 +307,8 @@ export function assetResourceHostAttributes(
         ["as", "font"],
         ["data-fig-resource-key", resource.key],
         ["type", resource.type],
-        ["crossorigin", resource.crossOrigin ?? "anonymous"],
-        ["fetchpriority", resource.fetchPriority],
+        ["crossorigin", resource.crossorigin ?? "anonymous"],
+        ["fetchpriority", resource.fetchpriority],
       );
       break;
     case "preconnect":
@@ -316,7 +316,7 @@ export function assetResourceHostAttributes(
         ["rel", "preconnect"],
         ["href", resource.href],
         ["data-fig-resource-key", resource.key],
-        ["crossorigin", resource.crossOrigin],
+        ["crossorigin", resource.crossorigin],
       );
       break;
     case "script":
@@ -332,7 +332,7 @@ export function assetResourceHostAttributes(
           (resource.async ?? resource.defer !== true) ? true : undefined,
         ],
         ["defer", resource.defer === true ? true : undefined],
-        ["crossorigin", resource.crossOrigin],
+        ["crossorigin", resource.crossorigin],
       );
       break;
     case "title":
@@ -349,6 +349,7 @@ function resourceFromHost(
   type: string,
   prop: (name: string) => unknown,
   children?: FigNode,
+  requireAsyncScript = false,
 ): FigAssetResource | null {
   const withKey = (resource: FigAssetResource): FigAssetResource => {
     const key = readProp(prop, "data-fig-resource-key");
@@ -357,13 +358,14 @@ function resourceFromHost(
 
   switch (type.toLowerCase()) {
     case "title":
+      if (readProp(prop, "itemprop") !== undefined) return null;
       return withKey({ kind: "title", value: textResourceValue(children) });
     case "meta":
-      if (readProp(prop, "itemProp", "itemprop") !== undefined) return null;
+      if (readProp(prop, "itemprop") !== undefined) return null;
       return withKey({
-        charset: readProp(prop, "charset", "charSet"),
+        charset: readProp(prop, "charset"),
         content: readProp(prop, "content"),
-        httpEquiv: readProp(prop, "httpEquiv", "http-equiv"),
+        "http-equiv": readProp(prop, "http-equiv"),
         kind: "meta",
         name: readProp(prop, "name"),
         property: readProp(prop, "property"),
@@ -372,24 +374,27 @@ function resourceFromHost(
       return withNullableKey(linkResourceFromHost(prop), withKey);
     case "script": {
       const src = readProp(prop, "src");
-      if (src === undefined) return null;
+      // A raw script keeps native placement and execution semantics unless the
+      // author explicitly marks it async. Explicit script() descriptors remain
+      // the opt-in path for hoisted defer, module, or synchronous scripts.
+      const async = hasBooleanAttribute(prop("async"));
+      if (src === undefined || (requireAsyncScript && !async)) return null;
       return withKey({
-        async:
-          prop("async") === true
-            ? true
-            : prop("async") === false
-              ? false
-              : undefined,
-        crossOrigin: readCrossOrigin(prop),
-        defer: prop("defer") === true,
+        async,
+        crossorigin: readCrossorigin(prop),
+        defer: hasBooleanAttribute(prop("defer")),
         kind: "script",
-        module: prop("module") === true || prop("type") === "module",
+        module: prop("type") === "module",
         src,
       });
     }
     default:
       return null;
   }
+}
+
+function hasBooleanAttribute(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== false;
 }
 
 function withNullableKey(
@@ -407,7 +412,7 @@ function linkResourceFromHost(
   if (
     rel === undefined ||
     href === undefined ||
-    readProp(prop, "itemProp", "itemprop") !== undefined
+    readProp(prop, "itemprop") !== undefined
   ) {
     return null;
   }
@@ -415,7 +420,7 @@ function linkResourceFromHost(
   if (rel === "stylesheet") {
     return {
       blocking: prop("blocking") === "none" ? "none" : undefined,
-      crossOrigin: readCrossOrigin(prop),
+      crossorigin: readCrossorigin(prop),
       href,
       kind: "stylesheet",
       media: readProp(prop, "media"),
@@ -427,10 +432,8 @@ function linkResourceFromHost(
 
   if (rel === "modulepreload") {
     return {
-      crossOrigin: readCrossOrigin(prop),
-      fetchPriority: fetchPriorityProp(
-        readProp(prop, "fetchPriority", "fetchpriority"),
-      ),
+      crossorigin: readCrossorigin(prop),
+      fetchpriority: fetchpriorityProp(readProp(prop, "fetchpriority")),
       href,
       kind: "modulepreload",
     };
@@ -441,10 +444,8 @@ function linkResourceFromHost(
     if (as === undefined) return null;
     return {
       as,
-      crossOrigin: readCrossOrigin(prop),
-      fetchPriority: fetchPriorityProp(
-        readProp(prop, "fetchPriority", "fetchpriority"),
-      ),
+      crossorigin: readCrossorigin(prop),
+      fetchpriority: fetchpriorityProp(readProp(prop, "fetchpriority")),
       href,
       kind: "preload",
       type: readProp(prop, "type"),
@@ -453,7 +454,7 @@ function linkResourceFromHost(
 
   if (rel === "preconnect") {
     return {
-      crossOrigin: readCrossOrigin(prop),
+      crossorigin: readCrossorigin(prop),
       href,
       kind: "preconnect",
     };
@@ -491,19 +492,19 @@ function stringProp(value: unknown): string | undefined {
   );
 }
 
-function readCrossOrigin(
+function readCrossorigin(
   prop: (name: string) => unknown,
 ): CrossOrigin | undefined {
-  return crossOriginProp(readProp(prop, "crossOrigin", "crossorigin"));
+  return crossoriginProp(readProp(prop, "crossorigin"));
 }
 
-function crossOriginProp(value: unknown): CrossOrigin | undefined {
+function crossoriginProp(value: unknown): CrossOrigin | undefined {
   return value === "anonymous" || value === "use-credentials" || value === ""
     ? value
     : undefined;
 }
 
-function fetchPriorityProp(value: unknown): FetchPriority | undefined {
+function fetchpriorityProp(value: unknown): FetchPriority | undefined {
   return value === "high" || value === "low" || value === "auto"
     ? value
     : undefined;
@@ -524,8 +525,8 @@ function metaResourceKey(resource: MetaResource): string {
   if (resource.name !== undefined) return `meta:name:${resource.name}`;
   if (resource.property !== undefined)
     return `meta:property:${resource.property}`;
-  if (resource.httpEquiv !== undefined) {
-    return `meta:http-equiv:${resource.httpEquiv}`;
+  if (resource["http-equiv"] !== undefined) {
+    return `meta:http-equiv:${resource["http-equiv"]}`;
   }
 
   return `meta:${resource.content ?? ""}`;

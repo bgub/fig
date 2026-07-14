@@ -185,6 +185,25 @@ describe("@bgub/fig-server", () => {
     expect(html).toBe('<svg><use xlink:href="#icon"></use></svg>');
   });
 
+  it("keeps SVG and itemprop titles in their native trees", async () => {
+    await expect(
+      renderToHtml(
+        createElement(
+          "main",
+          null,
+          createElement(
+            "svg",
+            null,
+            createElement("title", null, "Accessible icon"),
+          ),
+          createElement("title", { itemprop: "name" }, "Structured name"),
+        ),
+      ),
+    ).resolves.toBe(
+      '<main><svg><title>Accessible icon</title></svg><title itemprop="name">Structured name</title></main>',
+    );
+  });
+
   it("renders fragments, arrays, function components, and state initializers", async () => {
     function Counter() {
       const [count] = useState(() => 3);
@@ -877,8 +896,8 @@ describe("@bgub/fig-server", () => {
           [
             title("Fig & assets"),
             meta({ name: "description", content: "Fast < UI" }),
-            preconnect("https://cdn.example.com", { crossOrigin: "anonymous" }),
-            preload("/hero.png", "image", { fetchPriority: "high" }),
+            preconnect("https://cdn.example.com", { crossorigin: "anonymous" }),
+            preload("/hero.png", "image", { fetchpriority: "high" }),
             font("/font.woff2", "font/woff2"),
             stylesheet("/app.css", { precedence: "app" }),
             stylesheet("/app.css", { precedence: "app" }),
@@ -964,6 +983,7 @@ describe("@bgub/fig-server", () => {
             rel: "stylesheet",
           }),
           createElement("script", {
+            async: true,
             src: "/host.js",
             type: "module",
           }),
@@ -974,6 +994,27 @@ describe("@bgub/fig-server", () => {
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
       `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
+    );
+  });
+
+  it("keeps non-async host scripts in their native position", async () => {
+    function Page() {
+      return createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          createElement("main", null, "Before"),
+          createElement("script", { src: "/ordered.js" }),
+          createElement("main", null, "After"),
+        ),
+      );
+    }
+
+    await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
+      `<!doctype html><html><head>${EARLY_EVENTS}</head><body><main>Before</main><script src="/ordered.js"></script><main>After</main></body></html>`,
     );
   });
 
@@ -1957,5 +1998,34 @@ describe("@bgub/fig-server", () => {
         }),
       ),
     ).resolves.toBe('<input type="checkbox">');
+  });
+});
+
+it("preserves SVG namespace across suspended server work", async () => {
+  const pending = deferred<string>();
+
+  function AccessibleTitle() {
+    return createElement("title", null, readPromise(pending.promise));
+  }
+
+  const resultPromise = prerender(
+    createElement(
+      "svg",
+      null,
+      createElement(
+        Suspense,
+        { fallback: createElement("text", null, "Loading") },
+        createElement(AccessibleTitle, null),
+      ),
+    ),
+  );
+
+  await waitForMicrotasks();
+  pending.resolve("Accessible icon");
+
+  await expect(resultPromise).resolves.toEqual({
+    data: [],
+    head: "",
+    html: "<svg><!--fig:suspense:completed--><title>Accessible icon</title><!--/fig:suspense--></svg>",
   });
 });

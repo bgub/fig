@@ -887,7 +887,7 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "crossorigin", resource.crossorigin);
       assignDefined(model, "media", resource.media);
       assignDefined(model, "precedence", resource.precedence);
       return model;
@@ -898,8 +898,8 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
-      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      assignDefined(model, "crossorigin", resource.crossorigin);
+      assignDefined(model, "fetchpriority", resource.fetchpriority);
       assignDefined(model, "type", resource.type);
       return model;
     }
@@ -908,8 +908,8 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
-      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      assignDefined(model, "crossorigin", resource.crossorigin);
+      assignDefined(model, "fetchpriority", resource.fetchpriority);
       return model;
     }
     case "script": {
@@ -918,7 +918,7 @@ function serializeAssetResource(
         src: resource.src,
       };
       assignDefined(model, "async", resource.async);
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "crossorigin", resource.crossorigin);
       assignDefined(model, "defer", resource.defer);
       assignDefined(model, "module", resource.module);
       return model;
@@ -929,8 +929,8 @@ function serializeAssetResource(
         kind: resource.kind,
         type: resource.type,
       };
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
-      assignDefined(model, "fetchPriority", resource.fetchPriority);
+      assignDefined(model, "crossorigin", resource.crossorigin);
+      assignDefined(model, "fetchpriority", resource.fetchpriority);
       return model;
     }
     case "preconnect": {
@@ -938,7 +938,7 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossOrigin", resource.crossOrigin);
+      assignDefined(model, "crossorigin", resource.crossorigin);
       return model;
     }
     case "title":

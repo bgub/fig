@@ -157,6 +157,26 @@ describe("@bgub/fig", () => {
     });
   });
 
+  it("uses native HTML names in asset descriptor options", () => {
+    expect(
+      preload("/hero.png", "image", {
+        crossorigin: "anonymous",
+        fetchpriority: "high",
+      }),
+    ).toEqual({
+      as: "image",
+      crossorigin: "anonymous",
+      fetchpriority: "high",
+      href: "/hero.png",
+      kind: "preload",
+    });
+    expect(meta({ "http-equiv": "refresh", content: "30" })).toEqual({
+      "http-equiv": "refresh",
+      content: "30",
+      kind: "meta",
+    });
+  });
+
   it("retains eager asset resources on a client reference", () => {
     const css = stylesheet("/assets/Counter.css");
     const js = preload("/assets/Counter.js", "script");
@@ -269,13 +289,35 @@ describe("@bgub/fig", () => {
       assetResourceFromHostProps("title", { children: ["Fig", " ", 1] }),
     ).toEqual({ kind: "title", value: "Fig 1" });
     expect(
+      assetResourceFromHostProps("title", {
+        children: "Structured name",
+        itemprop: "name",
+      }),
+    ).toBeNull();
+    expect(
+      assetResourceFromHostProps("script", {
+        async: true,
+        src: "/async.js",
+      }),
+    ).toEqual({
+      async: true,
+      crossorigin: undefined,
+      defer: false,
+      kind: "script",
+      module: false,
+      src: "/async.js",
+    });
+    expect(
+      assetResourceFromHostProps("script", { src: "/ordered.js" }),
+    ).toBeNull();
+    expect(
       assetResourceFromHostProps("link", {
-        fetchPriority: "high",
+        fetchpriority: "high",
         href: "/chunk.js",
         rel: "modulepreload",
       }),
     ).toEqual({
-      fetchPriority: "high",
+      fetchpriority: "high",
       href: "/chunk.js",
       kind: "modulepreload",
     });
@@ -290,6 +332,36 @@ describe("@bgub/fig", () => {
     expect(
       assetResourceFromHostAttributes("link", (name) => attributes.get(name)),
     ).toEqual({ href: "/app.css", kind: "stylesheet" });
+
+    const scriptAttributes = new Map([
+      ["async", ""],
+      ["src", "/async.js"],
+    ]);
+    expect(
+      assetResourceFromHostAttributes("script", (name) =>
+        scriptAttributes.get(name),
+      ),
+    ).toEqual({
+      async: true,
+      crossorigin: undefined,
+      defer: false,
+      kind: "script",
+      module: false,
+      src: "/async.js",
+    });
+
+    expect(
+      assetResourceFromHostAttributes("script", (name) =>
+        name === "src" ? "/ordered.js" : undefined,
+      ),
+    ).toEqual({
+      async: false,
+      crossorigin: undefined,
+      defer: false,
+      kind: "script",
+      module: false,
+      src: "/ordered.js",
+    });
   });
 
   it("creates portal nodes", () => {

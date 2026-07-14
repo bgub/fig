@@ -156,6 +156,9 @@ interface RenderScope {
   // Suspended segments stream into staging nodes but are moved into place on
   // the client, so their spawn-point ancestors stay authoritative.
   hostAncestors: readonly string[];
+  // Namespace inherited by the next host element. Unlike dev-only nesting
+  // ancestry this is runtime semantics: asset lowering applies only to HTML.
+  hostNamespace: HostNamespace;
   idPath: string;
   selectProps: Props | null;
   stack: StackFrame | null;
@@ -214,6 +217,7 @@ interface SuspenseBoundary {
 type BoundaryStatus = "pending" | "completed" | "client-rendered";
 type SegmentStatus = "pending" | "rendering" | "completed" | "flushed";
 type Component = (props: Props & { children?: FigNode }) => FigNode;
+type HostNamespace = "html" | "mathml" | "svg";
 
 interface RenderFrame extends RenderScope {
   dispatcher: RenderDispatcher;
@@ -360,6 +364,7 @@ export function createServerRenderRequest(
     contextValues: new Map(),
     hiddenActivityId: null,
     hostAncestors: [],
+    hostNamespace: "html",
     idPath: "",
     selectProps: null,
     stack: null,
@@ -422,6 +427,7 @@ function forkScope(scope: RenderScope): RenderScope {
     contextValues: cloneContextValues(scope.contextValues),
     hiddenActivityId: scope.hiddenActivityId,
     hostAncestors: scope.hostAncestors,
+    hostNamespace: scope.hostNamespace,
     idPath: scope.idPath,
     selectProps: scope.selectProps,
     stack: scope.stack,
@@ -570,7 +576,7 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
     if (frame.request.document !== null && !frame.request.document.hasHead) {
       if (text.trim() !== "") throw invalidDocumentShellError();
     }
-    if (__DEV__) {
+    if (__DEV__ && frame.hostNamespace === "html") {
       validateTextNesting(text, frame.hostAncestors);
     }
     if (text !== "") {
@@ -1029,9 +1035,10 @@ function renderHostElement(
   props: Props,
   frame: RenderFrame,
 ): void {
-  if (renderHostAsset(type, props, frame)) return;
+  const namespace = hostElementNamespace(type, frame.hostNamespace);
+  if (namespace === "html" && renderHostAsset(type, props, frame)) return;
 
-  if (__DEV__) {
+  if (__DEV__ && namespace === "html") {
     validateInstanceNesting(type, frame.hostAncestors);
   }
 
@@ -1048,7 +1055,7 @@ function renderHostElement(
     document.hasHead = true;
   }
 
-  const isVoid = isVoidElement(type);
+  const isVoid = namespace === "html" && isVoidElement(type);
   const unsafeHTML = unsafeHTMLContent(props);
 
   // hasRenderableChild is an O(children) scan; only the error checks need it.
@@ -1092,7 +1099,7 @@ function renderHostElement(
     return;
   }
 
-  const formText = formTextContent(type, props);
+  const formText = namespace === "html" ? formTextContent(type, props) : null;
   if (formText !== null) {
     writeText(
       consumePendingLeadingNewline(frame)
@@ -1106,13 +1113,15 @@ function renderHostElement(
   }
 
   const previousSelectProps = frame.selectProps;
-  if (type === "select") frame.selectProps = props;
+  if (namespace === "html" && type === "select") frame.selectProps = props;
   const previousHostAncestors = frame.hostAncestors;
+  const previousHostNamespace = frame.hostNamespace;
   const previousViewTransition = frame.viewTransition;
   if (viewTransition !== null) frame.viewTransition = null;
   if (__DEV__) {
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
+  frame.hostNamespace = childHostNamespace(type, namespace);
 
   try {
     // Suspensions are handled inside renderChildSequence (the single suspend
@@ -1121,6 +1130,7 @@ function renderHostElement(
   } finally {
     frame.selectProps = previousSelectProps;
     frame.hostAncestors = previousHostAncestors;
+    frame.hostNamespace = previousHostNamespace;
     frame.viewTransition = previousViewTransition;
     frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
   }
@@ -1128,6 +1138,25 @@ function renderHostElement(
     writeDocumentHeadMarker(frame.segment);
   }
   writeElementEnd(type, frame.segment);
+}
+
+function hostElementNamespace(
+  type: string,
+  parent: HostNamespace,
+): HostNamespace {
+  const normalizedType = type.toLowerCase();
+  if (normalizedType === "svg") return "svg";
+  if (normalizedType === "math") return "mathml";
+  return parent;
+}
+
+function childHostNamespace(
+  type: string,
+  namespace: HostNamespace,
+): HostNamespace {
+  return namespace === "svg" && type.toLowerCase() === "foreignobject"
+    ? "html"
+    : namespace;
 }
 
 function renderHostAsset(

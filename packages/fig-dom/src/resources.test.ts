@@ -3,6 +3,7 @@ import {
   modulepreload,
   preconnect,
   preload,
+  script,
   stylesheet,
 } from "@bgub/fig";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -67,6 +68,16 @@ describe("@bgub/fig-dom asset resources", () => {
     head.appendChild(ssr);
 
     void insertAssetResources([stylesheet("/a.css")]);
+
+    expect(links()).toHaveLength(1);
+  });
+
+  it("dedupes an explicit non-async script against server output", () => {
+    const ssr = new FakeElement("script");
+    ssr.setAttribute("src", "/ordered.js");
+    head.appendChild(ssr);
+
+    void insertAssetResources([script("/ordered.js", { async: false })]);
 
     expect(links()).toHaveLength(1);
   });

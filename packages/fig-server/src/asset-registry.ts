@@ -133,7 +133,7 @@ function writeAssetTag(
           charset: resource.charset,
           name: resource.name,
           property: resource.property,
-          "http-equiv": resource.httpEquiv,
+          "http-equiv": resource["http-equiv"],
           content: resource.content,
           "data-fig-resource-key": resource.key,
         },
@@ -167,7 +167,7 @@ function assetSignature(resource: FigAssetResource): string {
         resource.href,
         resource.media ?? "",
         resource.precedence ?? "",
-        resource.crossOrigin ?? "",
+        resource.crossorigin ?? "",
         resource.blocking ?? "reveal",
       );
     case "preload":
@@ -176,15 +176,15 @@ function assetSignature(resource: FigAssetResource): string {
         resource.href,
         resource.as,
         resource.type ?? "",
-        resource.crossOrigin ?? "",
-        resource.fetchPriority ?? "",
+        resource.crossorigin ?? "",
+        resource.fetchpriority ?? "",
       );
     case "modulepreload":
       return signature(
         resource.kind,
         resource.href,
-        resource.crossOrigin ?? "",
-        resource.fetchPriority ?? "",
+        resource.crossorigin ?? "",
+        resource.fetchpriority ?? "",
       );
     case "font":
       // Mirror the preload-as-font signature: a font shares the preload-font key
@@ -195,14 +195,14 @@ function assetSignature(resource: FigAssetResource): string {
         resource.href,
         "font",
         resource.type,
-        resource.crossOrigin ?? "anonymous",
-        resource.fetchPriority ?? "",
+        resource.crossorigin ?? "anonymous",
+        resource.fetchpriority ?? "",
       );
     case "preconnect":
       return signature(
         resource.kind,
         resource.href,
-        resource.crossOrigin ?? "",
+        resource.crossorigin ?? "",
       );
     case "script":
       return signature(
@@ -211,7 +211,7 @@ function assetSignature(resource: FigAssetResource): string {
         resource.module === true,
         resource.async !== false,
         resource.defer === true,
-        resource.crossOrigin ?? "",
+        resource.crossorigin ?? "",
       );
     case "title":
       return signature(resource.kind, resource.value);
@@ -221,7 +221,7 @@ function assetSignature(resource: FigAssetResource): string {
         resource.charset ?? "",
         resource.name ?? "",
         resource.property ?? "",
-        resource.httpEquiv ?? "",
+        resource["http-equiv"] ?? "",
         resource.content ?? "",
       );
   }

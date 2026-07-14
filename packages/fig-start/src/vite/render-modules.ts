@@ -138,7 +138,7 @@ export function resolveServerRouteAssets(metadata) {
 function assetResource(href) {
   const type = assetType(href);
   if (type?.startsWith("font/")) {
-    return preload(href, "font", { crossOrigin: "anonymous", type });
+    return preload(href, "font", { crossorigin: "anonymous", type });
   }
   if (type?.startsWith("image/")) return preload(href, "image", { type });
   return preload(href, "fetch", type === undefined ? {} : { type });

@@ -530,7 +530,7 @@ describe("payload rendering", () => {
         // space, so only the first survives serialization.
         preload("/assets/Inter.woff2", "font", {
           type: "font/woff2",
-          crossOrigin: "anonymous",
+          crossorigin: "anonymous",
         }),
       ],
     });
