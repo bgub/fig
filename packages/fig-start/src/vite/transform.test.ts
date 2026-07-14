@@ -23,6 +23,7 @@ export function Dashboard() {
 
     expect(out.clientRefs).toEqual([
       {
+        exportName: "Island",
         id: "/src/routes/Island.tsx#Island",
         specifier: "/src/routes/Island.tsx",
       },
@@ -44,6 +45,7 @@ export function Dashboard() {
     );
     expect(out.clientRefs).toEqual([
       {
+        exportName: "Counter",
         id: "/src/widgets/Counter.tsx#Counter",
         specifier: "/src/widgets/Counter.tsx",
       },

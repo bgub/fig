@@ -15,14 +15,13 @@ import {
 } from "./internal.ts";
 import {
   assertPayloadCodecMatches,
-  decodePayloadStream,
   encodePayloadDataEntries,
-  isPayloadDecodeAborted,
   jsonPayloadCodec,
-  type PayloadDecodeOptions,
   payloadCodecIdFromContentType,
   type PayloadRow,
-} from "./payload.ts";
+} from "./payload-format.ts";
+import { decodePayloadStream, type PayloadDecodeOptions } from "./payload.ts";
+import * as payloadApi from "./payload.ts";
 
 // ---------------------------------------------------------------------------
 // Row and stream helpers: these tests hand-author wire rows; the render →
@@ -142,6 +141,10 @@ function decodeRows(
 }
 
 describe("decodePayloadStream", () => {
+  it("keeps the public runtime surface to the decoder", () => {
+    expect(Object.keys(payloadApi)).toEqual(["decodePayloadStream"]);
+  });
+
   it("resolves value with the decoded root tree and completes", async () => {
     const decode = decodeRows([
       model(
@@ -361,7 +364,7 @@ describe("decodePayloadStream", () => {
     const reason = await (root.props.data as Promise<unknown>).catch(
       (error: unknown) => error,
     );
-    expect(isPayloadDecodeAborted(reason)).toBe(true);
+    expect(reason).toMatchObject({ name: "PayloadDecodeAbortedError" });
     expect((reason as Error & { cause?: unknown }).cause).toBe(
       "navigated away",
     );
@@ -374,18 +377,16 @@ describe("decodePayloadStream", () => {
     live.abort("stop");
     expect(await decode.completion).toEqual({ status: "aborted" });
     const reason = await decode.value.catch((error: unknown) => error);
-    expect(isPayloadDecodeAborted(reason)).toBe(true);
+    expect(reason).toMatchObject({ name: "PayloadDecodeAbortedError" });
 
     const preAborted = AbortSignal.abort("already done");
     const second = decodePayloadStream(controlledRowStream().stream, {
       signal: preAborted,
     });
     expect(await second.completion).toEqual({ status: "aborted" });
-    expect(
-      isPayloadDecodeAborted(
-        await second.value.catch((error: unknown) => error),
-      ),
-    ).toBe(true);
+    await expect(second.value).rejects.toMatchObject({
+      name: "PayloadDecodeAbortedError",
+    });
   });
 
   it("hydrates decoded data rows through the capability", async () => {
@@ -486,15 +487,13 @@ describe("decodePayloadStream", () => {
 
   it("starts client reference loads at row arrival and renders islands", async () => {
     const loads: string[] = [];
-    const widgetModule = {
-      Widget: (props: { label: string }) =>
-        createElement("button", null, `widget:${props.label}`),
-    };
+    const Widget = (props: { label: string }) =>
+      createElement("button", null, `widget:${props.label}`);
     const source = controlledRowStream();
     const decode = decodePayloadStream(source.stream, {
-      loadClientReference: (metadata) => {
-        loads.push(metadata.id);
-        return Promise.resolve(widgetModule);
+      resolveClientReference: (reference) => {
+        loads.push(reference.id);
+        return Promise.resolve(Widget);
       },
     });
 
@@ -504,7 +503,7 @@ describe("decodePayloadStream", () => {
       value: { id: "src/Widget.tsx#Widget", exportName: "Widget" },
     });
     await tick();
-    // The module import overlaps the rest of the stream.
+    // Async resolution overlaps the rest of the stream.
     expect(loads).toEqual(["src/Widget.tsx#Widget"]);
 
     source.push(model(0, element({ $fig: "client", id: 1 }, { label: "hi" })));
@@ -519,7 +518,6 @@ describe("decodePayloadStream", () => {
   });
 
   it("short-circuits client references through resolveClientReference", async () => {
-    let loaded = false;
     const decode = decodeRows(
       [
         {
@@ -530,10 +528,6 @@ describe("decodePayloadStream", () => {
         model(0, element({ $fig: "client", id: 1 }, { label: "solid" })),
       ],
       {
-        loadClientReference: () => {
-          loaded = true;
-          return Promise.resolve({});
-        },
         resolveClientReference: () => (props: { label: string }) =>
           createElement("em", null, props.label),
       },
@@ -543,7 +537,6 @@ describe("decodePayloadStream", () => {
     const rendered = renderNode(root) as FigElement;
     expect(rendered.type).toBe("em");
     expect(rendered.props.children).toBe("solid");
-    expect(loaded).toBe(false);
   });
 
   it("keeps ungated resolved references identity-stable across decodes", async () => {
@@ -582,7 +575,7 @@ describe("decodePayloadStream", () => {
         },
         model(0, element({ $fig: "client", id: 1 }, {})),
       ],
-      { loadClientReference: () => Promise.reject(failure) },
+      { resolveClientReference: () => Promise.reject(failure) },
     );
 
     const root = (await decode.value) as FigElement;
@@ -675,11 +668,9 @@ describe("decodePayloadStream", () => {
     decode.abort();
 
     expect(await decode.completion).toEqual({ status: "aborted" });
-    expect(
-      isPayloadDecodeAborted(
-        await decode.value.catch((error: unknown) => error),
-      ),
-    ).toBe(true);
+    await expect(decode.value).rejects.toMatchObject({
+      name: "PayloadDecodeAbortedError",
+    });
   });
 });
 

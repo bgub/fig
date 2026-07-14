@@ -41,7 +41,6 @@ export interface FigPortal<Target = unknown> {
 export interface ClientReferenceOptions {
   assets?: ClientReferenceAssets;
   id: string;
-  load: () => Promise<unknown>;
   ssr?: ElementType;
 }
 
@@ -50,7 +49,6 @@ export interface FigClientReference<P = Props> {
   readonly $$typeof: symbol;
   readonly assets?: ClientReferenceAssets;
   readonly id: string;
-  readonly load: () => Promise<unknown>;
   readonly ssr?: ElementType;
 }
 
@@ -210,7 +208,6 @@ export function clientReference<P extends Props>(
     $$typeof: FigClientReferenceSymbol,
     assets: options.assets,
     id: options.id,
-    load: options.load,
     ssr: options.ssr,
   });
 }

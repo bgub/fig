@@ -62,8 +62,7 @@ export interface PayloadErrorValue {
 }
 
 /**
- * Semantic payload row before a PayloadCodec turns it into bytes. This row
- * model is the stable contract; a codec's byte layout is intentionally opaque.
+ * Semantic payload row before the internal codec turns it into bytes.
  */
 export type PayloadRow =
   | { for?: number; tag: "assets"; value: SerializedAssetResource[] }
@@ -82,9 +81,8 @@ export type PayloadRow =
   | { id: number; tag: "model"; value: PayloadModel };
 
 /**
- * Transport-safe model value used inside payload rows. The shape is public so
- * custom codecs and framework integrations can encode/decode rows, but callers
- * should not treat the exact tagged representation as an app data format.
+ * Transport-safe model value used inside internal payload rows. This is an
+ * implementation format, not an application data format.
  */
 export type PayloadModel =
   | null
@@ -142,16 +140,6 @@ export type PayloadValueSpecialModel = Extract<
 export type PayloadDataHydrationEntry = Omit<FigDataHydrationEntry, "value"> & {
   value: PayloadModel;
 };
-
-export interface PayloadClientReferenceMetadata {
-  // Opaque unique key for loading and dedupe. Fig's bundler tooling authors
-  // ids as "<module specifier>#<export>", but only the server ever splits
-  // that convention — it derives exportName once at serialization, so
-  // loaders and the client treat id as a black box.
-  id: string;
-  exportName?: string;
-  ssr?: boolean;
-}
 
 export interface PayloadCodec {
   /**

@@ -19,8 +19,6 @@ import {
   errorFromPayloadValue,
   isPayloadSpecialModel,
   jsonPayloadCodec,
-  type PayloadClientReferenceMetadata,
-  type PayloadCodec,
   type PayloadDecodeRefs,
   type PayloadElementModel,
   type PayloadModel,
@@ -33,37 +31,16 @@ import {
 import { type FigAssetResource, isFigAssetResource } from "./resource.ts";
 import { isThenable, trackThenable } from "./thenables.ts";
 
-// The payload subpath's public format surface. decodePayloadStream below is
-// the renderer-neutral client half; the server half (renderToPayloadStream)
-// lives in @bgub/fig-server/payload. Browser code never imports fig-server.
-export {
-  assertPayloadCodecMatches,
-  decodePayloadDataEntries,
-  decodePayloadValue,
-  encodePayloadDataEntries,
-  encodePayloadValue,
-  errorFromPayloadValue,
-  jsonPayloadCodec,
-  payloadCodecIdFromContentType,
-  type PayloadClientReferenceMetadata,
-  type PayloadCodec,
-  type PayloadDataHydrationEntry,
-  type PayloadElementModel,
-  type PayloadErrorValue,
-  type PayloadModel,
-  type PayloadRow,
-  type PayloadRowDecoder,
-  type PayloadSpecialModel,
-  type SerializedAssetResource,
-} from "./payload-format.ts";
-
-export type LoadClientReference = (
-  metadata: PayloadClientReferenceMetadata,
-) => PromiseLike<unknown>;
+export interface PayloadClientReference {
+  assets?: readonly FigAssetResource[];
+  exportName?: string;
+  id: string;
+  ssr?: boolean;
+}
 
 export type ResolveClientReference = (
-  metadata: PayloadClientReferenceMetadata,
-) => ElementType<any> | undefined;
+  reference: PayloadClientReference,
+) => ElementType<any> | PromiseLike<ElementType<any>> | undefined;
 
 export type PayloadDecodeCompletion =
   | { status: "aborted" }
@@ -87,26 +64,12 @@ export interface PayloadDecode {
 }
 
 export interface PayloadDecodeOptions {
-  codec?: PayloadCodec;
   /**
    * Receives decoded `data` rows for hydration into a data store. The
-   * capability itself is expected to be generation-guarded: it hydrates only
-   * while its caller is authoritative and returns false after supersession.
+   * capability itself is expected to be generation-guarded and to ignore
+   * entries after its caller loses authority.
    */
-  hydrate?: (entries: FigDataHydrationEntry[]) => boolean;
-  loadClientReference?: LoadClientReference;
-  /**
-   * Observes every client-reference row as it arrives (metadata plus its
-   * declared assets), before the referencing content decodes. Frameworks use
-   * it to track which modules a stream depends on (e.g. SSR module
-   * bootstrapping); it does not affect resolution.
-   */
-  onClientReference?: (reference: {
-    assets?: readonly FigAssetResource[];
-    exportName?: string;
-    id: string;
-    ssr?: boolean;
-  }) => void;
+  hydrate?: (entries: readonly FigDataHydrationEntry[]) => void;
   /**
    * Called with stream-safe asset resources as soon as their rows arrive
    * (e.g. fig-dom's insertAssetResources). A returned promise gates the
@@ -132,26 +95,11 @@ class PayloadDecodeAbortedError extends Error {
 }
 
 /**
- * True for the internal abort reason unresolved holes reject with when a
- * decode is aborted or superseded — frameworks treat it as cancellation, not
- * a user error.
- */
-export function isPayloadDecodeAborted(error: unknown): boolean {
-  return (
-    error instanceof PayloadDecodeAbortedError ||
-    (typeof DOMException !== "undefined" &&
-      error instanceof DOMException &&
-      error.name === "AbortError")
-  );
-}
-
-/**
  * Decode a payload row stream into a live PayloadDecode. The returned
  * `value` resolves with the decoded root FigNode; unfinished subtrees inside
  * it are outlined holes that suspend and fill (or reject) as their rows
  * arrive. Aborting `signal` or calling `abort` ignores remaining rows and
- * rejects unresolved holes with an internal abort reason
- * (isPayloadDecodeAborted).
+ * rejects unresolved holes with an internal cancellation reason.
  */
 export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
@@ -242,7 +190,7 @@ class PayloadStreamDecode {
     const gates = deferred<void>();
     this.gatesReleased = gates.promise;
     this.releaseGates = () => gates.resolve(undefined);
-    this.rowDecoder = (options.codec ?? jsonPayloadCodec).createDecoder((row) =>
+    this.rowDecoder = jsonPayloadCodec.createDecoder((row) =>
       this.handleRow(row),
     );
     this.value = this.chunkPromise(this.getChunk(0)) as Promise<FigNode>;
@@ -352,14 +300,17 @@ class PayloadStreamDecode {
       }
       case "client": {
         const chunk = this.getChunk(row.id);
-        const metadata: PayloadClientReferenceMetadata = { id: row.value.id };
+        const reference: PayloadClientReference = { id: row.value.id };
         if (row.value.exportName !== undefined) {
-          metadata.exportName = row.value.exportName;
+          reference.exportName = row.value.exportName;
         }
-        if (row.value.ssr === true) metadata.ssr = true;
-        this.observeClientReference(metadata, row.value.assets);
+        if (row.value.ssr === true) reference.ssr = true;
+        const assets = row.value.assets?.filter(isFigAssetResource);
+        if (assets !== undefined && assets.length > 0) {
+          reference.assets = assets;
+        }
         const gate = this.prepareAssets(row.value.assets);
-        const component = this.clientReferenceComponent(metadata, gate);
+        const component = this.clientReferenceComponent(reference, gate);
         chunk.arrived = true;
         this.fulfillChunk(chunk, component);
         return;
@@ -375,8 +326,6 @@ class PayloadStreamDecode {
       case "data": {
         const hydrate = this.options.hydrate;
         if (hydrate === undefined) return;
-        // The capability is generation-guarded by its supplier; a false
-        // return means authority was lost and the entries were rejected.
         hydrate(decodePayloadDataEntries(row.value));
         return;
       }
@@ -389,20 +338,6 @@ class PayloadStreamDecode {
         return;
       }
     }
-  }
-
-  private observeClientReference(
-    metadata: PayloadClientReferenceMetadata,
-    serializedAssets: readonly SerializedAssetResource[] | undefined,
-  ): void {
-    const observe = this.options.onClientReference;
-    if (observe === undefined) return;
-    const reference: Parameters<
-      NonNullable<PayloadDecodeOptions["onClientReference"]>
-    >[0] = { ...metadata };
-    const assets = serializedAssets?.filter(isFigAssetResource);
-    if (assets !== undefined && assets.length > 0) reference.assets = assets;
-    observe(reference);
   }
 
   // Never rejects and never blocks content on a failed asset: a rejected
@@ -428,11 +363,17 @@ class PayloadStreamDecode {
   }
 
   private clientReferenceComponent(
-    metadata: PayloadClientReferenceMetadata,
+    reference: PayloadClientReference,
     gate: Promise<void> | null,
   ): ElementType<any> {
-    const resolved = this.options.resolveClientReference?.(metadata);
-    if (resolved !== undefined) {
+    let resolved: ReturnType<ResolveClientReference>;
+    try {
+      resolved = this.options.resolveClientReference?.(reference);
+    } catch (error) {
+      resolved = Promise.reject(error);
+    }
+
+    if (resolved !== undefined && !isThenable(resolved)) {
       // Ungated references decode to the resolved component itself, so the
       // element type is stable across decodes and re-decoding a surrounding
       // payload (e.g. a refresh) updates the component instead of
@@ -444,19 +385,18 @@ class PayloadStreamDecode {
       };
     }
 
-    const load = this.options.loadClientReference;
-    if (load !== undefined) {
-      // Start the module import as soon as the reference row arrives so it
+    if (resolved !== undefined) {
+      // Start asynchronous resolution as soon as the reference row arrives so it
       // overlaps the rest of the stream instead of serializing behind it;
-      // tracking lets a module settled before its first render read resolve
+      // tracking lets a resolution settled before its first render read resolve
       // synchronously instead of suspending for a retry beat.
-      const module = Promise.resolve(load(metadata));
-      trackThenable(module);
+      const pending = Promise.resolve(resolved);
+      trackThenable(pending);
       let type: ElementType<any> | null = null;
       return function PayloadClientComponent(props: Props): FigNode {
         if (gate !== null) readPromise(gate);
         if (type === null) {
-          type = resolveClientReferenceExport(readPromise(module), metadata);
+          type = clientReferenceType(readPromise(pending), reference.id);
         }
         return createElement(type, props);
       };
@@ -464,7 +404,7 @@ class PayloadStreamDecode {
 
     return function PayloadUnresolvedClientComponent(): never {
       throw new Error(
-        `Cannot render client reference "${metadata.id}" because decodePayloadStream was not configured with loadClientReference or a matching resolveClientReference.`,
+        `Cannot render client reference "${reference.id}" because decodePayloadStream was not configured with a matching resolveClientReference.`,
       );
     };
   }
@@ -646,24 +586,7 @@ function PayloadStreamHole(props: {
   return props.decode.readChunkForRender(props.id) as FigNode;
 }
 
-export function resolveClientReferenceExport(
-  moduleValue: unknown,
-  metadata: PayloadClientReferenceMetadata,
-): ElementType<any> {
-  if (typeof moduleValue === "function") return moduleValue as ElementType<any>;
-
-  if (
-    typeof moduleValue === "object" &&
-    moduleValue !== null &&
-    metadata.exportName !== undefined
-  ) {
-    const candidate = (moduleValue as Record<string, unknown>)[
-      metadata.exportName
-    ];
-    if (typeof candidate === "function") return candidate as ElementType<any>;
-  }
-
-  throw new Error(
-    `Client reference "${metadata.id}" did not load a component.`,
-  );
+function clientReferenceType(value: unknown, id: string): ElementType<any> {
+  if (typeof value === "function") return value as ElementType<any>;
+  throw new Error(`Client reference "${id}" did not resolve to a component.`);
 }

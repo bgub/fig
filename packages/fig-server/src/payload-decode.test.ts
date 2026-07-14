@@ -20,7 +20,6 @@ import {
 } from "@bgub/fig/internal";
 import {
   decodePayloadStream,
-  isPayloadDecodeAborted,
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
 import { serverDataResource } from "@bgub/fig/server";
@@ -154,7 +153,6 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
   it("renders decoded client references as islands", async () => {
     const Island = clientReference<{ label: string }>({
       id: "src/Island.tsx#Island",
-      load: () => Promise.resolve({}),
     });
 
     function Page() {
@@ -167,12 +165,11 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
 
     const loads: string[] = [];
     const { decode } = decodeRender(createElement(Page, null), {
-      loadClientReference: (metadata) => {
-        loads.push(metadata.id);
-        return Promise.resolve({
-          Island: (props: { label: string }) =>
-            createElement("button", null, `island:${props.label}`),
-        });
+      resolveClientReference: (reference) => {
+        loads.push(reference.id);
+        return Promise.resolve((props: { label: string }) =>
+          createElement("button", null, `island:${props.label}`),
+        );
       },
     });
 
@@ -397,7 +394,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(isPayloadDecodeAborted(thrown)).toBe(true);
+    expect(thrown).toMatchObject({ name: "PayloadDecodeAbortedError" });
 
     result.abort();
   });

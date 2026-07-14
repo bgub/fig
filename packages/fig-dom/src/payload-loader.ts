@@ -1,12 +1,12 @@
 import type { DataResourceLoadContext, FigNode } from "@bgub/fig";
 import type { FigAssetResource } from "@bgub/fig";
-import { loadContextHydrate } from "@bgub/fig/internal";
 import {
   assertPayloadCodecMatches,
-  decodePayloadStream,
   jsonPayloadCodec,
-  type LoadClientReference,
-  type PayloadCodec,
+  loadContextHydrate,
+} from "@bgub/fig/internal";
+import {
+  decodePayloadStream,
   type ResolveClientReference,
 } from "@bgub/fig/payload";
 import { insertAssetResources } from "./asset-resources.ts";
@@ -17,8 +17,6 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 const noop = (): void => undefined;
 
 export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
-  codec?: PayloadCodec;
-  loadClientReference?: LoadClientReference;
   /**
    * Overrides the asset-preparation step (default: insertAssetResources).
    * Frameworks wrap the default to observe stylesheet gates — e.g. holding a
@@ -53,8 +51,6 @@ export function payloadDataLoader<TArgs extends unknown[]>(
 ): (
   ...argsAndContext: [...TArgs, DataResourceLoadContext]
 ) => Promise<FigNode> {
-  const codec = options.codec ?? jsonPayloadCodec;
-
   return async (...argsAndContext) => {
     const context = argsAndContext[
       argsAndContext.length - 1
@@ -76,18 +72,19 @@ export function payloadDataLoader<TArgs extends unknown[]>(
       throw new Error("Payload response did not include a body.");
     }
     try {
-      assertPayloadCodecMatches(codec, response.headers.get("content-type"));
+      assertPayloadCodecMatches(
+        jsonPayloadCodec,
+        response.headers.get("content-type"),
+      );
     } catch (error) {
       await body.cancel().catch(noop);
       throw error;
     }
 
     const decode = decodePayloadStream(body, {
-      codec,
       // Absent outside a data store (the loader called directly): data rows
       // are then ignored rather than hydrated.
       hydrate: loadContextHydrate(context),
-      loadClientReference: options.loadClientReference,
       prepareAssets:
         options.prepareAssets ?? ((assets) => insertAssetResources(assets)),
       resolveClientReference: options.resolveClientReference,

@@ -29,17 +29,17 @@ export async function renderManifest(root: string): Promise<string> {
       (ref) =>
         `  ${JSON.stringify(ref.id)}: () => import(${JSON.stringify(
           ref.specifier,
-        )})`,
+        )}).then((module) => module[${JSON.stringify(ref.exportName)}])`,
     )
     .join(",\n");
 
   return `const refs = {\n${entries}\n};
-export function loadClientReference(metadata) {
-  const load = refs[metadata.id];
-  if (load === undefined) {
-    throw new Error("Unknown client reference: " + metadata.id);
+export function resolveClientReference(reference) {
+  const resolve = refs[reference.id];
+  if (resolve === undefined) {
+    throw new Error("Unknown client reference: " + reference.id);
   }
-  return load();
+  return resolve();
 }
 `;
 }
@@ -172,13 +172,13 @@ startFigStartClient();
 export function renderClientRuntime(): string {
   return `import "${SERVER_ROUTE_ASSETS_ID}";
 import { hydrateStart } from "@bgub/fig-start/client";
-import { loadClientReference } from "virtual:fig-start/client-manifest";
+import { resolveClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
 export function startFigStartClient() {
   hydrateStart({
     context: { appName: start.appName },
-    loadClientReference,
+    resolveClientReference,
     onRecoverableError: start.onRecoverableError,
     routes: start.routes,
   });

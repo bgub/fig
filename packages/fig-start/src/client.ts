@@ -15,7 +15,14 @@ import {
   useReactive,
   useSyncExternalStore,
 } from "@bgub/fig";
-import { resolveClientReferenceExport } from "@bgub/fig/internal";
+import {
+  decodePayloadDataEntries,
+  decodePayloadValue,
+  encodePayloadValue,
+  isThenable,
+  jsonPayloadCodec,
+  type PayloadDataHydrationEntry,
+} from "@bgub/fig/internal";
 import {
   hydrateRoot,
   insertAssetResources,
@@ -28,17 +35,9 @@ import {
   storeDevtoolsOpen,
 } from "./devtools.ts";
 import {
-  decodePayloadDataEntries,
-  decodePayloadValue,
-  encodePayloadValue,
-  jsonPayloadCodec,
-  type PayloadClientReferenceMetadata,
-  type PayloadDataHydrationEntry,
+  type PayloadClientReference,
+  type ResolveClientReference,
 } from "@bgub/fig/payload";
-import {
-  getPayloadFrameStream,
-  type PayloadFrameStream,
-} from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
@@ -65,6 +64,10 @@ import { isServerRoute } from "./internal.ts";
 import type { AnyRoute } from "./route.ts";
 import { createRouter, type FigRouter, type RouterHistory } from "./router.ts";
 import type { RouterLocation } from "./types.ts";
+import {
+  getPayloadFrameStream,
+  type PayloadFrameStream,
+} from "./payload-frames.ts";
 
 interface ViteHotContext {
   on(
@@ -83,14 +86,9 @@ export interface StartClientOptions {
   container?: Element | null;
   context?: unknown;
   // Resolve a server route's client-reference ids back to components. With the
-  // @bgub/fig-start/vite plugin, pass the generated manifest's loadClientReference.
-  loadClientReference?: (
-    metadata: PayloadClientReferenceMetadata,
-  ) => Promise<unknown>;
+  // @bgub/fig-start/vite plugin, pass the generated manifest resolver.
   onRecoverableError?: (error: unknown) => void;
-  resolveClientReference?: (
-    metadata: PayloadClientReferenceMetadata,
-  ) => ElementType | undefined;
+  resolveClientReference?: ResolveClientReference;
   routes: readonly AnyRoute[];
 }
 
@@ -207,17 +205,17 @@ type PayloadStream = PayloadFrameStream<SerializedPayloadFrame>;
 // state survives re-decodes.
 function createRouteClientReference(
   options: StartClientOptions,
-  metadata: PayloadClientReferenceMetadata,
+  reference: PayloadClientReference,
   hydrationGate: ClientReferenceHydrationGate,
 ): ElementType {
-  const resolved =
-    resolvePreloadedClientReference(metadata) ??
-    options.resolveClientReference?.(metadata);
-  const loaded =
-    resolved === undefined
-      ? options.loadClientReference?.(metadata)
-      : undefined;
-  const ssr = metadata.ssr === true;
+  const resolution =
+    resolvePreloadedClientReference(reference) ??
+    options.resolveClientReference?.(reference);
+  const resolved = isThenable(resolution) ? undefined : resolution;
+  const pending = isThenable(resolution)
+    ? Promise.resolve(resolution)
+    : undefined;
+  const ssr = reference.ssr === true;
 
   return function StartClientReference(
     props: Props & { children?: FigNode },
@@ -230,34 +228,49 @@ function createRouteClientReference(
         () => hydrationGate.getSnapshot(),
         () => hydrationGate.getServerSnapshot(),
       );
-      if (!hydrated) return clientReferencePlaceholder(metadata.id);
+      if (!hydrated) return clientReferencePlaceholder(reference.id);
     }
 
     if (resolved !== undefined) return createElement(resolved, props);
-    if (loaded !== undefined) {
-      const type = resolveClientReferenceExport(readPromise(loaded), metadata);
+    if (pending !== undefined) {
+      const type = clientReferenceType(readPromise(pending), reference.id);
       return createElement(type, props);
     }
 
     throw new Error(
       ssr
-        ? `Client reference "${metadata.id}" was server-rendered but was not preloaded before hydration.`
-        : `Cannot render client reference "${metadata.id}" without a client-reference resolver.`,
+        ? `Client reference "${reference.id}" was server-rendered but was not preloaded before hydration.`
+        : `Cannot render client reference "${reference.id}" without a client-reference resolver.`,
     );
   };
 }
 
 function resolvePreloadedClientReference(
-  metadata: PayloadClientReferenceMetadata,
+  reference: PayloadClientReference,
 ): ElementType | undefined {
   const registry = (globalThis as Record<string, unknown>)[
     CLIENT_REFERENCE_MODULES_GLOBAL
   ];
   if (typeof registry !== "object" || registry === null) return undefined;
 
-  const moduleValue = (registry as Record<string, unknown>)[metadata.id];
+  const moduleValue = (registry as Record<string, unknown>)[reference.id];
   if (moduleValue === undefined) return undefined;
-  return resolveClientReferenceExport(moduleValue, metadata);
+  if (
+    typeof moduleValue === "object" &&
+    moduleValue !== null &&
+    reference.exportName !== undefined
+  ) {
+    return clientReferenceType(
+      (moduleValue as Record<string, unknown>)[reference.exportName],
+      reference.id,
+    );
+  }
+  return clientReferenceType(moduleValue, reference.id);
+}
+
+function clientReferenceType(value: unknown, id: string): ElementType {
+  if (typeof value === "function") return value as ElementType;
+  throw new Error(`Client reference "${id}" did not resolve to a component.`);
 }
 
 interface ClientReferenceHydrationGate {
@@ -340,23 +353,20 @@ function createServerRouteContent(
   const hydrationGate = createClientReferenceHydrationGate();
 
   const trackedOptions: StartClientOptions =
-    options.loadClientReference === undefined
+    options.resolveClientReference === undefined
       ? options
       : {
           ...options,
-          loadClientReference: (metadata) => {
-            const load = options.loadClientReference?.(metadata);
-            if (load === undefined) {
-              throw new Error(
-                `Client reference "${metadata.id}" has no loader.`,
-              );
-            }
-            pendingModuleLoads.add(load);
+          resolveClientReference: (reference) => {
+            const resolution = options.resolveClientReference?.(reference);
+            if (!isThenable(resolution)) return resolution;
+            const pending = Promise.resolve(resolution);
+            pendingModuleLoads.add(pending);
             const remove = (): void => {
-              pendingModuleLoads.delete(load);
+              pendingModuleLoads.delete(pending);
             };
-            void load.then(remove, remove);
-            return load;
+            void pending.then(remove, remove);
+            return pending;
           },
         };
 
@@ -366,27 +376,26 @@ function createServerRouteContent(
   const reportedMissingResolvers = new Set<string>();
 
   function resolveRouteClientReference(
-    metadata: PayloadClientReferenceMetadata,
+    reference: PayloadClientReference,
   ): ElementType {
-    const cached = clientReferenceTypes.get(metadata.id);
+    const cached = clientReferenceTypes.get(reference.id);
     if (cached !== undefined) return cached;
 
     // A payload with client references but no resolver would render
     // placeholders forever; report loudly as soon as the reference row
     // decodes (the render-time throw still lands in the ErrorBoundary).
     if (
-      options.loadClientReference === undefined &&
       options.resolveClientReference === undefined &&
-      resolvePreloadedClientReference(metadata) === undefined &&
-      !reportedMissingResolvers.has(metadata.id)
+      resolvePreloadedClientReference(reference) === undefined &&
+      !reportedMissingResolvers.has(reference.id)
     ) {
-      reportedMissingResolvers.add(metadata.id);
+      reportedMissingResolvers.add(reference.id);
       reportPayloadFetchError(
-        metadata.id,
+        reference.id,
         new Error(
-          `Server route content renders client reference "${metadata.id}", ` +
+          `Server route content renders client reference "${reference.id}", ` +
             `but hydrateStart() received no client-reference resolver. Pass ` +
-            `loadClientReference from "virtual:fig-start/client-manifest" ` +
+            `resolveClientReference from "virtual:fig-start/client-manifest" ` +
             `(the @bgub/fig-start/vite plugin).`,
         ),
         options,
@@ -395,10 +404,10 @@ function createServerRouteContent(
 
     const type = createRouteClientReference(
       trackedOptions,
-      metadata,
+      reference,
       hydrationGate,
     );
-    clientReferenceTypes.set(metadata.id, type);
+    clientReferenceTypes.set(reference.id, type);
     return type;
   }
 

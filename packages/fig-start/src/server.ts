@@ -15,7 +15,15 @@ import {
   type FigNode,
   type Props,
 } from "@bgub/fig";
-import { assetResourceKey, normalizeDataResourceKey } from "@bgub/fig/internal";
+import {
+  assetResourceKey,
+  decodePayloadValue,
+  encodePayloadDataEntries,
+  encodePayloadValue,
+  normalizeDataResourceKey,
+  type PayloadDataHydrationEntry,
+  type PayloadModel,
+} from "@bgub/fig/internal";
 import {
   createRenderTreeCollector,
   escapeAttribute,
@@ -35,19 +43,8 @@ import {
   devtoolsLayoutStyle,
   devtoolsOpenFromRequest,
 } from "./devtools.ts";
-import {
-  decodePayloadStream,
-  decodePayloadValue,
-  encodePayloadDataEntries,
-  encodePayloadValue,
-  type PayloadDataHydrationEntry,
-  type PayloadModel,
-} from "@bgub/fig/payload";
-import {
-  payloadFrameBootstrapScript,
-  payloadFrameScript,
-  renderToPayloadStream,
-} from "@bgub/fig-server/payload";
+import { decodePayloadStream } from "@bgub/fig/payload";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import {
   CLIENT_REFERENCE_MODULES_GLOBAL,
   DATA_ENDPOINT_PATH,
@@ -71,6 +68,10 @@ import {
   type ServerRouteContentStore,
   ServerRouteRenderProvider,
 } from "./components.tsx";
+import {
+  payloadFrameBootstrapScript,
+  payloadFrameScript,
+} from "./payload-frames.ts";
 import type { RouteMatch, Router } from "./core.ts";
 import { isServerRoute, resolveServerClientReference } from "./internal.ts";
 import type { AnyRoute } from "./route.ts";
@@ -463,14 +464,15 @@ function createDocumentPayloadSegment(
   // placeholder template the client hydrates against; streamed holes suspend
   // the document render and stream in as Suspense reveals.
   const decode = decodePayloadStream(decodeStream, {
-    onClientReference: (reference) => clientReferences.push(reference),
     prepareAssets: (streamed) => {
       assetResources.push(...streamed);
     },
-    resolveClientReference: (metadata) =>
-      metadata.ssr === true
-        ? resolveServerClientReference(metadata)
-        : createDocumentClientReferencePlaceholder(metadata.id),
+    resolveClientReference: (reference) => {
+      clientReferences.push(reference);
+      return reference.ssr === true
+        ? resolveServerClientReference(reference)
+        : createDocumentClientReferencePlaceholder(reference.id);
+    },
   });
   const value = decode.value;
   void value.catch(() => undefined);

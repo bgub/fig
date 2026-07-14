@@ -21,8 +21,8 @@ capability (symbol-keyed; read through `@bgub/fig/internal`) that hydrates
 server-pushed `data` rows through the calling store only while the load is
 authoritative, skipping rows that target the loading entry's own key.
 
-New in `@bgub/fig-dom`: `payloadDataLoader({ request, codec?,
-loadClientReference?, resolveClientReference? })` adapts a payload-stream
+New in `@bgub/fig-dom`: `payloadDataLoader({ request,
+resolveClientReference?, prepareAssets? })` adapts a payload-stream
 endpoint into an ordinary data-resource loader. It validates the response
 (status, body, payload codec content-type; unusable bodies are cancelled),
 wires `decodePayloadStream` to the generation-lifetime signal, hydrates

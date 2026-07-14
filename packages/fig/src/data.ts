@@ -120,10 +120,10 @@ export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 // each loader context (symbol-keyed: DataResourceLoadContext stays { signal }
 // publicly). Adapters that decode payload streams (fig-dom's
 // payloadDataLoader) use it to hydrate `data` rows through the calling store;
-// it returns false once the load's generation has lost authority.
+// it ignores entries once the load's generation has lost authority.
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
-) => boolean;
+) => void;
 
 const LoadContextHydrateSymbol = Symbol.for("fig.data-load-hydrate");
 

@@ -21,6 +21,7 @@ import {
   type DataStoreEntrySnapshot,
   definePayloadGraphElement,
   describeInvalidChild,
+  encodePayloadDataEntries,
   encodePayloadValueWithGraph,
   isActivity,
   isAssets,
@@ -34,7 +35,12 @@ import {
   isThenable,
   isValidElement,
   isViewTransition,
+  jsonPayloadCodec,
+  type PayloadElementModel,
   type PayloadGraphEncodeContext,
+  type PayloadModel,
+  type PayloadRow,
+  type PayloadSpecialModel,
   type RenderDispatcher,
   readThenable,
   rollbackPayloadGraph,
@@ -42,20 +48,11 @@ import {
   serializePayloadMap,
   serializePayloadPlainObject,
   serializePayloadSet,
+  type SerializedAssetResource,
   setCurrentDataStore,
   setCurrentDispatcher,
   type Thenable,
 } from "@bgub/fig/internal";
-import {
-  encodePayloadDataEntries,
-  jsonPayloadCodec,
-  type PayloadCodec,
-  type PayloadElementModel,
-  type PayloadModel,
-  type PayloadRow,
-  type PayloadSpecialModel,
-  type SerializedAssetResource,
-} from "@bgub/fig/payload";
 import {
   type ContextValues,
   cloneContextValues,
@@ -68,17 +65,6 @@ import {
   withContextValue,
 } from "./shared.ts";
 import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
-
-// The inline frame transport is part of the payload subpath's public
-// surface; its implementation lives in payload-frames.ts.
-export {
-  getPayloadFrameStream,
-  payloadFrameBootstrapCode,
-  payloadFrameBootstrapScript,
-  payloadFrameScript,
-  type PayloadFrameStream,
-  type PayloadFrameTransportOptions,
-} from "./payload-frames.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
@@ -93,7 +79,6 @@ export interface PayloadRenderResult {
 
 export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
-  codec?: PayloadCodec;
   dataPartition?: DataResourceKeyInput;
   /**
    * Encoded bytes the result stream buffers before row flushing pauses until
@@ -127,7 +112,6 @@ type PayloadRequest = {
   allReady: Deferred<void>;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
-  codec: PayloadCodec;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedAssetKeys: Set<string>;
@@ -194,18 +178,9 @@ export function renderToPayloadStream(
   return {
     abort: (reason?: unknown) => abortPayloadRequest(request, reason),
     allReady: request.allReady.promise,
-    contentType: request.codec.contentType,
+    contentType: jsonPayloadCodec.contentType,
     stream: request.stream,
   };
-}
-
-export function isPayloadRequestCancelled(error: unknown): boolean {
-  return (
-    error instanceof PayloadRequestCancelledError ||
-    (typeof DOMException !== "undefined" &&
-      error instanceof DOMException &&
-      error.name === "AbortError")
-  );
 }
 
 function createPayloadRequest(
@@ -221,7 +196,6 @@ function createPayloadRequest(
     allReady: deferred<void>(),
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
-    codec: options.codec ?? jsonPayloadCodec,
     controller: null,
     dataStore: createDataStore<object, null>({
       getLane: () => null,
@@ -986,7 +960,7 @@ function assignDefined(
 }
 
 function emitRow(request: PayloadRequest, row: PayloadRow): void {
-  request.queuedRows.push(request.codec.encodeRow(row));
+  request.queuedRows.push(jsonPayloadCodec.encodeRow(row));
   flushRows(request);
 }
 

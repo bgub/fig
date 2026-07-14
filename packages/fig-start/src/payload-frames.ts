@@ -1,11 +1,24 @@
-import { escapeScriptJson, nonceAttribute } from "./shared.ts";
+function escapeScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003C");
+}
+
+function nonceAttribute(nonce: string | undefined): string {
+  if (nonce === undefined) return "";
+  const escaped = nonce.replace(/[&"<>]/g, (character) => {
+    if (character === "&") return "&amp;";
+    if (character === '"') return "&quot;";
+    if (character === "<") return "&lt;";
+    return "&gt;";
+  });
+  return ` nonce="${escaped}"`;
+}
 
 // The inline payload-frame transport: how a document render carries payload
 // rows to the client as inline scripts interleaved between HTML chunks (the
 // complete-markup chunk contract makes between-chunk injection parse-safe —
 // see docs/concepts/server-rendering.md). The bootstrap installs a queue
 // global before any frame executes; each frame is a JSON carrier script plus
-// a push script; the client drains the queue into a payload consumer.
+// a push script; the client drains the queue into a payload decoder.
 
 export interface PayloadFrameTransportOptions {
   /**

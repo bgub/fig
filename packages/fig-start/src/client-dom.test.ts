@@ -27,19 +27,16 @@ import { createRequestHandler } from "./server.ts";
 const islandId = "test/Island.tsx#Island";
 const Island = clientReference({
   id: islandId,
-  load: () => Promise.resolve({}),
 });
 const styledIslandId = "test/StyledIsland.tsx#StyledIsland";
 const styledIslandHref = "http://[::1";
 const StyledIsland = clientReference({
   id: styledIslandId,
-  load: () => Promise.resolve({}),
   assets: [stylesheet(styledIslandHref)],
 });
 const ssrIslandId = "test/SsrIsland.tsx#SsrIsland";
 const SsrIsland = serverClientReference({
   id: ssrIslandId,
-  load: () => Promise.resolve({ SsrIsland: RealSsrIsland }),
   assets: [modulepreload("/assets/ssr-island.js")],
   ssr: RealSsrIsland,
 });
@@ -93,13 +90,13 @@ const routes = [
   ),
 ];
 
-const loadClientReference = ({ id }: { id: string }): Promise<unknown> =>
+const resolveClientReference = ({ id }: { id: string }) =>
   id === islandId
-    ? Promise.resolve({ Island: RealIsland })
+    ? Promise.resolve(RealIsland)
     : id === styledIslandId
-      ? Promise.resolve({ StyledIsland: RealStyledIsland })
+      ? Promise.resolve(RealStyledIsland)
       : id === ssrIslandId
-        ? Promise.resolve({ SsrIsland: RealSsrIsland })
+        ? Promise.resolve(RealSsrIsland)
         : Promise.reject(new Error(`unknown client reference ${id}`));
 
 async function flush(): Promise<void> {
@@ -166,7 +163,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     const errors: unknown[] = [];
     const router = await act(() =>
       hydrateStart({
-        loadClientReference,
+        resolveClientReference,
         onRecoverableError: (error) => errors.push(error),
         routes,
       }),
@@ -198,7 +195,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     const container = document.querySelector("#fig-root");
     expect(container?.hasAttribute("data-fig-start-hydrated")).toBe(false);
 
-    hydrateStart({ loadClientReference, routes });
+    hydrateStart({ resolveClientReference, routes });
 
     // Synchronously with hydrateStart returning: from this point clicks are
     // queued and replayed even before the shell commits, so tests and
@@ -220,7 +217,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
 
       const errors: unknown[] = [];
       hydrateStart({
-        loadClientReference,
+        resolveClientReference,
         onRecoverableError: (error) => errors.push(error),
         routes,
       });
@@ -255,7 +252,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     };
 
     try {
-      const router = hydrateStart({ routes, loadClientReference });
+      const router = hydrateStart({ routes, resolveClientReference });
       await flush();
       expect(document.body.textContent).toContain("Home");
 
@@ -285,7 +282,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     };
 
     try {
-      const router = hydrateStart({ routes, loadClientReference });
+      const router = hydrateStart({ routes, resolveClientReference });
       await flush();
       expect(document.body.textContent).toContain("Home");
 
@@ -316,17 +313,15 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
   it("keeps the previous route visible until navigated client references load", async () => {
     await installServerRenderedDocument("/");
     const restoreFetch = installHandlerFetch();
-    const islandModule = deferred<{ Island: typeof RealIsland }>();
-    const slowLoadClientReference = ({
-      id,
-    }: {
-      id: string;
-    }): Promise<unknown> =>
-      id === islandId ? islandModule.promise : loadClientReference({ id });
+    const islandResolution = deferred<typeof RealIsland>();
+    const slowResolveClientReference = ({ id }: { id: string }) =>
+      id === islandId
+        ? islandResolution.promise
+        : resolveClientReference({ id });
 
     try {
       const router = hydrateStart({
-        loadClientReference: slowLoadClientReference,
+        resolveClientReference: slowResolveClientReference,
         routes,
       });
       await flush();
@@ -344,7 +339,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
         document.querySelector('[data-fig-payload-slot="/dash"]'),
       ).toBeNull();
 
-      islandModule.resolve({ Island: RealIsland });
+      islandResolution.resolve(RealIsland);
       await navigation;
       await flush();
 
@@ -442,7 +437,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     try {
       const router = hydrateStart({
         routes: nestedRoutes,
-        loadClientReference,
+        resolveClientReference,
       });
       await router.navigate("/payload-layout/a");
       await flush();
@@ -509,7 +504,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     const errors: unknown[] = [];
 
     hydrateStart({
-      loadClientReference,
+      resolveClientReference,
       onRecoverableError: (error) => errors.push(error),
       routes,
     });
@@ -820,7 +815,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     const restoreFetch = installHandlerFetch();
 
     try {
-      const router = hydrateStart({ routes, loadClientReference });
+      const router = hydrateStart({ routes, resolveClientReference });
       const navigation = router.navigate("/styled");
       await flush();
 
@@ -850,7 +845,7 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     const restoreFetch = installHandlerFetch();
 
     try {
-      const router = hydrateStart({ routes, loadClientReference });
+      const router = hydrateStart({ routes, resolveClientReference });
       const navigation = router.navigate("/styled");
       await flush();
 

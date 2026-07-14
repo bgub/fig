@@ -22,9 +22,9 @@ declare module "*.svg" {
 }
 
 declare module "virtual:fig-start/client-manifest" {
-  export function loadClientReference(metadata: {
+  export function resolveClientReference(metadata: {
     id: string;
-  }): Promise<unknown>;
+  }): Promise<import("@bgub/fig").ElementType>;
 }
 
 declare module "virtual:fig-start/server-manifest" {

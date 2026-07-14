@@ -162,7 +162,6 @@ describe("@bgub/fig", () => {
     const js = preload("/assets/Counter.js", "script");
     const Counter = clientReference({
       id: "./Counter.tsx",
-      load: () => Promise.resolve({}),
       assets: [css, js],
     });
 
@@ -174,7 +173,6 @@ describe("@bgub/fig", () => {
     const css = stylesheet("/assets/Counter.css");
     const Counter = clientReference({
       id: "./Counter.tsx",
-      load: () => Promise.resolve({}),
       assets: css,
     });
 
@@ -185,7 +183,6 @@ describe("@bgub/fig", () => {
     let calls = 0;
     const Counter = clientReference({
       id: "./Counter.tsx",
-      load: () => Promise.resolve({}),
       assets: () => {
         calls += 1;
         return [stylesheet(`/assets/Counter.${calls}.css`)];
@@ -207,7 +204,6 @@ describe("@bgub/fig", () => {
   it("normalizes a lazy resource thunk that yields nothing to an empty list", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",
-      load: () => Promise.resolve({}),
       // A missing manifest entry can make a typed thunk return undefined at
       // runtime; the resolver must not leak a non-array.
       assets: () => undefined as never,
@@ -219,7 +215,6 @@ describe("@bgub/fig", () => {
   it("defaults client-reference resources to an empty list", () => {
     const Counter = clientReference({
       id: "./Counter.tsx",
-      load: () => Promise.resolve({}),
     });
 
     expect(Counter.assets).toBeUndefined();

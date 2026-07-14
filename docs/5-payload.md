@@ -1,6 +1,6 @@
 # Payload (server components)
 
-Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire through a codec, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the format and the client half (`decodePayloadStream`) live at the browser-safe `@bgub/fig/payload`, and fig-dom's `payloadDataLoader` turns the whole thing into an ordinary data resource. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
+Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the client half (`decodePayloadStream`) lives at the browser-safe `@bgub/fig/payload`; and fig-dom's `payloadDataLoader` turns the whole thing into an ordinary data resource. Rows and encoding stay internal. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
 
 Like docs 3 and 4, this one follows a single scenario end to end.
 
@@ -33,7 +33,6 @@ import { clientReference } from "@bgub/fig";
 
 export const LikeButton = clientReference({
   id: "src/like-button.tsx#LikeButton",
-  load: () => import("./like-button.tsx"),
 });
 ```
 
@@ -52,7 +51,7 @@ const { stream, allReady, contentType } = renderToPayloadStream(
 
 ## What's on the wire
 
-Payload is a semantic row model plus a pluggable byte codec. The default codec is `jsonPayloadCodec`, identified by `codec=json` in the content type (`text/x-fig-payload; codec=json; charset=utf-8`), and it encodes rows as newline-delimited JSON. For our scenario, three JSON-codec rows look like this (each is one line on the wire; wrapped here for readability):
+Payload currently uses newline-delimited JSON rows, identified by `text/x-fig-payload; codec=json; charset=utf-8`. The encoding and row types are internal so applications only need to pass the byte stream between `renderToPayloadStream` and `decodePayloadStream`. For our scenario, three rows look like this (each is one line on the wire; wrapped here for readability):
 
 ```
 {"id":1,"tag":"client","value":{"id":"src/like-button.tsx#LikeButton","exportName":"LikeButton"}}
@@ -83,7 +82,7 @@ The full row vocabulary:
 
 There is deliberately no refresh row. The refresh unit is the data-resource key that delivers the payload — refreshing is just requesting the same stream again, and the store's ordinary freshness semantics do the rest.
 
-Some things are deliberately absent from the row model: server actions and temporary references. The byte encoding is deliberately pluggable: JSON is the readable default for development, and a binary production codec can be added without changing the row semantics. Codec ids identify implementations, not stable public formats. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
+Some things are deliberately absent from the row model: server actions and temporary references. The byte encoding is deliberately private, so Fig can replace it without exposing codec machinery to applications. (Ids minted by `useId` during a payload render get a `fig-pl-` prefix so they can't collide with client-generated ones.)
 
 ## Serialization fidelity
 
@@ -107,7 +106,7 @@ const profileResource = dataResource({
   key: (id: string) => ["profile", id],
   load: payloadDataLoader({
     request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
-    loadClientReference: (metadata) => manifest[metadata.id](),
+    resolveClientReference: (reference) => manifest[reference.id]?.(),
   }),
 });
 
@@ -117,12 +116,12 @@ function Profile({ id }: { id: string }) {
 }
 ```
 
-- The loader validates the response (status, body, `codec=` content-type parameter; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
+- The loader validates the response (status, body, payload content type; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
 - Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it.
 - Streamed `data` rows hydrate the same store through a generation-guarded capability — the doc 5 handoff, completed, with no second request.
 - `assets` rows insert into the document head as they arrive; stylesheet gates delay only the content that declared them.
 
-Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns `{ value, completion, abort }` — `value` resolves at the root row, the never-rejecting `completion` reports how background ingestion ended, and `abort` retires unresolved holes with a cancellation reason (`isPayloadDecodeAborted`).
+Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns `{ value, completion, abort }` — `value` resolves at the root row, the never-rejecting `completion` reports how background ingestion ended, and `abort` retires unresolved holes with an internal cancellation reason.
 
 ## Refreshing
 

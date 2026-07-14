@@ -264,55 +264,20 @@ Suspense reveal gating as explicit `assets(...)` wrappers.
 ## Payload (server components)
 
 ```ts
-import {
-  createPayloadConsumer,
-  decodePayloadValue,
-  encodePayloadValue,
-  jsonPayloadCodec,
-  PAYLOAD_BOUNDARY_HEADER,
-  renderToPayloadStream,
-  PayloadBoundary,
-  PayloadFetchError,
-  type PayloadCodec,
-} from "@bgub/fig-server/payload";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
 ```
 
 `renderToPayloadStream(node, options?)` renders a server-component payload. The
-result exposes `abort(reason?)`, and `options.signal` also cancels the render;
-both paths reject `allReady`. The default `jsonPayloadCodec` writes one
-readable JSON row per newline and identifies itself with
-`text/x-fig-payload; codec=json; charset=utf-8`. Pass a custom `PayloadCodec`
-to both `renderToPayloadStream(node, { codec })` and
-`createPayloadConsumer({ codec })` when both ends should use a different byte
-encoding. Codec ids are implementation ids, not stable public wire formats.
+result exposes `stream`, `contentType`, `allReady`, and `abort(reason?)`;
+`options.signal` also cancels the render, and both cancellation paths reject
+`allReady`. Pass the stream and content type directly to a `Response`. Browser
+code decodes it with `decodePayloadStream` from `@bgub/fig/payload`, normally
+through fig-dom's `payloadDataLoader` adapter. Rows, codecs, value encoding, and
+Fig Start's inline document-frame transport are internal implementation details.
 
-Pass `refreshBoundary` to render a targeted boundary refresh:
-
-```tsx
-renderToPayloadStream(<FeedItems />, { refreshBoundary: "feed" });
-```
-
-The rendered node must be the replacement content for that boundary. Do not
-include a nested `<PayloadBoundary id="feed">` wrapper in the refresh payload.
-
-`createPayloadConsumer()` creates the decoding end of the wire, and
-`consumer.fetch(input, options?)` fetches and processes a payload. Pass
-`refreshBoundary` to `consumer.fetch` to request and apply a boundary refresh.
-`consumer.fetch` sends the consumer codec in `Accept` and checks the response
-`codec=` content-type parameter before decoding. Server integrations can read
-the exported `PAYLOAD_BOUNDARY_HEADER` constant for targeted refresh requests.
-Non-2xx responses reject with `PayloadFetchError`, which exposes `status` and
-`response` and cancels the response body before throwing.
-Decoded client references require `loadClientReference` or a matching
-`resolveClientReference` before render; metadata-only decodes can still inspect
-rows without configuring a loader.
-
-`encodePayloadValue` / `decodePayloadValue` are low-level helpers for payload
-integrations that need the same data-value fidelity as payload data rows:
-`undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and
-global `Symbol.for` symbols round-trip. Shared references and cycles across
-arrays, plain objects, `Map`, and `Set` also round-trip; functions, class
-instances, and non-global symbols are rejected.
+The public options cover error sanitization (`onError`), manifest-provided
+client assets (`clientReferenceAssets`), data-store partitioning, byte
+backpressure (`highWaterMark`), and cancellation (`signal`).
 
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useSyncExternalStore` server snapshots, no-op server

@@ -811,7 +811,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         entry.generation !== generation ||
         controller.signal.aborted
       ) {
-        return false;
+        return;
       }
 
       // The loading entry's own value comes from the loader's return, never
@@ -828,7 +828,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         );
       }
       if (foreign.length > 0) this.hydrate(foreign);
-      return true;
     });
     return context;
   }

@@ -1139,7 +1139,6 @@ describe("@bgub/fig-server", () => {
   it("renders a fallback for client references when configured", async () => {
     const Island = clientReference({
       id: "app/Island.tsx#Island",
-      load: () => Promise.resolve({}),
     });
 
     const html = await renderToHtml(

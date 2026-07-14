@@ -20,6 +20,7 @@ export interface ClientRef {
   // Stable id ("<root-relative-path>#<Export>") shared by the server transform
   // and the client manifest (both go through this module, so ids always match).
   id: string;
+  exportName: string;
   // Public CSS asset URLs emitted for this client module.
   css?: string[];
   // Root-relative module path the client manifest imports for this reference.
@@ -569,14 +570,12 @@ function serverComponentBabelPlugin(state: {
             }
 
             const id = clientRefId(specifier, exportName);
-            state.clientRefs.push({ id, specifier });
+            state.clientRefs.push({ exportName, id, specifier });
             declarations.push(
               api.template.statement.ast(
                 `const ${publicName} = __figClientRef({ id: ${JSON.stringify(
                   id,
-                )}, load: () => Promise.resolve({ ${JSON.stringify(
-                  exportName,
-                )}: ${implementation.name} }), ssr: ${implementation.name} });`,
+                )}, ssr: ${implementation.name} });`,
               ),
             );
           }

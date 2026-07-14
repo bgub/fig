@@ -19,23 +19,24 @@ import {
   ViewTransition,
 } from "@bgub/fig";
 import {
+  decodePayloadDataEntries,
+  decodePayloadValue,
+  encodePayloadDataEntries,
+  encodePayloadValue,
   isValidElement,
+  jsonPayloadCodec,
+  type PayloadRow,
   readThenable,
   setCurrentDispatcher,
 } from "@bgub/fig/internal";
 import {
-  decodePayloadDataEntries,
   decodePayloadStream,
-  decodePayloadValue,
-  encodePayloadDataEntries,
-  encodePayloadValue,
-  jsonPayloadCodec,
-  type PayloadClientReferenceMetadata,
+  type PayloadClientReference,
   type PayloadDecode,
   type PayloadDecodeOptions,
-  type PayloadRow,
 } from "@bgub/fig/payload";
 import { describe, expect, it } from "vitest";
+import * as payloadApi from "./payload.ts";
 import { renderToPayloadStream } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
 import {
@@ -213,13 +214,16 @@ function unwrapFunctionComponent(node: FigNode): FigNode {
 }
 
 describe("payload rendering", () => {
+  it("keeps the public runtime surface to the renderer", () => {
+    expect(Object.keys(payloadApi)).toEqual(["renderToPayloadStream"]);
+  });
+
   it("serializes client references with normal JSX props", async () => {
     const LikeButton = clientReference<{
       initialCount: number;
       tone?: string;
     }>({
       id: "app/LikeButton.client.tsx#LikeButton",
-      load: () => Promise.resolve({}),
     });
 
     const rows = await renderToPayloadRows(
@@ -253,7 +257,6 @@ describe("payload rendering", () => {
   it("serializes stream-safe asset assets on rendered client rows", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
-      load: () => Promise.resolve({}),
       assets: [
         stylesheet("/assets/Counter.css", {
           blocking: "none",
@@ -289,7 +292,6 @@ describe("payload rendering", () => {
   it("serializes assets from the render-level client reference resolver", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
-      load: () => Promise.resolve({}),
     });
 
     const rows = await renderToPayloadRows(createElement(Counter, {}), {
@@ -319,7 +321,6 @@ describe("payload rendering", () => {
   it("omits the assets field for client references with no assets", async () => {
     const Plain = clientReference({
       id: "app/Plain.client.tsx#Plain",
-      load: () => Promise.resolve({}),
     });
 
     const rows = await renderToPayloadRows(createElement(Plain, {}));
@@ -331,15 +332,14 @@ describe("payload rendering", () => {
     });
   });
 
-  it("passes reference metadata without assets to client reference resolvers", async () => {
+  it("passes reference metadata and assets to client reference resolvers", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
-      load: () => Promise.resolve({}),
       assets: [stylesheet("/assets/Counter.css")],
     });
 
     const rows = await renderToPayloadRows(createElement(Counter, {}));
-    const seen: PayloadClientReferenceMetadata[] = [];
+    const seen: PayloadClientReference[] = [];
     const decode = decodeTestPayloadRows(rows, {
       resolveClientReference(metadata) {
         seen.push(metadata);
@@ -348,47 +348,45 @@ describe("payload rendering", () => {
     });
     expect(await decode.completion).toEqual({ status: "complete" });
 
-    // The wire row carries assets, but resolver hooks see the documented
-    // metadata shape only.
     expect(seen).toEqual([
-      { id: "app/Counter.client.tsx#Counter", exportName: "Counter" },
+      {
+        assets: [{ href: "/assets/Counter.css", kind: "stylesheet" }],
+        exportName: "Counter",
+        id: "app/Counter.client.tsx#Counter",
+      },
     ]);
   });
 
   it("reports missing client reference loaders when decoded references render", async () => {
     const Widget = clientReference({
       id: "app/Widget.client.tsx#Widget",
-      load: () => Promise.resolve({}),
     });
     const rows = await renderToPayloadRows(createElement(Widget, {}));
     const decode = decodeTestPayloadRows(rows);
     const root = await decode.value;
 
     expect(() => renderNode(root)).toThrow(
-      'Cannot render client reference "app/Widget.client.tsx#Widget" because decodePayloadStream was not configured with loadClientReference or a matching resolveClientReference.',
+      'Cannot render client reference "app/Widget.client.tsx#Widget" because decodePayloadStream was not configured with a matching resolveClientReference.',
     );
   });
 
   it("starts client reference loads at row arrival and renders synchronously once settled", async () => {
     const Widget = clientReference({
       id: "app/Widget.client.tsx#Widget",
-      load: () => Promise.resolve({}),
     });
     const rows = await renderToPayloadRows(
       createElement(Widget, { label: "hi" }),
     );
 
-    const widgetModule = {
-      Widget: (props: { label: string }) =>
-        createElement("span", null, `widget:${props.label}`),
-    };
-    const module = deferred<typeof widgetModule>();
+    const ResolvedWidget = (props: { label: string }) =>
+      createElement("span", null, `widget:${props.label}`);
+    const resolution = deferred<typeof ResolvedWidget>();
     let loads = 0;
 
     const decode = decodeTestPayloadRows(rows, {
-      loadClientReference: () => {
+      resolveClientReference: () => {
         loads += 1;
-        return module.promise;
+        return resolution.promise;
       },
     });
     const root = await decode.value;
@@ -397,7 +395,7 @@ describe("payload rendering", () => {
     // The load started when the client row arrived, before any render.
     expect(loads).toBe(1);
 
-    // Before the module settles, the first render read suspends.
+    // Before the resolution settles, the first render read suspends.
     let thrown: unknown;
     try {
       renderNode(root);
@@ -406,9 +404,9 @@ describe("payload rendering", () => {
     }
     expect(typeof (thrown as PromiseLike<unknown>).then).toBe("function");
 
-    // Once the tracked module settles, rendering is synchronous and the row
+    // Once the tracked resolution settles, rendering is synchronous and the row
     // load was never repeated.
-    module.resolve(widgetModule);
+    resolution.resolve(ResolvedWidget);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const rendered = renderNode(root) as FigElement;
@@ -483,18 +481,15 @@ describe("payload rendering", () => {
     const shared = stylesheet("/assets/shared.css");
     const Header = clientReference({
       id: "app/Header.client.tsx#Header",
-      load: () => Promise.resolve({}),
       assets: [shared, stylesheet("/assets/Header.css")],
     });
     const Footer = clientReference({
       id: "app/Footer.client.tsx#Footer",
-      load: () => Promise.resolve({}),
       assets: [shared, stylesheet("/assets/Footer.css")],
     });
     // Defined but never rendered: must contribute nothing.
     clientReference({
       id: "app/Unused.client.tsx#Unused",
-      load: () => Promise.resolve({}),
       assets: [stylesheet("/assets/Unused.css")],
     });
 
@@ -529,7 +524,6 @@ describe("payload rendering", () => {
   it("dedupes a font against an equivalent preload-as-font on a client row", async () => {
     const Text = clientReference({
       id: "app/Text.client.tsx#Text",
-      load: () => Promise.resolve({}),
       assets: [
         font("/assets/Inter.woff2", "font/woff2"),
         // Same asset, expressed as a preload: both share the preload-font key
@@ -559,7 +553,6 @@ describe("payload rendering", () => {
   it("does not hang when a client reference resource thunk throws", async () => {
     const Broken = clientReference({
       id: "app/Broken.client.tsx#Broken",
-      load: () => Promise.resolve({}),
       // A bundler-manifest thunk may throw (missing entry). Resolving assets
       // before reserving the row id surfaces this as an ordinary error row
       // instead of a reserved-but-unemitted client row that suspends forever.
@@ -578,7 +571,6 @@ describe("payload rendering", () => {
   it("renders server components before passing them as client props", async () => {
     const Card = clientReference<{ header: unknown; children?: unknown }>({
       id: "app/Card.client.tsx#Card",
-      load: () => Promise.resolve({}),
     });
 
     function Header() {
@@ -674,7 +666,6 @@ describe("payload rendering", () => {
     const pending = deferred<string>();
     const Viewer = clientReference<{ value: Promise<string> }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
 
     const result = renderToPayloadStream(
@@ -708,7 +699,6 @@ describe("payload rendering", () => {
   it("round-trips built-in payload values through the JSON codec", async () => {
     const Viewer = clientReference<{ value: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const date = new Date("2026-07-06T12:34:56.789Z");
     const symbol = Symbol.for("fig.payload.test");
@@ -753,11 +743,9 @@ describe("payload rendering", () => {
   it("serializes rich server values inside Map and Set props", async () => {
     const Viewer = clientReference<{ value: Map<string, unknown> }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const Nested = clientReference<{ label: string }>({
       id: "app/Nested.client.tsx#Nested",
-      load: () => Promise.resolve({}),
     });
     const payload = new Map<string, unknown>([
       ["element", createElement("span", null, "Nested")],
@@ -854,7 +842,6 @@ describe("payload rendering", () => {
       value: unknown;
     }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const shared = { label: "shared" };
     const pending = deferred<typeof shared>();
@@ -878,7 +865,6 @@ describe("payload rendering", () => {
   it("resolves lazy refs to objects first defined in sibling content", async () => {
     const Viewer = clientReference<{ value: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const shared = { label: "shared" };
     const pending = deferred<typeof shared>();
@@ -925,7 +911,6 @@ describe("payload rendering", () => {
   it("preserves cyclic objects in rendered client props", async () => {
     const Viewer = clientReference<{ value: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const value: Record<string, unknown> = { label: "cycle" };
     value.self = value;
@@ -949,7 +934,6 @@ describe("payload rendering", () => {
       shared: unknown;
     }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const shared = { label: "shared" };
     const rows = await renderToPayloadRows([
@@ -979,7 +963,6 @@ describe("payload rendering", () => {
       mirror?: unknown;
     }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const child = createElement("span", null, "shared child");
     const fallback = new Map<unknown, unknown>([["state", "ready"]]);
@@ -1010,7 +993,6 @@ describe("payload rendering", () => {
   it("serializes object children on client references as values", async () => {
     const Viewer = clientReference<{ children?: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
 
     const decode = decodeTestPayloadRows(
@@ -1029,7 +1011,6 @@ describe("payload rendering", () => {
   it("reports invalid Date payload values as root errors", async () => {
     const Viewer = clientReference<{ value: unknown }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
 
     await expect(
@@ -1057,7 +1038,6 @@ describe("payload rendering", () => {
       promise: Promise<string>;
     }>({
       id: "app/Viewer.client.tsx#Viewer",
-      load: () => Promise.resolve({}),
     });
     const value = Promise.resolve("Loaded");
 
@@ -1186,7 +1166,6 @@ describe("payload rendering", () => {
   it("decodes completed rows back into Fig nodes", async () => {
     const LikeButton = clientReference<{ initialCount: number }>({
       id: "app/LikeButton.client.tsx#LikeButton",
-      load: () => Promise.resolve({}),
     });
 
     const rows = await renderToPayloadRows(
@@ -1203,7 +1182,7 @@ describe("payload rendering", () => {
     });
     const node = await decode.value;
 
-    expect(unwrapFunctionComponent(node)).toMatchObject({
+    expect(node).toMatchObject({
       key: null,
       props: { initialCount: 12 },
       type: ClientLikeButton,
@@ -1213,7 +1192,6 @@ describe("payload rendering", () => {
   it("rejects functions passed across the server-to-client boundary", async () => {
     const Button = clientReference<{ action: () => void }>({
       id: "app/Button.client.tsx#Button",
-      load: () => Promise.resolve({}),
     });
 
     await expect(

@@ -8,7 +8,7 @@ import {
   payloadFrameScript,
 } from "./payload-frames.ts";
 
-// Each test uses its own global name: the queue global outlives a test in
+// Each test uses its own global name because the queue global outlives a test in
 // the shared happy-dom window.
 let nextGlobal = 0;
 function uniqueGlobalName(): string {

@@ -18,7 +18,6 @@ export interface LikeButtonProps {
 
 export const LikeButtonRef = clientReference<LikeButtonProps>({
   id: likeButtonReferenceId,
-  load: () => Promise.resolve({}),
 });
 
 // The dashboard's slots: client components serialized by reference, so the
@@ -26,10 +25,8 @@ export const LikeButtonRef = clientReference<LikeButtonProps>({
 // its own data resource on the client.
 export const PostSlotRef = clientReference({
   id: postSlotReferenceId,
-  load: () => Promise.resolve({}),
 });
 
 export const WeatherSlotRef = clientReference({
   id: weatherSlotReferenceId,
-  load: () => Promise.resolve({}),
 });

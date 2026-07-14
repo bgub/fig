@@ -141,7 +141,6 @@ import { clientReference } from "@bgub/fig";
 
 export const LikeButton = clientReference<{ postId: string }>({
   id: "like-button.tsx#LikeButton",
-  load: () => import("./like-button.tsx"),
 });
 
 export function ProfilePage({ id }: { id: string }) {
@@ -183,22 +182,23 @@ app.get("/profile/:id", (c) => {
 
 Serve the next file, bundled for the browser, as `/client.js` (build it with `jsxImportSource: "@bgub/fig-dom"`).
 
-On the client, the serialized page is an ordinary data resource: the key is the refresh boundary, and the manifest is the other half of `clientReference` — it maps ids back to real modules:
+On the client, the serialized page is an ordinary data resource: the key is the refresh boundary, and the manifest is the other half of `clientReference` — it maps ids back to real components:
 
 ```tsx
 // client.tsx — runs in the browser
 import { dataResource, readData, refreshData, transition } from "@bgub/fig";
 import { createRoot, payloadDataLoader } from "@bgub/fig-dom";
 
-const clientManifest: Record<string, () => Promise<unknown>> = {
-  "like-button.tsx#LikeButton": () => import("./like-button.tsx"),
+const clientManifest = {
+  "like-button.tsx#LikeButton": () =>
+    import("./like-button.tsx").then((module) => module.LikeButton),
 };
 
 const profileResource = dataResource({
   key: (id: string) => ["profile", id],
   load: payloadDataLoader({
     request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
-    loadClientReference: ({ id }) => clientManifest[id](),
+    resolveClientReference: ({ id }) => clientManifest[id]?.(),
   }),
 });
 

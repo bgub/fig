@@ -1072,9 +1072,7 @@ describe("load-context hydrate capability", () => {
     const hydrate = captured[0];
     expect(hydrate).toBeTypeOf("function");
 
-    expect(
-      hydrate?.([{ key: ["cap-user", "1"], value: { name: "Ada" } }]),
-    ).toBe(true);
+    hydrate?.([{ key: ["cap-user", "1"], value: { name: "Ada" } }]);
     expect(store.snapshot()).toEqual(
       expect.arrayContaining([
         { key: ["cap-user", "1"], value: { name: "Ada" } },
@@ -1082,7 +1080,7 @@ describe("load-context hydrate capability", () => {
     );
   });
 
-  it("returns false after supersession and disposal without mutating the store", async () => {
+  it("ignores hydration after supersession and disposal", async () => {
     const { captured, resource } = capturingResource("cap-guard");
     const store = capabilityStore();
 
@@ -1090,18 +1088,14 @@ describe("load-context hydrate capability", () => {
     await store.refreshData(resource, "one");
     const superseded = captured[0];
 
-    expect(
-      superseded?.([{ key: ["cap-guard-late", "1"], value: "late" }]),
-    ).toBe(false);
+    superseded?.([{ key: ["cap-guard-late", "1"], value: "late" }]);
     expect(store.snapshot()).not.toEqual(
       expect.arrayContaining([{ key: ["cap-guard-late", "1"], value: "late" }]),
     );
 
     const live = captured[1];
     store.dispose();
-    expect(live?.([{ key: ["cap-guard-late", "2"], value: "late" }])).toBe(
-      false,
-    );
+    live?.([{ key: ["cap-guard-late", "2"], value: "late" }]);
   });
 
   it("skips data rows targeting the loading entry's own key", async () => {
@@ -1121,12 +1115,10 @@ describe("load-context hydrate capability", () => {
     await store.refreshData(selfAware, "one");
     const hydrate = captured[0];
 
-    expect(
-      hydrate?.([
-        { key: ["cap-self", "one"], value: "row-value" },
-        { key: ["cap-self-other", "1"], value: "other" },
-      ]),
-    ).toBe(true);
+    hydrate?.([
+      { key: ["cap-self", "one"], value: "row-value" },
+      { key: ["cap-self-other", "1"], value: "other" },
+    ]);
     // The loader's own generation was not superseded by its own data row.
     expect(signals[0]?.aborted).toBe(false);
     const snapshot = store.snapshot();
@@ -1151,9 +1143,7 @@ describe("load-context hydrate capability", () => {
     const store = capabilityStore();
 
     const pending = store.refreshData(resource, "one");
-    expect(
-      hydrate?.([{ key: ["cap-midload-user", "1"], value: "early" }]),
-    ).toBe(true);
+    hydrate?.([{ key: ["cap-midload-user", "1"], value: "early" }]);
     expect(store.snapshot()).toEqual(
       expect.arrayContaining([
         { key: ["cap-midload-user", "1"], value: "early" },

@@ -39,7 +39,6 @@ import { createClientAssetResolver } from "./server-assets.ts";
 const islandId = "test/Island.tsx#Island";
 const Island = clientReference({
   id: islandId,
-  load: () => Promise.resolve({}),
 });
 const ssrIslandId = "test/SsrIsland.tsx#SsrIsland";
 function SsrIslandImpl(): FigNode {
@@ -47,7 +46,6 @@ function SsrIslandImpl(): FigNode {
 }
 const SsrIsland = serverClientReference({
   id: ssrIslandId,
-  load: () => Promise.resolve({ SsrIsland: SsrIslandImpl }),
   assets: [modulepreload("/assets/ssr-island.js")],
   ssr: SsrIslandImpl,
 });

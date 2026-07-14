@@ -1,8 +1,8 @@
 import {
-  decodePayloadStream,
   decodePayloadValue,
   encodePayloadValue,
-} from "../../packages/fig/dist/payload.js";
+} from "../../packages/fig/dist/internal.js";
+import { decodePayloadStream } from "../../packages/fig/dist/payload.js";
 import { renderToPayloadStream } from "../../packages/fig-server/dist/payload.js";
 import {
   BenchElement,

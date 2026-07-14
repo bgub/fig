@@ -40,13 +40,13 @@ startFigStartClient();
     await expect(plugin.load(runtimeId ?? "")).resolves.toBe(
       `import "virtual:fig-start/server-route-assets";
 import { hydrateStart } from "@bgub/fig-start/client";
-import { loadClientReference } from "virtual:fig-start/client-manifest";
+import { resolveClientReference } from "virtual:fig-start/client-manifest";
 import { start } from "/src/start.tsx";
 
 export function startFigStartClient() {
   hydrateStart({
     context: { appName: start.appName },
-    loadClientReference,
+    resolveClientReference,
     onRecoverableError: start.onRecoverableError,
     routes: start.routes,
   });

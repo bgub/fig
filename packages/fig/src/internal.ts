@@ -76,25 +76,33 @@ export {
   type ViewTransitionProps,
 } from "./element.ts";
 export { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
-// The payload serializer seam: fig-server's payload renderer builds element
-// and value models against the format that lives in @bgub/fig/payload.
+// The private payload-format seam shared by fig-server, fig-dom, and Fig Start.
 export {
+  assertPayloadCodecMatches,
   checkpointPayloadGraph,
   createPayloadGraphEncodeContext,
+  decodePayloadDataEntries,
+  decodePayloadValue,
   definePayloadGraphElement,
+  encodePayloadDataEntries,
+  encodePayloadValue,
   encodePayloadValueWithGraph,
   isPayloadSpecialModel,
   isPlainPayloadValue,
+  jsonPayloadCodec,
+  type PayloadDataHydrationEntry,
+  type PayloadElementModel,
   type PayloadGraphEncodeContext,
+  type PayloadModel,
+  type PayloadRow,
+  type PayloadSpecialModel,
   rollbackPayloadGraph,
   serializePayloadArray,
   serializePayloadMap,
   serializePayloadPlainObject,
   serializePayloadSet,
+  type SerializedAssetResource,
 } from "./payload-format.ts";
-// Client-reference module→component resolution: the wire supplies
-// exportName, so consumers never string-parse reference ids.
-export { resolveClientReferenceExport } from "./payload.ts";
 export {
   type AssetResourceDestination,
   type AssetResourceHostAttribute,
