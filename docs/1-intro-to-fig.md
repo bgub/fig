@@ -113,109 +113,101 @@ Fig handles SSR and streaming similarly to React, but there are some implementat
 
 In Fig, all code is _isomorphic_ (meaning it can run on either server or client) unless it ends in `.server.ts(x)`. There are no `"use client"` or `"use server"` directives.
 
-A server component is a Fig component that renders into a Payload stream instead of HTML. Payload is Fig's own semantic row format, with a readable JSON codec by default. React's server-component details are mostly internal and exposed to frameworks, but Fig exposes the whole round trip as first-class APIs.
+A server component is a Fig component that renders into a Payload stream instead of HTML. Payload is Fig's own wire format; its encoding stays internal while Fig exposes focused APIs for rendering and decoding the stream.
 
-Here is the whole round trip — four files, one interactive component, one refreshable boundary.
-
-An interactive component. Nothing marks it as client code here; the tree does that:
+Here is the complete server-to-client path using `payloadDataLoader`.
 
 ```tsx
-// like-button.tsx
-export function LikeButton({ postId }: { postId: string }) {
-  const [likes, setLikes] = useState(0);
-  const addLike = on("click", () => setLikes((n) => n + 1));
-
-  return (
-    <button events={[addLike]}>
-      ♥ {likes} · post {postId}
-    </button>
-  );
-}
-```
-
-The tree. The `.server.tsx` suffix keeps it out of client bundles, and `clientReference` is the boundary between server and client code: the component serializes into the payload as an id instead of rendering. Ids are opaque; `"<module>#<export>"` is the convention bundler tooling uses, written by hand here:
-
-```tsx
-// app.server.tsx
+// profile.server.tsx
 import { clientReference } from "@bgub/fig";
 
-export const LikeButton = clientReference<{ postId: string }>({
-  id: "like-button.tsx#LikeButton",
+const Counter = clientReference<{ initial: number }>({
+  id: "./counter.tsx#Counter",
 });
 
-export function ProfilePage({ id }: { id: string }) {
+export function Profile() {
   return (
     <main>
-      <section>
-        <h1>User #{id}</h1>
-        <p>Rendered on the server at {new Date().toLocaleTimeString()}</p>
-      </section>
-      <LikeButton postId={id} />
+      <h1>Ada</h1>
+      <Counter initial={1} />
     </main>
   );
 }
 ```
 
-The server — routing shown with Hono, but anything that speaks `Request`/`Response` works. One route serves the payload stream:
+The referenced component is ordinary interactive Fig code:
+
+```tsx
+// counter.tsx
+import { useState } from "@bgub/fig";
+import { on } from "@bgub/fig-dom";
+
+export function Counter({ initial }: { initial: number }) {
+  const [count, setCount] = useState(initial);
+
+  return (
+    <button events={[on("click", () => setCount((n) => n + 1))]}>
+      Count: {count}
+    </button>
+  );
+}
+```
+
+Serve the payload stream from any request handler:
 
 ```tsx
 // server.tsx
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
-import { ProfilePage } from "./app.server.tsx";
+import { Profile } from "./profile.server.tsx";
 
-const shell = `<!doctype html>
-<div id="app"></div>
-<script type="module" src="/client.js"></script>`;
+export function handleProfile(): Response {
+  const payload = renderToPayloadStream(<Profile />);
 
-export const app = new Hono();
-
-app.get("/", (c) => c.html(shell));
-
-app.get("/profile/:id", (c) => {
-  const result = renderToPayloadStream(<ProfilePage id={c.req.param("id")} />);
-
-  return new Response(result.stream, {
-    headers: { "content-type": result.contentType },
+  return new Response(payload.stream, {
+    headers: { "content-type": payload.contentType },
   });
-});
+}
 ```
 
-Serve the next file, bundled for the browser, as `/client.js` (build it with `jsxImportSource: "@bgub/fig-dom"`).
-
-On the client, the serialized page is an ordinary data resource: the key is the refresh boundary, and the manifest is the other half of `clientReference` — it maps ids back to real components:
+Load and render it in the browser as an ordinary data resource:
 
 ```tsx
-// client.tsx — runs in the browser
-import { dataResource, readData, refreshData, transition } from "@bgub/fig";
+// client.tsx
+import { dataResource, type FigNode, readData } from "@bgub/fig";
 import { createRoot, payloadDataLoader } from "@bgub/fig-dom";
 
-const clientManifest = {
-  "like-button.tsx#LikeButton": () =>
-    import("./like-button.tsx").then((module) => module.LikeButton),
-};
+const profileResource = dataResource<[], FigNode>({
+  key: () => ["profile"],
 
-const profileResource = dataResource({
-  key: (id: string) => ["profile", id],
   load: payloadDataLoader({
-    request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
-    resolveClientReference: ({ id }) => clientManifest[id]?.(),
+    request: ({ signal }) => fetch("/profile", { signal }),
+
+    resolveClientReference: ({ id }) => {
+      if (id === "./counter.tsx#Counter") {
+        return import("./counter.tsx").then((module) => module.Counter);
+      }
+    },
   }),
 });
 
-function ProfileScreen({ id }: { id: string }) {
-  return readData(profileResource, id); // suspends, then returns the decoded tree
+function App() {
+  return readData(profileResource);
 }
 
-createRoot(document.getElementById("app")!).render(<ProfileScreen id="42" />);
+createRoot(document.getElementById("app")!).render(<App />);
 ```
 
-Later, refresh it like any other data:
+The server streams the rendered tree, the client decodes it as the resource value, and `Counter` loads as an interactive client component.
+
+Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
 
 ```ts
-transition(() => refreshData(profileResource, "42"));
+import { refreshData, transition } from "@bgub/fig";
+
+transition(() => refreshData(profileResource));
 ```
 
-The server re-renders the page, the store swaps the tree in (the timestamp changes), and the `LikeButton` island keeps its count — same component identity, ordinary reconciliation. Finer refresh granularity is just finer resource keys.
+The current tree stays visible while the server renders and decodes its replacement. Each resource key is its own refresh boundary; keyed resources pass the same arguments to `refreshData` that they pass to `readData`.
 
 ### Explicit reads instead of `use()`
 
