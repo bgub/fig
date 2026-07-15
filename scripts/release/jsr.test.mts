@@ -28,6 +28,36 @@ void test("release graph contains one synchronized public group", async () => {
   );
 });
 
+void test("JSR manifests expose every npm public entry", async () => {
+  for (const packageName of publicPackageNames) {
+    const packageDir = join(
+      process.cwd(),
+      "packages",
+      packageName.slice("@bgub/".length),
+    );
+    const npmManifest = JSON.parse(
+      await readFile(join(packageDir, "package.json"), "utf8"),
+    ) as { exports: string | Record<string, unknown> };
+    const jsrManifest = JSON.parse(
+      await readFile(join(packageDir, "jsr.json"), "utf8"),
+    ) as { exports: string | Record<string, unknown> };
+    const npmEntries = (
+      typeof npmManifest.exports === "string"
+        ? ["."]
+        : Object.keys(npmManifest.exports)
+    )
+      .filter((entry) => entry !== "./package.json")
+      .sort();
+    const jsrEntries = (
+      typeof jsrManifest.exports === "string"
+        ? ["."]
+        : Object.keys(jsrManifest.exports)
+    ).sort();
+
+    assert.deepEqual(jsrEntries, npmEntries, packageName);
+  }
+});
+
 void test("synchronizeJsrManifest updates only the version", async () => {
   const dir = await mkdtemp(join(tmpdir(), "fig-jsr-release-"));
   const path = join(dir, "jsr.json");
