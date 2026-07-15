@@ -260,16 +260,59 @@ h2 {
   border-color: var(--ink);
 }
 
-:where(.fig-demo-app-pane) button[data-resource-refresh] {
-  /* Wide enough for the longest label so the pending swap never shifts. */
-  min-width: 168px;
-}
-
 :where(.fig-demo-app-pane) button[data-refresh-state="pending"] {
-  animation: slot-pulse 0.9s ease-in-out infinite alternate;
   border-style: dashed;
   color: var(--muted);
   cursor: progress;
+}
+
+.resource-shell {
+  position: relative;
+}
+
+.resource-shell > .frame > h2 {
+  padding-right: 36px;
+}
+
+:where(.fig-demo-app-pane) button.refresh-button {
+  align-items: center;
+  background: var(--payload-tint);
+  border-color: var(--payload);
+  color: var(--payload);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 28px;
+  z-index: 1;
+}
+
+:where(.fig-demo-app-pane) button.refresh-button:hover {
+  background: var(--bg);
+  border-color: var(--payload);
+}
+
+.refresh-button svg {
+  fill: none;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 15px;
+}
+
+.refresh-button[data-refresh-state="pending"] svg {
+  animation: refresh-spin 0.8s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* --- Layer content ------------------------------------------------------ */

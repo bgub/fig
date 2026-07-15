@@ -1,4 +1,4 @@
-// Dev-only probe: rapid nav Home -> Data -> Dashboard -> Assets, capturing
+// Dev-only probe: rapid nav Home -> Data -> Posts -> Assets, capturing
 // page errors (removeChild NotFoundError repro) and the ?v= generation of
 // every loaded fig chunk (mixed generations = stale prebundle, not a bug).
 import { chromium } from "@playwright/test";
@@ -6,7 +6,7 @@ import { chromium } from "@playwright/test";
 const base = process.argv[2] ?? "https://fig-demo-start.localhost";
 const attempts = Number(process.argv[3] ?? 10);
 const clickGapMs = Number(process.argv[4] ?? 150);
-const labels = (process.argv[5] ?? "Data,Dashboard,Assets").split(",");
+const labels = (process.argv[5] ?? "Data,Posts,Assets").split(",");
 
 const browser = await chromium.launch({
   args: ["--ignore-certificate-errors"],

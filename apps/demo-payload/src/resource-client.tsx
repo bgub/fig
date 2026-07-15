@@ -107,21 +107,6 @@ function ResourcePage() {
           >
             Next post
           </button>
-          <RefreshButton
-            label="Refresh dashboard"
-            name="dashboard"
-            refresh={() => refreshData(dashboardResource)}
-          />
-          <RefreshButton
-            label="Refresh post"
-            name="post"
-            refresh={() => refreshData(postResource, seed)}
-          />
-          <RefreshButton
-            label="Refresh weather"
-            name="weather"
-            refresh={() => refreshData(weatherResource)}
-          />
           <button
             data-resource-nav="broken"
             events={[on("click", () => setSeed(brokenResourceSeed))]}
@@ -148,7 +133,16 @@ function ResourcePage() {
 }
 
 function DashboardView() {
-  return <div class="dashboard-slot">{readData(dashboardResource)}</div>;
+  return (
+    <div class="dashboard-slot resource-shell">
+      {readData(dashboardResource)}
+      <RefreshButton
+        label="Refresh dashboard"
+        name="dashboard"
+        refresh={() => refreshData(dashboardResource)}
+      />
+    </div>
+  );
 }
 
 // The dashboard's wireframe while the surrounding server component streams.
@@ -241,11 +235,29 @@ function WeatherSlotPending() {
 function PostView({ seed }: { seed: number }) {
   // Suspends until the payload's root row decodes; holes inside keep
   // streaming afterwards.
-  return <div class="payload-slot">{readData(postResource, seed)}</div>;
+  return (
+    <div class="payload-slot resource-shell">
+      {readData(postResource, seed)}
+      <RefreshButton
+        label="Refresh post"
+        name="post"
+        refresh={() => refreshData(postResource, seed)}
+      />
+    </div>
+  );
 }
 
 function WeatherView() {
-  return <div class="weather-slot">{readData(weatherResource)}</div>;
+  return (
+    <div class="weather-slot resource-shell">
+      {readData(weatherResource)}
+      <RefreshButton
+        label="Refresh weather"
+        name="weather"
+        refresh={() => refreshData(weatherResource)}
+      />
+    </div>
+  );
 }
 
 function RefreshButton({
@@ -261,6 +273,8 @@ function RefreshButton({
 
   return (
     <button
+      aria-label={label}
+      class="refresh-button"
       data-refresh-state={isPending ? "pending" : "idle"}
       data-resource-refresh={name}
       events={[
@@ -270,9 +284,12 @@ function RefreshButton({
           });
         }),
       ]}
+      title={label}
       type="button"
     >
-      {isPending ? "Refreshing…" : label}
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 0 0-14.9-3M4 5v6h6M4 13a8 8 0 0 0 14.9 3M20 19v-6h-6" />
+      </svg>
     </button>
   );
 }
