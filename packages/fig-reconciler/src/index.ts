@@ -396,8 +396,8 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
-// Capability types require the complete method group that gates a feature.
-// Plain regroupings of HostConfig members do not earn aliases.
+// Capability types describe coherent host method groups for renderers that
+// implement them. Plain regroupings of HostConfig members do not earn aliases.
 export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
