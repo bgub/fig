@@ -26,7 +26,7 @@ import {
   updateParentSelect,
 } from "./form-controls.ts";
 import { hydrateElement, updateElement } from "./props.ts";
-import { configureDomRefreshScheduler } from "./refresh.ts";
+import { configureDomRefreshScheduler } from "./refresh-internal.ts";
 import {
   enclosingSuspenseBoundaryStart,
   isWithinSuspenseBoundary,

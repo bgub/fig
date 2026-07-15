@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  configureDomRefreshScheduler,
-  type RefreshUpdate,
-  scheduleRefresh,
-} from "./refresh.ts";
+import { configureDomRefreshScheduler } from "./refresh-internal.ts";
+import { type RefreshUpdate, scheduleRefresh } from "./refresh.ts";
 
 // This file must not import ./index.ts: it exercises the window before the
 // @bgub/fig-dom main entry evaluates and configures the scheduler.

@@ -46,7 +46,7 @@ import {
   rollbackCommitIndex,
 } from "./commit-index.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
-import { devtoolsTypeName } from "./devtools.ts";
+import { devtoolsTypeName } from "./devtools-internal.ts";
 import {
   ActivityTag,
   AssetsTag,
@@ -395,26 +395,8 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
-export type HostRenderConfig<Container, Instance, TextInstance> = Pick<
-  HostConfig<Container, Instance, TextInstance>,
-  | "createInstance"
-  | "createTextInstance"
-  | "appendInitialChild"
-  | "finalizeInitialInstance"
-  | "setTextContent"
-  | "insertBefore"
-  | "removeChild"
-  | "commitUpdate"
-  | "commitTextUpdate"
-  | "shouldCommitUpdate"
-  | "clearContainer"
->;
-
-export type HostValidationConfig<Container, Instance, TextInstance> = Pick<
-  HostConfig<Container, Instance, TextInstance>,
-  "validateInstanceNesting" | "validateTextNesting" | "containerType"
->;
-
+// Capability types describe coherent host method groups for renderers that
+// implement them. Plain regroupings of HostConfig members do not earn aliases.
 export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,

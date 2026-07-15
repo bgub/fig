@@ -9,10 +9,9 @@ import { assets, meta, title } from "@bgub/fig";
 import { FigDevtools } from "@bgub/fig-devtools";
 import {
   createRenderTreeCollector,
-  escapeAttribute,
-  escapeText,
   renderToDocumentStream,
 } from "@bgub/fig-server";
+import { escapeAttribute, escapeText } from "@bgub/fig-server/html";
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import type { DataResourceKey, DataResourceLoadContext } from "@bgub/fig";
 import { normalizeDataResourceKey } from "@bgub/fig/internal";

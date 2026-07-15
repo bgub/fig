@@ -16,6 +16,11 @@
       "import": "./dist/payload.js",
       "default": "./dist/payload.js"
     },
+    "./html": {
+      "types": "./dist/html-entry.d.ts",
+      "import": "./dist/html-entry.js",
+      "default": "./dist/html-entry.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",

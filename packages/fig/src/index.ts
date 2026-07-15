@@ -41,7 +41,6 @@ export {
   type FigElement,
   type FigNode,
   type FigPortal,
-  type FigText,
   type FigViewTransition,
   Fragment,
   isValidElement,
