@@ -276,7 +276,7 @@ describe("@bgub/fig-dom", () => {
     });
   });
 
-  it("groups host stylesheets by first-discovered precedence", () => {
+  it("orders host stylesheets by precedence and href", () => {
     const { head, root } = documentResourceRoot();
 
     flushSync(() =>
@@ -285,7 +285,7 @@ describe("@bgub/fig-dom", () => {
           "main",
           null,
           createElement("link", {
-            href: "/reset.css",
+            href: "/z-reset.css",
             precedence: "reset",
             rel: "stylesheet",
           }),
@@ -295,7 +295,7 @@ describe("@bgub/fig-dom", () => {
             rel: "stylesheet",
           }),
           createElement("link", {
-            href: "/forms.css",
+            href: "/a-reset.css",
             precedence: "reset",
             rel: "stylesheet",
           }),
@@ -307,7 +307,7 @@ describe("@bgub/fig-dom", () => {
       head.childNodes.map((child) =>
         (child as FakeElement).getAttribute("href"),
       ),
-    ).toEqual(["/reset.css", "/forms.css", "/theme.css"]);
+    ).toEqual(["/a-reset.css", "/z-reset.css", "/theme.css"]);
   });
 
   it("updates the singleton title head slot in place", () => {
@@ -643,6 +643,7 @@ describe("@bgub/fig-dom", () => {
     // descriptor, not the aborted render's media="print" props.
     expect(head.childNodes).toHaveLength(1);
     expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      "data-precedence": "",
       href: "/late.css",
       rel: "stylesheet",
     });
@@ -655,6 +656,7 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Ready");
     expect(head.childNodes).toHaveLength(1);
     expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      "data-precedence": "",
       href: "/late.css",
       rel: "stylesheet",
     });

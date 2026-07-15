@@ -45,6 +45,10 @@ The sealing rules differ by mode. In streaming SSR the head is sealed when the s
 
 Only streamed kinds travel on the payload wire — doc 6's `assets` rows — serialized descriptor-only from a per-kind field table, which is the single source of truth for the wire type. Head-only kinds can't serialize into the payload.
 
+## Stylesheet precedence
+
+Stream completion timing never decides cascade order. Precedence values sort lexicographically, then href sorts stylesheets sharing one value; the omitted precedence is the empty string and sorts first. Initial server output, late streamed insertion, payload delivery, and host insertion all use that comparator. Use ordered names such as `00-reset`, `10-components`, and `20-theme` when the cascade depends on bucket order.
+
 ## Loading and reveal gating
 
 On the client, `insertAssetResources` (from `@bgub/fig-dom`) inserts descriptors idempotently by key and returns load tracking.

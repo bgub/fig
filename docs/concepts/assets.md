@@ -24,7 +24,7 @@ On the client, `insertAssetResources` inserts descriptors idempotently (by key) 
 
 ## Stylesheet Precedence
 
-Each `precedence` value names a stylesheet bucket. Bucket order is fixed by the order in which distinct values are first discovered, and discovery order is preserved within a bucket. When a host render or `insertAssetResources` discovers another stylesheet for an existing bucket, Fig inserts it before the next bucket in the document head. An omitted value forms the default bucket. Independently streamed server segments preserve discovery order; defining a stronger cross-segment ordering policy remains an open question.
+Stylesheet order is deterministic rather than completion-timed: precedence names sort lexicographically, then `href` sorts sheets inside a precedence value. An omitted value is the empty-string precedence and sorts first. The server applies the same comparator before initial emission; a stylesheet first discovered after the shell receives an id and a small `p` protocol op moves it into the matching position in `document.head`. Payload and host insertion use the shared comparator directly. When cascade order matters, authors and bundlers should encode it in precedence names such as `00-reset`, `10-components`, and `20-theme`; sheets sharing a precedence are ordered by URL.
 
 ## Diagnostics
 

@@ -16,6 +16,7 @@ import {
   assetResourceDestination,
   assetResourceFromHostProps,
   assetResourceKey,
+  compareStylesheetResources,
   collectChildren,
   createDataStore,
   type DataStore,
@@ -1706,10 +1707,32 @@ function flushAssetList(
   sink: AssetSink,
   blockingIds: Set<string>,
 ): void {
-  for (const resource of resources) {
-    const id = request.assetRegistry.write(resource, sink);
-    if (id !== null) blockingIds.add(id);
+  for (const resource of orderedAssetResources(resources)) {
+    const lateStylesheet =
+      resource.kind === "stylesheet" &&
+      request.completedRootSegment === null &&
+      !request.prerender;
+    const result = request.assetRegistry.write(resource, sink, {
+      requireStylesheetId: lateStylesheet,
+    });
+    if (result.blockingId !== null) blockingIds.add(result.blockingId);
+    if (lateStylesheet && result.emitted && result.elementId !== null) {
+      writeRuntime(request);
+      writeScript(request, `${RUNTIME_REF}.p(${jsString(result.elementId)})`);
+    }
   }
+}
+
+function orderedAssetResources(
+  resources: readonly FigAssetResource[],
+): FigAssetResource[] {
+  const stylesheets = resources
+    .filter((resource) => resource.kind === "stylesheet")
+    .sort(compareStylesheetResources);
+  let stylesheetIndex = 0;
+  return resources.map((resource) =>
+    resource.kind === "stylesheet" ? stylesheets[stylesheetIndex++] : resource,
+  );
 }
 
 function withAssetGate(

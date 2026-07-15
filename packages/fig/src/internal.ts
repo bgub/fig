@@ -110,6 +110,7 @@ export {
   type AssetResourceDestination,
   type AssetResourceHostAttribute,
   assetResourceDestination,
+  compareStylesheetResources,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
   assetResourceHostAttributes,

@@ -921,6 +921,26 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("emits stylesheets in deterministic precedence and href order", async () => {
+    const html = await renderToHtml(
+      assets(
+        [
+          stylesheet("/theme.css", { precedence: "theme" }),
+          stylesheet("/z-reset.css", { precedence: "reset" }),
+          stylesheet("/a-reset.css", { precedence: "reset" }),
+        ],
+        createElement("main", null, "Ready"),
+      ),
+    );
+
+    expect(html.indexOf("/a-reset.css")).toBeLessThan(
+      html.indexOf("/z-reset.css"),
+    );
+    expect(html.indexOf("/z-reset.css")).toBeLessThan(
+      html.indexOf("/theme.css"),
+    );
+  });
+
   it("does not emit head-only assets into the body stream", async () => {
     const html = await renderToHtml(
       assets(
@@ -1059,7 +1079,7 @@ describe("@bgub/fig-server", () => {
     );
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="doc-r-0">',
+      '<link rel="stylesheet" href="/message.css" data-precedence="" id="doc-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["doc-r-0"],()=>{__figSSR.c("doc-b-0","doc-s-0")})',
@@ -1225,11 +1245,45 @@ describe("@bgub/fig-server", () => {
     const html = await readStream(result.stream);
 
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="test-r-0">',
+      '<link rel="stylesheet" href="/message.css" data-precedence="" id="test-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["test-r-0"],()=>{__figSSR.c("test-b-0","test-s-0")})',
     );
+  });
+
+  it("moves stylesheets discovered after the shell into precedence order", async () => {
+    const pending = deferred<string>();
+
+    function LateStyle() {
+      const value = readPromise(pending.promise);
+      return assets(
+        stylesheet("/reset.css", { precedence: "reset" }),
+        createElement("span", null, value),
+      );
+    }
+
+    const result = renderToStream(
+      assets(
+        stylesheet("/theme.css", { precedence: "theme" }),
+        createElement(
+          Suspense,
+          { fallback: createElement("em", null, "Loading") },
+          createElement(LateStyle, null),
+        ),
+      ),
+      { identifierPrefix: "order" },
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    expect(html).toContain(
+      '<link rel="stylesheet" href="/reset.css" data-precedence="reset" id="order-r-1">',
+    );
+    expect(html).toContain('__figSSR.p("order-r-1")');
   });
 
   it("discovers assets from resolved component module ids", async () => {
@@ -1252,7 +1306,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toBe(
-      '<link rel="stylesheet" href="/card.css"><section>Card</section>',
+      '<link rel="stylesheet" href="/card.css" data-precedence=""><section>Card</section>',
     );
   });
 
@@ -1283,7 +1337,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="manifest-r-0">',
+      '<link rel="stylesheet" href="/message.css" data-precedence="" id="manifest-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["manifest-r-0"],()=>{__figSSR.c("manifest-b-0","manifest-s-0")})',

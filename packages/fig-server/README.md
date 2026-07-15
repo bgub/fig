@@ -226,14 +226,17 @@ function Page() {
 Metadata discovered before `headReady` is injected into the initial document
 head. Metadata discovered after `headReady`, for example inside pending
 Suspense content, is reported through `onAssetError` and is not added to the
-already-flushed shell. Stylesheets discovered for later Suspense segments remain
-stream-safe: Fig emits them near the segment and gates reveal until they load
-unless `{ blocking: "none" }` opts out.
+already-flushed shell.
+Stylesheets discovered for later Suspense segments are emitted near the segment,
+moved into deterministic `(precedence, href)` order in `document.head`, and gate
+reveal until they load unless `{ blocking: "none" }` opts out.
 
 Stylesheets, preloads, fonts, preconnects, and scripts are body-stream-safe
 resources. Fig hoists them before the HTML segment that depends on them and
 dedupes identical resources. Stylesheets block streamed Suspense reveals by
 default; pass `{ blocking: "none" }` to opt out for non-critical styles.
+Precedence values sort lexicographically, then href sorts within one value;
+use names such as `00-reset`, `10-components`, and `20-theme` when order matters.
 
 Resource duplicates are checked by key and behavior. Identical duplicates dedupe
 silently. Conflicting duplicates throw: for example, the same stylesheet `href`

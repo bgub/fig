@@ -1,9 +1,14 @@
-import { type FigAssetResource, type Props } from "@bgub/fig";
+import {
+  type FigAssetResource,
+  type Props,
+  type StylesheetResource,
+} from "@bgub/fig";
 import {
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
   assetResourceHostAttributes,
   assetResourceKey,
+  compareStylesheetResources,
   isFigAssetResource,
 } from "@bgub/fig/internal";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
@@ -233,31 +238,29 @@ function attachDocumentResource(
   return element;
 }
 
-// Stylesheets are grouped by precedence. Bucket order is set by first
-// discovery; later members join before the next bucket.
+// Stream timing never defines cascade order: precedence names sort buckets,
+// then href sorts members within a bucket. The same comparator is used by the
+// server before initial emission; late streamed sheets are moved into this
+// order by the inline runtime.
 function insertDocumentResource(
   registry: DocumentResources,
   element: Element,
 ): void {
-  const precedence = stylesheetPrecedence(element);
-  if (precedence === null) {
+  const resource = stylesheetResource(element);
+  if (resource === null) {
     registry.head.appendChild(element);
     return;
   }
 
-  let foundBucket = false;
   for (
     let child = registry.head.firstChild;
     child !== null;
     child = child.nextSibling
   ) {
-    const current = isElementNode(child) ? stylesheetPrecedence(child) : null;
-    if (current !== null) {
-      if (current === precedence) foundBucket = true;
-      else if (foundBucket) {
-        registry.head.insertBefore(element, child);
-        return;
-      }
+    const current = isElementNode(child) ? stylesheetResource(child) : null;
+    if (current !== null && compareStylesheetResources(resource, current) < 0) {
+      registry.head.insertBefore(element, child);
+      return;
     }
   }
   registry.head.appendChild(element);
@@ -322,10 +325,10 @@ function removableResourceKind(kind: FigAssetResource["kind"]): boolean {
   return kind === "title" || kind === "meta";
 }
 
-function stylesheetPrecedence(element: Element): string | null {
+function stylesheetResource(element: Element): StylesheetResource | null {
   if (elementName(element) !== "link") return null;
   const resource = resourceFromElement(element);
-  return resource?.kind === "stylesheet" ? (resource.precedence ?? "") : null;
+  return resource?.kind === "stylesheet" ? resource : null;
 }
 
 // A font is delivered as <link rel="preload" as="font">, which parses back

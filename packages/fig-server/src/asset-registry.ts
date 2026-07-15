@@ -18,16 +18,29 @@ export class AssetResourceRegistry {
     return this.canonical(resource).added;
   }
 
-  write(resource: FigAssetResource, sink: AssetSink): string | null {
+  write(
+    resource: FigAssetResource,
+    sink: AssetSink,
+    options: { requireStylesheetId?: boolean } = {},
+  ): AssetWriteResult {
     const { key, resource: current } = this.canonical(resource);
-    const id = this.revealBlockerId(key, current);
+    const blockingId = this.revealBlockerId(key, current);
+    const elementId =
+      current.kind === "stylesheet" &&
+      (blockingId !== null || options.requireStylesheetId === true)
+        ? this.stylesheetIdFor(key)
+        : null;
 
-    if (assetResourceDestination(current) === "head") return id;
-    if (this.emittedResources.has(key)) return id;
+    if (assetResourceDestination(current) === "head") {
+      return { blockingId, elementId, emitted: false };
+    }
+    if (this.emittedResources.has(key)) {
+      return { blockingId, elementId, emitted: false };
+    }
 
     this.emittedResources.add(key);
-    writeAssetTag(sink, current, id);
-    return id;
+    writeAssetTag(sink, current, elementId);
+    return { blockingId, elementId, emitted: true };
   }
 
   headHtml(nonce?: string): string {
@@ -113,6 +126,12 @@ export class AssetResourceConflictError extends Error {
 interface AssetSink {
   nonce?: string;
   write(chunk: string): void;
+}
+
+export interface AssetWriteResult {
+  blockingId: string | null;
+  elementId: string | null;
+  emitted: boolean;
 }
 
 function writeAssetTag(

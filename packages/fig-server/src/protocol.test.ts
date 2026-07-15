@@ -11,6 +11,7 @@ interface TestRuntime {
     message: string,
   ): void;
   c(boundaryId: string, segmentId: string): void;
+  p(stylesheetId: string): void;
   x(boundaryId: string, digest: string, message: string): void;
 }
 
@@ -79,10 +80,30 @@ function appendCompletedSegment(root: HTMLElement): {
 describe("server streaming protocol", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    document.head.replaceChildren();
     delete (document as unknown as { startViewTransition?: unknown })
       .startViewTransition;
     delete (document as unknown as { __figViewTransition?: unknown })
       .__figViewTransition;
+  });
+
+  it("places late stylesheets in deterministic precedence and href order", () => {
+    const theme = document.createElement("link");
+    theme.rel = "stylesheet";
+    theme.href = "data:text/css,theme";
+    theme.setAttribute("data-precedence", "theme");
+    document.head.append(theme);
+
+    const lateReset = document.createElement("link");
+    lateReset.id = "late-reset";
+    lateReset.rel = "stylesheet";
+    lateReset.href = "data:text/css,reset";
+    lateReset.setAttribute("data-precedence", "reset");
+    document.body.append(lateReset);
+
+    installRuntime().p("late-reset");
+
+    expect(Array.from(document.head.children)).toEqual([lateReset, theme]);
   });
 
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {

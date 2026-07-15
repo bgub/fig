@@ -24,6 +24,7 @@ Content that settles after its slot flushed streams later as hidden staging segm
 - `s(placeholderId, segmentId)` — fill a partial segment (a placeholder inside still-streaming content).
 - `x(boundaryId, digest, message)` — mark a boundary client-rendered: rewrite the marker to `client`, stash digest/message on the placeholder, ping the retry hook. The client re-renders that boundary locally.
 - `r(ids, fn)` — reveal gating: wait for blocking stylesheets to load before running a completion, so revealed content never flashes unstyled.
+- `p(stylesheetId)` — move a stylesheet discovered after the shell into `document.head` using the shared lexicographic `(precedence, href)` order.
 - View-transition annotations (`data-fig-vt-name` and `data-fig-vt-class`) on staged/fallback host surfaces make `s`, `c`, and `ac` run their DOM moves inside `document.startViewTransition` when the browser supports it. Without annotations or browser support, the ops take the same non-animated path. Annotated reveals share the per-document `__figViewTransition` mutex with client commits: a reveal chains on a running transition's `finished` instead of skipping it, and registers its own transition while animating (see view-transitions.md).
 - `ac`/`ax` — the Activity-hidden variants: resolve the boundary inside an inert `<template data-fig-activity>` content fragment (unreachable by id-based lookup), falling back to the light DOM if the activity already revealed. See activity.md.
 

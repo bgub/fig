@@ -296,7 +296,7 @@ function Chart() {
 }
 ```
 
-Fig discovers these declarations during rendering and deduplicates them across server rendering, Payload, and client insertion. Streamed content waits for blocking stylesheets before reveal, preventing a flash of unstyled content. The full creator set also covers scripts, preloads, module preloads, fonts, titles, and metadata.
+Fig discovers these declarations during rendering and deduplicates them across server rendering, Payload, and client insertion. Streamed content waits for blocking stylesheets before reveal, preventing a flash of unstyled content; precedence names and href provide deterministic ordering even when segments settle out of order. The full creator set also covers scripts, preloads, module preloads, fonts, titles, and metadata.
 
 ## What's gone (and what replaces it)
 

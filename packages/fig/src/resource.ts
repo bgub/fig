@@ -271,6 +271,23 @@ export function assetResourceDestination(
     : "stream";
 }
 
+// Stylesheet order must not depend on which streamed segment resolves first.
+// Precedence names form deterministic buckets, and href orders sheets inside
+// a bucket. Authors whose cascade requires a particular order should encode it
+// in precedence (for example, "00-reset", "10-components").
+export function compareStylesheetResources(
+  left: StylesheetResource,
+  right: StylesheetResource,
+): number {
+  const leftPrecedence = left.precedence ?? "";
+  const rightPrecedence = right.precedence ?? "";
+  if (leftPrecedence < rightPrecedence) return -1;
+  if (leftPrecedence > rightPrecedence) return 1;
+  if (left.href < right.href) return -1;
+  if (left.href > right.href) return 1;
+  return 0;
+}
+
 export function assetResourceFromHostProps(
   type: string,
   props: Props,
@@ -306,7 +323,7 @@ export function assetResourceHostAttributes(
         ["rel", "stylesheet"],
         ["href", resource.href],
         ["data-fig-resource-key", resource.key],
-        ["data-precedence", resource.precedence],
+        ["data-precedence", resource.precedence ?? ""],
         ["media", resource.media],
         ["crossorigin", resource.crossorigin],
       );
