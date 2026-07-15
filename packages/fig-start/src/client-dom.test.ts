@@ -352,6 +352,119 @@ describe("@bgub/fig-start client payload mount (happy-dom)", () => {
     }
   });
 
+  it("commits a navigated server route's content in a single pass", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+
+    // Snapshot the DOM at every root commit: the navigation must never
+    // commit an empty payload slot (a settled-but-untracked gate suspending
+    // for a retry beat) or an island placeholder (the hydration gate not
+    // revealed pre-commit). Either intermediate frame is invisible in a
+    // final-state assertion but stretches to the full animation length when
+    // a view transition parks the follow-up commit.
+    const commits: Array<{ slotText: string | null; text: string }> = [];
+    const globalWithHook = globalThis as typeof globalThis & {
+      __FIG_DEVTOOLS_GLOBAL_HOOK__?: unknown;
+    };
+    globalWithHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
+      inject: () => 1,
+      onCommitRoot() {
+        const slot = document.querySelector('[data-fig-payload-slot="/dash"]');
+        commits.push({
+          slotText: slot === null ? null : (slot.textContent ?? ""),
+          text: document.body.textContent ?? "",
+        });
+      },
+    };
+
+    try {
+      const router = hydrateStart({ routes, resolveClientReference });
+      await flush();
+      expect(document.body.textContent).toContain("Home");
+
+      const before = commits.length;
+      await router.navigate("/dash");
+      await flush();
+
+      const during = commits.slice(before);
+      const withSlot = during.filter((commit) => commit.slotText !== null);
+      expect(withSlot.length).toBeGreaterThan(0);
+      for (const commit of during) {
+        if (commit.slotText === null) {
+          // The route swap has not committed yet: the previous page must
+          // still be showing.
+          expect(commit.text).toContain("Home");
+          continue;
+        }
+        // Every commit that contains the slot contains the full decoded
+        // content, static markup and resolved island alike.
+        expect(commit.slotText).toContain("static markup");
+        expect(commit.slotText).toContain("island!");
+      }
+    } finally {
+      delete globalWithHook.__FIG_DEVTOOLS_GLOBAL_HOOK__;
+      restoreFetch();
+    }
+  });
+
+  it("commits a navigated asset-gated server route's content in a single pass", async () => {
+    await installServerRenderedDocument("/");
+    const restoreFetch = installHandlerFetch();
+
+    // Same single-pass contract as above, but through an island that carries
+    // a stylesheet: its payload elements inherit an asset gate, and a gate
+    // that settled during prepare() must read synchronously at the commit
+    // instead of suspending the slot for a retry beat.
+    const commits: Array<{ slotText: string | null; text: string }> = [];
+    const globalWithHook = globalThis as typeof globalThis & {
+      __FIG_DEVTOOLS_GLOBAL_HOOK__?: unknown;
+    };
+    globalWithHook.__FIG_DEVTOOLS_GLOBAL_HOOK__ = {
+      inject: () => 1,
+      onCommitRoot() {
+        const slot = document.querySelector(
+          '[data-fig-payload-slot="/styled"]',
+        );
+        commits.push({
+          slotText: slot === null ? null : (slot.textContent ?? ""),
+          text: document.body.textContent ?? "",
+        });
+      },
+    };
+
+    try {
+      const router = hydrateStart({ routes, resolveClientReference });
+      await flush();
+      expect(document.body.textContent).toContain("Home");
+
+      const before = commits.length;
+      const navigation = router.navigate("/styled");
+      await flush();
+
+      // prepare() is holding the commit on the stylesheet gate.
+      expect(document.body.textContent).toContain("Home");
+      document.head
+        .querySelector('link[rel="stylesheet"]')
+        ?.dispatchEvent(new Event("load"));
+      await navigation;
+      await flush();
+
+      const during = commits.slice(before);
+      const withSlot = during.filter((commit) => commit.slotText !== null);
+      expect(withSlot.length).toBeGreaterThan(0);
+      for (const commit of during) {
+        if (commit.slotText === null) {
+          expect(commit.text).toContain("Home");
+          continue;
+        }
+        expect(commit.slotText).toContain("styled!");
+      }
+    } finally {
+      delete globalWithHook.__FIG_DEVTOOLS_GLOBAL_HOOK__;
+      restoreFetch();
+    }
+  });
+
   it("refreshes an existing server route segment when navigating between its child routes", async () => {
     const nestedRoutes = [
       createRootRoute({

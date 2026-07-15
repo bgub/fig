@@ -368,6 +368,10 @@ class PayloadStreamDecode {
         if (gate !== null) {
           // Elements referencing this row inherit the gate as they
           // materialize; once it settles there is nothing left to gate.
+          // Track it now so a gate that settles before its first render
+          // read (e.g. awaited by a router's pre-commit prepare) resolves
+          // synchronously instead of suspending for a retry beat.
+          trackThenable(gate);
           this.clientRowGates.set(row.id, gate);
           void gate.then(() => {
             this.clientRowGates.delete(row.id);

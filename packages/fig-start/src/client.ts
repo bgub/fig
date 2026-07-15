@@ -22,6 +22,7 @@ import {
   isThenable,
   jsonPayloadCodec,
   type PayloadDataHydrationEntry,
+  trackThenable,
 } from "@bgub/fig/internal";
 import {
   hydrateRoot,
@@ -216,6 +217,10 @@ function createRouteClientReference(
   const pending = isThenable(resolution)
     ? Promise.resolve(resolution)
     : undefined;
+  // A resolution that settles before its first render read (module loads are
+  // awaited by prepare() ahead of the navigation commit) must read
+  // synchronously, not suspend for a retry beat.
+  if (pending !== undefined) trackThenable(pending);
   const ssr = reference.ssr === true;
 
   return function StartClientReference(
@@ -564,6 +569,12 @@ function createServerRouteContent(
       routeUrls.set(match.routeId, url);
       await ensureRouteLoaded(match.routeId, url);
       await Promise.allSettled([...pendingModuleLoads, ...pendingAssetGates]);
+      // Navigations commit post-hydration content: reveal the placeholder
+      // gate so islands mount real components inside the route-swap commit
+      // instead of paying a placeholder → reveal follow-up commit. On a
+      // fresh client-route document the gate has never revealed, and the
+      // route swap is the wrong place to start placeholder-matching.
+      hydrationGate.reveal();
     },
     render(routeId) {
       const url = routeUrls.get(routeId);
