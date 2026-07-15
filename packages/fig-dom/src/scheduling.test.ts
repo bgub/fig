@@ -2,7 +2,11 @@ import { createElement, useState } from "@bgub/fig";
 import { runWithEventPriority } from "@bgub/fig-reconciler";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, on } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -32,7 +36,7 @@ describe("@bgub/fig-dom scheduling", () => {
     setCount((count) => count + 1);
     expect(container.textContent).toBe("0");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("2");
     expect(renders).toBe(4);
   });
@@ -68,7 +72,7 @@ describe("@bgub/fig-dom scheduling", () => {
 
     expect(renders).toBe(2);
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("2");
     expect(renders).toBe(4);
   });
@@ -97,7 +101,7 @@ describe("@bgub/fig-dom scheduling", () => {
 
     expect(container.textContent).toBe("1");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("11");
   });
 

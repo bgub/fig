@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, on } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -43,7 +43,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Stable");
 
     resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loaded");
   });
@@ -72,7 +72,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loading");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loaded");
   });
@@ -107,7 +107,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(loads).toBe(1);
 
     pending.resolve(Message);
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ready");
 
@@ -169,7 +169,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(loads).toBe(1);
 
     first.reject(new Error("chunk failed"));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Crashed");
     expect(loads).toBe(1);
 
@@ -178,7 +178,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(loads).toBe(2);
 
     second.resolve(Message);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
   });
 
@@ -214,12 +214,12 @@ describe("@bgub/fig-dom suspense", () => {
     transition(() => {
       setValue?.(pending.promise);
     });
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ready");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loaded");
   });
@@ -258,15 +258,15 @@ describe("@bgub/fig-dom suspense", () => {
       await gate.promise;
       setValue?.(pending.promise);
     });
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
 
     gate.resolve(undefined);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loaded");
   });
 
@@ -289,12 +289,12 @@ describe("@bgub/fig-dom suspense", () => {
         ),
       );
     });
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loading");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loaded");
   });
@@ -328,7 +328,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("HeaderInnerFooter");
 
     pending.resolve("Message");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("HeaderMessageFooter");
   });
@@ -367,12 +367,12 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Outer");
 
     fallback.resolve("Inner fallback");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("HeaderInner fallbackFooter");
 
     primary.resolve("Primary");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("HeaderPrimaryFooter");
   });
@@ -403,11 +403,11 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loading");
 
     first.resolve("A");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loading");
 
     second.resolve("B");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("AB");
   });
 
@@ -456,7 +456,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(fallback.textContent).toBe("Loading");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("1Loaded");
   });
@@ -492,7 +492,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Gone");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Gone");
   });
@@ -521,7 +521,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loading");
 
     pending.reject(new Error("read failed"));
-    await delay();
+    await waitForHostTurns();
 
     expect(uncaught).toEqual(["read failed"]);
     expect(container.textContent).toBe("");
@@ -575,12 +575,12 @@ describe("@bgub/fig-dom suspense", () => {
     const fallbackMount = ["fallback:run", "fallback:abort", "fallback:run"];
 
     root.render(createElement(App, { value: null }));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Primary");
     expect(calls).toEqual(primaryMount);
 
     root.render(createElement(App, { value: pending.promise }));
-    await delay();
+    await waitForHostTurns();
     const [primary, fallback] = container.childNodes as FakeElement[];
     expect(display(primary)).toBe("none");
     expect(display(fallback)).toBe("");
@@ -588,7 +588,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(calls).toEqual([...primaryMount, "primary:abort", ...fallbackMount]);
 
     pending.resolve("Primary loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Primary loaded");
     // The restored primary effect already strict-ran at first mount, so the
@@ -632,7 +632,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("DONE");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("PDONE");
   });
@@ -659,7 +659,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("DONE");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("DONEP");
   });
@@ -688,7 +688,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("X");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("AXBC");
   });
@@ -719,7 +719,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("DONE");
-    await delay();
+    await waitForHostTurns();
 
     const div = container.childNodes[0] as FakeElement;
     const section = div.childNodes[0] as FakeElement;
@@ -758,7 +758,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("DONE");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("stableDONE");
   });
@@ -791,7 +791,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PONE");
 
     // Update the suspending child to a fresh pending promise: it re-suspends,
@@ -804,7 +804,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PTWO");
   });
 
@@ -838,7 +838,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise })),
     );
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PONE");
 
     const second = deferred<string>();
@@ -849,7 +849,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     // The deeper <section> wrapper is also rebuilt cleanly, with no stale "ONE".
     const div = container.childNodes[0] as FakeElement;
     const section = div.childNodes[0] as FakeElement;
@@ -911,7 +911,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("load");
 
     gate.resolve("done");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Solddone");
 
     // Replacing the section's children must run as a regular update: if the
@@ -959,7 +959,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise })),
     );
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("AONEB");
 
     const second = deferred<string>();
@@ -974,7 +974,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("AXTWOB");
   });
 
@@ -1011,7 +1011,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise })),
     );
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("0ONE");
 
     // Bump the sibling's state while content is revealed.
@@ -1028,7 +1028,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(fallback.textContent).toBe("load");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("1TWO");
   });
 
@@ -1071,13 +1071,13 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
 
     root.render(createElement(App, { initial: first.promise }));
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PONE");
     expect(calls).toEqual(["run", "abort", "run"]);
 
     const second = deferred<string>();
     flushSync(() => setGate?.(second.promise));
-    await delay();
+    await waitForHostTurns();
     const [primary, fallback] = container.childNodes as FakeElement[];
     expect(display(primary)).toBe("none");
     expect(display(fallback)).toBe("");
@@ -1085,7 +1085,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(calls).toEqual(["run", "abort", "run", "abort"]);
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PTWO");
     expect(calls).toEqual(["run", "abort", "run", "abort", "run"]);
   });
@@ -1125,7 +1125,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
 
     root.render(createElement(App, { initial: first.promise }));
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     const button = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("PONE");
     expect(signals).toHaveLength(2);
@@ -1141,7 +1141,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(signals[1]?.aborted).toBe(true);
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PTWO");
     expect(signals).toHaveLength(3);
     expect(signals[2]?.aborted).toBe(false);
@@ -1185,7 +1185,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise })),
     );
     first.resolve("A");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("c0A");
 
     // Re-suspend: the committed primary is kept hidden, fallback shows.
@@ -1199,7 +1199,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     // must NOT hang the scheduler (the update is downgraded to the offscreen
     // lane; it cannot make progress until the boundary reveals).
     flushSync(() => counterSet?.(5));
-    await delay();
+    await waitForHostTurns();
     // Still suspended — fallback stays IN THE DOM (a speculative reveal must
     // not commit its abandoned fallback deletion), primary stays hidden.
     expect(fallback.parentNode).toBe(container);
@@ -1209,7 +1209,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
 
     // Reveal: the parked update is applied to the now-visible primary.
     second.resolve("B");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("c5B");
   });
 
@@ -1259,7 +1259,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise, label: "A" })),
     );
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("A:0ONE");
 
     const second = deferred<string>();
@@ -1270,7 +1270,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     expect(container.textContent).toBe("A:1load");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("A:1TWO");
 
     flushSync(() => rerenderRoot?.());
@@ -1310,7 +1310,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
       root.render(createElement(App, { initial: first.promise })),
     );
     first.resolve("X");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("ONEX");
 
     // setState INSIDE the boundary changes BOTH the suspending promise and the
@@ -1325,7 +1325,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     // On reveal the kept-hidden primary must re-render and apply the parked
     // update — not adopt the stale committed content (regression: was "ONEX").
     second.resolve("Y");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("TWOY");
   });
 });

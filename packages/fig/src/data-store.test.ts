@@ -113,7 +113,7 @@ describe("@bgub/fig", () => {
     expect(store.readData(labelResource, ["one"], owner)).toBe("ready");
     store.commitDataDependencies(owner, null);
     store.deleteDataOwner(owner);
-    await delay();
+    await waitForNextMacrotask();
 
     expect(evicted).toEqual(['["label","one"]']);
   });
@@ -217,7 +217,7 @@ describe("@bgub/fig", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]?.aborted).toBe(false);
 
-    await delay();
+    await waitForNextMacrotask();
 
     expect(signals[0]?.aborted).toBe(true);
     expect(evicted).toEqual(['["pending","one"]']);
@@ -282,7 +282,7 @@ describe("@bgub/fig", () => {
 
     await store.refreshData(valueResource, "one");
     store.run(() => invalidateData(valueResource, "one"));
-    await delay();
+    await waitForNextMacrotask();
 
     expect(loads).toBe(1);
   });
@@ -510,7 +510,7 @@ describe("@bgub/fig", () => {
     failNext = true;
     store.invalidateData(valueResource, "one");
     expect(store.readData(valueResource, ["one"], owner)).toBe("value");
-    await delay();
+    await waitForNextMacrotask();
     expect(loads).toBe(2);
 
     expect(store.readData(valueResource, ["one"], owner)).toBe("value");
@@ -521,7 +521,7 @@ describe("@bgub/fig", () => {
     failNext = false;
     store.invalidateData(valueResource, "one");
     expect(store.readData(valueResource, ["one"], owner)).toBe("value");
-    await delay();
+    await waitForNextMacrotask();
     expect(loads).toBe(3);
   });
 
@@ -551,7 +551,7 @@ describe("@bgub/fig", () => {
     expect(scheduled).toEqual([owner]);
 
     first.resolve("stale");
-    await delay();
+    await waitForNextMacrotask();
 
     expect(store.readData(valueResource, ["one"], owner)).toBe("stale");
     expect(store.inspectDataEntries()).toMatchObject([
@@ -563,7 +563,7 @@ describe("@bgub/fig", () => {
     ]);
 
     second.resolve("fresh");
-    await delay();
+    await waitForNextMacrotask();
 
     expect(store.readData(valueResource, ["one"], owner)).toBe("fresh");
     expect(store.inspectDataEntries()).toMatchObject([
@@ -650,7 +650,7 @@ describe("@bgub/fig", () => {
     store.run(() => preloadData(valueResource, "one"));
     store.run(() => invalidateData(valueResource, "one"));
     store.run(() => preloadData(valueResource, "one"));
-    await delay();
+    await waitForNextMacrotask();
 
     const entries = store.inspectDataEntries();
     expect(loads).toBe(2);
@@ -706,7 +706,7 @@ describe("@bgub/fig", () => {
     // window elapses on a live store, the awaiter learns it was evicted.
     store.run(() => preloadData(pendingResource, "one"));
     const result = store.run(() => refreshData(pendingResource, "one"));
-    await delay();
+    await waitForNextMacrotask();
 
     await expect(result).resolves.toEqual({
       reason: "evicted",
@@ -736,7 +736,7 @@ describe("@bgub/fig", () => {
     // First read suspends on the initial load, which rejects.
     expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
     store.commitDataDependencies(owner, null);
-    await delay();
+    await waitForNextMacrotask();
 
     // The rejection is cached: every read rethrows without a new load.
     expect(() => store.readData(flakyResource, ["one"], owner)).toThrow(
@@ -759,7 +759,7 @@ describe("@bgub/fig", () => {
     ).toBe("pending");
 
     expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
-    await delay();
+    await waitForNextMacrotask();
 
     expect(store.readData(flakyResource, ["one"], owner)).toBe("recovered");
     expect(attempts).toBe(2);
@@ -790,7 +790,7 @@ describe("@bgub/fig", () => {
     store.commitDataDependencies(firstOwner, null);
     expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
     store.commitDataDependencies(secondOwner, null);
-    await delay();
+    await waitForNextMacrotask();
 
     expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow(
       sharedError,
@@ -811,7 +811,7 @@ describe("@bgub/fig", () => {
 
     expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow();
     expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
-    await delay();
+    await waitForNextMacrotask();
 
     expect(store.readData(flakyResource, ["one"], firstOwner)).toBe(
       "recovered-one",
@@ -951,7 +951,7 @@ describe("generation-lifetime loader signals", () => {
     expect(store.readData(resource, ["one"], owner)).toBe("loaded");
     store.commitDataDependencies(owner, null);
     store.deleteDataOwner(owner);
-    await delay();
+    await waitForNextMacrotask();
 
     expect(signals[0]?.aborted).toBe(true);
   });
@@ -1161,7 +1161,7 @@ describe("load-context hydrate capability", () => {
   });
 });
 
-function delay(): Promise<void> {
+function waitForNextMacrotask(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 

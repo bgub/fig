@@ -17,7 +17,7 @@ import {
 } from "./suspense-markers.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeComment,
   FakeElement,
   FakeText,
@@ -414,7 +414,7 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.childNodes).toEqual([span]);
     expect(span.textContent).toBe("Server");
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toEqual([span]);
     expect(span.textContent).toBe("Client");
@@ -557,7 +557,7 @@ describe("@bgub/fig-dom hydration", () => {
       }),
     );
     // Cursor skipping must not swallow the boundary's own marker comments.
-    await delay();
+    await waitForHostTurns();
 
     expect(recoverable.errors).toEqual([]);
     expect(container.textContent).toBe("Hi BenContentAfter");
@@ -667,7 +667,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.listenerSets.mousemove).toHaveLength(1);
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.listenerSets.mousemove).toBeUndefined();
     expect(container.childNodes).toEqual([button]);
@@ -736,7 +736,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     shouldYield = true;
     await flushed;
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Shell 1Client");
     expect(recoverable.messages()).toEqual([]);
@@ -776,7 +776,7 @@ describe("@bgub/fig-dom hydration", () => {
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
 
-    await delay();
+    await waitForHostTurns();
     expect(container.childNodes).toHaveLength(1);
     expect(container.childNodes[0]).toBe(button);
     expect(button.textContent).toBe("PONE");
@@ -790,7 +790,7 @@ describe("@bgub/fig-dom hydration", () => {
     expect(fallback.textContent).toBe("Loading");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.childNodes).toHaveLength(1);
     expect(container.childNodes[0]).toBe(button);
     expect(display(button)).toBe("");
@@ -829,14 +829,14 @@ describe("@bgub/fig-dom hydration", () => {
       ),
     );
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toEqual([start, content, end]);
     expect(content.textContent).toBe("Server");
     expect(errors).toEqual([]);
 
     resolve("Server");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toEqual([content]);
     expect(content.textContent).toBe("Server");
@@ -886,9 +886,9 @@ describe("@bgub/fig-dom hydration", () => {
       ),
     );
 
-    await delay();
+    await waitForHostTurns();
     resolve("Server");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Server");
     expect(content.textContent).toBe("Server");
@@ -942,7 +942,7 @@ describe("@bgub/fig-dom hydration", () => {
     );
 
     fallback.dispatch("mousemove");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.listenerSets.mousemove).toHaveLength(1);
     expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
@@ -995,7 +995,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.textContent = "Client";
     completePendingBoundary(parent, boundary);
 
-    await delay();
+    await waitForHostTurns();
 
     expect(parent.childNodes).toEqual([boundary.content]);
     expect(boundary.content.textContent).toBe("Client");
@@ -1062,7 +1062,7 @@ describe("@bgub/fig-dom hydration", () => {
     second.content.textContent = "Second done";
     completePendingBoundary(parent, second);
 
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["second"]);
     expect(firstContentReads).toBe(0);
@@ -1117,7 +1117,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     completePendingBoundary(parent, boundary);
 
-    await delay();
+    await waitForHostTurns();
 
     expect(parent.childNodes).toEqual([boundary.content]);
     expect(boundary.content.textContent).toBe("Hydrated target");
@@ -1172,7 +1172,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     boundary.content.textContent = "Client";
     completePendingBoundary(innerContainer, boundary);
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["inner"]);
   });
@@ -1266,12 +1266,12 @@ describe("@bgub/fig-dom hydration", () => {
     // still-blocked keydown so replayed input keeps its order.
     second.content.textContent = "Client";
     completePendingBoundary(container, second);
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([]);
 
     first.content.textContent = "ClientA";
     completePendingBoundary(container, first);
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["keydown", "click"]);
   });
 
@@ -1319,7 +1319,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     boundary.content.textContent = "Client";
     completePendingBoundary(container, boundary);
-    await delay();
+    await waitForHostTurns();
 
     // The replay tracks its own propagation state: the stale cancelBubble
     // must not drop the replayed handlers, and handler-visible reads of
@@ -1379,7 +1379,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     boundary.content.textContent = "Client";
     completePendingBoundary(parent, boundary);
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["child"]);
   });
@@ -1409,7 +1409,7 @@ describe("@bgub/fig-dom hydration", () => {
     boundary.content.textContent = "Client";
     completePendingBoundary(boundary.container, boundary);
 
-    await delay();
+    await waitForHostTurns();
 
     expect(boundary.container.childNodes).toEqual([boundary.content]);
     expect(boundary.content.textContent).toBe("Client");
@@ -1451,7 +1451,7 @@ describe("@bgub/fig-dom hydration", () => {
     container.insertBefore(serverContent, end);
     (start as RetriableFakeComment).__figRetry?.();
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toEqual([serverContent]);
     expect(serverContent.textContent).toBe("Client");
@@ -1492,7 +1492,7 @@ describe("@bgub/fig-dom hydration", () => {
 
     expect(container.textContent).toBe("Loading");
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toHaveLength(1);
     expect(container.childNodes[0]).not.toBe(fallback);
@@ -1541,7 +1541,7 @@ describe("@bgub/fig-dom hydration", () => {
     placeholder.dataset.msg = "Server failed after shell";
     (start as RetriableFakeComment).__figRetry?.();
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toHaveLength(1);
     expect(container.childNodes).not.toEqual([
@@ -1580,7 +1580,7 @@ describe("@bgub/fig-dom hydration", () => {
       ),
     );
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes).toEqual([start, placeholder, fallback, end]);
     expect(container.textContent).toBe("Loading");

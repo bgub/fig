@@ -11,7 +11,7 @@ import { act } from "./act.ts";
 import { createRoot, flushSync, insertAssetResources } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -24,7 +24,7 @@ describe("@bgub/fig-dom", () => {
     const root = createRoot(container as unknown as Element);
 
     root.render(createElement("div", { class: "box", id: "first" }, "Hello"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Hello");
     expect(container.childNodes).toHaveLength(1);
@@ -34,7 +34,7 @@ describe("@bgub/fig-dom", () => {
     });
 
     root.render(createElement("div", { id: "second" }, "Goodbye"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Goodbye");
     expect(container.childNodes).toHaveLength(1);
@@ -48,11 +48,11 @@ describe("@bgub/fig-dom", () => {
     const root = createRoot(container as unknown as Element);
 
     root.render(createElement("main", null, "Mounted"));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Mounted");
 
     root.unmount();
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("");
   });
 
@@ -160,7 +160,7 @@ describe("@bgub/fig-dom", () => {
     root.render(createElement(App, { label: "Second" }));
     expect(container.textContent).toBe("");
 
-    await delay();
+    await waitForHostTurns();
 
     // One render pass (strict-doubled in development) committed the last
     // render call; the superseded one never rendered.
@@ -459,7 +459,7 @@ describe("@bgub/fig-dom", () => {
     );
 
     pending.resolve("Ready");
-    await delay();
+    await waitForHostTurns();
 
     expect(head.childNodes).toHaveLength(1);
 
@@ -650,7 +650,7 @@ describe("@bgub/fig-dom", () => {
     // The revealed primary tree adopts the authoritative element instead of
     // committing its stale one alongside it.
     pending.resolve("Ready");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ready");
     expect(head.childNodes).toHaveLength(1);

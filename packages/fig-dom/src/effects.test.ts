@@ -6,7 +6,11 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -41,7 +45,7 @@ describe("@bgub/fig-dom effects", () => {
       "before-paint:Committed",
     ]);
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([
       "before-layout:",
       "before-layout:",
@@ -72,19 +76,19 @@ describe("@bgub/fig-dom effects", () => {
     }
 
     root.render(createElement(App, { value: 1 }));
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["run:1", "abort:1", "run:1"]);
 
     root.render(createElement(App, { value: 1 }));
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["run:1", "abort:1", "run:1"]);
 
     root.render(createElement(App, { value: 2 }));
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["run:1", "abort:1", "run:1", "abort:1", "run:2"]);
 
     root.unmount();
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([
       "run:1",
       "abort:1",
@@ -118,7 +122,7 @@ describe("@bgub/fig-dom effects", () => {
     expect(calls).toEqual([]);
 
     root.render(createElement(App, { value: 2 }));
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["run:1", "abort:1", "run:1", "abort:1", "run:2"]);
   });
@@ -192,14 +196,14 @@ describe("@bgub/fig-dom effects", () => {
     }
 
     root.render(createElement(App, { value: 1 }));
-    await delay();
+    await waitForHostTurns();
     root.render(createElement(App, { value: 2 }));
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["mount:1", "abort:1", "mount:1"]);
 
     root.unmount();
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["mount:1", "abort:1", "mount:1", "abort:1"]);
   });
 
@@ -238,15 +242,15 @@ describe("@bgub/fig-dom effects", () => {
     const childMount = ["child:run", "child:abort", "child:run"];
 
     root.render(createElement(App, { showChild: true }));
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([...parentMount, ...childMount]);
 
     root.render(createElement(App, { showChild: false }));
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([...parentMount, ...childMount, "child:abort"]);
 
     root.unmount();
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([
       ...parentMount,
       ...childMount,
@@ -284,9 +288,9 @@ describe("@bgub/fig-dom effects", () => {
     }
 
     root.render(createElement(App, { a: 1, b: 1 }));
-    await delay();
+    await waitForHostTurns();
     root.render(createElement(App, { a: 2, b: 1 }));
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual([
       "a:1",

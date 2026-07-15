@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -240,7 +240,7 @@ describe("@bgub/fig-dom error boundaries", () => {
     expect(container.textContent).toBe("");
 
     pending.resolve("Ready");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ready");
   });
@@ -274,7 +274,7 @@ describe("@bgub/fig-dom error boundaries", () => {
     expect(container.textContent).toBe("Loading");
 
     pending.reject(new Error("read failed"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Crashed");
     expect(reports).toEqual(["read failed"]);
@@ -342,7 +342,7 @@ describe("@bgub/fig-dom error boundaries", () => {
 
     expect(container.textContent).toBe("Primary");
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Crashed");
     expect(reports).toEqual(["reactive failed"]);

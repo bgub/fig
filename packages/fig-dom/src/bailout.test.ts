@@ -6,8 +6,9 @@ import {
   useState,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
+import { act } from "./act.ts";
 import { createRoot, flushSync } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -126,14 +127,14 @@ describe("@bgub/fig-dom subtree bailout", () => {
 
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
-    root.render(createElement(App, { show: true }));
-    await delay();
+    await act(() => root.render(createElement(App, { show: true })));
     expect(calls).toEqual(["run", "abort", "run"]);
 
     // Adopt the Wrapper subtree, then unmount it through a prop change.
     flushSync(() => setCount?.((count) => count + 1));
-    flushSync(() => root.render(createElement(App, { show: false })));
-    await delay();
+    await act(() =>
+      flushSync(() => root.render(createElement(App, { show: false }))),
+    );
 
     expect(calls).toEqual(["run", "abort", "run", "abort"]);
     expect(container.textContent).toBe("1");

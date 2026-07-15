@@ -1,7 +1,11 @@
 import { createElement, useReactive, useState } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -67,14 +71,14 @@ describe("@bgub/fig-dom strict development semantics", () => {
     }
 
     root.render(createElement(App, { value: 1 }));
-    await delay();
+    await waitForHostTurns();
 
     expect(signals).toHaveLength(2);
     expect(signals[0]?.aborted).toBe(true);
     expect(signals[1]?.aborted).toBe(false);
 
     root.render(createElement(App, { value: 2 }));
-    await delay();
+    await waitForHostTurns();
 
     // Deps-change reruns stay single; only first-time effects strict-run.
     expect(signals).toHaveLength(3);
@@ -120,11 +124,11 @@ describe("@bgub/fig-dom strict development semantics", () => {
     }
 
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
     const settledRuns = effectRuns;
 
     flushSync(() => setTick?.((value) => value + 1));
-    await delay();
+    await waitForHostTurns();
 
     // The nested flush re-renders while the strict cycle is mid-flight; the
     // once-per-lifetime marker keeps the cycle from re-entering forever.

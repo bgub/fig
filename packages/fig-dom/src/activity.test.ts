@@ -18,7 +18,7 @@ import {
 import { act } from "./act.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeComment,
   FakeElement,
   FakeText,
@@ -97,7 +97,7 @@ describe("@bgub/fig-dom activity", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
 
     const span = container.childNodes[0] as FakeElement;
     expect(display(span)).toBe("");
@@ -132,14 +132,14 @@ describe("@bgub/fig-dom activity", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
 
     const span = container.childNodes[0] as FakeElement;
     expect(display(span)).toBe("none");
     expect(calls).toEqual([]);
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
     expect(display(span)).toBe("");
     // The deferred first run strict-cycles on reveal.
     expect(calls).toEqual(["run", "abort", "run"]);
@@ -174,12 +174,12 @@ describe("@bgub/fig-dom activity", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual([]);
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
 
     expect(calls).toEqual(["run", "abort", "run"]);
   });
@@ -308,7 +308,7 @@ describe("@bgub/fig-dom activity", () => {
       updater: (count: number) => number,
     ) => void;
     queueHidden((count) => count + 1);
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("1");
     expect(display(span)).toBe("none");
@@ -341,7 +341,7 @@ describe("@bgub/fig-dom activity", () => {
       updater: (items: string[]) => string[],
     ) => void;
     grow((items) => [...items, "b"]);
-    await delay();
+    await waitForHostTurns();
 
     const first = container.childNodes[0] as FakeElement;
     const second = container.childNodes[1] as FakeElement;
@@ -392,7 +392,7 @@ describe("@bgub/fig-dom activity", () => {
     expect(display(span)).toBe("");
     expect(counterRenders).toBe(rendersBeforeReveal + 2);
 
-    await delay();
+    await waitForHostTurns();
     expect(counterRenders).toBe(rendersBeforeReveal + 2);
   });
 
@@ -487,7 +487,7 @@ describe("@bgub/fig-dom activity", () => {
     flushSync(() =>
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
-    await delay();
+    await waitForHostTurns();
 
     // Dehydrated: the template is untouched and no content work happened.
     expect(container.childNodes[0]).toBe(template);
@@ -497,7 +497,7 @@ describe("@bgub/fig-dom activity", () => {
     // Reveal: content hydrates against the template, adopting its nodes,
     // and the template unpacks into the live DOM.
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
     expect(container.childNodes[0]).toBe(span);
     expect(container.textContent).toBe("secret tab");
     expect(childRenders).toBe(2);
@@ -525,7 +525,7 @@ describe("@bgub/fig-dom activity", () => {
     flushSync(() =>
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes[0]).toBe(span);
     expect(container.textContent).toBe("tab");
@@ -561,10 +561,10 @@ describe("@bgub/fig-dom activity", () => {
           ),
       }),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(() => flushSync(() => setMode?.("visible"))).not.toThrow();
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("client text");
     expect(
@@ -617,14 +617,14 @@ describe("@bgub/fig-dom activity", () => {
     flushSync(() =>
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes[0]).toBe(template);
     expect(childRenders).toBe(0);
     expect(bindParents).toEqual([]);
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes[0]).toBe(button);
     expect(childRenders).toBe(2);
@@ -678,7 +678,7 @@ describe("@bgub/fig-dom activity", () => {
     flushSync(() =>
       hydrateRoot(container as unknown as Element, createElement(App, null)),
     );
-    await delay();
+    await waitForHostTurns();
 
     // Dehydrated while hidden: the template is untouched, no fallback rendered.
     expect(container.childNodes[0]).toBe(template);
@@ -688,7 +688,7 @@ describe("@bgub/fig-dom activity", () => {
     pending.resolve("Ready");
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
 
     // Server content is preserved with node identity, never client-rendered to a
     // fresh node, and the fallback never appeared.
@@ -748,12 +748,12 @@ describe("@bgub/fig-dom activity", () => {
           ),
       }),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.childNodes[0]).toBe(template);
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
 
     // The boundary recovers on the client: fresh content, not the server
     // fallback, and the failure surfaces through onRecoverableError.
@@ -837,10 +837,10 @@ describe("@bgub/fig-dom activity", () => {
           ),
       }),
     );
-    await delay();
+    await waitForHostTurns();
 
     flushSync(() => setMode?.("visible"));
-    await delay();
+    await waitForHostTurns();
 
     // The suspended boundary keeps its preserved server content; the sibling
     // recovers on the client.
@@ -874,14 +874,14 @@ describe("@bgub/fig-dom activity", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loading");
 
     // Hide while pending, then resolve: the restored primary is placed
     // inside the hidden tree and must stay hidden.
     flushSync(() => setMode?.("hidden"));
     pending.resolve("Ready");
-    await delay();
+    await waitForHostTurns();
 
     const span = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("Ready");
@@ -927,7 +927,7 @@ describe("@bgub/fig-dom activity", () => {
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, { initial: first.promise }));
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
 
     const div = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("PONE");
@@ -944,7 +944,7 @@ describe("@bgub/fig-dom activity", () => {
     expect(fallback.textContent).toBe("Loading");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PTWO");
     expect(display(div)).toBe("none");
 
@@ -986,7 +986,7 @@ describe("@bgub/fig-dom activity", () => {
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, { initial: first.promise }));
     first.resolve("ONE");
-    await delay();
+    await waitForHostTurns();
 
     const section = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("PONE");
@@ -1003,7 +1003,7 @@ describe("@bgub/fig-dom activity", () => {
     expect(fallback.textContent).toBe("Loading");
 
     second.resolve("TWO");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("PTWO");
     expect(display(section)).toBe("none");
 
@@ -1097,8 +1097,8 @@ describe("@bgub/fig-dom activity", () => {
     const rendersAfterUnmount = appRenders;
 
     // The orphaned offscreen lane must not keep waking the scheduler.
-    await delay();
-    await delay();
+    await waitForHostTurns();
+    await waitForHostTurns();
     expect(appRenders).toBe(rendersAfterUnmount);
 
     // The scheduler is still healthy: a normal update still commits.
@@ -1187,7 +1187,7 @@ describe("@bgub/fig-dom activity", () => {
 
     // The store changes while the boundary is hidden and unsubscribed.
     store.emit("b");
-    await delay();
+    await waitForHostTurns();
 
     // Reveal: the boundary must show the current store value, not the stale
     // snapshot captured before hiding, and re-subscribe for future changes.
@@ -1197,7 +1197,7 @@ describe("@bgub/fig-dom activity", () => {
 
     // A post-reveal change schedules normally again.
     store.emit("c");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("c");
   });
 });

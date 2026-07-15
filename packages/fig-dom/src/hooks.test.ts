@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -275,12 +275,12 @@ describe("@bgub/fig-dom hooks", () => {
       show as ((value: Promise<string>) => void) | null,
     );
     startTransition(() => showValue(pending.promise));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Pending Ready");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Idle Loaded");
   });
@@ -327,15 +327,15 @@ describe("@bgub/fig-dom hooks", () => {
       await gate.promise;
       showValue(content.promise);
     });
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending Ready");
 
     gate.resolve(undefined);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending Ready");
 
     content.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle Loaded");
   });
 
@@ -371,11 +371,11 @@ describe("@bgub/fig-dom hooks", () => {
       add as ((amount: number) => void) | null,
     );
     addAction(2);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle 2");
 
     addAction(3);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle 5");
     expect(calls).toEqual([0, 2]);
   });
@@ -426,15 +426,15 @@ describe("@bgub/fig-dom hooks", () => {
       submit as ((value: Promise<string>) => void) | null,
     );
     submitAction(content.promise);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending Ready");
 
     gate.resolve(undefined);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending Ready");
 
     content.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle Loaded");
   });
 
@@ -461,7 +461,7 @@ describe("@bgub/fig-dom hooks", () => {
       // the superseded callback cooperating.
       return never.promise;
     });
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending");
     expect(signals[0].aborted).toBe(false);
 
@@ -471,7 +471,7 @@ describe("@bgub/fig-dom hooks", () => {
     });
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
-    await delay();
+    await waitForHostTurns();
 
     // The second run settled; the first never will, but its pending slot was
     // released at supersede time, so isPending cannot be pinned.
@@ -503,10 +503,10 @@ describe("@bgub/fig-dom hooks", () => {
           );
         }),
     );
-    await delay();
+    await waitForHostTurns();
 
     startTransition(() => Promise.resolve());
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Idle");
   });
@@ -536,11 +536,11 @@ describe("@bgub/fig-dom hooks", () => {
       // going may still update state.
       set("late");
     });
-    await delay();
+    await waitForHostTurns();
 
     startTransition(() => undefined);
     gate.resolve(undefined);
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("late");
   });
@@ -577,19 +577,19 @@ describe("@bgub/fig-dom hooks", () => {
       run as ((value: Promise<string>) => void) | null,
     );
     runAction(first.promise);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending initial");
 
     runAction(second.promise);
     expect(signals[0].aborted).toBe(true);
 
     second.resolve("second");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle second");
 
     // The retired run's fulfillment is inert: it cannot clobber newer state.
     first.resolve("first");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle second");
   });
 
@@ -623,15 +623,15 @@ describe("@bgub/fig-dom hooks", () => {
       run as ((value: Promise<string>) => void) | null,
     );
     runAction(first.promise);
-    await delay();
+    await waitForHostTurns();
 
     runAction(Promise.resolve("second"));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("second");
 
     // A retired run's rejection must not reach the boundary.
     first.reject(new Error("stale failure"));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("second");
   });
 
@@ -664,7 +664,7 @@ describe("@bgub/fig-dom hooks", () => {
       return never.promise;
     });
     requireTestValue(run as (() => void) | null)();
-    await delay();
+    await waitForHostTurns();
     expect(signals.map((signal) => signal.aborted)).toEqual([false, false]);
 
     flushSync(() => root.render(null));
@@ -705,7 +705,7 @@ describe("@bgub/fig-dom hooks", () => {
     requireTestValue(run as ((value: Promise<string>) => void) | null)(
       first.promise,
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending initial");
     expect(signals[0].aborted).toBe(false);
 
@@ -715,12 +715,12 @@ describe("@bgub/fig-dom hooks", () => {
     // The retired run released its pending slot, so the revealed tree is not
     // stuck pending.
     flushSync(() => root.render(createElement(App, { mode: "visible" })));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle initial");
 
     // Hide retired the run: its late settlement can no longer apply state.
     first.resolve("stale");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle initial");
   });
 
@@ -747,7 +747,7 @@ describe("@bgub/fig-dom hooks", () => {
       signals.push(signal);
       return never.promise;
     });
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Pending");
     expect(signals[0].aborted).toBe(false);
 
@@ -757,7 +757,7 @@ describe("@bgub/fig-dom hooks", () => {
     // The retired run released its pending slot, so the revealed tree is not
     // stuck pending forever.
     flushSync(() => root.render(createElement(App, { mode: "visible" })));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Idle");
   });
 
@@ -788,7 +788,7 @@ describe("@bgub/fig-dom hooks", () => {
 
     const submitAction = requireTestValue(submit as (() => void) | null);
     submitAction();
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Crashed");
   });
 
@@ -808,13 +808,13 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Boot");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
 
     flushSync(() => setValue?.("Fresh"));
     expect(container.textContent).toBe("Ready");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Fresh");
   });
 
@@ -840,7 +840,7 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => setValue?.("C"));
     expect(container.textContent).toBe("A");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("C");
   });
 
@@ -877,11 +877,11 @@ describe("@bgub/fig-dom hooks", () => {
     flushSync(() => show?.(pending.promise));
     expect(container.textContent).toBe("Ready");
 
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loaded");
   });
 
@@ -908,7 +908,7 @@ describe("@bgub/fig-dom hooks", () => {
     const set = requireTestValue(setValue as ((value: string) => void) | null);
 
     startTransition(() => set("B"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("B");
   });

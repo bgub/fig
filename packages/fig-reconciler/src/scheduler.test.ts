@@ -8,8 +8,7 @@ import {
   scheduleCallback,
   shouldYieldToHost,
 } from "./scheduler.ts";
-
-const delay = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+import { waitForHostTurns } from "./test-utils.ts";
 
 describe("scheduler", () => {
   it("runs higher priority tasks first", async () => {
@@ -22,7 +21,7 @@ describe("scheduler", () => {
       calls.push("immediate");
     });
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["immediate", "normal"]);
   });
 
@@ -34,7 +33,7 @@ describe("scheduler", () => {
 
     task.cancel();
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual([]);
   });
 
@@ -48,7 +47,7 @@ describe("scheduler", () => {
       });
     });
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["low", "normal"]);
   });
 
@@ -64,7 +63,7 @@ describe("scheduler", () => {
       };
     });
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["first:false", "yield:true", "second"]);
   });
 

@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, payloadDataLoader } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -184,7 +184,7 @@ describe("payloadDataLoader", () => {
     );
 
     expect(container.textContent).toBe("Loading");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Post helloBy Grace— Grace");
     expect(requests).toBe(1);
@@ -225,17 +225,17 @@ describe("payloadDataLoader", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("note v1");
 
     const refresh = root.data.refreshData(noteResource);
-    await delay();
+    await waitForHostTurns();
     // The refreshing entry keeps serving the previous tree; no fallback.
     expect(container.textContent).toBe("note v1");
 
     gate.resolve(undefined);
     await refresh;
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("note v2");
   });
 
@@ -304,20 +304,20 @@ describe("payloadDataLoader", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toContain("body v1");
     expect(container.textContent).toContain("comments pending");
 
     // Refresh while the comments hole is still streaming.
     const refresh = root.data.refreshData(postResource);
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).not.toContain("boom");
     expect(container.textContent).toContain("body v1");
 
     // The superseded-but-still-authoritative generation keeps streaming:
     // its hole fills into the visible stale tree during the refresh window.
     gates[0]?.resolve("first comments");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toContain("first comments");
     expect(container.textContent).not.toContain("boom");
 
@@ -325,7 +325,7 @@ describe("payloadDataLoader", () => {
     secondResponse.resolve(undefined);
     gates[1]?.resolve("second comments");
     await refresh;
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toContain("body v2");
     expect(container.textContent).toContain("second comments");
     expect(container.textContent).not.toContain("boom");
@@ -385,12 +385,12 @@ describe("payloadDataLoader", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toContain("body v1");
     expect(signals[0]?.aborted).toBe(false);
 
     await root.data.refreshData(postResource);
-    await delay();
+    await waitForHostTurns();
 
     // The old generation's signal aborted, ending its background decode.
     expect(signals[0]?.aborted).toBe(true);
@@ -430,7 +430,7 @@ describe("payloadDataLoader", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
 
     const head = document.head as unknown as FakeElement;
     const link = head.childNodes.find(
@@ -443,7 +443,7 @@ describe("payloadDataLoader", () => {
     expect(container.textContent).toBe("Loading");
 
     link?.dispatch("load");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("styled");
   });
 

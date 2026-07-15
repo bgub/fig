@@ -35,6 +35,7 @@ import type {
 } from "./devtools.ts";
 import { createRenderer, type HostConfig } from "./index.ts";
 import { requestPaint } from "./scheduler.ts";
+import { waitForHostTurns } from "./test-utils.ts";
 
 class TestText {
   parentNode: TestElement | null = null;
@@ -129,8 +130,6 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
     text.nodeValue = value;
   },
 };
-
-const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
@@ -277,7 +276,7 @@ describe("reconciler", () => {
     expect(renders).toBe(1);
 
     pending.resolve("Ready");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ready");
   });
@@ -307,7 +306,7 @@ describe("reconciler", () => {
       );
 
     flushSync(() => root.render(list(["a", "b", "c"])));
-    await delay();
+    await waitForHostTurns();
     // Dev strict rendering re-runs each effect once; only deletion behavior
     // is under test here.
     events.length = 0;
@@ -317,7 +316,7 @@ describe("reconciler", () => {
     // whose hook state is shared with the new generation. Teardown must stay
     // inside the deleted subtree.
     flushSync(() => root.render(list(["b", "c"])));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("bc");
     expect(events).toEqual(["abort:a"]);
@@ -354,7 +353,7 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("HeaderLoadingFooter");
 
     resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("HeaderLoadedFooter");
   });
@@ -401,7 +400,7 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("tick 1Loading");
 
     resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("tick 1Loaded");
   });
@@ -444,7 +443,7 @@ describe("reconciler", () => {
 
     // The late resolution must neither crash nor resurrect the boundary.
     resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("outside 0");
 
     // The root itself must stay fully schedulable afterwards.
@@ -483,11 +482,11 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Loading");
 
     resolveFirst("Hello ");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loading");
 
     resolveSecond("World");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Hello World");
   });
 
@@ -526,7 +525,7 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Loading");
 
     resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Loaded");
 
     flushSync(() => root.render(createElement(App, { mode: "hidden" })));
@@ -1473,7 +1472,7 @@ describe("reconciler", () => {
       throw new Error("Expected transition controls to be captured.");
     }
     startTransition(() => suspendWith(suspended.promise));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Pending B");
   });
@@ -1532,7 +1531,7 @@ describe("reconciler", () => {
       throw new Error("Expected transition controls to be captured.");
     }
     startTransition(() => suspendWith(suspended.promise));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Pending BReady");
   });
@@ -1633,7 +1632,7 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("1");
     expect(calls).toEqual(["reactive:0", "reactive:0"]);
 
-    await delay();
+    await waitForHostTurns();
     expect(calls).toEqual(["reactive:0", "reactive:0", "reactive:1"]);
   });
 
@@ -2048,7 +2047,6 @@ describe("reconciler", () => {
     const root = createRoot(container);
     let setCount: ((updater: (count: number) => number) => void) | null = null;
     let yieldThenUpdate = false;
-    let updated: Promise<void> = Promise.resolve();
 
     function Counter() {
       const [count, set] = useState(0);
@@ -2060,14 +2058,11 @@ describe("reconciler", () => {
       if (yieldThenUpdate) {
         yieldThenUpdate = false;
         requestPaint();
-        updated = new Promise((resolve) => {
-          queueMicrotask(() => {
-            // The counter fiber already rendered in this pass, and this update
-            // shares its lane with the yielded render — it must survive the
-            // commit of that in-flight pass.
-            setCount?.((count) => count + 1);
-            resolve();
-          });
+        queueMicrotask(() => {
+          // The counter fiber already rendered in this pass, and this update
+          // shares its lane with the yielded render — it must survive the
+          // commit of that in-flight pass.
+          setCount?.((count) => count + 1);
         });
       }
 
@@ -2090,10 +2085,7 @@ describe("reconciler", () => {
     yieldThenUpdate = true;
     root.render(createElement(App, { label: "second" }));
 
-    await updated;
-    await delay();
-
-    expect(container.textContent).toBe("count:1second");
+    await expect.poll(() => container.textContent).toBe("count:1second");
   });
 
   it("routes uncaught reactive effect errors to onUncaughtError and clears the root", async () => {
@@ -2116,7 +2108,7 @@ describe("reconciler", () => {
     flushSync(() => root.render(createElement(Broken, null)));
     expect(container.textContent).toBe("Primary");
 
-    await delay();
+    await waitForHostTurns();
 
     expect(uncaught.map((report) => (report.error as Error).message)).toEqual([
       "reactive boom",
@@ -2224,7 +2216,7 @@ describe("reconciler", () => {
     );
     expect(container.textContent).toBe("Primary");
 
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Crashed");
     expect(reports).toEqual(["reactive failed"]);

@@ -8,7 +8,11 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
-import { delay, FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -35,7 +39,7 @@ describe("@bgub/fig-dom stable events", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     flushSync(() => root.render(createElement(App, null)));
-    await delay();
+    await waitForHostTurns();
     const fire = emit as unknown as (suffix: string) => void;
 
     fire("a");
@@ -67,7 +71,7 @@ describe("@bgub/fig-dom stable events", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     flushSync(() => root.render(createElement(App, null)));
-    await delay();
+    await waitForHostTurns();
     const fire = emit as unknown as () => void;
 
     fire();
@@ -150,7 +154,7 @@ describe("@bgub/fig-dom stable events", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     flushSync(() => root.render(createElement(App, null)));
-    await delay();
+    await waitForHostTurns();
     const fire = emit as unknown as (name: string) => void;
 
     fire("x");

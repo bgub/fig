@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, on } from "./index.ts";
 import {
   deferred,
-  delay,
+  waitForHostTurns,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -57,7 +57,7 @@ describe("@bgub/fig-dom data resources", () => {
     expect(loads).toBe(1);
 
     pending.resolve("Loaded");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Loaded");
     expect(loads).toBe(1);
@@ -117,12 +117,12 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ada");
 
     (container.firstChild as FakeElement).dispatch("click");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Grace");
   });
@@ -165,13 +165,13 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
 
     const input = container.firstChild as FakeElement;
     expect(input.value).toBe("Ada");
 
     input.dispatch("focus");
-    await delay();
+    await waitForHostTurns();
 
     expect(input.value).toBe("Grace");
   });
@@ -203,18 +203,18 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Initial");
 
     root.data.run(() => invalidateData(labelResource, "one"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Initial");
     expect(loads).toBe(2);
 
     next.resolve("Updated");
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Updated");
   });
@@ -246,17 +246,17 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Initial");
 
     // No ambient store here (plain async test code): the handle carries its
     // store, so the canonical `await save(); invalidate(...)` flow works.
     root.data.invalidateData(labelResource, "one");
-    await delay();
+    await waitForHostTurns();
     expect(loads).toBe(2);
 
     next.resolve("Updated");
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Updated");
   });
 
@@ -278,7 +278,7 @@ describe("@bgub/fig-dom data resources", () => {
               void (async () => {
                 // The ambient slot is gone after this await; the captured
                 // handle is the supported path.
-                await delay();
+                await waitForHostTurns();
                 await data.refreshData(userResource, "one");
               })();
             }),
@@ -300,12 +300,12 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Ada");
 
     (container.firstChild as FakeElement).dispatch("click");
-    await delay();
-    await delay();
+    await waitForHostTurns();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Grace");
   });
@@ -331,7 +331,7 @@ describe("@bgub/fig-dom data resources", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     flushSync(() => root.render(createElement(Preloader, null)));
-    await delay();
+    await waitForHostTurns();
 
     expect(loads).toBe(1);
   });
@@ -388,13 +388,13 @@ describe("@bgub/fig-dom data resources", () => {
     const root = createRoot(container as unknown as Element);
 
     flushSync(() => root.render(createElement(App, null)));
-    await delay();
+    await waitForHostTurns();
     expect(container.textContent).toBe("Failed: network down");
     expect(attempts).toBe(1);
 
     (container.firstChild as FakeElement).dispatch("click");
-    await delay();
-    await delay();
+    await waitForHostTurns();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Ada");
     expect(attempts).toBe(2);
@@ -476,12 +476,12 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Initial");
 
     const result = await root.data.run(() => refreshData(labelResource, "one"));
-    await delay();
+    await waitForHostTurns();
 
     expect(result).toEqual({
       error,
@@ -517,7 +517,7 @@ describe("@bgub/fig-dom data resources", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     root.render(createElement(App, null));
-    await delay();
+    await waitForHostTurns();
 
     const span = container.childNodes[0] as FakeElement;
     expect(container.textContent).toBe("Initial");
@@ -525,7 +525,7 @@ describe("@bgub/fig-dom data resources", () => {
     expect(loads).toBe(1);
 
     root.data.run(() => invalidateData(labelResource, "one"));
-    await delay();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Updated");
     expect(span.style.display).toBe("none");
@@ -568,8 +568,8 @@ describe("@bgub/fig-dom data resources", () => {
         ),
       ),
     );
-    await delay();
-    await delay();
+    await waitForHostTurns();
+    await waitForHostTurns();
 
     expect(container.textContent).toBe("Crashed");
     expect(reports).toEqual([
