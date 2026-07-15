@@ -31,3 +31,5 @@ An internal module (not a published package): a macrotask-hopping work loop with
 ## Subpaths
 
 `@bgub/fig-reconciler/devtools` (commit snapshots for fig-devtools) and `@bgub/fig-reconciler/refresh` (HMR family-swap: updated component families re-render in place with hook state preserved; hook-signature changes remount via the parent) are dev-only seams with exactly the consumers they were built for.
+
+`@bgub/fig-reconciler/test-utils` exports `act`, the testing boundary that temporarily routes scheduled callbacks into a test queue. It shares the scheduler instance used by the main renderer entry so work scheduled through either entry is flushed together; renderer construction APIs do not export it.

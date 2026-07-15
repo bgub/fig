@@ -1,1 +1,1 @@
-export { act } from "@bgub/fig-reconciler";
+export { act } from "@bgub/fig-reconciler/test-utils";
