@@ -396,7 +396,6 @@ describe("@bgub/fig-server", () => {
 
   it("prerender includes head assets discovered after suspension", async () => {
     const pending = deferred<string>();
-    const lateAssets: string[] = [];
 
     function Message() {
       const value = readPromise(pending.promise);
@@ -409,11 +408,6 @@ describe("@bgub/fig-server", () => {
         { fallback: createElement("em", null, "Loading") },
         createElement(Message, null),
       ),
-      {
-        onAssetError(_error, info) {
-          lateAssets.push(info.key);
-        },
-      },
     );
 
     await waitForMicrotasks();
@@ -421,7 +415,6 @@ describe("@bgub/fig-server", () => {
 
     const result = await resultPromise;
 
-    expect(lateAssets).toEqual([]);
     expect(result.head).toBe("<title>Late Ready</title>");
     expect(result.html).toBe(
       "<!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense-->",
@@ -1077,9 +1070,8 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("keeps late document metadata out of an already-flushed document head", async () => {
+  it("streams late document metadata into the browser head", async () => {
     const pending = deferred<string>();
-    const diagnostics: string[] = [];
 
     function Message() {
       return assets(
@@ -1103,11 +1095,6 @@ describe("@bgub/fig-server", () => {
           ),
         ),
       ),
-      {
-        onAssetError(_error, info) {
-          diagnostics.push(info.key);
-        },
-      },
     );
 
     await result.shellReady;
@@ -1116,13 +1103,14 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(`<head>${EARLY_EVENTS}</head>`);
-    expect(html).not.toContain("<title>Late Title</title>");
-    expect(diagnostics).toEqual(["title"]);
+    expect(html).toContain(
+      '<template id="h-0"><title data-fig-resource-key="title">Late Title</title></template>',
+    );
+    expect(html).toContain('__figSSR.t("h-0","title")');
   });
 
-  it("reports late head assets while keeping them out of the stream", async () => {
+  it("delivers late fragment head assets", async () => {
     const pending = deferred<string>();
-    const diagnostics: Array<{ componentStack: string; key: string }> = [];
 
     function Message() {
       const value = readPromise(pending.promise);
@@ -1135,15 +1123,6 @@ describe("@bgub/fig-server", () => {
         { fallback: createElement("em", null, "Loading") },
         createElement(Message, null),
       ),
-      {
-        onAssetError(error, info) {
-          expect(error).toBeInstanceOf(Error);
-          diagnostics.push({
-            componentStack: info.componentStack,
-            key: info.key,
-          });
-        },
-      },
     );
 
     await result.headReady;
@@ -1152,16 +1131,12 @@ describe("@bgub/fig-server", () => {
     pending.resolve("Ready");
     await result.allReady;
     expect(result.getHead()).toBe("");
-    expect(diagnostics).toEqual([
-      {
-        componentStack: "\n    at Message",
-        key: "title",
-      },
-    ]);
-
     const html = await readStream(result.stream);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).not.toContain("<title>");
+    expect(html).toContain(
+      '<template id="h-0"><title data-fig-resource-key="title">Late Ready</title></template>',
+    );
+    expect(html).toContain('__figSSR.t("h-0","title")');
   });
 
   it("rejects conflicting duplicate document assets", async () => {

@@ -157,7 +157,6 @@ export function insertAssetResources(
   const gates: Promise<void>[] = [];
   for (const resource of resources) {
     if (!isFigAssetResource(resource)) continue;
-    if (resource.kind === "title" || resource.kind === "meta") continue;
 
     const asset = asInsertableResource(resource);
     const key = assetResourceKey(asset);
@@ -170,6 +169,17 @@ export function insertAssetResources(
     const existing =
       (tracked?.parentNode === registry.head ? tracked : null) ??
       findDocumentResource(registry, key);
+
+    if (asset.kind === "title" && existing !== null) {
+      existing.textContent = asset.value;
+      let entry = registry.entries.get(key);
+      if (entry?.element !== existing) {
+        entry = { count: 1, element: existing, ready: null };
+        registry.entries.set(key, entry);
+        resourceMeta.set(existing, { key, kind: asset.kind });
+      }
+      continue;
+    }
 
     if (existing !== null) {
       // Already present (SSR, a host-rendered element, or a prior call):
@@ -377,6 +387,27 @@ function whenResourceSettled(element: Element): Promise<void> {
 }
 
 function createAssetResourceElement(resource: FigAssetResource): Element {
+  if (resource.kind === "title") {
+    const element = document.createElement("title");
+    element.textContent = resource.value;
+    return element;
+  }
+  if (resource.kind === "meta") {
+    const element = document.createElement("meta");
+    const attributes: Array<readonly [string, string | undefined]> = [
+      ["charset", resource.charset],
+      ["name", resource.name],
+      ["property", resource.property],
+      ["http-equiv", resource["http-equiv"]],
+      ["content", resource.content],
+      ["data-fig-resource-key", resource.key],
+    ];
+    for (const [name, value] of attributes) {
+      if (value !== undefined) element.setAttribute(name, value);
+    }
+    return element;
+  }
+
   const element = document.createElement(
     resource.kind === "script" ? "script" : "link",
   );

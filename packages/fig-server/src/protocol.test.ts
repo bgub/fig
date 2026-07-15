@@ -11,6 +11,7 @@ interface TestRuntime {
     message: string,
   ): void;
   c(boundaryId: string, segmentId: string): void;
+  t(templateId: string, resourceKey: string): void;
   x(boundaryId: string, digest: string, message: string): void;
 }
 
@@ -79,10 +80,42 @@ function appendCompletedSegment(root: HTMLElement): {
 describe("server streaming protocol", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    document.head.replaceChildren();
     delete (document as unknown as { startViewTransition?: unknown })
       .startViewTransition;
     delete (document as unknown as { __figViewTransition?: unknown })
       .__figViewTransition;
+  });
+
+  it("applies late title and meta updates to the document head", () => {
+    const currentTitle = document.createElement("title");
+    currentTitle.textContent = "Initial";
+    document.head.append(currentTitle);
+
+    const titleUpdate = document.createElement("template");
+    titleUpdate.id = "late-title";
+    titleUpdate.innerHTML =
+      '<title data-fig-resource-key="title">Updated</title>';
+    document.body.append(titleUpdate);
+
+    const runtime = installRuntime();
+    runtime.t("late-title", "title");
+
+    expect(document.title).toBe("Updated");
+    expect(document.getElementById("late-title")).toBeNull();
+
+    const metaUpdate = document.createElement("template");
+    metaUpdate.id = "late-meta";
+    metaUpdate.innerHTML =
+      '<meta data-fig-resource-key="meta:name:description" name="description" content="Late">';
+    document.body.append(metaUpdate);
+    runtime.t("late-meta", "meta:name:description");
+
+    expect(
+      document.head
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content"),
+    ).toBe("Late");
   });
 
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {

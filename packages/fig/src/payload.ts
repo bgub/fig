@@ -117,8 +117,9 @@ export interface PayloadDecodeOptions {
    */
   onStreamDone?: (result: PayloadDecodeCompletion) => void;
   /**
-   * Called with stream-safe asset resources as soon as their rows arrive
-   * (e.g. fig-dom's insertAssetResources). A returned promise gates the
+   * Called with asset resources as soon as their rows arrive (e.g. fig-dom's
+   * insertAssetResources, including title/meta document state). A returned
+   * promise gates the
    * reveal of only the content that declared a dependency on those assets;
    * gate settlement — fulfilled or rejected — releases the reveal, so a
    * failed asset never blocks content.

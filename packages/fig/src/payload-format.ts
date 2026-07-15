@@ -9,8 +9,8 @@ import type {
   StylesheetResource,
 } from "./resource.ts";
 
-// Stream-safe asset resources only (no head-only title/meta). Optional fields
-// stay optional on the wire; omitted `undefined` values are part of the payload
+// Asset descriptors discovered by payload rendering. Optional fields stay
+// optional on the wire; omitted `undefined` values are part of the payload
 // contract, not a serializer implementation detail.
 export type SerializedAssetResource =
   | {
@@ -53,6 +53,19 @@ export type SerializedAssetResource =
       crossorigin?: PreconnectResource["crossorigin"];
       href: string;
       kind: "preconnect";
+    }
+  | {
+      kind: "title";
+      value: string;
+    }
+  | {
+      charset?: string;
+      content?: string;
+      "http-equiv"?: string;
+      key?: string;
+      kind: "meta";
+      name?: string;
+      property?: string;
     };
 
 /** The `error` row value under the server's `onError` contract. */

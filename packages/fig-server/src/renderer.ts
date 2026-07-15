@@ -103,12 +103,12 @@ interface Request {
   fatalError: unknown;
   identifierPrefix: string;
   nextBoundaryId: number;
+  nextHeadUpdateId: number;
   nextSegmentId: number;
   nextActivityId: number;
   nextViewTransitionId: number;
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
-  onAssetError?: ServerRenderOptions["onAssetError"];
   pendingRootTasks: number;
   pendingTasks: number;
   pingedTasks: Task[];
@@ -191,6 +191,7 @@ interface Segment {
   lastPushedText: boolean;
   parentFlushed: boolean;
   assetResources: FigAssetResource[];
+  headUpdates: FigAssetResource[];
   status: SegmentStatus;
   // Spawned suspended segments splice between their parent's chunks, so text
   // may directly follow their end; when such a segment completes ending in
@@ -296,12 +297,12 @@ export function createServerRenderRequest(
     fatalError: null,
     identifierPrefix: options.identifierPrefix ?? "",
     nextBoundaryId: 0,
+    nextHeadUpdateId: 0,
     nextSegmentId: 0,
     nextActivityId: 0,
     nextViewTransitionId: 0,
     nonce: options.nonce,
     onError: options.onError,
-    onAssetError: options.onAssetError,
     pendingRootTasks: 0,
     pendingTasks: 0,
     pingedTasks: [],
@@ -459,6 +460,7 @@ function createSegment(
     lastPushedText: textSeams.lastPushedText,
     parentFlushed: false,
     assetResources: [],
+    headUpdates: [],
     status: "pending",
     textEmbedded: textSeams.textEmbedded,
     write(chunk) {
@@ -859,8 +861,12 @@ function renderAssetValue(value: unknown, frame: RenderFrame): void {
     }
 
     try {
-      if (frame.request.assetRegistry.register(resource)) {
-        reportLateHeadAsset(frame.request, resource, frame.stack);
+      if (
+        frame.request.assetRegistry.register(resource) &&
+        frame.request.headSnapshot !== null &&
+        assetResourceDestination(resource) === "head"
+      ) {
+        frame.segment.headUpdates.push(resource);
       }
     } catch (error) {
       recordErrorStack(error, frame.stack);
@@ -868,35 +874,6 @@ function renderAssetValue(value: unknown, frame: RenderFrame): void {
     }
 
     frame.segment.assetResources.push(resource);
-  }
-}
-
-function reportLateHeadAsset(
-  request: Request,
-  resource: FigAssetResource,
-  stack: StackFrame | null,
-): void {
-  if (
-    request.headSnapshot === null ||
-    assetResourceDestination(resource) !== "head"
-  ) {
-    return;
-  }
-
-  const key = assetResourceKey(resource);
-  const error = new Error(
-    `Fig head resource "${key}" was discovered after headReady. Move required metadata outside pending Suspense boundaries, or wait for allReady before reading getHead().`,
-  );
-
-  try {
-    request.onAssetError?.(error, {
-      componentStack: componentStack(stack),
-      destination: "head",
-      key,
-      resource,
-    });
-  } catch {
-    // Resource diagnostics are recoverable and should not change render output.
   }
 }
 
@@ -1692,6 +1669,8 @@ function collectSegmentAssets(
   blockingIds: Set<string>,
 ): void {
   if (segment.status !== "pending" && segment.status !== "rendering") {
+    flushHeadUpdateList(request, segment.headUpdates);
+    segment.headUpdates.length = 0;
     flushAssetList(request, segment.assetResources, sink, blockingIds);
   }
 
@@ -1709,6 +1688,23 @@ function flushAssetList(
   for (const resource of resources) {
     const id = request.assetRegistry.write(resource, sink);
     if (id !== null) blockingIds.add(id);
+  }
+}
+
+function flushHeadUpdateList(
+  request: Request,
+  resources: readonly FigAssetResource[],
+): void {
+  for (const resource of resources) {
+    const id = headUpdateId(request, request.nextHeadUpdateId++);
+    write(request, `<template id="${escapeAttribute(id)}">`);
+    request.assetRegistry.writeHeadUpdate(resource, request.assetSink);
+    write(request, "</template>");
+    writeRuntime(request);
+    writeScript(
+      request,
+      `${RUNTIME_REF}.t(${jsString(id)},${jsString(assetResourceKey(resource))})`,
+    );
   }
 }
 
@@ -1825,6 +1821,12 @@ function createRuntimeName(identifierPrefix: string | undefined): string {
   nextRuntimeId += 1;
   const prefix = identifierPrefix?.replace(/[^A-Za-z0-9_$]/g, "_") ?? "";
   return prefix === "" ? `__figSSR_${id}` : `__figSSR_${prefix}_${id}`;
+}
+
+function headUpdateId(request: Request, id: number): string {
+  return request.identifierPrefix === ""
+    ? `h-${id}`
+    : `${request.identifierPrefix}-h-${id}`;
 }
 
 function writeChunk(

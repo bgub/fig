@@ -122,9 +122,9 @@ createRoot(container).render(<App />);
 - Document resources: `assets([...], children)` attaches resources to a
   subtree while rendering only `children` on the client. Resource helpers include
   `stylesheet`, `preload`, `font`, `preconnect`, `title`, `meta`, and `script`.
-  Server rendering exposes `title` and `meta` as document head output; stream-safe
-  assets such as stylesheets can be emitted near the segments that depend on
-  them.
+  Server rendering exposes `title` and `meta` as document head output and
+  streams late updates into the browser head; stream-safe assets such as
+  stylesheets can be emitted near the segments that depend on them.
 
 ## Renderer APIs
 

@@ -16,7 +16,7 @@ Every asset has a deterministic dedupe key (`assetResourceKey`), shared across t
 
 ## Destinations
 
-Each kind has a destination: **head** (title, meta — document state, sealed with the shell in streaming mode, sealed at flush in prerender so late-discovered head assets still land) or **stream** (stylesheets, scripts, preloads, fonts, preconnects — emitted near the segment that needs them). Streamed kinds are the only ones that travel on the payload wire, serialized descriptor-only from a per-kind field table (the single source of truth for the wire type). Head-only kinds cannot serialize into the payload.
+Each kind has a destination: **head** (title, meta — document state) or **stream** (stylesheets, scripts, preloads, fonts, preconnects — emitted near the segment that needs them). The initial streaming head seals with the shell, but later title/meta discoveries emit a small `t` protocol op that moves a keyed descriptor from an inert template into `document.head`; title replaces the singleton slot and meta dedupes by its normal asset key. Prerender seals only at flush and therefore needs no update op. Every kind travels on the payload wire as descriptor data, so payload-delivered document state uses the same client registry and dedupe contract.
 
 ## Loading And Reveal Gating
 
@@ -28,4 +28,4 @@ Each `precedence` value names a stylesheet bucket. Bucket order is fixed by the 
 
 ## Diagnostics
 
-`onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode; no handler means no automatic warning. Prerender mode avoids the class entirely by sealing late. The HTML server registry throws `AssetResourceConflictError` for conflicting same-key definitions, except `title`, whose singleton slot uses the latest value. Payload and DOM insertion instead treat the first live definition for a key as authoritative and dedupe later definitions without signature comparison.
+The HTML server registry throws `AssetResourceConflictError` for conflicting same-key definitions, except `title`, whose singleton slot uses the latest value. Payload and DOM insertion treat the first live non-title definition for a key as authoritative and dedupe later definitions without signature comparison; title updates the singleton in place.

@@ -267,7 +267,7 @@ describe("payload rendering", () => {
     ]);
   });
 
-  it("serializes stream-safe asset assets on rendered client rows", async () => {
+  it("serializes stream and head assets on rendered client rows", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
       assets: [
@@ -277,7 +277,7 @@ describe("payload rendering", () => {
         }),
         modulepreload("/assets/Counter.js", { key: "counter-script" }),
         stylesheet("/assets/Counter.css"), // duplicate key, dropped
-        title("ignored"), // head-only, not stream-safe
+        title("Counter"),
       ],
     });
 
@@ -297,6 +297,7 @@ describe("payload rendering", () => {
             precedence: "app",
           },
           { href: "/assets/Counter.js", kind: "modulepreload" },
+          { kind: "title", value: "Counter" },
         ],
       },
     });

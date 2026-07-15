@@ -7,11 +7,13 @@ import {
   type FigElement,
   type FigNode,
   isValidElement,
+  meta,
   readContext,
   readData,
   readPromise,
   stylesheet,
   Suspense,
+  title,
   useState,
 } from "@bgub/fig";
 import { readThenable, setCurrentDispatcher } from "@bgub/fig/internal";
@@ -276,7 +278,11 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
 
     function Styled() {
       return assets(
-        [stylesheet("/styled.css", { precedence: "default" })],
+        [
+          stylesheet("/styled.css", { precedence: "default" }),
+          title("Styled page"),
+          meta({ name: "description", content: "Streamed metadata" }),
+        ],
         createElement("section", null, "styled content"),
       );
     }
@@ -295,6 +301,12 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(prepared).toMatchObject([
       { href: "/styled.css", kind: "stylesheet", precedence: "default" },
+      { kind: "title", value: "Styled page" },
+      {
+        content: "Streamed metadata",
+        kind: "meta",
+        name: "description",
+      },
     ]);
     expect(revealed).toBe(false);
 

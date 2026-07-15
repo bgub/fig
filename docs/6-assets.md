@@ -38,12 +38,12 @@ Each kind has a destination:
 
 | Destination | Kinds | Where it lands |
 | --- | --- | --- |
-| head | `title`, `meta` | document state, sealed with the shell |
+| head | `title`, `meta` | document state; initial values land in the shell and later values stream as keyed head updates |
 | stream | `stylesheet`, `script`, `preload`, `modulepreload`, `font`, `preconnect` | emitted near the segment that needs them |
 
-The sealing rules differ by mode. In streaming SSR the head is sealed when the shell flushes, so a head-destined asset discovered inside suspended content arrives too late (dev warns; see diagnostics). `prerender` holds every flush until all tasks settle (doc 4), so it seals the head at flush and late-discovered head assets still land.
+The sealing rules differ by mode. In streaming SSR the initial head seals when the shell flushes; a head-destined asset discovered later is carried in an inert template and a tiny `t` op moves it into `document.head`. `prerender` holds every flush until all tasks settle, so it seals only at flush and needs no update op.
 
-Only streamed kinds travel on the payload wire — doc 6's `assets` rows — serialized descriptor-only from a per-kind field table, which is the single source of truth for the wire type. Head-only kinds can't serialize into the payload.
+Every kind travels on the payload wire through `assets` rows, serialized descriptor-only from a per-kind field table. `insertAssetResources` applies payload-delivered title/meta through the same keyed document registry.
 
 ## Loading and reveal gating
 
@@ -53,7 +53,6 @@ The reveal gate is the part you've already seen from the other side: doc 4's inl
 
 ## Diagnostics
 
-- `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode. There is no automatic warning when no handler is configured. Prerender avoids the class entirely by sealing late.
 - The HTML server registry throws `AssetResourceConflictError` for conflicting definitions; payload and DOM insertion dedupe by key as described above.
 
 ---

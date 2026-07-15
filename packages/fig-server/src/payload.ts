@@ -12,7 +12,6 @@ import {
   type Props,
 } from "@bgub/fig";
 import {
-  assetResourceDestination,
   assetResourceKey,
   checkpointPayloadGraph,
   clientReferenceAssets,
@@ -112,6 +111,7 @@ type PayloadRequest = {
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedAssetKeys: Set<string>;
+  emittedTitleValue: string | null;
   emittedDataKeys: Set<string>;
   graph: PayloadGraphEncodeContext;
   nextRowId: number;
@@ -200,6 +200,7 @@ function createPayloadRequest(
       schedule: () => undefined,
     }),
     emittedAssetKeys: new Set(),
+    emittedTitleValue: null,
     emittedDataKeys: new Set(),
     graph: createPayloadGraphEncodeContext(),
     nextRowId: 1,
@@ -824,13 +825,14 @@ function serializeAssetResources(
 
   for (const resource of input) {
     if (!isFigAssetResource(resource)) continue;
-    // Only stream-safe assets travel on the wire; head-only title/meta are
-    // document state, not client-component assets (see the asset-resources plan).
-    if (assetResourceDestination(resource) !== "stream") continue;
-
     const key = assetResourceKey(resource);
-    if (request.emittedAssetKeys.has(key)) continue;
-    request.emittedAssetKeys.add(key);
+    if (resource.kind === "title") {
+      if (request.emittedTitleValue === resource.value) continue;
+      request.emittedTitleValue = resource.value;
+    } else {
+      if (request.emittedAssetKeys.has(key)) continue;
+      request.emittedAssetKeys.add(key);
+    }
     resources.push(serializeAssetResource(resource));
   }
 
@@ -917,10 +919,17 @@ function serializeAssetResource(
       return model;
     }
     case "title":
-    case "meta":
-      throw new Error(
-        "Head-only resources cannot be serialized into the payload.",
-      );
+      return { kind: resource.kind, value: resource.value };
+    case "meta": {
+      const model: SerializedAssetResource = { kind: resource.kind };
+      assignDefined(model, "charset", resource.charset);
+      assignDefined(model, "content", resource.content);
+      assignDefined(model, "http-equiv", resource["http-equiv"]);
+      assignDefined(model, "key", resource.key);
+      assignDefined(model, "name", resource.name);
+      assignDefined(model, "property", resource.property);
+      return model;
+    }
   }
 }
 

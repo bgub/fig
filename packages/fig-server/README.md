@@ -190,15 +190,14 @@ function Page() {
 }
 ```
 
-The document renderer keeps head-only metadata separate from body segment HTML
+The document renderer keeps initial metadata separate from body segment HTML
 and injects `title()` and `meta()` before `</head>`. With the lower-level
 `renderToStream`, those tags are available through `result.getHead()`
-after `headReady`; they are never emitted into segment HTML. `headReady`
+after `headReady`. `headReady`
 resolves with the shell and seals the initial document head; `getHead()` keeps
-returning that sealed snapshot afterward. If a new head resource is found
-later, such as behind pending Suspense, Fig reports it through `onAssetError`
-instead of adding it to the already-flushed head, so required shell metadata
-should render before `headReady`.
+returning that sealed snapshot afterward. If a new title or meta resource is
+found later, such as behind pending Suspense, Fig streams a small keyed update
+that inserts it into `document.head` without changing the snapshot.
 
 ```ts
 const result = renderToStream(<Page />);
@@ -225,8 +224,8 @@ function Page() {
 
 Metadata discovered before `headReady` is injected into the initial document
 head. Metadata discovered after `headReady`, for example inside pending
-Suspense content, is reported through `onAssetError` and is not added to the
-already-flushed shell. Stylesheets discovered for later Suspense segments remain
+Suspense content, is delivered through the inline head-update runtime.
+Stylesheets discovered for later Suspense segments remain
 stream-safe: Fig emits them near the segment and gates reveal until they load
 unless `{ blocking: "none" }` opts out.
 
@@ -237,8 +236,8 @@ default; pass `{ blocking: "none" }` to opt out for non-critical styles.
 
 Resource duplicates are checked by key and behavior. Identical duplicates dedupe
 silently. Conflicting duplicates throw: for example, the same stylesheet `href`
-with a different `media`, the same `title` key with a different value, or the
-same meta `name` with different `content`. Preloads are keyed by `href` plus
+with a different `media` or the same meta `name` with different `content`.
+Title is the singleton last-writer-wins slot. Preloads are keyed by `href` plus
 `as`, so the same URL can be preloaded for distinct targets, but behavior fields
 such as `type`, `crossorigin`, and `fetchpriority` must match for duplicates.
 Conflict errors include the resource key plus the existing and incoming

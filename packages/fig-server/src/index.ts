@@ -112,8 +112,6 @@ async function readStreamToString(
 }
 
 export type {
-  ServerAssetDestination,
-  ServerAssetErrorInfo,
   ServerDocumentRenderResult,
   ServerErrorInfo,
   ServerErrorPayload,

@@ -15,7 +15,7 @@ export class AssetResourceRegistry {
   constructor(private readonly identifierPrefix: string) {}
 
   register(resource: FigAssetResource): boolean {
-    return this.canonical(resource).added;
+    return this.canonical(resource).changed;
   }
 
   write(resource: FigAssetResource, sink: AssetSink): string | null {
@@ -28,6 +28,11 @@ export class AssetResourceRegistry {
     this.emittedResources.add(key);
     writeAssetTag(sink, current, id);
     return id;
+  }
+
+  writeHeadUpdate(resource: FigAssetResource, sink: AssetSink): void {
+    if (assetResourceDestination(resource) !== "head") return;
+    writeAssetTag(sink, resource, null, assetResourceKey(resource));
   }
 
   headHtml(nonce?: string): string {
@@ -50,6 +55,7 @@ export class AssetResourceRegistry {
 
   private canonical(resource: FigAssetResource): {
     added: boolean;
+    changed: boolean;
     key: string;
     resource: FigAssetResource;
   } {
@@ -60,16 +66,16 @@ export class AssetResourceRegistry {
       if (assetSignature(current) !== assetSignature(resource)) {
         if (resource.kind === "title") {
           this.resources.set(key, resource);
-          return { added: false, key, resource };
+          return { added: false, changed: true, key, resource };
         }
         throw new AssetResourceConflictError(key, current, resource);
       }
 
-      return { added: false, key, resource: current };
+      return { added: false, changed: false, key, resource: current };
     }
 
     this.resources.set(key, resource);
-    return { added: true, key, resource };
+    return { added: true, changed: true, key, resource };
   }
 
   private revealBlockerId(
@@ -119,10 +125,17 @@ function writeAssetTag(
   sink: AssetSink,
   resource: FigAssetResource,
   id: string | null,
+  resourceKey?: string,
 ): void {
   switch (resource.kind) {
     case "title":
-      writeElementStart("title", {}, sink);
+      writeElementStart(
+        "title",
+        resourceKey === undefined
+          ? {}
+          : { "data-fig-resource-key": resourceKey },
+        sink,
+      );
       writeText(resource.value, sink);
       writeElementEnd("title", sink);
       return;
@@ -135,7 +148,7 @@ function writeAssetTag(
           property: resource.property,
           "http-equiv": resource["http-equiv"],
           content: resource.content,
-          "data-fig-resource-key": resource.key,
+          "data-fig-resource-key": resourceKey ?? resource.key,
         },
         sink,
       );

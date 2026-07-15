@@ -1,10 +1,12 @@
 import {
   font,
+  meta,
   modulepreload,
   preconnect,
   preload,
   script,
   stylesheet,
+  title,
 } from "@bgub/fig";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { insertAssetResources } from "./index.ts";
@@ -52,6 +54,24 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(inserted[1]?.getAttribute("as")).toBe("script");
     expect(inserted[2]?.getAttribute("rel")).toBe("modulepreload");
     expect(inserted[2]?.getAttribute("href")).toBe("/b.js");
+  });
+
+  it("applies payload-delivered title and meta resources", async () => {
+    await insertAssetResources([
+      title("Initial"),
+      meta({ name: "description", content: "Payload metadata" }),
+    ]);
+    await insertAssetResources([title("Updated")]);
+
+    expect(head.childNodes).toHaveLength(2);
+    expect(
+      links().find((element) => element.tagName === "title")?.textContent,
+    ).toBe("Updated");
+    expect(
+      links()
+        .find((element) => element.tagName === "meta")
+        ?.getAttribute("content"),
+    ).toBe("Payload metadata");
   });
 
   it("keeps later stylesheets in their first-discovered precedence bucket", () => {
