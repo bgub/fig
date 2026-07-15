@@ -1,6 +1,6 @@
 import type { FigNode, Key } from "@bgub/fig";
 import type { Bind } from "./bind.ts";
-import type { EventDescriptor } from "./events.ts";
+import type { EventDescriptor } from "./event-descriptor.ts";
 import type {
   HtmlAttributeNameByTag,
   HtmlGlobalAttributeName,

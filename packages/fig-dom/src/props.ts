@@ -2,46 +2,31 @@ import type { Props } from "@bgub/fig";
 import { updateBind } from "./bind.ts";
 import { updateEvents } from "./events.ts";
 import {
-  elementName,
-  isElementNode,
-  isEmptyPropValue,
-  isHtmlElement,
-} from "./tree.ts";
+  type HostUpdateOptions,
+  hydratedFormAttributeName,
+  isFormProp,
+  updateFormControl,
+  updateParentSelect,
+  updateSelect,
+} from "./form-controls.ts";
+import {
+  extraHydratedStyleNames,
+  hydratedStyleNames,
+  updateStyle,
+} from "./styles.ts";
+import { elementName, isEmptyPropValue, isHtmlElement } from "./tree.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
-interface SelectState {
-  appliedDefault: boolean;
-  applyDefaultToInsertedOptions: boolean;
-  controlled: boolean;
-  selectedValues: ReadonlySet<string>;
-  value: unknown;
-}
-
-interface UpdateOptions {
-  hydrating?: boolean;
-  // The instance's first render: the only time defaultValue/defaultChecked
-  // may live-write the element's value/checked state.
-  initial?: boolean;
-}
-
-type StyleTarget = Record<string, unknown> & {
-  readonly length?: number;
-  item?: (index: number) => string;
-  removeProperty?: (name: string) => void;
-  setProperty?: (name: string, value: string) => void;
-};
-
-const selectState = new WeakMap<Element, SelectState>();
 const xlinkNamespace = "http://www.w3.org/1999/xlink";
 
 export function updateElement(
   element: Element,
   previousProps: Props,
   nextProps: Props,
-  options: UpdateOptions = {},
+  options: HostUpdateOptions = {},
 ): void {
   const type = elementName(element);
   const html = isHtmlElement(element);
@@ -80,7 +65,7 @@ export function updateElement(
       continue;
     }
 
-    if (formProp(name)) {
+    if (isFormProp(name)) {
       if (
         __DEV__ &&
         (name === "checked" || name === "defaultChecked") &&
@@ -94,24 +79,17 @@ export function updateElement(
             "Fig treats only `true` as checked, so this renders unchecked.",
         );
       }
-      setFormProperty(element, type, name, next, nextProps, options);
+      updateFormControl(element, type, name, next, nextProps, options);
       continue;
     }
 
     if (previous === next) continue;
     if (name === "style") {
-      if (__DEV__ && typeof next === "string" && next !== "") {
-        warnDroppedProp(
-          "style:string",
-          "The style prop must be an object of properties; string styles " +
-            "are ignored.",
-        );
-      }
-      setStyle(element, previous, next);
+      updateStyle(element, previous, next);
     } else setAttribute(element, hostAttributeName(name, html), next);
   }
 
-  updateSelectOptions(element, type, previousProps, nextProps, options);
+  updateSelect(element, type, nextProps, options);
   // Only option updates (value/text) can change which option a parent
   // select's stored value matches; skip the ancestor walk for everything
   // else.
@@ -119,7 +97,7 @@ export function updateElement(
 }
 
 // Dev-only, deduped by key: silently dropping a prop the author clearly
-// intended (onClick, checked={1}, string styles) is the worst failure mode —
+// intended (onClick, checked={1}) is the worst failure mode —
 // nothing renders wrong, the behavior just never happens.
 const warnedDroppedProps = new Set<string>();
 
@@ -228,54 +206,13 @@ function warnExtraHydratedAttributes(
   );
 }
 
-// Writing the client style prop to a scratch declaration routes both name
-// sets through the same CSSOM canonicalization (shorthand expansion, name
-// casing), so server-set and client-produced names compare directly.
-function extraHydratedStyleNames(
-  serverStyles: readonly string[],
-  next: unknown,
-): string[] {
-  if (serverStyles.length === 0) return [];
-
-  const scratch = document.createElement("div");
-  setStyle(scratch, {}, next);
-  const expected = new Set(hydratedStyleNames(scratch));
-
-  return serverStyles
-    .filter((name) => !expected.has(name))
-    .map((name) => `style.${name}`);
-}
-
-function hydratedStyleNames(element: Element): string[] {
-  const style = (element as HTMLElement).style as unknown as
-    | StyleTarget
-    | undefined;
-  if (style === undefined) return [];
-
-  if (typeof style.length === "number" && typeof style.item === "function") {
-    const names: string[] = [];
-    for (let index = 0; index < style.length; index += 1) {
-      const name = style.item(index);
-      if (name !== "") names.push(name);
-    }
-    return names;
-  }
-
-  return Object.keys(style).filter((name) => style[name] !== "");
-}
-
 function hydratedAttributeName(
   type: string,
   name: string,
   html: boolean,
 ): string | null {
-  if ((type === "textarea" || type === "select") && valueProp(name)) {
-    return null;
-  }
-
-  if (name === "defaultValue") return "value";
-  if (name === "defaultChecked") return "checked";
-  return hostAttributeName(name, html);
+  const formName = hydratedFormAttributeName(type, name);
+  return formName === undefined ? hostAttributeName(name, html) : formName;
 }
 
 function attributeNames(element: Element): string[] {
@@ -310,103 +247,6 @@ function attributeNames(element: Element): string[] {
   return Object.keys(attributes);
 }
 
-function setFormProperty(
-  element: Element,
-  type: string,
-  name: string,
-  next: unknown,
-  nextProps: Props,
-  options: UpdateOptions,
-): void {
-  if (type === "select" && valueProp(name)) return;
-  if (type === "option" && name === "value") {
-    setAttribute(element, "value", formValue(next));
-    return;
-  }
-
-  // Defaults live-write only on the instance's very first render (and never
-  // during hydration, or when a controlling sibling prop wins): a
-  // defaultValue/defaultChecked that APPEARS on a later update must not
-  // clobber what the user typed or toggled since mount.
-  const initial = options.initial === true && options.hydrating !== true;
-
-  if (name === "value") {
-    if (isEmptyPropValue(next)) return;
-    setFormValue(element, next, type, { live: true });
-  } else if (name === "defaultValue") {
-    setFormValue(element, next, type, {
-      defaultValue: true,
-      live: initial && nextProps.value === undefined,
-    });
-  } else if (name === "checked") {
-    if (next === undefined) return;
-    setChecked(element, next, { live: true });
-  } else if (name === "defaultChecked") {
-    setChecked(element, next, {
-      defaultChecked: true,
-      live: initial && nextProps.checked === undefined,
-    });
-  }
-}
-
-function setFormValue(
-  element: Element,
-  value: unknown,
-  type: string,
-  options: { defaultValue?: boolean; live?: boolean },
-): void {
-  const textArea = type === "textarea";
-  const next = formValue(value);
-
-  if (options.defaultValue === true && "defaultValue" in element) {
-    (element as unknown as { defaultValue: string }).defaultValue = next ?? "";
-  }
-  if (options.defaultValue === true) {
-    if (textArea) {
-      element.textContent = next ?? "";
-    } else {
-      setAttribute(element, "value", next);
-    }
-  }
-
-  if (options.live === true && "value" in element) {
-    if ((element as unknown as { value: string }).value !== (next ?? "")) {
-      (element as unknown as { value: string }).value = next ?? "";
-    }
-  } else if (options.live === true && next !== null) {
-    setAttribute(element, "value", next);
-  }
-}
-
-function formValue(value: unknown): string | null {
-  return isEmptyPropValue(value) ? null : String(value);
-}
-
-function setChecked(
-  element: Element,
-  value: unknown,
-  options: { defaultChecked?: boolean; live?: boolean },
-): void {
-  const checked = value === true;
-
-  // The checked content attribute IS defaultChecked's reflection, so only
-  // the defaultChecked prop may touch it — a controlled `checked` writes the
-  // live property alone, mirroring value/defaultValue above.
-  if (options.defaultChecked === true) {
-    if ("defaultChecked" in element) {
-      (element as unknown as { defaultChecked: boolean }).defaultChecked =
-        checked;
-    }
-    setAttribute(element, "checked", checked);
-  }
-
-  if (options.live === true && "checked" in element) {
-    (element as unknown as { checked: boolean }).checked = checked;
-  } else if (options.live === true) {
-    setAttribute(element, "checked", checked);
-  }
-}
-
 function setUnsafeHTML(element: Element, value: unknown): void {
   const html = unsafeHTMLValue(value);
   if (!("innerHTML" in element)) return;
@@ -418,193 +258,6 @@ function unsafeHTMLValue(value: unknown): string | null {
   if (isEmptyPropValue(value)) return null;
   if (typeof value === "string") return value;
   throw new Error("The unsafeHTML prop must be a string.");
-}
-
-function updateSelectOptions(
-  element: Element,
-  type: string,
-  previousProps: Props,
-  nextProps: Props,
-  options: UpdateOptions = {},
-): void {
-  if (type !== "select") return;
-
-  const controlled = nextProps.value !== undefined;
-  const value = controlled ? nextProps.value : nextProps.defaultValue;
-  if (value === undefined || value === null || value === false) {
-    selectState.delete(element);
-    return;
-  }
-
-  // A hydrating uncontrolled select trusts the server DOM's selection (the
-  // user may have changed it before JS loaded); record the default as
-  // applied so later updates don't re-apply it either. Controlled selects
-  // still re-assert their value.
-  const hydratingDefault = !controlled && options.hydrating === true;
-
-  const state = selectState.get(element);
-  const shouldApply =
-    !hydratingDefault &&
-    (controlled || (!controlled && options.initial === true));
-  const nextState = {
-    appliedDefault: state?.appliedDefault === true || !controlled,
-    applyDefaultToInsertedOptions:
-      !hydratingDefault && !controlled && options.initial === true,
-    controlled,
-    selectedValues: selectValues(value),
-    value,
-  };
-  selectState.set(element, nextState);
-  if (!shouldApply) return;
-
-  setSelectValue(element, nextState.selectedValues);
-}
-
-export function updateParentSelect(
-  element: Element,
-  applyDefault = false,
-): void {
-  const select = closestParentSelect(element);
-  if (select === null) return;
-
-  const state = selectState.get(select);
-  if (state === undefined) return;
-  if (!state.controlled && state.appliedDefault && !applyDefault) return;
-  if (
-    !state.controlled &&
-    applyDefault &&
-    !state.applyDefaultToInsertedOptions
-  ) {
-    return;
-  }
-
-  setSelectValue(element, state.selectedValues);
-  if (!state.controlled) {
-    state.appliedDefault = true;
-  }
-}
-
-function selectValues(value: unknown): ReadonlySet<string> {
-  return new Set(Array.isArray(value) ? value.map(String) : [String(value)]);
-}
-
-function setSelectValue(element: Element, values: ReadonlySet<string>): void {
-  if (elementName(element) === "option") {
-    setOptionSelected(element, values);
-    return;
-  }
-
-  forEachDescendantOption(element, (option) => {
-    setOptionSelected(option, values);
-  });
-}
-
-function setOptionSelected(option: Element, values: ReadonlySet<string>): void {
-  (option as unknown as { selected: boolean }).selected = values.has(
-    currentOptionValue(option),
-  );
-}
-
-function closestParentSelect(element: Element): Element | null {
-  let parent: Node | null = element.parentNode;
-  while (parent !== null) {
-    if (isElementNode(parent) && elementName(parent) === "select") {
-      return parent;
-    }
-    parent = parent.parentNode;
-  }
-
-  return null;
-}
-
-function forEachDescendantOption(
-  element: Element,
-  visitor: (option: Element) => void,
-): void {
-  for (let child = element.firstChild; child !== null;) {
-    const next = child.nextSibling;
-    if (isElementNode(child)) {
-      if (elementName(child) === "option") {
-        visitor(child);
-      } else {
-        forEachDescendantOption(child, visitor);
-      }
-    }
-    child = next;
-  }
-}
-
-function currentOptionValue(option: Element): string {
-  const value = attributeValue(option, "value");
-  if (value !== null) return value;
-
-  // Spec-ish option.text: pretty-printed markup collapses to the visible
-  // label, so implicit values match their authored form.
-  return (option.textContent ?? "").replace(/\s+/g, " ").trim();
-}
-
-function attributeValue(element: Element, name: string): string | null {
-  return element.getAttribute(name);
-}
-
-function setStyle(element: Element, previous: unknown, next: unknown): void {
-  const style = (element as HTMLElement).style as unknown as
-    | StyleTarget
-    | undefined;
-  if (style === undefined) return;
-
-  const previousStyle = styleProps(previous);
-  const nextStyle = styleProps(next);
-
-  for (const name of Object.keys(previousStyle)) {
-    if (!(name in nextStyle)) clearStyleProperty(style, name);
-  }
-
-  for (const [name, value] of Object.entries(nextStyle)) {
-    if (value === null || value === undefined || value === false) {
-      clearStyleProperty(style, name);
-    } else {
-      setStyleProperty(style, name, value);
-    }
-  }
-}
-
-function styleProps(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function setStyleProperty(
-  style: StyleTarget,
-  name: string,
-  value: unknown,
-): void {
-  if (typeof value === "number" || typeof value === "bigint") {
-    if (__DEV__) {
-      warnDroppedProp(
-        `style:${name}:${typeof value}`,
-        `The style property "${name}" received a ${typeof value} ` +
-          `(${String(value)}); Fig style values must be strings, so this ` +
-          "style is ignored.",
-      );
-    }
-    return;
-  }
-
-  if (name.startsWith("--") && typeof style.setProperty === "function") {
-    style.setProperty(name, String(value));
-  } else {
-    style[name] = value;
-  }
-}
-
-function clearStyleProperty(style: StyleTarget, name: string): void {
-  if (name.startsWith("--") && typeof style.removeProperty === "function") {
-    style.removeProperty(name);
-  } else {
-    style[name] = "";
-  }
 }
 
 function hostAttributeName(name: string, html: boolean): string {
@@ -636,14 +289,6 @@ function removeAttribute(element: Element, attribute: string): void {
   }
 
   element.removeAttribute(attribute);
-}
-
-function formProp(name: string): boolean {
-  return valueProp(name) || name === "checked" || name === "defaultChecked";
-}
-
-function valueProp(name: string): boolean {
-  return name === "value" || name === "defaultValue";
 }
 
 function reserved(name: string): boolean {
