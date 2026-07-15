@@ -5,10 +5,10 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  isValidElement,
   Suspense,
 } from "./index.ts";
 import {
-  isValidElement,
   type RenderDispatcher,
   readThenable,
   setCurrentDispatcher,

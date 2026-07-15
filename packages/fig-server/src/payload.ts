@@ -8,6 +8,7 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  isValidElement,
   type Props,
 } from "@bgub/fig";
 import {
@@ -33,7 +34,6 @@ import {
   isPortal,
   isSuspense,
   isThenable,
-  isValidElement,
   isViewTransition,
   jsonPayloadCodec,
   type PayloadElementModel,

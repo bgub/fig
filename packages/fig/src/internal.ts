@@ -67,7 +67,6 @@ export {
   isPortal,
   isSuspense,
   isViewTransition,
-  isValidElement,
   type Key,
   type LazyLoader,
   type Props,

@@ -7,6 +7,7 @@ import {
   type FigElement,
   type FigNode,
   Fragment,
+  isValidElement,
   type Props,
   type ViewTransitionProps,
 } from "@bgub/fig";
@@ -28,7 +29,6 @@ import {
   isPortal,
   isSuspense,
   isThenable,
-  isValidElement,
   isViewTransition,
   type NormalizedChild,
   type RenderDispatcher,
