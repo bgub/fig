@@ -26,10 +26,9 @@ import {
 } from "@bgub/fig/internal";
 import {
   createRenderTreeCollector,
-  escapeAttribute,
-  escapeText,
   renderToDocumentStream,
 } from "@bgub/fig-server";
+import { escapeAttribute, escapeText } from "@bgub/fig-server/html";
 import { FigDevtools } from "@bgub/fig-devtools";
 import {
   DevtoolsSnapshotScript,
