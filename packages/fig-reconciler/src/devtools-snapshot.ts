@@ -2,15 +2,17 @@ import type { DependencyList, ElementType, FigContext, Props } from "@bgub/fig";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 import {
   devtoolsTypeName,
-  type FigDevtoolsCommitInspection,
-  type FigDevtoolsEffectPhase,
-  type FigDevtoolsFiberKind,
-  type FigDevtoolsFiberSnapshot,
-  type FigDevtoolsHookSnapshot,
-  type FigDevtoolsHostSnapshot,
-  type FigDevtoolsRootSnapshot,
-  type FigDevtoolsWorkLabel,
   getFigDevtoolsGlobalHook,
+} from "./devtools-internal.ts";
+import type {
+  FigDevtoolsCommitInspection,
+  FigDevtoolsEffectPhase,
+  FigDevtoolsFiberKind,
+  FigDevtoolsFiberSnapshot,
+  FigDevtoolsHookSnapshot,
+  FigDevtoolsHostSnapshot,
+  FigDevtoolsRootSnapshot,
+  FigDevtoolsWorkLabel,
 } from "./devtools.ts";
 import {
   ActivityTag,
