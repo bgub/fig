@@ -39,6 +39,7 @@ export {
   type ActivityProps,
   Assets,
   type ClientReferenceOptions,
+  createPortalNode,
   type ElementType,
   type ErrorBoundaryProps,
   type ErrorInfo,
