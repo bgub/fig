@@ -9,40 +9,41 @@ import {
   runWithEventPriority,
 } from "@bgub/fig-reconciler";
 import {
-  elementName,
-  isElementNode,
-  isEmptyPropValue,
-  parentOf,
-} from "./tree.ts";
+  type EventCallback,
+  type EventDescriptor,
+  type EventOptions,
+  readEventDescriptors,
+} from "./event-descriptor.ts";
+import {
+  type PropagationState,
+  withCurrentTarget,
+  withPropagationState,
+} from "./event-propagation.ts";
+import { elementName, isElementNode, parentOf } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
-export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
-export type EventCallback<E extends Event = Event> = (
-  event: E,
-  signal: AbortSignal,
-) => void;
 type Batch = <T>(callback: () => T) => T;
-type RootScope = <T>(callback: () => T) => T;
-
-export interface EventDescriptor<E extends Event = Event> {
-  readonly $$typeof: symbol;
-  readonly type: string;
-  readonly callback: EventCallback<E>;
-  readonly options?: EventOptions;
-}
+type RootRun = <T>(callback: () => T) => T;
 
 interface EventSlot {
+  attachment: EventAttachment;
   key: string;
   type: string;
   callback: EventCallback;
   options: Required<EventOptions>;
   controller: AbortController | null;
-  element: Element | null;
-  listener: EventListener | null;
-  listenerTarget: Container | null;
-  root: Container | null;
 }
 type EventSlotList = Array<EventSlot | undefined>;
+
+type EventAttachment =
+  | { kind: "detached" }
+  | {
+      kind: "direct";
+      element: Element;
+      listener: EventListener;
+      root: Container | null;
+    }
+  | { kind: "delegated"; listenerTarget: Container; root: Container };
 
 // Snapshot of one handler invocation, extracted before any handler runs: a
 // re-entrant commit inside a handler may detach slots or swap callbacks
@@ -54,14 +55,6 @@ interface DispatchEntry {
   root: Container | null;
   slot: EventSlot;
   type: string;
-}
-
-// Propagation is tracked per logical dispatch rather than on the event:
-// a queued replay must not inherit cancelBubble state a third-party
-// listener left on the spent native event.
-interface PropagationState {
-  immediateStopped: boolean;
-  stopped: boolean;
 }
 
 // type/capture/passive are stored rather than re-parsed from the listener
@@ -92,13 +85,22 @@ interface PortalOwner {
   root: Container;
 }
 
+interface RootRegistration {
+  hydrate: HydrationCallback | null;
+  hydrationListeners: Array<readonly [string, EventListener]> | null;
+  run: RootRun;
+}
+
+interface RootOptions {
+  hydrate?: HydrationCallback;
+  run: RootRun;
+}
+
 // One record per container that participates in event routing — a root, a
 // portal target, or both roles' delegated listener host. Keeping every
 // per-container datum here keeps registration, dispatch, and teardown
 // reading one structure.
 interface ContainerRecord {
-  hydrate: HydrationCallback | null;
-  hydrationListeners: Array<readonly [string, EventListener]> | null;
   listeners: Map<string, RootListener>;
   portalOwner: PortalOwner | null;
   // Portal targets whose logical parent resolves to this container: this
@@ -106,11 +108,9 @@ interface ContainerRecord {
   // nested portals) so portal-inner events always have a dispatch point for
   // logical bubbling, even when no portal-inner handler shares the key.
   portals: Set<Container> | null;
-  root: boolean;
-  scope: RootScope | null;
+  root: RootRegistration | null;
 }
 
-const EventDescriptorSymbol = Symbol.for("fig.event");
 const eventSlots = new WeakMap<Element, EventSlotList>();
 const containerRecords = new WeakMap<Container, ContainerRecord>();
 // Keyed per (event, root): each root resolves selective hydration against
@@ -216,18 +216,18 @@ export function setEventBatching(nextBatch: Batch): void {
   batch = nextBatch;
 }
 
-export function registerRoot(
-  container: Container,
-  hydrate?: HydrationCallback,
-  scope?: RootScope,
-): void {
+export function registerRoot(container: Container, options: RootOptions): void {
   const record = containerRecord(container);
-  record.root = true;
-  if (scope !== undefined) record.scope = scope;
-  if (hydrate === undefined) return;
+  const root = (record.root ??= {
+    hydrate: null,
+    hydrationListeners: null,
+    run: options.run,
+  });
+  root.run = options.run;
+  if (options.hydrate === undefined) return;
 
-  record.hydrate = hydrate;
-  ensureHydrationListeners(container, record);
+  root.hydrate = options.hydrate;
+  ensureHydrationListeners(container, root);
   adoptEarlyEvents(container);
 }
 
@@ -315,14 +315,14 @@ export function unregisterRoot(container: Container): void {
 }
 
 export function disableRootHydration(container: Container): void {
-  const record = containerRecords.get(container);
-  if (record === undefined) return;
+  const root = containerRecords.get(container)?.root;
+  if (root == null) return;
 
-  record.hydrate = null;
-  for (const [type, listener] of record.hydrationListeners ?? []) {
+  root.hydrate = null;
+  for (const [type, listener] of root.hydrationListeners ?? []) {
     container.removeEventListener(type, listener, { capture: true });
   }
-  record.hydrationListeners = null;
+  root.hydrationListeners = null;
 }
 
 function sweepPortals(target: Container): void {
@@ -336,48 +336,19 @@ function containerRecord(container: Container): ContainerRecord {
   let record = containerRecords.get(container);
   if (record === undefined) {
     record = {
-      hydrate: null,
-      hydrationListeners: null,
       listeners: new Map(),
       portalOwner: null,
       portals: null,
-      root: false,
-      scope: null,
+      root: null,
     };
     containerRecords.set(container, record);
   }
   return record;
 }
 
-/**
- * Declares a listener for the `events` prop. Events keep their native
- * semantics: bubbling events are delegated through the Fig tree (including
- * portals), while non-bubbling events — `focus` and `blur` included — attach
- * directly to the element and fire only there. Fig does not emulate React's
- * bubbling `focus`/`blur`; to observe focus changes from an ancestor, use
- * the platform's bubbling variants, `focusin` and `focusout`.
- */
-export function on<K extends keyof HTMLElementEventMap>(
-  type: K,
-  callback: EventCallback<HTMLElementEventMap[K]>,
-  options?: EventOptions,
-): EventDescriptor<HTMLElementEventMap[K]>;
-export function on<E extends Event = Event>(
-  type: string,
-  callback: EventCallback<E>,
-  options?: EventOptions,
-): EventDescriptor<E>;
-export function on(
-  type: string,
-  callback: EventCallback,
-  options?: EventOptions,
-): EventDescriptor {
-  return { $$typeof: EventDescriptorSymbol, type, callback, options };
-}
-
 export function updateEvents(element: Element, value: unknown): void {
   const slots = eventSlotsFor(element);
-  const descriptors = eventDescriptors(value, elementName(element));
+  const descriptors = readEventDescriptors(value, elementName(element));
   let location: EventLocation | null = null;
 
   for (let index = 0; index < descriptors.length; index += 1) {
@@ -466,12 +437,17 @@ function eventLocationFor(
   const listenerTarget = listenerTargetFor(node);
   if (listenerTarget === null) return { listenerTarget: null, root: null };
 
+  // listenerTargetFor only returns containers with a live record; fail safe
+  // (no root) if that invariant ever breaks rather than treating the node's
+  // own container as a root.
   const record = containerRecords.get(listenerTarget);
+  if (record === undefined) return { listenerTarget: null, root: null };
+
   return {
     listenerTarget,
     root:
-      record?.portalOwner?.root ??
-      (record?.root === true ? listenerTarget : null),
+      record.portalOwner?.root ??
+      (record.root !== null ? listenerTarget : null),
   };
 }
 
@@ -577,15 +553,12 @@ function addEventSlot(
   key: string,
 ): EventSlot {
   const slot: EventSlot = {
+    attachment: { kind: "detached" },
     key,
     type: descriptor.type,
     callback: descriptor.callback as EventCallback,
     options,
     controller: null,
-    element: null,
-    listener: null,
-    listenerTarget: null,
-    root: null,
   };
   attachEventSlot(element, root, listenerTarget, slot);
   return slot;
@@ -632,14 +605,14 @@ function dispatchRootEvent(
 
 function ensureHydrationListeners(
   root: Container,
-  record: ContainerRecord,
+  registration: RootRegistration,
 ): void {
-  if (record.hydrationListeners !== null) return;
-  record.hydrationListeners = [];
+  if (registration.hydrationListeners !== null) return;
+  registration.hydrationListeners = [];
 
   for (const type of hydrationEvents) {
     const listener = (event: Event) => hydrateForEvent(root, type, event);
-    record.hydrationListeners.push([type, listener]);
+    registration.hydrationListeners.push([type, listener]);
     root.addEventListener(type, listener, {
       capture: true,
       passive: passiveHydrationEvent(type),
@@ -652,7 +625,7 @@ function hydrateForEvent(
   type: string,
   event: Event,
 ): HydrationTargetResult {
-  const hydrate = containerRecords.get(root)?.hydrate ?? null;
+  const hydrate = containerRecords.get(root)?.root?.hydrate ?? null;
   if (hydrate === null) return "none";
 
   let results = eventHydrationResults.get(event);
@@ -694,7 +667,7 @@ function queueReplayableEvent(
 function hydrateQueuedEvent(
   queued: QueuedReplayableEvent,
 ): HydrationTargetResult {
-  const hydrate = containerRecords.get(queued.root)?.hydrate ?? null;
+  const hydrate = containerRecords.get(queued.root)?.root?.hydrate ?? null;
   if (hydrate === null) return "none";
 
   const priority = eventPriority(queued.type);
@@ -752,7 +725,7 @@ function extractDispatches(
     for (const slot of eventSlots.get(element) ?? []) {
       if (slot === undefined) continue;
       if (
-        slot.root !== root ||
+        attachedRoot(slot) !== root ||
         slot.type !== type ||
         slot.options.capture !== capture ||
         (passive !== null && slot.options.passive !== passive)
@@ -763,7 +736,7 @@ function extractDispatches(
       entries.push({
         callback: slot.callback,
         element,
-        root: slot.root,
+        root: attachedRoot(slot),
         slot,
         type: slot.type,
       });
@@ -797,7 +770,7 @@ function invokeDispatches(
       // event fired — but its signal must end aborted per the abort-on-removal
       // contract, even if the handler threw.
       const slot = entry.slot;
-      if (slot.element === null && slot.listenerTarget === null) {
+      if (slot.attachment.kind === "detached") {
         abortEventSlot(slot);
       }
     }
@@ -822,51 +795,13 @@ function dispatchEventSlot(entry: DispatchEntry, event: Event): void {
 }
 
 function runWithRootScope<T>(root: Container | null, callback: () => T): T {
-  const scope =
-    root === null ? null : (containerRecords.get(root)?.scope ?? null);
-  return scope === null ? callback() : scope(callback);
+  const run = root === null ? undefined : containerRecords.get(root)?.root?.run;
+  return run === undefined ? callback() : run(callback);
 }
 
 function abortEventSlot(slot: EventSlot): void {
   slot.controller?.abort();
   slot.controller = null;
-}
-
-function eventDescriptors(
-  value: unknown,
-  elementType: string,
-): Array<EventDescriptor | undefined> {
-  if (isEmptyPropValue(value)) return [];
-  if (Array.isArray(value)) {
-    const descriptors: Array<EventDescriptor | undefined> = [];
-    for (const item of value) {
-      if (isEmptyPropValue(item)) {
-        descriptors.push(undefined);
-        continue;
-      }
-      if (!isEventDescriptor(item)) {
-        throwInvalidEventsProp(elementType);
-      }
-      descriptors.push(item);
-    }
-    return descriptors;
-  }
-  throwInvalidEventsProp(elementType);
-}
-
-function throwInvalidEventsProp(elementType: string): never {
-  const target = elementType === "" ? "an element" : `<${elementType}>`;
-  throw new Error(
-    `The events prop on ${target} must be an array of event descriptors created with on(type, callback).`,
-  );
-}
-
-function isEventDescriptor(value: unknown): value is EventDescriptor {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as EventDescriptor).$$typeof === EventDescriptorSymbol
-  );
 }
 
 function eventSlotsFor(element: Element): EventSlotList {
@@ -900,33 +835,33 @@ function attachDirectEventSlot(
   // delegated path. The first attach can run before insertion, when
   // rootFor() is still null, so a re-attach on the same element refreshes
   // the root without re-adding the DOM listener.
-  if (slot.element === element) {
-    if (root !== null) slot.root = root;
+  const attachment = slot.attachment;
+  if (attachment.kind === "direct" && attachment.element === element) {
+    if (root !== null) attachment.root = root;
     return;
   }
 
   detachEventSlot(slot);
-  slot.element = element;
-  slot.root = root;
-  slot.listener = (event) => {
+  const listener: EventListener = (event) => {
     try {
       dispatchEventSlot(
         {
           callback: slot.callback,
           element,
-          root: slot.root,
+          root: attachedRoot(slot),
           slot,
           type: slot.type,
         },
         event,
       );
     } finally {
-      if (slot.element === null && slot.listenerTarget === null) {
+      if (slot.attachment.kind === "detached") {
         abortEventSlot(slot);
       }
     }
   };
-  element.addEventListener(slot.type, slot.listener, slot.options);
+  slot.attachment = { element, kind: "direct", listener, root };
+  element.addEventListener(slot.type, listener, slot.options);
 }
 
 function attachDelegatedEventSlot(
@@ -934,17 +869,19 @@ function attachDelegatedEventSlot(
   listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
+  if (root === null || listenerTarget === null) return;
+
+  const attachment = slot.attachment;
   if (
-    root === null ||
-    listenerTarget === null ||
-    (slot.root === root && slot.listenerTarget === listenerTarget)
+    attachment.kind === "delegated" &&
+    attachment.root === root &&
+    attachment.listenerTarget === listenerTarget
   ) {
     return;
   }
 
   detachEventSlot(slot);
-  slot.root = root;
-  slot.listenerTarget = listenerTarget;
+  slot.attachment = { kind: "delegated", listenerTarget, root };
 
   acquireRootListener(
     root,
@@ -1012,28 +949,21 @@ function releaseRootListener(listenerTarget: Container, key: string): void {
 }
 
 function detachEventSlot(slot: EventSlot): void {
-  detachDirectEventSlot(slot);
-  detachDelegatedEventSlot(slot);
+  const attachment = slot.attachment;
+  if (attachment.kind === "detached") return;
+  slot.attachment = { kind: "detached" };
+
+  if (attachment.kind === "direct") {
+    attachment.element.removeEventListener(slot.type, attachment.listener, {
+      capture: slot.options.capture,
+    });
+  } else {
+    releaseRootListener(attachment.listenerTarget, rootListenerKey(slot));
+  }
 }
 
-function detachDirectEventSlot(slot: EventSlot): void {
-  if (slot.element === null || slot.listener === null) return;
-
-  slot.element.removeEventListener(slot.type, slot.listener, {
-    capture: slot.options.capture,
-  });
-  slot.element = null;
-  slot.listener = null;
-  slot.root = null;
-}
-
-function detachDelegatedEventSlot(slot: EventSlot): void {
-  const listenerTarget = slot.listenerTarget;
-  if (listenerTarget === null) return;
-
-  slot.root = null;
-  slot.listenerTarget = null;
-  releaseRootListener(listenerTarget, rootListenerKey(slot));
+function attachedRoot(slot: EventSlot): Container | null {
+  return slot.attachment.kind === "detached" ? null : slot.attachment.root;
 }
 
 function rootListenerMap(root: Container): Map<string, RootListener> {
@@ -1117,7 +1047,7 @@ function listenerTargetFor(node: EventTarget | null): Container | null {
       const record = containerRecords.get(current);
       if (
         record !== undefined &&
-        (record.portalOwner !== null || record.root)
+        (record.portalOwner !== null || record.root !== null)
       ) {
         return current;
       }
@@ -1127,127 +1057,6 @@ function listenerTargetFor(node: EventTarget | null): Container | null {
   }
 
   return null;
-}
-
-function withCurrentTarget<T>(
-  event: Event,
-  currentTarget: Element,
-  callback: (event: Event) => T,
-): T {
-  const previous = Object.getOwnPropertyDescriptor(event, "currentTarget");
-  const changed = Reflect.defineProperty(event, "currentTarget", {
-    configurable: true,
-    value: currentTarget,
-  });
-
-  try {
-    return callback(event);
-  } finally {
-    if (changed) {
-      if (previous === undefined) {
-        delete (event as unknown as { currentTarget?: EventTarget | null })
-          .currentTarget;
-      } else {
-        Object.defineProperty(event, "currentTarget", previous);
-      }
-    }
-  }
-}
-
-// Runs one logical dispatch with its own propagation state: the stop
-// methods and the legacy cancelBubble property are patched (save/restore,
-// so nested dispatches of other events are isolated) to record into the
-// state while still driving the natives. Replays set
-// `ignoreExistingCancelBubble`: a spent event's stale cancelBubble must not
-// drop the replay, while a LIVE dispatch honors cancelBubble a sibling root
-// listener's handler already set. Stops made DURING the dispatch — method
-// calls or `event.cancelBubble = true` assignments — are observed either
-// way via the patches.
-function withPropagationState<T>(
-  event: Event,
-  ignoreExistingCancelBubble: boolean,
-  callback: (state: PropagationState) => T,
-): T {
-  const existingCancelBubble = event.cancelBubble === true;
-  const state: PropagationState = {
-    immediateStopped: false,
-    stopped: !ignoreExistingCancelBubble && existingCancelBubble,
-  };
-
-  const restoreStop = patchEventMethod(event, "stopPropagation", () => {
-    state.stopped = true;
-  });
-  const restoreImmediate = patchEventMethod(
-    event,
-    "stopImmediatePropagation",
-    () => {
-      state.stopped = true;
-      state.immediateStopped = true;
-    },
-  );
-  const restoreCancelBubble = patchCancelBubble(event, state);
-
-  try {
-    return callback(state);
-  } finally {
-    restoreCancelBubble();
-    restoreImmediate();
-    restoreStop();
-    // Reflect a stop from this dispatch onto the real event once the
-    // patches are gone (a legacy assignment only reached the shadow).
-    if (state.stopped) event.cancelBubble = true;
-  }
-}
-
-function patchCancelBubble(event: Event, state: PropagationState): () => void {
-  const previous = Object.getOwnPropertyDescriptor(event, "cancelBubble");
-  const changed = Reflect.defineProperty(event, "cancelBubble", {
-    configurable: true,
-    // `stopped` is seeded from the effective pre-existing value (ignored
-    // for replays), so reads reflect THIS dispatch: a replay handler must
-    // not observe the spent event's stale stop state.
-    get: () => state.stopped,
-    set(value: unknown) {
-      // Per spec, assigning false does nothing.
-      if (value === true) state.stopped = true;
-    },
-  });
-
-  return () => {
-    if (!changed) return;
-    if (previous === undefined) {
-      delete (event as unknown as Record<string, unknown>).cancelBubble;
-    } else {
-      Object.defineProperty(event, "cancelBubble", previous);
-    }
-  };
-}
-
-function patchEventMethod(
-  event: Event,
-  name: "stopImmediatePropagation" | "stopPropagation",
-  onCall: () => void,
-): () => void {
-  const native = Reflect.get(event, name);
-  if (typeof native !== "function") return () => undefined;
-
-  const previous = Object.getOwnPropertyDescriptor(event, name);
-  const changed = Reflect.defineProperty(event, name, {
-    configurable: true,
-    value() {
-      onCall();
-      native.call(event);
-    },
-  });
-
-  return () => {
-    if (!changed) return;
-    if (previous === undefined) {
-      delete (event as unknown as Record<string, unknown>)[name];
-    } else {
-      Object.defineProperty(event, name, previous);
-    }
-  };
 }
 
 function normalizedOptions(options: EventOptions = {}): Required<EventOptions> {
