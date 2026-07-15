@@ -12,7 +12,7 @@ interface SelectState {
   appliedDefault: boolean;
   applyDefaultToInsertedOptions: boolean;
   controlled: boolean;
-  selectedValues: ReadonlySet<string>;
+  selectedValues: string | ReadonlySet<string>;
 }
 
 const selectStates = new WeakMap<Element, SelectState>();
@@ -74,9 +74,9 @@ export function updateSelect(
     applyDefaultToInsertedOptions:
       !hydratingDefault && !controlled && options.initial === true,
     controlled,
-    selectedValues: new Set(
-      Array.isArray(value) ? value.map(String) : [String(value)],
-    ),
+    selectedValues: Array.isArray(value)
+      ? new Set(value.map(String))
+      : String(value),
   };
   selectStates.set(element, state);
 
@@ -189,7 +189,10 @@ function formValue(value: unknown): string | null {
   return isEmptyPropValue(value) ? null : String(value);
 }
 
-function applySelectValue(element: Element, values: ReadonlySet<string>): void {
+function applySelectValue(
+  element: Element,
+  values: string | ReadonlySet<string>,
+): void {
   if (elementName(element) === "option") {
     setOptionSelected(element, values);
     return;
@@ -200,11 +203,15 @@ function applySelectValue(element: Element, values: ReadonlySet<string>): void {
   });
 }
 
-function setOptionSelected(option: Element, values: ReadonlySet<string>): void {
+function setOptionSelected(
+  option: Element,
+  values: string | ReadonlySet<string>,
+): void {
   const explicitValue = option.getAttribute("value");
   const value =
     explicitValue ?? (option.textContent ?? "").replace(/\s+/g, " ").trim();
-  (option as unknown as { selected: boolean }).selected = values.has(value);
+  (option as unknown as { selected: boolean }).selected =
+    typeof values === "string" ? value === values : values.has(value);
 }
 
 function closestParentSelect(element: Element): Element | null {

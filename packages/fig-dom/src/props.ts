@@ -30,31 +30,31 @@ export function updateElement(
 ): void {
   const type = elementName(element);
   const html = isHtmlElement(element);
-  const names = new Set([
-    ...Object.keys(previousProps),
-    ...Object.keys(nextProps),
-  ]);
+  const names = Object.keys(previousProps);
+
+  for (const name in nextProps) {
+    if (Object.hasOwn(nextProps, name) && !Object.hasOwn(previousProps, name)) {
+      names.push(name);
+    }
+  }
 
   for (const name of names) {
+    const previous = previousProps[name];
+    const next = nextProps[name];
+
     if (name === "events") {
-      updateEvents(element, nextProps[name]);
+      updateEvents(element, next);
       continue;
     }
 
     if (name === "bind") {
-      updateBind(element, nextProps[name]);
+      if (previous !== next) updateBind(element, next);
       continue;
     }
 
-    const previous = previousProps[name];
-    const next = nextProps[name];
-
     if (name === "unsafeHTML") {
-      if (options.hydrating === true) {
-        unsafeHTMLValue(next);
-        continue;
-      }
-      if (previous !== next) setUnsafeHTML(element, next);
+      if (options.hydrating === true) unsafeHTMLValue(next);
+      else if (previous !== next) setUnsafeHTML(element, next);
       continue;
     }
 
@@ -75,6 +75,9 @@ export function updateElement(
       ) {
         warnDroppedProp(
           `${name}:${typeof next}`,
+          // The value is useful in a development diagnostic; intentional JS
+          // coercion also handles symbols and custom toString implementations.
+          // oxlint-disable-next-line typescript/no-base-to-string
           `The "${name}" prop received a ${typeof next} (${String(next)}); ` +
             "Fig treats only `true` as checked, so this renders unchecked.",
         );
@@ -84,9 +87,8 @@ export function updateElement(
     }
 
     if (previous === next) continue;
-    if (name === "style") {
-      updateStyle(element, previous, next);
-    } else setAttribute(element, hostAttributeName(name, html), next);
+    if (name === "style") updateStyle(element, previous, next);
+    else setAttribute(element, hostAttributeName(name, html), next);
   }
 
   updateSelect(element, type, nextProps, options);

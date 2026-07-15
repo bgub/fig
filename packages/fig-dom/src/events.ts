@@ -11,7 +11,6 @@ import {
 import {
   type EventCallback,
   type EventDescriptor,
-  type EventOptions,
   readEventDescriptors,
 } from "./event-descriptor.ts";
 import {
@@ -19,31 +18,29 @@ import {
   withCurrentTarget,
   withPropagationState,
 } from "./event-propagation.ts";
-import { elementName, isElementNode, parentOf } from "./tree.ts";
+import { isElementNode, parentOf } from "./tree.ts";
 
 export type Container = Element | DocumentFragment;
 type Batch = <T>(callback: () => T) => T;
 type RootRun = <T>(callback: () => T) => T;
 
 interface EventSlot {
-  attachment: EventAttachment;
-  key: string;
+  attachment: EventAttachment | null;
+  capture: boolean;
   type: string;
   callback: EventCallback;
-  options: Required<EventOptions>;
+  passive: boolean;
   controller: AbortController | null;
 }
 type EventSlotList = Array<EventSlot | undefined>;
 
 type EventAttachment =
-  | { kind: "detached" }
   | {
-      kind: "direct";
       element: Element;
       listener: EventListener;
       root: Container | null;
     }
-  | { kind: "delegated"; listenerTarget: Container; root: Container };
+  | { listenerTarget: Container; root: Container };
 
 // Snapshot of one handler invocation, extracted before any handler runs: a
 // re-entrant commit inside a handler may detach slots or swap callbacks
@@ -54,7 +51,6 @@ interface DispatchEntry {
   element: Element;
   root: Container | null;
   slot: EventSlot;
-  type: string;
 }
 
 // type/capture/passive are stored rather than re-parsed from the listener
@@ -85,12 +81,6 @@ interface PortalOwner {
   root: Container;
 }
 
-interface RootRegistration {
-  hydrate: HydrationCallback | null;
-  hydrationListeners: Array<readonly [string, EventListener]> | null;
-  run: RootRun;
-}
-
 interface RootOptions {
   hydrate?: HydrationCallback;
   run: RootRun;
@@ -101,6 +91,8 @@ interface RootOptions {
 // per-container datum here keeps registration, dispatch, and teardown
 // reading one structure.
 interface ContainerRecord {
+  hydrate: HydrationCallback | null;
+  hydrationListeners: Array<readonly [string, EventListener]> | null;
   listeners: Map<string, RootListener>;
   portalOwner: PortalOwner | null;
   // Portal targets whose logical parent resolves to this container: this
@@ -108,7 +100,9 @@ interface ContainerRecord {
   // nested portals) so portal-inner events always have a dispatch point for
   // logical bubbling, even when no portal-inner handler shares the key.
   portals: Set<Container> | null;
-  root: RootRegistration | null;
+  // A non-null runner marks this container as a root. Portal-only records
+  // leave it null.
+  run: RootRun | null;
 }
 
 const eventSlots = new WeakMap<Element, EventSlotList>();
@@ -122,6 +116,9 @@ const eventHydrationResults = new WeakMap<
   WeakMap<Container, HydrationTargetResult>
 >();
 const queuedReplayableEvents: QueuedReplayableEvent[] = [];
+// Shared with the server's inline early-event-capture script: both sides
+// must agree on which events queue for replay.
+const replayableEvents = new Set<string>(REPLAYABLE_EVENT_TYPES);
 const discreteEvents = new Set([
   "beforeinput",
   "blur",
@@ -143,9 +140,6 @@ const discreteEvents = new Set([
   "touchend",
   "touchstart",
 ]);
-// Shared with the server's inline early-event-capture script: both sides
-// must agree on which events queue for replay.
-const replayableEvents = new Set<string>(REPLAYABLE_EVENT_TYPES);
 const continuousEvents = new Set([
   "drag",
   "dragover",
@@ -218,16 +212,11 @@ export function setEventBatching(nextBatch: Batch): void {
 
 export function registerRoot(container: Container, options: RootOptions): void {
   const record = containerRecord(container);
-  const root = (record.root ??= {
-    hydrate: null,
-    hydrationListeners: null,
-    run: options.run,
-  });
-  root.run = options.run;
+  record.run = options.run;
   if (options.hydrate === undefined) return;
 
-  root.hydrate = options.hydrate;
-  ensureHydrationListeners(container, root);
+  record.hydrate = options.hydrate;
+  ensureHydrationListeners(container, record);
   adoptEarlyEvents(container);
 }
 
@@ -296,9 +285,11 @@ export function unregisterRoot(container: Container): void {
   // Slot teardown normally empties this map before unmount finishes; sweep
   // whatever remains so no delegated listener outlives the root.
   for (const rootListener of record.listeners.values()) {
-    container.removeEventListener(rootListener.type, rootListener.listener, {
-      capture: rootListener.capture,
-    });
+    container.removeEventListener(
+      rootListener.type,
+      rootListener.listener,
+      rootListener.capture,
+    );
   }
 
   // Portal teardown normally clears these during unmount; sweep stragglers
@@ -315,14 +306,14 @@ export function unregisterRoot(container: Container): void {
 }
 
 export function disableRootHydration(container: Container): void {
-  const root = containerRecords.get(container)?.root;
-  if (root == null) return;
+  const record = containerRecords.get(container);
+  if (record === undefined || record.run === null) return;
 
-  root.hydrate = null;
-  for (const [type, listener] of root.hydrationListeners ?? []) {
-    container.removeEventListener(type, listener, { capture: true });
+  record.hydrate = null;
+  for (const [type, listener] of record.hydrationListeners ?? []) {
+    container.removeEventListener(type, listener, true);
   }
-  root.hydrationListeners = null;
+  record.hydrationListeners = null;
 }
 
 function sweepPortals(target: Container): void {
@@ -336,10 +327,12 @@ function containerRecord(container: Container): ContainerRecord {
   let record = containerRecords.get(container);
   if (record === undefined) {
     record = {
+      hydrate: null,
+      hydrationListeners: null,
       listeners: new Map(),
       portalOwner: null,
       portals: null,
-      root: null,
+      run: null,
     };
     containerRecords.set(container, record);
   }
@@ -347,13 +340,17 @@ function containerRecord(container: Container): ContainerRecord {
 }
 
 export function updateEvents(element: Element, value: unknown): void {
-  const slots = eventSlotsFor(element);
-  const descriptors = readEventDescriptors(value, elementName(element));
+  let slots = eventSlots.get(element);
+  if (slots === undefined) {
+    slots = [];
+    eventSlots.set(element, slots);
+  }
+  const descriptors = readEventDescriptors(value, element);
   let location: EventLocation | null = null;
 
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
-    if (descriptor === undefined) {
+    if (descriptor == null || descriptor === false) {
       const slot = slots[index];
       if (slot !== undefined) {
         removeEventSlot(slot);
@@ -362,8 +359,8 @@ export function updateEvents(element: Element, value: unknown): void {
       continue;
     }
 
-    const options = normalizedOptions(descriptor.options);
-    const key = eventKey(descriptor.type, options);
+    const capture = descriptor.options?.capture === true;
+    const passive = descriptor.options?.passive === true;
     const slot = slots[index];
 
     if (slot === undefined) {
@@ -373,10 +370,14 @@ export function updateEvents(element: Element, value: unknown): void {
         location.root,
         location.listenerTarget,
         descriptor,
-        options,
-        key,
+        capture,
+        passive,
       );
-    } else if (slot.key !== key) {
+    } else if (
+      slot.type !== descriptor.type ||
+      slot.capture !== capture ||
+      slot.passive !== passive
+    ) {
       location ??= eventLocationFor(element);
       removeEventSlot(slot);
       slots[index] = addEventSlot(
@@ -384,8 +385,8 @@ export function updateEvents(element: Element, value: unknown): void {
         location.root,
         location.listenerTarget,
         descriptor,
-        options,
-        key,
+        capture,
+        passive,
       );
     } else if (slot.callback !== descriptor.callback) {
       slot.callback = descriptor.callback as EventCallback;
@@ -401,17 +402,20 @@ export function updateEvents(element: Element, value: unknown): void {
 }
 
 export function attachElementEvents(element: Element): void {
-  const root = rootFor(element);
-  const listenerTarget = listenerTargetFor(element);
+  const slots = eventSlots.get(element);
+  if (slots === undefined) return;
+  const { listenerTarget, root } = eventLocationFor(element);
 
-  for (const slot of eventSlots.get(element) ?? []) {
+  for (const slot of slots) {
     if (slot === undefined) continue;
     attachEventSlot(element, root, listenerTarget, slot);
   }
 }
 
 export function detachElementEvents(element: Element): void {
-  for (const slot of eventSlots.get(element) ?? []) {
+  const slots = eventSlots.get(element);
+  if (slots === undefined) return;
+  for (const slot of slots) {
     if (slot !== undefined) removeEventSlot(slot);
   }
   eventSlots.delete(element);
@@ -446,8 +450,7 @@ function eventLocationFor(
   return {
     listenerTarget,
     root:
-      record.portalOwner?.root ??
-      (record.root !== null ? listenerTarget : null),
+      record.portalOwner?.root ?? (record.run !== null ? listenerTarget : null),
   };
 }
 
@@ -549,15 +552,15 @@ function addEventSlot(
   root: Container | null,
   listenerTarget: Container | null,
   descriptor: EventDescriptor,
-  options: Required<EventOptions>,
-  key: string,
+  capture: boolean,
+  passive: boolean,
 ): EventSlot {
   const slot: EventSlot = {
-    attachment: { kind: "detached" },
-    key,
+    attachment: null,
+    capture,
     type: descriptor.type,
     callback: descriptor.callback as EventCallback,
-    options,
+    passive,
     controller: null,
   };
   attachEventSlot(element, root, listenerTarget, slot);
@@ -605,14 +608,14 @@ function dispatchRootEvent(
 
 function ensureHydrationListeners(
   root: Container,
-  registration: RootRegistration,
+  record: ContainerRecord,
 ): void {
-  if (registration.hydrationListeners !== null) return;
-  registration.hydrationListeners = [];
+  if (record.hydrationListeners !== null) return;
+  record.hydrationListeners = [];
 
   for (const type of hydrationEvents) {
     const listener = (event: Event) => hydrateForEvent(root, type, event);
-    registration.hydrationListeners.push([type, listener]);
+    record.hydrationListeners.push([type, listener]);
     root.addEventListener(type, listener, {
       capture: true,
       passive: passiveHydrationEvent(type),
@@ -625,7 +628,7 @@ function hydrateForEvent(
   type: string,
   event: Event,
 ): HydrationTargetResult {
-  const hydrate = containerRecords.get(root)?.root?.hydrate ?? null;
+  const hydrate = containerRecords.get(root)?.hydrate ?? null;
   if (hydrate === null) return "none";
 
   let results = eventHydrationResults.get(event);
@@ -667,7 +670,7 @@ function queueReplayableEvent(
 function hydrateQueuedEvent(
   queued: QueuedReplayableEvent,
 ): HydrationTargetResult {
-  const hydrate = containerRecords.get(queued.root)?.root?.hydrate ?? null;
+  const hydrate = containerRecords.get(queued.root)?.hydrate ?? null;
   if (hydrate === null) return "none";
 
   const priority = eventPriority(queued.type);
@@ -721,14 +724,17 @@ function extractDispatches(
     index += step
   ) {
     const element = path[index];
+    const slots = eventSlots.get(element);
+    if (slots === undefined) continue;
 
-    for (const slot of eventSlots.get(element) ?? []) {
+    for (const slot of slots) {
       if (slot === undefined) continue;
+      const slotRoot = attachedRoot(slot);
       if (
-        attachedRoot(slot) !== root ||
+        slotRoot !== root ||
         slot.type !== type ||
-        slot.options.capture !== capture ||
-        (passive !== null && slot.options.passive !== passive)
+        slot.capture !== capture ||
+        (passive !== null && slot.passive !== passive)
       ) {
         continue;
       }
@@ -736,9 +742,8 @@ function extractDispatches(
       entries.push({
         callback: slot.callback,
         element,
-        root: attachedRoot(slot),
+        root: slotRoot,
         slot,
-        type: slot.type,
       });
     }
   }
@@ -770,7 +775,7 @@ function invokeDispatches(
       // event fired — but its signal must end aborted per the abort-on-removal
       // contract, even if the handler threw.
       const slot = entry.slot;
-      if (slot.attachment.kind === "detached") {
+      if (slot.attachment === null) {
         abortEventSlot(slot);
       }
     }
@@ -785,7 +790,7 @@ function dispatchEventSlot(entry: DispatchEntry, event: Event): void {
 
   batch(() => {
     runWithRootScope(entry.root, () =>
-      runWithEventPriority(eventPriority(entry.type), () => {
+      runWithEventPriority(eventPriority(slot.type), () => {
         withCurrentTarget(event, entry.element, (currentEvent) => {
           entry.callback(currentEvent, signal);
         });
@@ -795,22 +800,13 @@ function dispatchEventSlot(entry: DispatchEntry, event: Event): void {
 }
 
 function runWithRootScope<T>(root: Container | null, callback: () => T): T {
-  const run = root === null ? undefined : containerRecords.get(root)?.root?.run;
-  return run === undefined ? callback() : run(callback);
+  const run = root === null ? null : (containerRecords.get(root)?.run ?? null);
+  return run === null ? callback() : run(callback);
 }
 
 function abortEventSlot(slot: EventSlot): void {
   slot.controller?.abort();
   slot.controller = null;
-}
-
-function eventSlotsFor(element: Element): EventSlotList {
-  let slots = eventSlots.get(element);
-  if (slots === undefined) {
-    slots = [];
-    eventSlots.set(element, slots);
-  }
-  return slots;
 }
 
 function attachEventSlot(
@@ -836,12 +832,14 @@ function attachDirectEventSlot(
   // rootFor() is still null, so a re-attach on the same element refreshes
   // the root without re-adding the DOM listener.
   const attachment = slot.attachment;
-  if (attachment.kind === "direct" && attachment.element === element) {
-    if (root !== null) attachment.root = root;
-    return;
+  if (attachment !== null) {
+    if ("element" in attachment && attachment.element === element) {
+      if (root !== null) attachment.root = root;
+      return;
+    }
+    detachEventSlot(slot);
   }
 
-  detachEventSlot(slot);
   const listener: EventListener = (event) => {
     try {
       dispatchEventSlot(
@@ -850,18 +848,20 @@ function attachDirectEventSlot(
           element,
           root: attachedRoot(slot),
           slot,
-          type: slot.type,
         },
         event,
       );
     } finally {
-      if (slot.attachment.kind === "detached") {
+      if (slot.attachment === null) {
         abortEventSlot(slot);
       }
     }
   };
-  slot.attachment = { element, kind: "direct", listener, root };
-  element.addEventListener(slot.type, listener, slot.options);
+  slot.attachment = { element, listener, root };
+  element.addEventListener(slot.type, listener, {
+    capture: slot.capture,
+    passive: slot.passive,
+  });
 }
 
 function attachDelegatedEventSlot(
@@ -873,7 +873,8 @@ function attachDelegatedEventSlot(
 
   const attachment = slot.attachment;
   if (
-    attachment.kind === "delegated" &&
+    attachment !== null &&
+    "listenerTarget" in attachment &&
     attachment.root === root &&
     attachment.listenerTarget === listenerTarget
   ) {
@@ -881,14 +882,14 @@ function attachDelegatedEventSlot(
   }
 
   detachEventSlot(slot);
-  slot.attachment = { kind: "delegated", listenerTarget, root };
+  slot.attachment = { listenerTarget, root };
 
   acquireRootListener(
     root,
     listenerTarget,
     slot.type,
-    slot.options.capture,
-    slot.options.passive,
+    slot.capture,
+    slot.passive,
   );
 }
 
@@ -899,7 +900,7 @@ function acquireRootListener(
   capture: boolean,
   passive: boolean,
 ): void {
-  const listeners = rootListenerMap(listenerTarget);
+  const listeners = containerRecord(listenerTarget).listeners;
   const key = `${type}:${capture}:${passive}`;
   let rootListener = listeners.get(key);
 
@@ -937,9 +938,11 @@ function releaseRootListener(listenerTarget: Container, key: string): void {
   rootListener.count -= 1;
   if (rootListener.count > 0) return;
 
-  listenerTarget.removeEventListener(rootListener.type, rootListener.listener, {
-    capture: rootListener.capture,
-  });
+  listenerTarget.removeEventListener(
+    rootListener.type,
+    rootListener.listener,
+    rootListener.capture,
+  );
   listeners.delete(key);
 
   // The key died on this target: drop its mirrors from the portal targets.
@@ -950,28 +953,25 @@ function releaseRootListener(listenerTarget: Container, key: string): void {
 
 function detachEventSlot(slot: EventSlot): void {
   const attachment = slot.attachment;
-  if (attachment.kind === "detached") return;
-  slot.attachment = { kind: "detached" };
+  if (attachment === null) return;
+  slot.attachment = null;
 
-  if (attachment.kind === "direct") {
-    attachment.element.removeEventListener(slot.type, attachment.listener, {
-      capture: slot.options.capture,
-    });
+  if ("element" in attachment) {
+    attachment.element.removeEventListener(
+      slot.type,
+      attachment.listener,
+      slot.capture,
+    );
   } else {
-    releaseRootListener(attachment.listenerTarget, rootListenerKey(slot));
+    releaseRootListener(
+      attachment.listenerTarget,
+      `${slot.type}:${slot.capture}:${slot.passive}`,
+    );
   }
 }
 
 function attachedRoot(slot: EventSlot): Container | null {
-  return slot.attachment.kind === "detached" ? null : slot.attachment.root;
-}
-
-function rootListenerMap(root: Container): Map<string, RootListener> {
-  return containerRecord(root).listeners;
-}
-
-function rootListenerKey(slot: EventSlot): string {
-  return `${slot.type}:${slot.options.capture}:${slot.options.passive}`;
+  return slot.attachment?.root ?? null;
 }
 
 function eventPath(
@@ -979,36 +979,39 @@ function eventPath(
   listenerTarget: Container,
   event: Event,
 ): Element[] {
+  const path: Element[] = [];
   const composedPath = event.composedPath?.();
 
   if (composedPath !== undefined) {
     const index = composedPath.indexOf(listenerTarget);
     if (index !== -1) {
-      return [
-        ...composedPath.slice(0, index).filter(isElementNode),
-        ...logicalPortalPath(root, listenerTarget),
-      ];
+      for (let pathIndex = 0; pathIndex < index; pathIndex += 1) {
+        const node = composedPath[pathIndex];
+        if (isElementNode(node)) path.push(node);
+      }
+      appendLogicalPortalPath(path, root, listenerTarget);
+      return path;
     }
   }
 
-  const path: Element[] = [];
   for (let current: unknown = event.target; current !== listenerTarget;) {
     if (isElementNode(current)) path.push(current);
     current = parentOf(current);
     if (current === null) break;
   }
 
-  return [...path, ...logicalPortalPath(root, listenerTarget)];
+  appendLogicalPortalPath(path, root, listenerTarget);
+  return path;
 }
 
-function logicalPortalPath(
+function appendLogicalPortalPath(
+  path: Element[],
   root: Container,
   listenerTarget: Container,
-): Element[] {
+): void {
   const owner = containerRecords.get(listenerTarget)?.portalOwner ?? null;
-  if (owner === null || owner.root !== root) return [];
+  if (owner === null || owner.root !== root) return;
 
-  const path: Element[] = [];
   let cursor: unknown = owner.logicalParent;
 
   while (cursor !== null && cursor !== root) {
@@ -1025,8 +1028,6 @@ function logicalPortalPath(
     if (isElementNode(cursor)) path.push(cursor);
     cursor = parentOf(cursor);
   }
-
-  return path;
 }
 
 function targetWithinRoot(
@@ -1047,7 +1048,7 @@ function listenerTargetFor(node: EventTarget | null): Container | null {
       const record = containerRecords.get(current);
       if (
         record !== undefined &&
-        (record.portalOwner !== null || record.root !== null)
+        (record.portalOwner !== null || record.run !== null)
       ) {
         return current;
       }
@@ -1057,17 +1058,6 @@ function listenerTargetFor(node: EventTarget | null): Container | null {
   }
 
   return null;
-}
-
-function normalizedOptions(options: EventOptions = {}): Required<EventOptions> {
-  return {
-    capture: options.capture === true,
-    passive: options.passive === true,
-  };
-}
-
-function eventKey(type: string, options: Required<EventOptions>): string {
-  return `${type}:${options.capture}:${options.passive}`;
 }
 
 function eventPriority(type: string): EventPriority {

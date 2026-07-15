@@ -52,8 +52,7 @@ declare const __FIG_DEV__: boolean | undefined;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
-  createInstance: (type, props, parent) =>
-    createDomElement(type, props, parent),
+  createInstance: createDomElement,
   createTextInstance: (text) => document.createTextNode(text),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must
@@ -88,12 +87,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   setTextContent: (instance, text) => {
     if (instance.textContent !== text) instance.textContent = text;
   },
-  getFirstHydratableChild: (parent, props) =>
-    hydratableFirstChild(parent, props),
+  getFirstHydratableChild: hydratableFirstChild,
   getNextHydratableSibling: (node) =>
     skipTextSeparators(node.nextSibling as Element | TextLike | null),
-  canHydrateInstance: (node, type, props) =>
-    isHydratableElement(node, type, props),
+  canHydrateInstance: isHydratableElement,
   canHydrateTextInstance: (node, text, suppressHydrationWarning) =>
     isHydratableText(node) &&
     (suppressHydrationWarning === true || node.nodeValue === text),
@@ -105,10 +102,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     if (namespaceFor(type, parent) !== htmlNamespace) return null;
     return adoptDocumentResource(type, props);
   },
-  commitHoistedInstance: (instance) => acquireDocumentResource(instance),
-  removeHoistedInstance: (instance) => releaseDocumentResource(instance),
-  updateHoistedInstance: (instance, previousProps, nextProps) =>
-    updateHoistedResource(instance, previousProps, nextProps),
+  commitHoistedInstance: acquireDocumentResource,
+  removeHoistedInstance: releaseDocumentResource,
+  updateHoistedInstance: updateHoistedResource,
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
@@ -140,12 +136,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   commitTextUpdate: (text, value) => {
     if (text.nodeValue !== value) text.nodeValue = value;
   },
-  commitUpdate: (instance, previousProps, nextProps) =>
-    updateElement(instance, previousProps, nextProps),
-  commitHydratedInstance: (instance, nextProps) =>
-    hydrateElement(instance, nextProps),
-  getActivityBoundary: (node) =>
-    isActivityTemplate(node) ? (node as Element) : null,
+  commitUpdate: updateElement,
+  commitHydratedInstance: hydrateElement,
+  getActivityBoundary: activityBoundary,
   getFirstActivityHydratable: (boundary) =>
     skipTextSeparators(
       (activityTemplateContent(boundary).firstChild ?? null) as
@@ -182,11 +175,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   unhideTextInstance: (text, value) => {
     if (text.nodeValue !== value) text.nodeValue = value;
   },
-  getSuspenseBoundary: (node) => suspenseBoundaryFor(node),
-  getEnclosingSuspenseBoundaryStart: (target) =>
-    enclosingSuspenseBoundaryStart(target),
-  isTargetWithinSuspenseBoundary: (target, boundary) =>
-    isWithinSuspenseBoundary(target, boundary),
+  getSuspenseBoundary: suspenseBoundaryFor,
+  getEnclosingSuspenseBoundaryStart: enclosingSuspenseBoundaryStart,
+  isTargetWithinSuspenseBoundary: isWithinSuspenseBoundary,
   registerSuspenseBoundaryRetry: (boundary, retry) => {
     (boundary.start as RetriableSuspenseMarker).__figRetry = retry;
   },
@@ -212,16 +203,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     // boundary hook to re-drain them; root completion is their backstop.
     queueMicrotask(replayQueuedEvents);
   },
-  preparePortalContainer: (container, root, logicalParent) => {
-    registerPortalContainer(
-      container as Container,
-      root,
-      logicalParent as Container | Element,
-    );
-  },
-  removePortalContainer: (container) => {
-    removePortalContainer(container as Container);
-  },
+  preparePortalContainer: registerPortalContainer,
+  removePortalContainer,
   viewTransition: viewTransitionHostConfig,
 };
 
@@ -237,12 +220,12 @@ function activityTemplateContent(boundary: Element): ParentNode {
     : (boundary as ParentNode);
 }
 
-function isActivityTemplate(node: Element | TextLike): boolean {
-  return (
-    elementName(node) === "template" &&
+function activityBoundary(node: Element | TextLike): Element | null {
+  return elementName(node) === "template" &&
     "getAttribute" in node &&
     node.getAttribute(ACTIVITY_TEMPLATE_ATTRIBUTE) !== null
-  );
+    ? node
+    : null;
 }
 
 function isHydratableElement(
