@@ -859,6 +859,71 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     ]);
   });
 
+  it("replaces children inside a revealed assembled primary that a moved wrapper inserted", async () => {
+    const gate = deferred<string>();
+
+    function Slow() {
+      return createElement("em", null, readPromise(gate.promise));
+    }
+
+    function Wrapper({ swapped }: { swapped: boolean }) {
+      return createElement(
+        "section",
+        null,
+        swapped
+          ? createElement("div", null, "new")
+          : createElement("h1", null, "old"),
+        createElement(Slow, null),
+      );
+    }
+
+    function App({
+      showBefore,
+      swapped,
+    }: {
+      showBefore: boolean;
+      swapped: boolean;
+    }) {
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "load") },
+        showBefore ? createElement("span", null, "S") : null,
+        createElement(Wrapper, { key: "w", swapped }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    // The mount suspends below the <section>: the section assembles inside a
+    // render that never commits and survives only as the captured primary.
+    flushSync(() =>
+      root.render(createElement(App, { showBefore: false, swapped: false })),
+    );
+    expect(container.textContent).toBe("load");
+
+    // While still suspended, a sibling appears before the wrapper, so the
+    // reveal commit re-places the reused wrapper component and inserts the
+    // never-committed section through the wrapper's subtree insertion.
+    flushSync(() =>
+      root.render(createElement(App, { showBefore: true, swapped: false })),
+    );
+    expect(container.textContent).toBe("load");
+
+    gate.resolve("done");
+    await delay();
+    expect(container.textContent).toBe("Solddone");
+
+    // Replacing the section's children must run as a regular update: if the
+    // revealed section still claims it never committed, the next render
+    // re-assembles its live instance in place and the commit crashes removing
+    // the already-detached previous children.
+    flushSync(() =>
+      root.render(createElement(App, { showBefore: true, swapped: true })),
+    );
+    expect(container.textContent).toBe("Snewdone");
+  });
+
   it("does not commit the failed primary shape while re-suspended", async () => {
     let setGate: ((value: Promise<string>) => void) | null = null;
     let setShowExtra: ((value: boolean) => void) | null = null;

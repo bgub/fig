@@ -4440,6 +4440,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         commitMutationEffects(finishedWork.child);
         if (hasHiddenBoundaries)
           commitHiddenBoundaryVisibility(finishedWork.child);
+        if (__DEV__) assertPlacedHostCommitParity(finishedWork.child, false);
       };
       const completeCommit = () => {
         // Recompute from committed reality: the eager render-time set is sticky, so
@@ -4924,7 +4925,44 @@ export function createRenderer<Container, Instance, TextInstance>(
     parent: Parent<Container, Instance>,
     before: HostNode<Instance, TextInstance> | null,
   ): void {
+    // Re-placing a reused non-host fiber can carry host subtrees that were
+    // assembled inside a render that never committed (a captured Suspense
+    // primary revealed later). Commit those exactly like a direct host
+    // placement would: a live instance whose fiber still claims it never
+    // mounted gets re-assembled in place by the next re-render, mutating
+    // committed DOM during the render phase.
     visitHostNodes(node, (child) => host.insertBefore(parent, child, before));
+    visitHostFibers(node, (child) => {
+      if (child.committedProps !== null) return;
+      if (child.tag === HostTag && isHoistedFiber(child)) {
+        // Hoisted instances live out-of-band (visitHostNodes skips their
+        // insertion) but still need first-commit acquisition and marking.
+        acquireHoistedInstance(child);
+        markHostCommitted(child);
+        markHostSubtreeCommitted(child.child);
+        return;
+      }
+      markHostCommitted(child);
+      if (isPreassembledHostSubtree(child)) {
+        markHostSubtreeCommitted(child.child);
+      }
+    });
+  }
+
+  // Fiber-level companion to visitHostNodes: same traversal and portal
+  // boundary, but yields the topmost host fibers themselves (hoisted ones
+  // included — callers decide how to commit them).
+  function visitHostFibers(node: F, visitor: (child: F) => void): void {
+    if (isHost(node)) {
+      visitor(node);
+      return;
+    }
+
+    if (node.tag === PortalTag) return;
+
+    for (let child = node.child; child !== null; child = child.sibling) {
+      visitHostFibers(child, visitor);
+    }
   }
 
   function insertPortalChildren(node: F): void {
@@ -5161,6 +5199,28 @@ export function createRenderer<Container, Instance, TextInstance>(
       cursor.dataDependenciesDirty = false;
       if (cursor.alternate !== null)
         cursor.alternate.dataDependenciesDirty = false;
+    }
+  }
+
+  // Every host fiber that reaches the DOM through this commit — its own
+  // placement or an ancestor's subtree insertion — must leave the mutation
+  // phase marked committed. A live instance whose fiber still claims it
+  // never mounted is the poison behind render-phase re-assembly of
+  // committed DOM (in-place-reuse trap: insertion paths that skip commit
+  // marking), so fail loudly at the commit that minted it.
+  function assertPlacedHostCommitParity(node: F | null, placed: boolean): void {
+    for (let child = node; child !== null; child = child.sibling) {
+      const childPlaced = placed || (child.flags & PlacementFlag) !== 0;
+      if (childPlaced && isHost(child) && child.committedProps === null) {
+        throw new Error(
+          "Fig internal parity error: a placed host fiber has no committed " +
+            "props after the mutation phase (a subtree insertion skipped " +
+            "commit marking).",
+        );
+      }
+      if (childPlaced || (child.subtreeFlags & PlacementFlag) !== 0) {
+        assertPlacedHostCommitParity(child.child, childPlaced);
+      }
     }
   }
 
