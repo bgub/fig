@@ -9,8 +9,8 @@ dropped and Fig-specific APIs are adopted where they are clearer.
 - `docs/concepts/` — **the spec.** One file per subsystem; the single
   authoritative source for contracts, invariants, wire formats, and
   rationale. Start at `docs/concepts/README.md`; open questions and future
-  plans are summarized in `docs/concepts/open-questions.md`. When a change
-  alters a contract, update the owning concept file in the same commit.
+  plans are summarized in `docs/plans/open-questions.md`. When a change alters
+  a contract, update the owning concept file in the same commit.
 - `docs/` — user-facing guides; depth lives in `docs/concepts/`.
 - `docs/plans/` — time-bound work plans and investigations; historical once
   shipped (shipped contracts graduate to `docs/concepts/`).

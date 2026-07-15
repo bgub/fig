@@ -21,7 +21,7 @@ import {
 import { brokenResourceSeed, resourceRootId } from "./resource-shared.ts";
 import { styles } from "./styles.ts";
 
-// The standalone serialized-components demo (docs/plans/serialized-components.md):
+// The standalone serialized-components demo (docs/concepts/payload.md):
 // no framework, no boundaries, no refresh protocol — one route serving a payload
 // stream, one client consuming it as an ordinary data resource.
 

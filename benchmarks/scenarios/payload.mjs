@@ -63,11 +63,10 @@ function createPayloadFixture(rows, metrics) {
 }
 
 // ---------------------------------------------------------------------------
-// Refresh reconciliation (docs/plans/serialized-components.md, phase 3): each
+// Refresh reconciliation (docs/concepts/payload.md): each
 // refresh re-decodes the whole value into fresh element objects, so the
-// reconciler runs ordinary keyed diffing over the full document. The deleted
-// legacy consumer's targeted-refresh numbers are recorded in the plan as the
-// historical baseline these stay comparable to.
+// reconciler runs ordinary keyed diffing over the full document. These
+// scenarios track decode and reconciliation costs separately.
 
 // A "document": `rows` static article sections plus one small dynamic note
 // that a refresh replaces.

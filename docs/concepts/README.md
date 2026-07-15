@@ -8,7 +8,8 @@ The principles every file applies: prefer small runtime concepts over compatibil
 
 Every concept file carries a `Status:` line — `stable` for settled contracts, `exploring` for open designs (Problem → Prior Art → Direction → Open Questions → Provisional Stance), and a qualified status for mixed or living index files.
 
-- [open-questions.md](./open-questions.md) — every open design question and planned piece of work, in one place; items graduate into their owning concept file when resolved.
+The cross-subsystem living plan index is [open-questions.md](../plans/open-questions.md); items graduate into their owning concept file when resolved.
+
 - [architecture.md](./architecture.md) — package ownership doctrine, the internal protocol registry, lazy data-store installation, boundaries that never leak.
 - [rendering.md](./rendering.md) — element model, bailout tiers, always-strict dev rendering, pre-commit diagnostics, commit/batching.
 - [hooks.md](./hooks.md) — the AbortSignal contract table, state/effects/stable events, transitions and actions (cancellation, action last-run-wins), the read verbs, deliberate omissions.

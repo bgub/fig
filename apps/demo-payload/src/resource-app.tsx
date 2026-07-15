@@ -7,7 +7,7 @@ import {
   WeatherSlotRef,
 } from "./resource-shared.ts";
 
-// The resource-model server tree (docs/plans/serialized-components.md): no
+// The resource-model server tree (docs/concepts/data.md): no
 // PayloadBoundary, no refresh protocol — one renderToPayloadStream call
 // serves the whole value, and the client refreshes it as an ordinary data
 // resource. The comments promise is created by the route handler and passed

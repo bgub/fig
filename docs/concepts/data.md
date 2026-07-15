@@ -33,7 +33,7 @@ The load context also carries a non-public, generation-guarded hydration capabil
 
 The data layer does not own app/request context or dependency injection; frameworks and adapters that need request state should close over it when defining per-request server resources, or route remote data requests through their own endpoint code.
 
-Exploring: remote loaders run inside the framework data endpoint, which owns the request — so whether those loaders get an ambient per-request context (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is Fig Start's decision, not a core data contract (`docs/concepts/open-questions.md`).
+Exploring: remote loaders run inside the framework data endpoint, which owns the request — so whether those loaders get an ambient per-request context (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is Fig Start's decision, not a core data contract (`docs/plans/open-questions.md`).
 
 ## Remote Refresh Is A Framework Layer
 
@@ -81,9 +81,9 @@ Hydration into a live store is a completed refresh pushed by the server: create 
 
 Payload navigation does not make a second data request: data read while rendering the server route segment streams in the same payload response as `data` rows. The framework data endpoint (Fig Start's `remoteDataResource` — see Remote Refresh Is A Framework Layer) serves only client-side cache misses and refreshes outside a route payload render.
 
-## Exploring: Serialized Components As Data Resources
+## Serialized Components As Data Resources
 
-An adopted plan (`docs/plans/serialized-components.md`) extends this layer: a server can serialize any component tree (payload.md) and deliver it as an ordinary data-resource value — the resource key _is_ the refresh boundary, streaming structure is a property of the value (a tree with thenable holes), and a fulfilled entry may still contain live holes that settle as background decoding continues. The core client half (`decodePayloadStream`) exists today; the store-facing pieces — generation-lifetime loader signals, the fig-dom `payloadDataLoader` adapter, and hole-aware hydration timing — land with that plan and will graduate into this file as they stabilize.
+A server can serialize any component tree (payload.md) and deliver it as an ordinary data-resource value through fig-dom's `payloadDataLoader`. The resource key _is_ the refresh boundary, streaming structure is a property of the value (a tree with thenable holes), and a fulfilled entry may still contain live holes that settle as background decoding continues. Decoding and `data`-row hydration remain bound to the load generation's lifetime and authority described above.
 
 ## Error Attribution
 

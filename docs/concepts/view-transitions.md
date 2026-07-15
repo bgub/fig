@@ -63,7 +63,7 @@ Only the **commit** waits, never the rendering. An eligible commit arriving whil
 
 Deferred commits (the browser invokes the update callback asynchronously) freeze the root until the callback runs — that capture window is sub-frame, unlike the animation-length park. Errors thrown inside the callback are routed through the same uncaught-error path as synchronous commits (report to `onUncaughtError`, clear the root) rather than vanishing into the transition's promise. Hosts wired without the view-transition adapter's `suspend` hook fall back to fig-dom's chained wait, which freezes the root for the previous animation's full duration.
 
-Exploring: whether parked-commit latency under rapid input warrants API-free mitigation (fast-forward via `playbackRate`, a park-timeout backstop, stale-surface auto-interrupt) — see open-questions.md.
+Exploring: whether parked-commit latency under rapid input warrants API-free mitigation (fast-forward via `playbackRate`, a park-timeout backstop, stale-surface auto-interrupt) — see `docs/plans/open-questions.md`.
 
 ## Server Streaming
 

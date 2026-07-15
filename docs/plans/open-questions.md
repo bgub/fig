@@ -1,6 +1,6 @@
 # Open Questions & Future Plans
 
-Status: living summary
+Status: living plan index
 
 Every open design question and planned piece of work, in one place. Each item links its source (a concept file's `exploring` section or a plan in `docs/plans/`); when an item resolves, it graduates into the owning concept file and leaves this list.
 
@@ -27,12 +27,12 @@ Most valuable gaps:
 
 ## Serialized Components
 
-Completed plan: `docs/plans/serialized-components.md` — all phases landed; payload trees are delivered as ordinary data resources, and the targeted-refresh protocol was removed after its parity gate passed. Remaining follow-ups:
+Payload trees are delivered as ordinary data resources, and the targeted-refresh protocol was removed after its parity gate passed. Remaining follow-ups:
 
 - **Fulfilled entry containing a rejected hole** — the hole-rejection contract is specced (errors.md, payload.md); still open is how `invalidateDataError` attribution interacts with hole-level errors on the owning entry.
 - **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
-- **Promise-valued children** — the plan's authoring story (`{loadComments(slug).then(...)}` as a Suspense child) needs thenable children accepted by the payload serializer and the client reconciler; today only suspending server components and promise-valued props outline holes.
-- **Optimistic-state primitive** — out of scope for the plan; needs lane awareness so it cannot live in a framework. Capture in its own plan.
+- **Promise-valued children** — the intended authoring story (`{loadComments(slug).then(...)}` as a Suspense child) needs thenable children accepted by the payload serializer and the client reconciler; today only suspending server components and promise-valued props outline holes.
+- **Optimistic-state primitive** — needs lane awareness so it cannot live in a framework. Capture in its own plan.
 - **Payload codec productization** — whether Fig Start exposes codec selection as a first-class option, when to ship a binary codec, and whether binary codec ids need explicit versioning beyond the opaque implementation id.
 
 ## Asset Resources
@@ -65,4 +65,4 @@ Completed plan: `docs/plans/serialized-components.md` — all phases landed; pay
 ## DevTools
 
 - **Asset-registry inspection** — data-resource entries are already included in reconciler snapshots and rendered by the DevTools panel; equivalent asset-registry ownership, loading, gating, and conflict state is not yet exposed.
-- **Payload render-tree fidelity** — `renderToPayloadStream` could accept a render-tree collector so server-component names survive into DevTools; the payload flattening pass is the last layer that knows those names. Tracked as a follow-up of `docs/plans/serialized-components.md`.
+- **Payload render-tree fidelity** — `renderToPayloadStream` could accept a render-tree collector so server-component names survive into DevTools; the payload flattening pass is the last layer that knows those names. → `docs/concepts/payload.md`

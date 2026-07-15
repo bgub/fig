@@ -4,7 +4,7 @@ Status: stable API; wire encoding internal
 
 Fig's server-component wire layer. The terminology rule: it is **payload**, never "RSC" or "Flight"; those are React brands and the format is Fig's own.
 
-Payload is a **data format, not an architecture**. A server serializes a rendered component tree into a stream of rows; a client decodes that stream back into renderable elements. Everything above the format — endpoints, refresh policy, caching, hydration timing — belongs to the data layer and frameworks (see data.md and `docs/plans/serialized-components.md`). Core keeps the format; frameworks own the wire.
+Payload is a **data format, not an architecture**. A server serializes a rendered component tree into a stream of rows; a client decodes that stream back into renderable elements. Everything above the format — endpoints, refresh policy, caching, hydration timing — belongs to the data layer and frameworks (see data.md). Core keeps the format; frameworks own the wire.
 
 ## Homes
 
@@ -87,6 +87,8 @@ Fig Start's private inline frame transport carries initial-document payload byte
 - The caller owns the resolver's lifetime, but under a fast-refresh bundler contract no manual invalidation is needed: the latched resolution is no stickier than an ESM import binding — hot edits remap the latched function through its component family, and updates the bundler cannot accept escalate to a full reload, which resets the resolver with the page (pinned by a test in fig-dom's refresh suite). `delete`/`clear` serve lifetimes outside that contract, e.g. swapping a manifest without reloading. Unresolvable references are never latched, so a resolver that cannot resolve a reference yet is not poisoned for later decodes that can. Identity deliberately lives on the resolver rather than a separate cache option (folded 2026-07): the split carried a "one cache per resolver" pairing rule and factory-provenance validation that the merged seam makes structural.
 - `resolveClientReference(reference)` deliberately receives the full decoded reference: `{ id, exportName?, ssr?, assets? }` mirrors the `client` row's own wire fields, and the reference object is how the format layer hands delivery metadata to the framework. Narrowing the callback to an opaque id was considered and declined (2026-07): every field is load-bearing in fig-start's document pipeline (`ssr` picks the server component vs the hydration placeholder and filters the preload registry, `exportName` selects the export, `assets` supplies modulepreload discovery), and hiding fields the wire already carries would only force frameworks to re-parse fig's own format out-of-band.
 - Asynchronous client-reference resolution starts at row arrival and overlaps the stream. A resolution failure rejects the referencing decoded component when it renders — through whatever `ErrorBoundary` covers it — and fails the stream result only when it prevents protocol ingestion from continuing.
+
+Each decode materializes fresh element objects; ordinary keys and reconciliation preserve component identity across resource refreshes. Request-local row and graph ids are allocation details, not cross-refresh identity. Migration benchmarks found decoding dominated refresh cost and ordinary keyed reconciliation was acceptable, so Fig deliberately carries no decoded-chunk memoization or other cross-refresh identity protocol. Revisit only if a real profile shows reconciliation rather than decoding dominating.
 
 ### Failure Semantics
 

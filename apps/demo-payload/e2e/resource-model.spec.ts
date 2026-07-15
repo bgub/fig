@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-// The resource-model path (docs/plans/serialized-components.md phase 3): a
+// The resource-model path (docs/concepts/data.md): a
 // serialized post delivered through payloadDataLoader + readData, refreshed
 // with the ordinary freshness verbs — no PayloadBoundary, no refresh header.
 
