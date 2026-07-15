@@ -6,6 +6,7 @@ import {
   type ElementType,
   type FigElement,
   type FigNode,
+  isValidElement,
   readContext,
   readData,
   readPromise,
@@ -13,11 +14,7 @@ import {
   Suspense,
   useState,
 } from "@bgub/fig";
-import {
-  isValidElement,
-  readThenable,
-  setCurrentDispatcher,
-} from "@bgub/fig/internal";
+import { readThenable, setCurrentDispatcher } from "@bgub/fig/internal";
 import {
   decodePayloadStream,
   type PayloadDecodeCompletion,

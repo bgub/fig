@@ -1,9 +1,5 @@
-import type { FigNode, Props } from "@bgub/fig";
-import {
-  invalidChildError,
-  isPortal,
-  isValidElement,
-} from "@bgub/fig/internal";
+import { type FigNode, isValidElement, type Props } from "@bgub/fig";
+import { invalidChildError, isPortal } from "@bgub/fig/internal";
 
 const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
 const NonTextHostContent = Symbol("fig.non-text-host-content");
