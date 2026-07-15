@@ -318,6 +318,33 @@ describe("@bgub/fig-dom events", () => {
     ]);
   });
 
+  it("reconciles event descriptors when their array is mutated in place", () => {
+    const signals: AbortSignal[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const events = [
+      on("load", (_event, signal) => {
+        signals.push(signal);
+      }),
+    ];
+
+    flushSync(() =>
+      root.render(createElement("input", { events, value: "controlled" })),
+    );
+
+    const input = container.childNodes[0] as FakeElement;
+    input.dispatch("load");
+    expect(signals[0].aborted).toBe(false);
+
+    events.length = 0;
+    flushSync(() =>
+      root.render(createElement("input", { events, value: "controlled" })),
+    );
+
+    expect(signals[0].aborted).toBe(true);
+    expect(input.listenerSets.load).toBeUndefined();
+  });
+
   it("explains invalid event descriptor props with element context", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

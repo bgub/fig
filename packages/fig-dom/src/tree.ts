@@ -6,14 +6,30 @@ export function visitElementSubtree(
   node: Element | Text,
   visitor: (element: Element) => void,
 ): void {
-  if (isElementNode(node)) visitor(node);
-  if (!("childNodes" in node) || node.firstChild === null) return;
+  if (!("childNodes" in node) || node.firstChild === null) {
+    if (isElementNode(node)) visitor(node);
+    return;
+  }
 
-  // Visitors run user bind callbacks and abort listeners synchronously. Keep
-  // the original children reachable if one of those callbacks mutates or
-  // relocates siblings during the walk.
-  for (const child of Array.from(node.childNodes)) {
-    visitElementSubtree(child as Element | Text, visitor);
+  // Visitors run user bind callbacks and abort listeners synchronously.
+  // Snapshot the entire original element set before the first callback so a
+  // callback cannot hide a later descendant by mutating its parent first.
+  const elements: Element[] = [];
+  collectElementSubtree(node, elements);
+  for (const element of elements) {
+    visitor(element);
+  }
+}
+
+function collectElementSubtree(
+  node: Element | Text,
+  elements: Element[],
+): void {
+  if (isElementNode(node)) elements.push(node);
+  if (!("childNodes" in node)) return;
+
+  for (let child = node.firstChild; child !== null; child = child.nextSibling) {
+    collectElementSubtree(child as Element | Text, elements);
   }
 }
 

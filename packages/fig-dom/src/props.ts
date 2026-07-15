@@ -43,7 +43,7 @@ export function updateElement(
     const next = nextProps[name];
 
     if (name === "events") {
-      if (previous !== next) updateEvents(element, next);
+      updateEvents(element, next);
       continue;
     }
 
