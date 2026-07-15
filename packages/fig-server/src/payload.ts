@@ -107,8 +107,6 @@ class PayloadRequestCancelledError extends Error {
 }
 
 type PayloadRequest = {
-  abortListener: (() => void) | null;
-  abortSignal: AbortSignal | null;
   allReady: Deferred<void>;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
@@ -124,13 +122,13 @@ type PayloadRequest = {
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: Uint8Array[];
+  removeAbortListener: (() => void) | null;
   // Reentrancy guard: enqueueing inside flushRows can synchronously invoke
   // the stream's pull handler, which must not restart the drain — queuedRows
   // is spliced only after the loop, so a reentrant pass would re-enqueue the
   // same rows.
   flushingRows: boolean;
-  status: "opening" | "open" | "closed";
-  stream: ReadableStream<Uint8Array>;
+  status: "open" | "closed";
   workScheduled: boolean;
 };
 
@@ -174,25 +172,23 @@ export function renderToPayloadStream(
   node: FigNode,
   options: PayloadRenderOptions = {},
 ): PayloadRenderResult {
-  const request = createPayloadRequest(node, options);
+  const { request, stream } = createPayloadRequest(node, options);
   return {
     abort: (reason?: unknown) => abortPayloadRequest(request, reason),
     allReady: request.allReady.promise,
     contentType: jsonPayloadCodec.contentType,
-    stream: request.stream,
+    stream,
   };
 }
 
 function createPayloadRequest(
   node: FigNode,
   options: PayloadRenderOptions,
-): PayloadRequest {
+): { request: PayloadRequest; stream: ReadableStream<Uint8Array> } {
   throwIfAborted(options.signal);
 
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
-    abortListener: null,
-    abortSignal: null,
     allReady: deferred<void>(),
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
@@ -215,9 +211,9 @@ function createPayloadRequest(
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
+    removeAbortListener: null,
     flushingRows: false,
-    status: "opening",
-    stream: null as never,
+    status: "open",
     workScheduled: false,
   };
   // allReady also rejects through the stream when a consumer cancels (the
@@ -225,6 +221,10 @@ function createPayloadRequest(
   // from becoming an unhandled rejection for callers that do not await it
   // (await-ers still observe the rejection).
   void request.allReady.promise.catch(() => undefined);
+
+  request.pingedTasks.push(
+    createTask(request, 0, "node", node, new Map(), null),
+  );
 
   const stream = new ReadableStream<Uint8Array>(
     {
@@ -245,27 +245,18 @@ function createPayloadRequest(
       highWaterMark: streamHighWaterMark(options.highWaterMark),
     }),
   );
-  request.stream = stream;
 
-  if (options.signal !== undefined) {
-    const abortListener = () =>
-      abortPayloadRequest(request, options.signal?.reason);
-    request.abortListener = abortListener;
-    request.abortSignal = options.signal;
-    options.signal.addEventListener("abort", abortListener, { once: true });
+  const signal = options.signal;
+  if (signal !== undefined) {
+    const abortListener = () => abortPayloadRequest(request, signal.reason);
+    signal.addEventListener("abort", abortListener, { once: true });
+    request.removeAbortListener = () =>
+      signal.removeEventListener("abort", abortListener);
   }
 
-  request.pingedTasks.push(
-    createTask(request, 0, "node", node, new Map(), null),
-  );
+  scheduleWork(request);
 
-  request.workScheduled = true;
-  queueMicrotask(() => {
-    request.workScheduled = false;
-    performWork(request);
-  });
-
-  return request;
+  return { request, stream };
 }
 
 function createTask(
@@ -282,7 +273,6 @@ function createTask(
 
 function performWork(request: PayloadRequest): void {
   if (request.status === "closed") return;
-  if (request.status === "opening") request.status = "open";
 
   const tasks = request.pingedTasks;
   request.pingedTasks = [];
@@ -293,11 +283,13 @@ function performWork(request: PayloadRequest): void {
 }
 
 function retryTask(request: PayloadRequest, task: Task): void {
-  const frame = createRenderFrame(
+  const frame: RenderFrame = {
+    contextValues: cloneContextValues(task.contextValues),
+    dispatcher: null,
+    pendingAssets: [],
     request,
-    cloneContextValues(task.contextValues),
-    task.stack,
-  );
+    stack: task.stack,
+  };
 
   try {
     const value =
@@ -359,14 +351,6 @@ function emitDataRows(request: PayloadRequest): void {
   if (entries.length > 0) {
     emitRow(request, { tag: "data", value: encodePayloadDataEntries(entries) });
   }
-}
-
-function createRenderFrame(
-  request: PayloadRequest,
-  contextValues: ContextValues,
-  stack: StackFrame | null,
-): RenderFrame {
-  return { contextValues, dispatcher: null, pendingAssets: [], request, stack };
 }
 
 function flushFrameAssets(frame: RenderFrame, rowId: number): void {
@@ -806,7 +790,10 @@ function emitClientReference(
   // id and the client suspends on a chunk that never arrives. Resolving first
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
-  const assets = serializeClientReferenceAssets(request, reference);
+  const assets = serializeAssetResources(
+    request,
+    collectClientReferenceAssets(request, reference),
+  );
   const value: Extract<PayloadRow, { tag: "client" }>["value"] = {
     id: reference.id,
   };
@@ -824,16 +811,6 @@ function emitClientReference(
     value,
   });
   return id;
-}
-
-function serializeClientReferenceAssets(
-  request: PayloadRequest,
-  reference: FigClientReference,
-): SerializedAssetResource[] {
-  return serializeAssetResources(
-    request,
-    collectClientReferenceAssets(request, reference),
-  );
 }
 
 function serializeAssetResources(
@@ -967,6 +944,10 @@ function emitRow(request: PayloadRequest, row: PayloadRow): void {
 function pingTask(request: PayloadRequest, task: Task): void {
   if (request.status === "closed") return;
   request.pingedTasks.push(task);
+  scheduleWork(request);
+}
+
+function scheduleWork(request: PayloadRequest): void {
   // Many thenables settling in one tick ping many tasks; one performWork
   // pass drains them all, so schedule at most one.
   if (request.workScheduled) return;
@@ -979,7 +960,6 @@ function pingTask(request: PayloadRequest, task: Task): void {
 
 function flushRows(request: PayloadRequest): void {
   if (request.controller === null || request.status === "closed") return;
-  if (request.status === "opening") return;
   if (request.flushingRows) return;
 
   request.flushingRows = true;
@@ -1027,10 +1007,8 @@ function abortPayloadRequest(request: PayloadRequest, reason?: unknown): void {
 }
 
 function cleanupPayloadAbortListener(request: PayloadRequest): void {
-  if (request.abortListener === null) return;
-  request.abortSignal?.removeEventListener("abort", request.abortListener);
-  request.abortListener = null;
-  request.abortSignal = null;
+  request.removeAbortListener?.();
+  request.removeAbortListener = null;
 }
 
 // Wire-format flattening only: unlike the shared collectChildren, this keeps

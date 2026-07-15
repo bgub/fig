@@ -170,11 +170,10 @@ type DecodeChunk = {
   // whose rows never arrived.
   arrived: boolean;
   // Materialized lazily: most rows settle synchronously at arrival and are
-  // only ever read through status/value, so eagerly allocating a promise,
-  // its resolvers, and a thenable-registry entry per row would be waste.
+  // only ever read through status/value, so eagerly allocating a promise and
+  // its controls per row would be waste.
+  deferred: Deferred<unknown> | null;
   promise: Promise<unknown> | null;
-  reject: ((reason: unknown) => void) | null;
-  resolve: ((value: unknown) => void) | null;
   status: "pending" | "fulfilled" | "rejected";
   value: unknown;
 };
@@ -197,6 +196,14 @@ function deferred<T>(): Deferred<T> {
   return { promise, reject, resolve };
 }
 
+function decodeAssetResources(
+  serialized: readonly SerializedAssetResource[] | undefined,
+): FigAssetResource[] | null {
+  if (serialized === undefined) return null;
+  const assets = serialized.filter(isFigAssetResource);
+  return assets.length === 0 ? null : assets;
+}
+
 class PayloadStreamDecode {
   readonly value: Promise<FigNode>;
 
@@ -213,8 +220,7 @@ class PayloadStreamDecode {
   private done = false;
   // Resolved on abort so arrived-but-gated chunks reveal instead of waiting
   // for asset gates that may never settle.
-  private readonly releaseGates: () => void;
-  private readonly gatesReleased: Promise<void>;
+  private readonly gateRelease = deferred<void>();
   private removeAbortListener: () => void = noop;
   // One closure and one refs adapter reused across every decoded model, so
   // the per-node decode loop allocates only the decoded values themselves.
@@ -234,9 +240,6 @@ class PayloadStreamDecode {
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
-    const gates = deferred<void>();
-    this.gatesReleased = gates.promise;
-    this.releaseGates = () => gates.resolve(undefined);
     this.rowDecoder = jsonPayloadCodec.createDecoder((row) =>
       this.handleRow(row),
     );
@@ -260,7 +263,7 @@ class PayloadStreamDecode {
   abort(reason?: unknown): void {
     if (this.done) return;
     const error = new PayloadDecodeAbortedError(reason);
-    this.releaseGates();
+    this.gateRelease.resolve(undefined);
     void this.reader?.cancel(error).catch(noop);
     this.rejectUnresolved(error);
     this.settle({ status: "aborted" });
@@ -347,8 +350,8 @@ class PayloadStreamDecode {
           return;
         }
         this.rowGates.delete(row.id);
-        void Promise.race([Promise.all(gates), this.gatesReleased]).then(() =>
-          this.fulfillChunk(chunk, decoded),
+        void Promise.race([Promise.all(gates), this.gateRelease.promise]).then(
+          () => this.fulfillChunk(chunk, decoded),
         );
         return;
       }
@@ -359,19 +362,16 @@ class PayloadStreamDecode {
           reference.exportName = row.value.exportName;
         }
         if (row.value.ssr === true) reference.ssr = true;
-        const assets = row.value.assets?.filter(isFigAssetResource);
-        if (assets !== undefined && assets.length > 0) {
-          reference.assets = assets;
-        }
-        const gate = this.prepareAssets(row.value.assets);
+        const assets = decodeAssetResources(row.value.assets);
+        if (assets !== null) reference.assets = assets;
+        const gate = this.prepareAssets(assets);
         if (gate !== null) {
           // Elements referencing this row inherit the gate as they
           // materialize; once it settles there is nothing left to gate.
           this.clientRowGates.set(row.id, gate);
-          const settled = (): void => {
+          void gate.then(() => {
             this.clientRowGates.delete(row.id);
-          };
-          void gate.then(settled, settled);
+          });
         }
         const component = this.clientReferenceComponent(reference, gate);
         chunk.arrived = true;
@@ -393,7 +393,7 @@ class PayloadStreamDecode {
         return;
       }
       case "assets": {
-        const gate = this.prepareAssets(row.value);
+        const gate = this.prepareAssets(decodeAssetResources(row.value));
         if (gate === null || row.for === undefined) return;
         const gates = this.rowGates.get(row.for);
         if (gates === undefined) this.rowGates.set(row.for, [gate]);
@@ -406,12 +406,10 @@ class PayloadStreamDecode {
   // Never rejects and never blocks content on a failed asset: a rejected
   // prepareAssets result (or synchronous throw) settles the gate.
   private prepareAssets(
-    serialized: readonly SerializedAssetResource[] | undefined,
+    assets: readonly FigAssetResource[] | null,
   ): Promise<void> | null {
     const prepare = this.options.prepareAssets;
-    if (prepare === undefined || serialized === undefined) return null;
-    const assets = serialized.filter(isFigAssetResource);
-    if (assets.length === 0) return null;
+    if (prepare === undefined || assets === null) return null;
 
     let result: void | PromiseLike<void>;
     try {
@@ -471,9 +469,8 @@ class PayloadStreamDecode {
 
     const chunk: DecodeChunk = {
       arrived: false,
+      deferred: null,
       promise: null,
-      reject: null,
-      resolve: null,
       status: "pending",
       value: undefined,
     };
@@ -495,10 +492,8 @@ class PayloadStreamDecode {
       // still observe the stored error.
       void chunk.promise.catch(noop);
     } else {
-      const settled = deferred<unknown>();
-      chunk.promise = settled.promise;
-      chunk.resolve = settled.resolve;
-      chunk.reject = settled.reject;
+      chunk.deferred = deferred<unknown>();
+      chunk.promise = chunk.deferred.promise;
     }
     trackThenable(chunk.promise);
     return chunk.promise;
@@ -508,15 +503,15 @@ class PayloadStreamDecode {
     if (chunk.status !== "pending") return;
     chunk.status = "fulfilled";
     chunk.value = value;
-    chunk.resolve?.(value);
+    chunk.deferred?.resolve(value);
   }
 
   private rejectChunk(chunk: DecodeChunk, error: unknown): void {
     if (chunk.status !== "pending") return;
     chunk.status = "rejected";
     chunk.value = error;
-    if (chunk.reject !== null) {
-      chunk.reject(error);
+    if (chunk.deferred !== null) {
+      chunk.deferred.reject(error);
       void chunk.promise?.catch(noop);
     }
   }
