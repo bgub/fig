@@ -90,7 +90,6 @@ export {
   assets,
   type ClientReferenceAssets,
   type CrossOrigin,
-  clientReferenceAssets,
   type FetchPriority,
   type FigAssetResource,
   type FigAssetResourceList,
