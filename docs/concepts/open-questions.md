@@ -8,21 +8,10 @@ Every open design question and planned piece of work, in one place. Each item li
 
 Most valuable gaps:
 
-- useOptimistic.
 - Function-valued form action/formAction, useFormStatus, progressive enhancement, and Server Functions. React forms (https://react.dev/reference/react-dom/components/form)
-
-- Partial prerendering and resume/resumeAndPrerender. React prerender (https://react.dev/reference/react-dom/static/prerender)
-
 - Profiler, useDebugValue, performance tracks, and owner-stack capture.
-- Root-level onCaughtError; Fig deliberately requires boundary-local onError. React createRoot (https://react.dev/reference/react-dom/client/createRoot)
-
-- Promise-valued children in the payload/client reconciler.
-- Server-action transport and temporary references.
-- Late streamed <title>/<meta> delivery, early hints/header callbacks, and DNS-prefetch/preinit resource APIs.
+- DNS-prefetch asset resources.
 - React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs.
-- External streaming runtime support for strict nonce-less CSP.
-- Node-native streaming APIs and resumable Node streams.
-- Persistence-mode custom renderers.
 
 ## Hooks
 
@@ -35,11 +24,10 @@ Most valuable gaps:
 ## Data Resources
 
 - **ErrorBoundary reset ergonomics** — data-key attribution and invalidation now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still open: whether `ErrorBoundary` should expose a first-class reset/retry affordance instead of making userland remount the boundary by key.
-- **Prefetch verb** — loads start on first `readData` or a forcing `refreshData`; there is no "start the load if the entry is absent or stale, otherwise do nothing" verb. Router prefetching (link hover/viewport, eager segment loads on navigation) wants exactly that: `refreshData` on a warm entry refetches, which prefetch must not do. A small data-store addition, prerequisite for any segment-router built on payload resources. → `docs/concepts/data.md`
 
 ## Serialized Components
 
-Adopted plan: `docs/plans/serialized-components.md` — payload trees delivered as ordinary data resources; the targeted-refresh protocol deletes behind a parity gate. Phases 1–2 have landed (`decodePayloadStream` in `@bgub/fig/payload`; generation-lifetime loader signals and fig-dom's `payloadDataLoader` in the data layer); open before/while the remaining phases ship:
+Completed plan: `docs/plans/serialized-components.md` — all phases landed; payload trees are delivered as ordinary data resources, and the targeted-refresh protocol was removed after its parity gate passed. Remaining follow-ups:
 
 - **Fulfilled entry containing a rejected hole** — the hole-rejection contract is specced (errors.md, payload.md); still open is how `invalidateDataError` attribution interacts with hole-level errors on the owning entry.
 - **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
@@ -61,9 +49,9 @@ Adopted plan: `docs/plans/serialized-components.md` — payload trees delivered 
 
 ## fig-start
 
-- **Server action transport** — deliberately left out of `useActionState` core; the framework layer owns the wire (`docs/concepts/hooks.md`).
+- **Server action transport and temporary references** — server action transport is deliberately left out of `useActionState` core, and both server actions and temporary references are absent from the payload row model; the framework layer owns the wire (`docs/concepts/hooks.md`, `docs/concepts/payload.md`).
 - **Request state for remote data loaders** — `remoteDataResource` loaders run inside fig-start's data endpoint, which owns the request; loaders receive only `(...args, { signal })`. Open: whether fig-start provides an ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those loaders, or keeps auth and services in module scope. → `docs/concepts/data.md`
-- **Nested-segment routing (Next-style parallel segments)** — a segment router mostly falls out of shipped primitives: segments as keyed payload resources, composition via client-reference outlets, manifest-driven eager loads on navigation (needs the prefetch verb above), transitions for atomic commits. The open design piece is cold-load composition — one request delivering several segment entries. `data` rows deliberately use the value codec (no `element`/`client` models, no holes), so sibling segments cannot ride one stream today; candidate shapes are element-valued data rows (heavy: holes and asset gates span the whole stream), multi-root streams whose loader publishes each addressable root into its own entry, or serving initial segments over the existing document frame path and reserving per-segment requests for navigations. The former identity prerequisite is shipped: a caller-owned stateful resolver (`createPayloadClientReferenceResolver`) keeps gated and asynchronously resolved references identity-stable across decodes (`docs/concepts/payload.md`), and fig-start already passes one. Nothing shipped depends on the rest — address when a segment router is planned.
+- **Nested-segment routing (Next-style parallel segments)** — a segment router mostly falls out of shipped primitives: segments as keyed payload resources, composition via client-reference outlets, manifest-driven eager loads on navigation via `preloadData`, transitions for atomic commits. The open design piece is cold-load composition — one request delivering several segment entries. `data` rows deliberately use the value codec (no `element`/`client` models, no holes), so sibling segments cannot ride one stream today; candidate shapes are element-valued data rows (heavy: holes and asset gates span the whole stream), multi-root streams whose loader publishes each addressable root into its own entry, or serving initial segments over the existing document frame path and reserving per-segment requests for navigations. The former identity prerequisite is shipped: a caller-owned stateful resolver (`createPayloadClientReferenceResolver`) keeps gated and asynchronously resolved references identity-stable across decodes (`docs/concepts/payload.md`), and fig-start already passes one. Nothing shipped depends on the rest — address when a segment router is planned.
 
 ## View Transitions
 
