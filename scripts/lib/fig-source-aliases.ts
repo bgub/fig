@@ -16,6 +16,7 @@ const entries = [
   ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
   ["@bgub/fig-reconciler/devtools", "packages/fig-reconciler/src/devtools.ts"],
   ["@bgub/fig-reconciler/refresh", "packages/fig-reconciler/src/refresh.ts"],
+  ["@bgub/fig-reconciler/test-utils", "packages/fig-reconciler/src/act.ts"],
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
   ["@bgub/fig-refresh", "packages/fig-refresh/src/index.ts"],
   ["@bgub/fig-vite", "packages/fig-vite/src/index.ts"],

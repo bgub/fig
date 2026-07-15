@@ -38,6 +38,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/index.ts",
     "./src/devtools.ts",
     "./src/refresh.ts",
+    "./src/act.ts",
   ],
   "packages/fig-refresh": ["./src/index.ts"],
   "packages/fig-vite": ["./src/index.ts"],
