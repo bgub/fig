@@ -23,11 +23,11 @@ export type ElementType<P = Props> =
   | FigActivity
   | FigViewTransition
   | ComponentType<P>;
-export type FigText = string | number;
 export type FigNode =
   | FigElement<any>
   | FigPortal<any>
-  | FigText
+  | string
+  | number
   | boolean
   | null
   | undefined

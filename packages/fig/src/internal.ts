@@ -60,7 +60,6 @@ export {
   FigSuspenseSymbol,
   type FigViewTransition,
   FigViewTransitionSymbol,
-  type FigText,
   isActivity,
   isAssets,
   isClientReference,
