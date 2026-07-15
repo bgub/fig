@@ -58,6 +58,7 @@ function ViewTransitionLab(): FigNode {
           <ViewTransition
             default="fig-start-route-title"
             enter="none"
+            exit="none"
             name="start-vt-page-title"
             share="fig-start-route-title"
           >
