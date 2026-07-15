@@ -246,13 +246,18 @@ function insertDocumentResource(
   }
 
   let foundBucket = false;
-  for (const child of Array.from(registry.head.childNodes)) {
+  for (
+    let child = registry.head.firstChild;
+    child !== null;
+    child = child.nextSibling
+  ) {
     const current = isElementNode(child) ? stylesheetPrecedence(child) : null;
-    if (current === null) continue;
-    if (current === precedence) foundBucket = true;
-    else if (foundBucket) {
-      registry.head.insertBefore(element, child);
-      return;
+    if (current !== null) {
+      if (current === precedence) foundBucket = true;
+      else if (foundBucket) {
+        registry.head.insertBefore(element, child);
+        return;
+      }
     }
   }
   registry.head.appendChild(element);
@@ -262,10 +267,15 @@ function findDocumentResource(
   registry: DocumentResources,
   key: string,
 ): Element | null {
-  for (const child of Array.from(registry.head.childNodes)) {
-    if (!isElementNode(child)) continue;
-    const resource = resourceFromElement(child);
-    if (resource !== null && assetResourceKey(resource) === key) return child;
+  for (
+    let child = registry.head.firstChild;
+    child !== null;
+    child = child.nextSibling
+  ) {
+    if (isElementNode(child)) {
+      const resource = resourceFromElement(child);
+      if (resource !== null && assetResourceKey(resource) === key) return child;
+    }
   }
   return null;
 }

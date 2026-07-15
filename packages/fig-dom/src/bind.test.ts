@@ -134,6 +134,48 @@ describe("@bgub/fig-dom bind", () => {
     expect(signals[1].aborted).toBe(true);
   });
 
+  it("aborts every original sibling when an abort handler mutates the DOM", () => {
+    const signals: AbortSignal[] = [];
+    const runs = [0, 0, 0];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    const bind =
+      (index: number): Bind =>
+      (node, signal) => {
+        runs[index] += 1;
+        signals[index] = signal;
+
+        // Register only on the live strict-mode invocation; the first signal
+        // aborts immediately during mount.
+        if (index === 0 && runs[index] === 2) {
+          signal.addEventListener("abort", () => {
+            const element = node as unknown as FakeElement;
+            const sibling = element.nextSibling;
+            if (sibling !== null) element.parentNode?.removeChild(sibling);
+          });
+        }
+      };
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("span", { bind: bind(0) }),
+          createElement("span", { bind: bind(1) }),
+          createElement("span", { bind: bind(2) }),
+        ),
+      ),
+    );
+
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+
+    root.unmount();
+
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
   it("runs bind before before-paint effects", () => {
     const calls: string[] = [];
     const container = new FakeElement("root");

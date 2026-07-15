@@ -1,4 +1,4 @@
-import { isEmptyPropValue } from "./tree.ts";
+import { elementName, isEmptyPropValue } from "./tree.ts";
 
 export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
 
@@ -41,17 +41,19 @@ export function on(
 
 export function readEventDescriptors(
   value: unknown,
-  elementType: string,
-): Array<EventDescriptor | undefined> {
-  if (isEmptyPropValue(value)) return [];
-  if (!Array.isArray(value)) throwInvalidEventsProp(elementType);
+  element: Element,
+): ReadonlyArray<EventDescriptor | false | null | undefined> {
+  if (isEmptyPropValue(value)) return emptyEventDescriptors;
+  if (!Array.isArray(value)) throwInvalidEventsProp(element);
 
-  return value.map((item) => {
-    if (isEmptyPropValue(item)) return undefined;
-    if (!isEventDescriptor(item)) throwInvalidEventsProp(elementType);
-    return item;
-  });
+  for (const item of value) {
+    if (isEmptyPropValue(item)) continue;
+    if (!isEventDescriptor(item)) throwInvalidEventsProp(element);
+  }
+  return value;
 }
+
+const emptyEventDescriptors: readonly never[] = [];
 
 function isEventDescriptor(value: unknown): value is EventDescriptor {
   return (
@@ -61,7 +63,8 @@ function isEventDescriptor(value: unknown): value is EventDescriptor {
   );
 }
 
-function throwInvalidEventsProp(elementType: string): never {
+function throwInvalidEventsProp(element: Element): never {
+  const elementType = elementName(element);
   const target = elementType === "" ? "an element" : `<${elementType}>`;
   throw new Error(
     `The events prop on ${target} must be an array of event descriptors created with on(type, callback).`,

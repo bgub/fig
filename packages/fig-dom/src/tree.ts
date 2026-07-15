@@ -9,6 +9,9 @@ export function visitElementSubtree(
   if (isElementNode(node)) visitor(node);
   if (!("childNodes" in node) || node.firstChild === null) return;
 
+  // Visitors run user bind callbacks and abort listeners synchronously. Keep
+  // the original children reachable if one of those callbacks mutates or
+  // relocates siblings during the walk.
   for (const child of Array.from(node.childNodes)) {
     visitElementSubtree(child as Element | Text, visitor);
   }
