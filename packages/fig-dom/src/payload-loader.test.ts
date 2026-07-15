@@ -239,6 +239,79 @@ describe("payloadDataLoader", () => {
     expect(container.textContent).toBe("note v2");
   });
 
+  it("attributes rejected payload holes to their fulfilled owner entry", async () => {
+    const hole = deferred<string>();
+    let requests = 0;
+    let caughtError: unknown;
+    let caughtKeys: unknown;
+
+    function Comments() {
+      return createElement("span", null, readPromise(hole.promise));
+    }
+
+    const pageResource = dataResource<[], FigNode>({
+      key: () => ["payload-page"],
+      load: payloadDataLoader<[]>({
+        request: () => {
+          requests += 1;
+          return requests === 1
+            ? payloadResponse(
+                createElement(
+                  "main",
+                  null,
+                  createElement(
+                    Suspense,
+                    { fallback: createElement("i", null, "hole pending") },
+                    createElement(Comments, null),
+                  ),
+                ),
+              )
+            : payloadResponse(createElement("main", null, "recovered"));
+        },
+      }),
+    });
+
+    function Page() {
+      return readData(pageResource);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const renderPage = (key: string) =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: (error, info) => {
+              caughtError = error;
+              caughtKeys = info.dataResourceKeys;
+              return createElement("p", null, "hole failed");
+            },
+            key,
+          },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "page pending") },
+            createElement(Page, null),
+          ),
+        ),
+      );
+    flushSync(() => renderPage("initial"));
+    await waitForHostTurns();
+    expect(container.textContent).toContain("hole pending");
+
+    hole.reject(new Error("comments failed"));
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("hole failed");
+    expect(caughtKeys).toEqual([["payload-page"]]);
+    expect(root.data.invalidateDataError(caughtError)).toBe(true);
+    flushSync(() => renderPage("retry"));
+    await waitForHostTurns();
+    expect(requests).toBe(2);
+    expect(container.textContent).toBe("recovered");
+  });
+
   it("refreshing while holes stream neither errors nor kills the visible tree", async () => {
     // The demo-payload regression: click refresh while comments are still
     // streaming. The visible generation keeps its authority (and its live

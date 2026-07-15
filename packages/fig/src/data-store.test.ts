@@ -10,6 +10,8 @@ import {
 } from "./index.ts";
 import {
   createDataStore,
+  dataResourceKeysForError,
+  loadContextAttributeError,
   loadContextHydrate,
   normalizeDataResourceKey,
 } from "./internal.ts";
@@ -1044,6 +1046,39 @@ describe("generation-lifetime loader signals", () => {
 
     // A value-less pending load has no authority to defer: it dies at once.
     expect(signals[0]?.aborted).toBe(true);
+  });
+});
+
+describe("load-context error attribution capability", () => {
+  it("attributes live-generation errors and ignores retired generations", async () => {
+    const captured: Array<ReturnType<typeof loadContextAttributeError>> = [];
+    const resource = dataResource<[], string>({
+      key: () => ["payload-entry"],
+      load: (context) => {
+        captured.push(loadContextAttributeError(context));
+        return `value-${captured.length}`;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const liveError = new Error("live hole");
+    captured[0]?.(liveError);
+    expect(dataResourceKeysForError(liveError)).toEqual([["payload-entry"]]);
+
+    await store.refreshData(resource);
+    const retiredError = new Error("retired hole");
+    captured[0]?.(retiredError);
+    expect(dataResourceKeysForError(retiredError)).toBeUndefined();
+
+    const successorError = new Error("successor hole");
+    captured[1]?.(successorError);
+    expect(dataResourceKeysForError(successorError)).toEqual([
+      ["payload-entry"],
+    ]);
   });
 });
 

@@ -7,6 +7,7 @@ import {
   type DataResourceLoader,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
+  defineLoadContextAttributeError,
   defineLoadContextHydrate,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
@@ -57,6 +58,10 @@ interface Entry<Owner extends object, Lane> {
   // stale value keeps streaming through the refresh window, and a failed
   // refresh leaves it fully alive.
   valueController: AbortController | null;
+  // Errors rejected by streamed holes inside the authoritative fulfilled
+  // value. Invalidating one retires that broken value instead of serving it
+  // stale into a freshly remounted ErrorBoundary.
+  valueErrors: WeakSet<object>;
   error: unknown;
   fingerprint: string | null;
   generation: number;
@@ -435,7 +440,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       if (entry !== null) entries.push(entry);
     }
 
-    this.invalidateEntries(entries);
+    this.invalidateEntries(entries, error);
     return true;
   }
 
@@ -657,6 +662,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       subscribers: new Set(),
       value,
       valueController: null,
+      valueErrors: new WeakSet(),
     };
   }
 
@@ -749,12 +755,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // live for the background work still streaming into the value.
       entry.controller = null;
       entry.valueController = controller;
+      entry.valueErrors = new WeakSet();
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
       entry.stale = entry.invalidationVersion !== invalidationVersion;
       entry.status = "fulfilled";
       entry.value = value;
+      entry.valueErrors = new WeakSet();
       this.publish(entry);
       // The predecessor loses authority only now that the successor's value
       // has published: subscribers re-render top-down onto the new tree in
@@ -778,7 +786,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       controller.abort();
       entry.pending = null;
 
-      if (hadValue) {
+      if (hadValue && entryHasValue(entry)) {
         entry.refreshError = error;
         entry.stale = true;
         entry.status = "fulfilled";
@@ -817,6 +825,21 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     controller: AbortController,
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
+    defineLoadContextAttributeError(context, (error) => {
+      // A fulfilled payload value may reject one of its streamed holes later.
+      // Attribute that error only while this generation still owns the value;
+      // retired decodes must not make their successor invalidatable by a stale
+      // error object.
+      if (
+        this.disposed ||
+        entry.generation !== generation ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
+      markDataResourceError(error, entry.key);
+      if (isObjectError(error)) entry.valueErrors.add(error);
+    });
     defineLoadContextHydrate(context, (entries) => {
       // Server-pushed rows hydrate only while this load's generation is
       // authoritative; a superseded, evicted, or disposed decode cannot
@@ -996,13 +1019,27 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     throw entry.pending.promise;
   }
 
-  private invalidateEntry(entry: Entry<Owner, Lane>, lane: Lane): void {
+  private invalidateEntry(
+    entry: Entry<Owner, Lane>,
+    lane: Lane,
+    attributedError?: unknown,
+  ): void {
     entry.invalidationVersion += 1;
     entry.stale = true;
     // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
     entry.refreshError = undefined;
-    if (entry.status === "rejected") {
+    if (
+      isObjectError(attributedError) &&
+      entry.valueErrors.has(attributedError)
+    ) {
+      entry.valueController?.abort();
+      entry.valueController = null;
+      entry.valueErrors = new WeakSet();
+      entry.value = undefined;
+      entry.error = undefined;
+      entry.status = "pending";
+    } else if (entry.status === "rejected") {
       // The same intent applies to a cached rejection: without this, every
       // read rethrows the old error forever — remounting an ErrorBoundary
       // could never recover. Back to pending, so the next read loads afresh.
@@ -1015,12 +1052,23 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.scheduleSubscribers(entry, lane);
   }
 
-  private invalidateEntries(entries: readonly Entry<Owner, Lane>[]): void {
+  private invalidateEntries(
+    entries: readonly Entry<Owner, Lane>[],
+    attributedError?: unknown,
+  ): void {
     if (entries.length === 0) return;
 
     const lane = this.host.getLane();
-    for (const entry of entries) this.invalidateEntry(entry, lane);
+    for (const entry of entries) {
+      this.invalidateEntry(entry, lane, attributedError);
+    }
   }
+}
+
+function isObjectError(error: unknown): error is object {
+  return (
+    (typeof error === "object" || typeof error === "function") && error !== null
+  );
 }
 
 function normalizeKey(key: DataResourceKey): NormalizedKey {

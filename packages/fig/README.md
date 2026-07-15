@@ -91,7 +91,9 @@ createRoot(container).render(<App />);
 - `ErrorBoundary` catches render and Fig effect errors. Use `onError` for
   reporting and change the boundary key to reset sticky fallback state. Data
   resource load failures report failed keys on `info.dataResourceKeys`, so
-  recovery flows can refresh or invalidate those keys before resetting.
+  recovery flows can refresh or invalidate those keys before resetting. This
+  includes a streamed payload hole that rejects after its owning entry has
+  already fulfilled.
 - `transition(callback)` and `useTransition()` mark updates that may preserve
   already-revealed Suspense content while new work is pending. Updates scheduled
   inside the callback run at transition priority, including updates after an

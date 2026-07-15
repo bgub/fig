@@ -127,8 +127,23 @@ export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
 ) => void;
+export type LoadContextAttributeError = (error: unknown) => void;
 
 const LoadContextHydrateSymbol = Symbol.for("fig.data-load-hydrate");
+const LoadContextAttributeErrorSymbol = Symbol.for(
+  "fig.data-load-attribute-error",
+);
+
+export function defineLoadContextAttributeError(
+  context: DataResourceLoadContext,
+  attributeError: LoadContextAttributeError,
+): void {
+  Object.defineProperty(context, LoadContextAttributeErrorSymbol, {
+    configurable: true,
+    enumerable: false,
+    value: attributeError,
+  });
+}
 
 export function defineLoadContextHydrate(
   context: DataResourceLoadContext,
@@ -147,6 +162,14 @@ export function loadContextHydrate(
   return (context as unknown as Record<symbol, LoadContextHydrate | undefined>)[
     LoadContextHydrateSymbol
   ];
+}
+
+export function loadContextAttributeError(
+  context: DataResourceLoadContext,
+): LoadContextAttributeError | undefined {
+  return (
+    context as unknown as Record<symbol, LoadContextAttributeError | undefined>
+  )[LoadContextAttributeErrorSymbol];
 }
 
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
