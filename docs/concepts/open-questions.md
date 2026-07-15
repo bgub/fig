@@ -4,6 +4,30 @@ Status: living summary
 
 Every open design question and planned piece of work, in one place. Each item links its source (a concept file's `exploring` section or a plan in `docs/plans/`); when an item resolves, it graduates into the owning concept file and leaves this list.
 
+## React Parity Gaps
+
+Most valuable gaps:
+
+- useOptimistic.
+- Function-valued form action/formAction, useFormStatus, progressive enhancement, and Server Functions. React forms (https://react.dev/reference/react-dom/components/form)
+
+- Partial prerendering and resume/resumeAndPrerender. React prerender (https://react.dev/reference/react-dom/static/prerender)
+
+- Profiler, useDebugValue, performance tracks, and owner-stack capture.
+- Root-level onCaughtError; Fig deliberately requires boundary-local onError. React createRoot (https://react.dev/reference/react-dom/client/createRoot)
+
+- Promise-valued children in the payload/client reconciler.
+- Server-action transport and temporary references.
+- Late streamed <title>/<meta> delivery, early hints/header callbacks, and DNS-prefetch/preinit resource APIs.
+- React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs.
+- External streaming runtime support for strict nonce-less CSP.
+- Node-native streaming APIs and resumable Node streams.
+- Persistence-mode custom renderers.
+
+## Hooks
+
+- **Mutable cell primitive (`useCell`?)** — `useMemo(() => ({ current }), [])` currently provides stable mutable storage, but memoization communicates caching rather than instance-local mutable identity. Open: whether Fig should add a dedicated `useCell(initialValue)` primitive, whether its shape should be `{ current: T }`, and whether the name should emphasize stable identity, mutability, or its non-rendering semantics.
+
 ## Hydration
 
 - **Hydration-stable environment** — the one intentional-divergence class (time, locale, viewport) gets a serialized environment snapshot the client's hydration render reads, not a broad mismatch opt-out. Open: ownership (fig-start vs fig-dom vs core), app-wide vs nested scopes, how the client learns hydration finished, bootstrap-path vs renderer-slot serialization, a `hydrateRoot` snapshot option, and the missing-snapshot failure mode. Request-known shell state like cookie-backed color scheme belongs in the Fig Start document shell. `suppressHydrationWarning` now exists only as React-compatible one-level host escape hatch. → `docs/concepts/hydration.md`
