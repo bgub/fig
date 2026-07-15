@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
-import babel, { type PluginObj } from "@babel/core";
+import * as babel from "@babel/core";
+import type { PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 import {
   type ClientDataResourceStub,
@@ -293,7 +294,7 @@ export async function assertNoRemoteDataResourceImport(
 
 function remoteDataResourceImportGuardBabelPlugin(
   id: string,
-): (api: typeof babel) => PluginObj {
+): (api: typeof babel) => PluginObject {
   return (api) => {
     void api;
     const error =
@@ -357,10 +358,10 @@ function transformTypeScript(
   code: string,
   id: string,
   options: {
-    plugins: Array<(api: typeof babel) => PluginObj>;
+    plugins: Array<(api: typeof babel) => PluginObject>;
     sourceMaps: boolean;
   },
-): Promise<babel.BabelFileResult | null> {
+): Promise<babel.FileResult | null> {
   return babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
@@ -369,9 +370,10 @@ function transformTypeScript(
     presets: [
       [
         presetTypescript,
-        { allExtensions: true, isTSX: true, onlyRemoveTypeImports: true },
+        { ignoreExtensions: true, onlyRemoveTypeImports: true },
       ],
     ],
+    parserOpts: { plugins: ["jsx"] },
     plugins: options.plugins,
   });
 }
@@ -379,7 +381,7 @@ function transformTypeScript(
 function routeImportRewriteBabelPlugin(state: {
   markChanged: () => void;
   root: string;
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     void api;
     return {
@@ -413,7 +415,7 @@ function isRoutesRegistryImport(root: string, source: string): boolean {
 function routeRegistryBabelPlugin(state: {
   addRef: (ref: RouteRegistryRef) => void;
   setOrder: (order: string[]) => void;
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
     return {
@@ -466,7 +468,7 @@ function unwrapRouteRegistryInitializer(
 
 function routeDeclarationBabelPlugin(state: {
   setDeclaration: (declaration: RouteDeclaration) => void;
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
 
@@ -495,7 +497,7 @@ function serverComponentBabelPlugin(state: {
   markServerRoute: () => void;
   root: string;
   setServerRouteId: (id: string) => void;
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
     let needsClientReferenceImport = false;
@@ -613,7 +615,7 @@ function routePathFromBinding(
 
 function clientStubDiscoveryBabelPlugin(state: {
   setRoutePath: (path: string) => void;
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
 

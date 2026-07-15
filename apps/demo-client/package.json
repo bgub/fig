@@ -20,13 +20,13 @@
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^20.19.0",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3"
   }
 }

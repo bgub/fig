@@ -1,5 +1,6 @@
 import { relative, sep } from "node:path";
-import babel, { type PluginObj } from "@babel/core";
+import * as babel from "@babel/core";
+import type { PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 
 const SERVER_DATA_RESOURCE_MODULE = "@bgub/fig/server";
@@ -151,7 +152,7 @@ function serverDataDiscoveryBabelPlugin(state: {
   filename: string;
   root: string;
   serverDataResources: ServerDataResourceRef[];
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
 
@@ -183,7 +184,7 @@ function clientStubDiscoveryBabelPlugin(state: {
   filename: string;
   root: string;
   stubs: ClientDataResourceStub[];
-}): (api: typeof babel) => PluginObj {
+}): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
 
@@ -271,12 +272,13 @@ function serverDataResourceDeclaration(
 ): ServerDataResourceDeclaration | null {
   const exportName = exportedConstName(path, t);
   if (exportName === null) return null;
-  if (!t.isCallExpression(path.node.init)) return null;
-  if (!t.isIdentifier(path.node.init.callee, { name: callee })) {
+  const init = path.get("init");
+  if (!init.isCallExpression()) return null;
+  if (!t.isIdentifier(init.node.callee, { name: callee })) {
     return null;
   }
 
-  const [options] = path.get("init").get("arguments");
+  const [options] = init.get("arguments");
   if (options === undefined || !options.isObjectExpression()) return null;
 
   const specifier = rootRelative(root, filename);
@@ -425,10 +427,10 @@ function transformTypeScript(
   code: string,
   id: string,
   options: {
-    plugins: Array<(api: typeof babel) => PluginObj>;
+    plugins: Array<(api: typeof babel) => PluginObject>;
     sourceMaps: boolean;
   },
-): Promise<babel.BabelFileResult | null> {
+): Promise<babel.FileResult | null> {
   return babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
@@ -437,16 +439,17 @@ function transformTypeScript(
     presets: [
       [
         presetTypescript,
-        { allExtensions: true, isTSX: true, onlyRemoveTypeImports: true },
+        { ignoreExtensions: true, onlyRemoveTypeImports: true },
       ],
     ],
+    parserOpts: { plugins: ["jsx"] },
     plugins: options.plugins,
   });
 }
 
 function serverDataResourceImportGuardBabelPlugin(
   id: string,
-): (api: typeof babel) => PluginObj {
+): (api: typeof babel) => PluginObject {
   return (api) => {
     const error =
       `serverDataResource may only be imported from .server.ts or ` +

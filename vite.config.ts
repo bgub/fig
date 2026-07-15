@@ -22,7 +22,7 @@ export default defineConfig({
         : ["src/**/*.test.{ts,tsx}"],
     exclude: ["**/e2e/**", "**/node_modules/**", "**/dist/**"],
     coverage: {
-      provider: "istanbul",
+      provider: "v8",
       reporter: ["lcov"],
       include:
         packagePath === "." ? ["packages/*/src/**/*.ts"] : ["src/**/*.ts"],

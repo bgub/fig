@@ -33,13 +33,12 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@babel/core": "^7.25.0",
-    "@babel/preset-typescript": "^7.25.0",
+    "@babel/core": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-refresh": "workspace:*"
   },
   "devDependencies": {
-    "@types/babel__core": "^7.20.5",
     "@types/node": "^20.19.0"
   }
 }

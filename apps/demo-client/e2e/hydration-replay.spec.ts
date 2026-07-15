@@ -119,14 +119,18 @@ test("devtools hide and select mode inspect Fig host nodes", async ({
   await expect(devtools.getByText("Fig DevTools")).toBeVisible();
   await expect(devtools.locator(".fig-devtools__body")).toBeVisible();
 
-  const commitsToggle = devtools.getByRole("button", { name: /Commits/ });
-  await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
-  await expect(devtools.locator(".fig-devtools__commit-list")).toHaveCount(0);
-  await commitsToggle.click();
-  await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(devtools.locator(".fig-devtools__commit-list")).toBeVisible();
+  await expect(devtools.locator(".fig-devtools__tt-position")).toHaveText(
+    "1 / 1",
+  );
+  await expect(devtools.locator(".fig-devtools__tt-state")).toHaveText("live");
+  await expect(
+    devtools.getByRole("button", { name: "Previous commit" }),
+  ).toBeDisabled();
+  await expect(
+    devtools.getByRole("button", { name: "Next commit" }),
+  ).toBeDisabled();
 
-  await devtools.getByRole("button", { exact: true, name: "Hide" }).click();
+  await devtools.getByRole("button", { name: "Hide Fig DevTools" }).click();
   await expect(devtools.locator(".fig-devtools__body")).toHaveCount(0);
 
   const showButton = devtools.getByRole("button", {
@@ -137,6 +141,7 @@ test("devtools hide and select mode inspect Fig host nodes", async ({
 
   await showButton.click();
   await expect(devtools.locator(".fig-devtools__body")).toBeVisible();
+  await devtools.getByRole("button", { name: "Show HTML elements" }).click();
   await devtools.getByRole("button", { name: "Select" }).click();
 
   const increment = page.getByRole("button", { name: "Increment" });

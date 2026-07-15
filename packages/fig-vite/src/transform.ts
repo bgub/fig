@@ -1,4 +1,5 @@
-import babel, { type NodePath, type PluginObj } from "@babel/core";
+import * as babel from "@babel/core";
+import type { NodePath, PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 
 export interface TransformResult {
@@ -21,7 +22,7 @@ interface SignatureResult {
 // Babel visitor: find top-level component declarations (PascalCase functions),
 // then inject calls to the Fig refresh runtime + a self-accepting HMR boundary.
 // Emits register/setSignature directly (no react-refresh global protocol).
-function figRefreshBabelPlugin(api: typeof babel): PluginObj {
+function figRefreshBabelPlugin(api: typeof babel): PluginObject {
   const t = api.types;
   const template = api.template;
 
@@ -43,7 +44,11 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
             const declaration = exported
               ? statement.get("declaration")
               : statement;
-            if (!Array.isArray(declaration)) {
+            if (
+              !Array.isArray(declaration) &&
+              (declaration.isFunctionDeclaration() ||
+                declaration.isVariableDeclaration())
+            ) {
               collectFunction(declaration, functions);
             }
           }
@@ -107,7 +112,9 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
           path.node.body.push(...(tail as never[]));
 
           function collectFunction(
-            declaration: NodePath,
+            declaration:
+              | NodePath<babel.types.FunctionDeclaration>
+              | NodePath<babel.types.VariableDeclaration>,
             into: Map<string, FunctionRecord>,
           ): void {
             if (declaration.isFunctionDeclaration()) {
@@ -196,7 +203,11 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
           }
 
           function hookCallName(
-            callee: babel.types.Expression | babel.types.V8IntrinsicIdentifier,
+            callee:
+              | babel.types.Expression
+              | babel.types.Import
+              | babel.types.Super
+              | babel.types.V8IntrinsicIdentifier,
           ): string | null {
             if (t.isIdentifier(callee)) {
               return isCustomHookName(callee.name) ? callee.name : null;
@@ -221,7 +232,9 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
                 if (statement.node.exportKind === "type") continue;
                 const declaration = statement.get("declaration");
                 if (!Array.isArray(declaration) && declaration.node != null) {
-                  if (!declarationExportsOnlyComponents(declaration, records)) {
+                  if (
+                    !declarationExportsOnlyComponents(declaration.node, records)
+                  ) {
                     return false;
                   }
                   continue;
@@ -281,17 +294,17 @@ function figRefreshBabelPlugin(api: typeof babel): PluginObj {
           }
 
           function declarationExportsOnlyComponents(
-            declaration: NodePath<babel.types.Declaration | null | undefined>,
+            declaration: babel.types.Declaration,
             records: Map<string, FunctionRecord>,
           ): boolean {
-            if (declaration.isFunctionDeclaration()) {
-              const id = declaration.node.id;
+            if (t.isFunctionDeclaration(declaration)) {
+              const id = declaration.id;
               return id != null && records.get(id.name)?.isComponent === true;
             }
 
-            if (!declaration.isVariableDeclaration()) return false;
+            if (!t.isVariableDeclaration(declaration)) return false;
 
-            for (const declarator of declaration.node.declarations) {
+            for (const declarator of declaration.declarations) {
               if (!t.isIdentifier(declarator.id)) return false;
               if (records.get(declarator.id.name)?.isComponent !== true) {
                 return false;
@@ -346,12 +359,12 @@ export async function transformModule(
       [
         presetTypescript,
         {
-          allExtensions: true,
-          isTSX: id.endsWith("x"),
+          ignoreExtensions: true,
           onlyRemoveTypeImports: true,
         },
       ],
     ],
+    parserOpts: { plugins: id.endsWith("x") ? ["jsx"] : [] },
     plugins: [[figRefreshBabelPlugin, { moduleId: id }]],
   });
 

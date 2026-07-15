@@ -1,3 +1,14 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+autoInstallPeers: false
+
+peerDependencyRules:
+  ignoreMissing:
+    # Fig Start only imports NodeRuntime; it does not expose Effect's Redis adapter.
+    - ioredis
+
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: false
