@@ -33,7 +33,6 @@ export {
   type ComponentProps,
   type ComponentType,
   createElement,
-  createPortalNode,
   type ElementType,
   ErrorBoundary,
   type ErrorBoundaryProps,

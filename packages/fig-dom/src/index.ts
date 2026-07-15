@@ -1,12 +1,7 @@
-import {
-  createPortalNode,
-  type FigNode,
-  type FigPortal,
-  type Key,
-  type Props,
-} from "@bgub/fig";
+import type { FigNode, FigPortal, Key, Props } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
+  createPortalNode,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";

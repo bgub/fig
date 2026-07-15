@@ -29,7 +29,7 @@ The cross-package protocol registry, versioned together with the sibling package
 
 - injection slots: the render dispatcher and transition handler;
 - the lazy data-store protocol: the internal symbol that lets data resources carry their store factory to renderers without import-time registration;
-- the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `collectChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
+- the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `createPortalNode` (renderers wrap it in their container-typed `createPortal`), `collectChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
 - shared HTML knowledge both renderers need: DOM-nesting validation tables and the Suspense/Activity streaming marker constants.
 
 Child normalization (`collectChildren`) is shared because the server emits merged text nodes into HTML and hydration matches them against client fiber children — the two sides must not drift. Same for the thenable registry: promise identity keyed suspend/resume must agree between client and server.
