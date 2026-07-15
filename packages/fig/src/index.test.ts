@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   assets,
   clientReference,
-  clientReferenceAssets,
   createContext,
   createElement,
   createPortalNode,
@@ -36,6 +35,7 @@ import {
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
   assetResourceKey,
+  clientReferenceAssets,
   isAssets,
   isContext,
   isErrorBoundary,
