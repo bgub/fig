@@ -41,7 +41,11 @@ const libraryEntries: Record<string, string[]> = {
   ],
   "packages/fig-refresh": ["./src/index.ts"],
   "packages/fig-vite": ["./src/index.ts"],
-  "packages/fig-server": ["./src/index.ts", "./src/payload.ts"],
+  "packages/fig-server": [
+    "./src/index.ts",
+    "./src/html-entry.ts",
+    "./src/payload.ts",
+  ],
   "packages/fig-start": [
     "./src/cli.ts",
     "./src/index.ts",

@@ -19,6 +19,7 @@ const entries = [
   ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
   ["@bgub/fig-refresh", "packages/fig-refresh/src/index.ts"],
   ["@bgub/fig-vite", "packages/fig-vite/src/index.ts"],
+  ["@bgub/fig-server/html", "packages/fig-server/src/html-entry.ts"],
   ["@bgub/fig-server/payload", "packages/fig-server/src/payload.ts"],
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
   ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],

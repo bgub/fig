@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./html": "./src/html-entry.ts",
     "./payload": "./src/payload.ts"
   },
   "publish": {

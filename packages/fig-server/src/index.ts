@@ -8,7 +8,6 @@ import type {
   ServerRenderOptions,
 } from "./types.ts";
 
-export { escapeAttribute, escapeText } from "./html.ts";
 export {
   createRenderTreeCollector,
   type RenderTreeCollector,
