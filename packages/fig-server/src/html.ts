@@ -33,9 +33,7 @@ export function writeElementStart(
   inheritedProps: Props = {},
 ): void {
   validateTagName(type);
-  sink.write(`<${type}`);
-  writeAttributes(type, props, inheritedProps, sink);
-  sink.write(">");
+  sink.write(`<${type}${serializeAttributes(type, props, inheritedProps)}>`);
 }
 
 export function writeElementEnd(type: string, sink: HtmlSink): void {
@@ -66,40 +64,26 @@ export function unsafeHTMLContent(props: Props): string | null {
   throw new Error("The unsafeHTML prop must be a string during server render.");
 }
 
-function writeAttributes(
+function serializeAttributes(
   type: string,
   props: Props,
   inheritedProps: Props,
-  sink: HtmlSink,
-): void {
-  for (const [name, value] of Object.entries(props)) {
+): string {
+  let attributes = "";
+
+  for (const name of Object.keys(props)) {
+    const value = props[name];
     if (reservedProp(name)) continue;
     if (name === "value" && props.defaultValue !== undefined) continue;
     if (name === "checked" && props.defaultChecked !== undefined) continue;
 
     if (name === "style") {
       const style = serializeStyle(value);
-      if (style !== "") writeAttribute(sink, "style", style);
+      if (style !== "") attributes += serializeAttribute("style", style);
       continue;
     }
 
-    const attribute = formAttribute(type, name, value);
-    if (attribute === null) continue;
-
-    const [attributeNameValue, attributeValue] = attribute;
-    validateAttributeName(attributeNameValue);
-
-    if (attributeValue === true) {
-      sink.write(` ${attributeNameValue}`);
-      continue;
-    }
-
-    if (serializableAttributeValue(attributeValue)) {
-      writeAttribute(sink, attributeNameValue, String(attributeValue));
-      continue;
-    }
-
-    throw new Error(`Cannot serialize prop "${name}" to HTML.`);
+    attributes += serializeProp(type, name, value);
   }
 
   if (
@@ -107,45 +91,39 @@ function writeAttributes(
     props.selected === undefined &&
     optionSelected(optionValue(props), inheritedProps)
   ) {
-    sink.write(" selected");
+    attributes += " selected";
   }
+
+  return attributes;
 }
 
-function formAttribute(
-  type: string,
-  name: string,
-  value: unknown,
-): [string, unknown] | null {
+function serializeProp(type: string, name: string, value: unknown): string {
   if ((type === "textarea" || type === "select") && valueProp(name)) {
-    return null;
+    return "";
   }
+
+  let attributeName = name;
+  let attributeValue = value;
 
   if (valueProp(name)) {
-    return valueAttribute(value);
+    attributeName = "value";
+    if (serializableAttributeValue(value)) attributeValue = String(value);
+  } else if (name === "defaultChecked") {
+    attributeName = "checked";
+    attributeValue = value === true ? true : null;
+  } else if (type === "option" && name === "selected") {
+    attributeValue = value === true ? true : null;
   }
 
-  if (name === "defaultChecked") {
-    return value === true ? ["checked", true] : null;
+  if (emptyValue(attributeValue)) return "";
+
+  validateAttributeName(attributeName);
+  if (attributeValue === true) return ` ${attributeName}`;
+  if (serializableAttributeValue(attributeValue)) {
+    return serializeAttribute(attributeName, String(attributeValue));
   }
 
-  if (type === "option" && name === "selected") {
-    return value === true ? ["selected", true] : null;
-  }
-
-  return attributeValue(name, value);
-}
-
-function attributeValue(
-  name: string,
-  value: unknown,
-): [string, unknown] | null {
-  return emptyValue(value) ? null : [name, value];
-}
-
-function valueAttribute(value: unknown): [string, unknown] | null {
-  if (emptyValue(value)) return null;
-  if (serializableAttributeValue(value)) return ["value", String(value)];
-  return ["value", value];
+  throw new Error(`Cannot serialize prop "${name}" to HTML.`);
 }
 
 function optionSelected(value: unknown, selectProps: Props): boolean {
@@ -210,8 +188,8 @@ function emptyChild(value: unknown): boolean {
   return value === null || value === undefined || typeof value === "boolean";
 }
 
-function writeAttribute(sink: HtmlSink, name: string, value: string): void {
-  sink.write(` ${name}="${escapeAttribute(value)}"`);
+function serializeAttribute(name: string, value: string): string {
+  return ` ${name}="${escapeAttribute(value)}"`;
 }
 
 function serializeStyle(value: unknown): string {
@@ -220,7 +198,7 @@ function serializeStyle(value: unknown): string {
     throw new Error("The style prop must be an object during server render.");
   }
 
-  const declarations: string[] = [];
+  let serialized = "";
   for (const [name, item] of Object.entries(value)) {
     if (emptyValue(item)) continue;
     if (
@@ -231,10 +209,11 @@ function serializeStyle(value: unknown): string {
       throw new Error(`Cannot serialize style property "${name}" to HTML.`);
     }
 
-    declarations.push(`${styleName(name)}:${String(item)}`);
+    if (serialized !== "") serialized += ";";
+    serialized += `${styleName(name)}:${String(item)}`;
   }
 
-  return declarations.join(";");
+  return serialized;
 }
 
 function reservedProp(name: string): boolean {

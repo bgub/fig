@@ -37,6 +37,77 @@ async function measureServerSuspenseSiblings(_runtime, rows, iterations) {
   };
 }
 
+async function measureServerAttributes(_runtime, rows, iterations) {
+  const metrics = createScenarioMetrics();
+  const node = createAttributeFixture(rows);
+  const expected = attributeFixtureMarkup(rows);
+  const elapsed = await measureAsync(async () => {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      const html = await renderFigToHtml(node);
+      if (html !== expected) {
+        throw new Error("Attribute-heavy server output changed.");
+      }
+    }
+  });
+
+  return {
+    elapsed,
+    metrics,
+    operations: createOperationCounts(),
+  };
+}
+
+function createAttributeFixture(rows) {
+  return createFigElement(
+    "main",
+    {
+      "aria-label": "Items & <",
+      class: "grid",
+      "data-count": rows,
+      style: {
+        "--gap": "1rem",
+        display: "grid",
+        gridTemplateColumns: "1fr",
+      },
+    },
+    Array.from({ length: rows }, (_, index) =>
+      createFigElement(
+        "article",
+        {
+          "aria-label": `Item ${index} & <`,
+          class: "card",
+          "data-index": index,
+          hidden: index % 2 === 0,
+          style: {
+            "--index": index,
+            backgroundColor: "white",
+            borderWidth: 1,
+          },
+          tabindex: 0,
+        },
+        `Item ${index} & <`,
+      ),
+    ),
+  );
+}
+
+function attributeFixtureMarkup(rows) {
+  let articles = "";
+  for (let index = 0; index < rows; index += 1) {
+    const hidden = index % 2 === 0 ? " hidden" : "";
+    articles +=
+      `<article aria-label="Item ${index} &amp; &lt;" class="card" ` +
+      `data-index="${index}"${hidden} ` +
+      `style="--index:${index};background-color:white;border-width:1" ` +
+      `tabindex="0">Item ${index} &amp; &lt;</article>`;
+  }
+  return (
+    `<main aria-label="Items &amp; &lt;" class="grid" data-count="${rows}" ` +
+    `style="--gap:1rem;display:grid;grid-template-columns:1fr">` +
+    `${articles}</main>`
+  );
+}
+
 function createServerSuspenseFixture(rows, gates, metrics) {
   return createFigElement(
     "section",
@@ -79,6 +150,14 @@ function createDeferred() {
 
 export function serverScenariosForRows(rows) {
   return [
+    {
+      group: "server",
+      name: "server.attribute-heavy",
+      rows,
+      measure: (runtime, iterations) =>
+        measureServerAttributes(runtime, rows, iterations),
+      runtimes: [figOnlyRuntime],
+    },
     {
       group: "server",
       name: "server.suspense-sibling-streaming",
