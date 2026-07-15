@@ -24,7 +24,7 @@ Server render errors cross the wire only through `onError(error, info) => { dige
 
 ## Payload Holes
 
-A decoded payload value can be fulfilled while streamed subtrees inside it are still outlined holes (payload.md). A hole's `error` row — or a post-root transport/protocol failure — rejects that hole, and the nearest `ErrorBoundary` covering the decoded slot catches it, digest contract intact; the surrounding fulfilled value stays published. Aborting a decode follows Cancellation Is Not An Error: unresolved holes reject with an internal cancellation reason while `completion` reports `aborted`.
+A decoded payload value can be fulfilled while streamed subtrees inside it are still outlined holes (payload.md). A hole's `error` row — or a post-root transport/protocol failure — rejects that hole, and the nearest `ErrorBoundary` covering the decoded slot catches it, digest contract intact; the surrounding fulfilled value stays published. Aborting a decode follows Cancellation Is Not An Error: unresolved holes reject with an internal cancellation reason while `onStreamDone` reports `aborted`.
 
 ## Cancellation Is Not An Error
 

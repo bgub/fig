@@ -89,30 +89,27 @@ export function payloadDataLoader<TArgs extends unknown[]>(
       throw error;
     }
 
-    const decode = decodePayloadStream(body, {
+    return decodePayloadStream(body, {
       clientReferenceCache: options.clientReferenceCache,
       // Absent outside a data store (the loader called directly): data rows
       // are then ignored rather than hydrated.
       hydrate: loadContextHydrate(context),
+      // Post-root failures surface through the rejected holes they strand;
+      // observing the stream end keeps a failure that no longer has a
+      // pending slot from being silently discarded in development.
+      onStreamDone: (result) => {
+        if (__DEV__ && result.status === "failed") {
+          console.error(
+            "Payload decode failed after its root value published:",
+            result.error,
+          );
+        }
+      },
       prepareAssets:
         options.prepareAssets ?? ((assets) => insertAssetResources(assets)),
       resolveClientReference: options.resolveClientReference,
       signal,
     });
-
-    // completion never rejects, and post-root failures surface through the
-    // rejected holes they strand. Observing it here keeps a failure that no
-    // longer has a pending slot from being silently discarded in development.
-    void decode.completion.then((completion) => {
-      if (__DEV__ && completion.status === "failed") {
-        console.error(
-          "Payload decode failed after its root value published:",
-          completion.error,
-        );
-      }
-    });
-
-    return decode.value as Promise<FigNode>;
   };
 }
 

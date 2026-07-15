@@ -4,6 +4,7 @@ import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
 import { renderToPayloadStream } from "./payload.ts";
+import { deferred } from "./shared.ts";
 import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
@@ -67,13 +68,15 @@ describe("@bgub/fig-server data resources", () => {
     expect(modelIndex).toBeGreaterThan(dataIndex);
 
     const hydrated: unknown[] = [];
-    const decode = decodePayloadStream(decodeStream, {
+    const done = deferred<void>();
+    void decodePayloadStream(decodeStream, {
       hydrate: (entries) => {
         hydrated.push(...entries);
         return true;
       },
+      onStreamDone: () => done.resolve(undefined),
     });
-    await decode.completion;
+    await done.promise;
 
     expect(hydrated).toEqual([
       { key: ["payload-user", "one"], value: { name: "Grace" } },

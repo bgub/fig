@@ -91,22 +91,6 @@ export type PayloadDecodeCompletion =
   | { status: "complete" }
   | { status: "failed"; error: unknown };
 
-/**
- * A live payload decode. `value` resolves when the root row decodes (and
- * rejects only when the stream fails before producing a root value);
- * decoding continues in the background, filling outlined holes as their rows
- * arrive. `completion` never rejects, so post-root transport and protocol
- * failures are observable without creating an unhandled rejection.
- *
- * Deliberately not a thenable: assimilating it into a promise chain would
- * discard `completion` and `abort`.
- */
-export interface PayloadDecode {
-  abort(reason?: unknown): void;
-  readonly completion: Promise<PayloadDecodeCompletion>;
-  readonly value: Promise<FigNode>;
-}
-
 export interface PayloadDecodeOptions {
   /**
    * Stabilizes client-reference identity across decodes that share the
@@ -121,6 +105,15 @@ export interface PayloadDecodeOptions {
    * entries after its caller loses authority.
    */
   hydrate?: (entries: readonly FigDataHydrationEntry[]) => void;
+  /**
+   * Observes the end of ingestion: called exactly once when the stream
+   * settles as complete, failed, or aborted. Post-root failures reject the
+   * holes they strand, but a failure with no pending slot is otherwise
+   * invisible — this is the hook for reporting it. The callback is never
+   * awaited, and its exceptions and rejections are swallowed, so an
+   * observer cannot block or break decode teardown.
+   */
+  onStreamDone?: (result: PayloadDecodeCompletion) => void;
   /**
    * Called with stream-safe asset resources as soon as their rows arrive
    * (e.g. fig-dom's insertAssetResources). A returned promise gates the
@@ -146,16 +139,19 @@ class PayloadDecodeAbortedError extends Error {
 }
 
 /**
- * Decode a payload row stream into a live PayloadDecode. The returned
- * `value` resolves with the decoded root FigNode; unfinished subtrees inside
- * it are outlined holes that suspend and fill (or reject) as their rows
- * arrive. Aborting `signal` or calling `abort` ignores remaining rows and
- * rejects unresolved holes with an internal cancellation reason.
+ * Decode a payload row stream. The returned promise resolves with the
+ * decoded root FigNode as soon as the root row decodes (and rejects only
+ * when the stream fails before producing a root value, or with the root
+ * row's own error); decoding continues in the background, filling outlined
+ * holes as their rows arrive. Post-root failures reject the holes they
+ * strand and report through `onStreamDone`. Aborting `options.signal`
+ * ignores remaining rows and rejects unresolved holes with an internal
+ * cancellation reason.
  */
 export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
   options: PayloadDecodeOptions = {},
-): PayloadDecode {
+): Promise<FigNode> {
   if (
     options.clientReferenceCache !== undefined &&
     !clientReferenceCacheEntries.has(options.clientReferenceCache)
@@ -165,12 +161,7 @@ export function decodePayloadStream(
         "createPayloadClientReferenceCache().",
     );
   }
-  const decode = new PayloadStreamDecode(stream, options);
-  return {
-    abort: (reason?: unknown) => decode.abort(reason),
-    completion: decode.completion,
-    value: decode.value,
-  };
+  return new PayloadStreamDecode(stream, options).value;
 }
 
 type DecodeChunk = {
@@ -207,7 +198,6 @@ function deferred<T>(): Deferred<T> {
 }
 
 class PayloadStreamDecode {
-  readonly completion: Promise<PayloadDecodeCompletion>;
   readonly value: Promise<FigNode>;
 
   private readonly chunks = new Map<number, DecodeChunk>();
@@ -221,9 +211,6 @@ class PayloadStreamDecode {
   private readonly rowDecoder: PayloadRowDecoder;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private done = false;
-  private readonly resolveCompletion: (
-    completion: PayloadDecodeCompletion,
-  ) => void;
   // Resolved on abort so arrived-but-gated chunks reveal instead of waiting
   // for asset gates that may never settle.
   private readonly releaseGates: () => void;
@@ -247,9 +234,6 @@ class PayloadStreamDecode {
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
-    const completion = deferred<PayloadDecodeCompletion>();
-    this.completion = completion.promise;
-    this.resolveCompletion = completion.resolve;
     const gates = deferred<void>();
     this.gatesReleased = gates.promise;
     this.releaseGates = () => gates.resolve(undefined);
@@ -335,11 +319,18 @@ class PayloadStreamDecode {
     }
   }
 
-  private settle(completion: PayloadDecodeCompletion): void {
+  private settle(result: PayloadDecodeCompletion): void {
     if (this.done) return;
     this.done = true;
     this.removeAbortListener();
-    this.resolveCompletion(completion);
+    try {
+      const observed = this.options.onStreamDone?.(result) as unknown;
+      // An async observer's rejection must not surface as an unhandled
+      // rejection any more than a sync throw may break teardown.
+      if (isThenable(observed)) void Promise.resolve(observed).then(noop, noop);
+    } catch {
+      // An observer must not be able to break ingestion teardown.
+    }
   }
 
   private handleRow(row: PayloadRow): void {

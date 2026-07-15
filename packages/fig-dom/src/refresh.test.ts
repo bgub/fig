@@ -170,7 +170,7 @@ describe("@bgub/fig-dom fast refresh", () => {
       resolveClientReference: () => IslandV1,
     });
 
-    const container = mount((await decode.value) as FigNode);
+    const container = mount((await decode) as FigNode);
     expect(container.textContent).toBe("v1:0");
     flushSync(() => setCount(5));
     expect(container.textContent).toBe("v1:5");

@@ -20,6 +20,7 @@ import {
 } from "@bgub/fig/internal";
 import {
   decodePayloadStream,
+  type PayloadDecodeCompletion,
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
 import { serverDataResource } from "@bgub/fig/server";
@@ -39,8 +40,13 @@ function decodeRender(
 ) {
   const { render, ...decodeOptions } = options ?? {};
   const result = renderToPayloadStream(node, render);
+  const done = deferred<PayloadDecodeCompletion>();
   return {
-    decode: decodePayloadStream(result.stream, decodeOptions),
+    decode: decodePayloadStream(result.stream, {
+      ...decodeOptions,
+      onStreamDone: done.resolve,
+    }),
+    done: done.promise,
     result,
   };
 }
@@ -115,9 +121,9 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       );
     }
 
-    const { decode, result } = decodeRender(createElement(Post, null));
+    const { decode, done, result } = decodeRender(createElement(Post, null));
 
-    const root = (await decode.value) as FigElement;
+    const root = (await decode) as FigElement;
     expect(root.type).toBe("article");
     const [heading, suspense] = root.props.children as [FigElement, FigElement];
     expect(heading.props.children).toBe("Title");
@@ -134,7 +140,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
 
     comments.resolve(["first", "second"]);
     await result.allReady;
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     const list = renderNode(
       suspense.props.children as FigElement,
@@ -164,7 +170,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     }
 
     const loads: string[] = [];
-    const { decode } = decodeRender(createElement(Page, null), {
+    const { decode, done } = decodeRender(createElement(Page, null), {
       resolveClientReference: (reference) => {
         loads.push(reference.id);
         return Promise.resolve((props: { label: string }) =>
@@ -173,8 +179,8 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       },
     });
 
-    const root = (await decode.value) as FigElement;
-    await decode.completion;
+    const root = (await decode) as FigElement;
+    await done;
     expect(loads).toEqual(["src/Island.tsx#Island"]);
 
     const rendered = renderNode(root) as FigElement;
@@ -202,7 +208,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       },
     });
 
-    const root = (await decode.value) as FigElement;
+    const root = (await decode) as FigElement;
     expect(root.props.children).toBe("Grace");
     expect(hydrated).toEqual([
       { key: ["decode-user", "one"], value: { name: "Grace" } },
@@ -224,7 +230,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       ),
     );
 
-    const root = (await decode.value) as FigElement;
+    const root = (await decode) as FigElement;
     expect(root.props.children).toBe("ada@example.com");
   });
 
@@ -249,12 +255,12 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       );
     }
 
-    const { decode } = decodeRender(createElement(Page, null), {
+    const { decode, done } = decodeRender(createElement(Page, null), {
       render: { onError: () => ({ digest: "digest-7" }) },
     });
 
-    const root = (await decode.value) as FigElement;
-    expect(await decode.completion).toEqual({ status: "complete" });
+    const root = (await decode) as FigElement;
+    expect(await done).toEqual({ status: "complete" });
 
     const suspense = root.props.children as FigElement;
     let thrown: unknown;
@@ -286,7 +292,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     });
 
     let revealed = false;
-    void decode.value.then(() => {
+    void decode.then(() => {
       revealed = true;
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -296,7 +302,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     expect(revealed).toBe(false);
 
     gate.resolve(undefined);
-    const root = (await decode.value) as FigElement;
+    const root = (await decode) as FigElement;
     expect(root.type).toBe("section");
   });
 
@@ -325,7 +331,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       );
     }
 
-    const { decode, result } = decodeRender(createElement(Page, null), {
+    const { decode, done, result } = decodeRender(createElement(Page, null), {
       prepareAssets: (list) => {
         prepared.push(...list);
         return gate.promise;
@@ -334,7 +340,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
 
     // The root reveals ungated, yet the assets row is already on the wire —
     // preload starts before the hole's content settles.
-    const root = (await decode.value) as FigElement;
+    const root = (await decode) as FigElement;
     expect(root.type).toBe("div");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(prepared).toMatchObject([{ href: "/hole.css", kind: "stylesheet" }]);
@@ -343,7 +349,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     await result.allReady;
     // Ingestion completes while the gate is still held: gates delay reveal,
     // not arrival.
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     const suspense = root.props.children as FigElement;
     const hole = suspense.props.children as FigElement;
@@ -381,11 +387,14 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       );
     }
 
-    const { decode, result } = decodeRender(createElement(Page, null));
+    const controller = new AbortController();
+    const { decode, done, result } = decodeRender(createElement(Page, null), {
+      signal: controller.signal,
+    });
 
-    const root = (await decode.value) as FigElement;
-    decode.abort("superseded");
-    expect(await decode.completion).toEqual({ status: "aborted" });
+    const root = (await decode) as FigElement;
+    controller.abort("superseded");
+    expect(await done).toEqual({ status: "aborted" });
 
     const suspense = root.props.children as FigElement;
     let thrown: unknown;
@@ -407,7 +416,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
 
     const { decode } = decodeRender(createElement(Stateful, null));
 
-    await expect(decode.value).rejects.toThrow(
+    await expect(decode).rejects.toThrow(
       "useState cannot be used during payload render: serialized components are render-only.",
     );
   });

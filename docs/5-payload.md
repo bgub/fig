@@ -121,7 +121,7 @@ function Profile({ id }: { id: string }) {
 - Streamed `data` rows hydrate the same store through a generation-guarded capability — the doc 5 handoff, completed, with no second request.
 - `assets` rows insert into the document head as they arrive; stylesheet gates delay only the content that declared them.
 
-Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns `{ value, completion, abort }` — `value` resolves at the root row, the never-rejecting `completion` reports how background ingestion ended, and `abort` retires unresolved holes with an internal cancellation reason.
+Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns the root-value promise directly — it resolves at the root row while background ingestion continues. An `onStreamDone` option reports how ingestion ended (post-root failures reject the holes they strand), and aborting the options `signal` retires unresolved holes with an internal cancellation reason.
 
 ## Refreshing
 

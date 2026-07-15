@@ -32,7 +32,7 @@ import {
 import {
   decodePayloadStream,
   type PayloadClientReference,
-  type PayloadDecode,
+  type PayloadDecodeCompletion,
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
 import { describe, expect, it } from "vitest";
@@ -142,7 +142,7 @@ function parseTestPayloadRows(input: string): TestPayloadRow[] {
 function decodeTestPayloadRows(
   rows: readonly TestPayloadRow[],
   options?: PayloadDecodeOptions,
-): PayloadDecode {
+): { decode: Promise<FigNode>; done: Promise<PayloadDecodeCompletion> } {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       for (const row of rows) {
@@ -153,7 +153,20 @@ function decodeTestPayloadRows(
       controller.close();
     },
   });
-  return decodePayloadStream(stream, options);
+  const { done, onStreamDone } = streamDone();
+  return {
+    decode: decodePayloadStream(stream, { ...options, onStreamDone }),
+    done,
+  };
+}
+
+// Captures onStreamDone so tests can await the end of ingestion.
+function streamDone(): {
+  done: Promise<PayloadDecodeCompletion>;
+  onStreamDone: (result: PayloadDecodeCompletion) => void;
+} {
+  const result = deferred<PayloadDecodeCompletion>();
+  return { done: result.promise, onStreamDone: result.resolve };
 }
 
 function withTestDispatcher<T>(run: () => T): T {
@@ -340,13 +353,13 @@ describe("payload rendering", () => {
 
     const rows = await renderToPayloadRows(createElement(Counter, {}));
     const seen: PayloadClientReference[] = [];
-    const decode = decodeTestPayloadRows(rows, {
+    const { done } = decodeTestPayloadRows(rows, {
       resolveClientReference(metadata) {
         seen.push(metadata);
         return () => null;
       },
     });
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     expect(seen).toEqual([
       {
@@ -362,8 +375,8 @@ describe("payload rendering", () => {
       id: "app/Widget.client.tsx#Widget",
     });
     const rows = await renderToPayloadRows(createElement(Widget, {}));
-    const decode = decodeTestPayloadRows(rows);
-    const root = await decode.value;
+    const { decode } = decodeTestPayloadRows(rows);
+    const root = await decode;
 
     expect(() => renderNode(root)).toThrow(
       'Cannot render client reference "app/Widget.client.tsx#Widget" because decodePayloadStream was not configured with a matching resolveClientReference.',
@@ -383,14 +396,14 @@ describe("payload rendering", () => {
     const resolution = deferred<typeof ResolvedWidget>();
     let loads = 0;
 
-    const decode = decodeTestPayloadRows(rows, {
+    const { decode, done } = decodeTestPayloadRows(rows, {
       resolveClientReference: () => {
         loads += 1;
         return resolution.promise;
       },
     });
-    const root = await decode.value;
-    expect(await decode.completion).toEqual({ status: "complete" });
+    const root = await decode;
+    expect(await done).toEqual({ status: "complete" });
 
     // The load started when the client row arrived, before any render.
     expect(loads).toBe(1);
@@ -418,7 +431,7 @@ describe("payload rendering", () => {
 
   it("ignores invalid asset descriptors while decoding client rows", async () => {
     const prepared: unknown[] = [];
-    const decode = decodeTestPayloadRows(
+    const { done } = decodeTestPayloadRows(
       [
         {
           id: 1,
@@ -439,7 +452,7 @@ describe("payload rendering", () => {
         },
       },
     );
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     expect(prepared).toEqual([
       { href: "/assets/Counter.css", kind: "stylesheet" },
@@ -505,13 +518,15 @@ describe("payload rendering", () => {
     expect(text).not.toContain("Unused.css");
 
     const prepared: unknown[] = [];
-    const decode = decodePayloadStream(streamFromString(text), {
+    const { done, onStreamDone } = streamDone();
+    void decodePayloadStream(streamFromString(text), {
+      onStreamDone,
       prepareAssets(list) {
         prepared.push(...list);
       },
       resolveClientReference: () => "fig-client",
     });
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     // Shared asset deduped across the two references that rendered.
     expect(prepared).toEqual([
@@ -717,11 +732,11 @@ describe("payload rendering", () => {
     const rows = await renderToPayloadRows(
       createElement(Viewer, { value: payload }),
     );
-    const decode = decodeTestPayloadRows(rows, {
+    const { decode } = decodeTestPayloadRows(rows, {
       resolveClientReference: () => "fig-viewer",
     });
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
     const value = decoded.props.value as typeof payload;
 
@@ -754,7 +769,7 @@ describe("payload rendering", () => {
       ["set", new Set([createElement("em", null, "Set child")])],
     ]);
 
-    const decode = decodeTestPayloadRows(
+    const { decode } = decodeTestPayloadRows(
       await renderToPayloadRows(createElement(Viewer, { value: payload })),
       {
         resolveClientReference: ({ id }) =>
@@ -762,7 +777,7 @@ describe("payload rendering", () => {
       },
     );
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
     const value = decoded.props.value as Map<string, unknown>;
 
@@ -852,12 +867,14 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
+    const { done, onStreamDone } = streamDone();
     const decode = decodePayloadStream(result.stream, {
+      onStreamDone,
       resolveClientReference: () => "fig-viewer",
     });
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
 
     await expect(decoded.props.later).resolves.toBe(decoded.props.value);
   });
@@ -884,11 +901,13 @@ describe("payload rendering", () => {
     pending.resolve(shared);
     await result.allReady;
 
+    const { done, onStreamDone } = streamDone();
     const decode = decodePayloadStream(result.stream, {
+      onStreamDone,
       resolveClientReference: () => "fig-viewer",
     });
-    const root = (await decode.value) as FigElement;
-    expect(await decode.completion).toEqual({ status: "complete" });
+    const root = (await decode) as FigElement;
+    expect(await done).toEqual({ status: "complete" });
     if (!isValidElement(root) || !Array.isArray(root.props.children)) {
       throw new Error("Expected decoded root children.");
     }
@@ -915,14 +934,14 @@ describe("payload rendering", () => {
     const value: Record<string, unknown> = { label: "cycle" };
     value.self = value;
 
-    const decode = decodeTestPayloadRows(
+    const { decode } = decodeTestPayloadRows(
       await renderToPayloadRows(createElement(Viewer, { value })),
       {
         resolveClientReference: () => "fig-viewer",
       },
     );
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.value.self).toBe(decoded.props.value);
@@ -943,12 +962,12 @@ describe("payload rendering", () => {
       }),
       createElement(Viewer, { shared }),
     ]);
-    const decode = decodeTestPayloadRows(rows, {
+    const { decode, done } = decodeTestPayloadRows(rows, {
       resolveClientReference: () => "fig-viewer",
     });
 
-    const decoded = await decode.value;
-    expect(await decode.completion).toEqual({ status: "complete" });
+    const decoded = await decode;
+    expect(await done).toEqual({ status: "complete" });
     if (!Array.isArray(decoded) || !isValidElement(decoded[1])) {
       throw new Error("Expected decoded sibling client element.");
     }
@@ -967,7 +986,7 @@ describe("payload rendering", () => {
     const child = createElement("span", null, "shared child");
     const fallback = new Map<unknown, unknown>([["state", "ready"]]);
 
-    const decode = decodeTestPayloadRows(
+    const { decode } = decodeTestPayloadRows(
       await renderToPayloadRows(
         createElement(Viewer, {
           children: child,
@@ -978,7 +997,7 @@ describe("payload rendering", () => {
       { resolveClientReference: () => "fig-viewer" },
     );
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.children).toBe(decoded.props.mirror);
@@ -995,14 +1014,14 @@ describe("payload rendering", () => {
       id: "app/Viewer.client.tsx#Viewer",
     });
 
-    const decode = decodeTestPayloadRows(
+    const { decode } = decodeTestPayloadRows(
       await renderToPayloadRows(
         createElement(Viewer, { children: { custom: "data" } }),
       ),
       { resolveClientReference: () => "fig-viewer" },
     );
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.children).toEqual({ custom: "data" });
@@ -1048,11 +1067,11 @@ describe("payload rendering", () => {
         promise: value,
       }),
     );
-    const decode = decodeTestPayloadRows(rows, {
+    const { decode } = decodeTestPayloadRows(rows, {
       resolveClientReference: () => "fig-viewer",
     });
 
-    const decoded = (await decode.value) as FigElement;
+    const decoded = (await decode) as FigElement;
     if (!isValidElement(decoded)) throw new Error("Expected decoded element.");
 
     expect(decoded.props.$fig).toBe("literal");
@@ -1154,8 +1173,8 @@ describe("payload rendering", () => {
       ),
     });
 
-    const decode = decodeTestPayloadRows(rows);
-    const decoded = await decode.value;
+    const { decode } = decodeTestPayloadRows(rows);
+    const decoded = await decode;
 
     expect(isValidElement(decoded)).toBe(true);
     if (!isValidElement(decoded)) return;
@@ -1175,12 +1194,12 @@ describe("payload rendering", () => {
       return null;
     }
 
-    const decode = decodeTestPayloadRows(rows, {
+    const { decode } = decodeTestPayloadRows(rows, {
       resolveClientReference() {
         return ClientLikeButton;
       },
     });
-    const node = await decode.value;
+    const node = await decode;
 
     expect(node).toMatchObject({
       key: null,
@@ -1253,13 +1272,13 @@ describe("payload rendering", () => {
   });
 
   it("decodes error rows into digest-carrying errors with a generic message", async () => {
-    const decode = decodeTestPayloadRows([
+    const { decode, done } = decodeTestPayloadRows([
       { id: 0, tag: "error", value: { digest: "digest-9" } },
     ]);
 
     let thrown: unknown;
     try {
-      await decode.value;
+      await decode;
     } catch (error) {
       thrown = error;
     }
@@ -1268,14 +1287,15 @@ describe("payload rendering", () => {
     expect((thrown as Error & { digest?: string }).digest).toBe("digest-9");
     expect((thrown as Error).message).toBe("The server render failed.");
     // An error row is a delivered result, not a transport failure.
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
   });
 
   it("processes streamed rows incrementally", async () => {
+    const { done, onStreamDone } = streamDone();
     const source = controlledTextStream();
-    const decode = decodePayloadStream(source.stream);
+    const decode = decodePayloadStream(source.stream, { onStreamDone });
     let resolved = false;
-    void decode.value.then(() => {
+    void decode.then(() => {
       resolved = true;
     });
 
@@ -1286,33 +1306,37 @@ describe("payload rendering", () => {
     source.write(',"value":"Ready"}\n');
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(resolved).toBe(true);
-    expect(await decode.value).toBe("Ready");
+    expect(await decode).toBe("Ready");
 
     source.close();
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
   });
 
   it("pipes readable streams into a payload decoder", async () => {
+    const { done, onStreamDone } = streamDone();
     const decode = decodePayloadStream(
       streamFromString(
         await renderToPayloadText(createElement("p", null, "Hi")),
       ),
+      { onStreamDone },
     );
 
-    expect(await decode.value).toMatchObject({
+    expect(await decode).toMatchObject({
       props: { children: "Hi" },
       type: "p",
     });
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await done).toEqual({ status: "complete" });
   });
 
   it("flushes a final payload row without a trailing newline", async () => {
+    const { done, onStreamDone } = streamDone();
     const decode = decodePayloadStream(
       streamFromString('{"id":0,"tag":"model","value":"Done"}'),
+      { onStreamDone },
     );
 
-    expect(await decode.value).toBe("Done");
-    expect(await decode.completion).toEqual({ status: "complete" });
+    expect(await decode).toBe("Done");
+    expect(await done).toEqual({ status: "complete" });
   });
 
   it("cancelling a payload decode leaves no unhandled rejection", async () => {
@@ -1325,8 +1349,13 @@ describe("payload rendering", () => {
     const result = renderToPayloadStream(
       createElement("section", null, createElement(Slow, null)),
     );
-    const decode = decodePayloadStream(result.stream);
-    await decode.value;
+    const { done, onStreamDone } = streamDone();
+    const controller = new AbortController();
+    const decode = decodePayloadStream(result.stream, {
+      onStreamDone,
+      signal: controller.signal,
+    });
+    await decode;
 
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => {
@@ -1336,8 +1365,8 @@ describe("payload rendering", () => {
 
     try {
       // Client disconnect: the decoder aborts without awaiting allReady.
-      decode.abort(new Error("client disconnected"));
-      expect(await decode.completion).toEqual({ status: "aborted" });
+      controller.abort(new Error("client disconnected"));
+      expect(await done).toEqual({ status: "aborted" });
       // unhandledRejection fires after the microtask queue drains; give it
       // two macrotasks to surface before attaching our own handler.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1381,10 +1410,13 @@ describe("payload rendering", () => {
   });
 
   it("rejects malformed payload streams as real failures", async () => {
-    const decode = decodePayloadStream(streamFromString("{not-json}\n"));
+    const { done, onStreamDone } = streamDone();
+    const decode = decodePayloadStream(streamFromString("{not-json}\n"), {
+      onStreamDone,
+    });
 
-    await expect(decode.value).rejects.toThrow(SyntaxError);
-    expect((await decode.completion).status).toBe("failed");
+    await expect(decode).rejects.toThrow(SyntaxError);
+    expect((await done).status).toBe("failed");
   });
 
   it("cancels payload streams when row decoding throws", async () => {
@@ -1398,14 +1430,15 @@ describe("payload rendering", () => {
       },
     });
 
-    const decode = decodePayloadStream(stream);
-    const completion = await decode.completion;
+    const { done, onStreamDone } = streamDone();
+    const decode = decodePayloadStream(stream, { onStreamDone });
+    const completion = await done;
     if (completion.status !== "failed") {
       throw new Error("Expected a failed completion.");
     }
     expect(completion.error).toBeInstanceOf(SyntaxError);
     expect(cancelReason).toBeInstanceOf(SyntaxError);
-    await expect(decode.value).rejects.toThrow(SyntaxError);
+    await expect(decode).rejects.toThrow(SyntaxError);
   });
 });
 

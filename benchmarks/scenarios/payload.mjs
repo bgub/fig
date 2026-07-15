@@ -141,7 +141,7 @@ async function measureResourceRefresh(runtime, rows, iterations) {
   const initial = decodePayloadStream(
     streamFromText(await renderToPayloadText(documentNode(rows, 0))),
   );
-  const initialValue = await initial.value;
+  const initialValue = await initial;
 
   const { flushSync, operations, createRoot, container } =
     createFigBenchRootFor(runtime);
@@ -152,7 +152,7 @@ async function measureResourceRefresh(runtime, rows, iterations) {
   const elapsed = await measureAsync(async () => {
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       const decode = decodePayloadStream(streamFromText(texts[iteration % 2]));
-      const value = await decode.value;
+      const value = await decode;
       flushSync(() => root.render(value));
       metrics.payloadNodes += 1;
     }
@@ -174,7 +174,7 @@ async function measureResourceDecodeOnly(_runtime, rows, iterations) {
   const elapsed = await measureAsync(async () => {
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       const decode = decodePayloadStream(streamFromText(texts[iteration % 2]));
-      const value = await decode.value;
+      const value = await decode;
       if (value === null) throw new Error("Payload decode produced no root.");
       metrics.payloadNodes += 1;
     }

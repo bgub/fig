@@ -463,7 +463,7 @@ function createDocumentPayloadSegment(
   // resolve to their ssr components, everything else renders the same
   // placeholder template the client hydrates against; streamed holes suspend
   // the document render and stream in as Suspense reveals.
-  const decode = decodePayloadStream(decodeStream, {
+  const value = decodePayloadStream(decodeStream, {
     prepareAssets: (streamed) => {
       assetResources.push(...streamed);
     },
@@ -474,7 +474,6 @@ function createDocumentPayloadSegment(
         : createDocumentClientReferencePlaceholder(reference.id);
     },
   });
-  const value = decode.value;
   void value.catch(() => undefined);
 
   return {

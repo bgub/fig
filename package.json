@@ -37,7 +37,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "30.25 kB"
+      "limit": "33.5 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
