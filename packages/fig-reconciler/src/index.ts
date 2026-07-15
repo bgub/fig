@@ -46,7 +46,7 @@ import {
   rollbackCommitIndex,
 } from "./commit-index.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
-import { devtoolsTypeName } from "./devtools.ts";
+import { devtoolsTypeName } from "./devtools-internal.ts";
 import {
   ActivityTag,
   AssetsTag,
