@@ -71,7 +71,6 @@ declare const __FIG_DEV__: boolean | undefined;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 export interface PayloadRenderResult {
-  abort(reason?: unknown): void;
   allReady: Promise<void>;
   contentType: string;
   stream: ReadableStream<Uint8Array>;
@@ -174,7 +173,6 @@ export function renderToPayloadStream(
 ): PayloadRenderResult {
   const { request, stream } = createPayloadRequest(node, options);
   return {
-    abort: (reason?: unknown) => abortPayloadRequest(request, reason),
     allReady: request.allReady.promise,
     contentType: jsonPayloadCodec.contentType,
     stream,

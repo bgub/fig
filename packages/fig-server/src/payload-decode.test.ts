@@ -388,7 +388,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     }
 
     const controller = new AbortController();
-    const { decode, done, result } = decodeRender(createElement(Page, null), {
+    const { decode, done } = decodeRender(createElement(Page, null), {
       signal: controller.signal,
     });
 
@@ -404,8 +404,6 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
       thrown = error;
     }
     expect(thrown).toMatchObject({ name: "PayloadDecodeAbortedError" });
-
-    result.abort();
   });
 
   it("dev-throws client APIs during payload render", async () => {

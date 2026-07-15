@@ -35,7 +35,7 @@ import {
   storeDevtoolsOpen,
 } from "./devtools.ts";
 import {
-  createPayloadClientReferenceCache,
+  createPayloadClientReferenceResolver,
   type PayloadClientReference,
   type ResolveClientReference,
 } from "@bgub/fig/payload";
@@ -202,8 +202,8 @@ type PayloadStream = PayloadFrameStream<SerializedPayloadFrame>;
 // One wrapper covers every decoded client reference. Non-ssr references
 // hydrate against the SSR placeholder template until the gate reveals; ssr
 // references rendered real markup on the server and skip the gate. Identity
-// across re-decodes is the decoder's clientReferenceCache's job: it calls
-// this once per reference id and reuses the wrapper.
+// across re-decodes is the stateful resolver's job: it calls this once per
+// reference id and reuses the wrapper.
 function createRouteClientReference(
   options: StartClientOptions,
   reference: PayloadClientReference,
@@ -333,9 +333,11 @@ function createServerRouteContent(
   router: FigRouter,
 ): ServerRouteContent {
   // Component identity per reference id: island state survives re-decodes
-  // because the decoder reuses one cache-owned wrapper per reference, gated
-  // or not (the initial segment decodes ungated; navigations gate).
-  const clientReferenceCache = createPayloadClientReferenceCache();
+  // because the stateful resolver reuses one owned wrapper per reference,
+  // gated or not (the initial segment decodes ungated; navigations gate).
+  const clientReferenceResolver = createPayloadClientReferenceResolver(
+    resolveRouteClientReference,
+  );
   let rootData: FigDataStoreHandle | null = null;
   let initialSegment: InitialDocumentSegment | null = null;
   // The initial document's assets are already in the SSR head (hoisted at
@@ -374,8 +376,8 @@ function createServerRouteContent(
 
   const reportedMissingResolvers = new Set<string>();
 
-  // Called once per reference id: the decoder's clientReferenceCache owns
-  // identity and only consults the resolver on a miss.
+  // Called once per reference id: the stateful resolver wrapping this owns
+  // identity and only consults it on a miss.
   function resolveRouteClientReference(
     reference: PayloadClientReference,
   ): ElementType {
@@ -442,8 +444,7 @@ function createServerRouteContent(
           signal,
         });
       },
-      clientReferenceCache,
-      resolveClientReference: resolveRouteClientReference,
+      resolveClientReference: clientReferenceResolver,
     }),
   });
 

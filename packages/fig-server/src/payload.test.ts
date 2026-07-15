@@ -1380,19 +1380,6 @@ describe("payload rendering", () => {
     await expect(result.allReady).rejects.toThrow("Payload decode aborted.");
   });
 
-  it("aborts payload renders through the stream result", async () => {
-    const pending = deferred<string>();
-
-    function Slow() {
-      return createElement("p", null, readPromise(pending.promise));
-    }
-
-    const result = renderToPayloadStream(createElement(Slow, null));
-    result.abort(new Error("payload timed out"));
-
-    await expect(result.allReady).rejects.toThrow("payload timed out");
-  });
-
   it("aborts payload renders from the render signal", async () => {
     const pending = deferred<string>();
     const controller = new AbortController();

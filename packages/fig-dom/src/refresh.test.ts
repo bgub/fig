@@ -5,7 +5,7 @@ import {
   useState,
 } from "@bgub/fig";
 import {
-  createPayloadClientReferenceCache,
+  createPayloadClientReferenceResolver,
   decodePayloadStream,
 } from "@bgub/fig/payload";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
@@ -139,13 +139,13 @@ describe("@bgub/fig-dom fast refresh", () => {
     expect(container.textContent).toBe("parent:3 child-v2");
   });
 
-  it("hot-updates a client reference latched by the payload reference cache", async () => {
-    // The decoder's clientReferenceCache latches the first resolution per
-    // reference id for the life of the cache. That latch must not defeat
-    // fast refresh: the family remap resolves the latched function to its
-    // newest version at render, and updates a bundler cannot accept escalate
-    // to a full reload (which resets the cache with the page) — so the cache
-    // needs no manual invalidation under the accept-or-reload HMR contract.
+  it("hot-updates a client reference latched by a stateful resolver", async () => {
+    // A stateful resolver latches the first resolution per reference id for
+    // its own lifetime. That latch must not defeat fast refresh: the family
+    // remap resolves the latched function to its newest version at render,
+    // and updates a bundler cannot accept escalate to a full reload (which
+    // resets the resolver with the page) — so the resolver needs no manual
+    // invalidation under the accept-or-reload HMR contract.
     let setCount: (next: number) => void = () => undefined;
 
     function IslandV1(): FigNode {
@@ -163,11 +163,10 @@ describe("@bgub/fig-dom fast refresh", () => {
       id: "app/Island.tsx#Island",
     });
     const family = familyOf(IslandV1, IslandV2);
-    const cache = createPayloadClientReferenceCache();
+    const resolver = createPayloadClientReferenceResolver(() => IslandV1);
     const result = renderToPayloadStream(createElement(Island, {}));
     const decode = decodePayloadStream(result.stream, {
-      clientReferenceCache: cache,
-      resolveClientReference: () => IslandV1,
+      resolveClientReference: resolver,
     });
 
     const container = mount((await decode) as FigNode);

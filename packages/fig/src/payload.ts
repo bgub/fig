@@ -43,30 +43,39 @@ export type ResolveClientReference = (
 ) => ElementType<any> | PromiseLike<ElementType<any>> | undefined;
 
 /**
- * A caller-owned client-reference component cache. Passing one to
- * `decodePayloadStream` makes every client reference decode to a single
- * cache-owned wrapper per reference id, so re-decoding a payload updates
- * islands in place instead of remounting them. The caller owns the lifetime:
- * drop entries when their modules change (HMR) or the manifest swaps.
+ * A caller-owned stateful resolver: a `ResolveClientReference` that also
+ * owns component identity. Decodes given one (as `resolveClientReference`)
+ * resolve every client reference to a single resolver-owned wrapper per
+ * reference id, so re-decoding a payload updates islands in place instead
+ * of remounting them. The caller owns the lifetime: drop entries when their
+ * modules change (HMR) or the manifest swaps.
  */
-export interface PayloadClientReferenceCache {
+export interface PayloadClientReferenceResolver {
+  (
+    reference: PayloadClientReference,
+  ): ElementType<any> | PromiseLike<ElementType<any>> | undefined;
   clear(): void;
   delete(id: string): boolean;
 }
 
-const clientReferenceCacheEntries = new WeakMap<
-  PayloadClientReferenceCache,
+const resolverEntries = new WeakMap<
+  ResolveClientReference,
   Map<string, ElementType<any>>
 >();
 
-export function createPayloadClientReferenceCache(): PayloadClientReferenceCache {
+export function createPayloadClientReferenceResolver(
+  resolve: ResolveClientReference,
+): PayloadClientReferenceResolver {
   const entries = new Map<string, ElementType<any>>();
-  const cache: PayloadClientReferenceCache = {
-    clear: () => entries.clear(),
-    delete: (id: string) => entries.delete(id),
-  };
-  clientReferenceCacheEntries.set(cache, entries);
-  return cache;
+  const resolver = Object.assign(
+    (reference: PayloadClientReference) => resolve(reference),
+    {
+      clear: (): void => entries.clear(),
+      delete: (id: string): boolean => entries.delete(id),
+    },
+  );
+  resolverEntries.set(resolver, entries);
+  return resolver;
 }
 
 // Reveal gates ride the decoded element instances, not the reference
@@ -93,13 +102,6 @@ export type PayloadDecodeCompletion =
 
 export interface PayloadDecodeOptions {
   /**
-   * Stabilizes client-reference identity across decodes that share the
-   * cache (created by `createPayloadClientReferenceCache`). Without one,
-   * gated and asynchronously resolved references decode to per-decode
-   * wrappers and remount on re-decode. Use one cache per resolver.
-   */
-  clientReferenceCache?: PayloadClientReferenceCache;
-  /**
    * Receives decoded `data` rows for hydration into a data store. The
    * capability itself is expected to be generation-guarded and to ignore
    * entries after its caller loses authority.
@@ -124,6 +126,13 @@ export interface PayloadDecodeOptions {
   prepareAssets?: (
     assets: readonly FigAssetResource[],
   ) => void | PromiseLike<void>;
+  /**
+   * Resolves client-reference rows to components. A plain function keeps
+   * identity per decode: gated and asynchronously resolved references decode
+   * to per-decode wrappers and remount on re-decode. A stateful resolver
+   * (created by `createPayloadClientReferenceResolver`) keeps every
+   * resolvable reference's identity stable across the decodes sharing it.
+   */
   resolveClientReference?: ResolveClientReference;
   signal?: AbortSignal;
 }
@@ -152,15 +161,6 @@ export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
   options: PayloadDecodeOptions = {},
 ): Promise<FigNode> {
-  if (
-    options.clientReferenceCache !== undefined &&
-    !clientReferenceCacheEntries.has(options.clientReferenceCache)
-  ) {
-    throw new TypeError(
-      "options.clientReferenceCache must be created by " +
-        "createPayloadClientReferenceCache().",
-    );
-  }
   return new PayloadStreamDecode(stream, options).value;
 }
 
@@ -427,22 +427,23 @@ class PayloadStreamDecode {
     reference: PayloadClientReference,
     gate: Promise<void> | null,
   ): ElementType<any> {
-    const cache = this.options.clientReferenceCache;
+    const resolve = this.options.resolveClientReference;
     const entries =
-      cache === undefined ? undefined : clientReferenceCacheEntries.get(cache);
+      resolve === undefined ? undefined : resolverEntries.get(resolve);
     const existing = entries?.get(reference.id);
     if (existing !== undefined) return existing;
 
     let resolved: ReturnType<ResolveClientReference>;
     try {
-      resolved = this.options.resolveClientReference?.(reference);
+      resolved = resolve?.(reference);
     } catch (error) {
       resolved = Promise.reject(error);
     }
 
     if (resolved === undefined) {
-      // Never cached: a decode configured without a resolver must not
-      // poison a shared cache for later, properly configured decodes.
+      // Never cached: a stateful resolver that cannot resolve this
+      // reference must not latch the error component for later decodes
+      // that can.
       return function PayloadUnresolvedClientComponent(): never {
         throw new Error(
           `Cannot render client reference "${reference.id}" because decodePayloadStream was not configured with a matching resolveClientReference.`,
@@ -450,10 +451,10 @@ class PayloadStreamDecode {
       };
     }
 
-    // Without a cache, an ungated synchronously resolved reference decodes
-    // to the component itself, so its element type is stable across decodes
-    // whenever the resolver's answer is — re-decoding updates the client
-    // component in place and its state survives.
+    // Without a stateful resolver, an ungated synchronously resolved
+    // reference decodes to the component itself, so its element type is
+    // stable across decodes whenever the resolver's answer is — re-decoding
+    // updates the client component in place and its state survives.
     if (entries === undefined && gate === null && !isThenable(resolved)) {
       return resolved;
     }
@@ -653,10 +654,10 @@ function PayloadStreamHole(props: {
 }
 
 // The one client-reference wrapper: reads the per-element reveal gate
-// (elementGates), resolves the component, renders it. Cached in a
-// clientReferenceCache it is reused across decodes, so island identity
-// survives re-decodes whether a given decode arrives gated or not; without
-// a cache it lives for a single decode. Asynchronous resolution starts at
+// (elementGates), resolves the component, renders it. Owned by a stateful
+// resolver it is reused across decodes, so island identity survives
+// re-decodes whether a given decode arrives gated or not; otherwise it
+// lives for a single decode. Asynchronous resolution starts at
 // row arrival — overlapping the rest of the stream instead of serializing
 // behind it — and latches its type; thenable tracking lets a resolution
 // settled before its first render read synchronously instead of suspending

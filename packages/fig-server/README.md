@@ -268,9 +268,9 @@ import { renderToPayloadStream } from "@bgub/fig-server/payload";
 ```
 
 `renderToPayloadStream(node, options?)` renders a server-component payload. The
-result exposes `stream`, `contentType`, `allReady`, and `abort(reason?)`;
-`options.signal` also cancels the render, and both cancellation paths reject
-`allReady`. Pass the stream and content type directly to a `Response`. Browser
+result exposes `stream`, `contentType`, and `allReady`; cancellation is
+signal-only — aborting `options.signal` (or cancelling the stream) cancels the
+render and rejects `allReady`. Pass the stream and content type directly to a `Response`. Browser
 code decodes it with `decodePayloadStream` from `@bgub/fig/payload`, normally
 through fig-dom's `payloadDataLoader` adapter. Rows, codecs, value encoding, and
 Fig Start's inline document-frame transport are internal implementation details.

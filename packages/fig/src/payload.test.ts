@@ -21,7 +21,7 @@ import {
   type PayloadRow,
 } from "./payload-format.ts";
 import {
-  createPayloadClientReferenceCache,
+  createPayloadClientReferenceResolver,
   decodePayloadStream,
   type PayloadDecodeCompletion,
   type PayloadDecodeOptions,
@@ -176,9 +176,9 @@ function expectSuspends(node: FigNode): void {
 }
 
 describe("decodePayloadStream", () => {
-  it("keeps the public runtime surface to the decoder and its cache", () => {
+  it("keeps the public runtime surface to the decoder and its resolver factory", () => {
     expect(Object.keys(payloadApi)).toEqual([
-      "createPayloadClientReferenceCache",
+      "createPayloadClientReferenceResolver",
       "decodePayloadStream",
     ]);
   });
@@ -636,11 +636,12 @@ describe("decodePayloadStream", () => {
     expect(second.type).toBe(Widget);
   });
 
-  it("keeps gated references identity-stable across decodes sharing a cache", async () => {
+  it("keeps gated references identity-stable across decodes sharing a stateful resolver", async () => {
     // The fig-start shape: the row carries the reference's own stylesheet
-    // and prepareAssets returns a gate. Without a cache the decoder mints a
-    // fresh gate wrapper per decode, so a stable resolver alone cannot keep
-    // the island's identity — the cache is the contract for that.
+    // and prepareAssets returns a gate. With a plain function the decoder
+    // mints a fresh gate wrapper per decode, so a stable resolve callback
+    // alone cannot keep the island's identity — the stateful resolver is
+    // the contract for that.
     const Widget = (props: { label: string }) =>
       createElement("em", null, props.label);
     const rows: PayloadRow[] = [
@@ -664,8 +665,8 @@ describe("decodePayloadStream", () => {
     const bareAgain = (await decodeRows(rows, options)) as FigElement;
     expect(bareAgain.type).not.toBe(bare.type);
 
-    const cache = createPayloadClientReferenceCache();
-    const cached = { ...options, clientReferenceCache: cache };
+    const resolver = createPayloadClientReferenceResolver(() => Widget);
+    const cached = { ...options, resolveClientReference: resolver };
     const first = (await decodeRows(rows, cached)) as FigElement;
     const second = (await decodeRows(rows, cached)) as FigElement;
     expect(second.type).toBe(first.type);
@@ -676,7 +677,7 @@ describe("decodePayloadStream", () => {
 
     // Dropping the entry hands identity back to the caller (HMR, manifest
     // swaps): the next decode mints a fresh wrapper.
-    cache.delete("src/Widget.tsx#Widget");
+    resolver.delete("src/Widget.tsx#Widget");
     const third = (await decodeRows(rows, cached)) as FigElement;
     expect(third.type).not.toBe(first.type);
   });
@@ -685,7 +686,7 @@ describe("decodePayloadStream", () => {
     // fig-start's initial segment decodes ungated while navigations gate, so
     // the same reference id must resolve to one component either way.
     const Widget = () => createElement("em", null, "island");
-    const cache = createPayloadClientReferenceCache();
+    const resolver = createPayloadClientReferenceResolver(() => Widget);
     const rowsWith = (assets: boolean): PayloadRow[] => [
       {
         id: 1,
@@ -701,13 +702,11 @@ describe("decodePayloadStream", () => {
     ];
 
     const ungated = (await decodeRows(rowsWith(false), {
-      clientReferenceCache: cache,
-      resolveClientReference: () => Widget,
+      resolveClientReference: resolver,
     })) as FigElement;
     const gated = (await decodeRows(rowsWith(true), {
-      clientReferenceCache: cache,
       prepareAssets: () => Promise.resolve(),
-      resolveClientReference: () => Widget,
+      resolveClientReference: resolver,
     })) as FigElement;
     expect(gated.type).toBe(ungated.type);
   });
@@ -716,17 +715,16 @@ describe("decodePayloadStream", () => {
     const Widget = (props: { label: string }) =>
       createElement("em", null, props.label);
     const loads: string[] = [];
-    const cache = createPayloadClientReferenceCache();
+    const resolver = createPayloadClientReferenceResolver((reference) => {
+      loads.push(reference.id);
+      return Promise.resolve(Widget);
+    });
     const rows: PayloadRow[] = [
       { id: 1, tag: "client", value: { id: "src/Widget.tsx#Widget" } },
       model(0, element({ $fig: "client", id: 1 }, { label: "async" })),
     ];
     const options: PayloadDecodeOptions = {
-      clientReferenceCache: cache,
-      resolveClientReference: (reference) => {
-        loads.push(reference.id);
-        return Promise.resolve(Widget);
-      },
+      resolveClientReference: resolver,
     };
 
     const first = (await decodeRows(rows, options)) as FigElement;
@@ -751,7 +749,7 @@ describe("decodePayloadStream", () => {
       releaseGate = resolve;
     });
     const Widget = () => createElement("i", null, "island");
-    const cache = createPayloadClientReferenceCache();
+    const resolver = createPayloadClientReferenceResolver(() => Widget);
     const rows: PayloadRow[] = [
       {
         id: 1,
@@ -765,9 +763,8 @@ describe("decodePayloadStream", () => {
     ];
     // The creating decode's gate holds the island's first reveal.
     const first = (await decodeRows(rows, {
-      clientReferenceCache: cache,
       prepareAssets: () => gate,
-      resolveClientReference: () => Widget,
+      resolveClientReference: resolver,
     })) as FigElement;
     expectSuspends(first);
 
@@ -778,9 +775,8 @@ describe("decodePayloadStream", () => {
     // A later decode with a still-pending gate: same component identity, but
     // its own island instance waits for its own assets...
     const second = (await decodeRows(rows, {
-      clientReferenceCache: cache,
       prepareAssets: () => new Promise<void>(() => undefined),
-      resolveClientReference: () => Widget,
+      resolveClientReference: resolver,
     })) as FigElement;
     expect(second.type).toBe(first.type);
     expectSuspends(second);
@@ -852,14 +848,6 @@ describe("decodePayloadStream", () => {
     }
 
     expect(unhandled).toEqual([]);
-  });
-
-  it("rejects a clientReferenceCache that the factory did not create", () => {
-    expect(() =>
-      decodeRows([model(0, null)], {
-        clientReferenceCache: { clear: () => undefined, delete: () => false },
-      }),
-    ).toThrow("createPayloadClientReferenceCache");
   });
 
   it("surfaces client reference load failures when the island renders", async () => {
