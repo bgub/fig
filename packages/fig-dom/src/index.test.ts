@@ -143,6 +143,28 @@ describe("@bgub/fig-dom", () => {
     expect(container.textContent).toBe("Ready");
   });
 
+  it("renders promise-valued children through Suspense", async () => {
+    const pending = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    await act(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement("div", null, pending.promise),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+
+    await act(() => pending.resolve("Ready"));
+
+    expect(container.textContent).toBe("Ready");
+  });
+
   it("coalesces same-tick root renders into one async commit", async () => {
     let renders = 0;
 

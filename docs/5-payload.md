@@ -77,7 +77,7 @@ The full row vocabulary:
 | `model` | a serialized tree chunk; id 0 is the root |
 | `client` | a client reference: `{ id, exportName?, assets?, ssr? }` |
 | `data` | settled data-resource entries (doc 5's map rows) |
-| `assets` | stream-safe asset descriptors (doc 7) |
+| `assets` | asset descriptors, including title/meta document state (doc 7) |
 | `error` | `{ digest?, message? }` under the server `onError` contract (doc 4) |
 
 There is deliberately no refresh row. The refresh unit is the data-resource key that delivers the payload — refreshing is just requesting the same stream again, and the store's ordinary freshness semantics do the rest.
@@ -88,7 +88,7 @@ Some things are deliberately absent from the row model: server actions and tempo
 
 Payload data is not just `JSON.stringify` with crossed fingers. The shared value codec round-trips JSON scalars/arrays, plain objects (including a user-authored `$fig` key), shared references and cyclic graphs, `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global `Symbol.for` symbols. It rejects functions, class instances/non-plain objects, and non-global symbols.
 
-Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. Fig Start uses the same helpers for data hydration and remote data resource args/results, so data values don't silently degrade to JSON.
+Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. A promise used as a child becomes a lazy rendered-node row, while a promise-valued prop remains a promise for the receiving component. Fig Start uses the same helpers for data hydration and remote data resource args/results, so data values don't silently degrade to JSON.
 
 ## Suspense holes fill by row id
 

@@ -16,7 +16,7 @@ import {
   assetResourceDestination,
   assetResourceFromHostProps,
   assetResourceKey,
-  collectChildren,
+  collectStreamingChildren,
   createDataStore,
   type DataStore,
   invalidChildError,
@@ -30,7 +30,7 @@ import {
   isSuspense,
   isThenable,
   isViewTransition,
-  type NormalizedChild,
+  type StreamingChild,
   type RenderDispatcher,
   readThenable,
   SUSPENSE_CLIENT_MARKER,
@@ -506,7 +506,11 @@ function retryTask(request: Request, task: Task): void {
   const frame = createRenderFrame(request, task.segment, forkScope(task));
 
   try {
-    renderChildSequence(collectChildren(task.node), frame, task.childIndexBase);
+    renderChildSequence(
+      collectStreamingChildren(task.node),
+      frame,
+      task.childIndexBase,
+    );
     completeSegmentText(task.segment);
     task.segment.status = "completed";
     detachTask(request, task);
@@ -562,6 +566,11 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
 }
 
 function renderNode(node: FigNode, frame: RenderFrame): void {
+  if (isThenable(node)) {
+    renderNode(readThenable(node) as FigNode, frame);
+    return;
+  }
+
   if (Array.isArray(node)) {
     renderChildren(node, frame);
     return;
@@ -609,11 +618,11 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
 }
 
 function renderChildren(node: FigNode, frame: RenderFrame): void {
-  renderChildSequence(collectChildren(node), frame);
+  renderChildSequence(collectStreamingChildren(node), frame);
 }
 
 function renderChildSequence(
-  children: NormalizedChild[],
+  children: StreamingChild[],
   frame: RenderFrame,
   // Non-zero when resuming a suspended task: `children` starts at the
   // suspended child's original index, so id-path segments stay stable.

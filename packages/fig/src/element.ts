@@ -23,7 +23,7 @@ export type ElementType<P = Props> =
   | FigActivity
   | FigViewTransition
   | ComponentType<P>;
-export type FigNode =
+export type AwaitedFigNode =
   | FigElement<any>
   | FigPortal<any>
   | string
@@ -31,7 +31,9 @@ export type FigNode =
   | boolean
   | null
   | undefined
-  | FigNode[];
+  | readonly FigNode[];
+
+export type FigNode = AwaitedFigNode | Promise<AwaitedFigNode>;
 
 export interface FigElement<P = Props> {
   readonly $$typeof: symbol;

@@ -402,6 +402,10 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
 }
 
 function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
+  if (isThenable(node)) {
+    return serializeNode(readThenable(node) as FigNode, frame);
+  }
+
   if (Array.isArray(node)) {
     return flattenChildArrays(node).map((child) =>
       serializeNodeOrLazy(child, frame),

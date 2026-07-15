@@ -76,6 +76,9 @@ createRoot(container).render(<App />);
   signal; calling it during render throws.
 - `Suspense` catches pending `readPromise(promise)` reads and shows `fallback`
   until the promise settles.
+- Promises are valid children, so `<Suspense fallback={...}>{load().then(view)}</Suspense>`
+  is the direct form when the fulfilled value is renderable. Rejections flow
+  to the nearest `ErrorBoundary`.
 - Data resources live in `@bgub/fig`. Use `dataResource(...)` plus
   render-time `readData(...)` for keyed async values that need Suspense,
   deduping, invalidation, refresh, server hydration, and DevTools visibility.

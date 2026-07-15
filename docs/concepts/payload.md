@@ -55,7 +55,7 @@ It rejects functions, class instances/non-plain objects, and non-global symbols.
 
 The model format carries request-wide object ids. The first occurrence of a supported graph object defines it inline; later occurrences in the same payload request use a graph reference. Definitions always precede references in the row stream, so a streaming decoder never sees a dangling reference in a well-formed stream.
 
-The same internal value encoding backs payload data rows and Fig Start's remote data transport, so both preserve the same value fidelity.
+The same internal value encoding backs payload data rows and Fig Start's remote data transport, so both preserve the same value fidelity. A promise in a tree-valued position (including an ordinary JSX child) becomes a lazy row whose fulfilled value renders as nodes; a promise in a value prop stays a promise row delivered to the receiving component.
 
 ## Server Components Are Render-Only
 

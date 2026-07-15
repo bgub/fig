@@ -1,8 +1,10 @@
 export {
   collectChildren,
+  collectStreamingChildren,
   describeInvalidChild,
   invalidChildError,
   type NormalizedChild,
+  type StreamingChild,
 } from "./children.ts";
 export { type FigContext, FigContextSymbol, isContext } from "./context.ts";
 export {
@@ -37,6 +39,7 @@ export {
 export { validateInstanceNesting, validateTextNesting } from "./dom-nesting.ts";
 export {
   type ActivityProps,
+  type AwaitedFigNode,
   Assets,
   type ClientReferenceOptions,
   createPortalNode,

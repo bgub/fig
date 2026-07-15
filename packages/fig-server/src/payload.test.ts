@@ -411,7 +411,7 @@ describe("payload rendering", () => {
     // Before the resolution settles, the first render read suspends.
     let thrown: unknown;
     try {
-      renderNode(root);
+      void renderNode(root);
     } catch (error) {
       thrown = error;
     }
@@ -643,6 +643,34 @@ describe("payload rendering", () => {
         id: 1,
         tag: "model",
         value: graphElement(4, "span", { children: "Ready" }),
+      },
+    ]);
+  });
+
+  it("streams promise-valued children as lazy rows", async () => {
+    const pending = deferred<string>();
+    const child = pending.promise.then((value) =>
+      createElement("span", null, value),
+    );
+    const result = renderToPayloadStream(
+      createElement("div", null, "Before ", child),
+    );
+
+    pending.resolve("Ready");
+    await result.allReady;
+
+    expect(parseTestPayloadRows(await readStream(result.stream))).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "div", {
+          children: ["Before ", { $fig: "lazy", id: 1 }],
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(3, "span", { children: "Ready" }),
       },
     ]);
   });
@@ -1278,7 +1306,7 @@ describe("payload rendering", () => {
 
     let thrown: unknown;
     try {
-      await decode;
+      void (await decode);
     } catch (error) {
       thrown = error;
     }
@@ -1355,7 +1383,7 @@ describe("payload rendering", () => {
       onStreamDone,
       signal: controller.signal,
     });
-    await decode;
+    void (await decode);
 
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => {

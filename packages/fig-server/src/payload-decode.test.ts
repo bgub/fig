@@ -129,7 +129,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     // The hole suspends while its row is outstanding.
     let thrown: unknown;
     try {
-      renderNode(suspense.props.children as FigElement);
+      void renderNode(suspense.props.children as FigElement);
     } catch (error) {
       thrown = error;
     }
@@ -262,7 +262,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     const suspense = root.props.children as FigElement;
     let thrown: unknown;
     try {
-      renderNode(suspense.props.children as FigElement);
+      void renderNode(suspense.props.children as FigElement);
     } catch (error) {
       thrown = error;
     }
@@ -352,7 +352,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     const hole = suspense.props.children as FigElement;
     let thrown: unknown;
     try {
-      renderNode(hole);
+      void renderNode(hole);
     } catch (error) {
       thrown = error;
     }
@@ -396,7 +396,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     const suspense = root.props.children as FigElement;
     let thrown: unknown;
     try {
-      renderNode(suspense.props.children as FigElement);
+      void renderNode(suspense.props.children as FigElement);
     } catch (error) {
       thrown = error;
     }

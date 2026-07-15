@@ -168,7 +168,7 @@ function streamDone(): {
 function expectSuspends(node: FigNode): void {
   let thrown: unknown;
   try {
-    renderNode(node);
+    void renderNode(node);
   } catch (error) {
     thrown = error;
   }
@@ -300,7 +300,7 @@ describe("decodePayloadStream", () => {
 
     let thrown: unknown;
     try {
-      renderNode(hole);
+      void renderNode(hole);
     } catch (error) {
       thrown = error;
     }
@@ -361,7 +361,7 @@ describe("decodePayloadStream", () => {
 
     let thrown: unknown;
     try {
-      renderNode(root.props.children as FigElement);
+      void renderNode(root.props.children as FigElement);
     } catch (error) {
       thrown = error;
     }

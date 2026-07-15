@@ -569,6 +569,29 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("streams promise-valued children through Suspense", async () => {
+    const pending = deferred<string>();
+    const child = pending.promise.then((value) =>
+      createElement("span", null, value),
+    );
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        child,
+      ),
+    );
+
+    await result.shellReady;
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).toContain("<span>Ready</span>");
+    expect(html).toContain('__figSSR.c("b-0","s-0")');
+  });
+
   it("separates text across suspended segment seams", async () => {
     const pending = deferred<string>();
 

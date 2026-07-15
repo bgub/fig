@@ -1,5 +1,6 @@
 import type { FigDataHydrationEntry } from "./data.ts";
 import {
+  type AwaitedFigNode,
   createElement,
   type ElementType,
   type FigElement,
@@ -160,7 +161,7 @@ class PayloadDecodeAbortedError extends Error {
 export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
   options: PayloadDecodeOptions = {},
-): Promise<FigNode> {
+): Promise<AwaitedFigNode> {
   return new PayloadStreamDecode(stream, options).value;
 }
 
@@ -205,7 +206,7 @@ function decodeAssetResources(
 }
 
 class PayloadStreamDecode {
-  readonly value: Promise<FigNode>;
+  readonly value: Promise<AwaitedFigNode>;
 
   private readonly chunks = new Map<number, DecodeChunk>();
   private readonly objectRefs = new Map<number, unknown>();
@@ -243,7 +244,7 @@ class PayloadStreamDecode {
     this.rowDecoder = jsonPayloadCodec.createDecoder((row) =>
       this.handleRow(row),
     );
-    this.value = this.chunkPromise(this.getChunk(0)) as Promise<FigNode>;
+    this.value = this.chunkPromise(this.getChunk(0)) as Promise<AwaitedFigNode>;
 
     void this.ingest(stream);
 

@@ -2168,7 +2168,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
         const consumedBefore = root.consumedPendingQueues.length;
-        (node.type as Component)(node.props);
+        void (node.type as Component)(node.props);
         if (currentHook !== null) throw hookOrderError("fewer");
         restoreConsumedPendingQueues(root, consumedBefore);
         prepareHookRender(node, root);

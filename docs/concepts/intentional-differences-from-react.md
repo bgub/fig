@@ -36,7 +36,7 @@ Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks, Sus
 - `transition` (startTransition).
 - `useStableEvent` (useEffectEvent): "stable" names the identity guarantee rather than tying the hook to effects — Fig's version is the general escape-from-reactivity primitive (usable from handlers, timers, and subscriptions, not effects-only) and carries the Fig event contract (trailing `AbortSignal`, aborted on re-entry and unmount). Not `useEvent`: bare "event" collides with the `events`/`on()` listener vocabulary.
 - `StateSetter<S>` is the one `useState` setter type — there is no `Dispatch`/`SetStateAction` reducer vocabulary.
-- `FigNode` is the one children type — no `FigChild`/`ReactChild`-style duplicate. (Internally, `collectChildren` returns `NormalizedChild`: element | portal | string.)
+- `FigNode` is the one children type — no `FigChild`/`ReactChild`-style duplicate — and includes promises of nodes as Suspense-aware child slots. (Internally, settled `collectChildren` output remains `NormalizedChild`: element | portal | string.)
 - `bind` (ref), `events` (the `on*` prop family), `unsafeHTML` (dangerouslySetInnerHTML), `readContext`/`readPromise`/`readData` (use).
 - The server render entry points form one grid — `renderToStream`, `renderToDocumentStream`, `renderToHtml`, `renderToDocumentHtml` — and none reuse React names: `renderToHtml` is honestly "the streamed output, buffered" (runtime scripts included), not React's settled, script-free `renderToString`.
 - `prerender` is the separate static semantic: it waits for all async server work before emitting HTML, so completed Suspense content appears in logical position without streaming reveal scripts.
