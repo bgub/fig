@@ -119,34 +119,39 @@ export interface FigDataStoreHost {
 
 export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 
-// The internal, generation-guarded hydration capability a store attaches to
-// each loader context (symbol-keyed: DataResourceLoadContext stays { signal }
-// publicly). Adapters that decode payload streams (fig-dom's
-// payloadDataLoader) use it to hydrate `data` rows through the calling store;
-// it ignores entries once the load's generation has lost authority.
+// The internal, generation-guarded capabilities a store attaches to each
+// loader context (symbol-keyed: DataResourceLoadContext stays { signal }
+// publicly). Adapters that decode payload streams use them to hydrate `data`
+// rows and attribute rejected holes through the calling store.
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
 ) => void;
+export type LoadContextAttributeError = (error: unknown) => void;
 
-const LoadContextHydrateSymbol = Symbol.for("fig.data-load-hydrate");
+export interface LoadContextCapabilities {
+  attributeError: LoadContextAttributeError;
+  hydrate: LoadContextHydrate;
+}
 
-export function defineLoadContextHydrate(
+const LoadContextCapabilitiesSymbol = Symbol.for("fig.data-load-context");
+
+export function defineLoadContextCapabilities(
   context: DataResourceLoadContext,
-  hydrate: LoadContextHydrate,
+  capabilities: LoadContextCapabilities,
 ): void {
-  Object.defineProperty(context, LoadContextHydrateSymbol, {
+  Object.defineProperty(context, LoadContextCapabilitiesSymbol, {
     configurable: true,
     enumerable: false,
-    value: hydrate,
+    value: capabilities,
   });
 }
 
-export function loadContextHydrate(
+export function loadContextCapabilities(
   context: DataResourceLoadContext,
-): LoadContextHydrate | undefined {
-  return (context as unknown as Record<symbol, LoadContextHydrate | undefined>)[
-    LoadContextHydrateSymbol
-  ];
+): LoadContextCapabilities | undefined {
+  return (
+    context as unknown as Record<symbol, LoadContextCapabilities | undefined>
+  )[LoadContextCapabilitiesSymbol];
 }
 
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
@@ -176,7 +181,7 @@ export function markDataResourceError(
   // registry is GC-safe and cannot cross-attribute. Primitive rejection values
   // would collide by value and accumulate forever in a plain Map, so a thrown
   // primitive simply carries no resource-key metadata.
-  if (!isObjectKey(error)) return;
+  if (!isAttributableError(error)) return;
 
   let keys = objectDataErrors.get(error);
   if (keys === undefined) {
@@ -192,7 +197,7 @@ export function markDataResourceError(
 export function dataResourceKeysForError(
   error: unknown,
 ): DataResourceKey[] | undefined {
-  if (!isObjectKey(error)) return undefined;
+  if (!isAttributableError(error)) return undefined;
 
   const keys = objectDataErrors.get(error);
   return keys === undefined || keys.length === 0 ? undefined : [...keys];
@@ -205,7 +210,10 @@ function sameDataResourceKey(a: DataResourceKey, b: DataResourceKey): boolean {
   );
 }
 
-function isObjectKey(value: unknown): value is object {
+// The single rule for which errors can carry attribution: identity-keyed
+// (WeakMap/WeakSet) registries require object errors. Shared with the store's
+// per-generation value-error sets so the two can never disagree.
+export function isAttributableError(value: unknown): value is object {
   return (
     (typeof value === "object" || typeof value === "function") && value !== null
   );

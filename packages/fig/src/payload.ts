@@ -108,6 +108,13 @@ export interface PayloadDecodeOptions {
    */
   hydrate?: (entries: readonly FigDataHydrationEntry[]) => void;
   /**
+   * Observes every outlined hole rejection — an `error` row or a stream
+   * failure stranding referenced rows, before or after the root fulfills.
+   * Abort cancellation is excluded. Called once per rejected hole; the
+   * observer is never awaited and cannot break decoding.
+   */
+  onHoleError?: (error: unknown) => void;
+  /**
    * Observes the end of ingestion: called exactly once when the stream
    * settles as complete, failed, or aborted. Post-root failures reject the
    * holes they strand, but a failure with no pending slot is otherwise
@@ -173,6 +180,7 @@ type DecodeChunk = {
   // only ever read through status/value, so eagerly allocating a promise and
   // its controls per row would be waste.
   deferred: Deferred<unknown> | null;
+  id: number;
   promise: Promise<unknown> | null;
   status: "pending" | "fulfilled" | "rejected";
   value: unknown;
@@ -475,6 +483,7 @@ class PayloadStreamDecode {
     const chunk: DecodeChunk = {
       arrived: false,
       deferred: null,
+      id,
       promise: null,
       status: "pending",
       value: undefined,
@@ -518,6 +527,18 @@ class PayloadStreamDecode {
     if (chunk.deferred !== null) {
       chunk.deferred.reject(error);
       void chunk.promise?.catch(noop);
+    }
+    if (chunk.id !== 0 && !(error instanceof PayloadDecodeAbortedError)) {
+      this.observeHoleError(error);
+    }
+  }
+
+  private observeHoleError(error: unknown): void {
+    try {
+      const observed = this.options.onHoleError?.(error) as unknown;
+      if (isThenable(observed)) void Promise.resolve(observed).then(noop, noop);
+    } catch {
+      // Error attribution/reporting is observational and cannot break decode.
     }
   }
 

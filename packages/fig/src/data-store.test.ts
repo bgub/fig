@@ -10,7 +10,10 @@ import {
 } from "./index.ts";
 import {
   createDataStore,
-  loadContextHydrate,
+  dataResourceKeysForError,
+  type LoadContextAttributeError,
+  type LoadContextHydrate,
+  loadContextCapabilities,
   normalizeDataResourceKey,
 } from "./internal.ts";
 
@@ -1047,13 +1050,234 @@ describe("generation-lifetime loader signals", () => {
   });
 });
 
+describe("load-context error attribution capability", () => {
+  it("attributes live-generation errors and ignores retired generations", async () => {
+    const captured: Array<LoadContextAttributeError | undefined> = [];
+    const resource = dataResource<[], string>({
+      key: () => ["payload-entry"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.attributeError);
+        return `value-${captured.length}`;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const liveError = new Error("live hole");
+    captured[0]?.(liveError);
+    expect(dataResourceKeysForError(liveError)).toEqual([["payload-entry"]]);
+
+    await store.refreshData(resource);
+    const retiredError = new Error("retired hole");
+    captured[0]?.(retiredError);
+    expect(dataResourceKeysForError(retiredError)).toBeUndefined();
+
+    const successorError = new Error("successor hole");
+    captured[1]?.(successorError);
+    expect(dataResourceKeysForError(successorError)).toEqual([
+      ["payload-entry"],
+    ]);
+  });
+
+  it("retires a value whose hole error was attributed before publish", async () => {
+    // A hole's error row can share a network chunk with the root row (a
+    // server component that throws synchronously), so attribution fires
+    // before the loader's returned promise settles. It must survive publish.
+    const holeError = new Error("sync hole");
+    const gate = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["pre-publish-hole"],
+      load: (context) => {
+        loads += 1;
+        if (loads === 1) {
+          loadContextCapabilities(context)?.attributeError(holeError);
+          return "broken";
+        }
+        return gate.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    expect(dataResourceKeysForError(holeError)).toEqual([["pre-publish-hole"]]);
+    expect(store.invalidateDataError(holeError)).toBe(true);
+
+    // Retired, not served stale: the next read suspends on a fresh load
+    // instead of returning the broken value.
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(loads).toBe(2);
+    expect(thrown).toBeInstanceOf(Promise);
+    gate.resolve("fresh");
+    await waitForNextMacrotask();
+    expect(store.readData(resource, [], {})).toBe("fresh");
+  });
+
+  it("attributes through a superseding refresh's window", async () => {
+    const captured: Array<LoadContextAttributeError | undefined> = [];
+    const gate = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["refresh-window-hole"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.attributeError);
+        loads += 1;
+        return loads === 1 ? "v1" : gate.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const refresh = store.refreshData(resource);
+
+    // The visible value keeps its authority — and keeps attributing — until
+    // the successor publishes.
+    const holeError = new Error("window hole");
+    captured[0]?.(holeError);
+    expect(dataResourceKeysForError(holeError)).toEqual([
+      ["refresh-window-hole"],
+    ]);
+    expect(store.invalidateDataError(holeError)).toBe(true);
+
+    // The broken value is retired; the in-flight refresh delivers recovery.
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Promise);
+    gate.resolve("v2");
+    await refresh;
+    expect(store.readData(resource, [], {})).toBe("v2");
+  });
+
+  it("rejects cleanly when the refresh fails after the broken value was retired", async () => {
+    const captured: Array<LoadContextAttributeError | undefined> = [];
+    let failRefresh: (error: unknown) => void = () => undefined;
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["retire-then-reject"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.attributeError);
+        loads += 1;
+        if (loads === 1) return "v1";
+        return new Promise<string>((_resolve, reject) => {
+          failRefresh = reject;
+        });
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const refresh = store.refreshData(resource);
+
+    const holeError = new Error("window hole");
+    captured[0]?.(holeError);
+    expect(store.invalidateDataError(holeError)).toBe(true);
+
+    // The in-flight refresh fails, but the value it was refreshing is
+    // already retired: the entry must reject with the refresh error, not
+    // resurrect the retired value as a fulfilled `undefined`.
+    const refreshError = new Error("refresh failed");
+    failRefresh(refreshError);
+    const result = await refresh;
+    expect(result).toEqual({ error: refreshError, status: "rejected" });
+
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(refreshError);
+    expect(loads).toBe(2);
+  });
+
+  it("keeps the previous value when a failed refresh attributed a hole error", async () => {
+    const refreshHole = new Error("refresh hole");
+    const stuck = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["failed-refresh-hole"],
+      load: (context) => {
+        loads += 1;
+        if (loads === 2) {
+          loadContextCapabilities(context)?.attributeError(refreshHole);
+          return Promise.reject(new Error("refresh failed"));
+        }
+        return loads === 1 ? "v1" : stuck.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const refresh = await store.refreshData(resource);
+    expect(refresh.status).toBe("rejected");
+
+    // The failed generation never published; invalidating its hole error
+    // marks the entry stale but must not retire the live previous value.
+    expect(store.invalidateDataError(refreshHole)).toBe(true);
+    expect(store.readData(resource, [], {})).toBe("v1");
+    expect(loads).toBe(3);
+  });
+
+  it("hydrating over an entry clears its attributed hole errors", async () => {
+    const captured: Array<LoadContextAttributeError | undefined> = [];
+    const stuck = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["hydrate-over-hole"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.attributeError);
+        loads += 1;
+        return loads === 1 ? "v1" : stuck.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const holeError = new Error("stale hole");
+    captured[0]?.(holeError);
+    store.hydrate([{ key: ["hydrate-over-hole"], value: "pushed" }]);
+
+    // The error still names the key, but the hydrated value is not the
+    // broken one: invalidating marks it stale without retiring it.
+    expect(store.invalidateDataError(holeError)).toBe(true);
+    expect(store.readData(resource, [], {})).toBe("pushed");
+  });
+});
+
 describe("load-context hydrate capability", () => {
   function capturingResource(key: string) {
-    const captured: Array<ReturnType<typeof loadContextHydrate>> = [];
+    const captured: Array<LoadContextHydrate | undefined> = [];
     const resource = dataResource<[string], string>({
       key: (id: string) => [key, id],
       load: (_id, context) => {
-        captured.push(loadContextHydrate(context));
+        captured.push(loadContextCapabilities(context)?.hydrate);
         return `value-${captured.length}`;
       },
     });
@@ -1079,6 +1303,33 @@ describe("load-context hydrate capability", () => {
     expect(store.snapshot()).toEqual(
       expect.arrayContaining([
         { key: ["cap-user", "1"], value: { name: "Ada" } },
+      ]),
+    );
+  });
+
+  it("keeps hydrating through a superseding refresh's window", async () => {
+    const captured: Array<LoadContextHydrate | undefined> = [];
+    const stuck = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["cap-window"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.hydrate);
+        loads += 1;
+        return loads === 1 ? "v1" : stuck.promise;
+      },
+    });
+    const store = capabilityStore();
+
+    await store.refreshData(resource);
+    void store.refreshData(resource);
+
+    // The visible generation keeps its authority — and its data rows keep
+    // hydrating — until the successor publishes, not when it merely starts.
+    captured[0]?.([{ key: ["cap-window-user", "1"], value: "streamed" }]);
+    expect(store.snapshot()).toEqual(
+      expect.arrayContaining([
+        { key: ["cap-window-user", "1"], value: "streamed" },
       ]),
     );
   });
@@ -1109,7 +1360,7 @@ describe("load-context hydrate capability", () => {
       key: (id: string) => ["cap-self", id],
       load: (_id, context) => {
         signals.push(context.signal);
-        captured.push(loadContextHydrate(context));
+        captured.push(loadContextCapabilities(context)?.hydrate);
         return "loader-value";
       },
     });
@@ -1135,11 +1386,11 @@ describe("load-context hydrate capability", () => {
 
   it("hydrates mid-load, before the loader settles", async () => {
     const gate = deferred<string>();
-    let hydrate: ReturnType<typeof loadContextHydrate>;
+    let hydrate: LoadContextHydrate | undefined;
     const resource = dataResource<[string], string>({
       key: (id: string) => ["cap-midload", id],
       load: (_id, context) => {
-        hydrate = loadContextHydrate(context);
+        hydrate = loadContextCapabilities(context)?.hydrate;
         return gate.promise;
       },
     });

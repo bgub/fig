@@ -347,12 +347,13 @@ describe("decodePayloadStream", () => {
 
   it("rejects a hole through its error row while the root stays fulfilled", async () => {
     const { done, onStreamDone } = streamDone();
+    const holeErrors: unknown[] = [];
     const decode = decodeRows(
       [
         model(0, element("div", { children: { $fig: "lazy", id: 1 } })),
         { id: 1, tag: "error", value: { digest: "hole-digest" } },
       ],
-      { onStreamDone },
+      { onHoleError: (error) => holeErrors.push(error), onStreamDone },
     );
 
     const root = (await decode) as FigElement;
@@ -361,11 +362,12 @@ describe("decodePayloadStream", () => {
 
     let thrown: unknown;
     try {
-      renderNode(root.props.children as FigElement);
+      void renderNode(root.props.children as FigElement);
     } catch (error) {
       thrown = error;
     }
     expect((thrown as { digest?: string }).digest).toBe("hole-digest");
+    expect(holeErrors).toEqual([thrown]);
   });
 
   it("rejects unresolved holes when the stream truncates after the root", async () => {
@@ -403,10 +405,12 @@ describe("decodePayloadStream", () => {
 
   it("aborts idempotently, rejecting unresolved holes with an internal abort reason", async () => {
     const { done, onStreamDone } = streamDone();
+    const holeErrors: unknown[] = [];
     const controller = new AbortController();
     const source = controlledRowStream();
     const decode = decodePayloadStream(source.stream, {
       onStreamDone,
+      onHoleError: (error) => holeErrors.push(error),
       signal: controller.signal,
     });
 
@@ -424,6 +428,7 @@ describe("decodePayloadStream", () => {
     expect((reason as Error & { cause?: unknown }).cause).toBe(
       "navigated away",
     );
+    expect(holeErrors).toEqual([]);
   });
 
   it("aborts through options.signal, including an already-aborted signal", async () => {

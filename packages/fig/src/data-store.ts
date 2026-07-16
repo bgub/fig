@@ -7,12 +7,13 @@ import {
   type DataResourceLoader,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
-  defineLoadContextHydrate,
+  defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataStore,
   type FigDataStoreFactory,
   type FigDataStoreHandle,
+  isAttributableError,
   markDataResourceError,
   resolveCurrentDataStore,
   setCurrentDataStore,
@@ -57,6 +58,10 @@ interface Entry<Owner extends object, Lane> {
   // stale value keeps streaming through the refresh window, and a failed
   // refresh leaves it fully alive.
   valueController: AbortController | null;
+  // Errors rejected by streamed holes inside the authoritative fulfilled
+  // value. Invalidating one retires that broken value instead of serving it
+  // stale into a freshly remounted ErrorBoundary.
+  valueErrors: WeakSet<object>;
   error: unknown;
   fingerprint: string | null;
   generation: number;
@@ -435,7 +440,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       if (entry !== null) entries.push(entry);
     }
 
-    this.invalidateEntries(entries);
+    this.invalidateEntries(entries, error);
     return true;
   }
 
@@ -657,6 +662,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       subscribers: new Set(),
       value,
       valueController: null,
+      valueErrors: new WeakSet(),
     };
   }
 
@@ -669,6 +675,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.abortEntryGenerations(entry, "superseded");
     entry.error = undefined;
     entry.generation += 1;
+    // The hydrated value replaces whatever attributed hole errors the old
+    // value carried; a boundary still holding one must not retire it.
+    entry.valueErrors = new WeakSet();
     entry.invalidationVersion = 0;
     entry.key = key;
     entry.lane = null;
@@ -710,6 +719,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     this.abortPendingLoad(entry, "superseded");
     const controller = new AbortController();
+    // This generation's attributed hole errors. Allocated per load and
+    // installed on the entry only at publish: attribution can fire before the
+    // root value settles (a hole's error row can share a network chunk with
+    // the root row), so the set must survive fulfillment, and a generation
+    // that never publishes must never make the entry's live value
+    // invalidatable through its own errors.
+    const valueErrors = new WeakSet<object>();
     const generation = entry.generation + 1;
     const invalidationVersion = entry.invalidationVersion;
     const pending = createPendingResult<TValue>();
@@ -725,7 +741,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     try {
       loaded = load(
         ...args,
-        this.createLoadContext(entry, generation, controller),
+        this.createLoadContext(entry, controller, valueErrors),
       );
     } catch (error) {
       loaded = Promise.reject(error);
@@ -749,6 +765,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // live for the background work still streaming into the value.
       entry.controller = null;
       entry.valueController = controller;
+      entry.valueErrors = valueErrors;
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
@@ -778,7 +795,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       controller.abort();
       entry.pending = null;
 
-      if (hadValue) {
+      if (hadValue && entryHasValue(entry)) {
         entry.refreshError = error;
         entry.stale = true;
         entry.status = "fulfilled";
@@ -813,36 +830,46 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private createLoadContext(
     entry: Entry<Owner, Lane>,
-    generation: number,
     controller: AbortController,
+    valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
-    defineLoadContextHydrate(context, (entries) => {
-      // Server-pushed rows hydrate only while this load's generation is
-      // authoritative; a superseded, evicted, or disposed decode cannot
-      // mutate the store.
-      if (
-        this.disposed ||
-        entry.generation !== generation ||
-        controller.signal.aborted
-      ) {
-        return;
-      }
+    defineLoadContextCapabilities(context, {
+      attributeError: (error) => {
+        // A fulfilled payload value may reject one of its streamed holes later.
+        // Attribute that error for as long as this generation's signal is live —
+        // the signal's lifetime IS its authority, so a visible value keeps
+        // attributing through a superseding refresh's window. Retired decodes
+        // must not make their successor invalidatable by a stale error object;
+        // the errors land in this generation's own set, which reaches the entry
+        // only if this generation publishes.
+        if (this.disposed || controller.signal.aborted) return;
+        markDataResourceError(error, entry.key);
+        if (isAttributableError(error)) valueErrors.add(error);
+      },
+      hydrate: (entries) => {
+        // Server-pushed rows hydrate for as long as this generation's signal
+        // is live — the same authority window as attributeError. A visible
+        // value keeps hydrating through a superseding refresh's window;
+        // retired, evicted, and disposed decodes cannot mutate the store
+        // (every retirement path aborts the signal).
+        if (this.disposed || controller.signal.aborted) return;
 
-      // The loading entry's own value comes from the loader's return, never
-      // from a data row: hydrating its key here would supersede — and abort —
-      // the very load delivering it.
-      const foreign = entries.filter(
-        (hydrated) =>
-          this.storeKey(normalizeKey(hydrated.key).canonical) !==
-          entry.storeKey,
-      );
-      if (__DEV__ && foreign.length !== entries.length) {
-        warn(
-          `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
+        // The loading entry's own value comes from the loader's return, never
+        // from a data row: hydrating its key here would supersede — and abort —
+        // the very load delivering it.
+        const foreign = entries.filter(
+          (hydrated) =>
+            this.storeKey(normalizeKey(hydrated.key).canonical) !==
+            entry.storeKey,
         );
-      }
-      if (foreign.length > 0) this.hydrate(foreign);
+        if (__DEV__ && foreign.length !== entries.length) {
+          warn(
+            `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
+          );
+        }
+        if (foreign.length > 0) this.hydrate(foreign);
+      },
     });
     return context;
   }
@@ -996,13 +1023,27 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     throw entry.pending.promise;
   }
 
-  private invalidateEntry(entry: Entry<Owner, Lane>, lane: Lane): void {
+  private invalidateEntry(
+    entry: Entry<Owner, Lane>,
+    lane: Lane,
+    attributedError?: unknown,
+  ): void {
     entry.invalidationVersion += 1;
     entry.stale = true;
     // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
     entry.refreshError = undefined;
-    if (entry.status === "rejected") {
+    if (
+      isAttributableError(attributedError) &&
+      entry.valueErrors.has(attributedError)
+    ) {
+      entry.valueController?.abort();
+      entry.valueController = null;
+      entry.valueErrors = new WeakSet();
+      entry.value = undefined;
+      entry.error = undefined;
+      entry.status = "pending";
+    } else if (entry.status === "rejected") {
       // The same intent applies to a cached rejection: without this, every
       // read rethrows the old error forever — remounting an ErrorBoundary
       // could never recover. Back to pending, so the next read loads afresh.
@@ -1015,11 +1056,16 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.scheduleSubscribers(entry, lane);
   }
 
-  private invalidateEntries(entries: readonly Entry<Owner, Lane>[]): void {
+  private invalidateEntries(
+    entries: readonly Entry<Owner, Lane>[],
+    attributedError?: unknown,
+  ): void {
     if (entries.length === 0) return;
 
     const lane = this.host.getLane();
-    for (const entry of entries) this.invalidateEntry(entry, lane);
+    for (const entry of entries) {
+      this.invalidateEntry(entry, lane, attributedError);
+    }
   }
 }
 

@@ -7,7 +7,7 @@ import type { FigAssetResource } from "@bgub/fig";
 import {
   assertPayloadCodecMatches,
   jsonPayloadCodec,
-  loadContextHydrate,
+  loadContextCapabilities,
 } from "@bgub/fig/internal";
 import {
   decodePayloadStream,
@@ -87,10 +87,12 @@ export function payloadDataLoader<TArgs extends unknown[]>(
       throw error;
     }
 
+    const capabilities = loadContextCapabilities(context);
     return decodePayloadStream(body, {
       // Absent outside a data store (the loader called directly): data rows
       // are then ignored rather than hydrated.
-      hydrate: loadContextHydrate(context),
+      hydrate: capabilities?.hydrate,
+      onHoleError: capabilities?.attributeError,
       // Post-root failures surface through the rejected holes they strand;
       // observing the stream end keeps a failure that no longer has a
       // pending slot from being silently discarded in development.
