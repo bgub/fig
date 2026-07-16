@@ -24,7 +24,7 @@ Every Fig callback that outlives its call site receives an `AbortSignal` instead
 
 ## Effects
 
-`useReactive` (useEffect), `useBeforePaint` (useLayoutEffect), and `useBeforeLayout` (useInsertionEffect) are named for when they run. Effects must return `undefined` — the type makes a React-style returned cleanup a compile error. There is no mount-only hook; `useReactive(fn, [])` is the idiom. Dependency arrays are the honest choice without a compiler; the signal is for cleanup, not tracking. Effects run with the ambient data store set, so data APIs work synchronously inside them.
+`useReactive` (useEffect), `useBeforePaint` (useLayoutEffect), and `useBeforeLayout` (useInsertionEffect) are named for when they run. Commit runs `useBeforeLayout` before host mutations, applies host mutations and publishes the finished tree, then runs `useBeforePaint` before yielding for paint. `useReactive` is scheduled separately at normal priority; if another render starts before it fires, pending reactive effects flush before that render. Effects must return `undefined` — the type makes a React-style returned cleanup a compile error. There is no mount-only hook; `useReactive(fn, [])` is the idiom. Dependency arrays are the honest choice without a compiler; the signal is for cleanup, not tracking. Effects run with the ambient data store set, so data APIs work synchronously inside them.
 
 In development, scheduling state from `useBeforeLayout` throws a diagnostic because that phase runs before host mutations. The diagnostic is raised through the normal effect-error path, so an ancestor ErrorBoundary may capture it; production builds do not include the diagnostic and the update follows normal scheduling.
 

@@ -1,6 +1,6 @@
 # Data resources
 
-Fig data resources are keyed async values tied into rendering, scheduling, SSR, and hydration. Doc 2 showed the API in passing; doc 4 built the suspense and streaming machinery it rides on. This doc is the whole model, which is intentionally small:
+Fig data resources are keyed async values tied into rendering, scheduling, SSR, and hydration. Doc 1 showed the API in passing; doc 4 built the suspense and streaming machinery it rides on. This doc is the whole model, which is intentionally small:
 
 - a per-root store of entries keyed by resource keys
 - a render-time read verb: `readData`

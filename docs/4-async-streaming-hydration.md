@@ -1,14 +1,14 @@
 # Async, streaming & hydration
 
-Doc 3 built the machine — lanes, the work loop, render, commit — and followed an update through it that never had to wait for anything. This doc is what happens when a component isn't ready: on the client (suspense and transitions), on the server (streaming), and across the two (hydration).
+Doc 2 built the machine — lanes, the work loop, render, and commit — and doc 3 followed a normal update through its lifecycle. This doc is what happens when a component isn't ready: on the client (suspense and transitions), on the server (streaming), and across the two (hydration).
 
 ## The async lifecycle
 
-Everything async in Fig rides one trick: `readPromise` and `readData` _throw_ the pending promise. A component that isn't ready doesn't return partial UI — it throws, the render abandons that attempt, and the machinery from doc 3 (lanes, parked work, retries) handles the rest.
+Everything async in Fig rides one trick: `readPromise` and `readData` _throw_ the pending promise. A component that isn't ready doesn't return partial UI — it throws, the render abandons that attempt, and the machinery from doc 2 (lanes, parked work, retries) handles the rest.
 
 ### What happens when a render suspends
 
-- The thrown promise propagates out of the render. The WIP attempt is discarded, and the lanes being rendered are marked suspended on the root — this is the `suspendedLanes` skip from doc 3's scheduler section: `getNextLanes` passes over them, so Fig doesn't busy-loop re-rendering something that can't finish.
+- The thrown promise propagates out of the render. The WIP attempt is discarded, and the lanes being rendered are marked suspended on the root. The scheduler passes over them, so Fig doesn't busy-loop re-rendering something that can't finish.
 - Fig attaches a listener to the promise. When it settles (either way!), it "pings" the root: the suspended lanes go into `pingedLanes` and become schedulable again. The re-render runs, and this time `readPromise` returns the value (or throws the real error).
 - Rejection means the error is thrown at the read site on the retry render, so it routes to the nearest `ErrorBoundary` like any render error. One carve-out: an aborted run's rejection is swallowed — cancellation is not an error in Fig.
 
@@ -16,11 +16,11 @@ Everything async in Fig rides one trick: `readPromise` and `readData` _throw_ th
 
 - The nearest `Suspense` boundary above the suspension catches it: the primary content is set aside and the fallback is committed. Retries schedule on `RetryLane`s — low priority, excluded from expiration, genuinely background.
 - Re-suspension after content already showed: the committed primary is kept hidden, not destroyed. State, effect instances, and DOM survive under the fallback and come back on reveal.
-- State updates targeting content inside a hidden or suspended subtree get demoted to `OffscreenLane` (doc 3's lane table), so background trees can't preempt visible work.
+- State updates targeting content inside a hidden or suspended subtree get demoted to `OffscreenLane` (see doc 2's lane section), so background trees can't preempt visible work.
 
 ### Transitions + suspense
 
-This is why transitions exist. Suppose doc 3's `ExpensiveChart` had also read data that wasn't cached yet: a transition render that suspends doesn't yank the current screen. The transition lanes just park (suspended), the committed tree stays up and interactive, `isPending` stays true, and the ping restarts the background render when data arrives. The user sees old screen → new screen, never old screen → fallback → new screen.
+This is why transitions exist. Suppose doc 2's `ExpensiveChart` had also read data that wasn't cached yet: a transition render that suspends doesn't yank the current screen. The transition lanes just park (suspended), the committed tree stays up and interactive, `isPending` stays true, and the ping restarts the background render when data arrives. The user sees old screen → new screen, never old screen → fallback → new screen.
 
 ### Cancellation
 
@@ -70,7 +70,7 @@ Hydration is the client render adopting the server's DOM instead of creating nod
 
 ### Dehydrated boundaries are first-class
 
-fig-dom parses the streaming markers (`<!--fig:suspense:...-->`) into `DehydratedSuspenseBoundary` objects — marker knowledge lives in the renderer package, behind hydration host hooks. A dehydrated boundary commits _as_ a fiber without touching its server DOM: the tree around it is live and interactive while the boundary hydrates later, at its own priority (the hydration-twin lanes from doc 3's taxonomy). Streaming and hydration overlap freely — segments can still be arriving while hydration proceeds, and a boundary whose content completes gets its retry scheduled (the `c` op pings the retry hook the client attached).
+fig-dom parses the streaming markers (`<!--fig:suspense:...-->`) into `DehydratedSuspenseBoundary` objects — marker knowledge lives in the renderer package, behind hydration host hooks. A dehydrated boundary commits _as_ a fiber without touching its server DOM: the tree around it is live and interactive while the boundary hydrates later, at its own priority. Streaming and hydration overlap freely — segments can still be arriving while hydration proceeds, and a boundary whose content completes gets its retry scheduled (the `c` op pings the retry hook the client attached).
 
 ### Selective hydration
 
