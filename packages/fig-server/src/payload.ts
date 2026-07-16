@@ -563,8 +563,9 @@ function serializeFunctionComponent(
 
   try {
     const result = type(props);
-    const node = isThenable(result) ? readThenable(result) : result;
-    return serializeNode(node as FigNode, frame);
+    return isThenable(result)
+      ? serializeNodeOrLazy(result as FigNode, frame)
+      : serializeNode(result as FigNode, frame);
   } catch (error) {
     recordErrorStack(error, frame.stack);
     throw error;

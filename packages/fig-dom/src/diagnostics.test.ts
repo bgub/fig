@@ -1,7 +1,12 @@
-import { createElement, type FigNode } from "@bgub/fig";
+import { createElement, type FigNode, Suspense } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createPortal, createRoot, flushSync } from "./index.ts";
-import { FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  deferred,
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
 
 installFakeDocument();
 
@@ -51,6 +56,47 @@ describe("@bgub/fig-dom diagnostics", () => {
       createElement(Broken, null),
       "Invalid Fig child: object with keys nope.",
     );
+  });
+
+  it("throws on async client components before commit", () => {
+    let renders = 0;
+
+    async function AsyncComponent() {
+      renders += 1;
+      return createElement("span", null, "Async");
+    }
+
+    expectRenderDiagnostic(
+      createElement(AsyncComponent, null),
+      "Client components must not return a new promise per render (async components are unsupported on the client). Use readPromise or readData.",
+    );
+    expect(renders).toBe(2);
+  });
+
+  it("allows components to pass through stable promise children", async () => {
+    const pending = deferred<string>();
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    function Layout({ children }: { children?: FigNode }) {
+      return children;
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement(Layout, null, pending.promise),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("Loading");
+
+    pending.resolve("Ready");
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("Ready");
   });
 
   it("throws when unsafeHTML is mixed with children", () => {

@@ -532,6 +532,35 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.textContent).toBe("ab");
   });
 
+  it("hydrates text seams around a resolved promise child", async () => {
+    const pending = deferred<string>();
+    const app = createElement(
+      "div",
+      null,
+      "Before ",
+      pending.promise,
+      " after",
+    );
+    const rendering = prerender(app);
+    await Promise.resolve();
+    pending.resolve("middle");
+
+    const { html } = await rendering;
+    const container = containerFromHtml(html);
+    const server = container.childNodes[0];
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.childNodes[0]).toBe(server);
+    expect(container.textContent).toBe("Before middle after");
+  });
+
   it("hydrates parsed server output with text seams beside Suspense", async () => {
     function Name() {
       return "Ben";

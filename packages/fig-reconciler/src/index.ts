@@ -2163,22 +2163,25 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousDispatcher = setCurrentDispatcher(dispatcher);
     const previousDataStore = setCurrentDataStore(root.dataStore);
     try {
+      let shadowResult: FigNode | undefined;
       if (__DEV__) {
         // Strict shadow pass: invoke the component once and discard every
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
         const consumedBefore = root.consumedPendingQueues.length;
-        void (node.type as Component)(node.props);
+        shadowResult = (node.type as Component)(node.props);
         if (currentHook !== null) throw hookOrderError("fewer");
         restoreConsumedPendingQueues(root, consumedBefore);
         prepareHookRender(node, root);
         node.effects = null;
       }
-      reconcileCurrentChildren(
-        node,
-        (node.type as Component)(node.props),
-        root,
-      );
+      const result = (node.type as Component)(node.props);
+      if (__DEV__ && isThenable(result) && result !== shadowResult) {
+        throw new Error(
+          "Client components must not return a new promise per render (async components are unsupported on the client). Use readPromise or readData.",
+        );
+      }
+      reconcileCurrentChildren(node, result, root);
       if (currentHook !== null) throw hookOrderError("fewer");
     } finally {
       setCurrentDataStore(previousDataStore);

@@ -675,6 +675,70 @@ describe("payload rendering", () => {
     ]);
   });
 
+  it("streams rejected promise-valued children as error rows", async () => {
+    const pending = deferred<string>();
+    const errors: unknown[] = [];
+    const result = renderToPayloadStream(
+      createElement("div", null, pending.promise),
+      {
+        onError(error) {
+          errors.push(error);
+          return { digest: "child-digest" };
+        },
+      },
+    );
+
+    const error = new Error("child failed");
+    pending.reject(error);
+    await result.allReady;
+
+    expect(errors).toEqual([error]);
+    expect(parseTestPayloadRows(await readStream(result.stream))).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "div", {
+          children: { $fig: "lazy", id: 1 },
+        }),
+      },
+      {
+        id: 1,
+        tag: "error",
+        value: { digest: "child-digest" },
+      },
+    ]);
+  });
+
+  it("captures an async component result as the lazy task", async () => {
+    let renders = 0;
+
+    function AsyncMessage() {
+      renders += 1;
+      if (renders > 3) throw new Error("async component was reinvoked");
+      return Promise.resolve(createElement("span", null, "Ready"));
+    }
+
+    const rows = await renderToPayloadRows(
+      createElement("div", null, createElement(AsyncMessage, null)),
+    );
+
+    expect(renders).toBe(1);
+    expect(rows).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "div", {
+          children: { $fig: "lazy", id: 1 },
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(4, "span", { children: "Ready" }),
+      },
+    ]);
+  });
+
   it("streams lazy component loaders as lazy rows", async () => {
     function Message() {
       return createElement("span", null, "Lazy ready");

@@ -14,8 +14,8 @@ export type StreamingChild =
   | NormalizedChild
   | Extract<FigNode, Promise<unknown>>;
 
-interface ChildCollector<TChild> {
-  children: TChild[];
+interface ChildCollector {
+  children: StreamingChild[];
   mergeText: boolean;
 }
 
@@ -24,12 +24,7 @@ interface ChildCollector<TChild> {
 // merged text nodes into HTML, and hydration matches them against the
 // client's fiber children — divergence is a hydration mismatch.
 export function collectChildren(node: FigNode): NormalizedChild[] {
-  const collector: ChildCollector<NormalizedChild> = {
-    children: [],
-    mergeText: true,
-  };
-  collectChild(node, collector);
-  return collector.children;
+  return collectChildSequence(node, "settled");
 }
 
 // Streaming keeps a pending thenable as its own child slot so the server can
@@ -38,82 +33,70 @@ export function collectChildren(node: FigNode): NormalizedChild[] {
 // on either side, so hydration sees the same fibers whether the promise was
 // pending or already fulfilled when each renderer encountered it.
 export function collectStreamingChildren(node: FigNode): StreamingChild[] {
-  const collector: ChildCollector<StreamingChild> = {
+  return collectChildSequence(node, "streaming");
+}
+
+function collectChildSequence(
+  node: FigNode,
+  mode: "settled",
+): NormalizedChild[];
+function collectChildSequence(
+  node: FigNode,
+  mode: "streaming",
+): StreamingChild[];
+function collectChildSequence(
+  node: FigNode,
+  mode: "settled" | "streaming",
+): StreamingChild[] {
+  const collector: ChildCollector = {
     children: [],
     mergeText: true,
   };
-  collectStreamingChild(node, collector);
+  collectChild(node, collector, mode === "streaming");
   return collector.children;
 }
 
 function collectChild(
-  node: unknown,
-  collector: ChildCollector<NormalizedChild>,
+  child: unknown,
+  collector: ChildCollector,
+  streaming: boolean,
 ): void {
-  if (isThenable(node)) {
-    collector.mergeText = false;
-    collectChild(readThenable(node), collector);
-    collector.mergeText = false;
+  if (isThenable(child)) {
+    if (streaming) {
+      // The promise slot itself prevents text on either side from merging.
+      collector.children.push(child as Extract<FigNode, Promise<unknown>>);
+    } else {
+      collector.mergeText = false;
+      collectChild(readThenable(child), collector, false);
+      collector.mergeText = false;
+    }
     return;
   }
 
-  if (Array.isArray(node)) {
-    for (const child of node) collectChild(child, collector);
+  if (Array.isArray(child)) {
+    for (const nested of child) collectChild(nested, collector, streaming);
     return;
   }
 
-  if (node === null || node === undefined || typeof node === "boolean") return;
-
-  if (typeof node === "string" || typeof node === "number") {
-    appendTextChild(collector, String(node));
+  if (child === null || child === undefined || typeof child === "boolean") {
     return;
   }
 
-  if (isValidElement(node) || isPortal(node)) {
-    collector.children.push(node);
+  if (typeof child === "string" || typeof child === "number") {
+    appendTextChild(collector, String(child));
+    return;
+  }
+
+  if (isValidElement(child) || isPortal(child)) {
+    collector.children.push(child);
     collector.mergeText = true;
     return;
   }
 
-  throw invalidChildError(node);
+  throw invalidChildError(child);
 }
 
-function collectStreamingChild(
-  node: unknown,
-  collector: ChildCollector<StreamingChild>,
-): void {
-  if (isThenable(node)) {
-    collector.mergeText = false;
-    collector.children.push(node as Extract<FigNode, Promise<unknown>>);
-    collector.mergeText = false;
-    return;
-  }
-
-  if (Array.isArray(node)) {
-    for (const child of node) collectStreamingChild(child, collector);
-    return;
-  }
-
-  if (node === null || node === undefined || typeof node === "boolean") return;
-
-  if (typeof node === "string" || typeof node === "number") {
-    appendTextChild(collector, String(node));
-    return;
-  }
-
-  if (isValidElement(node) || isPortal(node)) {
-    collector.children.push(node);
-    collector.mergeText = true;
-    return;
-  }
-
-  throw invalidChildError(node);
-}
-
-function appendTextChild(
-  collector: ChildCollector<StreamingChild>,
-  text: string,
-): void {
+function appendTextChild(collector: ChildCollector, text: string): void {
   const previous = collector.children.at(-1);
 
   if (collector.mergeText && typeof previous === "string") {

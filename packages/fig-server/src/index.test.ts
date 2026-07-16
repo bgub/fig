@@ -592,6 +592,49 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('__figSSR.c("b-0","s-0")');
   });
 
+  it("renders async components once", async () => {
+    let renders = 0;
+
+    async function AsyncMessage() {
+      renders += 1;
+      return createElement("span", null, "Ready");
+    }
+
+    await expect(renderToHtml(createElement(AsyncMessage, null))).resolves.toBe(
+      "<span>Ready</span>",
+    );
+    expect(renders).toBe(1);
+  });
+
+  it("client-renders Suspense when a promise-valued child rejects", async () => {
+    const pending = deferred<string>();
+    const errors: unknown[] = [];
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        pending.promise,
+      ),
+      {
+        identifierPrefix: "promise",
+        onError(error) {
+          errors.push(error);
+          return { digest: "child-digest" };
+        },
+      },
+    );
+
+    await result.shellReady;
+    const error = new Error("child failed");
+    pending.reject(error);
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(errors).toEqual([error]);
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).toContain('__figSSR.x("promise-b-0","child-digest","")');
+  });
+
   it("separates text across suspended segment seams", async () => {
     const pending = deferred<string>();
 

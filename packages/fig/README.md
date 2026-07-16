@@ -78,7 +78,10 @@ createRoot(container).render(<App />);
   until the promise settles.
 - Promises are valid children, so `<Suspense fallback={...}>{load().then(view)}</Suspense>`
   is the direct form when the fulfilled value is renderable. Rejections flow
-  to the nearest `ErrorBoundary`.
+  to the nearest `ErrorBoundary`. In client components, hoist the promise or
+  use `readData` for cacheable work: creating it during render refetches and
+  re-suspends on every retry or re-render. The inline form is intended for
+  render-once server trees.
 - Data resources live in `@bgub/fig`. Use `dataResource(...)` plus
   render-time `readData(...)` for keyed async values that need Suspense,
   deduping, invalidation, refresh, server hydration, and DevTools visibility.

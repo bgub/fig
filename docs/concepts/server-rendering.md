@@ -17,6 +17,8 @@ Streams are Web `ReadableStream`s (same shape across Node, edge, Deno, Bun). Res
 
 `renderToHtml` is honestly "the streamed output, buffered": it awaits `allReady` and concatenates exactly the bytes a streaming client would have received — including the inline runtime and reveal scripts when the tree suspends past the shell. Right for caching responses and snapshotting wire output; it is **not** React's `renderToString`.
 
+Function components may return promises in every HTML entry. The returned promise becomes the component's stable child slot, so a pending result suspends without re-invoking the component and its fulfilled node resumes through the ordinary streaming machinery.
+
 ## Prerender
 
 `prerender(node, { document? })` is the settled static semantic: it holds all flushing until every task settles, generalizing the flush-time content-vs-fallback choice — boundaries only enter the op-writing queues once their parent has flushed, so with nothing flushed before `pendingTasks` reaches zero, every boundary inlines in logical position and no streaming runtime is ever written. Returns `{ html, head, data }` — the SSG primitive.
