@@ -181,7 +181,7 @@ export function markDataResourceError(
   // registry is GC-safe and cannot cross-attribute. Primitive rejection values
   // would collide by value and accumulate forever in a plain Map, so a thrown
   // primitive simply carries no resource-key metadata.
-  if (!isObjectKey(error)) return;
+  if (!isAttributableError(error)) return;
 
   let keys = objectDataErrors.get(error);
   if (keys === undefined) {
@@ -197,7 +197,7 @@ export function markDataResourceError(
 export function dataResourceKeysForError(
   error: unknown,
 ): DataResourceKey[] | undefined {
-  if (!isObjectKey(error)) return undefined;
+  if (!isAttributableError(error)) return undefined;
 
   const keys = objectDataErrors.get(error);
   return keys === undefined || keys.length === 0 ? undefined : [...keys];
@@ -210,7 +210,10 @@ function sameDataResourceKey(a: DataResourceKey, b: DataResourceKey): boolean {
   );
 }
 
-function isObjectKey(value: unknown): value is object {
+// The single rule for which errors can carry attribution: identity-keyed
+// (WeakMap/WeakSet) registries require object errors. Shared with the store's
+// per-generation value-error sets so the two can never disagree.
+export function isAttributableError(value: unknown): value is object {
   return (
     (typeof value === "object" || typeof value === "function") && value !== null
   );

@@ -13,6 +13,7 @@ import {
   type FigDataStore,
   type FigDataStoreFactory,
   type FigDataStoreHandle,
+  isAttributableError,
   markDataResourceError,
   resolveCurrentDataStore,
   setCurrentDataStore,
@@ -740,7 +741,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     try {
       loaded = load(
         ...args,
-        this.createLoadContext(entry, generation, controller, valueErrors),
+        this.createLoadContext(entry, controller, valueErrors),
       );
     } catch (error) {
       loaded = Promise.reject(error);
@@ -829,7 +830,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private createLoadContext(
     entry: Entry<Owner, Lane>,
-    generation: number,
     controller: AbortController,
     valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
@@ -845,19 +845,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         // only if this generation publishes.
         if (this.disposed || controller.signal.aborted) return;
         markDataResourceError(error, entry.key);
-        if (isObjectError(error)) valueErrors.add(error);
+        if (isAttributableError(error)) valueErrors.add(error);
       },
       hydrate: (entries) => {
-        // Server-pushed rows hydrate only while this load's generation is
-        // authoritative; a superseded, evicted, or disposed decode cannot
-        // mutate the store.
-        if (
-          this.disposed ||
-          entry.generation !== generation ||
-          controller.signal.aborted
-        ) {
-          return;
-        }
+        // Server-pushed rows hydrate for as long as this generation's signal
+        // is live — the same authority window as attributeError. A visible
+        // value keeps hydrating through a superseding refresh's window;
+        // retired, evicted, and disposed decodes cannot mutate the store
+        // (every retirement path aborts the signal).
+        if (this.disposed || controller.signal.aborted) return;
 
         // The loading entry's own value comes from the loader's return, never
         // from a data row: hydrating its key here would supersede — and abort —
@@ -1038,7 +1034,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
     entry.refreshError = undefined;
     if (
-      isObjectError(attributedError) &&
+      isAttributableError(attributedError) &&
       entry.valueErrors.has(attributedError)
     ) {
       entry.valueController?.abort();
@@ -1071,12 +1067,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       this.invalidateEntry(entry, lane, attributedError);
     }
   }
-}
-
-function isObjectError(error: unknown): error is object {
-  return (
-    (typeof error === "object" || typeof error === "function") && error !== null
-  );
 }
 
 function normalizeKey(key: DataResourceKey): NormalizedKey {

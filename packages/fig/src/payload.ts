@@ -108,9 +108,10 @@ export interface PayloadDecodeOptions {
    */
   hydrate?: (entries: readonly FigDataHydrationEntry[]) => void;
   /**
-   * Observes errors that reject outlined holes after the root value has
-   * fulfilled. Called once per rejected hole; abort cancellation is excluded.
-   * The observer is never awaited and cannot break decoding.
+   * Observes every outlined hole rejection — an `error` row or a stream
+   * failure stranding referenced rows, before or after the root fulfills.
+   * Abort cancellation is excluded. Called once per rejected hole; the
+   * observer is never awaited and cannot break decoding.
    */
   onHoleError?: (error: unknown) => void;
   /**

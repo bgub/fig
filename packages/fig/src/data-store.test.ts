@@ -1166,6 +1166,51 @@ describe("load-context error attribution capability", () => {
     expect(store.readData(resource, [], {})).toBe("v2");
   });
 
+  it("rejects cleanly when the refresh fails after the broken value was retired", async () => {
+    const captured: Array<LoadContextAttributeError | undefined> = [];
+    let failRefresh: (error: unknown) => void = () => undefined;
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["retire-then-reject"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.attributeError);
+        loads += 1;
+        if (loads === 1) return "v1";
+        return new Promise<string>((_resolve, reject) => {
+          failRefresh = reject;
+        });
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+
+    await store.refreshData(resource);
+    const refresh = store.refreshData(resource);
+
+    const holeError = new Error("window hole");
+    captured[0]?.(holeError);
+    expect(store.invalidateDataError(holeError)).toBe(true);
+
+    // The in-flight refresh fails, but the value it was refreshing is
+    // already retired: the entry must reject with the refresh error, not
+    // resurrect the retired value as a fulfilled `undefined`.
+    const refreshError = new Error("refresh failed");
+    failRefresh(refreshError);
+    const result = await refresh;
+    expect(result).toEqual({ error: refreshError, status: "rejected" });
+
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(refreshError);
+    expect(loads).toBe(2);
+  });
+
   it("keeps the previous value when a failed refresh attributed a hole error", async () => {
     const refreshHole = new Error("refresh hole");
     const stuck = deferred<string>();
@@ -1258,6 +1303,33 @@ describe("load-context hydrate capability", () => {
     expect(store.snapshot()).toEqual(
       expect.arrayContaining([
         { key: ["cap-user", "1"], value: { name: "Ada" } },
+      ]),
+    );
+  });
+
+  it("keeps hydrating through a superseding refresh's window", async () => {
+    const captured: Array<LoadContextHydrate | undefined> = [];
+    const stuck = deferred<string>();
+    let loads = 0;
+    const resource = dataResource<[], string>({
+      key: () => ["cap-window"],
+      load: (context) => {
+        captured.push(loadContextCapabilities(context)?.hydrate);
+        loads += 1;
+        return loads === 1 ? "v1" : stuck.promise;
+      },
+    });
+    const store = capabilityStore();
+
+    await store.refreshData(resource);
+    void store.refreshData(resource);
+
+    // The visible generation keeps its authority — and its data rows keep
+    // hydrating — until the successor publishes, not when it merely starts.
+    captured[0]?.([{ key: ["cap-window-user", "1"], value: "streamed" }]);
+    expect(store.snapshot()).toEqual(
+      expect.arrayContaining([
+        { key: ["cap-window-user", "1"], value: "streamed" },
       ]),
     );
   });
