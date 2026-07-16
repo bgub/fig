@@ -1,26 +1,85 @@
 # Fig
 
-Fig is a TypeScript UI runtime inspired by React. It explores the same ideas, but drops legacy features like class components, changes up APIs to "use the platform" more (e.g. passing AbortControllers instead of returning cleanup functions, using native instead of synthetic events) and adds a few new features.
+Fig is a small TypeScript UI runtime for people who like React's component model but want it rebuilt around browser semantics.
 
-I love React and I have huge respect for the React team. I think they're brilliant and made pretty much all the right choices. This project is directly inspired by their ideas, often copies syntax, and wouldn't exist without them! Fig also takes some inspiration from Remix 3.
+It keeps JSX, function components, hooks, fibers, concurrent rendering, Suspense, transitions, and hydration. It includes keyed data resources, uses native DOM behavior where React adds an abstraction, gives every async lifetime the same cancellation protocol, and treats server-rendered component trees as ordinary values. It leaves behind legacy APIs such as class components.
 
-Similarities to React: fiber/concurrency, Suspense, Context (with lazy propagation), transitions, `Activity`, etc.
+Fig would not exist without React. I have enormous respect for the React team and their work; Fig deliberately builds on their ideas, often keeps their syntax, and explores what a clean-slate implementation can do differently. Fig also takes inspiration from Remix 3.
 
-Differences from React (highlights):
+Fig is a working alpha. The DOM renderer, streaming SSR, hydration, data resources, payload protocol, and custom-renderer API are implemented and tested. The ecosystem is still small, APIs may change before 1.0, and Fig is not a drop-in replacement for React libraries.
 
-- 55% smaller bundle size
-- Written in TypeScript, not Flow (no need to install `@types` packages)
-- First-class support for data: loading, streaming from the server, and invalidating
-- DOM events are native, declared as `events={[on("click", handler)]}`
-  - Propagation is native with no exceptions
-- DOM access uses `bind={(node, signal) => ...}` instead of references
-- Effects, events, binds, transitions, actions, and data loaders all receive an `AbortSignal`; nothing returns a cleanup function.
-- `class` instead of `className`
-- Host props use native names (`class`, `for`, `stroke-width`)
-- React's `use(resource)` splits into `readContext`, `readPromise`, and `readData`
-- Fig has its own server-component wire format, called payload
+## Why Fig?
 
-The full divergence list lives in [docs/concepts/intentional-differences-from-react.md](./docs/concepts/intentional-differences-from-react.md);
+### Data is built in
+
+Fig includes keyed data resources for loading, deduplication, Suspense, invalidation, refresh, cancellation, and server-to-client hydration. The API is a small renderer contract that richer data libraries can build on top of.
+
+### A server-rendered tree should be a value
+
+Server components are often delivered as a second application model with router-owned caching and a special refresh path. Fig's server-component format is called **payload**, and a decoded payload tree is an ordinary data-resource value:
+
+```tsx
+import { dataResource, readData, refreshData, transition } from "@bgub/fig";
+import { payloadDataLoader } from "@bgub/fig-dom";
+
+const pageResource = dataResource({
+  key: (id: string) => ["profile-page", id],
+  load: payloadDataLoader({
+    request: (id, { signal }) => fetch(`/profiles/${id}`, { signal }),
+    resolveClientReference,
+  }),
+});
+
+function ProfilePage({ id }: { id: string }) {
+  return readData(pageResource, id);
+}
+
+transition(() => refreshData(pageResource, "42"));
+```
+
+`readData` renders the tree. `refreshData` requests a new one. The existing resource handles identity, stale content, cancellation, and Suspense, so payload does not need its own client cache or refresh protocol. Client references are explicit, the row encoding is private, and there are no `"use client"` or `"use server"` directives.
+
+### Every lifetime should end the same way
+
+Effects, event handlers, DOM bindings, transitions, actions, and data loaders all have lifetimes. Fig represents each one with an `AbortSignal`:
+
+```tsx
+useReactive(
+  (signal) => {
+    const socket = new WebSocket(`/rooms/${roomId}`);
+    signal.addEventListener("abort", () => socket.close(), { once: true });
+  },
+  [roomId],
+);
+```
+
+Effects return nothing. When their dependencies change or the component unmounts, their signal aborts. The same rule drives `bind`, events, transitions, actions, and data loaders, rather than giving each API a separate cleanup convention.
+
+## Familiar on purpose
+
+That familiarity is deliberate: Fig keeps React's core runtime model and diverges where a clean-slate implementation can make stronger choices.
+
+Other differences include:
+
+- Native DOM events declared as `events={[on("click", handler)]}`, with native propagation and no exceptions.
+- Native host prop names such as `class`, `for`, and `stroke-width`.
+- DOM access through `bind={(node, signal) => ...}` instead of refs.
+- Explicit `readContext`, `readPromise`, and `readData` instead of one overloaded `use(resource)`.
+- Always-strict development rendering and diagnostics that throw before commit.
+- TypeScript source and bundled types—no separate `@types` package.
+
+The full divergence list lives in [docs/concepts/intentional-differences-from-react.md](./docs/concepts/intentional-differences-from-react.md).
+
+### Bundle size
+
+For a minimal interactive client surface, Fig is roughly half the size of React:
+
+| Runtime      | Minified | Minified + gzip |
+| ------------ | -------- | --------------- |
+| Fig          | 92.5 kB  | 29.3 kB         |
+| React 19.2.7 | 194.1 kB | 60.3 kB         |
+
+Measured with esbuild 0.28.1 in production mode. The Fig entry imports `jsx`, `useState`, `createRoot`, and `on`; the React entry imports `jsx`, `useState`, and `createRoot` from `react` and `react-dom`. Fig is 52% smaller minified and 51% smaller after gzip in this comparison.
 
 ## Key Design Principles
 
@@ -28,37 +87,35 @@ The full divergence list lives in [docs/concepts/intentional-differences-from-re
 - Use native platform semantics when possible
 - Don't add React APIs unless they clearly strengthen Fig
 
-## Packages
+## Quick start
 
-- [@bgub/fig](./packages/fig/README.md): core elements, hooks, context, Suspense, error boundaries, and transitions.
-- [@bgub/fig-dom](./packages/fig-dom/README.md): browser rendering, hydration, delegated events, `bind`, portals, native DOM props, and `unsafeHTML`.
-- [@bgub/fig-server](./packages/fig-server/README.md): streaming server rendering, Suspense streaming, resource hoisting, server errors, and the server-component payload helpers.
-- [@bgub/fig-reconciler](./packages/fig-reconciler/README.md): renderer internals for custom host configs, including the cooperative task scheduler.
+```bash
+pnpm add @bgub/fig @bgub/fig-dom
+```
 
-## Example
+Configure TypeScript to use the DOM renderer's JSX runtime:
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@bgub/fig-dom",
+    "moduleResolution": "bundler"
+  }
+}
+```
 
 ```tsx
-import { Suspense, readPromise, useState } from "@bgub/fig";
+import { useState } from "@bgub/fig";
 import { createRoot, on } from "@bgub/fig-dom";
-
-const message = Promise.resolve("Ready");
-
-function Message() {
-  return <span>{readPromise(message)}</span>;
-}
 
 function App() {
   const [count, setCount] = useState(0);
 
   return (
-    <main>
-      <button events={[on("click", () => setCount((v) => v + 1))]}>
-        Count {count}
-      </button>
-      <Suspense fallback={<span>Loading</span>}>
-        <Message />
-      </Suspense>
-    </main>
+    <button events={[on("click", () => setCount((count) => count + 1))]}>
+      Count: {count}
+    </button>
   );
 }
 
@@ -67,6 +124,27 @@ if (root === null) throw new Error("Missing root.");
 
 createRoot(root).render(<App />);
 ```
+
+## Documentation
+
+- [Introduction and API overview](./docs/1-intro-to-fig.md)
+- [Fiber architecture](./docs/2-fiber-architecture.md)
+- [Rendering, commit, effects, and cleanup](./docs/3-lifecycle.md)
+- [Suspense, streaming, and hydration](./docs/4-async-streaming-hydration.md)
+- [Data resources](./docs/5-data.md)
+- [Payload](./docs/6-payload.md)
+- [Asset resources](./docs/7-assets.md)
+- [Subsystem contracts and rationale](./docs/concepts/README.md)
+
+## Packages
+
+- [@bgub/fig](./packages/fig/README.md): core elements, hooks, context, Suspense, data resources, error boundaries, and transitions.
+- [@bgub/fig-dom](./packages/fig-dom/README.md): browser rendering, hydration, delegated events, `bind`, portals, native DOM props, and payload loading.
+- [@bgub/fig-server](./packages/fig-server/README.md): streaming server rendering, Suspense streaming, asset delivery, server errors, and payload rendering.
+- [@bgub/fig-reconciler](./packages/fig-reconciler/README.md): renderer internals for custom host configs, including the cooperative task scheduler.
+- [@bgub/fig-refresh](./packages/fig-refresh/README.md): renderer-agnostic component-family tracking for hot refresh.
+
+Fig Start, the Vite integration, and DevTools are implemented as private workspace previews while their public contracts mature.
 
 ## Development
 
