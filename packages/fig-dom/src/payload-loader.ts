@@ -1,4 +1,8 @@
-import type { DataResourceLoadContext, DataResourceLoader } from "@bgub/fig";
+import type {
+  DataResourceLoadContext,
+  DataResourceLoader,
+  FigNode,
+} from "@bgub/fig";
 import type { FigAssetResource } from "@bgub/fig";
 import {
   assertPayloadCodecMatches,
@@ -16,7 +20,6 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 const noop = (): void => undefined;
-type PayloadNode = Awaited<ReturnType<typeof decodePayloadStream>>;
 
 export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
   /**
@@ -54,7 +57,7 @@ export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
  */
 export function payloadDataLoader<TArgs extends unknown[]>(
   options: PayloadDataLoaderOptions<TArgs>,
-): DataResourceLoader<TArgs, PayloadNode> {
+): DataResourceLoader<TArgs, FigNode> {
   return async (...argsAndContext) => {
     const context = argsAndContext[
       argsAndContext.length - 1

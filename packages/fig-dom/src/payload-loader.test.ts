@@ -312,6 +312,78 @@ describe("payloadDataLoader", () => {
     expect(container.textContent).toBe("recovered");
   });
 
+  it("retires the broken value when the hole error row shares a chunk with the root", async () => {
+    // A server component that throws synchronously emits its hole's error
+    // row in the same flush as the root row, so attribution fires before the
+    // loader's returned promise settles — it must still survive publish and
+    // retire the broken value on invalidation.
+    let requests = 0;
+    let caughtError: unknown;
+    let caughtKeys: unknown;
+
+    function Comments(): FigNode {
+      throw new Error("comments failed synchronously");
+    }
+
+    const pageResource = dataResource<[], FigNode>({
+      key: () => ["sync-hole-page"],
+      load: payloadDataLoader<[]>({
+        request: () => {
+          requests += 1;
+          return requests === 1
+            ? payloadResponse(
+                createElement(
+                  "main",
+                  null,
+                  createElement(
+                    Suspense,
+                    { fallback: createElement("i", null, "hole pending") },
+                    createElement(Comments, null),
+                  ),
+                ),
+              )
+            : payloadResponse(createElement("main", null, "recovered"));
+        },
+      }),
+    });
+
+    function Page() {
+      return readData(pageResource);
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const renderPage = (key: string) =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: (error, info) => {
+              caughtError = error;
+              caughtKeys = info.dataResourceKeys;
+              return createElement("p", null, "hole failed");
+            },
+            key,
+          },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "page pending") },
+            createElement(Page, null),
+          ),
+        ),
+      );
+    flushSync(() => renderPage("initial"));
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("hole failed");
+    expect(caughtKeys).toEqual([["sync-hole-page"]]);
+    expect(root.data.invalidateDataError(caughtError)).toBe(true);
+    flushSync(() => renderPage("retry"));
+    await waitForHostTurns();
+    expect(requests).toBe(2);
+    expect(container.textContent).toBe("recovered");
+  });
+
   it("refreshing while holes stream neither errors nor kills the visible tree", async () => {
     // The demo-payload regression: click refresh while comments are still
     // streaming. The visible generation keeps its authority (and its live

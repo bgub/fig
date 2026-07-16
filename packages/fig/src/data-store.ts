@@ -675,6 +675,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.abortEntryGenerations(entry, "superseded");
     entry.error = undefined;
     entry.generation += 1;
+    // The hydrated value replaces whatever attributed hole errors the old
+    // value carried; a boundary still holding one must not retire it.
+    entry.valueErrors = new WeakSet();
     entry.invalidationVersion = 0;
     entry.key = key;
     entry.lane = null;
@@ -716,6 +719,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     this.abortPendingLoad(entry, "superseded");
     const controller = new AbortController();
+    // This generation's attributed hole errors. Allocated per load and
+    // installed on the entry only at publish: attribution can fire before the
+    // root value settles (a hole's error row can share a network chunk with
+    // the root row), so the set must survive fulfillment, and a generation
+    // that never publishes must never make the entry's live value
+    // invalidatable through its own errors.
+    const valueErrors = new WeakSet<object>();
     const generation = entry.generation + 1;
     const invalidationVersion = entry.invalidationVersion;
     const pending = createPendingResult<TValue>();
@@ -731,7 +741,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     try {
       loaded = load(
         ...args,
-        this.createLoadContext(entry, generation, controller),
+        this.createLoadContext(entry, generation, controller, valueErrors),
       );
     } catch (error) {
       loaded = Promise.reject(error);
@@ -755,14 +765,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // live for the background work still streaming into the value.
       entry.controller = null;
       entry.valueController = controller;
-      entry.valueErrors = new WeakSet();
+      entry.valueErrors = valueErrors;
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
       entry.stale = entry.invalidationVersion !== invalidationVersion;
       entry.status = "fulfilled";
       entry.value = value;
-      entry.valueErrors = new WeakSet();
       this.publish(entry);
       // The predecessor loses authority only now that the successor's value
       // has published: subscribers re-render top-down onto the new tree in
@@ -823,22 +832,20 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry: Entry<Owner, Lane>,
     generation: number,
     controller: AbortController,
+    valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
     defineLoadContextAttributeError(context, (error) => {
       // A fulfilled payload value may reject one of its streamed holes later.
-      // Attribute that error only while this generation still owns the value;
-      // retired decodes must not make their successor invalidatable by a stale
-      // error object.
-      if (
-        this.disposed ||
-        entry.generation !== generation ||
-        controller.signal.aborted
-      ) {
-        return;
-      }
+      // Attribute that error for as long as this generation's signal is live —
+      // the signal's lifetime IS its authority, so a visible value keeps
+      // attributing through a superseding refresh's window. Retired decodes
+      // must not make their successor invalidatable by a stale error object;
+      // the errors land in this generation's own set, which reaches the entry
+      // only if this generation publishes.
+      if (this.disposed || controller.signal.aborted) return;
       markDataResourceError(error, entry.key);
-      if (isObjectError(error)) entry.valueErrors.add(error);
+      if (isObjectError(error)) valueErrors.add(error);
     });
     defineLoadContextHydrate(context, (entries) => {
       // Server-pushed rows hydrate only while this load's generation is
