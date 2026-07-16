@@ -650,6 +650,10 @@ interface SuspenseFallbackState<Container, Instance, TextInstance> {
 interface DehydratedSuspenseState<Instance, TextInstance> {
   kind: "dehydrated";
   boundary: DehydratedSuspenseBoundary<Instance, TextInstance>;
+  // Canonical server-tree position captured when the marker is first claimed.
+  // Hydration restores this base even if updates insert or move siblings before
+  // the boundary resumes.
+  idPath: string;
   wasPending: boolean;
 }
 
@@ -673,6 +677,9 @@ interface ActivityState<Instance> {
   // boundary is dehydrated, or null; cleared when the content unpacks at
   // commit.
   dehydrated: Instance | null;
+  // Same snapshot as dehydrated Suspense, for hidden server content that may
+  // hydrate after the surrounding client tree has changed.
+  idPath: string | null;
 }
 
 type BoundaryState<Container, Instance, TextInstance> =
@@ -774,6 +781,7 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   current: Fiber<Container, Instance, TextInstance>;
   element: FigNode;
   identifierPrefix: string;
+  nextClientId: number;
   devtools: boolean;
   callback: ScheduledTask | null;
   callbackPriority: Lane;
@@ -1043,6 +1051,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       current,
       element: null,
       identifierPrefix: options.identifierPrefix ?? "",
+      nextClientId: 0,
       devtools: options.devtools ?? true,
       pendingLanes: NoLanes,
       suspendedLanes: NoLanes,
@@ -2245,6 +2254,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
         const consumedBefore = root.consumedPendingQueues.length;
+        const nextClientIdBefore = root.nextClientId;
         const shadowResult = (node.type as Component)(node.props);
         // Discarded promise children can still reject. Observe them without
         // comparing identities: mount-time useMemo intentionally recomputes
@@ -2252,6 +2262,9 @@ export function createRenderer<Container, Instance, TextInstance>(
         observeDiscardedPromiseChildren(shadowResult);
         if (currentHook !== null) throw hookOrderError("fewer");
         restoreConsumedPendingQueues(root, consumedBefore);
+        // Client ids are attempt-scoped during the strict shadow pass: the
+        // real invocation must observe the same allocation sequence.
+        root.nextClientId = nextClientIdBefore;
         prepareHookRender(node, root);
         node.effects = null;
       }
@@ -2294,7 +2307,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         node.boundaryState = previousSuspenseState;
         return;
       }
-      hydrateDehydratedSuspenseBoundary(node, previousSuspenseState.boundary);
+      hydrateDehydratedSuspenseBoundary(node, previousSuspenseState);
       return;
     }
 
@@ -2436,6 +2449,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.boundaryState = {
       boundary,
+      idPath: hydrationIdPath(root, node),
       kind: "dehydrated",
       wasPending: boundary.status === "pending",
     };
@@ -2448,8 +2462,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function hydrateDehydratedSuspenseBoundary(
     node: F,
-    boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
+    state: DehydratedSuspenseState<Instance, TextInstance>,
   ): void {
+    const boundary = state.boundary;
     abandonedHydrationBoundaries.delete(node);
     if (node.alternate !== null) {
       abandonedHydrationBoundaries.delete(node.alternate);
@@ -2465,11 +2480,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       if (boundary.status === "pending") {
-        node.boundaryState = {
-          boundary,
-          kind: "dehydrated",
-          wasPending: true,
-        };
+        node.boundaryState = state;
         return;
       }
     }
@@ -2548,6 +2559,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     hasHiddenBoundaries = true;
     state.dehydrated = boundary;
+    state.idPath = hydrationIdPath(root, node);
     root.nextHydratableInstance =
       requireHydrationHostConfig().getNextHydratableSibling(boundary);
     return true;
@@ -3134,18 +3146,55 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function createFiberId(root: R, fiber: F, localId: number): string {
-    return `${root.identifierPrefix}fig-${fiberPath(fiber)}-${localId.toString(32)}`;
+    if (!root.isHydrating || insideHydrationExemptHost(fiber)) {
+      const id = root.nextClientId;
+      root.nextClientId += 1;
+      // Server paths contain only lowercase base-32 segments. The uppercase
+      // client discriminator therefore cannot collide with hydrated ids.
+      return `${root.identifierPrefix}fig-C-${id.toString(32)}`;
+    }
+
+    return `${root.identifierPrefix}fig-${hydrationIdPath(root, fiber)}-${localId.toString(32)}`;
   }
 
-  function fiberPath(fiber: F): string {
+  function hydrationIdPath(root: R, fiber: F): string {
+    const suspense = root.hydratingSuspenseBoundary;
+    if (suspense !== null) {
+      const state = fiberSuspenseState(suspense.alternate);
+      if (state?.kind === "dehydrated") {
+        return appendIdPath(state.idPath, fiberPath(fiber, suspense));
+      }
+    }
+
+    const activity = root.hydratingActivityBoundary;
+    if (activity !== null) {
+      const base = fiberActivityState(activity)?.idPath ?? null;
+      if (base !== null) {
+        return appendIdPath(base, fiberPath(fiber, activity));
+      }
+    }
+
+    return fiberPath(fiber, null);
+  }
+
+  function appendIdPath(base: string, relative: string): string {
+    return relative === "" ? base : `${base}-${relative}`;
+  }
+
+  function fiberPath(fiber: F, stopBefore: F | null): string {
     const parts: string[] = [];
 
     for (
       let node: F | null = fiber;
-      node !== null && node.tag !== RootTag;
+      node !== null && node !== stopBefore && node.tag !== RootTag;
       node = node.return
     ) {
-      parts.push(node.index.toString(32));
+      // Suspense inserts a private Activity fiber around its primary tree.
+      // The server has no corresponding element, so it is transparent to the
+      // canonical id path just like React's implementation-only indirections.
+      if (node.tag !== ActivityTag || node.type !== null) {
+        parts.push(node.index.toString(32));
+      }
     }
 
     return parts.reverse().join("-");
@@ -5625,7 +5674,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     const current = fiberActivityState(node);
     if (current !== null) return current;
 
-    const state = { hidden: false, dehydrated: null };
+    const state: ActivityState<Instance> = {
+      hidden: false,
+      dehydrated: null,
+      idPath: null,
+    };
     node.boundaryState = state;
     return state;
   }

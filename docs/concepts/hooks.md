@@ -45,7 +45,7 @@ In development, scheduling state from `useBeforeLayout` throws a diagnostic beca
 - `useMemo`/`useCallback` — stable values and callback identities.
 - `useDeferredValue` — deferred render-time values.
 - `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` — server render and hydration require `getServerSnapshot`; subscriptions under hidden Activity defer until reveal.
-- `useId` — SSR-stable ids with the root's `identifierPrefix`.
+- `useId` — SSR-stable ids with the root's `identifierPrefix`. Server render and hydration derive the id from the same canonical element path; private renderer fibers are transparent. A dehydrated Suspense or Activity boundary snapshots that path when the server marker is claimed and restores it when hydration resumes, so intervening client updates cannot renumber its ids. Components mounted purely on the client use a separate `fig-C-*` namespace and therefore cannot claim or collide with server ids.
 - No `useRef`: `useMemo(() => ({ current: null }), [])` for mutable storage, `bind` for DOM access.
 
 ## Read Verbs (Not Hooks)

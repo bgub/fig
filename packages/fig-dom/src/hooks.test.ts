@@ -215,14 +215,14 @@ describe("@bgub/fig-dom hooks", () => {
     );
 
     expect(ids).toEqual([
-      "app-fig-0-0-0",
-      "app-fig-0-0-0",
-      "app-fig-0-1-0",
-      "app-fig-0-1-0",
-      "app-fig-0-0-0",
-      "app-fig-0-0-0",
-      "app-fig-0-1-0",
-      "app-fig-0-1-0",
+      "app-fig-C-0",
+      "app-fig-C-0",
+      "app-fig-C-1",
+      "app-fig-C-1",
+      "app-fig-C-0",
+      "app-fig-C-0",
+      "app-fig-C-1",
+      "app-fig-C-1",
     ]);
 
     const main = container.childNodes[0] as FakeElement;
@@ -231,10 +231,10 @@ describe("@bgub/fig-dom hooks", () => {
     const firstInput = firstLabel.childNodes[1] as FakeElement;
     const secondInput = secondLabel.childNodes[1] as FakeElement;
 
-    expect(firstLabel.attributes.for).toBe("app-fig-0-0-0");
-    expect(firstInput.attributes.id).toBe("app-fig-0-0-0");
-    expect(secondLabel.attributes.for).toBe("app-fig-0-1-0");
-    expect(secondInput.attributes.id).toBe("app-fig-0-1-0");
+    expect(firstLabel.attributes.for).toBe("app-fig-C-0");
+    expect(firstInput.attributes.id).toBe("app-fig-C-0");
+    expect(secondLabel.attributes.for).toBe("app-fig-C-1");
+    expect(secondInput.attributes.id).toBe("app-fig-C-1");
   });
 
   it("tracks pending transition work until suspended content resolves", async () => {
