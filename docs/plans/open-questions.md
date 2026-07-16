@@ -1,29 +1,26 @@
 # Open Questions & Future Plans
 
-Status: living plan index
-
-Every open design question and planned piece of work, in one place. Each item links its source (a concept file's `exploring` section or a plan in `docs/plans/`); when an item resolves, it graduates into the owning concept file and leaves this list.
-
 ## React Parity Gaps
 
-Most valuable gaps:
-
-- Function-valued form action/formAction, useFormStatus, progressive enhancement, and Server Functions. React forms (https://react.dev/reference/react-dom/components/form)
-- Profiler, useDebugValue, performance tracks, and owner-stack capture.
-- DNS-prefetch asset resources.
-- React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs.
+- React forms ([https://react.dev/reference/react-dom/components/form](https://react.dev/reference/react-dom/components/form)) with function-valued form action/formAction, useFormStatus, and progressive enhancement
+- Server Functions
+  - This is both one of the most valuable things to add, and one of the things I want to be most cautious about adding
+- Profiler, useDebugValue, performance tracks, and owner-stack capture
+- DNS-prefetch asset resources
+- React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs
+  - Shouldn't be too difficult hopefully
 
 ## Hooks
 
-- **Mutable cell primitive (`useCell`?)** — `useMemo(() => ({ current }), [])` currently provides stable mutable storage, but memoization communicates caching rather than instance-local mutable identity. Open: whether Fig should add a dedicated `useCell(initialValue)` primitive, whether its shape should be `{ current: T }`, and whether the name should emphasize stable identity, mutability, or its non-rendering semantics.
+- Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive
 
 ## Hydration
 
-- **Hydration-stable environment** — the one intentional-divergence class (time, locale, viewport) gets a serialized environment snapshot the client's hydration render reads, not a broad mismatch opt-out. Open: ownership (fig-start vs fig-dom vs core), app-wide vs nested scopes, how the client learns hydration finished, bootstrap-path vs renderer-slot serialization, a `hydrateRoot` snapshot option, and the missing-snapshot failure mode. Request-known shell state like cookie-backed color scheme belongs in the Fig Start document shell. `suppressHydrationWarning` now exists only as React-compatible one-level host escape hatch. → `docs/concepts/hydration.md`
+- Would be cool to introduce a new primitive to fix common classes of hydration errors like local time, local, and viewport. This might remove the need for `suppressHydrationWarning` entirely. See the [hydration concept](../concepts/hydration.md) for some brainstorms
 
 ## Data Resources
 
-- **ErrorBoundary reset ergonomics** — data-key attribution and invalidation now exist (`invalidateDataError(error)`, `invalidateDataKey(key)`). Still open: whether `ErrorBoundary` should expose a first-class reset/retry affordance instead of making userland remount the boundary by key.
+- Adding first-class `reset` or `retry` functions to ErrorBoundary might be helpful. Currently you can run `invalidateDataError(error)` or `invalidateDataKey(key)` manually
 
 ## Serialized Components
 
