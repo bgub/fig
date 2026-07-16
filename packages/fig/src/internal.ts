@@ -1,10 +1,8 @@
 export {
   collectChildren,
-  collectStreamingChildren,
   describeInvalidChild,
   invalidChildError,
   type NormalizedChild,
-  type StreamingChild,
 } from "./children.ts";
 export { type FigContext, FigContextSymbol, isContext } from "./context.ts";
 export {

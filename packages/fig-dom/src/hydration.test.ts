@@ -561,6 +561,45 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.textContent).toBe("Before middle after");
   });
 
+  it("keeps useId paths stable after an empty promise child", async () => {
+    const pending = deferred<null>();
+    const ids: string[] = [];
+
+    function IdentifiedChild() {
+      const id = useId();
+      ids.push(id);
+      return createElement("span", { id }, "child");
+    }
+
+    const app = createElement(
+      "div",
+      null,
+      pending.promise,
+      createElement(IdentifiedChild, null),
+    );
+    const rendering = prerender(app);
+    await Promise.resolve();
+    pending.resolve(null);
+
+    const { html } = await rendering;
+    const container = containerFromHtml(html);
+    const serverId = (
+      (container.childNodes[0] as FakeElement).childNodes[0] as FakeElement
+    ).attributes.id;
+    ids.length = 0;
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(ids).not.toHaveLength(0);
+    expect(ids.every((id) => id === serverId)).toBe(true);
+  });
+
   it("hydrates parsed server output with text seams beside Suspense", async () => {
     function Name() {
       return "Ben";

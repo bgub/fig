@@ -171,6 +171,58 @@ describe("@bgub/fig-server", () => {
     await expect(
       renderToHtml(createElement("textarea", { defaultValue: "\ndraft" })),
     ).resolves.toBe("<textarea>\n\ndraft</textarea>");
+
+    const leading = deferred<string>();
+    const leadingRender = prerender(
+      createElement("pre", null, leading.promise),
+    );
+    await Promise.resolve();
+    leading.resolve("\nasync code");
+    await expect(leadingRender).resolves.toEqual({
+      data: [],
+      head: "",
+      html: "<pre>\n\nasync code<!--,--></pre>",
+    });
+
+    const beforeNewline = deferred<string>();
+    const siblingRender = prerender(
+      createElement("pre", null, beforeNewline.promise, "\nafter"),
+    );
+    await Promise.resolve();
+    beforeNewline.resolve("before");
+    await expect(siblingRender).resolves.toEqual({
+      data: [],
+      head: "",
+      html: "<pre>before<!--,-->\nafter</pre>",
+    });
+
+    async function AsyncPrefix() {
+      return "before";
+    }
+
+    await expect(
+      prerender(
+        createElement("pre", null, createElement(AsyncPrefix, null), "\nafter"),
+      ),
+    ).resolves.toEqual({
+      data: [],
+      head: "",
+      html: "<pre>before<!--,-->\nafter</pre>",
+    });
+
+    async function AsyncLeadingNewline() {
+      return "\nasync component";
+    }
+
+    await expect(
+      prerender(
+        createElement("pre", null, createElement(AsyncLeadingNewline, null)),
+      ),
+    ).resolves.toEqual({
+      data: [],
+      head: "",
+      html: "<pre>\n\nasync component<!--,--></pre>",
+    });
   });
 
   it("serializes namespaced SVG attribute aliases", async () => {
@@ -590,6 +642,19 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain("<span>Ready</span>");
     expect(html).toContain('__figSSR.c("b-0","s-0")');
+  });
+
+  it("renders promise-valued title children", async () => {
+    const pending = deferred<string>();
+    const rendering = prerender(createElement("title", null, pending.promise));
+    await Promise.resolve();
+    pending.resolve("Ready");
+
+    await expect(rendering).resolves.toEqual({
+      data: [],
+      head: "<title>Ready</title>",
+      html: "",
+    });
   });
 
   it("renders async components once", async () => {

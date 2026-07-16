@@ -5,17 +5,19 @@ import {
   isPortal,
   isValidElement,
 } from "./element.ts";
-import { isThenable, readThenable } from "./thenables.ts";
+import { isThenable } from "./thenables.ts";
 
 // What normalization leaves behind: arrays are flattened, null/undefined/
-// booleans are dropped, and numbers are stringified into (merged) text.
-export type NormalizedChild = FigElement<any> | FigPortal<any> | string;
-export type StreamingChild =
-  | NormalizedChild
-  | Extract<FigNode, Promise<unknown>>;
+// booleans are dropped, numbers are stringified into (merged) text, and a
+// thenable keeps one stable child slot whose fulfilled value nests below it.
+export type NormalizedChild =
+  | FigElement<any>
+  | FigPortal<any>
+  | Extract<FigNode, Promise<unknown>>
+  | string;
 
 interface ChildCollector {
-  children: StreamingChild[];
+  children: NormalizedChild[];
   mergeText: boolean;
 }
 
@@ -24,57 +26,29 @@ interface ChildCollector {
 // merged text nodes into HTML, and hydration matches them against the
 // client's fiber children — divergence is a hydration mismatch.
 export function collectChildren(node: FigNode): NormalizedChild[] {
-  return collectChildSequence(node, "settled");
+  return collectChildSequence(node);
 }
 
-// Streaming keeps a pending thenable as its own child slot so the server can
-// suspend only that slot after its parent has started writing. The ordinary
-// collector reads it for the reconciler. Both collectors preserve a text seam
-// on either side, so hydration sees the same fibers whether the promise was
-// pending or already fulfilled when each renderer encountered it.
-export function collectStreamingChildren(node: FigNode): StreamingChild[] {
-  return collectChildSequence(node, "streaming");
-}
-
-function collectChildSequence(
-  node: FigNode,
-  mode: "settled",
-): NormalizedChild[];
-function collectChildSequence(
-  node: FigNode,
-  mode: "streaming",
-): StreamingChild[];
-function collectChildSequence(
-  node: FigNode,
-  mode: "settled" | "streaming",
-): StreamingChild[] {
+function collectChildSequence(node: FigNode): NormalizedChild[] {
   const collector: ChildCollector = {
     children: [],
     mergeText: true,
   };
-  collectChild(node, collector, mode === "streaming");
+  collectChild(node, collector);
   return collector.children;
 }
 
-function collectChild(
-  child: unknown,
-  collector: ChildCollector,
-  streaming: boolean,
-): void {
+function collectChild(child: unknown, collector: ChildCollector): void {
   if (isThenable(child)) {
-    if (streaming) {
-      // The promise slot itself prevents text on either side from merging.
-      collector.children.push(child as Extract<FigNode, Promise<unknown>>);
-    } else {
-      collector.mergeText = false;
-      collectChild(readThenable(child), collector, false);
-      collector.mergeText = false;
-    }
+    // The slot itself prevents text on either side from merging. Its fiber
+    // reads the thenable and reconciles the fulfilled node as nested content.
+    collector.children.push(child as Extract<FigNode, Promise<unknown>>);
+    collector.mergeText = true;
     return;
   }
 
   if (Array.isArray(child)) {
-    for (const nested of child) collectChild(nested, collector, streaming);
+    for (const nested of child) collectChild(nested, collector);
     return;
   }
 

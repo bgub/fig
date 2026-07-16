@@ -34,6 +34,7 @@ import {
   setCurrentDataStore,
   setCurrentDispatcher,
   setTransitionHandler,
+  trackThenable,
   type Thenable,
 } from "@bgub/fig/internal";
 import {
@@ -208,6 +209,13 @@ setTransitionHandler(runWithTransition);
 type Component = (props: Props & { children?: FigNode }) => FigNode;
 type HostNode<Instance, TextInstance> = Instance | TextInstance;
 type Parent<Container, Instance> = Container | Instance;
+
+// A promise-valued child owns one stable parent slot. Its fulfilled value is
+// reconciled below this internal fragment so server and client id paths agree
+// even when that value is empty or expands to multiple children.
+const ThenableChildType = Symbol(
+  "fig.thenable-child",
+) as unknown as ElementType;
 
 export interface DehydratedSuspenseError {
   digest?: string;
@@ -1710,6 +1718,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === FragmentTag && node.type === ThenableChildType) {
+      reconcileCurrentChildren(
+        node,
+        readThenable(node.props.thenable as Thenable) as FigNode,
+        root,
+      );
+      return;
+    }
+
     reconcileCurrentChildren(node, node.props.children, root);
   }
 
@@ -2177,6 +2194,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       const result = (node.type as Component)(node.props);
       if (__DEV__ && isThenable(result) && result !== shadowResult) {
+        if (isThenable(shadowResult)) trackThenable(shadowResult);
+        trackThenable(result);
         throw new Error(
           "Client components must not return a new promise per render (async components are unsupported on the client). Use readPromise or readData.",
         );
@@ -5906,6 +5925,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       return fiber(TextTag, null, null, { nodeValue: child }, null);
     }
 
+    if (isThenable(child)) {
+      return fiber(
+        FragmentTag,
+        ThenableChildType,
+        null,
+        { thenable: child },
+        null,
+      );
+    }
+
     if (isPortal(child)) {
       return fiber(PortalTag, null, child.key, portalProps(child), null);
     }
@@ -6825,6 +6854,10 @@ function sameType<Container, Instance, TextInstance>(
     return fiber.tag === TextTag;
   }
 
+  if (isThenable(child)) {
+    return fiber.tag === FragmentTag && fiber.type === ThenableChildType;
+  }
+
   if (isPortal(child)) {
     return fiber.tag === PortalTag && fiber.props.target === child.target;
   }
@@ -6842,6 +6875,8 @@ function propsFor(child: NormalizedChild): Props {
   if (typeof child === "string") {
     return { nodeValue: child };
   }
+
+  if (isThenable(child)) return { thenable: child };
 
   if (isPortal(child)) return portalProps(child);
   if (isValidElement(child)) return child.props;

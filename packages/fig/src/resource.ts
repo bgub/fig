@@ -6,6 +6,7 @@ import {
   type FigNode,
   type Props,
 } from "./element.ts";
+import { isThenable, readThenable } from "./thenables.ts";
 
 export type AssetResourceBlocking = "reveal" | "none";
 export type CrossOrigin = "anonymous" | "use-credentials" | "";
@@ -559,6 +560,9 @@ function fetchpriorityProp(value: unknown): FetchPriority | undefined {
 }
 
 function textResourceValue(node: FigNode): string {
+  if (isThenable(node)) {
+    return textResourceValue(readThenable(node) as FigNode);
+  }
   if (node === null || node === undefined || typeof node === "boolean") {
     return "";
   }

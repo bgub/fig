@@ -29,10 +29,10 @@ The cross-package protocol registry, versioned together with the sibling package
 
 - injection slots: the render dispatcher and transition handler;
 - the lazy data-store protocol: the internal symbol that lets data resources carry their store factory to renderers without import-time registration;
-- the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `createPortalNode` (renderers wrap it in their container-typed `createPortal`), `collectChildren`/`collectStreamingChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
+- the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `createPortalNode` (renderers wrap it in their container-typed `createPortal`), `collectChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
 - shared HTML knowledge both renderers need: DOM-nesting validation tables and the Suspense/Activity streaming marker constants.
 
-Child normalization is shared because the server emits text nodes into HTML and hydration matches them against client fibers — the two sides must not drift. `collectChildren` reads promise children for the reconciler; `collectStreamingChildren` preserves a pending promise slot until the server's per-child suspension seam. Both preserve text seams around the slot. The thenable registry is shared for the same reason: promise-identity-keyed suspend/resume must agree between client and server.
+Child normalization is shared because the server emits text nodes into HTML and hydration matches them against client fibers — the two sides must not drift. The collector preserves a promise as one stable child slot. The reconciler represents that slot with an internal fragment whose nested children come from `readThenable`; the server reads the same slot at its per-child suspension seam. The stable parent slot preserves text seams and id paths even when fulfillment is empty or expands to multiple children. The thenable registry is shared for the same reason: promise-identity-keyed suspend/resume must agree between client and server.
 
 ## Lazy Data-Store Installation
 

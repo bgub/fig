@@ -8,6 +8,11 @@ import {
   installFakeDocument,
 } from "./test-utils.ts";
 
+declare const process: {
+  on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+};
+
 installFakeDocument();
 
 function expectRenderDiagnostic(node: FigNode, message: string): void {
@@ -71,6 +76,28 @@ describe("@bgub/fig-dom diagnostics", () => {
       "Client components must not return a new promise per render (async components are unsupported on the client). Use readPromise or readData.",
     );
     expect(renders).toBe(2);
+  });
+
+  it("observes rejected async component results before diagnosing them", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      async function RejectingComponent(): Promise<null> {
+        throw new Error("async rejection");
+      }
+
+      expectRenderDiagnostic(
+        createElement(RejectingComponent, null),
+        "Client components must not return a new promise per render (async components are unsupported on the client). Use readPromise or readData.",
+      );
+      await waitForHostTurns(1);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
   });
 
   it("allows components to pass through stable promise children", async () => {

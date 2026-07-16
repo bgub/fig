@@ -16,7 +16,7 @@ import {
   assetResourceDestination,
   assetResourceFromHostProps,
   assetResourceKey,
-  collectStreamingChildren,
+  collectChildren,
   createDataStore,
   type DataStore,
   invalidChildError,
@@ -30,7 +30,7 @@ import {
   isSuspense,
   isThenable,
   isViewTransition,
-  type StreamingChild,
+  type NormalizedChild,
   type RenderDispatcher,
   readThenable,
   SUSPENSE_CLIENT_MARKER,
@@ -102,6 +102,10 @@ interface Request {
   dataStore: DataStore<object, null>;
   fatalError: unknown;
   identifierPrefix: string;
+  // Flush-time parser state for nested <pre>/<textarea> hosts. Rendering may
+  // complete child segments out of order; only logical flush order can decide
+  // which text is the parser's first child.
+  leadingNewlineStack: boolean[];
   nextBoundaryId: number;
   nextSegmentId: number;
   nextActivityId: number;
@@ -160,6 +164,7 @@ interface RenderScope {
   // ancestry this is runtime semantics: asset lowering applies only to HTML.
   hostNamespace: HostNamespace;
   idPath: string;
+  pendingLeadingNewlineHost: string | null;
   selectProps: Props | null;
   stack: StackFrame | null;
   // Where collected render-tree nodes attach; null when no collector was
@@ -181,7 +186,7 @@ interface Task extends RenderScope {
 interface Segment {
   boundary: SuspenseBoundary | null;
   children: Segment[];
-  chunks: Array<string | typeof documentHeadMarker>;
+  chunks: SegmentChunk[];
   id: number | null;
   index: number;
   // True when the trailing edge of everything written so far — including the
@@ -196,7 +201,7 @@ interface Segment {
   // may directly follow their end; when such a segment completes ending in
   // text, it closes with a trailing TEXT_SEPARATOR.
   textEmbedded: boolean;
-  write(chunk: string): void;
+  write(chunk: SegmentChunk): void;
 }
 
 interface SuspenseBoundary {
@@ -222,7 +227,6 @@ type HostNamespace = "html" | "mathml" | "svg";
 interface RenderFrame extends RenderScope {
   dispatcher: RenderDispatcher;
   localIdCounter: number;
-  pendingLeadingNewlineHost: string | null;
   request: Request;
   segment: Segment;
 }
@@ -250,6 +254,19 @@ interface AssetSink {
 const errorStacks = new WeakMap<object, StackFrame>();
 const textEncoder = new TextEncoder();
 const documentHeadMarker = Symbol("fig.document-head");
+const leadingNewlineStartMarker = Symbol("fig.leading-newline-start");
+const leadingNewlineEndMarker = Symbol("fig.leading-newline-end");
+const leadingNewlineTextMarker = Symbol("fig.leading-newline-text");
+interface LeadingNewlineTextChunk {
+  kind: typeof leadingNewlineTextMarker;
+  value: string;
+}
+type SegmentChunk =
+  | string
+  | typeof documentHeadMarker
+  | typeof leadingNewlineStartMarker
+  | typeof leadingNewlineEndMarker
+  | LeadingNewlineTextChunk;
 const RUNTIME_REF = "__figSSR";
 // Emitted between two adjacent text writes that come from different
 // normalized text children (component seams, resumed suspended segments).
@@ -295,6 +312,7 @@ export function createServerRenderRequest(
     }),
     fatalError: null,
     identifierPrefix: options.identifierPrefix ?? "",
+    leadingNewlineStack: [],
     nextBoundaryId: 0,
     nextSegmentId: 0,
     nextActivityId: 0,
@@ -366,6 +384,7 @@ export function createServerRenderRequest(
     hostAncestors: [],
     hostNamespace: "html",
     idPath: "",
+    pendingLeadingNewlineHost: null,
     selectProps: null,
     stack: null,
     treeParent: options.renderTree?.tree ?? null,
@@ -429,6 +448,7 @@ function forkScope(scope: RenderScope): RenderScope {
     hostAncestors: scope.hostAncestors,
     hostNamespace: scope.hostNamespace,
     idPath: scope.idPath,
+    pendingLeadingNewlineHost: scope.pendingLeadingNewlineHost,
     selectProps: scope.selectProps,
     stack: scope.stack,
     treeParent: scope.treeParent,
@@ -506,11 +526,7 @@ function retryTask(request: Request, task: Task): void {
   const frame = createRenderFrame(request, task.segment, forkScope(task));
 
   try {
-    renderChildSequence(
-      collectStreamingChildren(task.node),
-      frame,
-      task.childIndexBase,
-    );
+    renderChildSequence(collectChildren(task.node), frame, task.childIndexBase);
     completeSegmentText(task.segment);
     task.segment.status = "completed";
     detachTask(request, task);
@@ -531,7 +547,6 @@ function createRenderFrame(
     ...scope,
     dispatcher: null as unknown as RenderDispatcher,
     localIdCounter: 0,
-    pendingLeadingNewlineHost: null,
     request,
     segment,
   };
@@ -598,13 +613,14 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
           props: { nodeValue: text },
         });
       }
-      const output = consumePendingLeadingNewline(frame)
-        ? preserveParserStrippedLeadingNewline(text)
-        : text;
       // Directly adjacent text from a different fiber: separate it so the
       // browser's parser yields one DOM text node per client text fiber.
       if (frame.segment.lastPushedText) frame.segment.write(TEXT_SEPARATOR);
-      writeText(output, frame.segment);
+      if (consumePendingLeadingNewline(frame)) {
+        writeLeadingNewlineText(text, frame.segment);
+      } else {
+        writeText(text, frame.segment);
+      }
       frame.segment.lastPushedText = true;
     }
     return;
@@ -618,11 +634,11 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
 }
 
 function renderChildren(node: FigNode, frame: RenderFrame): void {
-  renderChildSequence(collectStreamingChildren(node), frame);
+  renderChildSequence(collectChildren(node), frame);
 }
 
 function renderChildSequence(
-  children: StreamingChild[],
+  children: NormalizedChild[],
   frame: RenderFrame,
   // Non-zero when resuming a suspended task: `children` starts at the
   // suspended child's original index, so id-path segments stay stable.
@@ -1131,6 +1147,10 @@ function renderHostElement(
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
   frame.hostNamespace = childHostNamespace(type, namespace);
+  const tracksLeadingNewline = frame.pendingLeadingNewlineHost !== null;
+  if (tracksLeadingNewline) {
+    frame.segment.chunks.push(leadingNewlineStartMarker);
+  }
 
   try {
     // Suspensions are handled inside renderChildSequence (the single suspend
@@ -1142,6 +1162,9 @@ function renderHostElement(
     frame.hostNamespace = previousHostNamespace;
     frame.viewTransition = previousViewTransition;
     frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
+  }
+  if (tracksLeadingNewline) {
+    frame.segment.chunks.push(leadingNewlineEndMarker);
   }
   if (document !== null && type === "head") {
     writeDocumentHeadMarker(frame.segment);
@@ -1838,9 +1861,27 @@ function createRuntimeName(identifierPrefix: string | undefined): string {
 
 function writeChunk(
   request: Request,
-  chunk: string | typeof documentHeadMarker,
+  chunk: SegmentChunk,
   segment: Segment,
 ): void {
+  if (chunk === leadingNewlineStartMarker) {
+    request.leadingNewlineStack.push(false);
+    return;
+  }
+  if (chunk === leadingNewlineEndMarker) {
+    request.leadingNewlineStack.pop();
+    return;
+  }
+  if (typeof chunk === "object") {
+    if (
+      request.leadingNewlineStack.at(-1) === false &&
+      chunk.value.startsWith("\n")
+    ) {
+      write(request, "\n");
+    }
+    write(request, chunk.value);
+    return;
+  }
   if (chunk !== documentHeadMarker) {
     write(request, chunk);
     return;
@@ -1853,6 +1894,9 @@ function writeChunk(
 }
 
 function write(request: Request, chunk: string): void {
+  if (chunk !== "" && request.leadingNewlineStack.length > 0) {
+    request.leadingNewlineStack[request.leadingNewlineStack.length - 1] = true;
+  }
   request.writeBuffer.push(chunk);
 }
 
@@ -1869,6 +1913,14 @@ function consumePendingLeadingNewline(frame: RenderFrame): boolean {
 
 function leadingNewlineStrippedHost(type: string): boolean {
   return type === "pre" || type === "textarea";
+}
+
+function writeLeadingNewlineText(text: string, segment: Segment): void {
+  writeText(text, {
+    write(value) {
+      segment.write({ kind: leadingNewlineTextMarker, value });
+    },
+  });
 }
 
 function preserveParserStrippedLeadingNewline(text: string): string {

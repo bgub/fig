@@ -10,7 +10,7 @@ Elements are plain objects branded with `$$typeof` (string-keyed symbol values, 
 
 Portals (`createPortal(children, target, key?)`) render into explicit DOM targets while remaining logical children: context, effects ordering, error propagation, and delegated event bubbling all follow the Fig tree, not the DOM position (see events.md for the delegation mechanics).
 
-Child normalization flattens arrays, drops `null`/`undefined`/booleans, and merges adjacent text (numbers stringify). Promise slots preserve a text seam on both sides so a server-streamed value and a client render produce the same text-fiber boundaries. The client collector reads thenables; the server collector keeps a pending thenable as its own child until the per-child suspension seam handles it. Settled output otherwise normalizes identically. The ordinary normalized member type remains `NormalizedChild = element | portal | string`.
+Child normalization flattens arrays, drops `null`/`undefined`/booleans, and merges adjacent text (numbers stringify). A promise remains one normalized child slot. The reconciler gives that slot an internal fragment and reconciles the fulfilled node beneath it; the server reads it at the same logical slot. This preserves text seams and id paths whether fulfillment produces zero, one, or many nested children. The normalized member type is `NormalizedChild = element | portal | promise | string`.
 
 ## Render Bailouts (Two Tiers)
 
