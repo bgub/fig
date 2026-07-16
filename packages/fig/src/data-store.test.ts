@@ -11,8 +11,9 @@ import {
 import {
   createDataStore,
   dataResourceKeysForError,
-  loadContextAttributeError,
-  loadContextHydrate,
+  type LoadContextAttributeError,
+  type LoadContextHydrate,
+  loadContextCapabilities,
   normalizeDataResourceKey,
 } from "./internal.ts";
 
@@ -1051,11 +1052,11 @@ describe("generation-lifetime loader signals", () => {
 
 describe("load-context error attribution capability", () => {
   it("attributes live-generation errors and ignores retired generations", async () => {
-    const captured: Array<ReturnType<typeof loadContextAttributeError>> = [];
+    const captured: Array<LoadContextAttributeError | undefined> = [];
     const resource = dataResource<[], string>({
       key: () => ["payload-entry"],
       load: (context) => {
-        captured.push(loadContextAttributeError(context));
+        captured.push(loadContextCapabilities(context)?.attributeError);
         return `value-${captured.length}`;
       },
     });
@@ -1093,7 +1094,7 @@ describe("load-context error attribution capability", () => {
       load: (context) => {
         loads += 1;
         if (loads === 1) {
-          loadContextAttributeError(context)?.(holeError);
+          loadContextCapabilities(context)?.attributeError(holeError);
           return "broken";
         }
         return gate.promise;
@@ -1124,13 +1125,13 @@ describe("load-context error attribution capability", () => {
   });
 
   it("attributes through a superseding refresh's window", async () => {
-    const captured: Array<ReturnType<typeof loadContextAttributeError>> = [];
+    const captured: Array<LoadContextAttributeError | undefined> = [];
     const gate = deferred<string>();
     let loads = 0;
     const resource = dataResource<[], string>({
       key: () => ["refresh-window-hole"],
       load: (context) => {
-        captured.push(loadContextAttributeError(context));
+        captured.push(loadContextCapabilities(context)?.attributeError);
         loads += 1;
         return loads === 1 ? "v1" : gate.promise;
       },
@@ -1174,7 +1175,7 @@ describe("load-context error attribution capability", () => {
       load: (context) => {
         loads += 1;
         if (loads === 2) {
-          loadContextAttributeError(context)?.(refreshHole);
+          loadContextCapabilities(context)?.attributeError(refreshHole);
           return Promise.reject(new Error("refresh failed"));
         }
         return loads === 1 ? "v1" : stuck.promise;
@@ -1197,13 +1198,13 @@ describe("load-context error attribution capability", () => {
   });
 
   it("hydrating over an entry clears its attributed hole errors", async () => {
-    const captured: Array<ReturnType<typeof loadContextAttributeError>> = [];
+    const captured: Array<LoadContextAttributeError | undefined> = [];
     const stuck = deferred<string>();
     let loads = 0;
     const resource = dataResource<[], string>({
       key: () => ["hydrate-over-hole"],
       load: (context) => {
-        captured.push(loadContextAttributeError(context));
+        captured.push(loadContextCapabilities(context)?.attributeError);
         loads += 1;
         return loads === 1 ? "v1" : stuck.promise;
       },
@@ -1227,11 +1228,11 @@ describe("load-context error attribution capability", () => {
 
 describe("load-context hydrate capability", () => {
   function capturingResource(key: string) {
-    const captured: Array<ReturnType<typeof loadContextHydrate>> = [];
+    const captured: Array<LoadContextHydrate | undefined> = [];
     const resource = dataResource<[string], string>({
       key: (id: string) => [key, id],
       load: (_id, context) => {
-        captured.push(loadContextHydrate(context));
+        captured.push(loadContextCapabilities(context)?.hydrate);
         return `value-${captured.length}`;
       },
     });
@@ -1287,7 +1288,7 @@ describe("load-context hydrate capability", () => {
       key: (id: string) => ["cap-self", id],
       load: (_id, context) => {
         signals.push(context.signal);
-        captured.push(loadContextHydrate(context));
+        captured.push(loadContextCapabilities(context)?.hydrate);
         return "loader-value";
       },
     });
@@ -1313,11 +1314,11 @@ describe("load-context hydrate capability", () => {
 
   it("hydrates mid-load, before the loader settles", async () => {
     const gate = deferred<string>();
-    let hydrate: ReturnType<typeof loadContextHydrate>;
+    let hydrate: LoadContextHydrate | undefined;
     const resource = dataResource<[string], string>({
       key: (id: string) => ["cap-midload", id],
       load: (_id, context) => {
-        hydrate = loadContextHydrate(context);
+        hydrate = loadContextCapabilities(context)?.hydrate;
         return gate.promise;
       },
     });

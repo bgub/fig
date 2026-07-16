@@ -7,8 +7,7 @@ import {
   type DataResourceLoader,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
-  defineLoadContextAttributeError,
-  defineLoadContextHydrate,
+  defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataStore,
@@ -835,44 +834,46 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
-    defineLoadContextAttributeError(context, (error) => {
-      // A fulfilled payload value may reject one of its streamed holes later.
-      // Attribute that error for as long as this generation's signal is live —
-      // the signal's lifetime IS its authority, so a visible value keeps
-      // attributing through a superseding refresh's window. Retired decodes
-      // must not make their successor invalidatable by a stale error object;
-      // the errors land in this generation's own set, which reaches the entry
-      // only if this generation publishes.
-      if (this.disposed || controller.signal.aborted) return;
-      markDataResourceError(error, entry.key);
-      if (isObjectError(error)) valueErrors.add(error);
-    });
-    defineLoadContextHydrate(context, (entries) => {
-      // Server-pushed rows hydrate only while this load's generation is
-      // authoritative; a superseded, evicted, or disposed decode cannot
-      // mutate the store.
-      if (
-        this.disposed ||
-        entry.generation !== generation ||
-        controller.signal.aborted
-      ) {
-        return;
-      }
+    defineLoadContextCapabilities(context, {
+      attributeError: (error) => {
+        // A fulfilled payload value may reject one of its streamed holes later.
+        // Attribute that error for as long as this generation's signal is live —
+        // the signal's lifetime IS its authority, so a visible value keeps
+        // attributing through a superseding refresh's window. Retired decodes
+        // must not make their successor invalidatable by a stale error object;
+        // the errors land in this generation's own set, which reaches the entry
+        // only if this generation publishes.
+        if (this.disposed || controller.signal.aborted) return;
+        markDataResourceError(error, entry.key);
+        if (isObjectError(error)) valueErrors.add(error);
+      },
+      hydrate: (entries) => {
+        // Server-pushed rows hydrate only while this load's generation is
+        // authoritative; a superseded, evicted, or disposed decode cannot
+        // mutate the store.
+        if (
+          this.disposed ||
+          entry.generation !== generation ||
+          controller.signal.aborted
+        ) {
+          return;
+        }
 
-      // The loading entry's own value comes from the loader's return, never
-      // from a data row: hydrating its key here would supersede — and abort —
-      // the very load delivering it.
-      const foreign = entries.filter(
-        (hydrated) =>
-          this.storeKey(normalizeKey(hydrated.key).canonical) !==
-          entry.storeKey,
-      );
-      if (__DEV__ && foreign.length !== entries.length) {
-        warn(
-          `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
+        // The loading entry's own value comes from the loader's return, never
+        // from a data row: hydrating its key here would supersede — and abort —
+        // the very load delivering it.
+        const foreign = entries.filter(
+          (hydrated) =>
+            this.storeKey(normalizeKey(hydrated.key).canonical) !==
+            entry.storeKey,
         );
-      }
-      if (foreign.length > 0) this.hydrate(foreign);
+        if (__DEV__ && foreign.length !== entries.length) {
+          warn(
+            `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
+          );
+        }
+        if (foreign.length > 0) this.hydrate(foreign);
+      },
     });
     return context;
   }

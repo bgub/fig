@@ -119,57 +119,39 @@ export interface FigDataStoreHost {
 
 export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 
-// The internal, generation-guarded hydration capability a store attaches to
-// each loader context (symbol-keyed: DataResourceLoadContext stays { signal }
-// publicly). Adapters that decode payload streams (fig-dom's
-// payloadDataLoader) use it to hydrate `data` rows through the calling store;
-// it ignores entries once the load's generation has lost authority.
+// The internal, generation-guarded capabilities a store attaches to each
+// loader context (symbol-keyed: DataResourceLoadContext stays { signal }
+// publicly). Adapters that decode payload streams use them to hydrate `data`
+// rows and attribute rejected holes through the calling store.
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
 ) => void;
 export type LoadContextAttributeError = (error: unknown) => void;
 
-const LoadContextHydrateSymbol = Symbol.for("fig.data-load-hydrate");
-const LoadContextAttributeErrorSymbol = Symbol.for(
-  "fig.data-load-attribute-error",
-);
+export interface LoadContextCapabilities {
+  attributeError: LoadContextAttributeError;
+  hydrate: LoadContextHydrate;
+}
 
-export function defineLoadContextAttributeError(
+const LoadContextCapabilitiesSymbol = Symbol.for("fig.data-load-context");
+
+export function defineLoadContextCapabilities(
   context: DataResourceLoadContext,
-  attributeError: LoadContextAttributeError,
+  capabilities: LoadContextCapabilities,
 ): void {
-  Object.defineProperty(context, LoadContextAttributeErrorSymbol, {
+  Object.defineProperty(context, LoadContextCapabilitiesSymbol, {
     configurable: true,
     enumerable: false,
-    value: attributeError,
+    value: capabilities,
   });
 }
 
-export function defineLoadContextHydrate(
+export function loadContextCapabilities(
   context: DataResourceLoadContext,
-  hydrate: LoadContextHydrate,
-): void {
-  Object.defineProperty(context, LoadContextHydrateSymbol, {
-    configurable: true,
-    enumerable: false,
-    value: hydrate,
-  });
-}
-
-export function loadContextHydrate(
-  context: DataResourceLoadContext,
-): LoadContextHydrate | undefined {
-  return (context as unknown as Record<symbol, LoadContextHydrate | undefined>)[
-    LoadContextHydrateSymbol
-  ];
-}
-
-export function loadContextAttributeError(
-  context: DataResourceLoadContext,
-): LoadContextAttributeError | undefined {
+): LoadContextCapabilities | undefined {
   return (
-    context as unknown as Record<symbol, LoadContextAttributeError | undefined>
-  )[LoadContextAttributeErrorSymbol];
+    context as unknown as Record<symbol, LoadContextCapabilities | undefined>
+  )[LoadContextCapabilitiesSymbol];
 }
 
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
