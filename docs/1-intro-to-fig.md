@@ -320,5 +320,3 @@ Fig discovers these declarations during rendering and deduplicates them across s
 | `startTransition` | `transition` |
 | `use(ctx)` / `use(promise)` | `readContext` / `readPromise` |
 | RSC / Flight | payload (`@bgub/fig-server/payload` + `@bgub/fig/payload`) |
-
-The next doc explains what the runtime actually does with all of this (lanes, scheduling, rendering, commit); doc 4 covers suspense, streaming SSR, and hydration.
