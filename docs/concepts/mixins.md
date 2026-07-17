@@ -19,9 +19,9 @@ const labelled = createMixin((context, label: string) => ({
 <button mix={labelled("Save")} />;
 ```
 
-The mixin runs when an intrinsic element is created, on the server and client. It receives `{ type, props }`: the host name and props composed so far. It may return host props, more mixins, or nothing. Explicit host props are the baseline; mixins run in authoring order, and later returned props win. A mixin that wants to preserve a prop checks `context.props` before returning a replacement. The authored `mix` value stays on the resolved props as a reconciliation marker but is never emitted as a DOM/HTML attribute.
+The mixin runs when an intrinsic element is created, on the server and client. It receives `{ type, props }`: the host name and props composed so far. It may return host props, more mixins, or nothing. Explicit host props form the baseline; mixins run in authoring order, and later returned props win. A mixin that wants to preserve or extend the current value reads `context.props`. The authored `mix` value stays on the resolved props as a reconciliation marker but is never emitted as a DOM/HTML attribute, and the payload serializer strips it from host props — a server-component host ships only its resolved props (`payload.md`).
 
-Mixin functions are pure render-time code: no hooks, subscriptions, DOM reads, or side effects. Stateful work belongs to the component; host lifetimes belong in returned `on()` or `bind` behavior. Results may not replace `children`, `key`, or `unsafeHTML`, so a mixin cannot restructure or replace the host tree. Resolution stops with an error after 1,024 descriptors to diagnose recursive mixes.
+Mixin functions are pure render-time code: no hooks, subscriptions, DOM reads, or side effects. In dev, calling a hook or read verb inside a mixin throws — mixins resolve inside the creating component's render, so a hook call would silently consume one of that component's hook slots. Stateful work belongs to the component; host lifetimes belong in returned `on()` or `bind` behavior. Results may not replace `children`, `key`, or `unsafeHTML`, so a mixin cannot restructure or replace the host tree. Resolution stops with an error after 1,024 descriptors to diagnose recursive mixes.
 
 `mix` on a component is an ordinary component prop. The component decides which intrinsic element receives it:
 
@@ -37,7 +37,7 @@ function Button({ mix, children }: { mix?: MixinInput; children?: FigNode }) {
 
 Arrays may nest and contain `false | 0 | 0n | "" | null | undefined`. Structural positions include those empty entries, so toggling an earlier conditional mixin does not change later mixin slots.
 
-Returned props compose shallowly. A mixin that augments `style`, `bind`, or another structured prop must explicitly merge with the current value. Returned mixins are appended immediately after their owner and keep the owner's slot in their identity path.
+Returned props compose shallowly. A mixin that builds on `style`, `bind`, or another structured prop reads the current value from `context.props` and returns the merge. Returned mixins are appended immediately after their owner and keep the owner's slot in their identity path.
 
 ## Built-ins
 

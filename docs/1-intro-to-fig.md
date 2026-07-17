@@ -33,7 +33,7 @@ const labelled = createMixin((context, label: string) => ({
 <button mix={labelled("Save")} />;
 ```
 
-`mix` accepts one descriptor or nested arrays with falsy conditional entries. Custom components receive `mix` as an ordinary prop and decide which intrinsic element receives it.
+`mix` accepts one descriptor or nested arrays with falsy conditional entries. Explicit host props form the baseline; mixins run in authoring order, and later returned props win. A mixin that wants to preserve or extend the current value reads `context.props`. Custom components receive `mix` as an ordinary prop and decide which intrinsic element receives it.
 
 ### Events
 

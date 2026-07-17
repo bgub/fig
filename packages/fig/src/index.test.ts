@@ -88,6 +88,36 @@ describe("@bgub/fig", () => {
     });
   });
 
+  it("throws in dev when a mixin calls a hook during resolution", () => {
+    const hooky = createMixin(() => {
+      useState(0);
+      return undefined;
+    });
+
+    expect(() => jsx("div", { mix: hooky() })).toThrow(
+      "A mixin on <div> (slot 0) called useState.",
+    );
+    const foreignContext = {
+      [Symbol.for("fig.mixin-slot")]: "foreign",
+      props: {},
+      type: "span",
+    };
+    expect(() => hooky().type(foreignContext)).toThrow(
+      "A mixin on <span> (slot foreign) called useState.",
+    );
+    expect(() => useState(0)).toThrow(
+      "Hooks can only be called while rendering a component.",
+    );
+  });
+
+  it("lets a mixin intentionally replace an authored host prop", () => {
+    const buttonRole = createMixin(() => ({ role: "button" }));
+
+    expect(jsx("div", { mix: buttonRole(), role: "link" }).props.role).toBe(
+      "button",
+    );
+  });
+
   it("leaves component mix props for the component to forward", () => {
     const behavior = createMixin(() => ({ role: "button" }));
     const mix = behavior();

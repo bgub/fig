@@ -10,6 +10,8 @@ import {
   requestUpdateLane,
   SyncLane,
 } from "../../fig-reconciler/src/lanes.ts";
+import { clientOnlyHostBehavior } from "@bgub/fig/internal";
+import { eventDescriptorsFromProps } from "./event-descriptor.ts";
 import { createRoot, flushSync, on } from "./index.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
@@ -362,6 +364,27 @@ describe("@bgub/fig-dom events", () => {
 
     expect(signals[0].aborted).toBe(true);
     expect(input.listenerSets.load).toBeUndefined();
+  });
+
+  it("does not duplicate listeners when resolved host props are spread", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+    const source = createElement("button", {
+      mix: on("click", () => calls.push("click")),
+    });
+    const clone = createElement("button", { ...source.props });
+
+    expect(eventDescriptorsFromProps(source.props)).toHaveLength(1);
+    expect(eventDescriptorsFromProps(clone.props)).toHaveLength(1);
+    expect(clientOnlyHostBehavior(source.props)).toBe("on()");
+    expect(clientOnlyHostBehavior(clone.props)).toBe("on()");
+
+    flushSync(() => render(clone, container as unknown as Element));
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["click"]);
   });
 
   it("explains invalid mix entries with element context", () => {

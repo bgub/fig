@@ -3,6 +3,7 @@ import {
   clientReference,
   createContext,
   createElement,
+  createMixin,
   type ElementType,
   type FigElement,
   type FigNode,
@@ -25,6 +26,7 @@ import {
   encodePayloadDataEntries,
   encodePayloadValue,
   jsonPayloadCodec,
+  markClientOnlyHostBehavior,
   type PayloadRow,
   readThenable,
   setCurrentDispatcher,
@@ -263,6 +265,48 @@ describe("payload rendering", () => {
             tone: "primary",
           },
         ),
+      },
+    ]);
+  });
+
+  it("strips the host mix marker and serializes its resolved props", async () => {
+    const identify = createMixin((context) => ({
+      "data-host": context.type,
+    }));
+
+    const rows = await renderToPayloadRows(
+      createElement("button", { "aria-label": "Save", mix: identify() }),
+    );
+
+    expect(rows).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(0, "button", {
+          "aria-label": "Save",
+          "data-host": "button",
+        }),
+      },
+    ]);
+  });
+
+  it("rejects client-only host behavior instead of dropping it", async () => {
+    const interactive = createMixin((context) => {
+      markClientOnlyHostBehavior(context, "test()");
+      return { role: "button" };
+    });
+
+    await expect(
+      renderToPayloadRows(createElement("button", { mix: interactive() })),
+    ).resolves.toEqual([
+      {
+        id: 0,
+        tag: "error",
+        value: {
+          message:
+            "Client-only host behavior from test() cannot be serialized in " +
+            "a payload; move it into a client reference.",
+        },
       },
     ]);
   });

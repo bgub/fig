@@ -76,7 +76,13 @@ export {
   type ViewTransitionClass,
   type ViewTransitionProps,
 } from "./element.ts";
-export { FigMixinSymbol, mixinSlot, resolveHostMix } from "./mixin.ts";
+export {
+  clientOnlyHostBehavior,
+  FigMixinSymbol,
+  markClientOnlyHostBehavior,
+  mixinSlot,
+  resolveHostMix,
+} from "./mixin.ts";
 export {
   type RenderDispatcher,
   setCurrentDispatcher,

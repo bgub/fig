@@ -3,7 +3,7 @@ import {
   type MixinContext,
   type MixinDescriptor,
 } from "@bgub/fig";
-import { mixinSlot } from "@bgub/fig/internal";
+import { markClientOnlyHostBehavior, mixinSlot } from "@bgub/fig/internal";
 
 export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
 
@@ -28,8 +28,19 @@ const eventMixin = createMixin(
     callback: EventCallback,
     options?: EventOptions,
   ) => {
+    markClientOnlyHostBehavior(context, "on()");
     const props = context.props as EventDescriptorProps;
-    (props[NativeEventDescriptorsSymbol] ??= []).push({
+    let descriptors = props[NativeEventDescriptorsSymbol];
+    if (descriptors === undefined) {
+      descriptors = [];
+      // Non-enumerable: a spread copy of resolved host props must not share
+      // this array — the copied `mix` re-resolves into a fresh one.
+      Object.defineProperty(props, NativeEventDescriptorsSymbol, {
+        configurable: true,
+        value: descriptors,
+      });
+    }
+    descriptors.push({
       callback,
       options,
       slot: mixinSlot(context),

@@ -15,6 +15,7 @@ import {
   assetResourceDestination,
   assetResourceKey,
   checkpointPayloadGraph,
+  clientOnlyHostBehavior,
   clientReferenceAssets,
   createDataStore,
   createPayloadGraphEncodeContext,
@@ -539,7 +540,12 @@ function serializeElementModel(
   const model: PayloadElementModel = {
     $fig: "element",
     key: element.key,
-    props: serializeProps(element.props, frame, treeProps),
+    props: serializeProps(
+      element.props,
+      frame,
+      treeProps,
+      typeof type === "string",
+    ),
     type,
   };
   if (id !== undefined) model.id = id;
@@ -595,9 +601,24 @@ function serializeProps(
   props: Props,
   frame: RenderFrame,
   treeProps: ReadonlySet<string>,
+  hostElement = false,
 ): PayloadModel {
+  const clientOnlyBehavior = hostElement
+    ? clientOnlyHostBehavior(props)
+    : undefined;
+  if (clientOnlyBehavior !== undefined) {
+    throw new Error(
+      `Client-only host behavior from ${clientOnlyBehavior} cannot be ` +
+        "serialized in a payload; move it into a client reference.",
+    );
+  }
+
   const value: Record<string, PayloadModel> = {};
   for (const name of Object.keys(props)) {
+    // A host `mix` already resolved into these props at element creation;
+    // the marker itself holds descriptors (functions) and stays server-side.
+    // Component `mix` props still serialize (and fail loudly on functions).
+    if (hostElement && name === "mix") continue;
     const child = props[name];
     value[name] = treeProps.has(name)
       ? serializeTreeProp(child as FigNode, frame)

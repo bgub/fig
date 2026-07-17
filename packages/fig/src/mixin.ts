@@ -1,4 +1,9 @@
 import type { Props } from "./element.ts";
+import { type RenderDispatcher, setCurrentDispatcher } from "./hooks.ts";
+
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 export interface MixinContext {
   /** The intrinsic host name receiving this mixin. */
@@ -36,17 +41,25 @@ export type MixinFactory<TArgs extends unknown[]> = (
   ...args: TArgs
 ) => MixinDescriptor;
 
+// Registered symbols: descriptors and contexts must stay recognizable when
+// duplicate copies of this module are live (linked source next to a
+// prebundled copy).
 export const FigMixinSymbol = Symbol.for("fig.mixin");
-const FigMixinSlotSymbol = Symbol("fig.mixin-slot");
+const FigMixinSlotSymbol = Symbol.for("fig.mixin-slot");
+const FigClientOnlyHostBehaviorSymbol = Symbol.for(
+  "fig.client-only-host-behavior",
+);
 
 /** Creates a render-time host behavior for the `mix` prop. */
 export function createMixin<TArgs extends unknown[]>(
   type: MixinType<TArgs>,
 ): MixinFactory<TArgs> {
+  const runtimeType = type as MixinRuntimeType;
+  const descriptorType = __DEV__ ? guardMixinType(runtimeType) : runtimeType;
   return (...args) => ({
     $$typeof: FigMixinSymbol,
     args,
-    type: type as MixinRuntimeType,
+    type: descriptorType,
   });
 }
 
@@ -122,6 +135,26 @@ export function mixinSlot(context: MixinContext): string {
   return (context as MixinRuntimeContext)[FigMixinSlotSymbol];
 }
 
+export function markClientOnlyHostBehavior(
+  context: MixinContext,
+  behavior: string,
+): void {
+  if (
+    Reflect.get(context.props, FigClientOnlyHostBehaviorSymbol) !== undefined
+  ) {
+    return;
+  }
+  Object.defineProperty(context.props, FigClientOnlyHostBehaviorSymbol, {
+    configurable: true,
+    value: behavior,
+  });
+}
+
+export function clientOnlyHostBehavior(props: object): string | undefined {
+  const behavior = Reflect.get(props, FigClientOnlyHostBehaviorSymbol);
+  return typeof behavior === "string" ? behavior : undefined;
+}
+
 function emptyMixinValue(value: unknown): value is EmptyMixinValue {
   return (
     value === false ||
@@ -145,4 +178,33 @@ function throwInvalidMixinResult(type: string): never {
   throw new Error(
     `A mixin on <${type}> must return host props, more mixins, or nothing.`,
   );
+}
+
+// Dev-only: the wrapper lives in the createMixin module copy, so it guards the
+// dispatcher used by hooks imported alongside that factory even when another
+// linked or prebundled copy resolves the descriptor.
+function guardMixinType(type: MixinRuntimeType): MixinRuntimeType {
+  return (context, ...args) => {
+    const previousDispatcher = setCurrentDispatcher(
+      mixinDispatcher(context.type, mixinSlot(context)),
+    );
+    try {
+      return type(context, ...args);
+    } finally {
+      setCurrentDispatcher(previousDispatcher);
+    }
+  };
+}
+
+function mixinDispatcher(type: string, slot: string): RenderDispatcher {
+  return new Proxy({} as RenderDispatcher, {
+    get(_target, property) {
+      throw new Error(
+        `A mixin on <${type}> (slot ${slot}) called ${String(property)}. ` +
+          "Mixins are pure render-time code: hooks and read verbs belong to " +
+          "the component; host lifetimes belong in returned on() or bind " +
+          "behavior.",
+      );
+    },
+  });
 }
