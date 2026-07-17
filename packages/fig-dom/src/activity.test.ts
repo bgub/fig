@@ -588,7 +588,7 @@ describe("@bgub/fig-dom activity", () => {
               (node.parentNode as FakeElement | null)?.tagName ?? "none",
             );
           },
-          events: [
+          mix: [
             on("click", () => {
               clicks += 1;
             }),

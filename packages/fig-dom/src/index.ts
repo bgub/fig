@@ -8,7 +8,6 @@ import type {
 import { composeBind } from "./bind.ts";
 import {
   type EventCallback,
-  type EventDescriptor,
   type EventOptions,
   on,
 } from "./event-descriptor.ts";
@@ -18,10 +17,9 @@ import { domRenderer } from "./renderer.ts";
 export { insertAssetResources } from "./asset-resources.ts";
 export type { Bind } from "./bind.ts";
 export { composeBind };
-export { type EventCallback, type EventDescriptor, type EventOptions, on };
+export { type EventCallback, type EventOptions, on };
 export type {
   EmptyPropValue,
-  HostEvents,
   HostIntrinsicElements,
   HostProps,
   HostStyle,

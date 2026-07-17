@@ -13,7 +13,8 @@ The cross-subsystem living plan index is [open-questions.md](../plans/open-quest
 - [architecture.md](./architecture.md) — package ownership doctrine, the internal protocol registry, lazy data-store installation, boundaries that never leak.
 - [rendering.md](./rendering.md) — element model, bailout tiers, always-strict dev rendering, pre-commit diagnostics, commit/batching.
 - [hooks.md](./hooks.md) — the AbortSignal contract table, state/effects/stable events, transitions and actions (cancellation, action last-run-wins), the read verbs, deliberate omissions.
-- [events.md](./events.md) — `on()`/`events`, logical-tree delegation, native propagation (focus/blur stance), replay, `bind`.
+- [mixins.md](./mixins.md) — render-time host behavior composition, descriptor identity, prop precedence, and tree boundaries.
+- [events.md](./events.md) — the `on()` mixin, logical-tree delegation, native propagation (focus/blur stance), replay, `bind`.
 - [jsx.md](./jsx.md) — namespace placement, `HostProps`, React-habit traps, the stage-2 external-package plan.
 - [data.md](./data.md) — data resources: key identity, loader inputs, read semantics, the freshness verbs, ambient store vs explicit handle, SSR handoff.
 - [assets.md](./assets.md) — asset resources: creators, dedupe keys, destinations, reveal gating.

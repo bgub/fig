@@ -4,6 +4,7 @@ import {
   clientReference,
   createContext,
   createElement,
+  createMixin,
   ErrorBoundary,
   type FigNode,
   Fragment,
@@ -75,6 +76,9 @@ async function readResolvedSuspenseHtml(
 
 describe("@bgub/fig-server", () => {
   it("renders host elements and escapes text and attributes", async () => {
+    const identifyHost = createMixin((context) => ({
+      "data-mixed": context.type,
+    }));
     const html = await renderToHtml(
       createElement(
         "button",
@@ -83,9 +87,9 @@ describe("@bgub/fig-server", () => {
           class: "primary",
           "data-id": "save",
           disabled: true,
+          mix: identifyHost(),
           tabindex: 0,
           value: '<&"',
-          events: [{}],
           bind: () => undefined,
           onClick: () => undefined,
           style: {
@@ -99,7 +103,7 @@ describe("@bgub/fig-server", () => {
     );
 
     expect(html).toBe(
-      '<button aria-label="Save" class="primary" data-id="save" disabled tabindex="0" value="&lt;&amp;&quot;" style="background-color:red;--gap:1rem;opacity:0">Save &amp; &lt;</button>',
+      '<button aria-label="Save" class="primary" data-id="save" disabled tabindex="0" value="&lt;&amp;&quot;" style="background-color:red;--gap:1rem;opacity:0" data-mixed="button">Save &amp; &lt;</button>',
     );
   });
 

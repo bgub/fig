@@ -124,10 +124,10 @@ describe("@bgub/fig-dom portals", () => {
       root.render(
         createElement(
           "main",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createPortal(
             createElement("button", {
-              events: [on("click", () => calls.push("button"))],
+              mix: [on("click", () => calls.push("button"))],
             }),
             portalTarget(target),
           ),
@@ -151,7 +151,7 @@ describe("@bgub/fig-dom portals", () => {
       root.render(
         createElement(
           "main",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createPortal(
             createElement("button", null, "Plain"),
             portalTarget(target),
@@ -179,7 +179,7 @@ describe("@bgub/fig-dom portals", () => {
         createElement(
           "main",
           {
-            events: [
+            mix: [
               on("click", () => calls.push("parent-capture"), {
                 capture: true,
               }),
@@ -187,7 +187,7 @@ describe("@bgub/fig-dom portals", () => {
           },
           createPortal(
             createElement("button", {
-              events: [on("click", () => calls.push("button"))],
+              mix: [on("click", () => calls.push("button"))],
             }),
             portalTarget(target),
           ),
@@ -212,14 +212,14 @@ describe("@bgub/fig-dom portals", () => {
       root.render(
         createElement(
           "main",
-          { events: [on("click", () => calls.push("main"))] },
+          { mix: [on("click", () => calls.push("main"))] },
           createPortal(
             createElement(
               "section",
-              { events: [on("click", () => calls.push("section"))] },
+              { mix: [on("click", () => calls.push("section"))] },
               createPortal(
                 createElement("button", {
-                  events: [on("click", () => calls.push("button"))],
+                  mix: [on("click", () => calls.push("button"))],
                 }),
                 portalTarget(innerTarget),
               ),
@@ -251,7 +251,7 @@ describe("@bgub/fig-dom portals", () => {
           createPortal(
             createElement(
               "section",
-              { events: [on("click", () => calls.push("section"))] },
+              { mix: [on("click", () => calls.push("section"))] },
               createPortal(
                 createElement("button", null, "Plain"),
                 portalTarget(innerTarget),
@@ -282,10 +282,10 @@ describe("@bgub/fig-dom portals", () => {
       root.render(
         createElement(
           "main",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createPortal(
             createElement("button", {
-              events: [on("click", () => calls.push("button"))],
+              mix: [on("click", () => calls.push("button"))],
             }),
             portalTarget(target),
           ),

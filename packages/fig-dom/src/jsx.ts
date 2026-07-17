@@ -7,7 +7,6 @@ import type {
 
 export type {
   EmptyPropValue,
-  HostEvents,
   HostProps,
   HostStyle,
   HtmlHostProps,

@@ -32,7 +32,7 @@ function App() {
 
   return (
     <main>
-      <button events={[on("click", () => setCount((value) => value + 1))]}>
+      <button mix={on("click", () => setCount((value) => value + 1))}>
         Count {count}
       </button>
       <Suspense fallback={<span>Loading</span>}>
@@ -52,6 +52,10 @@ createRoot(container).render(<App />);
 
 - Elements: `createElement`, `isValidElement`, `Fragment`, and the JSX
   runtime.
+- Host behavior: `createMixin(type)` creates render-time prop composers for
+  intrinsic elements. A host accepts one descriptor or nested arrays through
+  `mix`; mixins may return props or more mixins but cannot replace `children`,
+  `key`, or `unsafeHTML`.
 - State and memoization: `useState`, `useDeferredValue`, `useMemo`, and
   `useCallback`.
 - Stable identifiers: `useId()` generates IDs that match server render and
@@ -136,7 +140,8 @@ Use `@bgub/fig-dom` for browser rendering:
 - `hydrateRoot(container, children, options?)` hydrates server HTML and reports
   recoverable mismatches with `onRecoverableError`.
 - `createPortal(children, container, key?)` renders into external DOM targets.
-- DOM events use `events={[on("click", (event, signal) => ...)]}`.
+- DOM events use `mix={on("click", (event, signal) => ...)}`; arrays compose
+  multiple or conditional mixins.
 - DOM node access uses `bind={(node, signal) => ...}`.
 - Raw trusted HTML uses `unsafeHTML="<p>trusted html</p>"`.
 
@@ -171,7 +176,7 @@ function Profile({ id }: { id: string }) {
   const user = readData(userResource, id);
 
   return (
-    <button events={[on("click", () => void refreshData(userResource, id))]}>
+    <button mix={on("click", () => void refreshData(userResource, id))}>
       {user.name}
     </button>
   );

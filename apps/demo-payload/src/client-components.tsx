@@ -14,7 +14,7 @@ export function LikeButton({ label }: LikeButtonProps) {
       <button
         class="island-button"
         data-like-island={label}
-        events={[on("click", () => setLikes((value) => value + 1))]}
+        mix={[on("click", () => setLikes((value) => value + 1))]}
         type="button"
       >
         Like ({likes})

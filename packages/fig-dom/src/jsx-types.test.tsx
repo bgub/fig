@@ -1,4 +1,4 @@
-import type { FigNode } from "@bgub/fig";
+import { createMixin, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { type Bind, on } from "./index.ts";
 
@@ -14,6 +14,9 @@ function expectNode(node: FigNode): FigNode {
 function typeChecks(): FigNode[] {
   // @ts-expect-error bind cleanup is signal-driven; returned cleanup is invalid.
   const invalidBind: Bind = () => () => undefined;
+  const labelled = createMixin((_context, label: string) => ({
+    "aria-label": label,
+  }));
   void invalidBind;
 
   return [
@@ -28,7 +31,7 @@ function typeChecks(): FigNode[] {
           void input;
           void abort;
         }}
-        events={[on("input", (event, signal) => void [event, signal])]}
+        mix={on("input", (event, signal) => void [event, signal])}
       />,
     ),
     expectNode(<label for="field">Name</label>),
@@ -39,6 +42,7 @@ function typeChecks(): FigNode[] {
     expectNode(<div style={{ color: "red", "--gap": "4px" }} />),
     expectNode(<div unsafeHTML="<b>trusted</b>" />),
     expectNode(<time suppressHydrationWarning>{Date.now()}</time>),
+    expectNode(<button mix={labelled("Save")} />),
     expectNode(
       <circle bind={(node) => void (node satisfies SVGCircleElement)} />,
     ),
@@ -62,15 +66,13 @@ function typeChecks(): FigNode[] {
         bind={(node) => void (node satisfies HTMLElement)}
       />,
     ),
-    // Conditional entries are part of the events contract.
+    // Conditional entries are part of the mix contract.
     expectNode(
-      <button
-        events={[false, null, undefined, on("click", () => undefined)]}
-      />,
+      <button mix={[false, null, undefined, on("click", () => undefined)]} />,
     ),
     expectNode(
       <my-widget
-        events={[
+        mix={[
           on<CustomEvent<{ value: number }>>("value-changed", (event) => {
             const value: number = event.detail.value;
             void value;
@@ -104,7 +106,7 @@ function typeChecks(): FigNode[] {
     expectNode(<div ref={() => undefined} />),
     // @ts-expect-error dangerouslySetInnerHTML does not exist — use unsafeHTML.
     expectNode(<div dangerouslySetInnerHTML={{ __html: "x" }} />),
-    // @ts-expect-error listener props do not exist — use events={[on(...)]}.
+    // @ts-expect-error listener props do not exist — use mix={on(...)}.
     expectNode(<button onClick={() => undefined} />),
     // @ts-expect-error listener props are rejected on custom elements too.
     expectNode(<my-widget onClick={() => undefined} />),
@@ -130,10 +132,10 @@ function typeChecks(): FigNode[] {
     expectNode(<input value={["a"]} />),
 
     // Fig props are shape-checked.
-    // @ts-expect-error events takes an array of on() descriptors, not a handler.
-    expectNode(<button events={() => undefined} />),
-    // @ts-expect-error events entries must be descriptors (or falsy), not handlers.
-    expectNode(<button events={[() => undefined]} />),
+    // @ts-expect-error mix takes descriptors, not a handler.
+    expectNode(<button mix={() => undefined} />),
+    // @ts-expect-error mix entries must be descriptors (or falsy), not handlers.
+    expectNode(<button mix={[() => undefined]} />),
     // @ts-expect-error style is an object, not a string.
     expectNode(<div style="color: red" />),
     // @ts-expect-error numeric style values are dropped at runtime — use strings.

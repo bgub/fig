@@ -1,5 +1,6 @@
 import type { Props } from "@bgub/fig";
 import { updateBind } from "./bind.ts";
+import { eventDescriptorsFromProps } from "./event-descriptor.ts";
 import { updateEvents } from "./events.ts";
 import {
   type HostUpdateOptions,
@@ -28,6 +29,10 @@ export function updateElement(
   nextProps: Props,
   options: HostUpdateOptions = {},
 ): void {
+  if ("mix" in previousProps || "mix" in nextProps) {
+    updateEvents(element, eventDescriptorsFromProps(nextProps));
+  }
+
   const type = elementName(element);
   const html = isHtmlElement(element);
   const names = Object.keys(previousProps);
@@ -42,10 +47,7 @@ export function updateElement(
     const previous = previousProps[name];
     const next = nextProps[name];
 
-    if (name === "events") {
-      updateEvents(element, next);
-      continue;
-    }
+    if (name === "mix") continue;
 
     if (name === "bind") {
       if (previous !== next) updateBind(element, next);
@@ -123,7 +125,7 @@ function eventPropWarning(name: string, type: string, props: Props): string {
   const options = capture ? ", { capture: true }" : "";
   const suggest = (eventName: string) =>
     `Fig has no "${name}" event props; use ` +
-    `events={[on("${eventName}", handler${options})]} instead.`;
+    `mix={on("${eventName}", handler${options})} instead.`;
 
   if (rawName === "DoubleClick") return suggest("dblclick");
   if (rawName === "Change" && reactChangeUsesInputEvent(type, props)) {
@@ -184,7 +186,9 @@ function warnExtraHydratedAttributes(
   const html = isHtmlElement(element);
 
   for (const name of Object.keys(nextProps)) {
-    if (name === "events" || name === "bind" || reserved(name)) continue;
+    if (name === "bind" || reserved(name)) {
+      continue;
+    }
 
     const attribute = hydratedAttributeName(type, name, html);
     if (attribute !== null) expectedAttributes.add(attribute);
@@ -297,6 +301,7 @@ function reserved(name: string): boolean {
   return (
     name === "children" ||
     name === "key" ||
+    name === "mix" ||
     name === "suppressHydrationWarning" ||
     name === "unsafeHTML" ||
     event(name)

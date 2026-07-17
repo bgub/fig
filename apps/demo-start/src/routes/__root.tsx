@@ -64,7 +64,7 @@ function ThemeButton(props: {
       class="px-2.5 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-100"
       data-theme-choice={props.value}
       data-theme-selected={selected ? "" : undefined}
-      events={[
+      mix={[
         on("click", () => {
           setBrowserThemePreference(props.value);
           props.setTheme(props.value);

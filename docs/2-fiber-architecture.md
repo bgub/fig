@@ -64,11 +64,9 @@ function Counter() {
   const [count, setCount] = useState(1);
   return (
     <>
-      <button events={[on("click", () => setCount((c) => c * 2))]}>
-        double
-      </button>
+      <button mix={on("click", () => setCount((c) => c * 2))}>double</button>
       <button
-        events={[on("click", () => transition(() => setCount((c) => c + 10)))]}
+        mix={on("click", () => transition(() => setCount((c) => c + 10)))}
       >
         add ten
       </button>

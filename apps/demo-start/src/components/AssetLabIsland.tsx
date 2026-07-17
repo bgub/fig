@@ -8,10 +8,7 @@ export function AssetLabIsland(): FigNode {
   const [count, setCount] = useState(0);
 
   return (
-    <button
-      class={styles.root}
-      events={[on("click", () => setCount(count + 1))]}
-    >
+    <button class={styles.root} mix={[on("click", () => setCount(count + 1))]}>
       <img alt="" class={styles.mark} src={markHref} />
       <span class={styles.body}>
         <span class={styles.label}>Client asset island</span>

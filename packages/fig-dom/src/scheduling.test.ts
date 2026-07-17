@@ -50,7 +50,7 @@ describe("@bgub/fig-dom scheduling", () => {
       return createElement(
         "button",
         {
-          events: [
+          mix: [
             on("click", () => {
               setCount((value) => value + 1);
               setCount((value) => value + 1);

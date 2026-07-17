@@ -56,7 +56,7 @@ describe("early event replay", () => {
           container,
           createElement(
             "button",
-            { events: [on("click", () => clicks.push("click"))] },
+            { mix: [on("click", () => clicks.push("click"))] },
             "Server",
           ),
         ),
@@ -97,7 +97,7 @@ describe("early event replay", () => {
           container,
           createElement(
             "button",
-            { events: [on("click", () => clicks.push("click"))] },
+            { mix: [on("click", () => clicks.push("click"))] },
             "Server",
           ),
         ),

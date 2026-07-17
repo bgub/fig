@@ -1,6 +1,5 @@
-import type { FigNode, Key } from "@bgub/fig";
+import type { FigNode, Key, MixinDescriptor, MixinInput } from "@bgub/fig";
 import type { Bind } from "./bind.ts";
-import type { EventDescriptor } from "./event-descriptor.ts";
 import type {
   HtmlAttributeNameByTag,
   HtmlGlobalAttributeName,
@@ -18,17 +17,11 @@ type AttributeValue = string | number | true | EmptyPropValue;
 
 export type HostStyle = Readonly<Record<string, string | EmptyPropValue>>;
 
-// `any` for variance only: on("click", ...) yields EventDescriptor<MouseEvent>
-// and callback parameters are contravariant, so a concrete-event descriptor
-// is not assignable to EventDescriptor<Event>.
-// oxlint-disable-next-line typescript/no-explicit-any
-export type HostEvents = ReadonlyArray<EventDescriptor<any> | EmptyPropValue>;
-
 interface FigHostProps<E extends Element> {
   bind?: Bind<E> | EmptyPropValue;
   children?: FigNode;
-  events?: HostEvents | EmptyPropValue;
   key?: Key | null;
+  mix?: MixinInput;
   style?: HostStyle | EmptyPropValue;
   suppressHydrationWarning?: boolean | null;
   unsafeHTML?: string | EmptyPropValue;
@@ -134,5 +127,11 @@ export interface OpenHostProps<E extends Element>
   extends FigHostProps<E>, ReactHabitTraps {
   // Custom elements and MathML stay open: their vocabularies are app-defined
   // or not covered well enough by the external HTML/SVG attribute packages.
-  [attribute: string]: FigNode | HostStyle | HostEvents | Bind<E>;
+  [attribute: string]:
+    | FigNode
+    | HostStyle
+    | MixinDescriptor
+    | ReadonlyArray<MixinInput>
+    | 0n
+    | Bind<E>;
 }

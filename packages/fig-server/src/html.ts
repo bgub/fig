@@ -220,7 +220,7 @@ function reservedProp(name: string): boolean {
   return (
     name === "children" ||
     name === "key" ||
-    name === "events" ||
+    name === "mix" ||
     name === "bind" ||
     name === "suppressHydrationWarning" ||
     name === "unsafeHTML" ||

@@ -21,6 +21,25 @@ function render(node: FigNode, container: Element): void {
 }
 
 describe("@bgub/fig-dom events", () => {
+  it("accepts a single event mixin", () => {
+    const calls: string[] = [];
+    const container = new FakeElement("root");
+
+    flushSync(() =>
+      render(
+        createElement("button", {
+          mix: on("click", () => calls.push("click")),
+        }),
+        container as unknown as Element,
+      ),
+    );
+
+    const button = container.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["click"]);
+  });
+
   it("runs DOM event handlers with event priority", () => {
     const lanes: number[] = [];
     const container = new FakeElement("root");
@@ -31,7 +50,7 @@ describe("@bgub/fig-dom events", () => {
     flushSync(() =>
       render(
         createElement("button", {
-          events: [
+          mix: [
             on("click", record),
             on("mousemove", record),
             on("load", record),
@@ -57,7 +76,7 @@ describe("@bgub/fig-dom events", () => {
     flushSync(() =>
       render(
         createElement("button", {
-          events: [on("mousedown", record), on("contextmenu", record)],
+          mix: [on("mousedown", record), on("contextmenu", record)],
         }),
         container as unknown as Element,
       ),
@@ -77,7 +96,7 @@ describe("@bgub/fig-dom events", () => {
     const root = createRoot(container as unknown as Element);
     const app = (enabled: boolean, label: string) =>
       createElement("button", {
-        events: [
+        mix: [
           false,
           enabled &&
             on("pointermove", () => calls.push(`conditional:${label}`)),
@@ -122,7 +141,7 @@ describe("@bgub/fig-dom events", () => {
 
     function App({ both }: { both: boolean }) {
       return createElement("button", {
-        events: both
+        mix: both
           ? [
               on("click", () => {
                 calls.push("first");
@@ -155,7 +174,7 @@ describe("@bgub/fig-dom events", () => {
         createElement(
           "main",
           {
-            events: [
+            mix: [
               on("click", (event) => {
                 calls.push(
                   `main:${(event.currentTarget as unknown as FakeElement).tagName}`,
@@ -164,7 +183,7 @@ describe("@bgub/fig-dom events", () => {
             ],
           },
           createElement("button", {
-            events: [
+            mix: [
               on("click", (event) => {
                 calls.push(
                   `button:${(event.currentTarget as unknown as FakeElement).tagName}`,
@@ -197,7 +216,7 @@ describe("@bgub/fig-dom events", () => {
       outerRoot.render(
         createElement(
           "section",
-          { events: [on("click", () => calls.push("outer"))] },
+          { mix: [on("click", () => calls.push("outer"))] },
           createElement("div", null),
         ),
       ),
@@ -210,7 +229,7 @@ describe("@bgub/fig-dom events", () => {
     flushSync(() =>
       innerRoot.render(
         createElement("button", {
-          events: [on("click", () => calls.push("inner"))],
+          mix: [on("click", () => calls.push("inner"))],
         }),
       ),
     );
@@ -229,15 +248,15 @@ describe("@bgub/fig-dom events", () => {
       render(
         createElement(
           "main",
-          { events: [on("load", () => calls.push("main"))] },
+          { mix: [on("load", () => calls.push("main"))] },
           createElement("img", {
-            events: [
+            mix: [
               on("load", () => calls.push("img:load")),
               on("pointerenter", () => calls.push("img:pointerenter")),
             ],
           }),
           createElement("video", {
-            events: [on("play", () => calls.push("video:play"))],
+            mix: [on("play", () => calls.push("video:play"))],
           }),
         ),
         container as unknown as Element,
@@ -267,7 +286,7 @@ describe("@bgub/fig-dom events", () => {
     const root = createRoot(container as unknown as Element);
     const app = (listen: boolean) =>
       createElement("button", {
-        events: listen ? [on("htmx:afterSwap", () => calls.push("swap"))] : [],
+        mix: listen ? [on("htmx:afterSwap", () => calls.push("swap"))] : [],
       });
 
     flushSync(() => root.render(app(true)));
@@ -292,7 +311,7 @@ describe("@bgub/fig-dom events", () => {
 
     function Button({ label }: { label: string }) {
       return createElement("button", {
-        events: [
+        mix: [
           on("click", () => calls.push(`first:${label}`)),
           on("click", () => calls.push(`second:${label}`)),
         ],
@@ -318,58 +337,58 @@ describe("@bgub/fig-dom events", () => {
     ]);
   });
 
-  it("reconciles event descriptors when their array is mutated in place", () => {
+  it("reconciles event mixins when their array is mutated in place", () => {
     const signals: AbortSignal[] = [];
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
-    const events = [
+    const mix = [
       on("load", (_event, signal) => {
         signals.push(signal);
       }),
     ];
 
     flushSync(() =>
-      root.render(createElement("input", { events, value: "controlled" })),
+      root.render(createElement("input", { mix, value: "controlled" })),
     );
 
     const input = container.childNodes[0] as FakeElement;
     input.dispatch("load");
     expect(signals[0].aborted).toBe(false);
 
-    events.length = 0;
+    mix.length = 0;
     flushSync(() =>
-      root.render(createElement("input", { events, value: "controlled" })),
+      root.render(createElement("input", { mix, value: "controlled" })),
     );
 
     expect(signals[0].aborted).toBe(true);
     expect(input.listenerSets.load).toBeUndefined();
   });
 
-  it("explains invalid event descriptor props with element context", () => {
+  it("explains invalid mix entries with element context", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     const props: Record<string, unknown> = {
-      events: [() => undefined],
+      mix: [() => undefined],
     };
 
     expect(() =>
       flushSync(() => root.render(createElement("button", props))),
     ).toThrow(
-      "The events prop on <button> must be an array of event descriptors created with on(type, callback).",
+      "The mix prop on <button> must contain descriptors created by createMixin().",
     );
   });
 
-  it("explains non-array event props with element context", () => {
+  it("explains invalid singular mix values with element context", () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);
     const props: Record<string, unknown> = {
-      events: () => undefined,
+      mix: () => undefined,
     };
 
     expect(() =>
       flushSync(() => root.render(createElement("section", props))),
     ).toThrow(
-      "The events prop on <section> must be an array of event descriptors created with on(type, callback).",
+      "The mix prop on <section> must contain descriptors created by createMixin().",
     );
   });
 
@@ -382,7 +401,7 @@ describe("@bgub/fig-dom events", () => {
         createElement(
           "main",
           {
-            events: [
+            mix: [
               on("click", () => calls.push("parent:capture"), {
                 capture: true,
               }),
@@ -390,7 +409,7 @@ describe("@bgub/fig-dom events", () => {
             ],
           },
           createElement("button", {
-            events: [
+            mix: [
               on("click", () => calls.push("child:capture"), {
                 capture: true,
               }),
@@ -425,10 +444,10 @@ describe("@bgub/fig-dom events", () => {
         createElement(
           "main",
           {
-            events: [on("click", () => calls.push("parent"))],
+            mix: [on("click", () => calls.push("parent"))],
           },
           createElement("button", {
-            events: [
+            mix: [
               on("click", (event) => {
                 calls.push("child");
                 event.stopPropagation();
@@ -457,10 +476,10 @@ describe("@bgub/fig-dom events", () => {
         createElement(
           "main",
           {
-            events: [on("click", () => calls.push("parent"))],
+            mix: [on("click", () => calls.push("parent"))],
           },
           createElement("button", {
-            events: [
+            mix: [
               on("click", (event) => {
                 calls.push("child:first");
                 event.stopPropagation();
@@ -491,7 +510,7 @@ describe("@bgub/fig-dom events", () => {
           createElement(
             "main",
             {
-              events: [
+              mix: [
                 on(type, () => calls.push("parent:capture"), {
                   capture: true,
                 }),
@@ -499,7 +518,7 @@ describe("@bgub/fig-dom events", () => {
               ],
             },
             createElement("button", {
-              events: [on(type, () => calls.push("child:bubble"))],
+              mix: [on(type, () => calls.push("child:bubble"))],
             }),
           ),
           container as unknown as Element,
@@ -541,10 +560,10 @@ describe("@bgub/fig-dom events", () => {
           createElement(
             "main",
             {
-              events: [on(type, () => calls.push("parent"))],
+              mix: [on(type, () => calls.push("parent"))],
             },
             createElement("button", {
-              events: [on(type, () => calls.push("child"))],
+              mix: [on(type, () => calls.push("child"))],
             }),
           ),
           container as unknown as Element,
@@ -576,12 +595,12 @@ describe("@bgub/fig-dom events", () => {
         showFirst
           ? createElement("button", {
               key: "first",
-              events: [on("click", () => calls.push("first"))],
+              mix: [on("click", () => calls.push("first"))],
             })
           : null,
         createElement("button", {
           key: "second",
-          events: [on("click", () => calls.push("second"))],
+          mix: [on("click", () => calls.push("second"))],
         }),
       );
     }
@@ -608,7 +627,7 @@ describe("@bgub/fig-dom events", () => {
 
     function Button({ label }: { label: string }) {
       return createElement("button", {
-        events: [
+        mix: [
           on("click", (_event, signal) => {
             signals.push(signal);
             calls.push(label);

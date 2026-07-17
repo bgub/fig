@@ -1,6 +1,7 @@
 import type { DataResourceKey } from "./data.ts";
 import { readPromise } from "./hooks.ts";
 import type { ClientReferenceAssets } from "./resource.ts";
+import { resolveHostMix } from "./mixin.ts";
 
 export type Key = string | number;
 export type Props = Record<string, any>;
@@ -178,7 +179,15 @@ export function createElement<P extends Props>(
   if (children.length === 1) props.children = children[0];
   else if (children.length > 1) props.children = children;
 
-  return { $$typeof: FigElementSymbol, type, key, props };
+  return {
+    $$typeof: FigElementSymbol,
+    type,
+    key,
+    props:
+      "mix" in props && typeof type === "string"
+        ? resolveHostMix(type, props)
+        : props,
+  };
 }
 
 export function isValidElement(value: unknown): value is FigElement {

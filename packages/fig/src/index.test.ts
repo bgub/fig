@@ -4,6 +4,7 @@ import {
   clientReference,
   createContext,
   createElement,
+  createMixin,
   ErrorBoundary,
   Fragment,
   font,
@@ -64,6 +65,43 @@ describe("@bgub/fig", () => {
     expect(element.props).toEqual({ id: "root" });
     expect(explicit.key).toBe("explicit-key");
     expect(explicit.props).toEqual({});
+  });
+
+  it("composes host mixins in order and retains their authored value", () => {
+    const label = createMixin((context, value: string) => ({
+      "aria-label": value,
+      "data-host": context.type,
+      role: context.props.role ?? "button",
+    }));
+    const nested = createMixin(() => [false, label("nested")]);
+
+    const element = jsx("div", {
+      mix: [label("first"), nested()],
+      role: "link",
+    });
+
+    expect(element.props).toEqual({
+      "aria-label": "nested",
+      "data-host": "div",
+      mix: expect.any(Array),
+      role: "link",
+    });
+  });
+
+  it("leaves component mix props for the component to forward", () => {
+    const behavior = createMixin(() => ({ role: "button" }));
+    const mix = behavior();
+    const Component = () => null;
+
+    expect(createElement(Component, { mix }).props.mix).toBe(mix);
+  });
+
+  it("rejects mixins that replace host tree props", () => {
+    const invalid = createMixin(() => ({ children: "replacement" }));
+
+    expect(() => jsx("div", { mix: invalid() })).toThrow(
+      "A mixin on <div> cannot return children, key, or unsafeHTML.",
+    );
   });
 
   it("routes browser imports of serverDataResource to a throwing stub", async () => {

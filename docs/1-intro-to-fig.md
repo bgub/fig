@@ -18,11 +18,30 @@ In general, Fig follows a simple rule: when syntax is identical to React, use th
 
 Fig uses native names for props: `class`, `for`, `tabindex`, etc. No `className` allowed!
 
+### Host mixins
+
+Intrinsic elements compose reusable host behavior through `mix`. A mixin runs during element creation and may contribute props or more mixins without wrapping the host or replacing its children:
+
+```tsx
+import { createMixin } from "@bgub/fig";
+
+const labelled = createMixin((context, label: string) => ({
+  "aria-label": context.props["aria-label"] ?? label,
+  "data-host": context.type,
+}));
+
+<button mix={labelled("Save")} />;
+```
+
+`mix` accepts one descriptor or nested arrays with falsy conditional entries. Custom components receive `mix` as an ordinary prop and decide which intrinsic element receives it.
+
 ### Events
+
+`on()` is Fig DOM's first built-in mixin:
 
 ```tsx
 <input
-  events={[
+  mix={[
     on("input", (event, signal) => {
       const input = event.currentTarget;
       if (input instanceof HTMLInputElement) setQuery(input.value);
@@ -146,7 +165,7 @@ export function Counter({ initial }: { initial: number }) {
   const [count, setCount] = useState(initial);
 
   return (
-    <button events={[on("click", () => setCount((n) => n + 1))]}>
+    <button mix={on("click", () => setCount((n) => n + 1))}>
       Count: {count}
     </button>
   );
@@ -259,7 +278,7 @@ function ProfilePage({ id }: { id: string }) {
       key={retryKey}
       fallback={(error) => (
         <button
-          events={[
+          mix={[
             on("click", () => {
               invalidateDataError(error);
               setRetryKey((key) => key + 1);
@@ -310,7 +329,7 @@ Fig discovers these declarations during rendering and deduplicates them across s
 | React | Fig |
 | --- | --- |
 | `className` / `htmlFor` | `class` / `for` |
-| `onClick={fn}` | `events={[on("click", fn)]}` |
+| `onClick={fn}` | `mix={on("click", fn)}` |
 | `ref` / `forwardRef` | `bind` |
 | `dangerouslySetInnerHTML` | `unsafeHTML` |
 | `useEffect` | `useReactive` |

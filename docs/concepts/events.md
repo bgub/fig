@@ -2,13 +2,13 @@
 
 Status: stable
 
-The `events` prop, delegation through the logical tree, and native propagation semantics.
+The `on()` host mixin, delegation through the logical tree, and native propagation semantics.
 
 ## The API
 
-Listeners are declared as `events={[on("click", (event, signal) => ...)]}` — an array of `on()` descriptors, not `onClick` props. Callbacks receive the **native** event plus an `AbortSignal` that aborts on re-entry and on listener removal (enforced even mid-dispatch). `on(type, callback, options?)` supports `capture` and `passive` (`signal` is excluded — Fig owns the signal). Callback identity swaps in place without listener churn.
+Listeners are declared as `mix={on("click", (event, signal) => ...)}` — an `on()` mixin, not an `onClick` prop. Multiple or conditional listeners use an array: `mix={[condition && on("click", first), on("click", second)]}`. Callbacks receive the **native** event plus an `AbortSignal` that aborts on re-entry and on listener removal (enforced even mid-dispatch). `on(type, callback, options?)` supports `capture` and `passive` (`signal` is excluded — Fig owns the signal). Callback identity swaps in place without listener churn.
 
-Array entries may be `false | null | undefined` (conditional listeners), and array position is a listener's identity: slots match by index, so a key change (type/options) at a position tears down and recreates that slot.
+Nested mix arrays may contain falsy conditional entries without shifting later listener slots. A change to the event type, capture mode, or passive mode tears down and recreates that slot.
 
 ## Delegation
 
@@ -30,6 +30,4 @@ Server-rendered documents open `<head>` with a tiny inline script that queues re
 
 DOM node access is `bind={(node, signal) => ...}`, forwarded as a normal prop — no `forwardRef`, no ref objects. Bind callbacks return `undefined`: cleanup belongs on the signal, and returned cleanup functions or promises are type errors. The signal aborts on identity change and unmount; DOM _moves_ do not re-fire it. `composeBind` merges binds and accepts falsy entries. Strict dev runs first-time binds through the run/abort/re-run cycle like effects. (Note: binds fire during insertion; use `useBeforePaint` for layout measurement.)
 
-## Styling Stays Separate
-
-Styling is deliberately not part of the `events` or `bind` APIs: `style` is its own prop (string-valued object — see jsx.md), and neither descriptors nor bind callbacks grow styling conveniences. One prop kind per concern.
+`on()` contributes only event behavior. General host prop composition belongs to `createMixin()` (`mixins.md`); `bind` remains the direct DOM-node lifetime API.

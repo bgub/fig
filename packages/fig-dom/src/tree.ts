@@ -72,7 +72,7 @@ export function parentOf(node: unknown): unknown {
 }
 
 // The shared "absent prop" predicate: null, undefined, and false all mean
-// "not provided" for prop-shaped values (bind, events, unsafeHTML,
+// "not provided" for prop-shaped values (bind, mix, unsafeHTML,
 // attributes) — one authority so the prop kinds cannot drift.
 export function isEmptyPropValue(value: unknown): boolean {
   return value === null || value === undefined || value === false;

@@ -1112,7 +1112,7 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
             bind: (_node: Element, signal: AbortSignal) => {
               signals.push(signal);
             },
-            events: [on("click", () => clicks++)],
+            mix: [on("click", () => clicks++)],
           },
           "P",
           createElement(Slow, { gate }),

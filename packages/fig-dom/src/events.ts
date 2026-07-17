@@ -10,8 +10,7 @@ import {
 } from "@bgub/fig-reconciler";
 import {
   type EventCallback,
-  type EventDescriptor,
-  readEventDescriptors,
+  type NativeEventDescriptor,
 } from "./event-descriptor.ts";
 import {
   type PropagationState,
@@ -27,12 +26,13 @@ type RootRun = <T>(callback: () => T) => T;
 interface EventSlot {
   attachment: EventAttachment | null;
   capture: boolean;
-  type: string;
   callback: EventCallback;
-  passive: boolean;
   controller: AbortController | null;
+  passive: boolean;
+  slot: string;
+  type: string;
 }
-type EventSlotList = Array<EventSlot | undefined>;
+type EventSlotList = EventSlot[];
 
 type EventAttachment =
   | {
@@ -339,33 +339,26 @@ function containerRecord(container: Container): ContainerRecord {
   return record;
 }
 
-export function updateEvents(element: Element, value: unknown): void {
-  let slots = eventSlots.get(element);
-  if (slots === undefined) {
-    slots = [];
-    eventSlots.set(element, slots);
-  }
-  const descriptors = readEventDescriptors(value, element);
+export function updateEvents(
+  element: Element,
+  descriptors: readonly NativeEventDescriptor[],
+): void {
+  const previousSlots = eventSlots.get(element) ?? [];
+  if (previousSlots.length === 0 && descriptors.length === 0) return;
+  const previousBySlot = new Map<string, EventSlot>();
+  for (const slot of previousSlots) previousBySlot.set(slot.slot, slot);
+  const nextSlots: EventSlot[] = [];
   let location: EventLocation | null = null;
 
-  for (let index = 0; index < descriptors.length; index += 1) {
-    const descriptor = descriptors[index];
-    if (descriptor == null || descriptor === false) {
-      const slot = slots[index];
-      if (slot !== undefined) {
-        removeEventSlot(slot);
-        slots[index] = undefined;
-      }
-      continue;
-    }
-
+  for (const descriptor of descriptors) {
     const capture = descriptor.options?.capture === true;
     const passive = descriptor.options?.passive === true;
-    const slot = slots[index];
+    let slot = previousBySlot.get(descriptor.slot);
+    previousBySlot.delete(descriptor.slot);
 
     if (slot === undefined) {
       location ??= eventLocationFor(element);
-      slots[index] = addEventSlot(
+      slot = addEventSlot(
         element,
         location.root,
         location.listenerTarget,
@@ -380,7 +373,7 @@ export function updateEvents(element: Element, value: unknown): void {
     ) {
       location ??= eventLocationFor(element);
       removeEventSlot(slot);
-      slots[index] = addEventSlot(
+      slot = addEventSlot(
         element,
         location.root,
         location.listenerTarget,
@@ -391,14 +384,12 @@ export function updateEvents(element: Element, value: unknown): void {
     } else if (slot.callback !== descriptor.callback) {
       slot.callback = descriptor.callback as EventCallback;
     }
+    nextSlots.push(slot);
   }
 
-  for (let index = slots.length - 1; index >= descriptors.length; index -= 1) {
-    const slot = slots[index];
-    if (slot !== undefined) removeEventSlot(slot);
-  }
-
-  slots.length = descriptors.length;
+  for (const slot of previousBySlot.values()) removeEventSlot(slot);
+  if (nextSlots.length === 0) eventSlots.delete(element);
+  else eventSlots.set(element, nextSlots);
 }
 
 export function attachElementEvents(element: Element): void {
@@ -407,7 +398,6 @@ export function attachElementEvents(element: Element): void {
   const { listenerTarget, root } = eventLocationFor(element);
 
   for (const slot of slots) {
-    if (slot === undefined) continue;
     attachEventSlot(element, root, listenerTarget, slot);
   }
 }
@@ -415,9 +405,7 @@ export function attachElementEvents(element: Element): void {
 export function detachElementEvents(element: Element): void {
   const slots = eventSlots.get(element);
   if (slots === undefined) return;
-  for (const slot of slots) {
-    if (slot !== undefined) removeEventSlot(slot);
-  }
+  for (const slot of slots) removeEventSlot(slot);
   eventSlots.delete(element);
 }
 
@@ -551,17 +539,18 @@ function addEventSlot(
   element: Element,
   root: Container | null,
   listenerTarget: Container | null,
-  descriptor: EventDescriptor,
+  descriptor: NativeEventDescriptor,
   capture: boolean,
   passive: boolean,
 ): EventSlot {
   const slot: EventSlot = {
     attachment: null,
     capture,
-    type: descriptor.type,
     callback: descriptor.callback as EventCallback,
-    passive,
     controller: null,
+    passive,
+    slot: descriptor.slot,
+    type: descriptor.type,
   };
   attachEventSlot(element, root, listenerTarget, slot);
   return slot;
@@ -728,7 +717,6 @@ function extractDispatches(
     if (slots === undefined) continue;
 
     for (const slot of slots) {
-      if (slot === undefined) continue;
       const slotRoot = attachedRoot(slot);
       if (
         slotRoot !== root ||

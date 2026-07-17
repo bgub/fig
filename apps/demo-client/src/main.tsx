@@ -261,7 +261,7 @@ function Command({
     <button
       type="button"
       class={primary ? "button primary" : "button"}
-      events={[on("click", run)]}
+      mix={[on("click", run)]}
     >
       {children}
     </button>
@@ -300,7 +300,7 @@ function App() {
                 key={item.id}
                 type="button"
                 class={item.id === page ? "active" : ""}
-                events={[on("click", () => navigate(item.id))]}
+                mix={[on("click", () => navigate(item.id))]}
               >
                 <span class="nav-label">{item.label}</span>
                 <span class="nav-short-label">{item.shortLabel}</span>
@@ -542,7 +542,7 @@ function AsyncPage() {
         class="input"
         value={query}
         placeholder="Try typing quickly"
-        events={[
+        mix={[
           on("input", (event, signal) => {
             const nextQuery = (event.currentTarget as HTMLInputElement).value;
             setQuery(nextQuery);
@@ -601,7 +601,7 @@ function DataResourceCard() {
             key={id}
             type="button"
             class={id === handle ? "button primary" : "button"}
-            events={[
+            mix={[
               on("click", () => {
                 setHandle(id);
                 setStatus(`Reading "${id}" (cached after first load).`);
@@ -830,7 +830,7 @@ function ViewTransitionsPage() {
                   class={
                     card.id === selected.id ? "vt-card selected" : "vt-card"
                   }
-                  events={[on("click", () => selectCard(card.id))]}
+                  mix={[on("click", () => selectCard(card.id))]}
                   type="button"
                 >
                   <span>
@@ -1229,7 +1229,7 @@ function HydrationIsland({
       <button
         type="button"
         class="button primary"
-        events={[on("click", () => onAction?.())]}
+        mix={[on("click", () => onAction?.())]}
       >
         Test hydrated event
       </button>
@@ -1264,7 +1264,7 @@ function ActivityHydrationIsland({
       <button
         type="button"
         class="button primary"
-        events={[
+        mix={[
           on("click", () => {
             setMode("visible");
             onReveal?.();
@@ -1293,7 +1293,7 @@ function ActivityHydrationChild({ onAction }: { onAction: () => void }) {
           { once: true },
         );
       }}
-      events={[
+      mix={[
         on("click", () => {
           onAction();
         }),
@@ -1312,10 +1312,7 @@ function ReplayIsland({
   onParentAction: () => void;
 }) {
   return (
-    <section
-      class="replay-parent"
-      events={[on("click", () => onParentAction())]}
-    >
+    <section class="replay-parent" mix={[on("click", () => onParentAction())]}>
       <Suspense fallback={<ReplayButton label="Pending target" />}>
         <ReplayButton
           label="Hydrated target"
@@ -1341,7 +1338,7 @@ function ReplayButton({
       type="button"
       class="button primary replay-action"
       data-replay-button="true"
-      events={onAction === undefined ? undefined : [on("click", onAction)]}
+      mix={onAction === undefined ? undefined : [on("click", onAction)]}
     >
       {label}
     </button>
@@ -1505,7 +1502,7 @@ function BenchmarksPage() {
             min="10"
             max="10000"
             value={rowCount}
-            events={[
+            mix={[
               on("input", (event) => {
                 const value = Number(
                   (event.currentTarget as HTMLInputElement).value,

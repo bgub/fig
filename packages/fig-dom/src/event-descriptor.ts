@@ -1,4 +1,9 @@
-import { elementName, isEmptyPropValue } from "./tree.ts";
+import {
+  createMixin,
+  type MixinContext,
+  type MixinDescriptor,
+} from "@bgub/fig";
+import { mixinSlot } from "@bgub/fig/internal";
 
 export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
 
@@ -7,17 +12,38 @@ export type EventCallback<E extends Event = Event> = (
   signal: AbortSignal,
 ) => void;
 
-export interface EventDescriptor<E extends Event = Event> {
-  readonly $$typeof: symbol;
+export interface NativeEventDescriptor<E extends Event = Event> {
+  readonly slot: string;
   readonly type: string;
   readonly callback: EventCallback<E>;
   readonly options?: EventOptions;
 }
 
-const EventDescriptorSymbol = Symbol.for("fig.event");
+const NativeEventDescriptorsSymbol = Symbol.for("fig.native-event-descriptors");
+
+const eventMixin = createMixin(
+  (
+    context: MixinContext,
+    type: string,
+    callback: EventCallback,
+    options?: EventOptions,
+  ) => {
+    const props = context.props as EventDescriptorProps;
+    (props[NativeEventDescriptorsSymbol] ??= []).push({
+      callback,
+      options,
+      slot: mixinSlot(context),
+      type,
+    });
+  },
+);
+
+interface EventDescriptorProps {
+  [NativeEventDescriptorsSymbol]?: NativeEventDescriptor[];
+}
 
 /**
- * Declares one native listener for an element's `events` prop. Bubbling
+ * Declares one native listener for an element's `mix` prop. Bubbling
  * events follow the logical Fig tree through portals; non-bubbling events,
  * including `focus` and `blur`, attach directly with native semantics.
  */
@@ -25,48 +51,27 @@ export function on<K extends keyof HTMLElementEventMap>(
   type: K,
   callback: EventCallback<HTMLElementEventMap[K]>,
   options?: EventOptions,
-): EventDescriptor<HTMLElementEventMap[K]>;
+): MixinDescriptor;
 export function on<E extends Event = Event>(
   type: string,
   callback: EventCallback<E>,
   options?: EventOptions,
-): EventDescriptor<E>;
+): MixinDescriptor;
 export function on(
   type: string,
   callback: EventCallback,
   options?: EventOptions,
-): EventDescriptor {
-  return { $$typeof: EventDescriptorSymbol, type, callback, options };
-}
-
-export function readEventDescriptors(
-  value: unknown,
-  element: Element,
-): ReadonlyArray<EventDescriptor | false | null | undefined> {
-  if (isEmptyPropValue(value)) return emptyEventDescriptors;
-  if (!Array.isArray(value)) throwInvalidEventsProp(element);
-
-  for (const item of value) {
-    if (isEmptyPropValue(item)) continue;
-    if (!isEventDescriptor(item)) throwInvalidEventsProp(element);
-  }
-  return value;
+): MixinDescriptor {
+  return eventMixin(type, callback, options);
 }
 
 const emptyEventDescriptors: readonly never[] = [];
 
-function isEventDescriptor(value: unknown): value is EventDescriptor {
+export function eventDescriptorsFromProps(
+  props: object,
+): readonly NativeEventDescriptor[] {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as EventDescriptor).$$typeof === EventDescriptorSymbol
-  );
-}
-
-function throwInvalidEventsProp(element: Element): never {
-  const elementType = elementName(element);
-  const target = elementType === "" ? "an element" : `<${elementType}>`;
-  throw new Error(
-    `The events prop on ${target} must be an array of event descriptors created with on(type, callback).`,
+    (props as EventDescriptorProps)[NativeEventDescriptorsSymbol] ??
+    emptyEventDescriptors
   );
 }

@@ -102,21 +102,21 @@ function ResourcePage() {
         <div class="controls">
           <button
             data-resource-nav="next"
-            events={[on("click", () => setSeed((value) => value + 1))]}
+            mix={[on("click", () => setSeed((value) => value + 1))]}
             type="button"
           >
             Next post
           </button>
           <button
             data-resource-nav="broken"
-            events={[on("click", () => setSeed(brokenResourceSeed))]}
+            mix={[on("click", () => setSeed(brokenResourceSeed))]}
             type="button"
           >
             Load broken post
           </button>
           <button
             data-resource-nav="first"
-            events={[on("click", () => setSeed(1))]}
+            mix={[on("click", () => setSeed(1))]}
             type="button"
           >
             First post
@@ -277,7 +277,7 @@ function RefreshButton({
       class="refresh-button"
       data-refresh-state={isPending ? "pending" : "idle"}
       data-resource-refresh={name}
-      events={[
+      mix={[
         on("click", () => {
           startTransition(async () => {
             await refresh();

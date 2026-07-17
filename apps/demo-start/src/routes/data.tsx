@@ -101,7 +101,7 @@ function DataCard(props: {
           {props.actions.map((action) => (
             <button
               class="rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
-              events={[on("click", action.run)]}
+              mix={[on("click", action.run)]}
               key={action.label}
             >
               {action.label}

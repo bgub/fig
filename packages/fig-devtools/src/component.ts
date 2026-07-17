@@ -270,7 +270,7 @@ function collapsedTab(setOpen: (open: boolean) => void): FigNode {
       "aria-label": "Show Fig DevTools",
       class: "fig-devtools__collapsed-tab",
       type: "button",
-      events: [on("click", () => setOpen(true))],
+      mix: [on("click", () => setOpen(true))],
     },
     h("span", null, "D"),
     h("span", null, "E"),
@@ -505,7 +505,7 @@ function rootSelector(
       "aria-label": "Select Fig root",
       class: "fig-devtools__root-select",
       value: String(snapshot.root?.id ?? ""),
-      events: [
+      mix: [
         on("change", (event: Event) => {
           const target = event.target as HTMLSelectElement;
           const selectedRootId = Number(target.value);
@@ -651,7 +651,7 @@ function treePane(
     "div",
     {
       class: "fig-devtools__tree",
-      events: [on("pointerleave", () => onFiberHover(null))],
+      mix: [on("pointerleave", () => onFiberHover(null))],
     },
     fiberTree(
       snapshot.root.tree,
@@ -683,7 +683,7 @@ function fiberTree(
           fiber.id === selection.selectedFiberId && "is-selected",
         ),
         type: "button",
-        events: [
+        mix: [
           on("click", () => setSelection(fiberSelection(selection, fiber.id))),
           on("pointerenter", () => onFiberHover(fiber)),
         ],
@@ -866,9 +866,7 @@ function tabBar(selection: Selection, setSelection: SetSelection): FigNode {
           ),
           role: "tab",
           type: "button",
-          events: [
-            on("click", () => setSelection(tabSelection(selection, tab))),
-          ],
+          mix: [on("click", () => setSelection(tabSelection(selection, tab)))],
         },
         tabLabel(tab),
       ),
@@ -1135,7 +1133,7 @@ function button(
       disabled: disabled === true ? true : undefined,
       title,
       type: "button",
-      events: [on("click", onClick)],
+      mix: [on("click", onClick)],
     },
     label,
   );

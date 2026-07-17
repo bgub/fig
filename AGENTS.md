@@ -44,9 +44,10 @@ dropped and Fig-specific APIs are adopted where they are clearer.
 - Callbacks receive `AbortSignal`s, never return cleanups; the aborted
   signal is the indicator everywhere (effects, events, binds, stable events,
   transitions, actions, data loaders) → `docs/concepts/hooks.md`.
-- Native DOM names and native propagation semantics, no exceptions; events
-  declare via `events={[on(...)]}`; DOM access via `bind` →
-  `docs/concepts/events.md`, `docs/concepts/jsx.md`.
+- Native DOM names and native propagation semantics, no exceptions; host
+  behavior composes through `mix` and events declare via `mix={on(...)}`; DOM
+  access via `bind` → `docs/concepts/mixins.md`, `docs/concepts/events.md`,
+  `docs/concepts/jsx.md`.
 - Explicit read verbs instead of `use(resource)`: `readContext`,
   `readPromise`, `readData` → `docs/concepts/hooks.md`, `docs/concepts/data.md`.
 - Always-strict dev rendering; diagnostics throw before commit; dev behavior

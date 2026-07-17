@@ -100,7 +100,7 @@ describe("@bgub/fig-dom data resources", () => {
       const user = readData(userResource, "one");
       return createElement(
         "button",
-        { events: [on("click", () => void refreshData(userResource, "one"))] },
+        { mix: [on("click", () => void refreshData(userResource, "one"))] },
         user,
       );
     }
@@ -142,7 +142,7 @@ describe("@bgub/fig-dom data resources", () => {
           // focus is non-bubbling, so its listener attaches directly to the
           // element instead of the delegation root; dispatch must still run
           // inside the root's data scope for the ambient store to resolve.
-          events: [
+          mix: [
             on("focus", () => {
               void readDataStore().refreshData(userResource, "one");
             }),
@@ -273,7 +273,7 @@ describe("@bgub/fig-dom data resources", () => {
       return createElement(
         "button",
         {
-          events: [
+          mix: [
             on("click", () => {
               void (async () => {
                 // The ambient slot is gone after this await; the captured
@@ -366,7 +366,7 @@ describe("@bgub/fig-dom data resources", () => {
             createElement(
               "button",
               {
-                events: [
+                mix: [
                   on("click", () => {
                     data.invalidateData(profileResource, "one");
                     setGeneration((value) => value + 1);

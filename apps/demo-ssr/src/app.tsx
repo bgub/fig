@@ -329,7 +329,7 @@ function ServerInfoPanel({
         <button
           class="button primary"
           data-demo-control="refresh-server-data"
-          events={[
+          mix={[
             on("click", () => {
               void data.refreshData(resource);
             }),
@@ -341,7 +341,7 @@ function ServerInfoPanel({
         <button
           class="button"
           data-demo-control="invalidate-server-data-key"
-          events={[
+          mix={[
             on("click", () => {
               data.invalidateDataKey(serverInfoKey());
             }),
@@ -380,7 +380,7 @@ function ServerOnlyInfoPanel({
         <button
           class="button"
           data-demo-control="refresh-server-only-data"
-          events={[
+          mix={[
             on("click", () => {
               void data.refreshData(resource).then(
                 (result) => setRefreshMessage(refreshResultMessage(result)),
@@ -492,7 +492,7 @@ function ClientTransitionPanel() {
           <button
             class="button primary"
             data-demo-control="transition"
-            events={[
+            mix={[
               on("click", () => {
                 startTransition(async () => {
                   await delay(undefined, 250);
@@ -546,7 +546,7 @@ function HiddenActivityPanel({
         <button
           class="button primary"
           data-demo-control="reveal-hidden"
-          events={[on("click", () => flushSync(() => setRevealed(true)))]}
+          mix={[on("click", () => flushSync(() => setRevealed(true)))]}
           type="button"
         >
           {revealed ? "Hidden activity revealed" : "Reveal hidden activity"}
@@ -640,7 +640,7 @@ function CounterButton({ id, label }: { id: string; label: string }) {
     <button
       class="button primary"
       data-demo-control={id}
-      events={[on("click", () => setCount((value) => value + 1))]}
+      mix={[on("click", () => setCount((value) => value + 1))]}
       type="button"
     >
       {label}: {count}

@@ -75,14 +75,14 @@ function ViewTransitionLab(): FigNode {
           <div class="flex flex-wrap gap-2">
             <button
               class="select-none rounded border border-teal-700 bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
-              events={[on("click", cycle)]}
+              mix={[on("click", cycle)]}
               type="button"
             >
               Cycle surface
             </button>
             <button
               class="select-none rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
-              events={[
+              mix={[
                 on("click", () =>
                   transition(() => setDense((value) => !value)),
                 ),
@@ -111,7 +111,7 @@ function ViewTransitionLab(): FigNode {
                       ? "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-teal-700 bg-teal-50 p-3 text-left text-slate-950"
                       : "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-slate-300 bg-white p-3 text-left text-slate-950 hover:bg-slate-50"
                   }
-                  events={[
+                  mix={[
                     on("click", () =>
                       transition(() => setTargetId(surface.id)),
                     ),

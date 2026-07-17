@@ -18,7 +18,7 @@ describe("@bgub/fig-dom props", () => {
         createElement("button", {
           class: "primary",
           disabled: true,
-          events: [on("click", firstClick)],
+          mix: [on("click", firstClick)],
           for: "field",
           style: { color: "red", fontWeight: "bold" },
         }),
@@ -40,7 +40,7 @@ describe("@bgub/fig-dom props", () => {
       root.render(
         createElement("button", {
           disabled: false,
-          events: [on("click", secondClick)],
+          mix: [on("click", secondClick)],
           style: { color: "blue" },
         }),
       ),
@@ -311,11 +311,11 @@ describe("@bgub/fig-dom props", () => {
     // assertion's order or count.
     expect(errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('events={[on("click", handler)]}'),
+        expect.stringContaining('mix={on("click", handler)}'),
         expect.stringContaining(
-          'events={[on("click", handler, { capture: true })]}',
+          'mix={on("click", handler, { capture: true })}',
         ),
-        expect.stringContaining('events={[on("dblclick", handler)]}'),
+        expect.stringContaining('mix={on("dblclick", handler)}'),
         expect.stringContaining('"checked" prop received a number'),
         expect.stringContaining("style prop must be an object"),
         expect.stringContaining('style property "marginTop" received a number'),
@@ -356,13 +356,13 @@ describe("@bgub/fig-dom props", () => {
       expect.arrayContaining([
         // React's onChange on a text input fires per keystroke, so the
         // behavior-preserving suggestion is on("input"), not on("change").
-        expect.stringContaining('events={[on("input", handler)]}'),
+        expect.stringContaining('mix={on("input", handler)}'),
         // The trailing "Capture" is part of these event names, not React's
         // capture-phase suffix.
-        expect.stringContaining('events={[on("gotpointercapture", handler)]}'),
-        expect.stringContaining('events={[on("lostpointercapture", handler)]}'),
+        expect.stringContaining('mix={on("gotpointercapture", handler)}'),
+        expect.stringContaining('mix={on("lostpointercapture", handler)}'),
         // A bare "onCapture" prop must not strip down to an empty name.
-        expect.stringContaining('events={[on("capture", handler)]}'),
+        expect.stringContaining('mix={on("capture", handler)}'),
       ]),
     );
   });

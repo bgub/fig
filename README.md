@@ -61,7 +61,8 @@ That familiarity is deliberate: Fig keeps React's core runtime model and diverge
 
 Other differences include:
 
-- Native DOM events declared as `events={[on("click", handler)]}`, with native propagation and no exceptions.
+- Host behavior composes through render-time `mix` descriptors.
+- Native DOM events declared as `mix={on("click", handler)}`, with native propagation and no exceptions.
 - Native host prop names such as `class`, `for`, and `stroke-width`.
 - DOM access through `bind={(node, signal) => ...}` instead of refs.
 - Explicit `readContext`, `readPromise`, and `readData` instead of one overloaded `use(resource)`.
@@ -113,7 +114,7 @@ function App() {
   const [count, setCount] = useState(0);
 
   return (
-    <button events={[on("click", () => setCount((count) => count + 1))]}>
+    <button mix={on("click", () => setCount((count) => count + 1))}>
       Count: {count}
     </button>
   );
@@ -138,7 +139,7 @@ createRoot(root).render(<App />);
 
 ## Packages
 
-- [@bgub/fig](./packages/fig/README.md): core elements, hooks, context, Suspense, data resources, error boundaries, and transitions.
+- [@bgub/fig](./packages/fig/README.md): core elements, host mixins, hooks, context, Suspense, data resources, error boundaries, and transitions.
 - [@bgub/fig-dom](./packages/fig-dom/README.md): browser rendering, hydration, delegated events, `bind`, portals, native DOM props, and payload loading.
 - [@bgub/fig-server](./packages/fig-server/README.md): streaming server rendering, Suspense streaming, asset delivery, server errors, and payload rendering.
 - [@bgub/fig-reconciler](./packages/fig-reconciler/README.md): renderer internals for custom host configs, including the cooperative task scheduler.

@@ -6,6 +6,7 @@ import {
   Fragment,
   type Key,
 } from "./element.ts";
+import { resolveHostMix } from "./mixin.ts";
 
 type JSXProps = Record<string, unknown>;
 
@@ -20,7 +21,10 @@ export function jsx(
       $$typeof: FigElementSymbol,
       type,
       key: key ?? (propsKey as Key | null | undefined) ?? null,
-      props: rest,
+      props:
+        "mix" in rest && typeof type === "string"
+          ? resolveHostMix(type, rest)
+          : rest,
     };
   }
 
@@ -28,7 +32,10 @@ export function jsx(
     $$typeof: FigElementSymbol,
     type,
     key: key ?? null,
-    props: props ?? {},
+    props:
+      props !== null && "mix" in props && typeof type === "string"
+        ? resolveHostMix(type, { ...props })
+        : (props ?? {}),
   };
 }
 

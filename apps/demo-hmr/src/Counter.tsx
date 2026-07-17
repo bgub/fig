@@ -10,9 +10,7 @@ export function Counter(): FigNode {
     <div class="counter">
       <h1>Fig HMR</h1>
       <p>count: {count}</p>
-      <button events={[on("click", () => setCount(count + 1))]}>
-        increment
-      </button>
+      <button mix={[on("click", () => setCount(count + 1))]}>increment</button>
     </div>
   );
 }

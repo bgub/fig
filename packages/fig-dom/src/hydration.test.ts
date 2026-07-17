@@ -65,7 +65,7 @@ describe("@bgub/fig-dom hydration", () => {
         createElement(
           "button",
           {
-            events: [on("click", () => calls.push("click"))],
+            mix: [on("click", () => calls.push("click"))],
             id: "client",
           },
           "Client",
@@ -625,7 +625,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("span", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),
@@ -658,7 +658,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("span", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),
@@ -966,14 +966,14 @@ describe("@bgub/fig-dom hydration", () => {
         container as unknown as Element,
         createElement(
           "section",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createElement(
             Suspense,
             { fallback: createElement("button", null, "Loading") },
             createElement(
               "button",
               {
-                events: [
+                mix: [
                   on("click", (event) => {
                     calls.push(
                       `child:${(event.currentTarget as unknown as FakeElement).tagName}`,
@@ -1036,7 +1036,7 @@ describe("@bgub/fig-dom hydration", () => {
             { fallback: createElement("button", null, "Second loading") },
             createElement(
               "button",
-              { events: [on("click", () => calls.push("second"))] },
+              { mix: [on("click", () => calls.push("second"))] },
               "Second done",
             ),
           ),
@@ -1091,14 +1091,14 @@ describe("@bgub/fig-dom hydration", () => {
         container as unknown as Element,
         createElement(
           "section",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createElement(
             Suspense,
             { fallback: createElement("button", null, "Pending target") },
             createElement(
               "button",
               {
-                events: [
+                mix: [
                   on("click", (event) => {
                     calls.push("child");
                     event.stopPropagation();
@@ -1157,7 +1157,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("inner"))] },
+            { mix: [on("click", () => calls.push("inner"))] },
             "Client",
           ),
         ),
@@ -1198,7 +1198,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),
@@ -1242,7 +1242,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "LoadingA"), key: "a" },
           createElement(
             "button",
-            { events: [on("keydown", () => calls.push("keydown"))] },
+            { mix: [on("keydown", () => calls.push("keydown"))] },
             "ClientA",
           ),
         ),
@@ -1251,7 +1251,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "LoadingB"), key: "b" },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),
@@ -1302,7 +1302,7 @@ describe("@bgub/fig-dom hydration", () => {
           createElement(
             "button",
             {
-              events: [
+              mix: [
                 on("click", (event) =>
                   calls.push(`replayed:${event.cancelBubble}`),
                 ),
@@ -1351,14 +1351,14 @@ describe("@bgub/fig-dom hydration", () => {
         container as unknown as Element,
         createElement(
           "section",
-          { events: [on("click", () => calls.push("parent"))] },
+          { mix: [on("click", () => calls.push("parent"))] },
           createElement(
             Suspense,
             { fallback: createElement("button", null, "Loading") },
             createElement(
               "button",
               {
-                events: [
+                mix: [
                   on("click", (event) => {
                     calls.push("child");
                     // Legacy property assignment must stop the parent even
@@ -1396,7 +1396,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("textarea", null, "Loading") },
           createElement(
             "textarea",
-            { events: [on("input", () => calls.push("input"))] },
+            { mix: [on("input", () => calls.push("input"))] },
             "Client",
           ),
         ),
@@ -1434,7 +1434,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),
@@ -1482,7 +1482,7 @@ describe("@bgub/fig-dom hydration", () => {
           { fallback: createElement("button", null, "Loading") },
           createElement(
             "button",
-            { events: [on("click", () => calls.push("click"))] },
+            { mix: [on("click", () => calls.push("click"))] },
             "Client",
           ),
         ),

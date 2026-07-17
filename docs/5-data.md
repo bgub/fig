@@ -96,7 +96,7 @@ function RefreshButton() {
 
   return (
     <button
-      events={[
+      mix={[
         on("click", async () => {
           await doSomethingElse();
           await data.refreshData(userResource, "42");
