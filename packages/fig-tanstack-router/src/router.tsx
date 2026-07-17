@@ -2,7 +2,9 @@ import {
   createContext,
   createElement,
   type ComponentType,
+  type DataResource,
   ErrorBoundary,
+  type FigDataStoreHandle,
   type FigNode,
   readContext,
   Suspense,
@@ -11,6 +13,7 @@ import {
   useCallback,
   useMemo,
   useReactive,
+  useState,
   useSyncExternalStore,
 } from "@bgub/fig";
 import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
@@ -88,6 +91,18 @@ export interface RouteErrorComponentProps {
   reset: () => void;
 }
 
+export interface RouteDataContext {
+  data: FigDataStoreHandle;
+}
+
+export async function ensureRouteData<TArgs extends unknown[], TValue>(
+  context: RouteDataContext,
+  resource: DataResource<TArgs, TValue>,
+  ...args: TArgs
+): Promise<void> {
+  await context.data.ensureData(resource, ...args);
+}
+
 export type RouteComponent = ComponentType;
 export type ErrorRouteComponent = ComponentType<RouteErrorComponentProps>;
 export type NotFoundRouteComponent = ComponentType<NotFoundRouteProps>;
@@ -130,7 +145,13 @@ export class Router<
       TDehydrated
     >,
   ) {
-    super(options, getStoreConfig);
+    super(
+      options.defaultPreloadStaleTime === undefined &&
+        dataStoreFromContext(options.context) !== null
+        ? { ...options, defaultPreloadStaleTime: 0 }
+        : options,
+      getStoreConfig,
+    );
   }
 }
 
@@ -511,6 +532,7 @@ export function Matches(): FigNode {
 
 function Match({ matchId }: { matchId: string }): FigNode {
   const router = useRouter<AnyRouter>();
+  const [manualResetKey, setManualResetKey] = useState(0);
   const store = router.stores.matchStores.get(matchId);
   if (store === undefined) {
     throw new Error(`Could not find route match ${JSON.stringify(matchId)}.`);
@@ -542,11 +564,23 @@ function Match({ matchId }: { matchId: string }): FigNode {
       ? createElement(
           ErrorBoundary,
           {
+            key:
+              match.status === "error"
+                ? `route-error:${match.fetchCount}`
+                : `route:${manualResetKey}`,
             fallback: (error) =>
               createElement(ErrorComponent, {
                 error,
                 reset: () => {
-                  void router.invalidate().then(() => settleRouter(router));
+                  dataStoreFromContext(match.context)?.invalidateDataError(
+                    error,
+                  );
+                  void router.invalidate().then(() => {
+                    settleRouter(router);
+                    if (match.status !== "error") {
+                      setManualResetKey((key) => key + 1);
+                    }
+                  });
                 },
               }),
           },
@@ -574,18 +608,7 @@ function MatchContent({
   }
   if (match.status === "error") throw match.error;
   if (match.status === "redirected") return null;
-  if (match.status === "notFound") {
-    const NotFoundComponent =
-      route.options.notFoundComponent ??
-      router.options.defaultNotFoundComponent;
-    return NotFoundComponent === undefined
-      ? null
-      : createElement(NotFoundComponent, {
-          data: match.error,
-          isNotFound: true,
-          routeId: match.routeId,
-        });
-  }
+  if (match.status === "notFound") return renderNotFound(router, route, match);
 
   const Component = route.options.component ?? router.options.defaultComponent;
   return Component === undefined
@@ -598,10 +621,51 @@ export function Outlet(): FigNode {
   const parentMatchId = readContext(MatchContext);
   const matchIds = useReadableStore(router.stores.matchesId);
   const parentIndex = matchIds.findIndex((id) => id === parentMatchId);
+  const parentMatch =
+    parentMatchId === null
+      ? undefined
+      : router.stores.matchStores.get(parentMatchId)?.get();
+  if (parentMatch?.globalNotFound === true) {
+    const route = router.routesById[parentMatch.routeId];
+    if (route === undefined) {
+      throw new Error(
+        `Could not find route ${JSON.stringify(parentMatch.routeId)}.`,
+      );
+    }
+    return renderNotFound(router, route, parentMatch);
+  }
   const childMatchId = matchIds[parentIndex + 1];
   return childMatchId === undefined
     ? null
     : createElement(Match, { matchId: childMatchId });
+}
+
+function renderNotFound(
+  router: AnyRouter,
+  route: AnyRoute,
+  match: AnyRouteMatch,
+): FigNode {
+  const NotFoundComponent =
+    route.options.notFoundComponent ?? router.options.defaultNotFoundComponent;
+  return NotFoundComponent === undefined
+    ? null
+    : createElement(NotFoundComponent, {
+        data: match.error,
+        isNotFound: true,
+        routeId: match.routeId,
+      });
+}
+
+function dataStoreFromContext(context: unknown): FigDataStoreHandle | null {
+  if (typeof context !== "object" || context === null) return null;
+  const data = (context as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return null;
+  const candidate = data as Partial<FigDataStoreHandle>;
+  return typeof candidate.ensureData === "function" &&
+    typeof candidate.invalidateDataError === "function" &&
+    typeof candidate.preloadData === "function"
+    ? (candidate as FigDataStoreHandle)
+    : null;
 }
 
 type AnchorProps = HostIntrinsicElements["a"];

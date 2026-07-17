@@ -63,26 +63,28 @@ hook to target an active route and infer its value from the registered tree.
 
 Fig data resources are the external cache for route data — TanStack's
 ["pass all loader events to an external cache"](https://tanstack.com/router/latest/docs/guide/data-loading#passing-all-loader-events-to-an-external-cache)
-pattern, in the role TanStack Query plays for React. The router decides *when*
+pattern, in the role TanStack Query plays for React. The router decides _when_
 loaders run (navigation, intent/viewport preloads, `router.invalidate()`);
 the data store owns identity, dedup, freshness, and reads.
 
-Three pieces of wiring:
+Two pieces of wiring:
 
 1. Put the root's data handle in router context. `root.data` is a lazy
-   handle, so it can enter context before the first render.
-2. Set `defaultPreloadStaleTime: 0` so every load and preload event reaches
-   your loaders instead of the router's built-in SWR cache.
-3. Loaders await `ensureData`; components read the same resource with
-   `readData`.
+   handle, so it can enter context before the first render. The adapter then
+   defaults `defaultPreloadStaleTime` to `0`, ensuring every preload event
+   reaches the external cache; an explicit router option still wins.
+2. Loaders return `ensureRouteData(...)`; components read the same resource
+   with `readData`.
 
 ```tsx
-import { dataResource, type FigDataStoreHandle, readData } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  ensureRouteData,
+  type RouteDataContext,
   RouterProvider,
   useParams,
 } from "@bgub/fig-tanstack-router";
@@ -92,15 +94,15 @@ const userResource = dataResource({
   load: async (id, { signal }) => fetchUser(id, signal),
 });
 
-const rootRoute = createRootRouteWithContext<{
-  data: FigDataStoreHandle;
-}>()({ component: Layout });
+const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+  component: Layout,
+});
 
 const userRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "users/$id",
   loader: ({ context, params }) =>
-    context.data.ensureData(userResource, params.id),
+    ensureRouteData(context, userResource, params.id),
   component: function User() {
     const { id } = useParams({ from: "/users/$id" });
     const user = readData(userResource, id);
@@ -113,21 +115,25 @@ const root = createRoot(container);
 const router = createRouter({
   routeTree,
   context: { data: root.data },
-  defaultPreloadStaleTime: 0,
 });
 root.render(<RouterProvider router={router} />);
 ```
 
-The loader's `ensureData` and the component's `readData` share one store
+The loader's `ensureRouteData` and the component's `readData` share one store
 entry, so navigation commits with the data already cached and `Link` preloads
-warm the same entry the component reads.
+warm the same entry the component reads. The helper deliberately resolves to
+`void`, preventing TanStack Router from also retaining the value as
+`loaderData`.
 
 Freshness lives in the store, not the router: `invalidateData(userResource,
 id)` re-renders every subscribed route component with the revalidated value —
 no `router.invalidate()` needed. (`router.invalidate()` still composes: it
-re-runs loaders, which hit the cache.) For streaming instead of blocking,
-have the loader call `preloadData` and return; `readData` then suspends into
-the route's `pendingComponent` until the entry settles.
+re-runs loaders, which hit the cache.) Route error `reset()` first invalidates
+any Fig data keys attributed to the caught error, then re-runs the router.
+
+For streaming instead of blocking, have the loader call
+`context.data.preloadData(resource, ...args)` and return; `readData` then
+suspends into the route's `pendingComponent` until the entry settles.
 
 This first adapter slice supports code-defined routes. File-route generation,
 SSR, scroll restoration, blockers, head management, and TanStack Start are

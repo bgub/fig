@@ -6,7 +6,7 @@ Status: exploring
 
 ## Initial Surface
 
-The initial code-route surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `Link`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered route tree. File-route generation, SSR, scroll restoration, blockers, head management, and TanStack Start integration remain future adapter layers rather than partial compatibility shims.
+The initial code-route surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `Link`, `ensureRouteData`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered route tree. File-route generation, SSR, scroll restoration, blockers, head management, and TanStack Start integration remain future adapter layers rather than partial compatibility shims.
 
 The adapter pins the Router core version it is built and tested against. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
 
@@ -15,6 +15,12 @@ The adapter pins the Router core version it is built and tested against. TanStac
 The adapter follows Router Core's [signal-graph architecture](https://tanstack.com/blog/tanstack-router-signal-graph): top-level atoms and per-match stores are the sources of truth, while `router.state` is the compatibility snapshot derived from them. Browser routers supply TanStack Store atoms for mutable and derived stores; server routers use Core's non-reactive stores because a server render reads each value once.
 
 Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, each rendered match reads its own match store, and targeted match hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
+
+## Route Data Contract
+
+Fig data resources are the default external cache for route data. Applications place the root's `FigDataStoreHandle` at `router.context.data`; its presence makes `createRouter` default `defaultPreloadStaleTime` to `0`, while an explicit option remains authoritative. A blocking loader calls `ensureRouteData(context, resource, ...args)`, which awaits the store's `ensureData` but resolves to `void`. The component calls `readData` for the same key. Router Core therefore controls when loaders run without retaining a second copy in `loaderData`; the Fig store exclusively owns identity, deduplication, freshness, errors, and the value.
+
+For non-blocking streaming, a loader calls the explicit `context.data.preloadData` handle and returns. Route error reset invalidates keys attributed to the caught Fig data error before invalidating Router Core, so the same reset affordance retries both layers. Root/global not-found state renders the root route's not-found component through its `Outlet`, preserving the root shell in accordance with Router Core's match contract.
 
 ## Link Contract
 

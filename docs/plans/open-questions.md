@@ -45,7 +45,7 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 
 ## TanStack Adapters
 
-fig-start predates the adapter direction and now serves as a reference implementation; the metaframework bet is `@bgub/fig-tanstack-router` plus a planned TanStack Start adapter. Data resources are the external cache for route data (`ensureData` delegation, TanStack's `defaultPreloadStaleTime: 0` pattern — see `docs/concepts/data.md` and the adapter README).
+fig-start predates the adapter direction and now serves as a reference implementation; the metaframework bet is `@bgub/fig-tanstack-router` plus a planned TanStack Start adapter. Data resources are the external cache for route data (`ensureRouteData` delegates to `ensureData` without creating `loaderData`, and data-backed routers default `defaultPreloadStaleTime` to `0` — see `docs/concepts/data.md` and the adapter README).
 
 - **TanStack Start adapter** — the next layer: SSR, streaming, and server routes over the router adapter. On the server, loaders run before a per-request data store exists, so the Start adapter owns wiring request stores into router context; the client handoff is the existing `initialData`/`getData()` contract.
 - **Payload routes inside TanStack Router** — a route loader ensuring a `payloadDataLoader`-backed resource yields server-component routes. Needs a serving side, so it lands with the Start adapter (demo-payload covers payload-as-resource today; fig-start's `routeResource` is the reference).

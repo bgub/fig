@@ -1,11 +1,5 @@
 // @vitest-environment happy-dom
-import {
-  createElement,
-  dataResource,
-  type FigDataStoreHandle,
-  type FigNode,
-  readData,
-} from "@bgub/fig";
+import { createElement, dataResource, type FigNode, readData } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,8 +10,11 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  ensureRouteData,
   Link,
   Outlet,
+  type RouteDataContext,
+  type RouteErrorComponentProps,
   RouterProvider,
   useLocation,
   useParams,
@@ -247,6 +244,85 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.textContent).toBe("/");
   });
 
+  it("renders a global not-found inside the root outlet", async () => {
+    const rootRoute = createRootRoute({
+      component: () =>
+        createElement("main", { id: "root-shell" }, createElement(Outlet)),
+      notFoundComponent: () =>
+        createElement("h1", { id: "global-not-found" }, "Not found"),
+    });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/missing"] }),
+      routeTree: rootRoute.addChildren([homeRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+
+    expect(container.querySelector("#root-shell")).not.toBeNull();
+    expect(container.querySelector("#global-not-found")?.textContent).toBe(
+      "Not found",
+    );
+  });
+
+  it("invalidates attributed data errors before resetting a route", async () => {
+    let loads = 0;
+    let resetRoute: (() => void) | undefined;
+    const resource = dataResource<[], string>({
+      key: () => ["route-reset"],
+      load: async () => {
+        loads += 1;
+        if (loads === 1) throw new Error("failed once");
+        return "recovered";
+      },
+    });
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({});
+    const route = createRoute({
+      component: () => createElement("h1", null, readData(resource)),
+      errorComponent: ({ error, reset }: RouteErrorComponentProps) => {
+        resetRoute = reset;
+        return createElement(
+          "p",
+          { id: "route-error" },
+          error instanceof Error ? error.message : "unknown",
+        );
+      },
+      getParentRoute: () => rootRoute,
+      loader: ({ context }) => ensureRouteData(context, resource),
+      path: "/",
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const router = createRouter({
+      context: { data: root.data },
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([route]),
+    });
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForMatches(router));
+
+    expect(container.querySelector("#route-error")?.textContent).toBe(
+      "failed once",
+    );
+    expect(loads).toBe(1);
+
+    await act(() => resetRoute?.());
+    await act(() => waitForText(container, "recovered"));
+
+    expect(container.textContent).toBe("recovered");
+    expect(loads).toBe(2);
+  });
+
   it("delegates route data to the fig data store as the external cache", async () => {
     let loads = 0;
     const userResource = dataResource<[string], string>({
@@ -266,9 +342,7 @@ describe("@bgub/fig-tanstack-router", () => {
       );
     }
 
-    const rootRoute = createRootRouteWithContext<{
-      data: FigDataStoreHandle;
-    }>()({});
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({});
     const homeRoute = createRoute({
       component: () => createElement("h1", null, "home"),
       getParentRoute: () => rootRoute,
@@ -278,7 +352,7 @@ describe("@bgub/fig-tanstack-router", () => {
       component: UserData,
       getParentRoute: () => rootRoute,
       loader: ({ context, params }) =>
-        context.data.ensureData(userResource, params.id),
+        ensureRouteData(context, userResource, params.id),
       path: "users/$id",
     });
     const routeTree = rootRoute.addChildren([homeRoute, userRoute]);
@@ -288,15 +362,15 @@ describe("@bgub/fig-tanstack-router", () => {
     mountedRoots.push(root);
 
     // root.data is a lazy handle, so it can enter router context before the
-    // first render. defaultPreloadStaleTime: 0 disables the router's own SWR
-    // cache: every load and preload event reaches the loader, which delegates
-    // to the store.
+    // first render. Its presence makes the adapter disable the router's own
+    // preload SWR cache: every load event reaches the route-data helper, which
+    // delegates to the store.
     const router = createRouter({
       context: { data: root.data },
-      defaultPreloadStaleTime: 0,
       history: createMemoryHistory({ initialEntries: ["/"] }),
       routeTree,
     });
+    expect(router.options.defaultPreloadStaleTime).toBe(0);
 
     await act(() => root.render(createElement(RouterProvider, { router })));
     await act(() => waitForMatches(router));
@@ -308,6 +382,9 @@ describe("@bgub/fig-tanstack-router", () => {
       "user-7 v1",
     );
     expect(loads).toBe(1);
+    expect(
+      router.stores.getRouteMatchStore("/users/$id").get()?.loaderData,
+    ).toBeUndefined();
 
     // Freshness lives in the store: invalidating the resource re-renders the
     // subscribed route component with the revalidated value, no router
@@ -414,4 +491,15 @@ async function waitForMatches(router: AnyRouter): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("Router did not load its initial matches.");
+}
+
+async function waitForText(
+  container: HTMLElement,
+  text: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (container.textContent === text) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`Container did not render ${JSON.stringify(text)}.`);
 }

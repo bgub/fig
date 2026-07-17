@@ -3,11 +3,11 @@ packages:
   npm:@bgub/fig-tanstack-router: patch
 ---
 
-## Data resources documented as the router's external cache
+## Make data resources the router's default external cache
 
-The README now documents the blessed data story: put `root.data` in router
-context, set `defaultPreloadStaleTime: 0`, await `ensureData` in loaders, and
-read the same resource with `readData` in components — TanStack's
-"pass all loader events to an external cache" pattern with Fig's data store
-as the cache. Covered by an adapter test exercising loader/component entry
-sharing, store-driven revalidation, and cache hits on re-navigation.
+Put `root.data` in router context, return `ensureRouteData` from loaders, and
+read the same resource with `readData` in components. Data-backed routers now
+default `defaultPreloadStaleTime` to `0`, the loader helper resolves to `void`
+so the value is not duplicated in `loaderData`, and route reset invalidates
+attributed Fig data errors before re-running the router. The adapter also
+renders Router Core's global not-found state through the root outlet.

@@ -1,9 +1,7 @@
 import {
   dataResource,
-  type FigDataStoreHandle,
   type FigNode,
   invalidateData,
-  invalidateDataError,
   readData,
   useState,
 } from "@bgub/fig";
@@ -12,8 +10,10 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  ensureRouteData,
   Link,
   Outlet,
+  type RouteDataContext,
   type RouteErrorComponentProps,
   RouterProvider,
   useLocation,
@@ -92,9 +92,7 @@ const personResource = dataResource({
   },
 });
 
-const rootRoute = createRootRouteWithContext<{
-  data: FigDataStoreHandle;
-}>()({
+const rootRoute = createRootRouteWithContext<RouteDataContext>()({
   component: AppShell,
   errorComponent: RouteError,
 });
@@ -116,7 +114,7 @@ const personRoute = createRoute({
   errorComponent: RouteError,
   getParentRoute: () => rootRoute,
   loader: ({ context, params }) =>
-    context.data.ensureData(personResource, params.personId),
+    ensureRouteData(context, personResource, params.personId),
   pendingComponent: PersonPending,
   path: "people/$personId",
   validateSearch: (search) => ({
@@ -147,14 +145,13 @@ const container = document.getElementById("root");
 if (container === null) throw new Error("Missing #root container.");
 const root = createRoot(container);
 
-// root.data is a lazy handle, so it can enter router context before the
-// first render. defaultPreloadStaleTime: 0 hands every load and preload
-// event to the loaders, which delegate to the data store.
+// root.data is a lazy handle, so it can enter router context before the first
+// render. Its presence makes the adapter hand every preload event to loaders,
+// which delegate to the data store through ensureRouteData.
 const router = createRouter({
   context: { data: root.data },
   defaultPendingMinMs: 300,
   defaultPendingMs: 0,
-  defaultPreloadStaleTime: 0,
   routeTree,
 });
 
@@ -593,9 +590,8 @@ function RouteError({ error, reset }: RouteErrorComponentProps): FigNode {
         <button
           class="button button-quiet cursor-pointer"
           mix={on("click", () => {
-            // The rejection is cached in the data store; clear the keys
-            // attributed to this error before the router re-runs the loader.
-            invalidateDataError(error);
+            // Route reset clears attributed data errors before re-running the
+            // loader, so this retries both the Fig cache and the router match.
             reset();
           })}
           type="button"
