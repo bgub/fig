@@ -1,0 +1,59 @@
+{
+  "name": "@bgub/fig-tanstack-router",
+  "version": "0.1.0-alpha.0",
+  "description": "TanStack Router adapter for Fig",
+  "keywords": [
+    "fig",
+    "router",
+    "tanstack"
+  ],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/router.d.ts",
+      "import": "./dist/router.js",
+      "default": "./dist/router.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/router.d.ts",
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "prepack": "pnpm build",
+    "test": "vitest run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-tanstack-router"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@tanstack/history": "1.162.0",
+    "@tanstack/router-core": "1.171.15",
+    "@tanstack/store": "0.9.3"
+  },
+  "peerDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*"
+  },
+  "devDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

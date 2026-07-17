@@ -1,0 +1,27 @@
+{
+  "name": "@bgub/fig-demo-tanstack-router",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown --config ../../tsdown.config.ts",
+    "dev": "portless",
+    "dev:app": "SPA_FALLBACK=index.html node ../dev/static-server-cli.mjs",
+    "dev:build": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
+    "serve": "SPA_FALLBACK=index.html node ../dev/static-server-cli.mjs"
+  },
+  "portless": {
+    "name": "fig-demo-tanstack-router",
+    "script": "dev:app"
+  },
+  "dependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-tanstack-router": "workspace:*",
+    "@tanstack/router-core": "1.171.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.2",
+    "postcss": "^8.5.19",
+    "tailwindcss": "^4.3.2"
+  }
+}

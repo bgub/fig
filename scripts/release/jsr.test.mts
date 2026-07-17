@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createFigRelease, publicPackageNames } from "./config.mts";
+import {
+  createFigRelease,
+  jsrPackageNames,
+  publicPackageNames,
+} from "./config.mts";
 import { jsrRelease, synchronizeJsrManifest } from "./jsr.mts";
 
 void test("release graph contains one synchronized public group", async () => {
@@ -28,8 +32,8 @@ void test("release graph contains one synchronized public group", async () => {
   );
 });
 
-void test("JSR manifests expose every npm public entry", async () => {
-  for (const packageName of publicPackageNames) {
+void test("JSR manifests expose every JSR package's npm entries", async () => {
+  for (const packageName of jsrPackageNames) {
     const packageDir = join(
       process.cwd(),
       "packages",

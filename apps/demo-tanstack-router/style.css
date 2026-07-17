@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@source "./src";
+
+@theme {
+  --color-canvas: #fafaf7;
+  --color-ink: #1c1c1f;
+  --color-muted: #77777e;
+  --color-line: #dcdcd4;
+  --color-shell: #9a9aa2;
+  --color-shell-tint: #ffffff;
+  --color-route: #2f6fed;
+  --color-route-tint: #f3f6fe;
+  --color-loader: #d97706;
+  --color-loader-tint: #fcf7ef;
+  --color-fig: #059669;
+  --color-fig-tint: #f1f9f5;
+  --color-danger: #b42318;
+  --color-danger-tint: #fcf4f3;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background-color: var(--color-canvas);
+    background-image:
+      linear-gradient(rgb(28 28 31 / 4%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(28 28 31 / 4%) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  button,
+  a {
+    font: inherit;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--color-route);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .frame {
+    @apply relative rounded-lg border-[1.5px] bg-shell-tint;
+  }
+
+  .frame-tag {
+    @apply absolute -top-2.5 left-3.5 rounded-sm bg-canvas px-2 py-0.5 font-mono text-[10px] leading-none font-semibold tracking-[0.14em] uppercase whitespace-nowrap;
+  }
+
+  .button {
+    @apply inline-flex min-h-9 items-center justify-center rounded-md border-[1.5px] px-3.5 py-2 font-mono text-[13px] leading-none font-medium no-underline transition-colors;
+  }
+
+  .button-route {
+    @apply border-route bg-route-tint text-route hover:bg-white;
+  }
+
+  .button-quiet {
+    @apply border-line bg-transparent text-ink hover:border-ink hover:bg-white;
+  }
+
+  .shimmer {
+    animation: shimmer 900ms ease-in-out infinite alternate;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.85;
+  }
+}

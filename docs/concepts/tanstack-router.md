@@ -1,0 +1,21 @@
+# TanStack Router Adapter
+
+Status: exploring
+
+`@bgub/fig-tanstack-router` adapts `@tanstack/router-core` to Fig without forking TanStack's route matching, loading, history, or navigation contracts. The package owns only the framework seam: Fig components and hooks, native DOM link behavior, and the reactive store factory supplied to `RouterCore`.
+
+## Initial Surface
+
+The initial code-route surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `Link`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered route tree. File-route generation, SSR, scroll restoration, blockers, head management, and TanStack Start integration remain future adapter layers rather than partial compatibility shims.
+
+The adapter pins the Router core version it is built and tested against. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
+
+## Signal Graph
+
+The adapter follows Router Core's [signal-graph architecture](https://tanstack.com/blog/tanstack-router-signal-graph): top-level atoms and per-match stores are the sources of truth, while `router.state` is the compatibility snapshot derived from them. Browser routers supply TanStack Store atoms for mutable and derived stores; server routers use Core's non-reactive stores because a server render reads each value once.
+
+Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, each rendered match reads its own match store, and targeted match hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
+
+## Link Contract
+
+`Link` always renders a native anchor with an `href`. Fig's `on()` mixin adds client navigation while preserving native behavior for external URLs, reload requests, downloads, non-primary clicks, modifier keys, and non-`_self` targets. Disabled links omit `href` and expose `aria-disabled`. Intent, render, and viewport preloading delegate to `router.preloadRoute`.

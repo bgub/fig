@@ -14,6 +14,7 @@ const isDevSourcePack = process.env.FIG_DEV_SOURCE === "1";
 const sourceAliases = figSourceAliases();
 const figPackages = /^@bgub\/fig/;
 const reactPackages = /^react/;
+const tanstackPackages = /^@tanstack\//;
 const libraryEntries: Record<string, string[]> = {
   "packages/fig": [
     "./src/index.ts",
@@ -56,6 +57,7 @@ const libraryEntries: Record<string, string[]> = {
     "./src/internal.ts",
     "./src/vite/index.ts",
   ],
+  "packages/fig-tanstack-router": ["./src/router.tsx"],
 };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };
@@ -100,6 +102,21 @@ function packConfigFor(path: string): PackConfig | undefined {
   }
 
   switch (path) {
+    case "apps/demo-tanstack-router":
+      return {
+        entry: ["./src/main.tsx"],
+        alias: sourceAliases,
+        css: {
+          transformer: "postcss",
+        },
+        define: demoBrowserDefine,
+        onSuccess: assertDevBundle("dist/main.js"),
+        platform: "browser",
+        deps: {
+          alwaysBundle: [figPackages, tanstackPackages],
+        },
+        sourcemap: true,
+      };
     case "apps/demo-client":
       return demoClientPackConfig();
     case "apps/demo-payload":

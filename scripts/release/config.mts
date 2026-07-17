@@ -2,12 +2,17 @@ import { tegami } from "tegami";
 import { github } from "tegami/plugins/github";
 import { jsrRelease } from "./jsr.mts";
 
-export const publicPackageNames = [
+export const jsrPackageNames = [
   "@bgub/fig",
   "@bgub/fig-reconciler",
   "@bgub/fig-dom",
   "@bgub/fig-refresh",
   "@bgub/fig-server",
+] as const;
+
+export const publicPackageNames = [
+  ...jsrPackageNames,
+  "@bgub/fig-tanstack-router",
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
@@ -28,6 +33,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-payload",
       "@bgub/fig-demo-ssr",
       "@bgub/fig-demo-start",
+      "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-devtools",
       "@bgub/fig-start",
       "@bgub/fig-vite",
@@ -47,9 +53,10 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-reconciler": { group: "fig" },
       "@bgub/fig-refresh": { group: "fig" },
       "@bgub/fig-server": { group: "fig" },
+      "@bgub/fig-tanstack-router": { group: "fig" },
     },
     plugins: [
-      jsrRelease({ publishOrder: publicPackageNames }),
+      jsrRelease({ publishOrder: jsrPackageNames }),
       github({
         repo: "bgub/fig",
         versionPr: { base: "main" },

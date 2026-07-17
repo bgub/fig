@@ -26,3 +26,4 @@ The cross-subsystem living plan index is [open-questions.md](../plans/open-quest
 - [payload.md](./payload.md) — the server-component wire format, `decodePayloadStream`, client references, render-only rules, terminology rule.
 - [errors.md](./errors.md) — boundary contract, the recovery loop, uncaught routing, digests, cancellation-is-not-an-error.
 - [renderer-authoring.md](./renderer-authoring.md) — HostConfig, the root API, the internal scheduler, dev subpaths.
+- [tanstack-router.md](./tanstack-router.md) — the Router-core adapter boundary, initial surface, and native link contract.

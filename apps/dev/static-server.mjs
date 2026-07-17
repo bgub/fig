@@ -14,6 +14,7 @@ export function startStaticServer(options) {
       request.method ?? "GET",
       request.url ?? "/",
       response,
+      options.fallback,
     );
   });
   const exitListeners = new Set();
@@ -86,14 +87,21 @@ export function contentTypeFor(path) {
   );
 }
 
-async function serveStaticRequest(root, method, url, response) {
+async function serveStaticRequest(root, method, url, response, fallback) {
   if (method !== "GET" && method !== "HEAD") {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
     response.end("Method not allowed");
     return;
   }
 
-  const file = await resolveStaticFile(root, url);
+  let file = await resolveStaticFile(root, url);
+  if (
+    file === null &&
+    fallback !== undefined &&
+    extname(requestPathname(url)) === ""
+  ) {
+    file = await resolveStaticFile(root, `/${fallback}`);
+  }
   if (file === null) {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("Not found");

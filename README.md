@@ -144,6 +144,7 @@ createRoot(root).render(<App />);
 - [@bgub/fig-server](./packages/fig-server/README.md): streaming server rendering, Suspense streaming, asset delivery, server errors, and payload rendering.
 - [@bgub/fig-reconciler](./packages/fig-reconciler/README.md): renderer internals for custom host configs, including the cooperative task scheduler.
 - [@bgub/fig-refresh](./packages/fig-refresh/README.md): renderer-agnostic component-family tracking for hot refresh.
+- [@bgub/fig-tanstack-router](./packages/fig-tanstack-router/README.md): TanStack Router code routes, Fig components and hooks, native links, and the private reactive-store bridge.
 
 Fig Start, the Vite integration, and DevTools are implemented as private workspace previews while their public contracts mature.
 
@@ -169,12 +170,13 @@ The demo sites run through Portless:
 - `https://fig-demo-ssr.localhost`
 - `https://fig-demo-payload.localhost`
 - `https://fig-demo-start.localhost`
+- `https://fig-demo-tanstack-router.localhost`
 
 Use a demo package's `dev:app` script to run the underlying server without Portless.
 
 ## Releases
 
-Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release the five public packages as one alpha-versioned group to npm and JSR. Contributor tooling requires Node.js 24.
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release six public packages as one alpha-versioned group. The five renderer/core packages publish to npm and JSR; `@bgub/fig-tanstack-router` publishes to npm because its required TanStack module augmentation is not supported by JSR. Contributor tooling requires Node.js 24.
 
 Add a changelog for a publishable change with `pnpm tegami`, or create an explicit `.tegami/<description>.md` file:
 
@@ -188,7 +190,7 @@ packages:
 ## Describe the user-visible change
 ```
 
-On `main`, the publish workflow opens or updates a Version Packages pull request. Merging that pull request publishes the matching versions to both registries and creates one grouped GitHub release. See [docs/releases.md](./docs/releases.md) for maintainer setup and recovery.
+On `main`, the publish workflow opens or updates a Version Packages pull request. Merging that pull request publishes the matching versions to their configured registries and creates one grouped GitHub release. See [docs/releases.md](./docs/releases.md) for maintainer setup and recovery.
 
 ## License
 

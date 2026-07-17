@@ -2,6 +2,7 @@
 import { startStaticServer } from "./static-server.mjs";
 
 startStaticServer({
+  fallback: process.env.SPA_FALLBACK,
   logger: {
     line(_label, line, output = process.stdout) {
       output.write(`${line}\n`);
