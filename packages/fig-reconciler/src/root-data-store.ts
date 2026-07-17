@@ -73,6 +73,12 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     ): void {
       installStore(resource).preloadData(resource, ...args);
     },
+    ensureData<TArgs extends unknown[], TValue>(
+      resource: DataResource<TArgs, TValue>,
+      ...args: TArgs
+    ): Promise<TValue> {
+      return installStore(resource).ensureData(resource, ...args);
+    },
     invalidateData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
       ...args: TArgs

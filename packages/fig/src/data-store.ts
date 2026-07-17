@@ -62,6 +62,10 @@ interface Entry<Owner extends object, Lane> {
   // value. Invalidating one retires that broken value instead of serving it
   // stale into a freshly remounted ErrorBoundary.
   valueErrors: WeakSet<object>;
+  // Count of ensureData calls currently awaiting this entry's load. A
+  // retainer like a subscriber or the preload timer: an awaited ensure must
+  // not be evicted-and-aborted out from under its caller mid-load.
+  ensureRetainers: number;
   error: unknown;
   fingerprint: string | null;
   generation: number;
@@ -129,6 +133,13 @@ export function dataResource<TArgs extends unknown[], TValue>(
       Record<symbol, FigDataStoreFactory>
   )[DataStoreFactorySymbol] = dataStoreFactory;
   return resource;
+}
+
+export function ensureData<TArgs extends unknown[], TValue>(
+  resource: DataResource<TArgs, TValue>,
+  ...args: TArgs
+): Promise<TValue> {
+  return resolveDataMutationStore("ensureData").ensureData(resource, ...args);
 }
 
 export function invalidateData<TArgs extends unknown[], TValue>(
@@ -336,6 +347,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (
       entry.subscribers.size > 0 ||
       entry.preloadTimer !== null ||
+      entry.ensureRetainers > 0 ||
       entry.pending === null ||
       entryHasValue(entry)
     ) {
@@ -465,6 +477,66 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
 
     this.invalidateEntries(entries);
+  }
+
+  async ensureData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+    ...args: TArgs
+  ): Promise<TValue> {
+    for (;;) {
+      if (this.disposed) {
+        throw new Error(
+          "ensureData() requires a live data store; this store was disposed.",
+        );
+      }
+
+      const { entry } = this.entryFor(resource, args, true);
+      this.clearInactiveTimer(entry);
+      this.retainPreload(entry);
+
+      if (entryHasValue(entry)) {
+        if (
+          entry.status === "fulfilled" &&
+          entry.stale &&
+          entry.pending === null &&
+          entry.refreshError === undefined &&
+          resource.load !== undefined
+        ) {
+          // Same stale-read semantics as readData: serve the stale value now,
+          // revalidate in the background. A recorded refreshError blocks the
+          // auto-retry until an explicit invalidate/refresh re-arms it.
+          void this.startLoad(entry, resource, args, {
+            lane: this.host.getLane(),
+            refresh: true,
+          });
+        }
+        return entry.value as TValue;
+      }
+
+      if (entry.status === "rejected") throwDataResourceError(entry);
+
+      entry.ensureRetainers += 1;
+      try {
+        if (entry.pending !== null) {
+          await entry.pending.promise;
+        } else {
+          await this.startLoad(entry, resource, args, {
+            lane: this.host.getLane(),
+            refresh: false,
+          });
+        }
+      } finally {
+        entry.ensureRetainers -= 1;
+        // Hand retention back to the normal preload window so a reader
+        // (the route component about to render) can still claim the entry.
+        if (this.entries.get(entry.storeKey) === entry) {
+          this.retainPreload(entry);
+        }
+      }
+      // Loop and re-inspect the entry rather than trusting this load's
+      // result: a superseding load, a server hydration, or an eviction may
+      // have changed the authoritative state while we awaited.
+    }
   }
 
   preloadData<TArgs extends unknown[], TValue>(
@@ -645,6 +717,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return {
       canonicalKey: normalized.canonical,
       controller: null,
+      ensureRetainers: 0,
       error: undefined,
       fingerprint,
       generation: 0,
@@ -923,6 +996,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         entry.preloadTimer = null;
         if (
           entry.subscribers.size === 0 &&
+          entry.ensureRetainers === 0 &&
           entry.pending !== null &&
           !entryHasValue(entry)
         ) {
@@ -941,6 +1015,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.subscribers.size > 0 ||
       entry.pending !== null ||
       entry.preloadTimer !== null ||
+      entry.ensureRetainers > 0 ||
       !Number.isFinite(this.inactiveRetentionMs)
     ) {
       return;
@@ -953,7 +1028,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         if (
           entry.subscribers.size > 0 ||
           entry.pending !== null ||
-          entry.preloadTimer !== null
+          entry.preloadTimer !== null ||
+          entry.ensureRetainers > 0
         ) {
           return;
         }

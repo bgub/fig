@@ -17,6 +17,7 @@ export type {
 export {
   type DataResourceOptions,
   dataResource,
+  ensureData,
   invalidateData,
   invalidateDataError,
   invalidateDataKey,

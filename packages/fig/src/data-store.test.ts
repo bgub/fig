@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   dataResource,
+  ensureData,
   invalidateData,
   invalidateDataError,
   invalidateDataKey,
@@ -1409,6 +1410,175 @@ describe("load-context hydrate capability", () => {
       status: "fulfilled",
       value: "done",
     });
+  });
+});
+
+describe("ensureData", () => {
+  function ensureStore() {
+    return createDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+  }
+
+  it("loads on a cache miss and reuses the cached value", async () => {
+    let loads = 0;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure", id],
+      load: async (id: string) => {
+        loads += 1;
+        return `value-${id}`;
+      },
+    });
+    const store = ensureStore();
+
+    await expect(store.ensureData(resource, "one")).resolves.toBe("value-one");
+    await expect(store.ensureData(resource, "one")).resolves.toBe("value-one");
+    expect(loads).toBe(1);
+  });
+
+  it("resolves the ambient store for the free function", async () => {
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-ambient", id],
+      load: (id: string) => `value-${id}`,
+    });
+    const store = ensureStore();
+
+    await expect(store.run(() => ensureData(resource, "one"))).resolves.toBe(
+      "value-one",
+    );
+  });
+
+  it("shares an in-flight load instead of starting another", async () => {
+    let loads = 0;
+    const gate = deferred<string>();
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-shared", id],
+      load: () => {
+        loads += 1;
+        return gate.promise;
+      },
+    });
+    const store = ensureStore();
+
+    const first = store.ensureData(resource, "one");
+    const second = store.ensureData(resource, "one");
+    gate.resolve("ready");
+    await expect(first).resolves.toBe("ready");
+    await expect(second).resolves.toBe("ready");
+    expect(loads).toBe(1);
+  });
+
+  it("returns the stale value and revalidates in the background", async () => {
+    let loads = 0;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-stale", id],
+      load: async (id: string) => {
+        loads += 1;
+        return `v${loads}-${id}`;
+      },
+    });
+    const store = ensureStore();
+
+    await store.ensureData(resource, "one");
+    store.invalidateData(resource, "one");
+    await expect(store.ensureData(resource, "one")).resolves.toBe("v1-one");
+    await waitForNextMacrotask();
+    await expect(store.ensureData(resource, "one")).resolves.toBe("v2-one");
+    expect(loads).toBe(2);
+  });
+
+  it("rejects with the cached load error and retries after invalidation", async () => {
+    let attempts = 0;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-reject", id],
+      load: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("load failed");
+        return "recovered";
+      },
+    });
+    const store = ensureStore();
+
+    await expect(store.ensureData(resource, "one")).rejects.toThrow(
+      "load failed",
+    );
+    await expect(store.ensureData(resource, "one")).rejects.toThrow(
+      "load failed",
+    );
+    expect(attempts).toBe(1);
+
+    store.invalidateData(resource, "one");
+    await expect(store.ensureData(resource, "one")).resolves.toBe("recovered");
+  });
+
+  it("retains an unclaimed pending ensure through the preload window", async () => {
+    const gate = deferred<string>();
+    const signals: AbortSignal[] = [];
+    const evicted: string[] = [];
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-retain", id],
+      load: (_id, { signal }) => {
+        signals.push(signal);
+        return gate.promise;
+      },
+    });
+    const store = createDataStore<object, null>({
+      getLane: () => null,
+      onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
+      preloadRetentionMs: 0,
+      schedule: () => undefined,
+    });
+
+    const pending = store.ensureData(resource, "one");
+    // The 0ms preload window elapses while the load is still in flight; the
+    // awaiting ensure must keep the entry alive instead of evict-and-abort.
+    await waitForNextMacrotask();
+    expect(signals[0]?.aborted).toBe(false);
+    expect(evicted).toEqual([]);
+
+    gate.resolve("ready");
+    await expect(pending).resolves.toBe("ready");
+  });
+
+  it("resolves a hydration that supersedes the awaited load", async () => {
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-hydrate", id],
+      load: () => never,
+    });
+    const store = ensureStore();
+
+    const pending = store.ensureData(resource, "one");
+    store.hydrate([{ key: ["ensure-hydrate", "one"], value: "pushed" }]);
+    await expect(pending).resolves.toBe("pushed");
+  });
+
+  it("resolves hydrate-only entries and rejects missing ones", async () => {
+    const hydrateOnly = dataResource<[string], string>({
+      key: (id: string) => ["ensure-hydrate-only", id],
+    });
+    const store = ensureStore();
+
+    store.hydrate([
+      { key: ["ensure-hydrate-only", "one"], value: "from-server" },
+    ]);
+    await expect(store.ensureData(hydrateOnly, "one")).resolves.toBe(
+      "from-server",
+    );
+    await expect(store.ensureData(hydrateOnly, "two")).rejects.toThrow(
+      "no loader and no hydrated value",
+    );
+  });
+
+  it("rejects on a disposed store", async () => {
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["ensure-disposed", id],
+      load: (id: string) => id,
+    });
+    const store = ensureStore();
+
+    store.dispose();
+    await expect(store.ensureData(resource, "one")).rejects.toThrow("disposed");
   });
 });
 

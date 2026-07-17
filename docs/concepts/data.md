@@ -55,6 +55,8 @@ Without a framework, the same shape is a one-liner: an isomorphic `dataResource`
 
 `preloadData` starts a load without subscribing; unclaimed preloads abort and evict after a grace window (default 30s). Fulfilled entries with no subscribers evict after an inactivity window (default 5 minutes).
 
+`ensureData(resource, ...args)` is the awaitable read for code outside render — router loaders, async actions. It resolves the value the key would render with: the cached value when the entry has one (a stale entry kicks the same background revalidation a stale `readData` does; a recorded `refreshError` blocks the auto-retry the same way), or the in-flight load's settlement on a cache miss (starting the load if none is pending); it rejects with the error `readData` would throw, including the "no loader and no hydrated value" case. Supersessions are followed, not surfaced: an ensure that loses its load to a newer load or a server hydration resolves with the successor's authoritative value. It never subscribes — the reading component pairs it with `readData`, which claims the settled entry within the preload retention window — but an awaiting caller does retain the entry, so the unclaimed-preload eviction cannot abort a load out from under an ensure. This is the delegation verb for external routers (TanStack Router's "pass loader events to an external cache" pattern): the route loader awaits `ensureData`, the component reads with `readData`, and the store stays the single cache.
+
 ## The Freshness Verbs
 
 Deliberately narrow — two semantics with crisp meanings, not a react-query vocabulary: **mark stale** (invalidate; the next read reloads lazily) and **fetch now** (refresh). The invalidate variants differ only in targeting — by resource and args, by exact key, by attributed error, by key prefix:
@@ -71,7 +73,7 @@ Invalidating a hydrate-only entry (no client loader) marks it stale but leaves t
 
 ## Ambient Store Vs Explicit Handle
 
-The free functions (`readData` aside) resolve an **ambient store** that is set only while Fig executes synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects (which run inside `dataStore.run`). After an `await` the slot is gone. Async flows capture the **explicit handle** — `readDataStore()` during any synchronous window, or `root.data` — and call the same variadic methods (`invalidateData`/`invalidateDataKey`/`invalidateDataError`/`invalidateDataPrefix`/`preloadData`/`refreshData`/`hydrate`/`run`) on it.
+The free functions (`readData` aside) resolve an **ambient store** that is set only while Fig executes synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects (which run inside `dataStore.run`). After an `await` the slot is gone. Async flows capture the **explicit handle** — `readDataStore()` during any synchronous window, or `root.data` — and call the same variadic methods (`ensureData`/`invalidateData`/`invalidateDataKey`/`invalidateDataError`/`invalidateDataPrefix`/`preloadData`/`refreshData`/`hydrate`/`run`) on it.
 
 ## Stores, Scopes, And SSR Handoff
 

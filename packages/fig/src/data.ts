@@ -71,6 +71,17 @@ export interface DataStoreEntrySnapshot {
 // `await` the slot is gone, so async flows capture this handle first and call
 // its methods instead.
 export interface FigDataStoreHandle {
+  // The awaitable read for code outside render (route loaders, actions after
+  // an await): resolve the value this key would render with — the cached
+  // value when the entry has one (kicking the same background revalidation a
+  // stale readData does), the in-flight load's settlement on a cache miss —
+  // and reject with the error readData would throw. Does not subscribe;
+  // pair with readData in the component, which claims the settled entry
+  // within the preload retention window.
+  ensureData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+    ...args: TArgs
+  ): Promise<TValue>;
   hydrate(entries: readonly FigDataHydrationEntry[]): void;
   invalidateData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
