@@ -1,11 +1,19 @@
 // @vitest-environment happy-dom
-import { createElement, type FigNode } from "@bgub/fig";
+import {
+  createElement,
+  dataResource,
+  type FigDataStoreHandle,
+  type FigNode,
+  readData,
+} from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  type AnyRouter,
   createMemoryHistory,
   createRootRoute,
+  createRootRouteWithContext,
   createRoute,
   createRouter,
   Link,
@@ -238,6 +246,86 @@ describe("@bgub/fig-tanstack-router", () => {
 
     expect(container.textContent).toBe("/");
   });
+
+  it("delegates route data to the fig data store as the external cache", async () => {
+    let loads = 0;
+    const userResource = dataResource<[string], string>({
+      key: (id: string) => ["tsr-user", id],
+      load: async (id: string) => {
+        loads += 1;
+        return `user-${id} v${loads}`;
+      },
+    });
+
+    function UserData(): FigNode {
+      const params = useParams() as { id: string };
+      return createElement(
+        "h2",
+        { id: "user-data" },
+        readData(userResource, params.id),
+      );
+    }
+
+    const rootRoute = createRootRouteWithContext<{
+      data: FigDataStoreHandle;
+    }>()({});
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const userRoute = createRoute({
+      component: UserData,
+      getParentRoute: () => rootRoute,
+      loader: ({ context, params }) =>
+        context.data.ensureData(userResource, params.id),
+      path: "users/$id",
+    });
+    const routeTree = rootRoute.addChildren([homeRoute, userRoute]);
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    // root.data is a lazy handle, so it can enter router context before the
+    // first render. defaultPreloadStaleTime: 0 disables the router's own SWR
+    // cache: every load and preload event reaches the loader, which delegates
+    // to the store.
+    const router = createRouter({
+      context: { data: root.data },
+      defaultPreloadStaleTime: 0,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree,
+    });
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForMatches(router));
+
+    await act(() => router.navigate({ params: { id: "7" }, to: "/users/$id" }));
+
+    // The loader's ensureData and the component's readData share one entry.
+    expect(container.querySelector("#user-data")?.textContent).toBe(
+      "user-7 v1",
+    );
+    expect(loads).toBe(1);
+
+    // Freshness lives in the store: invalidating the resource re-renders the
+    // subscribed route component with the revalidated value, no router
+    // invalidation involved.
+    await act(() => root.data.invalidateData(userResource, "7"));
+    expect(container.querySelector("#user-data")?.textContent).toBe(
+      "user-7 v2",
+    );
+    expect(loads).toBe(2);
+
+    // Re-navigation re-runs the loader (staleTime 0), which hits the cache.
+    await act(() => router.navigate({ to: "/" }));
+    await act(() => router.navigate({ params: { id: "7" }, to: "/users/$id" }));
+    expect(container.querySelector("#user-data")?.textContent).toBe(
+      "user-7 v2",
+    );
+    expect(loads).toBe(2);
+  });
 });
 
 function makeRouter() {
@@ -307,10 +395,7 @@ function User(): FigNode {
   );
 }
 
-async function waitForPath(
-  router: ReturnType<typeof makeRouter>,
-  pathname: string,
-): Promise<void> {
+async function waitForPath(router: AnyRouter, pathname: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (router.stores.location.get().pathname === pathname) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -318,9 +403,7 @@ async function waitForPath(
   throw new Error(`Router did not navigate to ${pathname}.`);
 }
 
-async function waitForMatches(
-  router: ReturnType<typeof makeRouter>,
-): Promise<void> {
+async function waitForMatches(router: AnyRouter): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (
       router.stores.matchesId.get().length > 0 &&
