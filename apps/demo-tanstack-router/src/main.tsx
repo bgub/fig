@@ -1,16 +1,24 @@
-import { type FigNode, useState } from "@bgub/fig";
+import {
+  dataResource,
+  type FigDataStoreHandle,
+  type FigNode,
+  invalidateData,
+  invalidateDataError,
+  readData,
+  useState,
+} from "@bgub/fig";
 import { createRoot, on } from "@bgub/fig-dom";
 import {
-  createRootRoute,
+  createRootRouteWithContext,
   createRoute,
   createRouter,
   Link,
   Outlet,
   type RouteErrorComponentProps,
   RouterProvider,
-  useLoaderData,
   useLocation,
   useNavigate,
+  useParams,
   useRouterState,
   useSearch,
 } from "@bgub/fig-tanstack-router";
@@ -66,7 +74,27 @@ const people: readonly Person[] = [
   },
 ];
 
-const rootRoute = createRootRoute({
+// The route data cache is Fig's data store, not the router: loaders delegate
+// to ensureData, components read (and subscribe) with readData, and freshness
+// is driven by invalidateData — TanStack's "external cache" pattern.
+const personResource = dataResource({
+  key: (personId: string) => ["person", personId],
+  load: async (personId: string) => {
+    await delay(650);
+    const person = people.find((candidate) => candidate.id === personId);
+    if (person === undefined) {
+      throw new Error(`No profile exists for “${personId}”.`);
+    }
+    return {
+      ...person,
+      loadedAt: new Date().toLocaleTimeString(),
+    };
+  },
+});
+
+const rootRoute = createRootRouteWithContext<{
+  data: FigDataStoreHandle;
+}>()({
   component: AppShell,
   errorComponent: RouteError,
 });
@@ -87,17 +115,8 @@ const personRoute = createRoute({
   component: PersonDetail,
   errorComponent: RouteError,
   getParentRoute: () => rootRoute,
-  loader: async ({ params }) => {
-    await delay(650);
-    const person = people.find((candidate) => candidate.id === params.personId);
-    if (person === undefined) {
-      throw new Error(`No profile exists for “${params.personId}”.`);
-    }
-    return {
-      ...person,
-      loadedAt: new Date().toLocaleTimeString(),
-    };
-  },
+  loader: ({ context, params }) =>
+    context.data.ensureData(personResource, params.personId),
   pendingComponent: PersonPending,
   path: "people/$personId",
   validateSearch: (search) => ({
@@ -124,9 +143,18 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
 ]);
 
+const container = document.getElementById("root");
+if (container === null) throw new Error("Missing #root container.");
+const root = createRoot(container);
+
+// root.data is a lazy handle, so it can enter router context before the
+// first render. defaultPreloadStaleTime: 0 hands every load and preload
+// event to the loaders, which delegate to the data store.
 const router = createRouter({
+  context: { data: root.data },
   defaultPendingMinMs: 300,
   defaultPendingMs: 0,
+  defaultPreloadStaleTime: 0,
   routeTree,
 });
 
@@ -309,7 +337,8 @@ function PeopleDirectory(): FigNode {
         </div>
         <p class="m-0 text-sm leading-6 text-muted">
           Hover or focus a profile before opening it. The route loader starts
-          ahead of navigation and TanStack reuses its result.
+          ahead of navigation and fills Fig’s data store; the profile component
+          reads the same entry.
         </p>
       </header>
 
@@ -362,7 +391,10 @@ function PeopleDirectory(): FigNode {
 }
 
 function PersonDetail(): FigNode {
-  const person = useLoaderData({ from: "/people/$personId" });
+  const { personId } = useParams({ from: "/people/$personId" });
+  // Reads the entry the route loader ensured — and subscribes, so an
+  // invalidation re-renders this component with the revalidated value.
+  const person = readData(personResource, personId);
   const search = useSearch({ from: "/people/$personId" });
   const navigate = useNavigate();
 
@@ -374,6 +406,13 @@ function PersonDetail(): FigNode {
         type="button"
       >
         ← Directory
+      </button>
+      <button
+        class="button button-quiet cursor-pointer"
+        mix={on("click", () => invalidateData(personResource, personId))}
+        type="button"
+      >
+        Refresh profile data
       </button>
 
       <article class="frame grid gap-7 border-loader bg-loader-tint p-6 sm:grid-cols-[auto_1fr] sm:p-8">
@@ -553,7 +592,12 @@ function RouteError({ error, reset }: RouteErrorComponentProps): FigNode {
         </Link>
         <button
           class="button button-quiet cursor-pointer"
-          mix={on("click", reset)}
+          mix={on("click", () => {
+            // The rejection is cached in the data store; clear the keys
+            // attributed to this error before the router re-runs the loader.
+            invalidateDataError(error);
+            reset();
+          })}
           type="button"
         >
           Retry loader
@@ -571,7 +615,4 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-const container = document.getElementById("root");
-if (container === null) throw new Error("Missing #root container.");
-
-createRoot(container).render(<RouterProvider router={router} />);
+root.render(<RouterProvider router={router} />);
