@@ -43,6 +43,14 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 - **Size-based outlining** — no `progressiveChunkSize`: the outline-vs-inline choice is purely flush-time completion state, and consumer backpressure already shifts it naturally (a slow consumer coalesces less-urgent work; see Flow Control). A byte threshold that outlines huge completed-early boundaries out of the shell flush would change the completed-inline wire shape and needs evidence that big inlined boundaries actually hurt first paint before it earns the churn. → `docs/concepts/server-rendering.md`
 - **Resume / partial prerendering** — `prerender` is all-or-nothing settled and aborting yields static fallbacks; there is no postpone/resume pair, so the slot React canary's `prerender` + `resume` fills (prerender the static shell once, resume the dynamic holes per-request) is empty. The hard part is the parked-state contract: which suspension points can park, what render-scope state serializes across the boundary (id paths, provider values, asset-registry state), and whether the byte-identical-resume invariant extends across processes. A major feature, not an increment. → `docs/concepts/server-rendering.md`
 
+## TanStack Adapters
+
+fig-start predates the adapter direction and now serves as a reference implementation; the metaframework bet is `@bgub/fig-tanstack-router` plus a planned TanStack Start adapter. Data resources are the external cache for route data (`ensureData` delegation, TanStack's `defaultPreloadStaleTime: 0` pattern — see `docs/concepts/data.md` and the adapter README).
+
+- **TanStack Start adapter** — the next layer: SSR, streaming, and server routes over the router adapter. On the server, loaders run before a per-request data store exists, so the Start adapter owns wiring request stores into router context; the client handoff is the existing `initialData`/`getData()` contract.
+- **Payload routes inside TanStack Router** — a route loader ensuring a `payloadDataLoader`-backed resource yields server-component routes. Needs a serving side, so it lands with the Start adapter (demo-payload covers payload-as-resource today; fig-start's `routeResource` is the reference).
+- **TanStack Query adapter** — a Query-flavored API over data resources would layer freshness policy (stale timers, refetch-on-focus) above the two core verbs, the same core/framework split as `remoteDataResource`. Build when demand appears.
+
 ## fig-start
 
 - **Server action transport and temporary references** — server action transport is deliberately left out of `useActionState` core, and both server actions and temporary references are absent from the payload row model; the framework layer owns the wire (`docs/concepts/hooks.md`, `docs/concepts/payload.md`).
