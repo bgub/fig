@@ -1,16 +1,26 @@
 // @vitest-environment happy-dom
-import { createElement, dataResource, type FigNode, readData } from "@bgub/fig";
+import {
+  createElement,
+  dataResource,
+  type FigNode,
+  readData,
+  Suspense,
+} from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  type AnyRoute,
   type AnyRouter,
+  createFileRoute,
+  createLazyFileRoute,
   createMemoryHistory,
   createRootRoute,
   createRootRouteWithContext,
   createRoute,
   createRouter,
   ensureRouteData,
+  lazyRouteComponent,
   Link,
   Outlet,
   type RouteDataContext,
@@ -21,6 +31,18 @@ import {
   useRouterState,
   useSearch,
 } from "./router.tsx";
+
+declare module "./router.tsx" {
+  interface FileRoutesByPath {
+    "/generated": {
+      fullPath: "/generated";
+      id: "/generated";
+      parentRoute: AnyRoute;
+      path: "/generated";
+      preLoaderRoute: AnyRoute;
+    };
+  }
+}
 
 type TestRouter = ReturnType<typeof makeRouter>;
 
@@ -40,6 +62,51 @@ afterEach(() => {
 });
 
 describe("@bgub/fig-tanstack-router", () => {
+  it("creates generated file and lazy route records", () => {
+    const route = createFileRoute("/generated")({ component: Home });
+    const lazyRoute = createLazyFileRoute("/generated")({ component: User });
+
+    expect(route.isRoot).toBe(false);
+    expect(lazyRoute.options).toMatchObject({
+      component: User,
+      id: "/generated",
+    });
+  });
+
+  it("preloads and suspends for a lazy route component once", async () => {
+    let resolveModule:
+      | ((module: { RouteComponent: typeof LazyContent }) => void)
+      | undefined;
+    const modulePromise = new Promise<{ RouteComponent: typeof LazyContent }>(
+      (resolve) => {
+        resolveModule = resolve;
+      },
+    );
+    const importer = vi.fn(() => modulePromise);
+    const Lazy = lazyRouteComponent(importer, "RouteComponent");
+    const preload = Lazy.preload?.();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "loading") },
+          createElement(Lazy, { label: "loaded" }),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("loading");
+    resolveModule?.({ RouteComponent: LazyContent });
+    await preload;
+    await act(() => waitForText(container, "loaded"));
+
+    expect(importer).toHaveBeenCalledOnce();
+  });
+
   it("renders nested code routes and reacts to router navigation", async () => {
     const router = makeRouter();
     const container = document.createElement("div");
@@ -470,6 +537,10 @@ function User(): FigNode {
     createElement("h1", null, `User ${params.id}`),
     createElement("p", null, `Search ${JSON.stringify(search)}`),
   );
+}
+
+function LazyContent({ label }: { label: string }): FigNode {
+  return createElement("span", null, label);
 }
 
 async function waitForPath(router: AnyRouter, pathname: string): Promise<void> {

@@ -5,6 +5,10 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@bgub/fig-dom",
     "noEmit": true,
+    "paths": {
+      "@tanstack/solid-router": ["./node_modules/@bgub/fig-tanstack-router"],
+      "@tanstack/solid-start": ["./node_modules/@bgub/fig-tanstack-start"]
+    },
     "types": ["node", "vite/client"]
   },
   "include": ["src"]

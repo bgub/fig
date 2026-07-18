@@ -1,12 +1,16 @@
 # TanStack Router Adapter
 
-Status: exploring
+Status: implemented adapter surface; broader Router feature parity remains incremental
 
 `@bgub/fig-tanstack-router` adapts `@tanstack/router-core` to Fig without forking TanStack's route matching, loading, history, or navigation contracts. The package owns only the framework seam: Fig components and hooks, native DOM link behavior, and the reactive store factory supplied to `RouterCore`.
 
 ## Initial Surface
 
-The initial code-route surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `Link`, `ensureRouteData`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered route tree. File-route generation, SSR, scroll restoration, blockers, head management, and TanStack Start integration remain future adapter layers rather than partial compatibility shims.
+The adapter surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, `lazyFn`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `HeadContent`, `Scripts`, `Link`, `ensureRouteData`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered tree.
+
+`createFileRoute` creates an uninitialized non-root `BaseRoute`; TanStack's generated tree supplies its parent, id, and path with `update`, then attaches generated children and file types. `createLazyFileRoute` returns the lazy option record Router Core merges into that route. `lazyRouteComponent` caches one dynamic import, exposes its preload function, and suspends through Fig's `readPromise` until the selected component export resolves. `lazyFn` is Router Core's typed lazy function loader.
+
+The current generator accepts only React, Solid, and Vue targets and hard-codes the corresponding constructor import during route-file normalization. The Start plugin therefore uses the Solid package ID as a build-time alias to Fig; no Solid runtime participates. A native framework target removes that source-level compatibility ID but does not change the route object or rendering contracts.
 
 The adapter pins the Router core version it is built and tested against. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
 

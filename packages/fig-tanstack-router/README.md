@@ -135,6 +135,29 @@ For streaming instead of blocking, have the loader call
 `context.data.preloadData(resource, ...args)` and return; `readData` then
 suspends into the route's `pendingComponent` until the entry settles.
 
-This first adapter slice supports code-defined routes. File-route generation,
-SSR, scroll restoration, blockers, head management, and TanStack Start are
-planned follow-up layers.
+## Generated file routes
+
+The adapter implements the route-generator surface used by TanStack Start:
+`createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, and `lazyFn`.
+Generated route trees therefore use the same Fig route objects as code-defined
+trees, including typed params, loaders, head entries, lazy chunks, redirects,
+and route error/not-found components.
+
+TanStack's generator still hard-codes its closed framework target when it
+normalizes constructor imports. Until it accepts a native Fig target, the Start
+plugin maps the generated `@tanstack/solid-router` compatibility ID directly to
+this package. Add the equivalent compiler-only mapping to the application's
+`tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/solid-router": ["./node_modules/@bgub/fig-tanstack-router"]
+    }
+  }
+}
+```
+
+No Solid runtime is installed or bundled. Application components, hooks, links,
+router construction, and generated route behavior remain Fig APIs.

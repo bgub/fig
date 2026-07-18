@@ -20,8 +20,24 @@ const plugins = [tanstackStart()];
 The plugin supplies the default client and server entries, including streamed
 Fig SSR and full-document hydration. It currently uses TanStack's Solid target
 as a private compiler compatibility layer because plugin core has no custom
-framework target. Applications import only `@bgub/fig-*`; no Solid runtime is
-installed or bundled.
+framework target. The generator currently normalizes file-route constructor
+imports to its Solid package ID; the plugin maps that ID directly to Fig, and no
+Solid runtime is installed or bundled. TypeScript needs the corresponding
+compiler-only `paths` entry:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/solid-router": ["./node_modules/@bgub/fig-tanstack-router"],
+      "@tanstack/solid-start": ["./node_modules/@bgub/fig-tanstack-start"]
+    }
+  }
+}
+```
+
+The Start mapping lets the generated registration footer carry middleware
+context types from a conventional `src/start.ts` into `createServerFn`.
 
 Create the router with a root-neutral Fig store:
 
@@ -67,6 +83,38 @@ function Document() {
 
 `StartData` serializes the Fig store into the document with Fig's value codec. Because it appears before `Scripts`, client router creation decodes it before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
+## Request and function middleware
+
+The package root also exports TanStack's `createStart`, `createMiddleware`, and
+`createCsrfMiddleware`. A conventional `src/start.ts` configures global request
+and server-function middleware:
+
+```ts
+import {
+  createCsrfMiddleware,
+  createMiddleware,
+  createStart,
+} from "@bgub/fig-tanstack-start";
+
+const requestContext = createMiddleware({ type: "request" }).server(
+  ({ request, next }) =>
+    next({ context: { requestId: request.headers.get("x-request-id") } }),
+);
+
+export const startInstance = createStart(() => ({
+  requestMiddleware: [
+    requestContext,
+    createCsrfMiddleware({
+      filter: (context) => context.handlerType === "serverFn",
+    }),
+  ],
+}));
+```
+
+Start's global async context remains request-local across interleaved SSR and
+server-function work. Redirects thrown by generated route loaders or
+`beforeLoad` use Router Core's normal server and client redirect handling.
+
 ## Server functions
 
 The package root exports TanStack's `createServerFn`. The Vite plugin compiles
@@ -94,7 +142,8 @@ data.invalidateData(userResource, id);
 ```
 
 The [`demo-tanstack-start`](../../apps/demo-tanstack-start) app exercises the
-adapter through Vite's production client and SSR builds: streamed SSR, Router
-dehydration, Fig-owned data serialization, full-document hydration, a compiled
-server mutation, and live data-resource invalidation all run through public
-adapter entries.
+adapter through Vite's production client and SSR builds: generated and lazy
+file routes, streamed SSR, Router dehydration, Fig-owned data serialization,
+full-document hydration, middleware isolation, redirects, a compiled server
+mutation, and live data-resource invalidation all run through public adapter
+entries.

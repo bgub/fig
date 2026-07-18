@@ -2,7 +2,7 @@ import { createServerFn } from "@bgub/fig-tanstack-start";
 import { users, type UserSnapshot } from "./users.ts";
 
 const editCounts = new Map<string, number>();
-let loadSequence = 0;
+const loadCounts = new Map<string, number>();
 
 const validateUser = (input: unknown): { id: string } => {
   if (typeof input !== "object" || input === null) {
@@ -15,7 +15,23 @@ const validateUser = (input: unknown): { id: string } => {
 
 export const getUser = createServerFn({ method: "GET" })
   .validator(validateUser)
-  .handler(({ data }) => loadUser(data.id));
+  .handler(async ({ context, data }): Promise<UserSnapshot> => {
+    await delay(180);
+    const user = requireUser(data.id);
+    const editCount = editCounts.get(data.id) ?? 0;
+    const sequence = (loadCounts.get(data.id) ?? 0) + 1;
+    loadCounts.set(data.id, sequence);
+    return {
+      ...user,
+      functionMiddleware: context.functionMiddleware,
+      loadedAt: new Date().toLocaleTimeString(),
+      loadedBy: "server",
+      requestId: context.requestId,
+      role:
+        editCount === 0 ? user.role : `${user.role} · server edit ${editCount}`,
+      sequence,
+    };
+  });
 
 export const changeUserRole = createServerFn({ method: "POST" })
   .validator(validateUser)
@@ -24,21 +40,6 @@ export const changeUserRole = createServerFn({ method: "POST" })
     editCounts.set(data.id, (editCounts.get(data.id) ?? 0) + 1);
     return { id: data.id };
   });
-
-async function loadUser(id: string): Promise<UserSnapshot> {
-  await delay(180);
-  const user = requireUser(id);
-  loadSequence += 1;
-  const editCount = editCounts.get(id) ?? 0;
-  return {
-    ...user,
-    loadedAt: new Date().toLocaleTimeString(),
-    loadedBy: "server",
-    role:
-      editCount === 0 ? user.role : `${user.role} · server edit ${editCount}`,
-    sequence: loadSequence,
-  };
-}
 
 function requireUser(id: string) {
   const user = users[id as keyof typeof users];

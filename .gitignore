@@ -19,7 +19,6 @@ yarn.lock
 .repos/effect
 playwright-report
 test-results
-apps/demo-tanstack-start/src/routeTree.gen.ts
 .claude
 .repos/
 /tmp/

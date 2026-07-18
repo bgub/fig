@@ -8,7 +8,9 @@ import {
   type FigAssetResource,
   type FigDataStoreHandle,
   type FigNode,
+  type Props,
   readContext,
+  readPromise,
   Suspense,
   transition,
   useBeforePaint,
@@ -40,9 +42,12 @@ import {
   type AssetCrossOriginConfig,
   BaseRootRoute,
   BaseRoute,
+  type CreateFileRoute,
+  type CreateLazyFileRoute,
   deepEqual,
   escapeHtml,
   exactPathTest,
+  type FileRoutesByPath as CoreFileRoutesByPath,
   getAssetCrossOrigin,
   getLocationChangeInfo,
   getScriptPreloadAttrs,
@@ -98,6 +103,7 @@ export {
   rootRouteId,
   stringifySearchWith,
   stripSearchParams,
+  lazyFn,
 } from "@tanstack/router-core";
 export type {
   AnyRoute,
@@ -110,6 +116,8 @@ export type {
   RouterState,
 } from "@tanstack/router-core";
 export type { RouterHistory } from "@tanstack/history";
+
+export interface FileRoutesByPath extends CoreFileRoutesByPath {}
 
 export interface RouteErrorComponentProps {
   error: unknown;
@@ -259,6 +267,82 @@ export function createRoute<
   TServerMiddlewares
 > {
   return new BaseRoute(options);
+}
+
+export function createFileRoute<
+  TFilePath extends keyof FileRoutesByPath,
+  TParentRoute extends AnyRoute = FileRoutesByPath[TFilePath]["parentRoute"],
+  TId extends RouteConstraints["TId"] = FileRoutesByPath[TFilePath]["id"],
+  TPath extends RouteConstraints["TPath"] = FileRoutesByPath[TFilePath]["path"],
+  TFullPath extends RouteConstraints["TFullPath"] =
+    FileRoutesByPath[TFilePath]["fullPath"],
+>(
+  _path?: TFilePath,
+): CreateFileRoute<TFilePath, TParentRoute, TId, TPath, TFullPath> {
+  return ((options) => {
+    const route = new BaseRoute(options as any);
+    Reflect.set(route, "isRoot", false);
+    return route as any;
+  }) as CreateFileRoute<TFilePath, TParentRoute, TId, TPath, TFullPath>;
+}
+
+export function createLazyFileRoute<
+  TFilePath extends keyof FileRoutesByPath,
+  TRoute extends FileRoutesByPath[TFilePath]["preLoaderRoute"],
+>(id: TFilePath): CreateLazyFileRoute<TRoute> {
+  return (options) => ({ options: { id, ...options } });
+}
+
+export type AsyncRouteComponent<TProps = Props> = ComponentType<TProps> & {
+  preload?: () => Promise<void>;
+};
+
+type ImportedRouteComponent<TValue> =
+  TValue extends ComponentType<infer TProps>
+    ? AsyncRouteComponent<TProps>
+    : never;
+
+export function lazyRouteComponent<TComponent>(
+  importer: () => Promise<{ default: TComponent }>,
+): ImportedRouteComponent<TComponent>;
+export function lazyRouteComponent<
+  TModule extends Record<string, unknown>,
+  TKey extends keyof TModule,
+>(
+  importer: () => Promise<TModule>,
+  exportName: TKey,
+): ImportedRouteComponent<TModule[TKey]>;
+export function lazyRouteComponent(
+  importer: () => Promise<Record<string, unknown>>,
+  exportName = "default",
+): AsyncRouteComponent {
+  let component: ComponentType | undefined;
+  let loadPromise: Promise<ComponentType> | undefined;
+
+  const load = () =>
+    (loadPromise ??= importer().then((module) => {
+      const imported = Reflect.get(module, exportName);
+      if (!isRouteComponent(imported)) {
+        throw new TypeError(
+          `Route module export ${JSON.stringify(exportName)} is not a component.`,
+        );
+      }
+      component = imported;
+      return imported;
+    }));
+
+  const LazyComponent: ComponentType = (props) =>
+    createElement(component ?? readPromise(load()), props);
+
+  return Object.assign(LazyComponent, {
+    preload: async () => {
+      await load();
+    },
+  });
+}
+
+function isRouteComponent(value: unknown): value is ComponentType {
+  return typeof value === "function";
 }
 
 export function createRootRoute<

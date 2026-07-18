@@ -15,7 +15,13 @@ import {
   startDataScriptId,
 } from "./transport.ts";
 
-export { createServerFn } from "@tanstack/start-client-core";
+export {
+  createCsrfMiddleware,
+  createMiddleware,
+  createServerFn,
+  createStart,
+} from "@tanstack/start-client-core";
+export type { Register } from "@tanstack/router-core";
 
 export interface StartDataContext extends RouteDataContext {
   data: FigDataStoreController;

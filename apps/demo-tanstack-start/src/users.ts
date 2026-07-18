@@ -6,8 +6,10 @@ export interface UserRecord {
 }
 
 export interface UserSnapshot extends UserRecord {
+  functionMiddleware: true;
   loadedAt: string;
   loadedBy: "server";
+  requestId: string;
   sequence: number;
 }
 

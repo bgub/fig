@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import { getStartContext, runWithStartContext } from "./storage-context.ts";
 
 describe("Start storage context", () => {
-  it("preserves request state across async server work", async () => {
-    const context = { requestId: "one" };
+  it("isolates interleaved async request contexts", async () => {
+    const first = { requestId: "first" };
+    const second = { requestId: "second" };
+    const readAfterYield = (context: object) =>
+      runWithStartContext(context, async () => {
+        await Promise.resolve();
+        return getStartContext();
+      });
 
-    await runWithStartContext(context, async () => {
-      await Promise.resolve();
-      expect(getStartContext()).toBe(context);
-    });
-
+    await expect(
+      Promise.all([readAfterYield(first), readAfterYield(second)]),
+    ).resolves.toEqual([first, second]);
     expect(getStartContext({ throwIfNotFound: false })).toBeUndefined();
   });
 });

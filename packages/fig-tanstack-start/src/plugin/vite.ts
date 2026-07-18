@@ -7,6 +7,7 @@ import {
 import type { PluginOption } from "vite";
 
 const compatibilityFramework = "solid";
+const figRouterPackage = "@bgub/fig-tanstack-router";
 const figStartPackage = "@bgub/fig-tanstack-start";
 const tanstackStartPackage = "@tanstack/solid-start";
 const resolveDependency = (id: string) =>
@@ -48,6 +49,13 @@ const compilerRpcModules = [
 export function tanstackStart(
   options?: TanStackStartViteInputConfig,
 ): PluginOption[] {
+  const startOptions: TanStackStartViteInputConfig = {
+    ...options,
+    start: {
+      ...options?.start,
+      entry: options?.start?.entry ?? "start",
+    },
+  };
   return [
     compatibilityPlugin(),
     tanStackStartVite(
@@ -58,7 +66,7 @@ export function tanstackStart(
         ssrIsProvider: true,
         ssrResolverStrategy: { type: "default" },
       },
-      options,
+      startOptions,
     ),
   ];
 }
@@ -77,14 +85,14 @@ function compatibilityPlugin(): PluginOption {
             },
             {
               find: /^@tanstack\/solid-router$/,
-              replacement: "@bgub/fig-tanstack-router",
+              replacement: figRouterPackage,
             },
             {
               find: /^@tanstack\/solid-start$/,
               replacement: figStartPackage,
             },
           ],
-          dedupe: [figStartPackage, "@bgub/fig-tanstack-router"],
+          dedupe: [figStartPackage, figRouterPackage],
         },
       };
     },
@@ -95,7 +103,7 @@ function compatibilityPlugin(): PluginOption {
           exclude: [
             ...(environment.optimizeDeps?.exclude ?? []),
             figStartPackage,
-            "@bgub/fig-tanstack-router",
+            figRouterPackage,
             "@tanstack/start-client-core",
           ],
         },
