@@ -12,3 +12,8 @@ peerDependencyRules:
 allowBuilds:
   esbuild: true
   msgpackr-extract: false
+
+minimumReleaseAgeExclude:
+  - "@tanstack/router-generator@1.167.21"
+  - "@tanstack/router-plugin@1.168.22"
+  - "@tanstack/start-plugin-core@1.171.22"

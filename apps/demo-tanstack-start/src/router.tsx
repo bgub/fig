@@ -1,9 +1,4 @@
-import {
-  dataResource,
-  type FigNode,
-  invalidateData,
-  readData,
-} from "@bgub/fig";
+import { dataResource, type FigNode, readData, readDataStore } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import {
   createRootRouteWithContext,
@@ -21,57 +16,19 @@ import {
   type StartDataContext,
   StartData,
 } from "@bgub/fig-tanstack-start";
-
-interface UserRecord {
-  id: string;
-  initials: string;
-  name: string;
-  role: string;
-}
-
-interface UserSnapshot extends UserRecord {
-  loadedAt: string;
-  loadedBy: "browser" | "server";
-  sequence: number;
-}
-
-const users = {
-  ada: {
-    id: "ada",
-    initials: "AL",
-    name: "Ada Lovelace",
-    role: "Router architect",
-  },
-  grace: {
-    id: "grace",
-    initials: "GH",
-    name: "Grace Hopper",
-    role: "Data systems engineer",
-  },
-} satisfies Record<string, UserRecord>;
-
-let loadSequence = 0;
+import styleUrl from "../style.css?url";
+import { changeUserRole, getUser } from "./user-functions.ts";
+import { users, type UserSnapshot } from "./users.ts";
 
 const userResource = dataResource<[string], UserSnapshot>({
   key: (id) => ["start-demo-user", id],
-  load: async (id) => {
-    await delay(180);
-    const user = users[id as keyof typeof users];
-    if (user === undefined) throw new Error(`Unknown user “${id}”.`);
-    loadSequence += 1;
-    return {
-      ...user,
-      loadedAt: new Date().toLocaleTimeString(),
-      loadedBy: typeof document === "undefined" ? "server" : "browser",
-      sequence: loadSequence,
-    };
-  },
+  load: (id, { signal }) => getUser({ data: { id }, signal }),
 });
 
 const rootRoute = createRootRouteWithContext<StartDataContext>()({
   component: Document,
   head: () => ({
-    links: [{ href: "/style.css", precedence: "app", rel: "stylesheet" }],
+    links: [{ href: styleUrl, precedence: "app", rel: "stylesheet" }],
     meta: [
       { title: "Fig × TanStack Start" },
       {
@@ -81,7 +38,6 @@ const rootRoute = createRootRouteWithContext<StartDataContext>()({
     ],
   }),
   notFoundComponent: NotFound,
-  scripts: () => [{ src: "/client.js", type: "module" }],
 });
 
 const homeRoute = createRoute({
@@ -108,16 +64,16 @@ const userRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([homeRoute, usersRoute, userRoute]);
 
-export function createAppRouter(options: { isServer?: boolean } = {}) {
+export function getRouter() {
   return createRouter({
     ...createStartDataContext(),
     defaultPendingMs: 0,
-    isServer: options.isServer,
+    isServer: typeof document === "undefined",
     routeTree,
   });
 }
 
-export type AppRouter = ReturnType<typeof createAppRouter>;
+export type AppRouter = ReturnType<typeof getRouter>;
 
 declare module "@tanstack/router-core" {
   interface Register {
@@ -290,6 +246,7 @@ function UserDetail(): FigNode {
         <div>
           <span
             class="font-mono text-[10px] tracking-wide text-data uppercase"
+            data-generation={String(user.sequence)}
             data-loaded-by={user.loadedBy}
           >
             Loaded by {user.loadedBy} · generation {user.sequence}
@@ -297,7 +254,9 @@ function UserDetail(): FigNode {
           <h1 class="mt-2 mb-0 text-3xl font-semibold tracking-[-0.02em]">
             {user.name}
           </h1>
-          <p class="mt-1 font-mono text-xs text-data">{user.role}</p>
+          <p class="mt-1 font-mono text-xs text-data" data-user-role>
+            {user.role}
+          </p>
           <p class="mt-5 text-sm leading-6 text-muted">
             Resolved at <strong class="text-ink">{user.loadedAt}</strong>. The
             initial value came from SSR without a browser refetch. Invalidate it
@@ -305,10 +264,14 @@ function UserDetail(): FigNode {
           </p>
           <button
             class="button mt-5 border-data bg-white text-data hover:bg-data-tint"
-            mix={on("click", () => invalidateData(userResource, userId))}
+            mix={on("click", async (_event, signal) => {
+              const data = readDataStore();
+              await changeUserRole({ data: { id: userId }, signal });
+              data.invalidateData(userResource, userId);
+            })}
             type="button"
           >
-            Invalidate Fig data
+            Change role on server
           </button>
         </div>
       </article>
@@ -341,8 +304,4 @@ function NotFound(): FigNode {
       </Link>
     </section>
   );
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

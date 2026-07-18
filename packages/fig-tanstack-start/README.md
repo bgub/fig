@@ -1,10 +1,27 @@
 # @bgub/fig-tanstack-start
 
-The TanStack Start runtime adapter for Fig. TanStack owns requests and route loading; Fig owns rendering, data resources, asset resources, and the single data store used by loaders and components.
+The TanStack Start adapter for Fig. TanStack owns builds, requests, route
+loading, redirects, and server-function transport; Fig owns rendering, data
+resources, asset resources, and the single data store used by loaders and
+components.
 
 ```bash
 pnpm add @bgub/fig-tanstack-start @bgub/fig-tanstack-router
 ```
+
+Add the adapter to Vite:
+
+```ts
+import { tanstackStart } from "@bgub/fig-tanstack-start/plugin/vite";
+
+const plugins = [tanstackStart()];
+```
+
+The plugin supplies the default client and server entries, including streamed
+Fig SSR and full-document hydration. It currently uses TanStack's Solid target
+as a private compiler compatibility layer because plugin core has no custom
+framework target. Applications import only `@bgub/fig-*`; no Solid runtime is
+installed or bundled.
 
 Create the router with a root-neutral Fig store:
 
@@ -48,28 +65,36 @@ function Document() {
 }
 ```
 
-Server entry:
-
-```ts
-import { createStartHandler } from "@tanstack/start-server-core";
-import { defaultStreamHandler } from "@bgub/fig-tanstack-start/server";
-
-export const fetch = createStartHandler(defaultStreamHandler);
-```
-
-Client entry:
-
-```ts
-import { hydrateStart } from "@bgub/fig-tanstack-start/client";
-
-await hydrateStart();
-```
-
 `StartData` serializes the Fig store into the document with Fig's value codec. Because it appears before `Scripts`, client router creation decodes it before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
-The Start runtime is implemented. A first-class Vite plugin still requires TanStack's plugin core to admit framework adapters beyond its current React, Solid, and Vue union.
+## Server functions
+
+The package root exports TanStack's `createServerFn`. The Vite plugin compiles
+the handler into the server build and the browser call into an RPC request:
+
+```ts
+import { createServerFn } from "@bgub/fig-tanstack-start";
+
+export const renameUser = createServerFn({ method: "POST" })
+  .validator((input: { id: string; name: string }) => input)
+  .handler(async ({ data }) => {
+    await database.users.rename(data.id, data.name);
+  });
+```
+
+An async event must capture the Fig store before its first `await` when it
+needs to refresh data afterward:
+
+```ts
+import { readDataStore } from "@bgub/fig";
+
+const data = readDataStore();
+await renameUser({ data: { id, name }, signal });
+data.invalidateData(userResource, id);
+```
 
 The [`demo-tanstack-start`](../../apps/demo-tanstack-start) app exercises the
-runtime today with a small build-time router-entry alias: streamed SSR, Router
-dehydration, Fig-owned data serialization, full-document hydration, and live
-client invalidation all run through the public adapter entries.
+adapter through Vite's production client and SSR builds: streamed SSR, Router
+dehydration, Fig-owned data serialization, full-document hydration, a compiled
+server mutation, and live data-resource invalidation all run through public
+adapter entries.

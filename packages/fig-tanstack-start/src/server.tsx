@@ -30,13 +30,18 @@ export async function renderRouterToStream({
   );
   await render.shellReady;
 
-  const stream = transformReadableStreamWithRouter(router, render.stream, {
+  // Router Core and the DOM library resolve this Web stream through different
+  // Node buffer generics, even though the runtime value is the same.
+  const routerStream = render.stream as unknown as Parameters<
+    typeof transformReadableStreamWithRouter
+  >[1];
+  const stream = transformReadableStreamWithRouter(router, routerStream, {
     onAbort: (reason) => render.abort(reason),
   });
   responseHeaders.set("content-type", render.contentType);
   return createSsrStreamResponse(
     router,
-    new Response(stream, {
+    new Response(stream as unknown as BodyInit, {
       headers: responseHeaders,
       status: router.stores.statusCode.get(),
     }),

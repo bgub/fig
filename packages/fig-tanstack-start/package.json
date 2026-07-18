@@ -26,6 +26,11 @@
       "import": "./dist/server.js",
       "default": "./dist/server.js"
     },
+    "./plugin/vite": {
+      "types": "./dist/plugin/vite.d.ts",
+      "import": "./dist/plugin/vite.js",
+      "default": "./dist/plugin/vite.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/data.d.ts",
@@ -57,19 +62,22 @@
   "dependencies": {
     "@tanstack/router-core": "1.171.15",
     "@tanstack/start-client-core": "1.170.14",
+    "@tanstack/start-plugin-core": "1.171.22",
     "@tanstack/start-server-core": "1.169.17"
   },
   "peerDependencies": {
     "@bgub/fig": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
-    "@bgub/fig-tanstack-router": "workspace:*"
+    "@bgub/fig-tanstack-router": "workspace:*",
+    "vite": ">=7.0.0"
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
-    "@bgub/fig-tanstack-router": "workspace:*"
+    "@bgub/fig-tanstack-router": "workspace:*",
+    "vite": "8.1.4"
   },
   "engines": {
     "node": ">=22.12.0"

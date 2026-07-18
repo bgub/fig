@@ -15,6 +15,8 @@ import {
   startDataScriptId,
 } from "./transport.ts";
 
+export { createServerFn } from "@tanstack/start-client-core";
+
 export interface StartDataContext extends RouteDataContext {
   data: FigDataStoreController;
 }
