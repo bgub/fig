@@ -1,8 +1,19 @@
 import type { FigNode } from "@bgub/fig";
-import { HeadContent, Link, Outlet, Scripts } from "@bgub/fig-tanstack-router";
+import {
+  getRouteApi,
+  HeadContent,
+  Link,
+  MatchRoute,
+  Outlet,
+  Scripts,
+  useMatches,
+} from "@bgub/fig-tanstack-router";
 import { StartData } from "@bgub/fig-tanstack-start";
 
+const usersRouteApi = getRouteApi("/users/");
+
 export function Document(): FigNode {
+  const matchCount = useMatches({ select: (matches) => matches.length });
   return (
     <html lang="en">
       <head>
@@ -33,9 +44,9 @@ export function Document(): FigNode {
                 <Link class="button button-quiet" to="/">
                   Overview
                 </Link>
-                <Link class="button button-quiet" to="/users">
+                <usersRouteApi.Link class="button button-quiet" to="/users">
                   Users
-                </Link>
+                </usersRouteApi.Link>
                 <Link class="button button-quiet" to="/about">
                   Architecture
                 </Link>
@@ -48,9 +59,17 @@ export function Document(): FigNode {
             <main class="flex-1 px-5 py-8 sm:px-7 sm:py-10">
               <Outlet />
             </main>
-            <footer class="border-t border-line bg-white/60 px-5 py-4 font-mono text-[11px] text-muted sm:px-7">
+            <footer
+              class="border-t border-line bg-white/60 px-5 py-4 font-mono text-[11px] text-muted sm:px-7"
+              data-match-count={String(matchCount)}
+            >
               Router hydration and route data cross the document independently;
               Fig owns the live cache.
+              <MatchRoute fuzzy to="/users">
+                <span class="ml-2 text-route" data-users-route-active>
+                  Users branch active.
+                </span>
+              </MatchRoute>
             </footer>
           </div>
         </div>

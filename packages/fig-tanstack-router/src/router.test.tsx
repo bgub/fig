@@ -8,7 +8,7 @@ import {
 } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   type AnyRoute,
   type AnyRouter,
@@ -20,16 +20,20 @@ import {
   createRoute,
   createRouter,
   ensureRouteData,
+  getRouteApi,
   lazyRouteComponent,
   Link,
+  MatchRoute,
+  Navigate,
   Outlet,
   type RouteDataContext,
   type RouteErrorComponentProps,
   RouterProvider,
   useLocation,
+  useMatches,
+  useMatchRoute,
   useParams,
   useRouterState,
-  useSearch,
 } from "./router.tsx";
 
 declare module "./router.tsx" {
@@ -51,6 +55,8 @@ declare module "@tanstack/router-core" {
     router: TestRouter;
   }
 }
+
+const userRouteApi = getRouteApi("/users/$id");
 
 const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
 const externalUrl: string = "https://example.com/";
@@ -130,6 +136,52 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.querySelector("p")?.textContent).toBe(
       'Search {"tab":"profile"}',
     );
+    expect(container.querySelector("#active-user-route")?.textContent).toBe(
+      "active",
+    );
+    expect(container.querySelector("#route-match-count")?.textContent).toBe(
+      "2",
+    );
+    expect(router.routesById["/users/$id"].notFound().routeId).toBe(
+      "/users/$id",
+    );
+  });
+
+  it("navigates after commit with the Navigate component", async () => {
+    const router = makeRouter("/users/42?tab=redirect");
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForPath(router, "/"));
+
+    expect(container.querySelector("h1")?.textContent).toBe("Home at /");
+  });
+
+  it("types route-bound hooks, links, and navigation from registration", () => {
+    function checkTypes(): void {
+      expectTypeOf(userRouteApi.useParams()).toEqualTypeOf<{ id: string }>();
+      expectTypeOf(userRouteApi.useSearch()).toEqualTypeOf<{
+        tab?: string;
+      }>();
+      expectTypeOf(userRouteApi.useLoaderDeps()).toEqualTypeOf<{
+        tab: string;
+      }>();
+      expectTypeOf(userRouteApi.useLoaderData()).toEqualTypeOf<string>();
+      expectTypeOf(
+        userRouteApi.useMatch({ select: (match) => match.id }),
+      ).toEqualTypeOf<string>();
+
+      userRouteApi.Link({ params: { id: "42" }, to: "/users/$id" });
+      void userRouteApi.useNavigate()({ to: "/" });
+
+      // @ts-expect-error The registered user route has no "missing" param.
+      userRouteApi.Link({ params: { missing: "42" }, to: "/users/$id" });
+    }
+    void checkTypes;
+
+    expect(userRouteApi.id).toBe("/users/$id");
   });
 
   it("uses a native anchor and only hijacks unmodified primary clicks", async () => {
@@ -472,7 +524,7 @@ describe("@bgub/fig-tanstack-router", () => {
   });
 });
 
-function makeRouter() {
+function makeRouter(initialEntry = "/") {
   const rootRoute = createRootRoute({ component: Layout });
   const homeRoute = createRoute({
     component: Home,
@@ -486,10 +538,12 @@ function makeRouter() {
     validateSearch: (search): { tab?: string } => ({
       tab: typeof search.tab === "string" ? search.tab : undefined,
     }),
+    loaderDeps: ({ search }) => ({ tab: search.tab ?? "overview" }),
+    loader: ({ deps }) => `loader:${deps.tab}`,
   });
   const routeTree = rootRoute.addChildren([homeRoute, userRoute]);
   return createRouter({
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
     routeTree,
   });
 }
@@ -529,13 +583,34 @@ function Home(): FigNode {
 }
 
 function User(): FigNode {
-  const params = useParams({ from: "/users/$id" });
-  const search = useSearch({ from: "/users/$id" });
+  const params = userRouteApi.useParams();
+  const search = userRouteApi.useSearch();
+  const loaderDeps = userRouteApi.useLoaderDeps();
+  const loaderData = userRouteApi.useLoaderData();
+  const routeId = userRouteApi.useMatch({ select: (match) => match.id });
+  const matchCount = useMatches({ select: (matches) => matches.length });
+  const matchRoute = useMatchRoute();
+  const matched = matchRoute({ params, to: "/users/$id" });
+
+  if (search.tab === "redirect") return <Navigate to="/" />;
+
   return createElement(
     "section",
-    null,
+    {
+      "data-loader-data": loaderData,
+      "data-loader-tab": loaderDeps.tab,
+      "data-route-id": routeId,
+      "data-route-matched": String(matched !== false),
+    },
     createElement("h1", null, `User ${params.id}`),
     createElement("p", null, `Search ${JSON.stringify(search)}`),
+    createElement("span", { id: "route-match-count" }, String(matchCount)),
+    createElement(
+      MatchRoute,
+      { params, to: "/users/$id" },
+      createElement("span", { id: "active-user-route" }, "active"),
+    ),
+    createElement(userRouteApi.Link, { to: "/" }, "Home"),
   );
 }
 

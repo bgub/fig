@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as ComponentRedirectRouteImport } from './routes/component-redirect'
 import { Route as LegacyUsersRouteImport } from './routes/legacy-users'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as UsersIndexRouteImport } from './routes/users.index'
@@ -26,6 +27,11 @@ const AboutRoute = AboutRouteImport.update({
   path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/about.lazy').then((d) => d.Route))
+const ComponentRedirectRoute = ComponentRedirectRouteImport.update({
+  id: '/component-redirect',
+  path: '/component-redirect',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LegacyUsersRoute = LegacyUsersRouteImport.update({
   id: '/legacy-users',
   path: '/legacy-users',
@@ -50,6 +56,7 @@ const UsersUserIdRoute = UsersUserIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/component-redirect': typeof ComponentRedirectRoute
   '/legacy-users': typeof LegacyUsersRoute
   '/users': typeof UsersRouteWithChildren
   '/users/$userId': typeof UsersUserIdRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/component-redirect': typeof ComponentRedirectRoute
   '/legacy-users': typeof LegacyUsersRoute
   '/users/$userId': typeof UsersUserIdRoute
   '/users': typeof UsersIndexRoute
@@ -66,6 +74,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/component-redirect': typeof ComponentRedirectRoute
   '/legacy-users': typeof LegacyUsersRoute
   '/users': typeof UsersRouteWithChildren
   '/users/$userId': typeof UsersUserIdRoute
@@ -74,13 +83,26 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/about' | '/legacy-users' | '/users' | '/users/$userId' | '/users/'
+    | '/'
+    | '/about'
+    | '/component-redirect'
+    | '/legacy-users'
+    | '/users'
+    | '/users/$userId'
+    | '/users/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/legacy-users' | '/users/$userId' | '/users'
+  to:
+    | '/'
+    | '/about'
+    | '/component-redirect'
+    | '/legacy-users'
+    | '/users/$userId'
+    | '/users'
   id:
     | '__root__'
     | '/'
     | '/about'
+    | '/component-redirect'
     | '/legacy-users'
     | '/users'
     | '/users/$userId'
@@ -90,6 +112,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  ComponentRedirectRoute: typeof ComponentRedirectRoute
   LegacyUsersRoute: typeof LegacyUsersRoute
   UsersRoute: typeof UsersRouteWithChildren
 }
@@ -108,6 +131,13 @@ declare module '@tanstack/solid-router' {
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/component-redirect': {
+      id: '/component-redirect'
+      path: '/component-redirect'
+      fullPath: '/component-redirect'
+      preLoaderRoute: typeof ComponentRedirectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/legacy-users': {
@@ -156,6 +186,7 @@ const UsersRouteWithChildren = UsersRoute._addFileChildren(UsersRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  ComponentRedirectRoute: ComponentRedirectRoute,
   LegacyUsersRoute: LegacyUsersRoute,
   UsersRoute: UsersRouteWithChildren,
 }

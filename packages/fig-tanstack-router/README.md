@@ -59,6 +59,43 @@ browser behavior. Preloading supports `intent`, `render`, and `viewport`.
 Pass `{ from: routeId }` to the params, search, loader-data, or route-context
 hook to target an active route and infer its value from the registered tree.
 
+Routes expose the same hooks already bound to their id and full path:
+
+```tsx
+import { on } from "@bgub/fig-dom";
+
+const userRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "users/$id",
+  validateSearch: (search): { preview?: boolean } => ({
+    preview: search.preview === true,
+  }),
+  loaderDeps: ({ search }) => ({ preview: search.preview === true }),
+  component: User,
+});
+
+function User() {
+  const { id } = userRoute.useParams();
+  const { preview } = userRoute.useLoaderDeps();
+  const navigate = userRoute.useNavigate();
+
+  return (
+    <article>
+      <userRoute.Link to="/">Home</userRoute.Link>
+      <button mix={on("click", () => navigate({ to: "/" }))} type="button">
+        Done
+      </button>
+      <p>{preview ? `Previewing ${id}` : `User ${id}`}</p>
+    </article>
+  );
+}
+```
+
+`getRouteApi(routeId)` provides that bound interface outside the route's own
+module. `useMatches` reads or selects the active match list; `useMatchRoute`
+and `MatchRoute` test locations reactively; `Navigate` performs declarative
+post-commit navigation.
+
 ## Route data: delegate to data resources
 
 Fig data resources are the external cache for route data — TanStack's
@@ -86,7 +123,6 @@ import {
   ensureRouteData,
   type RouteDataContext,
   RouterProvider,
-  useParams,
 } from "@bgub/fig-tanstack-router";
 
 const userResource = dataResource({
@@ -104,7 +140,7 @@ const userRoute = createRoute({
   loader: ({ context, params }) =>
     ensureRouteData(context, userResource, params.id),
   component: function User() {
-    const { id } = useParams({ from: "/users/$id" });
+    const { id } = userRoute.useParams();
     const user = readData(userResource, id);
     return <h1>{user.name}</h1>;
   },

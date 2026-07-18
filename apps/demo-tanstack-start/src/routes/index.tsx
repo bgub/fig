@@ -27,6 +27,9 @@ function Home(): FigNode {
           <Link class="button button-quiet" to="/legacy-users">
             Exercise a redirect
           </Link>
+          <Link class="button button-quiet" to="/component-redirect">
+            Exercise component navigation
+          </Link>
         </div>
       </section>
       <section class="grid gap-5 md:grid-cols-3">

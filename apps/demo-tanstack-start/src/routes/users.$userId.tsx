@@ -1,6 +1,6 @@
-import { type FigNode, readData, readDataStore } from "@bgub/fig";
+import { type FigNode, readData } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { ensureRouteData, Link, useParams } from "@bgub/fig-tanstack-router";
+import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
 import { changeUserRole } from "../user-functions.ts";
 import { userResource } from "../user-resource.ts";
@@ -9,19 +9,30 @@ export const Route = createFileRoute("/users/$userId")({
   component: UserDetail,
   errorComponent: UserError,
   head: ({ params }) => ({ meta: [{ title: `${params.userId} · Fig Start` }] }),
+  loaderDeps: (): { source: "fig-data" } => ({ source: "fig-data" }),
   loader: ({ context, params }) =>
     ensureRouteData(context, userResource, params.userId),
 });
 
 function UserDetail(): FigNode {
-  const { userId } = useParams({ from: "/users/$userId" });
+  const { userId } = Route.useParams();
+  const { source } = Route.useLoaderDeps();
+  const { data } = Route.useRouteContext();
+  const routeId = Route.useMatch({ select: (match) => match.routeId });
+  const navigate = Route.useNavigate();
   const user = readData(userResource, userId);
+  const nextUserId = userId === "ada" ? "grace" : "ada";
+  const nextUserName = nextUserId === "ada" ? "Ada Lovelace" : "Grace Hopper";
   return (
     <div class="space-y-6">
-      <Link class="button button-quiet" to="/users">
+      <Route.Link class="button button-quiet" to="/users">
         ← Users
-      </Link>
-      <article class="frame grid gap-7 border-data bg-data-tint p-6 sm:grid-cols-[auto_1fr] sm:p-8">
+      </Route.Link>
+      <article
+        class="frame grid gap-7 border-data bg-data-tint p-6 sm:grid-cols-[auto_1fr] sm:p-8"
+        data-loader-source={source}
+        data-route-id={routeId}
+      >
         <span class="frame-tag text-data">Fig data resource</span>
         <div class="grid size-20 place-items-center rounded-lg border-[1.5px] border-data bg-white font-mono text-lg font-semibold text-data">
           {user.initials}
@@ -50,13 +61,24 @@ function UserDetail(): FigNode {
           <button
             class="button mt-5 border-data bg-white text-data hover:bg-data-tint"
             mix={on("click", async (_event, signal) => {
-              const data = readDataStore();
               await changeUserRole({ data: { id: userId }, signal });
               data.invalidateData(userResource, userId);
             })}
             type="button"
           >
             Change role on server
+          </button>
+          <button
+            class="button button-quiet mt-5 ml-3"
+            mix={on("click", () =>
+              navigate({
+                params: { userId: nextUserId },
+                to: "/users/$userId",
+              }),
+            )}
+            type="button"
+          >
+            View {nextUserName}
           </button>
         </div>
       </article>
@@ -72,9 +94,9 @@ function UserError({ error }: { error: unknown }): FigNode {
       <p class="text-sm text-muted">
         {error instanceof Error ? error.message : "Unknown route error."}
       </p>
-      <Link class="button button-quiet mt-4" to="/users">
+      <Route.Link class="button button-quiet mt-4" to="/users">
         Return to users
-      </Link>
+      </Route.Link>
     </section>
   );
 }

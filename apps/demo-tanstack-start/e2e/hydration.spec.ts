@@ -28,6 +28,22 @@ test("hydrates the document and updates metadata during navigation", async ({
   await expect(page.locator("[data-user-role]")).toContainText("server edit 1");
   await expect(loadMetadata).toHaveAttribute("data-generation", "2");
 
+  await page.getByRole("button", { name: "View Grace Hopper" }).click();
+  await expect(page).toHaveURL(/\/users\/grace$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Grace Hopper",
+  );
+  await expect(page.locator("[data-route-id]")).toHaveAttribute(
+    "data-route-id",
+    "/users/$userId",
+  );
+  await expect(page.locator("[data-loader-source]")).toHaveAttribute(
+    "data-loader-source",
+    "fig-data",
+  );
+  await expect(page.locator("footer")).toHaveAttribute("data-match-count", "3");
+  await expect(page.locator("[data-users-route-active]")).toBeVisible();
+
   await page.getByRole("link", { exact: true, name: "Users" }).click();
 
   await expect(page).toHaveURL(/\/users$/);
@@ -66,6 +82,14 @@ test("handles redirects on the server and client", async ({
   await page.goto("/");
   await page.getByRole("link", { name: "Exercise a redirect" }).click();
 
+  await expect(page).toHaveURL(/\/users$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Users");
+  expect(errors()).toEqual([]);
+
+  await page.goto("/");
+  await page
+    .getByRole("link", { name: "Exercise component navigation" })
+    .click();
   await expect(page).toHaveURL(/\/users$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Users");
   expect(errors()).toEqual([]);

@@ -6,7 +6,9 @@ Status: implemented adapter surface; broader Router feature parity remains incre
 
 ## Initial Surface
 
-The adapter surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, `lazyFn`, `createRouter`, `RouterProvider`, `Matches`, `Outlet`, `HeadContent`, `Scripts`, `Link`, `ensureRouteData`, and the router, location, match, params, search, loader-data, route-context, and navigation hooks. Params, search, loader-data, and route-context hooks accept `{ from: routeId }` to subscribe directly to a specific active match and infer its value from the registered tree.
+The adapter surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, `lazyFn`, `createRouter`, `getRouteApi`, `RouterProvider`, `Matches`, `MatchRoute`, `Navigate`, `Outlet`, `HeadContent`, `Scripts`, `Link`, `ensureRouteData`, and the router, location, match-list, match-route, match, params, search, loader-deps, loader-data, route-context, and navigation hooks. Targeted hooks accept `{ from: routeId }` and an optional selector to subscribe directly to a specific active match and infer its value from the registered tree.
+
+Route objects, root-route objects, and `RouteApi` expose the canonical bound interface: `useMatch`, `useParams`, `useSearch`, `useLoaderDeps`, `useLoaderData`, `useRouteContext`, `useNavigate`, `Link`, and `notFound`. Bound hooks close over the route id; navigation and links close over its full path. `getRouteApi(id)` resolves the full path from the registered router at render time, so code outside a route module gets the same interface without retaining a route instance. Generated-tree transforms preserve the interface through Router Core's `RouteExtensions` seam.
 
 `createFileRoute` creates an uninitialized non-root `BaseRoute`; TanStack's generated tree supplies its parent, id, and path with `update`, then attaches generated children and file types. `createLazyFileRoute` returns the lazy option record Router Core merges into that route. `lazyRouteComponent` caches one dynamic import, exposes its preload function, and suspends through Fig's `readPromise` until the selected component export resolves. `lazyFn` is Router Core's typed lazy function loader.
 
@@ -18,7 +20,9 @@ The adapter pins the Router core version it is built and tested against. TanStac
 
 The adapter follows Router Core's [signal-graph architecture](https://tanstack.com/blog/tanstack-router-signal-graph): top-level atoms and per-match stores are the sources of truth, while `router.state` is the compatibility snapshot derived from them. Browser routers supply TanStack Store atoms for mutable and derived stores; server routers use Core's non-reactive stores because a server render reads each value once.
 
-Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, each rendered match reads its own match store, and targeted match hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
+Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, `useMatches` reads the match-list store, `useMatchRoute` reads the match-route dependency store, each rendered match reads its own match store, and targeted or route-bound hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
+
+`Navigate` runs after commit through Fig's before-paint lifecycle. It compares navigation option values rather than props-object identity, preventing a still-active redirect route from restarting the same navigation when Router state changes during loading.
 
 ## Route Data Contract
 

@@ -42,18 +42,32 @@ import {
   type AssetCrossOriginConfig,
   BaseRootRoute,
   BaseRoute,
+  BaseRouteApi,
+  type ConstrainLiteral,
   type CreateFileRoute,
   type CreateLazyFileRoute,
+  type DeepPartial,
   deepEqual,
   escapeHtml,
   exactPathTest,
+  type Expand,
   type FileRoutesByPath as CoreFileRoutesByPath,
+  type FromPathOption,
   getAssetCrossOrigin,
   getLocationChangeInfo,
   getScriptPreloadAttrs,
   isDangerousProtocol,
   type LinkOptions,
+  type MakeOptionalPathParams,
+  type MakeOptionalSearchParams,
+  type MakeRouteMatch,
+  type MakeRouteMatchUnion,
+  type MaskOptions,
+  type MatchRouteOptions,
   type MetaDescriptor,
+  type NavigateOptions,
+  notFound as createNotFound,
+  type NotFoundError,
   type NotFoundRouteProps,
   removeTrailingSlash,
   resolveManifestCssLink,
@@ -62,9 +76,12 @@ import {
   type ResolveFullPath,
   type ResolveId,
   type ResolveUseLoaderData,
+  type ResolveUseLoaderDeps,
   type ResolveUseParams,
   type ResolveUseSearch,
+  type ResolveRoute,
   type ResolveParams,
+  type RootRouteId,
   type RootRouteOptions,
   RouterCore,
   type RouterConstructorOptions,
@@ -74,8 +91,15 @@ import {
   type RouteConstraints,
   type RouteIds,
   type RouteOptions,
+  type RouteTypesById,
+  type ToSubOptionsProps,
   type TrailingSlashOption,
+  type UseLoaderDataResult,
+  type UseLoaderDepsResult,
+  type UseNavigateResult,
+  type UseParamsResult,
   type UseRouteContextResult,
+  type UseSearchResult,
 } from "@tanstack/router-core";
 import { batch } from "@tanstack/store";
 import { getStoreConfig } from "./store.ts";
@@ -140,7 +164,175 @@ export type RouteComponent = ComponentType;
 export type ErrorRouteComponent = ComponentType<RouteErrorComponentProps>;
 export type NotFoundRouteComponent = ComponentType<NotFoundRouteProps>;
 
+interface SelectRouteValue<TValue, TSelected> {
+  select?: (value: TValue) => TSelected;
+}
+
+type RouteMatchResult<
+  TRouter extends AnyRouter,
+  TFrom,
+  TSelected,
+> = unknown extends TSelected
+  ? MakeRouteMatch<TRouter["routeTree"], TFrom, true>
+  : TSelected;
+
+export type UseMatchRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<
+    MakeRouteMatch<TRouter["routeTree"], TFrom, true>,
+    TSelected
+  >,
+) => RouteMatchResult<TRouter, TFrom, TSelected>;
+
+export type UseParamsRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<ResolveUseParams<TRouter, TFrom, true>, TSelected>,
+) => UseParamsResult<TRouter, TFrom, true, TSelected>;
+
+export type UseSearchRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<ResolveUseSearch<TRouter, TFrom, true>, TSelected>,
+) => UseSearchResult<TRouter, TFrom, true, TSelected>;
+
+export type UseLoaderDataRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<
+    ResolveUseLoaderData<TRouter, TFrom, true>,
+    TSelected
+  >,
+) => UseLoaderDataResult<TRouter, TFrom, true, TSelected>;
+
+export type UseLoaderDepsRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<ResolveUseLoaderDeps<TRouter, TFrom>, TSelected>,
+) => UseLoaderDepsResult<TRouter, TFrom, TSelected>;
+
+export type UseRouteContextRoute<out TFrom> = <
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: SelectRouteValue<
+    UseRouteContextResult<TRouter, TFrom, true, unknown>,
+    TSelected
+  >,
+) => UseRouteContextResult<TRouter, TFrom, true, TSelected>;
+
+export type LinkComponentRoute<TFrom extends string> = <
+  const TTo extends string | undefined = undefined,
+  const TMaskFrom extends string = TFrom,
+  const TMaskTo extends string = "",
+>(
+  props: Omit<LinkProps<TFrom, TTo, TMaskFrom, TMaskTo>, "from">,
+) => FigNode;
+
+export interface RouteApiMethods<TId extends string, TFullPath extends string> {
+  Link: LinkComponentRoute<TFullPath>;
+  notFound: (options?: NotFoundError) => NotFoundError;
+  useLoaderData: UseLoaderDataRoute<TId>;
+  useLoaderDeps: UseLoaderDepsRoute<TId>;
+  useMatch: UseMatchRoute<TId>;
+  useNavigate: () => UseNavigateResult<TFullPath>;
+  useParams: UseParamsRoute<TId>;
+  useRouteContext: UseRouteContextRoute<TId>;
+  useSearch: UseSearchRoute<TId>;
+}
+
+function bindRouteApi<TId extends string, TFullPath extends string>(
+  getId: () => TId,
+  useFullPath: () => TFullPath,
+): RouteApiMethods<TId, TFullPath> {
+  return {
+    Link: (props) =>
+      createElement(Link, {
+        ...props,
+        from: useFullPath(),
+      } as never),
+    notFound: (options) =>
+      createNotFound({ routeId: getId(), ...options } as never),
+    useLoaderData: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined
+          ? match.loaderData
+          : options.select(match.loaderData as never),
+      ) as never,
+    useLoaderDeps: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined
+          ? match.loaderDeps
+          : options.select(match.loaderDeps as never),
+      ) as never,
+    useMatch: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined ? match : options.select(match as never),
+      ) as never,
+    useNavigate: () => useNavigateFrom(useFullPath()) as never,
+    useParams: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined
+          ? match.params
+          : options.select(match.params as never),
+      ) as never,
+    useRouteContext: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined
+          ? match.context
+          : options.select(match.context as never),
+      ) as never,
+    useSearch: (options) =>
+      useMatchSelection(getId(), (match) =>
+        options?.select === undefined
+          ? match.search
+          : options.select(match.search as never),
+      ) as never,
+  };
+}
+
+type RouteWithApi<
+  TRoute,
+  TId extends string,
+  TFullPath extends string,
+> = TRoute & RouteApiMethods<TId, TFullPath>;
+
+function attachRouteApi<
+  TId extends string,
+  TFullPath extends string,
+  TRoute extends { readonly fullPath: TFullPath; readonly id: TId },
+>(route: TRoute): RouteWithApi<TRoute, TId, TFullPath> {
+  return Object.assign(
+    route,
+    bindRouteApi(
+      () => route.id,
+      () => route.fullPath,
+    ),
+  );
+}
+
 declare module "@tanstack/router-core" {
+  interface RouteExtensions<
+    in out TId extends string,
+    in out TFullPath extends string,
+  > {
+    Link: LinkComponentRoute<TFullPath>;
+    notFound: (options?: NotFoundError) => NotFoundError;
+    useLoaderData: UseLoaderDataRoute<TId>;
+    useLoaderDeps: UseLoaderDepsRoute<TId>;
+    useMatch: UseMatchRoute<TId>;
+    useNavigate: () => UseNavigateResult<TFullPath>;
+    useParams: UseParamsRoute<TId>;
+    useRouteContext: UseRouteContextRoute<TId>;
+    useSearch: UseSearchRoute<TId>;
+  }
+
   interface UpdatableRouteOptionsExtensions {
     component?: RouteComponent;
     errorComponent?: false | null | ErrorRouteComponent;
@@ -206,6 +398,43 @@ export function createRouter<
   return new Router(options);
 }
 
+export function getRouteApi<
+  const TId extends string,
+  TRouter extends AnyRouter = RegisteredRouter,
+>(id: ConstrainLiteral<TId, RouteIds<TRouter["routeTree"]>>) {
+  return new RouteApi<TId, TRouter>({ id });
+}
+
+export class RouteApi<
+  TId extends string,
+  TRouter extends AnyRouter = RegisteredRouter,
+> extends BaseRouteApi<TId, TRouter> {
+  declare Link: LinkComponentRoute<RouteTypesById<TRouter, TId>["fullPath"]>;
+  declare useLoaderData: UseLoaderDataRoute<TId>;
+  declare useLoaderDeps: UseLoaderDepsRoute<TId>;
+  declare useMatch: UseMatchRoute<TId>;
+  declare useNavigate: () => UseNavigateResult<
+    RouteTypesById<TRouter, TId>["fullPath"]
+  >;
+  declare useParams: UseParamsRoute<TId>;
+  declare useRouteContext: UseRouteContextRoute<TId>;
+  declare useSearch: UseSearchRoute<TId>;
+
+  constructor({ id }: { id: TId }) {
+    super({ id });
+    Object.assign(
+      this,
+      bindRouteApi(
+        () => String(this.id),
+        () => {
+          const router = useRouter<TRouter>();
+          return router.routesById[String(this.id)].fullPath;
+        },
+      ),
+    );
+  }
+}
+
 export function createRoute<
   TRegister = unknown,
   TParentRoute extends RouteConstraints["TParentRoute"] = AnyRoute,
@@ -229,6 +458,7 @@ export function createRoute<
   TChildren = unknown,
   TSSR = unknown,
   const TServerMiddlewares = unknown,
+  THandlers = undefined,
 >(
   options: RouteOptions<
     TRegister,
@@ -245,28 +475,34 @@ export function createRoute<
     TRouteContextFn,
     TBeforeLoadFn,
     TSSR,
-    TServerMiddlewares
+    TServerMiddlewares,
+    THandlers
   >,
-): BaseRoute<
-  TRegister,
-  TParentRoute,
-  TPath,
-  TFullPath,
-  TCustomId,
+): RouteWithApi<
+  BaseRoute<
+    TRegister,
+    TParentRoute,
+    TPath,
+    TFullPath,
+    TCustomId,
+    TId,
+    TSearchValidator,
+    TParams,
+    AnyContext,
+    TRouteContextFn,
+    TBeforeLoadFn,
+    TLoaderDeps,
+    TLoaderFn,
+    TChildren,
+    unknown,
+    TSSR,
+    TServerMiddlewares,
+    THandlers
+  >,
   TId,
-  TSearchValidator,
-  TParams,
-  AnyContext,
-  TRouteContextFn,
-  TBeforeLoadFn,
-  TLoaderDeps,
-  TLoaderFn,
-  TChildren,
-  unknown,
-  TSSR,
-  TServerMiddlewares
+  TFullPath
 > {
-  return new BaseRoute(options);
+  return attachRouteApi(new BaseRoute(options));
 }
 
 export function createFileRoute<
@@ -280,7 +516,7 @@ export function createFileRoute<
   _path?: TFilePath,
 ): CreateFileRoute<TFilePath, TParentRoute, TId, TPath, TFullPath> {
   return ((options) => {
-    const route = new BaseRoute(options as any);
+    const route = attachRouteApi(new BaseRoute(options as any));
     Reflect.set(route, "isRoot", false);
     return route as any;
   }) as CreateFileRoute<TFilePath, TParentRoute, TId, TPath, TFullPath>;
@@ -369,21 +605,25 @@ export function createRootRoute<
     TServerMiddlewares,
     THandlers
   >,
-): BaseRootRoute<
-  TRegister,
-  TSearchValidator,
-  TRouterContext,
-  TRouteContextFn,
-  TBeforeLoadFn,
-  TLoaderDeps,
-  TLoaderFn,
-  unknown,
-  unknown,
-  TSSR,
-  TServerMiddlewares,
-  THandlers
+): RouteWithApi<
+  BaseRootRoute<
+    TRegister,
+    TSearchValidator,
+    TRouterContext,
+    TRouteContextFn,
+    TBeforeLoadFn,
+    TLoaderDeps,
+    TLoaderFn,
+    unknown,
+    unknown,
+    TSSR,
+    TServerMiddlewares,
+    THandlers
+  >,
+  RootRouteId,
+  "/"
 > {
-  return new BaseRootRoute(options);
+  return attachRouteApi(new BaseRootRoute(options));
 }
 
 export function createRootRouteWithContext<TRouterContext extends object>() {
@@ -396,6 +636,7 @@ export function createRootRouteWithContext<TRouterContext extends object>() {
     TLoaderFn = undefined,
     TSSR = unknown,
     TServerMiddlewares = unknown,
+    THandlers = undefined,
   >(
     options?: RootRouteOptions<
       TRegister,
@@ -406,7 +647,8 @@ export function createRootRouteWithContext<TRouterContext extends object>() {
       TLoaderDeps,
       TLoaderFn,
       TSSR,
-      TServerMiddlewares
+      TServerMiddlewares,
+      THandlers
     >,
   ) => createRootRoute(options);
 }
@@ -471,10 +713,28 @@ interface MatchOptions<TSelected> {
   select?: (match: AnyRouteMatch) => TSelected;
 }
 
-interface FromRouteOptions<TFrom extends string> {
+interface FromRouteOptions<
+  TFrom extends string,
+  TValue,
+  TSelected,
+> extends SelectRouteValue<TValue, TSelected> {
   from: TFrom;
 }
 
+export function useMatch(): AnyRouteMatch;
+export function useMatch<
+  TRouter extends AnyRouter = RegisteredRouter,
+  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
+    TRouter["routeTree"]
+  >,
+  TSelected = unknown,
+>(
+  options: FromRouteOptions<
+    TFrom,
+    MakeRouteMatch<TRouter["routeTree"], TFrom, true>,
+    TSelected
+  >,
+): RouteMatchResult<TRouter, TFrom, TSelected>;
 export function useMatch(options?: MatchOptions<AnyRouteMatch>): AnyRouteMatch;
 export function useMatch<TSelected>(
   options: MatchOptions<TSelected> & {
@@ -482,21 +742,28 @@ export function useMatch<TSelected>(
   },
 ): TSelected;
 export function useMatch(options?: MatchOptions<unknown>): unknown {
+  return useMatchSelection(options?.from, options?.select);
+}
+
+function useMatchSelection(
+  from: string | undefined,
+  select: ((match: AnyRouteMatch) => unknown) | undefined,
+): unknown {
   const router = useRouter<AnyRouter>();
   const nearestMatchId = readContext(MatchContext);
-  const store = options?.from
-    ? router.stores.getRouteMatchStore(options.from)
+  const store = from
+    ? router.stores.getRouteMatchStore(from)
     : nearestMatchId === null
       ? undefined
       : router.stores.matchStores.get(nearestMatchId);
 
-  if (store === undefined) throwMissingMatch(options?.from);
+  if (store === undefined) throwMissingMatch(from);
 
   const selected = useReadableStore(store, (match) => {
     if (match === undefined) return missingMatch;
-    return options?.select === undefined ? match : options.select(match);
+    return select === undefined ? match : select(match);
   });
-  if (selected === missingMatch) throwMissingMatch(options?.from);
+  if (selected === missingMatch) throwMissingMatch(from);
   return selected;
 }
 
@@ -511,9 +778,24 @@ export function useParams<
   const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
     TRouter["routeTree"]
   >,
->(options: FromRouteOptions<TFrom>): ResolveUseParams<TRouter, TFrom, true>;
-export function useParams(options?: FromRouteOptions<string>): unknown {
-  return useMatch({ from: options?.from, select: (match) => match.params });
+  TSelected = unknown,
+>(
+  options: FromRouteOptions<
+    TFrom,
+    ResolveUseParams<TRouter, TFrom, true>,
+    TSelected
+  >,
+): UseParamsResult<TRouter, TFrom, true, TSelected>;
+export function useParams(
+  options?: FromRouteOptions<string, unknown, unknown>,
+): unknown {
+  return useMatch({
+    from: options?.from,
+    select: (match) =>
+      options?.select === undefined
+        ? match.params
+        : options.select(match.params),
+  });
 }
 
 export function useSearch(): AnyRouteMatch["search"];
@@ -522,9 +804,24 @@ export function useSearch<
   const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
     TRouter["routeTree"]
   >,
->(options: FromRouteOptions<TFrom>): ResolveUseSearch<TRouter, TFrom, true>;
-export function useSearch(options?: FromRouteOptions<string>): unknown {
-  return useMatch({ from: options?.from, select: (match) => match.search });
+  TSelected = unknown,
+>(
+  options: FromRouteOptions<
+    TFrom,
+    ResolveUseSearch<TRouter, TFrom, true>,
+    TSelected
+  >,
+): UseSearchResult<TRouter, TFrom, true, TSelected>;
+export function useSearch(
+  options?: FromRouteOptions<string, unknown, unknown>,
+): unknown {
+  return useMatch({
+    from: options?.from,
+    select: (match) =>
+      options?.select === undefined
+        ? match.search
+        : options.select(match.search),
+  });
 }
 
 export function useLoaderData(): AnyRouteMatch["loaderData"];
@@ -533,9 +830,50 @@ export function useLoaderData<
   const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
     TRouter["routeTree"]
   >,
->(options: FromRouteOptions<TFrom>): ResolveUseLoaderData<TRouter, TFrom, true>;
-export function useLoaderData(options?: FromRouteOptions<string>): unknown {
-  return useMatch({ from: options?.from, select: (match) => match.loaderData });
+  TSelected = unknown,
+>(
+  options: FromRouteOptions<
+    TFrom,
+    ResolveUseLoaderData<TRouter, TFrom, true>,
+    TSelected
+  >,
+): UseLoaderDataResult<TRouter, TFrom, true, TSelected>;
+export function useLoaderData(
+  options?: FromRouteOptions<string, unknown, unknown>,
+): unknown {
+  return useMatch({
+    from: options?.from,
+    select: (match) =>
+      options?.select === undefined
+        ? match.loaderData
+        : options.select(match.loaderData),
+  });
+}
+
+export function useLoaderDeps(): AnyRouteMatch["loaderDeps"];
+export function useLoaderDeps<
+  TRouter extends AnyRouter = RegisteredRouter,
+  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
+    TRouter["routeTree"]
+  >,
+  TSelected = unknown,
+>(
+  options: FromRouteOptions<
+    TFrom,
+    ResolveUseLoaderDeps<TRouter, TFrom>,
+    TSelected
+  >,
+): UseLoaderDepsResult<TRouter, TFrom, TSelected>;
+export function useLoaderDeps(
+  options?: FromRouteOptions<string, unknown, unknown>,
+): unknown {
+  return useMatch({
+    from: options?.from,
+    select: (match) =>
+      options?.select === undefined
+        ? match.loaderDeps
+        : options.select(match.loaderDeps),
+  });
 }
 
 export function useRouteContext(): AnyRouteMatch["context"];
@@ -544,18 +882,169 @@ export function useRouteContext<
   const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
     TRouter["routeTree"]
   >,
+  TSelected = unknown,
 >(
-  options: FromRouteOptions<TFrom>,
-): UseRouteContextResult<TRouter, TFrom, true, unknown>;
-export function useRouteContext(options?: FromRouteOptions<string>): unknown {
-  return useMatch({ from: options?.from, select: (match) => match.context });
+  options: FromRouteOptions<
+    TFrom,
+    UseRouteContextResult<TRouter, TFrom, true, unknown>,
+    TSelected
+  >,
+): UseRouteContextResult<TRouter, TFrom, true, TSelected>;
+export function useRouteContext(
+  options?: FromRouteOptions<string, unknown, unknown>,
+): unknown {
+  return useMatch({
+    from: options?.from,
+    select: (match) =>
+      options?.select === undefined
+        ? match.context
+        : options.select(match.context),
+  });
 }
 
 export function useNavigate<
   TRouter extends AnyRouter = RegisteredRouter,
->(): TRouter["navigate"] {
+  TDefaultFrom extends string = string,
+>(options?: {
+  from?: FromPathOption<TRouter, TDefaultFrom>;
+}): UseNavigateResult<TDefaultFrom> {
+  return useNavigateFrom(options?.from) as UseNavigateResult<TDefaultFrom>;
+}
+
+function useNavigateFrom(from: string | undefined): UseNavigateResult<string> {
+  const router = useRouter<AnyRouter>();
+  return useCallback(
+    ((navigateOptions: NavigateOptions) =>
+      router.navigate({
+        ...navigateOptions,
+        from: navigateOptions.from ?? from,
+      } as never)) as UseNavigateResult<string>,
+    [from, router],
+  );
+}
+
+export function Navigate<
+  TRouter extends AnyRouter = RegisteredRouter,
+  const TFrom extends string = string,
+  const TTo extends string | undefined = undefined,
+  const TMaskFrom extends string = TFrom,
+  const TMaskTo extends string = "",
+>(props: NavigateOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>): null {
+  const navigate = useNavigateFrom(undefined);
+  const previous = useMemo<{ props: typeof props | undefined }>(
+    () => ({ props: undefined }),
+    [],
+  );
+  useBeforePaint(() => {
+    if (previous.props === undefined || !deepEqual(previous.props, props)) {
+      previous.props = props;
+      void navigate(props as never);
+    }
+    return undefined;
+  }, [navigate, previous, props]);
+  return null;
+}
+
+export interface UseMatchesOptions<TRouter extends AnyRouter, TSelected> {
+  select?: (matches: Array<MakeRouteMatchUnion<TRouter>>) => TSelected;
+}
+
+export type UseMatchesResult<
+  TRouter extends AnyRouter,
+  TSelected,
+> = unknown extends TSelected ? Array<MakeRouteMatchUnion<TRouter>> : TSelected;
+
+export function useMatches<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TSelected = unknown,
+>(
+  options?: UseMatchesOptions<TRouter, TSelected>,
+): UseMatchesResult<TRouter, TSelected> {
   const router = useRouter<TRouter>();
-  return router.navigate;
+  return useReadableStore(
+    router.stores.matches,
+    (matches) =>
+      options?.select === undefined
+        ? matches
+        : options.select(matches as Array<MakeRouteMatchUnion<TRouter>>),
+    deepEqual,
+  ) as UseMatchesResult<TRouter, TSelected>;
+}
+
+export type UseMatchRouteOptions<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TFrom extends string = string,
+  TTo extends string | undefined = undefined,
+  TMaskFrom extends string = TFrom,
+  TMaskTo extends string = "",
+> = ToSubOptionsProps<TRouter, TFrom, TTo> &
+  DeepPartial<MakeOptionalSearchParams<TRouter, TFrom, TTo>> &
+  DeepPartial<MakeOptionalPathParams<TRouter, TFrom, TTo>> &
+  MaskOptions<TRouter, TMaskFrom, TMaskTo> &
+  MatchRouteOptions;
+
+export interface MatchRouteFn<TRouter extends AnyRouter = RegisteredRouter> {
+  <
+    const TFrom extends string = string,
+    const TTo extends string | undefined = undefined,
+    const TMaskFrom extends string = TFrom,
+    const TMaskTo extends string = "",
+  >(
+    options: UseMatchRouteOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>,
+  ): false | Expand<ResolveRoute<TRouter, TFrom, TTo>["types"]["allParams"]>;
+}
+
+export function useMatchRoute<
+  TRouter extends AnyRouter = RegisteredRouter,
+>(): MatchRouteFn<TRouter> {
+  const router = useRouter<TRouter>();
+  useReadableStore(router.stores.matchRouteDeps);
+  return useCallback(
+    (options: UseMatchRouteOptions<TRouter>) => {
+      const { pending, caseSensitive, fuzzy, includeSearch, ...location } =
+        options;
+      return router.matchRoute(location as never, {
+        pending,
+        caseSensitive,
+        fuzzy,
+        includeSearch,
+      });
+    },
+    [router],
+  ) as MatchRouteFn<TRouter>;
+}
+
+export type MakeMatchRouteOptions<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TFrom extends string = string,
+  TTo extends string | undefined = undefined,
+  TMaskFrom extends string = TFrom,
+  TMaskTo extends string = "",
+> = UseMatchRouteOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo> & {
+  children?:
+    | FigNode
+    | ((
+        params?: Expand<
+          ResolveRoute<TRouter, TFrom, TTo>["types"]["allParams"]
+        >,
+      ) => FigNode);
+};
+
+export function MatchRoute<
+  TRouter extends AnyRouter = RegisteredRouter,
+  const TFrom extends string = string,
+  const TTo extends string | undefined = undefined,
+  const TMaskFrom extends string = TFrom,
+  const TMaskTo extends string = "",
+>(
+  props: MakeMatchRouteOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>,
+): FigNode {
+  const { children, ...options } = props;
+  const params = useMatchRoute<TRouter>()(options as never);
+  if (typeof children === "function") {
+    return children(params === false ? undefined : params);
+  }
+  return params === false ? null : children;
 }
 
 export interface RouterProviderProps {
