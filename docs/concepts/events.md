@@ -24,7 +24,7 @@ Selective hydration queues replayable events (click, key, pointer) that target a
 
 ## Early Capture (Pre-Bundle Events)
 
-Server-rendered documents open `<head>` with a tiny inline script that queues replayable events fired before the client bundle executes (the `EARLY_EVENT_*` contract in `@bgub/fig/internal`). The first hydration root drains the document's queue, removes the capture listeners, and each root claims the events inside its container into the standard replay queue — so a user's first click is honored instead of lost, no matter how slowly the bundle arrives. Unclaimed events (targets outside any root) are dropped at replay time. Documents without a client bundle just carry a small inert array.
+Server-rendered documents open `<head>` with a tiny inline script that queues replayable events fired before the client bundle executes (the `EARLY_EVENT_*` contract in `@bgub/fig/internal`). The server marks that framework-owned script with the shared `data-fig-hydration-skip` protocol attribute so full-document hydration skips it rather than expecting an application fiber. The first hydration root drains the document's queue, removes the capture listeners, and each root claims the events inside its container into the standard replay queue — so a user's first click is honored instead of lost, no matter how slowly the bundle arrives. Unclaimed events (targets outside any root) are dropped at replay time. Documents without a client bundle just carry a small inert array.
 
 ## bind
 

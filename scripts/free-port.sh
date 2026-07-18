@@ -4,7 +4,7 @@
 # Call sites pass the port literal that also lives in the sibling
 # playwright.config.ts: apps/demo-ssr (4181), apps/demo-client (4182),
 # apps/demo-start (4183), and apps/demo-payload (4184) `test:e2e`
-# scripts — keep them in sync.
+# scripts, plus apps/demo-tanstack-start (4185) — keep them in sync.
 pids=$(lsof -ti "tcp:$1" 2>/dev/null)
 if [ -n "$pids" ]; then
   kill $pids 2>/dev/null

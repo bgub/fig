@@ -7,6 +7,10 @@ import {
   type Props,
 } from "./element.ts";
 
+const PreventAssetResourceHoistSymbol = Symbol.for(
+  "fig.prevent-asset-resource-hoist",
+);
+
 export type AssetResourceBlocking = "reveal" | "none";
 export type CrossOrigin = "anonymous" | "use-credentials" | "";
 export type FetchPriority = "high" | "low" | "auto";
@@ -275,7 +279,16 @@ export function assetResourceFromHostProps(
   type: string,
   props: Props,
 ): FigAssetResource | null {
+  if (Reflect.get(props, PreventAssetResourceHoistSymbol) === true) return null;
   return resourceFromHost(type, (name) => props[name], props.children, true);
+}
+
+export function preventAssetResourceHoist<P extends Props>(props: P): P {
+  Object.defineProperty(props, PreventAssetResourceHoistSymbol, {
+    enumerable: true,
+    value: true,
+  });
+  return props;
 }
 
 export function assetResourceFromHostAttributes(

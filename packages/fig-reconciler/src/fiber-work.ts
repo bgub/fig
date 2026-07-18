@@ -11,6 +11,9 @@ export const VisibilityFlag = 1 << 5;
 export const DeletionFlag = 1 << 7;
 export const EffectFlag = 1 << 9;
 export const StoreConsistencyFlag = 1 << 11;
+// An Assets fiber owes its renderer a committed descriptor-list diff. Asset
+// work is sparse-indexed and out-of-band, so it never enters subtreeFlags.
+export const AssetFlag = 1 << 14;
 
 // The fiber reused its committed children without cloning; render skips the
 // subtree and commit walks must not consume already-committed state below it.
@@ -39,7 +42,7 @@ export const HostUpdateMask = UpdateFlag | TextContentFlag;
 // These marks never enter subtreeFlags. Host updates are found through the
 // sparse commit index; membership and cache marks are not descendant work.
 const SubtreeMaskedFlags =
-  CommitIndexedFlag | HostUpdateMask | HoistedStaticFlag;
+  AssetFlag | CommitIndexedFlag | HostUpdateMask | HoistedStaticFlag;
 // Static facts survive commits and bailouts so adopted and deleted subtrees
 // remain searchable without rebuilding their summaries.
 export const StaticFlagsMask = ViewTransitionStaticFlag | HoistedStaticFlag;

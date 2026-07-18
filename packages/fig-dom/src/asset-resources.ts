@@ -1,4 +1,8 @@
-import { type FigAssetResource, type Props } from "@bgub/fig";
+import {
+  type FigAssetResource,
+  type FigAssetResourceList,
+  type Props,
+} from "@bgub/fig";
 import {
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
@@ -28,6 +32,29 @@ interface DocumentResources {
 
 const registries = new WeakMap<Element, DocumentResources>();
 const resourceMeta = new WeakMap<Element, DocumentResourceMeta>();
+
+export function commitAssetResources(
+  previous: FigAssetResourceList | null,
+  next: FigAssetResourceList | null,
+): void {
+  const registry = currentDocumentResources();
+  if (registry === null) return;
+
+  const previousByKey = canonicalResources(previous);
+  const nextByKey = canonicalResources(next);
+
+  for (const [key] of previousByKey) {
+    if (!nextByKey.has(key)) releaseDeclaredResource(registry, key);
+  }
+
+  for (const [key, resource] of nextByKey) {
+    if (!previousByKey.has(key)) {
+      acquireDeclaredResource(registry, resource);
+    } else if (resource.kind === "title" || resource.kind === "meta") {
+      updateDeclaredMetadata(registry, key, resource);
+    }
+  }
+}
 
 // Render-phase find-or-create only. Acquisition waits for commit because a
 // render can be discarded; the zero-count entry still dedupes sibling work.
@@ -222,6 +249,67 @@ function currentDocumentResources(): DocumentResources | null {
   return registry;
 }
 
+function canonicalResources(
+  resources: FigAssetResourceList | null,
+): Map<string, FigAssetResource> {
+  const result = new Map<string, FigAssetResource>();
+  if (resources === null) return result;
+
+  const list = Array.isArray(resources) ? resources : [resources];
+  for (const value of list) {
+    if (!isFigAssetResource(value)) continue;
+    const resource = asInsertableResource(value);
+    const key = assetResourceKey(resource);
+    if (!result.has(key) || resource.kind === "title") {
+      result.set(key, resource);
+    }
+  }
+  return result;
+}
+
+function acquireDeclaredResource(
+  registry: DocumentResources,
+  resource: FigAssetResource,
+): void {
+  const key = assetResourceKey(resource);
+  const tracked = registry.entries.get(key)?.element;
+  const element =
+    tracked ??
+    findDocumentResource(registry, key) ??
+    createAssetResourceElement(resource);
+
+  if (tracked === undefined) {
+    registry.entries.set(key, { count: 0, element, ready: null });
+    resourceMeta.set(element, { key, kind: resource.kind });
+  }
+
+  if (resource.kind === "title" || resource.kind === "meta") {
+    applyMetadataResource(element, resource);
+  }
+  acquireDocumentResource(element);
+}
+
+function updateDeclaredMetadata(
+  registry: DocumentResources,
+  key: string,
+  resource: FigAssetResource & { kind: "title" | "meta" },
+): void {
+  const entry = registry.entries.get(key);
+  if (entry === undefined) {
+    acquireDeclaredResource(registry, resource);
+    return;
+  }
+  applyMetadataResource(entry.element, resource);
+}
+
+function releaseDeclaredResource(
+  registry: DocumentResources,
+  key: string,
+): void {
+  const entry = registry.entries.get(key);
+  if (entry !== undefined) releaseDocumentResource(entry.element);
+}
+
 function attachDocumentResource(
   registry: DocumentResources,
   element: Element,
@@ -377,6 +465,12 @@ function whenResourceSettled(element: Element): Promise<void> {
 }
 
 function createAssetResourceElement(resource: FigAssetResource): Element {
+  if (resource.kind === "title" || resource.kind === "meta") {
+    const element = document.createElement(resource.kind);
+    applyMetadataResource(element, resource);
+    return element;
+  }
+
   const element = document.createElement(
     resource.kind === "script" ? "script" : "link",
   );
@@ -384,4 +478,36 @@ function createAssetResourceElement(resource: FigAssetResource): Element {
     element.setAttribute(name, value === true ? "" : value);
   }
   return element;
+}
+
+function applyMetadataResource(
+  element: Element,
+  resource: FigAssetResource & { kind: "title" | "meta" },
+): void {
+  if (resource.kind === "title") {
+    element.textContent = resource.value;
+    return;
+  }
+
+  const names = [
+    "charset",
+    "name",
+    "property",
+    "http-equiv",
+    "content",
+    "data-fig-resource-key",
+  ];
+  for (const name of names) element.removeAttribute(name);
+
+  const attributes = [
+    ["charset", resource.charset],
+    ["name", resource.name],
+    ["property", resource.property],
+    ["http-equiv", resource["http-equiv"]],
+    ["content", resource.content],
+    ["data-fig-resource-key", resource.key],
+  ] as const;
+  for (const [name, value] of attributes) {
+    if (value !== undefined) element.setAttribute(name, value);
+  }
 }

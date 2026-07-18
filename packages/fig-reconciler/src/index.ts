@@ -8,6 +8,7 @@ import {
   type ElementType,
   type ErrorInfo,
   type ExternalStoreSubscribe,
+  type FigAssetResourceList,
   type FigContext,
   type FigDataHydrationEntry,
   type FigDataStoreController,
@@ -67,6 +68,7 @@ import {
 } from "./fiber-tags.ts";
 import { walkFiberForest, walkFiberSubtree } from "./fiber-traversal.ts";
 import {
+  AssetFlag,
   AdoptedFlag,
   AssembledFlag,
   childSubtreeFlags,
@@ -336,6 +338,13 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousProps: Props,
     nextProps: Props,
   ): Instance;
+  // Assets fibers are transparent to host placement. This commit-time diff is
+  // their complete lifecycle: null means the owner did not exist on that side
+  // of the commit. The host owns normalization, dedupe, and reference counts.
+  commitAssetResources?(
+    previous: FigAssetResourceList | null,
+    next: FigAssetResourceList | null,
+  ): void;
   shouldCommitUpdate?(
     type: string,
     previousProps: Props,
@@ -3362,6 +3371,15 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (node.tag === ViewTransitionTag) node.flags |= ViewTransitionStaticFlag;
 
+    if (
+      node.tag === AssetsTag &&
+      host.commitAssetResources !== undefined &&
+      (node.committedProps === null ||
+        node.committedProps.assets !== node.props.assets)
+    ) {
+      recordCommitWork(rootOf(node).commitIndex, node, AssetFlag);
+    }
+
     node.childLanes = childLanes;
     node.subtreeFlags = subtreeFlags;
     node.contextSubtreeDependencies = contextSubtreeDependencies;
@@ -4426,6 +4444,8 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.needsCommitDeletions = false;
         }
         if (__DEV__) assertDeletionCommitParity(finishedWork);
+        commitAssetResourceUpdates(root);
+        if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
         commitDataDependencies(root);
         if (__DEV__) assertDataDependencyCommitParity(finishedWork.child);
         commitHostUpdates(root);
@@ -4712,6 +4732,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (host.clearContainer !== undefined) {
       removePortalDescendants(root.current.child);
+      releaseOutOfBandDescendants(root.current.child);
       host.clearContainer(root.container);
     } else if (root.current.child !== null) {
       let child: F | null = root.current.child;
@@ -5195,6 +5216,38 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  function commitAssetResourceUpdates(root: R): void {
+    if (host.commitAssetResources === undefined) return;
+
+    for (const cursor of root.commitIndex) {
+      if ((cursor.flags & AssetFlag) === 0) continue;
+      commitHostMutation(cursor, () =>
+        host.commitAssetResources?.(
+          (cursor.committedProps?.assets as FigAssetResourceList | undefined) ??
+            null,
+          cursor.props.assets as FigAssetResourceList,
+        ),
+      );
+      cursor.committedProps = cursor.props;
+      if (cursor.alternate !== null) {
+        cursor.alternate.committedProps = cursor.props;
+      }
+      cursor.flags &= ~AssetFlag;
+    }
+  }
+
+  function assertAssetResourceCommitParity(node: F | null): void {
+    walkFiberForest(node, (cursor) => {
+      if ((cursor.flags & AssetFlag) !== 0) {
+        throw new Error(
+          "Fig internal parity error: an Assets fiber with pending resource " +
+            "work was missing from the commit index.",
+        );
+      }
+      return (cursor.flags & AdoptedFlag) === 0;
+    });
+  }
+
   // Every host fiber that reaches the DOM through this commit — its own
   // placement or an ancestor's subtree insertion — must leave the mutation
   // phase marked committed. A live instance whose fiber still claims it
@@ -5274,6 +5327,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === AssetsTag) releaseAssetResources(node);
+
     if (node.tag === HostTag && isHoistedFiber(node)) {
       if (node.committedProps !== null) {
         requireHoistedAssetHostConfig().removeHoistedInstance(
@@ -5285,7 +5340,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (isHost(node)) {
       removePortalDescendants(node.child);
-      removeHoistedDescendants(node.child);
+      releaseOutOfBandDescendants(node.child);
       host.removeChild(parent, hostNode(node));
       return;
     }
@@ -5295,13 +5350,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  // Hoisted instances are not DOM descendants of the removed host, so the
-  // top-node removal above never reaches them; release them explicitly.
-  function removeHoistedDescendants(node: F | null): void {
-    if (host.resolveHoistedInstance === undefined) return;
+  // Hoisted instances and declarative assets are not DOM descendants of the
+  // removed host, so the top-node removal above never reaches them; release
+  // them explicitly.
+  function releaseOutOfBandDescendants(node: F | null): void {
+    if (
+      host.resolveHoistedInstance === undefined &&
+      host.commitAssetResources === undefined
+    ) {
+      return;
+    }
 
     for (let child = node; child !== null; child = child.sibling) {
       if (child.tag === PortalTag) continue;
+
+      if (child.tag === AssetsTag) releaseAssetResources(child);
 
       if (child.tag === HostTag && isHoistedFiber(child)) {
         if (child.committedProps !== null && child.stateNode !== null) {
@@ -5312,8 +5375,24 @@ export function createRenderer<Container, Instance, TextInstance>(
         continue;
       }
 
-      removeHoistedDescendants(child.child);
+      releaseOutOfBandDescendants(child.child);
     }
+  }
+
+  function releaseAssetResources(node: F): void {
+    if (
+      node.tag !== AssetsTag ||
+      node.committedProps === null ||
+      host.commitAssetResources === undefined
+    ) {
+      return;
+    }
+    host.commitAssetResources(
+      node.committedProps.assets as FigAssetResourceList,
+      null,
+    );
+    node.committedProps = null;
+    if (node.alternate !== null) node.alternate.committedProps = null;
   }
 
   function removePortalChildren(node: F): void {

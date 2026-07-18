@@ -30,6 +30,7 @@ export const VIEW_TRANSITION_PENDING_PROPERTY = "__figViewTransition";
 // The event list must stay in sync with fig-dom's replayable set — a
 // discrete replay forces synchronous hydration of its target, which is what
 // makes pre-bundle clicks safe to honor.
+export const HYDRATION_SKIP_ATTRIBUTE = "data-fig-hydration-skip";
 export const EARLY_EVENT_QUEUE_PROPERTY = "__figEarlyEvents";
 export const EARLY_EVENT_HANDLER_PROPERTY = "__figEarlyEventHandler";
 export const REPLAYABLE_EVENT_TYPES = [

@@ -1,6 +1,7 @@
 import type { Props } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
+  HYDRATION_SKIP_ATTRIBUTE,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
@@ -8,6 +9,7 @@ import { createRenderer, type HostConfig } from "@bgub/fig-reconciler";
 import {
   acquireDocumentResource,
   adoptDocumentResource,
+  commitAssetResources,
   releaseDocumentResource,
   updateHoistedResource,
 } from "./asset-resources.ts";
@@ -45,6 +47,7 @@ import {
 import { viewTransitionHostConfig } from "./view-transition.ts";
 
 type TextLike = Text | Comment;
+type HydrationNode = Element | TextLike | DocumentType;
 type RetriableSuspenseMarker = TextLike & { __figRetry?: () => void };
 
 declare const __FIG_DEV__: boolean | undefined;
@@ -89,7 +92,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   getFirstHydratableChild: hydratableFirstChild,
   getNextHydratableSibling: (node) =>
-    skipTextSeparators(node.nextSibling as Element | TextLike | null),
+    nextHydratableNode(node.nextSibling as HydrationNode | null),
   canHydrateInstance: isHydratableElement,
   canHydrateTextInstance: (node, text, suppressHydrationWarning) =>
     isHydratableText(node) &&
@@ -103,6 +106,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     return adoptDocumentResource(type, props);
   },
   commitHoistedInstance: acquireDocumentResource,
+  commitAssetResources,
   removeHoistedInstance: releaseDocumentResource,
   updateHoistedInstance: updateHoistedResource,
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
@@ -140,11 +144,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   commitHydratedInstance: hydrateElement,
   getActivityBoundary: activityBoundary,
   getFirstActivityHydratable: (boundary) =>
-    skipTextSeparators(
-      (activityTemplateContent(boundary).firstChild ?? null) as
-        | Element
-        | TextLike
-        | null,
+    nextHydratableNode(
+      (activityTemplateContent(boundary).firstChild ??
+        null) as HydrationNode | null,
     ),
   commitHydratedActivityBoundary: (boundary) => {
     const parent = boundary.parentNode;
@@ -273,7 +275,7 @@ function hydratableFirstChild(
     return null;
   }
 
-  return skipTextSeparators(parent.firstChild as Element | TextLike | null);
+  return nextHydratableNode(parent.firstChild as HydrationNode | null);
 }
 
 // The server writes a `<!--,-->` comment between adjacent text nodes that
@@ -282,19 +284,35 @@ function hydratableFirstChild(
 // see TEXT_SEPARATOR in @bgub/fig-server). The hydration cursor steps over
 // separators when advancing; only comments with exactly this data are
 // skipped, so the fig:suspense marker comments are never affected.
+// A DocumentType is document metadata rather than content represented by a
+// fiber, so full-document hydration advances through it to the existing html
+// element. This also matters when a root Suspense marker precedes the doctype.
+// Server-owned elements carrying the shared skip marker likewise have no
+// in-tree hydration fiber; the DOM renderer need not know why each exists.
 const TEXT_SEPARATOR_DATA = ",";
 
-function skipTextSeparators(
-  node: Element | TextLike | null,
+function nextHydratableNode(
+  node: HydrationNode | null,
 ): Element | TextLike | null {
   let current = node;
-  while (current !== null && isTextSeparator(current)) {
-    current = current.nextSibling as Element | TextLike | null;
+  while (
+    current !== null &&
+    (isTextSeparator(current) ||
+      current.nodeType === 10 ||
+      isServerOwnedNode(current))
+  ) {
+    current = current.nextSibling as HydrationNode | null;
   }
-  return current;
+  return current as Element | TextLike | null;
 }
 
-function isTextSeparator(node: Element | TextLike): boolean {
+function isServerOwnedNode(node: HydrationNode): boolean {
+  return (
+    isElementNode(node) && node.getAttribute(HYDRATION_SKIP_ATTRIBUTE) !== null
+  );
+}
+
+function isTextSeparator(node: HydrationNode): boolean {
   return (
     "nodeType" in node &&
     node.nodeType === 8 &&

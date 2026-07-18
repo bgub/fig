@@ -12,6 +12,8 @@ The application renders `StartData` near the end of its document body, after rou
 
 The contract is covered end to end: a Router loader populates the server store, that exact store renders the document, a fresh client document supplies the serialized snapshot, initial hydration performs no resource load, and invalidating the hydrated entry performs exactly one new load.
 
+`apps/demo-tanstack-start` is the executable proof. Until the first-class Vite adapter exists, its build supplies only the router-entry alias that TanStack's client core normally receives from a framework plugin; the runtime behavior remains the public adapter's.
+
 ## Remaining Plugin Boundary
 
 The runtime adapter is independent of a bundler. TanStack Start's current plugin-core framework type is closed over React, Solid, and Vue, so a first-class Fig Vite plugin needs a small upstream extensibility change or a deliberately maintained plugin adapter. The runtime contract is kept separate so that bundler decision cannot change store, rendering, or hydration semantics.

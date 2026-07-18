@@ -107,6 +107,47 @@ function packConfigFor(path: string): PackConfig | undefined {
   }
 
   switch (path) {
+    case "apps/demo-tanstack-start":
+      return [
+        {
+          entry: ["./src/server.ts"],
+          alias: sourceAliases,
+          define: figDevDefine,
+          platform: "node",
+          deps: {
+            alwaysBundle: [figPackages],
+            neverBundle: [tanstackPackages],
+          },
+          sourcemap: true,
+        },
+        {
+          entry: ["./src/client.tsx"],
+          alias: {
+            ...sourceAliases,
+            "#tanstack-router-entry": workspacePath(
+              "apps/demo-tanstack-start/src/router-entry.ts",
+            ),
+            "@tanstack/start-storage-context": workspacePath(
+              "apps/demo-tanstack-start/src/start-storage-context.ts",
+            ),
+          },
+          css: {
+            transformer: "postcss",
+          },
+          define: {
+            ...demoBrowserDefine,
+            "process.env.TSS_ROUTER_BASEPATH": JSON.stringify("/"),
+            "process.env.TSS_SERVER_FN_BASE": JSON.stringify("/_serverFn/"),
+          },
+          onSuccess: assertDevBundle("dist/client.js"),
+          platform: "browser",
+          deps: {
+            alwaysBundle: [figPackages, tanstackPackages],
+          },
+          sourcemap: true,
+          clean: false,
+        },
+      ];
     case "apps/demo-tanstack-router":
       return {
         entry: ["./src/main.tsx"],

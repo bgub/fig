@@ -1,9 +1,12 @@
 import {
+  assets,
   createElement,
+  meta,
   readPromise,
   type StateSetter,
   Suspense,
   stylesheet,
+  title,
   useState,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
@@ -326,6 +329,61 @@ describe("@bgub/fig-dom", () => {
 
     expect(head.childNodes).toHaveLength(1);
     expect(head.textContent).toBe("Two");
+  });
+
+  it("commits declarative title and metadata ownership", () => {
+    const { head, root } = documentResourceRoot();
+    const page = (name: string) =>
+      createElement(
+        "main",
+        null,
+        assets(
+          [
+            title(name),
+            meta({ content: `${name} description`, name: "description" }),
+          ],
+          createElement("span", null, name),
+        ),
+      );
+
+    flushSync(() => root.render(page("One")));
+
+    expect(head.childNodes).toHaveLength(2);
+    expect(head.textContent).toBe("One");
+    expect((head.childNodes[1] as FakeElement).attributes).toEqual({
+      content: "One description",
+      name: "description",
+    });
+
+    flushSync(() => root.render(page("Two")));
+
+    expect(head.childNodes).toHaveLength(2);
+    expect(head.textContent).toBe("Two");
+    expect((head.childNodes[1] as FakeElement).attributes).toEqual({
+      content: "Two description",
+      name: "description",
+    });
+
+    flushSync(() => root.render(createElement("main", null, "Empty")));
+
+    expect(head.childNodes).toHaveLength(0);
+  });
+
+  it("retains declarative delivery assets after their owner unmounts", () => {
+    const { head, root } = documentResourceRoot();
+
+    flushSync(() =>
+      root.render(
+        assets(stylesheet("/app.css"), createElement("main", null, "Styled")),
+      ),
+    );
+    flushSync(() => root.render(createElement("main", null, "Plain")));
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).attributes).toEqual({
+      href: "/app.css",
+      rel: "stylesheet",
+    });
   });
 
   it("inserts keyed siblings before hoisted asset fibers", () => {

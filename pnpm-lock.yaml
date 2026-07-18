@@ -231,6 +231,49 @@ importers:
         specifier: ^4.3.2
         version: 4.3.2
 
+  apps/demo-tanstack-start:
+    dependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../../packages/fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../../packages/fig-dom
+      '@bgub/fig-tanstack-router':
+        specifier: workspace:*
+        version: link:../../packages/fig-tanstack-router
+      '@bgub/fig-tanstack-start':
+        specifier: workspace:*
+        version: link:../../packages/fig-tanstack-start
+      '@tanstack/history':
+        specifier: 1.162.0
+        version: 1.162.0
+      '@tanstack/router-core':
+        specifier: 1.171.15
+        version: 1.171.15
+      '@tanstack/start-server-core':
+        specifier: 1.169.17
+        version: 1.169.17
+      '@tanstack/store':
+        specifier: 0.9.3
+        version: 0.9.3
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
+      '@tailwindcss/postcss':
+        specifier: ^4.3.2
+        version: 4.3.2
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.43
+      postcss:
+        specifier: ^8.5.19
+        version: 8.5.19
+      tailwindcss:
+        specifier: ^4.3.2
+        version: 4.3.2
+
   packages/fig: {}
 
   packages/fig-devtools:

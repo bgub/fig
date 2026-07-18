@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
-import { serverRuntimeCodeFor } from "./protocol.ts";
+import { earlyEventCaptureMarkup, serverRuntimeCodeFor } from "./protocol.ts";
 
 interface TestRuntime {
   ac(activityId: string, boundaryId: string, segmentId: string): void;
@@ -83,6 +83,12 @@ describe("server streaming protocol", () => {
       .startViewTransition;
     delete (document as unknown as { __figViewTransition?: unknown })
       .__figViewTransition;
+  });
+
+  it("marks the server-only early-event bootstrap for hydration", () => {
+    expect(earlyEventCaptureMarkup({ nonce: "nonce-1" })).toMatch(
+      /^<script data-fig-hydration-skip="" nonce="nonce-1">/,
+    );
   });
 
   it("replaces fallback content and preserves Suspense markers when completing a boundary", () => {

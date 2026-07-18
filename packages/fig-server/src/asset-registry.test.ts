@@ -30,7 +30,7 @@ describe("AssetResourceRegistry", () => {
     const resource = stylesheet("/app.css", { media: "screen" });
 
     expect(write(registry, resource)).toBe(
-      '<link rel="stylesheet" href="/app.css" media="screen" id="r-0">',
+      '<link data-fig-hydration-skip rel="stylesheet" href="/app.css" media="screen" id="r-0">',
     );
     expect(write(registry, stylesheet("/app.css", { media: "screen" }))).toBe(
       "",
@@ -41,16 +41,18 @@ describe("AssetResourceRegistry", () => {
     const registry = new AssetResourceRegistry("");
 
     expect(write(registry, script("/plain.js"))).toBe(
-      '<script src="/plain.js" async></script>',
+      '<script data-fig-hydration-skip src="/plain.js" async></script>',
     );
     expect(write(registry, script("/ordered.js", { defer: true }))).toBe(
-      '<script src="/ordered.js" defer></script>',
+      '<script data-fig-hydration-skip src="/ordered.js" defer></script>',
     );
     expect(
       write(registry, script("/both.js", { async: true, defer: true })),
-    ).toBe('<script src="/both.js" async defer></script>');
+    ).toBe(
+      '<script data-fig-hydration-skip src="/both.js" async defer></script>',
+    );
     expect(write(registry, script("/sync.js", { async: false }))).toBe(
-      '<script src="/sync.js"></script>',
+      '<script data-fig-hydration-skip src="/sync.js"></script>',
     );
   });
 
@@ -72,7 +74,9 @@ describe("AssetResourceRegistry", () => {
     registry.register(title("Dashboard"));
     registry.register(title("Settings"));
 
-    expect(registry.headHtml()).toBe("<title>Settings</title>");
+    expect(registry.headHtml()).toBe(
+      "<title data-fig-hydration-skip>Settings</title>",
+    );
   });
 
   it("rejects conflicting meta resources", () => {
@@ -92,7 +96,7 @@ describe("AssetResourceRegistry", () => {
     registry.register(meta({ "http-equiv": "refresh", content: "30" }));
 
     expect(registry.headHtml()).toBe(
-      '<meta http-equiv="refresh" content="30">',
+      '<meta http-equiv="refresh" content="30" data-fig-hydration-skip>',
     );
   });
 
@@ -102,7 +106,7 @@ describe("AssetResourceRegistry", () => {
     // font() and preload(href, "font") emit byte-identical markup and now share
     // the preload-font key space, so the second must dedupe rather than conflict.
     expect(write(registry, font("/a.woff2", "font/woff2"))).toBe(
-      '<link rel="preload" href="/a.woff2" as="font" type="font/woff2" crossorigin="anonymous">',
+      '<link data-fig-hydration-skip rel="preload" href="/a.woff2" as="font" type="font/woff2" crossorigin="anonymous">',
     );
     expect(
       write(
@@ -121,7 +125,7 @@ describe("AssetResourceRegistry", () => {
     expect(
       write(registry, font("/brand.woff2", "font/woff2", { key: "brand" })),
     ).toBe(
-      '<link rel="preload" href="/brand.woff2" as="font" data-fig-resource-key="brand" type="font/woff2" crossorigin="anonymous">',
+      '<link data-fig-hydration-skip rel="preload" href="/brand.woff2" as="font" data-fig-resource-key="brand" type="font/woff2" crossorigin="anonymous">',
     );
     expect(
       write(
@@ -141,18 +145,20 @@ describe("AssetResourceRegistry", () => {
     registry.register(title("Dashboard"));
     registry.register(title("Settings"));
 
-    expect(registry.headHtml()).toBe("<title>Settings</title>");
+    expect(registry.headHtml()).toBe(
+      "<title data-fig-hydration-skip>Settings</title>",
+    );
   });
 
   it("dedupes identical preloads and keeps different preload targets distinct", () => {
     const registry = new AssetResourceRegistry("");
 
     expect(write(registry, preload("/asset", "image"))).toBe(
-      '<link rel="preload" href="/asset" as="image">',
+      '<link data-fig-hydration-skip rel="preload" href="/asset" as="image">',
     );
     expect(write(registry, preload("/asset", "image"))).toBe("");
     expect(write(registry, preload("/asset", "script"))).toBe(
-      '<link rel="preload" href="/asset" as="script">',
+      '<link data-fig-hydration-skip rel="preload" href="/asset" as="script">',
     );
   });
 
@@ -168,7 +174,7 @@ describe("AssetResourceRegistry", () => {
         }),
       ),
     ).toBe(
-      '<link rel="modulepreload" href="/chunk.js" crossorigin="anonymous" fetchpriority="high">',
+      '<link data-fig-hydration-skip rel="modulepreload" href="/chunk.js" crossorigin="anonymous" fetchpriority="high">',
     );
     expect(
       write(

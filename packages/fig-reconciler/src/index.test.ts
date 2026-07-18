@@ -734,6 +734,81 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Ready");
   });
 
+  it("commits declarative asset ownership through the host lifecycle", () => {
+    const changes: Array<readonly [unknown, unknown]> = [];
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      commitAssetResources(previous, next) {
+        changes.push([previous, next]);
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const first = title("One");
+    const second = title("Two");
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          assets(first, createElement("span", null, "Ready")),
+        ),
+      ),
+    );
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          assets(second, createElement("span", null, "Ready")),
+        ),
+      ),
+    );
+    flushSync(() => root.render(null));
+
+    expect(changes).toEqual([
+      [null, first],
+      [first, second],
+      [second, null],
+    ]);
+  });
+
+  it("does not acquire assets from a discarded suspended render", async () => {
+    const changes: Array<readonly [unknown, unknown]> = [];
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      commitAssetResources(previous, next) {
+        changes.push([previous, next]);
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let resolve!: (value: string | PromiseLike<string>) => void;
+    const pending = new Promise<string>((complete) => {
+      resolve = complete;
+    });
+
+    function Reader() {
+      return readPromise(pending);
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          assets(title("Pending"), createElement(Reader, null)),
+        ),
+      ),
+    );
+    flushSync(() => root.render(null));
+    resolve("Ready");
+    await waitForHostTurns();
+
+    expect(changes).toEqual([]);
+  });
+
   it("preserves child state when keyed resource metadata changes", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

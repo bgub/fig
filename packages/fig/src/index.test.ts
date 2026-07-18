@@ -43,6 +43,7 @@ import {
   isPortal,
   isSuspense,
   isViewTransition,
+  preventAssetResourceHoist,
 } from "./internal.ts";
 import { jsx } from "./jsx-runtime.ts";
 
@@ -444,6 +445,12 @@ describe("@bgub/fig", () => {
       href: "/chunk.js",
       kind: "modulepreload",
     });
+    expect(
+      assetResourceFromHostProps(
+        "link",
+        preventAssetResourceHoist({ href: "/route.css", rel: "stylesheet" }),
+      ),
+    ).toBeNull();
   });
 
   it("reads host resources from attributes", () => {

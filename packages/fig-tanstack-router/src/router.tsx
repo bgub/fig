@@ -18,7 +18,11 @@ import {
   useState,
   useSyncExternalStore,
 } from "@bgub/fig";
-import { assetResourceFromHostProps } from "@bgub/fig/internal";
+import {
+  assetResourceDestination,
+  assetResourceFromHostProps,
+  preventAssetResourceHoist,
+} from "@bgub/fig/internal";
 import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   createBrowserHistory,
@@ -865,18 +869,24 @@ function renderHeadTags(tags: RouterManagedTag[]): FigNode {
       ...nativeAttributes(tag.attrs),
       children: tag.children,
     });
-    if (resource === null) nodes.push(renderManagedTag(tag));
-    else resources.push(resource);
+    if (resource === null || assetResourceDestination(resource) !== "head") {
+      nodes.push(renderManagedTag(tag));
+    } else {
+      resources.push(resource);
+    }
   }
   return resources.length === 0 ? nodes : assets(resources, nodes);
 }
 
 function renderManagedTag(tag: RouterManagedTag): FigNode {
   const attrs = nativeAttributes(tag.attrs);
-  return createElement(tag.tag, {
-    ...attrs,
-    ...(tag.children === undefined ? {} : { unsafeHTML: tag.children }),
-  });
+  return createElement(
+    tag.tag,
+    preventAssetResourceHoist({
+      ...attrs,
+      ...(tag.children === undefined ? {} : { unsafeHTML: tag.children }),
+    }),
+  );
 }
 
 function nativeAttributes(

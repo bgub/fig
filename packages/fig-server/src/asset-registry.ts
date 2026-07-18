@@ -3,6 +3,7 @@ import {
   assetResourceDestination,
   assetResourceHostAttributes,
   assetResourceKey,
+  HYDRATION_SKIP_ATTRIBUTE,
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 
@@ -122,7 +123,7 @@ function writeAssetTag(
 ): void {
   switch (resource.kind) {
     case "title":
-      writeElementStart("title", {}, sink);
+      writeElementStart("title", { [HYDRATION_SKIP_ATTRIBUTE]: true }, sink);
       writeText(resource.value, sink);
       writeElementEnd("title", sink);
       return;
@@ -135,6 +136,7 @@ function writeAssetTag(
           property: resource.property,
           "http-equiv": resource["http-equiv"],
           content: resource.content,
+          [HYDRATION_SKIP_ATTRIBUTE]: true,
           "data-fig-resource-key": resource.key,
         },
         sink,
@@ -143,9 +145,10 @@ function writeAssetTag(
     default: {
       // The attribute set is shared with the client's head insertion; only
       // the server-side reveal-blocker id and nonce are appended here.
-      const props: Props = Object.fromEntries(
-        assetResourceHostAttributes(resource),
-      );
+      const props: Props = {
+        [HYDRATION_SKIP_ATTRIBUTE]: true,
+        ...Object.fromEntries(assetResourceHostAttributes(resource)),
+      };
       if (resource.kind === "stylesheet" && id !== null) props.id = id;
 
       const tag = resource.kind === "script" ? "script" : "link";

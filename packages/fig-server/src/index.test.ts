@@ -426,7 +426,9 @@ describe("@bgub/fig-server", () => {
     const result = await resultPromise;
 
     expect(lateAssets).toEqual([]);
-    expect(result.head).toBe("<title>Late Ready</title>");
+    expect(result.head).toBe(
+      "<title data-fig-hydration-skip>Late Ready</title>",
+    );
     expect(result.html).toBe(
       "<!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense-->",
     );
@@ -465,7 +467,7 @@ describe("@bgub/fig-server", () => {
 
     expect(result.head).toBe("");
     expect(result.html).toBe(
-      `<!doctype html><html><head>${EARLY_EVENTS}<title>Late Ready</title></head><body><!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense--></body></html>`,
+      `<!doctype html><html><head>${EARLY_EVENTS}<title data-fig-hydration-skip>Late Ready</title></head><body><!--fig:suspense:completed--><span>Ready</span><!--/fig:suspense--></body></html>`,
     );
     expect(result.html).not.toContain("Loading");
     expect(result.html).not.toContain("__figSSR");
@@ -915,13 +917,13 @@ describe("@bgub/fig-server", () => {
 
     await result.headReady;
     expect(result.getHead()).toBe(
-      '<title>Fig &amp; assets</title><meta name="description" content="Fast &lt; UI">',
+      '<title data-fig-hydration-skip>Fig &amp; assets</title><meta name="description" content="Fast &lt; UI" data-fig-hydration-skip>',
     );
 
     const html = await readStream(result.stream);
 
     expect(html).toBe(
-      '<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous" nonce="abc"><link rel="preload" href="/hero.png" as="image" fetchpriority="high" nonce="abc"><link rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin="anonymous" nonce="abc"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0" nonce="abc"><script src="/app.js" type="module" async nonce="abc"></script><main><h1>Ready</h1></main>',
+      '<link data-fig-hydration-skip rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous" nonce="abc"><link data-fig-hydration-skip rel="preload" href="/hero.png" as="image" fetchpriority="high" nonce="abc"><link data-fig-hydration-skip rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin="anonymous" nonce="abc"><link data-fig-hydration-skip rel="stylesheet" href="/app.css" data-precedence="app" id="r-0" nonce="abc"><script data-fig-hydration-skip src="/app.js" type="module" async nonce="abc"></script><main><h1>Ready</h1></main>',
     );
   });
 
@@ -962,7 +964,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      `<!doctype html><html lang="en"><head>${EARLY_EVENTS}<meta charset="utf-8"><title>Document</title><meta name="description" content="SSR"><link rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>`,
+      `<!doctype html><html lang="en"><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><title data-fig-hydration-skip>Document</title><meta name="description" content="SSR" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>`,
     );
   });
 
@@ -997,7 +999,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8"><title>Host Tags</title><meta name="description" content="Host"><link rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
+      `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><title data-fig-hydration-skip>Host Tags</title><meta name="description" content="Host" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script data-fig-hydration-skip src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
     );
   });
 
@@ -1059,17 +1061,17 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(
-      `<!doctype html><html><head>${EARLY_EVENTS}<title>Stream</title></head><body>`,
+      `<!doctype html><html><head>${EARLY_EVENTS}<title data-fig-hydration-skip>Stream</title></head><body>`,
     );
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="doc-r-0">',
+      '<link data-fig-hydration-skip rel="stylesheet" href="/message.css" id="doc-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["doc-r-0"],()=>{__figSSR.c("doc-b-0","doc-s-0")})',
     );
-    expect(html.indexOf("<title>Stream</title>")).toBe(
-      html.lastIndexOf("<title>Stream</title>"),
+    expect(html.indexOf("<title data-fig-hydration-skip>Stream</title>")).toBe(
+      html.lastIndexOf("<title data-fig-hydration-skip>Stream</title>"),
     );
   });
 
@@ -1120,7 +1122,9 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(`<head>${EARLY_EVENTS}</head>`);
-    expect(html).not.toContain("<title>Late Title</title>");
+    expect(html).not.toContain(
+      "<title data-fig-hydration-skip>Late Title</title>",
+    );
     expect(diagnostics).toEqual(["title"]);
   });
 
@@ -1165,7 +1169,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).not.toContain("<title>");
+    expect(html).not.toContain("<title");
   });
 
   it("rejects conflicting duplicate document assets", async () => {
@@ -1229,7 +1233,7 @@ describe("@bgub/fig-server", () => {
     const html = await readStream(result.stream);
 
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="test-r-0">',
+      '<link data-fig-hydration-skip rel="stylesheet" href="/message.css" id="test-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["test-r-0"],()=>{__figSSR.c("test-b-0","test-s-0")})',
@@ -1252,11 +1256,13 @@ describe("@bgub/fig-server", () => {
     });
 
     await result.headReady;
-    expect(result.getHead()).toBe("<title>Card</title>");
+    expect(result.getHead()).toBe(
+      "<title data-fig-hydration-skip>Card</title>",
+    );
 
     const html = await readStream(result.stream);
     expect(html).toBe(
-      '<link rel="stylesheet" href="/card.css"><section>Card</section>',
+      '<link data-fig-hydration-skip rel="stylesheet" href="/card.css"><section>Card</section>',
     );
   });
 
@@ -1287,7 +1293,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(
-      '<link rel="stylesheet" href="/message.css" id="manifest-r-0">',
+      '<link data-fig-hydration-skip rel="stylesheet" href="/message.css" id="manifest-r-0">',
     );
     expect(html).toContain(
       '__figSSR.r(["manifest-r-0"],()=>{__figSSR.c("manifest-b-0","manifest-s-0")})',

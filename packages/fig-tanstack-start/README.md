@@ -68,3 +68,8 @@ await hydrateStart();
 `StartData` serializes the Fig store into the document with Fig's value codec. Because it appears before `Scripts`, client router creation decodes it before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
 The Start runtime is implemented. A first-class Vite plugin still requires TanStack's plugin core to admit framework adapters beyond its current React, Solid, and Vue union.
+
+The [`demo-tanstack-start`](../../apps/demo-tanstack-start) app exercises the
+runtime today with a small build-time router-entry alias: streamed SSR, Router
+dehydration, Fig-owned data serialization, full-document hydration, and live
+client invalidation all run through the public adapter entries.

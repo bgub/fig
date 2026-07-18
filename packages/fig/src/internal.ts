@@ -130,11 +130,13 @@ export {
   type ClientReferenceAssets,
   clientReferenceAssets,
   isFigAssetResource,
+  preventAssetResourceHoist,
 } from "./resource.ts";
 export {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   EARLY_EVENT_HANDLER_PROPERTY,
   EARLY_EVENT_QUEUE_PROPERTY,
+  HYDRATION_SKIP_ATTRIBUTE,
   REPLAYABLE_EVENT_TYPES,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,

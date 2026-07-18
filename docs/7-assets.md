@@ -30,6 +30,8 @@ Raw tags still work. HTML `<link>`, `<title>`, `<meta>`, and explicitly `async` 
 
 Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion. A stylesheet discovered three ways — an `assets(...)` wrapper, a client reference, a raw `<link>` — renders once. Fonts and equivalent `preload`-as-font entries share a key space, so those dedupe against each other too. `title` collapses to a single head slot, last writer wins.
 
+On client roots, each `assets(...)` wrapper owns its descriptor list through commit and deletion. Fig DOM applies that lifecycle to the same document registry used by raw hoisted tags, so client navigation updates title/meta in place, removes metadata with its last owner, and still dedupes delivery assets globally.
+
 In HTML server rendering, same-key entries with different definitions throw `AssetResourceConflictError`: a shared key is a claim that two descriptors are the same asset. The exception is `title`, where the singleton slot uses the latest value. Payload and DOM insertion use first-live-definition-wins dedupe instead; they do not compare descriptor signatures.
 
 ## Destinations

@@ -1,6 +1,7 @@
 import {
   EARLY_EVENT_HANDLER_PROPERTY,
   EARLY_EVENT_QUEUE_PROPERTY,
+  HYDRATION_SKIP_ATTRIBUTE,
   REPLAYABLE_EVENT_TYPES,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
@@ -64,11 +65,7 @@ export function earlyEventCaptureCode(): string {
 export function earlyEventCaptureMarkup(
   request: Pick<ProtocolRequest, "nonce">,
 ): string {
-  let markup = "";
-  writeScript(request, earlyEventCaptureCode(), (chunk) => {
-    markup += chunk;
-  });
-  return markup;
+  return `<script ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute(request.nonce)}>${earlyEventCaptureCode()}</script>`;
 }
 
 export function placeholderMarkup(

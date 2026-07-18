@@ -48,6 +48,7 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(inserted[0]?.tagName).toBe("link");
     expect(inserted[0]?.getAttribute("rel")).toBe("stylesheet");
     expect(inserted[0]?.getAttribute("href")).toBe("/a.css");
+    expect(inserted[0]?.getAttribute("data-fig-hydration-skip")).toBeNull();
     expect(inserted[1]?.getAttribute("rel")).toBe("preload");
     expect(inserted[1]?.getAttribute("as")).toBe("script");
     expect(inserted[2]?.getAttribute("rel")).toBe("modulepreload");
