@@ -58,6 +58,11 @@ const libraryEntries: Record<string, string[]> = {
     "./src/vite/index.ts",
   ],
   "packages/fig-tanstack-router": ["./src/router.tsx"],
+  "packages/fig-tanstack-start": [
+    "./src/data.ts",
+    "./src/client.tsx",
+    "./src/server.tsx",
+  ],
 };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };

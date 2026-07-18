@@ -13,7 +13,9 @@ The streaming model, the entry-point grid, prerender, and the error contract.
 | fragment | `renderToStream`         | `renderToHtml`         |
 | document | `renderToDocumentStream` | `renderToDocumentHtml` |
 
-Streams are Web `ReadableStream`s (same shape across Node, edge, Deno, Bun). Results return **synchronously** — `{ stream, shellReady, headReady?, allReady, getHead()?, getData(), abort(), contentType }` — no shell-gated promise. A shell failure rejects `shellReady` (and errors the stream); there is no callback channel. Fragment mode exposes the collected head (`getHead()`/`headReady`); document mode owns the head and injects it itself (the root must render `<html>` with a `<head>`). Document heads open with the inline early-event-capture script so pre-bundle interactions replay after hydration (events.md).
+Streams are Web `ReadableStream`s (same shape across Node, edge, Deno, Bun). Results return **synchronously** — `{ stream, shellReady, headReady?, allReady, data, getHead()?, getData(), abort(), contentType }` — no shell-gated promise. A shell failure rejects `shellReady` (and errors the stream); there is no callback channel. Fragment mode exposes the collected head (`getHead()`/`headReady`); document mode owns the head and injects it itself (the root must render `<html>` with a `<head>`). Document heads open with the inline early-event-capture script so pre-bundle interactions replay after hydration (events.md).
+
+`data` is the request-scoped store handle. `dataStore` adopts a root-neutral store already populated by request or route loaders; the renderer uses that same store rather than copying a snapshot into a second cache. `initialData` remains the value-only hydration option when no pre-created store is needed. A supplied store is owned and disposed by the render lifecycle.
 
 `renderToHtml` is honestly "the streamed output, buffered": it awaits `allReady` and concatenates exactly the bytes a streaming client would have received — including the inline runtime and reveal scripts when the tree suspends past the shell. Right for caching responses and snapshotting wire output; it is **not** React's `renderToString`.
 

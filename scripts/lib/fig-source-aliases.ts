@@ -30,6 +30,15 @@ const entries = [
   ["@bgub/fig-start/vite", "packages/fig-start/src/vite/index.ts"],
   ["@bgub/fig-start", "packages/fig-start/src/index.ts"],
   ["@bgub/fig-tanstack-router", "packages/fig-tanstack-router/src/router.tsx"],
+  [
+    "@bgub/fig-tanstack-start/client",
+    "packages/fig-tanstack-start/src/client.tsx",
+  ],
+  [
+    "@bgub/fig-tanstack-start/server",
+    "packages/fig-tanstack-start/src/server.tsx",
+  ],
+  ["@bgub/fig-tanstack-start", "packages/fig-tanstack-start/src/data.ts"],
   ["@bgub/fig", "packages/fig/src/index.ts"],
 ] as const;
 

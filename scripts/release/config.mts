@@ -13,6 +13,7 @@ export const jsrPackageNames = [
 export const publicPackageNames = [
   ...jsrPackageNames,
   "@bgub/fig-tanstack-router",
+  "@bgub/fig-tanstack-start",
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
@@ -54,6 +55,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-refresh": { group: "fig" },
       "@bgub/fig-server": { group: "fig" },
       "@bgub/fig-tanstack-router": { group: "fig" },
+      "@bgub/fig-tanstack-start": { group: "fig" },
     },
     plugins: [
       jsrRelease({ publishOrder: jsrPackageNames }),

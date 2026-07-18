@@ -19,7 +19,7 @@ import {
 } from "./event-propagation.ts";
 import { isElementNode, parentOf } from "./tree.ts";
 
-export type Container = Element | DocumentFragment;
+export type Container = Document | DocumentFragment | Element;
 type Batch = <T>(callback: () => T) => T;
 type RootRun = <T>(callback: () => T) => T;
 

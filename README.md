@@ -145,8 +145,9 @@ createRoot(root).render(<App />);
 - [@bgub/fig-reconciler](./packages/fig-reconciler/README.md): renderer internals for custom host configs, including the cooperative task scheduler.
 - [@bgub/fig-refresh](./packages/fig-refresh/README.md): renderer-agnostic component-family tracking for hot refresh.
 - [@bgub/fig-tanstack-router](./packages/fig-tanstack-router/README.md): TanStack Router code routes, Fig components and hooks, native links, and the private reactive-store bridge.
+- [@bgub/fig-tanstack-start](./packages/fig-tanstack-start/README.md): TanStack Start server/client rendering with one Fig-owned route-data store.
 
-Fig Start, the Vite integration, and DevTools are implemented as private workspace previews while their public contracts mature.
+Fig Start, the Vite integration, and DevTools are implemented as private workspace previews while their public contracts mature. The TanStack Start runtime adapter is public; its first-class Vite plugin remains under development.
 
 ## Development
 
@@ -176,7 +177,7 @@ Use a demo package's `dev:app` script to run the underlying server without Portl
 
 ## Releases
 
-Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release six public packages as one alpha-versioned group. The five renderer/core packages publish to npm and JSR; `@bgub/fig-tanstack-router` publishes to npm because its required TanStack module augmentation is not supported by JSR. Contributor tooling requires Node.js 24.
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release seven public packages as one alpha-versioned group. The five renderer/core packages publish to npm and JSR; the two TanStack adapters publish to npm. Contributor tooling requires Node.js 24.
 
 Add a changelog for a publishable change with `pnpm tegami`, or create an explicit `.tegami/<description>.md` file:
 

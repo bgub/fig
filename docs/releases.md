@@ -1,6 +1,6 @@
 # Releases
 
-Fig uses Tegami to version the public packages and create grouped GitHub releases. All six public packages belong to one `fig` release group, use the `alpha` prerelease channel, and receive the same version bump. The five renderer/core packages publish to npm and JSR; `@bgub/fig-tanstack-router` publishes to npm only because JSR rejects the ambient TanStack module augmentation required by framework adapters. npm publishes prerelease versions under `latest`, so the default install always resolves to the newest Fig release even while its SemVer version includes an `alpha` prerelease suffix.
+Fig uses Tegami to version the public packages and create grouped GitHub releases. All seven public packages belong to one `fig` release group, use the `alpha` prerelease channel, and receive the same version bump. The five renderer/core packages publish to npm and JSR; the two TanStack adapters publish to npm only. npm publishes prerelease versions under `latest`, so the default install always resolves to the newest Fig release even while its SemVer version includes an `alpha` prerelease suffix.
 
 ## Contributor workflow
 

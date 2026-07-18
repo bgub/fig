@@ -17,7 +17,7 @@ import {
   checkpointPayloadGraph,
   clientOnlyHostBehavior,
   clientReferenceAssets,
-  createDataStore,
+  createRendererDataStore,
   createPayloadGraphEncodeContext,
   type DataStore,
   type DataStoreEntrySnapshot,
@@ -192,7 +192,7 @@ function createPayloadRequest(
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
     controller: null,
-    dataStore: createDataStore<object, null>({
+    dataStore: createRendererDataStore<object, null>({
       getLane: () => null,
       onEntryChange: (entry: DataStoreEntrySnapshot) => {
         pendingDataSnapshots.set(entry.canonicalKey, entry);

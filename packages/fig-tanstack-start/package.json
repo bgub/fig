@@ -1,0 +1,77 @@
+{
+  "name": "@bgub/fig-tanstack-start",
+  "version": "0.1.0-alpha.0",
+  "description": "TanStack Start adapter for Fig",
+  "keywords": [
+    "fig",
+    "tanstack",
+    "start",
+    "ssr"
+  ],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/data.d.ts",
+      "import": "./dist/data.js",
+      "default": "./dist/data.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/data.d.ts",
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "prepack": "pnpm build",
+    "test": "vitest run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-tanstack-start"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@tanstack/router-core": "1.171.15",
+    "@tanstack/start-client-core": "1.170.14",
+    "@tanstack/start-server-core": "1.169.17"
+  },
+  "peerDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*",
+    "@bgub/fig-tanstack-router": "workspace:*"
+  },
+  "devDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*",
+    "@bgub/fig-tanstack-router": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

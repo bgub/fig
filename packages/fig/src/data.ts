@@ -101,6 +101,20 @@ export interface FigDataStoreHandle {
   run<T>(callback: () => T): T;
 }
 
+/**
+ * A root-neutral data store. A renderer adopts it exactly once, preserving
+ * entries loaded before rendering while attaching subscriber scheduling.
+ */
+export interface FigDataStoreController extends FigDataStoreHandle {
+  dispose(): void;
+  snapshot(): FigDataHydrationEntry[];
+}
+
+export interface FigDataStoreOptions {
+  initialData?: readonly FigDataHydrationEntry[];
+  partition?: DataResourceKeyInput;
+}
+
 export interface FigDataStore extends FigDataStoreHandle {
   commitDataDependencies(owner: object, previousOwner: object | null): void;
   deleteDataOwner(owner: object): void;
@@ -120,7 +134,7 @@ export interface FigDataStore extends FigDataStoreHandle {
 }
 
 // The host callbacks a renderer hands to the data-store factory. Structurally
-// compatible with @bgub/fig's DataStoreHost so its createDataStore can
+// compatible with @bgub/fig's DataStoreHost so its renderer store can
 // register directly.
 export interface FigDataStoreHost {
   getLane(): unknown;

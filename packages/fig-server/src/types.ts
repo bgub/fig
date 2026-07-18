@@ -5,6 +5,8 @@ import type {
   FigAssetResourceList,
   FigClientReference,
   FigDataHydrationEntry,
+  FigDataStoreController,
+  FigDataStoreHandle,
   FigNode,
   Props,
 } from "@bgub/fig";
@@ -34,6 +36,13 @@ export interface ServerRenderOptions {
   ) => FigNode;
   resolveAssetKey?: (type: ElementType) => string | undefined;
   dataPartition?: DataResourceKeyInput;
+  /** Adopt a store populated by request loaders before rendering. */
+  dataStore?: FigDataStoreController;
+  /**
+   * Values loaded before rendering, such as route-loader data. They hydrate
+   * the request store before the first component reads it.
+   */
+  initialData?: readonly FigDataHydrationEntry[];
   assets?: Record<string, FigAssetResourceList>;
   /**
    * Caller-owned collector the renderer fills with the component structure
@@ -75,6 +84,8 @@ interface ServerStreamRenderResult {
   abort(reason?: unknown): void;
   allReady: Promise<void>;
   contentType: "text/html; charset=utf-8";
+  /** The request-scoped store used by this render. */
+  data: FigDataStoreHandle;
   getData(): FigDataHydrationEntry[];
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;

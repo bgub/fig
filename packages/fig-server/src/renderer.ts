@@ -16,9 +16,10 @@ import {
   assetResourceDestination,
   assetResourceFromHostProps,
   assetResourceKey,
+  attachDataStore,
   collectChildren,
-  createDataStore,
-  type DataStore,
+  createRendererDataStore,
+  type FigDataStore,
   invalidChildError,
   isActivity,
   isAssets,
@@ -99,7 +100,7 @@ interface Request {
   completedBoundaries: Set<SuspenseBoundary>;
   completedRootSegment: Segment | null;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
-  dataStore: DataStore<object, null>;
+  dataStore: FigDataStore;
   fatalError: unknown;
   identifierPrefix: string;
   nextBoundaryId: number;
@@ -279,6 +280,15 @@ export function createServerRenderRequest(
   void headReady.promise.catch(() => undefined);
   void allReady.promise.catch(() => undefined);
   const rootSegment = createSegment(0, null);
+  const dataStoreHost = {
+    getLane: () => null,
+    partition: options.dataPartition,
+    schedule: () => undefined,
+  };
+  const dataStore =
+    options.dataStore === undefined
+      ? createRendererDataStore<object, null>(dataStoreHost)
+      : attachDataStore(options.dataStore, dataStoreHost, options.initialData);
 
   const request: Request = {
     abortableTasks: new Set<Task>(),
@@ -288,11 +298,7 @@ export function createServerRenderRequest(
     completedBoundaries: new Set(),
     completedRootSegment: null,
     controller: null,
-    dataStore: createDataStore<object, null>({
-      getLane: () => null,
-      partition: options.dataPartition,
-      schedule: () => undefined,
-    }),
+    dataStore,
     fatalError: null,
     identifierPrefix: options.identifierPrefix ?? "",
     nextBoundaryId: 0,
@@ -326,6 +332,9 @@ export function createServerRenderRequest(
     flushing: false,
     writeBuffer: [],
   };
+  if (options.dataStore === undefined && options.initialData !== undefined) {
+    request.dataStore.hydrate(options.initialData);
+  }
   request.assetSink = {
     nonce: options.nonce,
     write: (chunk) => write(request, chunk),
@@ -389,6 +398,7 @@ export function createServerRenderRequest(
     abort: (reason?: unknown) => abort(request, reason),
     allReady: allReady.promise,
     contentType: "text/html; charset=utf-8",
+    data: request.dataStore,
     getData: () => request.dataStore.snapshot(),
     getHead: () =>
       request.headSnapshot ?? request.assetRegistry.headHtml(request.nonce),

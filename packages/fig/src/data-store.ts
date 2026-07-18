@@ -11,8 +11,11 @@ import {
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataStore,
+  type FigDataStoreController,
   type FigDataStoreFactory,
   type FigDataStoreHandle,
+  type FigDataStoreHost,
+  type FigDataStoreOptions,
   isAttributableError,
   markDataResourceError,
   resolveCurrentDataStore,
@@ -111,13 +114,14 @@ type AbortReason = "superseded" | "store-disposed" | "evicted";
 
 const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
+const DataStoreControllerSymbol = Symbol.for("fig.data-store-controller");
 const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
-const dataStoreFactory = createDataStore as FigDataStoreFactory;
+const dataStoreFactory = createRendererDataStore as FigDataStoreFactory;
 
 export function dataResource<TArgs extends unknown[], TValue>(
   options: DataResourceOptions<TArgs, TValue>,
@@ -182,6 +186,59 @@ export function readDataStore(): FigDataStoreHandle {
   );
 }
 
+interface DataStoreControllerState {
+  attached: boolean;
+  host: FigDataStoreHost;
+}
+
+export function createDataStore(
+  options: FigDataStoreOptions = {},
+): FigDataStoreController {
+  const detachedHost: FigDataStoreHost = {
+    getLane: () => null,
+    partition: options.partition,
+    schedule: () => undefined,
+  };
+  const state: DataStoreControllerState = {
+    attached: false,
+    host: detachedHost,
+  };
+  const forwardingHost: FigDataStoreHost = {
+    getLane: () => state.host.getLane(),
+    partition: options.partition,
+    schedule: (owner, lane) => state.host.schedule(owner, lane),
+  };
+  const store = createRendererDataStore(forwardingHost);
+  Object.defineProperty(store, DataStoreControllerSymbol, { value: state });
+  if (options.initialData !== undefined) store.hydrate(options.initialData);
+  return store;
+}
+
+export function attachDataStore(
+  controller: FigDataStoreController,
+  host: FigDataStoreHost,
+  initialData?: readonly FigDataHydrationEntry[],
+): FigDataStore {
+  if (host.partition !== undefined || initialData !== undefined) {
+    throw new Error(
+      "Pass partition and initialData to createDataStore(), not the renderer, when adopting a data store.",
+    );
+  }
+  const state = (
+    controller as FigDataStoreController &
+      Record<symbol, DataStoreControllerState | undefined>
+  )[DataStoreControllerSymbol];
+  if (state === undefined) {
+    throw new Error("dataStore must be created with createDataStore().");
+  }
+  if (state.attached) {
+    throw new Error("A data store can only be adopted by one Fig renderer.");
+  }
+  state.attached = true;
+  state.host = host;
+  return controller as FigDataStore;
+}
+
 function resolveDataMutationStore(name: string): FigDataStore {
   return resolveCurrentDataStore(
     `${name}() must be called synchronously while Fig is executing — ` +
@@ -190,7 +247,7 @@ function resolveDataMutationStore(name: string): FigDataStore {
   );
 }
 
-export function createDataStore<Owner extends object, Lane>(
+export function createRendererDataStore<Owner extends object, Lane>(
   host: DataStoreHost<Owner, Lane>,
 ): DataStore<Owner, Lane> {
   return new DefaultDataStore(host);

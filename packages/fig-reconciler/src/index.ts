@@ -10,6 +10,7 @@ import {
   type ExternalStoreSubscribe,
   type FigContext,
   type FigDataHydrationEntry,
+  type FigDataStoreController,
   type FigDataStoreHandle,
   type FigNode,
   type FigPortal,
@@ -22,6 +23,7 @@ import {
 } from "@bgub/fig";
 import {
   collectChildren,
+  attachDataStore,
   dataResourceKeysForError,
   type FigDataStore,
   invalidChildError,
@@ -461,6 +463,8 @@ export interface FigRoot {
 }
 
 export interface FigRootOptions {
+  /** Adopt a store populated before the renderer root was created. */
+  dataStore?: FigDataStoreController;
   dataPartition?: DataResourceKeyInput;
   initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
@@ -986,13 +990,21 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function createFiberRoot(container: Container, options: FigRootOptions): R {
     const current = fiber(RootTag, null, null, { children: null }, null);
-    const dataStore = createRootDataStore({
+    const dataStoreHost = {
       getLane: requestUpdateLane,
       partition: options.dataPartition,
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
-    });
+    };
+    const dataStore =
+      options.dataStore === undefined
+        ? createRootDataStore(dataStoreHost)
+        : attachDataStore(
+            options.dataStore,
+            dataStoreHost,
+            options.initialData,
+          );
     const root: R = {
       container,
       current,
@@ -1043,7 +1055,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       clearContainerBeforeCommit: false,
       hydrationInitialElement: NoHydrationInitialElement,
     };
-    if (options.initialData !== undefined)
+    if (options.dataStore === undefined && options.initialData !== undefined)
       dataStore.hydrate(options.initialData);
     current.stateNode = root;
     return root;

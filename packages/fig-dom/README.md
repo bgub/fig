@@ -23,6 +23,18 @@ bindings/events, and reports recoverable mismatches through
 `useSyncExternalStore` use their server snapshot during hydration, then subscribe
 and reconcile to the current client snapshot after commit.
 
+For full-document rendering, pass the `Document` itself as the container. A
+root-neutral data store can be populated before hydration and adopted without
+copying its entries:
+
+```tsx
+import { createDataStore } from "@bgub/fig";
+import { hydrateRoot } from "@bgub/fig-dom";
+
+const dataStore = createDataStore({ initialData });
+hydrateRoot(document, <App />, { dataStore });
+```
+
 Suspense hydration is boundary-based: server Suspense markers stay
 dehydrated after the shell hydrates, then hydrate in background work or
 synchronously when an interaction lands inside that boundary. Pending

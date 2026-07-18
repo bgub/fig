@@ -40,6 +40,7 @@ export function renderToDocumentStream(
     abort: (reason) => request.abort(reason),
     allReady: request.allReady,
     contentType: request.contentType,
+    data: request.data,
     getData: () => request.getData(),
     shellReady: request.shellReady,
     stream: request.stream,

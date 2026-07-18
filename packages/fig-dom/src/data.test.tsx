@@ -1,6 +1,7 @@
 import type { DataResourceKey } from "@bgub/fig";
 import {
   Activity,
+  createDataStore,
   createElement,
   dataResource,
   ErrorBoundary,
@@ -425,6 +426,49 @@ describe("@bgub/fig-dom data resources", () => {
     );
 
     expect(container.textContent).toBe("Hydrated");
+  });
+
+  it("adopts a populated root-neutral store exactly once", async () => {
+    let loads = 0;
+    const resource = dataResource<[string], string>({
+      key: (id: string) => ["adopted", id],
+      load: (id: string) => {
+        loads += 1;
+        return `${id}-${loads}`;
+      },
+    });
+    const dataStore = createDataStore();
+    await dataStore.ensureData(resource, "one");
+
+    function Value() {
+      return createElement("span", null, readData(resource, "one"));
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element, { dataStore });
+    flushSync(() => root.render(createElement(Value)));
+
+    expect(root.data).toBe(dataStore);
+    expect(container.textContent).toBe("one-1");
+    expect(loads).toBe(1);
+    expect(() =>
+      createRoot(new FakeElement("root") as unknown as Element, { dataStore }),
+    ).toThrow("only be adopted by one Fig renderer");
+
+    root.unmount();
+  });
+
+  it("rejects renderer initialization data with an adopted store", () => {
+    const dataStore = createDataStore();
+
+    expect(() =>
+      createRoot(new FakeElement("root") as unknown as Element, {
+        dataStore,
+        initialData: [],
+      }),
+    ).toThrow("Pass partition and initialData to createDataStore()");
+
+    dataStore.dispose();
   });
 
   it("reports unsupported refreshes for loader-less resources", async () => {

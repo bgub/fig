@@ -1,9 +1,11 @@
 import {
+  assets,
   createContext,
   createElement,
   type ComponentType,
   type DataResource,
   ErrorBoundary,
+  type FigAssetResource,
   type FigDataStoreHandle,
   type FigNode,
   readContext,
@@ -16,6 +18,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "@bgub/fig";
+import { assetResourceFromHostProps } from "@bgub/fig/internal";
 import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   createBrowserHistory,
@@ -29,15 +32,22 @@ import {
   type AnyRoute,
   type AnyRouteMatch,
   type AnyRouter,
+  appendUniqueUserTags,
+  type AssetCrossOriginConfig,
   BaseRootRoute,
   BaseRoute,
   deepEqual,
+  escapeHtml,
   exactPathTest,
+  getAssetCrossOrigin,
   getLocationChangeInfo,
+  getScriptPreloadAttrs,
   isDangerousProtocol,
   type LinkOptions,
+  type MetaDescriptor,
   type NotFoundRouteProps,
   removeTrailingSlash,
+  resolveManifestCssLink,
   type RegisteredRouter,
   type Register,
   type ResolveFullPath,
@@ -50,6 +60,7 @@ import {
   RouterCore,
   type RouterConstructorOptions,
   type RouterReadableStore,
+  type RouterManagedTag,
   type RouterState,
   type RouteConstraints,
   type RouteIds,
@@ -59,6 +70,16 @@ import {
 } from "@tanstack/router-core";
 import { batch } from "@tanstack/store";
 import { getStoreConfig } from "./store.ts";
+
+declare module "@tanstack/router-core" {
+  interface RouteMatchExtensions {
+    headScripts?: Array<HostIntrinsicElements["script"] | undefined>;
+    links?: Array<HostIntrinsicElements["link"] | undefined>;
+    meta?: Array<HostIntrinsicElements["meta"] | MetaDescriptor | undefined>;
+    scripts?: Array<HostIntrinsicElements["script"] | undefined>;
+    styles?: Array<HostIntrinsicElements["style"] | undefined>;
+  }
+}
 
 export { createBrowserHistory, createHashHistory, createMemoryHistory };
 export {
@@ -640,6 +661,253 @@ export function Outlet(): FigNode {
     : createElement(Match, { matchId: childMatchId });
 }
 
+export interface HeadContentProps {
+  assetCrossOrigin?: AssetCrossOriginConfig;
+}
+
+export function HeadContent({ assetCrossOrigin }: HeadContentProps): FigNode {
+  const router = useRouter<AnyRouter>();
+  const selectTags = useCallback(
+    (matches: AnyRouteMatch[]) =>
+      buildHeadTags(router, matches, assetCrossOrigin),
+    [assetCrossOrigin, router],
+  );
+  const tags = useReadableStore(router.stores.matches, selectTags, deepEqual);
+  return renderHeadTags(tags);
+}
+
+export function Scripts(): FigNode {
+  const router = useRouter<AnyRouter>();
+  const selectTags = useCallback(
+    (matches: AnyRouteMatch[]) => buildScriptTags(router, matches),
+    [router],
+  );
+  const selectedTags = useReadableStore(
+    router.stores.matches,
+    selectTags,
+    deepEqual,
+  );
+  const tags = [...selectedTags];
+
+  const buffered = router.serverSsr?.takeBufferedScripts();
+  if (buffered !== undefined) tags.unshift(buffered);
+  return tags.map(renderManagedTag);
+}
+
+function buildScriptTags(
+  router: AnyRouter,
+  matches: AnyRouteMatch[],
+): RouterManagedTag[] {
+  const nonce = router.options.ssr?.nonce;
+  const tags: RouterManagedTag[] = matches.flatMap((match) =>
+    (match.scripts ?? [])
+      .filter((script) => script !== undefined)
+      .map(({ children, ...attrs }) => ({
+        tag: "script" as const,
+        attrs: { ...attrs, nonce, suppressHydrationWarning: true },
+        children: children as string | undefined,
+      })),
+  );
+  const manifest = router.ssr?.manifest;
+  if (manifest === undefined) return tags;
+
+  for (const match of matches) {
+    for (const script of manifest.routes[match.routeId]?.scripts ?? []) {
+      tags.push({
+        tag: "script",
+        attrs: { ...script.attrs, nonce },
+        children: script.children,
+      });
+    }
+  }
+  return tags;
+}
+
+function buildHeadTags(
+  router: AnyRouter,
+  matches: AnyRouteMatch[],
+  assetCrossOrigin?: AssetCrossOriginConfig,
+): RouterManagedTag[] {
+  const nonce = router.options.ssr?.nonce;
+  const metaTags: RouterManagedTag[] = [];
+  const seenMeta = new Set<string>();
+  let selectedTitle: RouterManagedTag | undefined;
+
+  for (let matchIndex = matches.length - 1; matchIndex >= 0; matchIndex -= 1) {
+    const routeMeta = matches[matchIndex]?.meta ?? [];
+    for (let metaIndex = routeMeta.length - 1; metaIndex >= 0; metaIndex -= 1) {
+      const value = routeMeta[metaIndex];
+      if (value === undefined) continue;
+      const title = stringAttribute(Reflect.get(value, "title"));
+      if (title !== undefined) {
+        selectedTitle ??= { tag: "title", children: title };
+        continue;
+      }
+      if (Reflect.has(value, "script:ld+json")) {
+        try {
+          metaTags.push({
+            tag: "script",
+            attrs: { type: "application/ld+json" },
+            children: escapeHtml(
+              JSON.stringify(Reflect.get(value, "script:ld+json")),
+            ),
+          });
+        } catch {
+          // Invalid JSON-LD is omitted, matching TanStack Router's adapters.
+        }
+        continue;
+      }
+      const identity =
+        stringAttribute(Reflect.get(value, "name")) ??
+        stringAttribute(Reflect.get(value, "property"));
+      if (identity !== undefined) {
+        if (seenMeta.has(identity)) continue;
+        seenMeta.add(identity);
+      }
+      metaTags.push({ tag: "meta", attrs: { ...value, nonce } });
+    }
+  }
+  if (selectedTitle !== undefined) metaTags.push(selectedTitle);
+  if (nonce !== undefined) {
+    metaTags.push({
+      tag: "meta",
+      attrs: { content: nonce, property: "csp-nonce" },
+    });
+  }
+  metaTags.reverse();
+
+  const tags: RouterManagedTag[] = [];
+  appendUniqueUserTags(tags, metaTags);
+  const manifest = router.ssr?.manifest;
+  if (manifest !== undefined) {
+    for (const match of matches) {
+      for (const link of manifest.routes[match.routeId]?.preloads ?? []) {
+        tags.push({
+          tag: "link",
+          attrs: {
+            ...getScriptPreloadAttrs(manifest, link, assetCrossOrigin),
+            nonce,
+          },
+        });
+      }
+    }
+  }
+  appendUniqueUserTags(
+    tags,
+    matches.flatMap((match) =>
+      (match.links ?? [])
+        .filter((link) => link !== undefined)
+        .map((link) => ({
+          tag: "link" as const,
+          attrs: { ...link, nonce },
+        })),
+    ),
+  );
+  if (manifest !== undefined) {
+    for (const match of matches) {
+      for (const link of manifest.routes[match.routeId]?.css ?? []) {
+        const resolvedLink = resolveManifestCssLink(link);
+        tags.push({
+          tag: "link",
+          attrs: {
+            rel: "stylesheet",
+            ...resolvedLink,
+            crossOrigin:
+              getAssetCrossOrigin(assetCrossOrigin, "stylesheet") ??
+              resolvedLink.crossOrigin,
+            nonce,
+            suppressHydrationWarning: true,
+          },
+        });
+      }
+    }
+    if (manifest.inlineStyle !== undefined) {
+      tags.push({
+        tag: "style",
+        attrs: { ...manifest.inlineStyle.attrs, nonce },
+        children: manifest.inlineStyle.children,
+        inlineCss: true,
+      });
+    }
+  }
+  appendUniqueUserTags(
+    tags,
+    matches.flatMap((match) =>
+      (match.styles ?? [])
+        .filter((style) => style !== undefined)
+        .map(({ children, ...attrs }) => ({
+          tag: "style" as const,
+          attrs: { ...attrs, nonce },
+          children: children as string | undefined,
+        })),
+    ),
+  );
+  appendUniqueUserTags(
+    tags,
+    matches.flatMap((match) =>
+      (match.headScripts ?? [])
+        .filter((script) => script !== undefined)
+        .map(({ children, ...attrs }) => ({
+          tag: "script" as const,
+          attrs: { ...attrs, nonce },
+          children: children as string | undefined,
+        })),
+    ),
+  );
+  return tags;
+}
+
+function renderHeadTags(tags: RouterManagedTag[]): FigNode {
+  const resources: FigAssetResource[] = [];
+  const nodes: FigNode[] = [];
+  for (const tag of tags) {
+    const resource = assetResourceFromHostProps(tag.tag, {
+      ...nativeAttributes(tag.attrs),
+      children: tag.children,
+    });
+    if (resource === null) nodes.push(renderManagedTag(tag));
+    else resources.push(resource);
+  }
+  return resources.length === 0 ? nodes : assets(resources, nodes);
+}
+
+function renderManagedTag(tag: RouterManagedTag): FigNode {
+  const attrs = nativeAttributes(tag.attrs);
+  return createElement(tag.tag, {
+    ...attrs,
+    ...(tag.children === undefined ? {} : { unsafeHTML: tag.children }),
+  });
+}
+
+function nativeAttributes(
+  attrs: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (attrs === undefined) return {};
+  const result = { ...attrs };
+  renameAttribute(result, "charSet", "charset");
+  renameAttribute(result, "className", "class");
+  renameAttribute(result, "crossOrigin", "crossorigin");
+  renameAttribute(result, "fetchPriority", "fetchpriority");
+  renameAttribute(result, "httpEquiv", "http-equiv");
+  renameAttribute(result, "referrerPolicy", "referrerpolicy");
+  return result;
+}
+
+function renameAttribute(
+  attrs: Record<string, unknown>,
+  from: string,
+  to: string,
+): void {
+  if (attrs[from] !== undefined && attrs[to] === undefined) {
+    attrs[to] = attrs[from];
+  }
+  delete attrs[from];
+}
+
+function stringAttribute(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 function renderNotFound(
   router: AnyRouter,
   route: AnyRoute,
@@ -888,12 +1156,14 @@ function useReadableStore<TValue>(store: RouterReadableStore<TValue>): TValue;
 function useReadableStore<TValue, TSelected>(
   store: RouterReadableStore<TValue>,
   select: (value: TValue) => TSelected,
+  equal?: (previous: TSelected, next: TSelected) => boolean,
 ): TSelected;
 function useReadableStore<TValue, TSelected = TValue>(
   store: RouterReadableStore<TValue>,
   select: (value: TValue) => TSelected = selectStoreValue as (
     value: TValue,
   ) => TSelected,
+  equal: (previous: TSelected, next: TSelected) => boolean = Object.is,
 ): TSelected {
   if (typeof Reflect.get(store, "subscribe") !== "function") {
     return select(store.get());
@@ -912,12 +1182,14 @@ function useReadableStore<TValue, TSelected = TValue>(
     return () => {
       const nextSource = store.get();
       if (initialized && Object.is(source, nextSource)) return selected;
+      const nextSelected = select(nextSource);
       source = nextSource;
-      selected = select(nextSource);
+      if (initialized && equal(selected, nextSelected)) return selected;
+      selected = nextSelected;
       initialized = true;
       return selected;
     };
-  }, [select, store]);
+  }, [equal, select, store]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 

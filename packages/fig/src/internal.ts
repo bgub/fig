@@ -17,9 +17,11 @@ export {
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
   type FigDataStore,
+  type FigDataStoreController,
   type FigDataStoreFactory,
   type FigDataStoreHandle,
   type FigDataStoreHost,
+  type FigDataStoreOptions,
   type LoadContextCapabilities,
   type LoadContextHydrate,
   type LoadContextAttributeError,
@@ -29,7 +31,9 @@ export {
   setCurrentDataStore,
 } from "./data.ts";
 export {
+  attachDataStore,
   createDataStore,
+  createRendererDataStore,
   currentDataStore,
   type DataStore,
   type DataStoreHost,

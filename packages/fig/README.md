@@ -268,8 +268,24 @@ await save();
 data.run(() => refreshData(userResource, "one"));
 ```
 
-Client roots accept `dataPartition` and `initialData` options. The partition
-separates a store's internal keyspace without changing public resource keys.
+Framework adapters can create and populate a root-neutral store before a
+renderer exists, then let exactly one root adopt that same store:
+
+```ts
+const dataStore = createDataStore();
+
+await dataStore.ensureData(userResource, "one");
+
+const root = createRoot(container, { dataStore });
+root.data === dataStore; // true
+```
+
+Adoption preserves entry identity and subscriptions. The adopting root owns
+the store lifetime and disposes it when the root unmounts.
+
+Client roots accept `dataStore`, `dataPartition`, and `initialData` options.
+`dataStore` is exclusive with the other two options. The partition separates a
+store's internal keyspace without changing public resource keys.
 Loaders receive only their resource arguments plus `{ signal }`; app services,
 request cookies, and auth state belong in the surrounding adapter or closure,
 not in the data store.
@@ -277,7 +293,9 @@ not in the data store.
 ### Server Values And Hydration
 
 Server renderers expose fulfilled data entries with `getData()`. Pass those
-entries to the client root as `initialData` to hydrate by key.
+entries to the client root as `initialData` to hydrate by key, or use
+`createDataStore()` when an adapter needs to populate and render through the
+same live store.
 
 For server-only data, split the browser-safe key resource from the server
 loader:

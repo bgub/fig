@@ -144,8 +144,8 @@ document mode emits only the nonce-carrying early event-capture script.
 
 ## Data Resources
 
-Server render requests have their own data-resource store. Reads through
-`@bgub/fig` dedupe by key within the request and fulfilled entries are
+Server render requests have their own data-resource store by default. Reads
+through `@bgub/fig` dedupe by key within the request and fulfilled entries are
 available through `result.getData()`:
 
 ```tsx
@@ -168,6 +168,22 @@ await result.allReady;
 
 const initialData = result.getData();
 ```
+
+Adapters that run loaders before rendering can create the store themselves.
+The renderer adopts that exact store instead of copying its entries:
+
+```tsx
+import { createDataStore } from "@bgub/fig";
+import { renderToStream } from "@bgub/fig-server";
+
+const dataStore = createDataStore();
+await dataStore.ensureData(userResource, "one");
+
+const result = renderToStream(<Profile id="one" />, { dataStore });
+result.data === dataStore; // true
+```
+
+One renderer may adopt a store, and that renderer owns its lifetime.
 
 Pass `initialData` to `createRoot(...)` or `hydrateRoot(...)` on the client to
 hydrate those values by key. Client imports can use a loader-less resource with

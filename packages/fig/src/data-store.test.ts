@@ -10,7 +10,7 @@ import {
   refreshData,
 } from "./index.ts";
 import {
-  createDataStore,
+  createRendererDataStore,
   dataResourceKeysForError,
   type LoadContextAttributeError,
   type LoadContextHydrate,
@@ -67,7 +67,7 @@ describe("@bgub/fig", () => {
         return `hello-${id}`;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -89,7 +89,7 @@ describe("@bgub/fig", () => {
         key: (id: string) => ["processless", id],
         load: (id: string) => `value-${id}`,
       });
-      const store = createDataStore<object, null>({
+      const store = createRendererDataStore<object, null>({
         getLane: () => null,
         schedule: () => undefined,
       });
@@ -107,7 +107,7 @@ describe("@bgub/fig", () => {
       key: (id: string) => ["label", id],
       load: () => "ready",
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       inactiveRetentionMs: 0,
       onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
@@ -129,7 +129,7 @@ describe("@bgub/fig", () => {
       key: (id: string) => ["reset", id],
       load: (id: string) => id,
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -176,7 +176,7 @@ describe("@bgub/fig", () => {
         key: (id: string) => ["retained", id],
         load: (id: string) => id,
       });
-      const store = createDataStore<object, null>({
+      const store = createRendererDataStore<object, null>({
         getLane: () => null,
         schedule: () => undefined,
       });
@@ -209,7 +209,7 @@ describe("@bgub/fig", () => {
         return never;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       inactiveRetentionMs: Number.POSITIVE_INFINITY,
       onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
@@ -232,7 +232,7 @@ describe("@bgub/fig", () => {
       key: (id: string) => ["dispose", id],
       load: () => never,
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -256,7 +256,7 @@ describe("@bgub/fig", () => {
         return "ready";
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -279,7 +279,7 @@ describe("@bgub/fig", () => {
         return `value-${loads}`;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -303,7 +303,7 @@ describe("@bgub/fig", () => {
       key: (id: string) => ["entity", "post", id],
       load: (id: string) => `post-${id}`,
     });
-    const store = createDataStore<object, string>({
+    const store = createRendererDataStore<object, string>({
       getLane: () => "mutation",
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -342,7 +342,7 @@ describe("@bgub/fig", () => {
       ],
       load: () => "nested",
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -380,7 +380,7 @@ describe("@bgub/fig", () => {
       key: (input) => ["exact-key", input],
       load: () => "value",
     });
-    const store = createDataStore<object, string>({
+    const store = createRendererDataStore<object, string>({
       getLane: () => "retry",
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -407,7 +407,7 @@ describe("@bgub/fig", () => {
       key: (id) => ["hydrate-lane", id],
       load: (id) => `loaded-${id}`,
     });
-    const store = createDataStore<object, string>({
+    const store = createRendererDataStore<object, string>({
       getLane: () => lane,
       schedule: (subscriber, scheduledLane) =>
         scheduled.push([subscriber, scheduledLane]),
@@ -431,7 +431,7 @@ describe("@bgub/fig", () => {
     const hydrateOnlyResource = dataResource<[string], string>({
       key: (id) => ["hydrate-only-missing", id],
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       onEntryChange: (entry) => changes.push(entry.canonicalKey),
       schedule: () => undefined,
@@ -463,7 +463,7 @@ describe("@bgub/fig", () => {
         return next.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -500,7 +500,7 @@ describe("@bgub/fig", () => {
         return "value";
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -543,7 +543,7 @@ describe("@bgub/fig", () => {
         return next.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -589,7 +589,7 @@ describe("@bgub/fig", () => {
         return never;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -613,7 +613,7 @@ describe("@bgub/fig", () => {
         return loads === 1 ? "first" : never;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -644,7 +644,7 @@ describe("@bgub/fig", () => {
         return loads === 1 ? "first" : never;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       inactiveRetentionMs: Number.POSITIVE_INFINITY,
       preloadRetentionMs: 0,
@@ -672,7 +672,7 @@ describe("@bgub/fig", () => {
         return "value";
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -699,7 +699,7 @@ describe("@bgub/fig", () => {
       key: (id: string) => ["evicted-reason", id],
       load: () => never,
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       inactiveRetentionMs: Number.POSITIVE_INFINITY,
       preloadRetentionMs: 0,
@@ -732,7 +732,7 @@ describe("@bgub/fig", () => {
           : Promise.resolve("recovered");
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -785,7 +785,7 @@ describe("@bgub/fig", () => {
           : Promise.resolve(`recovered-${id}`);
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: (subscriber) => scheduled.push(subscriber),
     });
@@ -826,7 +826,7 @@ describe("@bgub/fig", () => {
   });
 
   it("does not invalidate untagged errors", () => {
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -846,7 +846,7 @@ describe("@bgub/fig", () => {
           : Promise.resolve("recovered");
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -865,7 +865,7 @@ describe("@bgub/fig", () => {
 
 describe("generation-lifetime loader signals", () => {
   function signalStore() {
-    return createDataStore<object, null>({
+    return createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -946,7 +946,7 @@ describe("generation-lifetime loader signals", () => {
         return "loaded";
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       inactiveRetentionMs: 0,
       schedule: () => undefined,
@@ -1038,7 +1038,7 @@ describe("generation-lifetime loader signals", () => {
         return loads === 1 ? never.promise : "second";
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1061,7 +1061,7 @@ describe("load-context error attribution capability", () => {
         return `value-${captured.length}`;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1101,7 +1101,7 @@ describe("load-context error attribution capability", () => {
         return gate.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1137,7 +1137,7 @@ describe("load-context error attribution capability", () => {
         return loads === 1 ? "v1" : gate.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1182,7 +1182,7 @@ describe("load-context error attribution capability", () => {
         });
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1227,7 +1227,7 @@ describe("load-context error attribution capability", () => {
         return loads === 1 ? "v1" : stuck.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1255,7 +1255,7 @@ describe("load-context error attribution capability", () => {
         return loads === 1 ? "v1" : stuck.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1286,7 +1286,7 @@ describe("load-context hydrate capability", () => {
   }
 
   function capabilityStore() {
-    return createDataStore<object, null>({
+    return createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1415,7 +1415,7 @@ describe("load-context hydrate capability", () => {
 
 describe("ensureData", () => {
   function ensureStore() {
-    return createDataStore<object, null>({
+    return createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
@@ -1523,7 +1523,7 @@ describe("ensureData", () => {
         return gate.promise;
       },
     });
-    const store = createDataStore<object, null>({
+    const store = createRendererDataStore<object, null>({
       getLane: () => null,
       onEntryEvict: (entry) => evicted.push(entry.canonicalKey),
       preloadRetentionMs: 0,

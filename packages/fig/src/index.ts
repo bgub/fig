@@ -12,10 +12,13 @@ export type {
   DataResourceLoadContext,
   DataResourceLoader,
   FigDataHydrationEntry,
+  FigDataStoreController,
   FigDataStoreHandle,
+  FigDataStoreOptions,
 } from "./data.ts";
 export {
   type DataResourceOptions,
+  createDataStore,
   dataResource,
   ensureData,
   invalidateData,
