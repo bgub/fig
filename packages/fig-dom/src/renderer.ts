@@ -54,6 +54,10 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+function isDocumentContainer(container: Container): container is Document {
+  return container.nodeType === 9;
+}
+
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: createDomElement,
   createTextInstance: (text) => document.createTextNode(text),
@@ -112,12 +116,14 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
-    let child = container.firstChild as Element | TextLike | null;
+    let child = container.firstChild as HydrationNode | null;
 
     while (child !== null) {
-      const next = child.nextSibling as Element | TextLike | null;
-      detachSubtree(child as Element | Text);
-      container.removeChild(child);
+      const next = child.nextSibling as HydrationNode | null;
+      if (child.nodeType !== 10) {
+        detachSubtree(child as Element | Text);
+        container.removeChild(child);
+      }
       child = next;
     }
 
@@ -180,6 +186,9 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   getSuspenseBoundary: suspenseBoundaryFor,
   getEnclosingSuspenseBoundaryStart: enclosingSuspenseBoundaryStart,
   isTargetWithinSuspenseBoundary: isWithinSuspenseBoundary,
+  shouldRecoverSuspenseMismatchAtRoot: (container, boundary) =>
+    isDocumentContainer(container) &&
+    isWithinSuspenseBoundary(container.documentElement, boundary),
   registerSuspenseBoundaryRetry: (boundary, retry) => {
     (boundary.start as RetriableSuspenseMarker).__figRetry = retry;
   },

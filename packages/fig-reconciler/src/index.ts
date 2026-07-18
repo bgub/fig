@@ -385,6 +385,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     target: unknown,
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): boolean;
+  shouldRecoverSuspenseMismatchAtRoot?(
+    container: Container,
+    boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
+  ): boolean;
   registerSuspenseBoundaryRetry?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
     retry: () => void,
@@ -1364,6 +1368,19 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (state?.kind !== "dehydrated") {
       markHydrationRecovery(root, "root");
+      forceClientRender(root);
+      performRoot(root, true);
+      return;
+    }
+
+    if (
+      host.shouldRecoverSuspenseMismatchAtRoot?.(
+        root.container,
+        state.boundary,
+      ) === true
+    ) {
+      markHydrationRecovery(root, "root");
+      state.boundary.forceClientRender = true;
       forceClientRender(root);
       performRoot(root, true);
       return;
@@ -4437,7 +4454,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       const commitHostChanges = () => {
         if (root.clearContainerBeforeCommit) {
           requireHydrationHostConfig().clearContainer(root.container);
-          root.clearContainerBeforeCommit = false;
         }
         if (root.needsCommitDeletions) {
           commitDeletions(root);
@@ -4454,6 +4470,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (hasHiddenBoundaries)
           commitHiddenBoundaryVisibility(finishedWork.child);
         if (__DEV__) assertPlacedHostCommitParity(finishedWork.child, false);
+        root.clearContainerBeforeCommit = false;
       };
       const completeCommit = () => {
         // Recompute from committed reality: the eager render-time set is sticky, so
@@ -5462,6 +5479,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function hostSibling(node: F): HostNode<Instance, TextInstance> | null {
+    // Root hydration recovery removes every existing host sibling before
+    // placement. Keep the flag live through mutations so none of those
+    // detached nodes can become an insertion anchor.
+    if (rootOf(node).clearContainerBeforeCommit) return null;
+
     const dehydratedBoundary = dehydratedSuspenseParent(node);
     if (dehydratedBoundary !== null) return dehydratedBoundary.start;
 

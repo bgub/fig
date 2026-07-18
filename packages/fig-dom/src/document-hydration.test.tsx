@@ -136,4 +136,46 @@ describe("document hydration", () => {
     expect(end.parentNode).toBeNull();
     expect(serverDocument.querySelector("main")?.textContent).toBe("Ready");
   });
+
+  it("recovers a full-document mismatch inside a completed Suspense boundary", async () => {
+    const serverDocument = document.implementation.createHTMLDocument("");
+    const doctype = document.implementation.createDocumentType("html", "", "");
+    const start = serverDocument.createComment("fig:suspense:completed");
+    const end = serverDocument.createComment("/fig:suspense");
+    serverDocument.insertBefore(doctype, serverDocument.documentElement);
+    serverDocument.insertBefore(start, doctype);
+    serverDocument.appendChild(end);
+    serverDocument.body.innerHTML = "<main>Server</main>";
+    const recoverableErrors: unknown[] = [];
+
+    expect(() =>
+      flushSync(() =>
+        hydrateRoot(
+          serverDocument,
+          createElement(
+            Suspense,
+            { fallback: null },
+            createElement(
+              "html",
+              null,
+              createElement("head"),
+              createElement(
+                "body",
+                null,
+                createElement("main", null, "Client"),
+              ),
+            ),
+          ),
+          { onRecoverableError: (error) => recoverableErrors.push(error) },
+        ),
+      ),
+    ).not.toThrow();
+
+    await waitForHostTurns();
+
+    expect(recoverableErrors).toHaveLength(1);
+    expect(serverDocument.doctype).toBe(doctype);
+    expect(serverDocument.querySelectorAll("html")).toHaveLength(1);
+    expect(serverDocument.querySelector("main")?.textContent).toBe("Client");
+  });
 });

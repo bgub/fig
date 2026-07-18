@@ -13,7 +13,7 @@ A deliberate cleanup of react-reconciler's config, not a clone. The required cor
 Hydration is split into capability groups:
 
 - General host adoption requires `getFirstHydratableChild`, `getNextHydratableSibling`, `canHydrateInstance`, `canHydrateTextInstance`, and `clearContainer`; `commitHydratedInstance` is optional within that group.
-- Suspense hydration is seven methods around the host-owned `DehydratedSuspenseBoundary`: boundary parsing, enclosing-boundary lookup, containment fallback, retry registration, hydrated commit, root-hydration completion, and dehydrated-boundary removal.
+- Suspense hydration is seven required methods around the host-owned `DehydratedSuspenseBoundary`: boundary parsing, enclosing-boundary lookup, containment fallback, retry registration, hydrated commit, root-hydration completion, and dehydrated-boundary removal. A host may also classify boundary mismatches that cannot be replaced locally with `shouldRecoverSuspenseMismatchAtRoot`; fig-dom uses this for a boundary that encloses a `Document`'s document element.
 - Activity hydration/visibility is seven methods: boundary parsing and first- child lookup, hydrated commit, and instance/text hide/unhide hooks.
 
 Each `HostConfig` member remains optional so a renderer can omit a capability; the exported `HostHydrationConfig`, `HostSuspenseHydrationConfig`, and `HostActivityConfig` types express the complete groups for renderers that implement them. Marker parsing stays in the renderer package where the markup knowledge lives.
