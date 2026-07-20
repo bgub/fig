@@ -5,7 +5,6 @@ import { routeTree } from "./routeTree.gen.ts";
 export function getRouter() {
   return createRouter({
     ...createStartDataContext(),
-    defaultPendingMs: 0,
     isServer: typeof document === "undefined",
     routeTree,
   });

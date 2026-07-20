@@ -1540,7 +1540,8 @@ export function Link<
   const TMaskTo extends string = "",
 >(props: LinkProps<TFrom, TTo, TMaskFrom, TMaskTo>): FigNode {
   const router = useRouter<RegisteredRouter>();
-  const currentLocation = useReadableStore(router.stores.location);
+  const resolvedLocation = useReadableStore(router.stores.resolvedLocation);
+  const currentLocation = resolvedLocation ?? router.stores.location.get();
   const {
     _fromLocation,
     activeOptions,
@@ -1566,6 +1567,7 @@ export function Link<
     target,
     to,
     unsafeRelative: _unsafeRelative,
+    viewTransition: _viewTransition,
     ...anchorProps
   } = props;
   const absolute = isAbsoluteLinkTarget(to, router.origin);

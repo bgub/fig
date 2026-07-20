@@ -4,6 +4,7 @@ import {
   encodePayloadDataEntries,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
+import { serializableStartData } from "./payload-internal.ts";
 import { requireStartDataStore } from "./store.ts";
 
 export const startDataScriptId = "__fig_tanstack_start_data__";
@@ -30,7 +31,9 @@ export function hydrateStartDataStore(
 export function serializeStartDataStore(
   dataStore: FigDataStoreController,
 ): string {
-  return escapeJson(encodePayloadDataEntries(dataStore.snapshot()));
+  return escapeJson(
+    encodePayloadDataEntries(serializableStartData(dataStore.snapshot())),
+  );
 }
 
 function hydrateDataStore(

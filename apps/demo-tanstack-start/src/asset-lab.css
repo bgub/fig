@@ -1,0 +1,19 @@
+.asset-lab-root {
+  background: var(--fig-start-card);
+  border: 1px solid var(--fig-start-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+}
+
+.asset-lab-title {
+  font-size: 1.875rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.asset-lab-copy {
+  color: var(--fig-start-muted);
+  margin: 6px 0 0;
+}

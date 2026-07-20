@@ -76,6 +76,9 @@ describe("@bgub/fig-tanstack-start server", () => {
     expect(html).toContain('type="application/ld+json"');
     expect(html).toContain('"name":"\\u003c/script\\u003e"');
     expect(html).toContain("<main>user-42</main>");
+    expect(html).toContain(
+      'data-fig-hydration-skip id="__fig_tanstack_start_data__"',
+    );
     expect(loads).toBe(1);
     expect(
       router.stores.getRouteMatchStore("/users/$id").get()?.loaderData,

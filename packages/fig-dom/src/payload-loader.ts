@@ -29,6 +29,8 @@ export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
   prepareAssets?: (
     assets: readonly FigAssetResource[],
   ) => void | PromiseLike<void>;
+  /** Retains asset declarations for a server document renderer. */
+  retainAssets?: boolean;
   /**
    * Produces the payload response — typically a fetch of the framework's
    * serialized-component endpoint. Receives the resource arguments and the
@@ -106,6 +108,7 @@ export function payloadDataLoader<TArgs extends unknown[]>(
       },
       prepareAssets:
         options.prepareAssets ?? ((assets) => insertAssetResources(assets)),
+      retainAssets: options.retainAssets,
       resolveClientReference: options.resolveClientReference,
       signal,
     });

@@ -48,7 +48,9 @@ export function writeScript(
   code: string,
   write: WriteChunk,
 ): void {
-  write(`<script${nonceAttribute(request.nonce)}>${code}</script>`);
+  write(
+    `<script ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute(request.nonce)}>${code}</script>`,
+  );
 }
 
 // Queues replayable events that fire before the client bundle executes so

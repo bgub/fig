@@ -519,6 +519,55 @@ describe("decodePayloadStream", () => {
     expect(await done).toEqual({ status: "complete" });
   });
 
+  it("retains assets on the decoded row that declared them", async () => {
+    const root = (await decodeRows(
+      [
+        {
+          for: 0,
+          tag: "assets",
+          value: [{ href: "/route.css", kind: "stylesheet" }],
+        } as PayloadRow,
+        model(0, element("main", { children: "styled" })),
+      ],
+      { retainAssets: true },
+    )) as FigElement;
+
+    expect(root.props.assets).toEqual([
+      { href: "/route.css", kind: "stylesheet" },
+    ]);
+    const content = root.props.children as FigElement;
+    expect(content.type).toBe("main");
+    expect(content.props.children).toBe("styled");
+  });
+
+  it("retains late assets on their outlined hole instead of the root", async () => {
+    const root = (await decodeRows(
+      [
+        model(0, element("main", { children: { $fig: "lazy", id: 1 } })),
+        {
+          for: 1,
+          tag: "assets",
+          value: [{ href: "/hole.css", kind: "stylesheet" }],
+        } as PayloadRow,
+        model(1, element("section", { children: "late" })),
+      ],
+      { retainAssets: true },
+    )) as FigElement;
+
+    expect(root.type).toBe("main");
+    await tick();
+    const holeElement = root.props.children as FigElement;
+    const hole = withTestDispatcher(() =>
+      (holeElement.type as (props: FigElement["props"]) => FigNode)(
+        holeElement.props,
+      ),
+    ) as FigElement;
+    expect(hole.props.assets).toEqual([
+      { href: "/hole.css", kind: "stylesheet" },
+    ]);
+    expect((hole.props.children as FigElement).type).toBe("section");
+  });
+
   it("reveals gated content when the asset gate rejects", async () => {
     const decode = decodeRows(
       [
@@ -614,6 +663,35 @@ describe("decodePayloadStream", () => {
     const rendered = renderNode(root) as FigElement;
     expect(rendered.type).toBe("em");
     expect(rendered.props.children).toBe("solid");
+  });
+
+  it("retains client-reference assets around the resolved island", async () => {
+    const root = (await decodeRows(
+      [
+        {
+          id: 1,
+          tag: "client",
+          value: {
+            assets: [{ href: "/widget.css", kind: "stylesheet" }],
+            id: "src/Widget.tsx#Widget",
+          },
+        },
+        model(0, element({ $fig: "client", id: 1 }, { label: "solid" })),
+      ],
+      {
+        resolveClientReference: () => (props: { label: string }) =>
+          createElement("em", null, props.label),
+        retainAssets: true,
+      },
+    )) as FigElement;
+
+    const retained = withTestDispatcher(() =>
+      (root.type as (props: FigElement["props"]) => FigNode)(root.props),
+    ) as FigElement;
+    expect(retained.props.assets).toEqual([
+      { href: "/widget.css", kind: "stylesheet" },
+    ]);
+    expect((retained.props.children as FigElement).type).toBeTypeOf("function");
   });
 
   it("keeps ungated resolved references identity-stable across decodes", async () => {

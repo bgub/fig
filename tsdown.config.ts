@@ -64,6 +64,7 @@ const libraryEntries: Record<string, string[] | Record<string, string>> = {
     "default-entry/client": "./src/default-entry/client.ts",
     "default-entry/server": "./src/default-entry/server.ts",
     "default-entry/start": "./src/default-entry/start.ts",
+    payload: "./src/payload.ts",
     server: "./src/server.tsx",
     "storage-context": "./src/storage-context.ts",
     "plugin/vite": "./src/plugin/vite.ts",

@@ -1,0 +1,42 @@
+.root {
+  align-items: center;
+  background: var(--fig-start-card);
+  border: 1px solid var(--fig-start-link);
+  border-radius: 8px;
+  color: var(--fig-start-fg);
+  cursor: pointer;
+  display: inline-grid;
+  font: inherit;
+  gap: 12px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  justify-self: start;
+  max-width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.root:hover {
+  background: var(--fig-start-hover);
+  border-color: var(--fig-start-link);
+}
+
+.mark {
+  display: block;
+  height: 40px;
+  width: 40px;
+}
+
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.count {
+  color: var(--fig-start-link);
+  font-size: 0.875rem;
+}

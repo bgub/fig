@@ -3,6 +3,7 @@ import {
   type FigDataStoreController,
   type FigNode,
 } from "@bgub/fig";
+import { HYDRATION_SKIP_ATTRIBUTE } from "@bgub/fig/internal";
 import {
   type AnyRouter,
   type RouteDataContext,
@@ -44,8 +45,11 @@ export function createStartDataContext<TContext extends object = {}>(
 
 export function StartData(): FigNode {
   const router = useRouter<AnyRouter>();
+  if (!router.isServer) return null;
+
   const dataStore = requireStartDataStore(router.options.context);
   return createElement("script", {
+    [HYDRATION_SKIP_ATTRIBUTE]: true,
     id: startDataScriptId,
     type: "application/json",
     unsafeHTML: serializeStartDataStore(dataStore),

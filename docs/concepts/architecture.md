@@ -14,7 +14,7 @@ Every app-facing export has exactly one home: behavior lives in the package whos
 - `@bgub/fig-server` — server rendering (`renderToStream` grid, `prerender`) and the `./payload` server half (`renderToPayloadStream`). The serializer and decoder share their private row/value format through `@bgub/fig/internal`; Fig Start owns its document frame transport. The `./html` subpath owns `escapeAttribute`/`escapeText`, whose contract is "consistent with fig-server's own HTML emission".
 - `@bgub/fig-refresh` — the published HMR runtime layer.
 - `@bgub/fig-tanstack-router` — the TanStack Router framework adapter: Fig route components and hooks, the private reactive-store bridge supplied to `RouterCore`, and native anchor navigation. Matching, loading, and history remain owned by `@tanstack/router-core`.
-- `@bgub/fig-tanstack-start` — the TanStack Start runtime adapter: one Fig-owned request/root data store, Fig document-data serialization, and Fig server/client rendering around Start's request and hydration cores.
+- `@bgub/fig-tanstack-start` — the TanStack Start runtime adapter: one Fig-owned request/root data store, Fig document-data serialization, Payload route serving/adoption, and Fig server/client rendering around Start's request and hydration cores.
 - `@bgub/fig-start`, `@bgub/fig-vite`, and `@bgub/fig-devtools` — implemented framework, bundler, and DevTools workspace previews. They are private and excluded from the synchronized public release group today.
 
 fig-server is a fully separate render implementation (it depends only on `@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never grew a server mode.

@@ -19,7 +19,7 @@ describe("document hydration", () => {
     const doctype = document.implementation.createDocumentType("html", "", "");
     document.insertBefore(doctype, document.documentElement);
     document.head.innerHTML = `<script ${HYDRATION_SKIP_ATTRIBUTE}=""></script><link rel="preconnect" href="https://example.com"><meta ${HYDRATION_SKIP_ATTRIBUTE}="" charset="utf-8">`;
-    document.body.innerHTML = "<main>Ready</main>";
+    document.body.innerHTML = `<main>Ready</main><script ${HYDRATION_SKIP_ATTRIBUTE}="">globalThis.__figSSR={}</script>`;
     const serverHtml = document.documentElement;
     const recoverableErrors: unknown[] = [];
 
@@ -52,6 +52,7 @@ describe("document hydration", () => {
     expect(document.doctype).toBe(doctype);
     expect(document.querySelectorAll("html")).toHaveLength(1);
     expect(document.querySelector("main")?.textContent).toBe("Ready");
+    expect(document.body.lastElementChild?.tagName).toBe("SCRIPT");
   });
 
   it("hydrates a document whose first DOM element follows a doctype", () => {

@@ -48,7 +48,6 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 fig-start predates the adapter direction and now serves as a reference implementation; the metaframework bet is the shipped `@bgub/fig-tanstack-router` and `@bgub/fig-tanstack-start` adapters. Data resources are the external cache for route data (`ensureRouteData` delegates to `ensureData` without creating `loaderData`, and data-backed routers default `defaultPreloadStaleTime` to `0` — see `docs/concepts/data.md` and the adapter README).
 
 - **Native TanStack Start framework target** — generated and lazy file routes are shipped, but plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Upstream needs an extensible framework descriptor (package ids, route templates, compiler imports, refresh behavior) before Fig can remove its private Solid package-id mappings. The route objects, runtime, store, and hydration contracts do not depend on that change.
-- **Payload routes inside TanStack Router** — a route loader ensuring a `payloadDataLoader`-backed resource yields server-component routes. Needs a serving side, so it lands with the Start adapter (demo-payload covers payload-as-resource today; fig-start's `routeResource` is the reference).
 - **TanStack Query adapter** — a Query-flavored API over data resources would layer freshness policy (stale timers, refetch-on-focus) above the two core verbs, the same core/framework split as `remoteDataResource`. Build when demand appears.
 
 ## fig-start

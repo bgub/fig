@@ -123,6 +123,12 @@ function Profile({ id }: { id: string }) {
 
 Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns the root-value promise directly — it resolves at the root row while background ingestion continues. An `onStreamDone` option reports how ingestion ended (post-root failures reject the holes they strand), and aborting the options `signal` retires unresolved holes with an internal cancellation reason.
 
+Server-side decoders that feed Fig's HTML renderer set `retainAssets: true`. That keeps each streamed asset declaration attached to its owning root, outlined hole, or client reference, so the HTML renderer emits it before the dependent segment instead of racing a pre-render asset snapshot.
+
+### TanStack Start routes
+
+`@bgub/fig-tanstack-start/payload` packages that same pattern for TanStack Start. `payloadResource` wraps a raw Payload-returning server function; route loaders call `ensureRouteData`, and route components call `readData`. On SSR the adapter embeds the response stream into the document and retains asset declarations on their decoded owners, letting the document renderer deliver them before dependent HTML. The browser adopts the embedded root without refetching, then uses the server function normally for navigation and refresh. Shell HTML streams immediately, while TanStack's hydration barrier waits for outlined Payload holes before each completed response enters a keyed carrier. See the [adapter guide](../packages/fig-tanstack-start/README.md#payload-routes) for the complete serving, resource, resolver, and route example.
+
 ## Refreshing
 
 There is no refresh protocol, because there doesn't need to be one: **the resource key is the refresh boundary.**

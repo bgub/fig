@@ -11,11 +11,12 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
-import { Route as ComponentRedirectRouteImport } from './routes/component-redirect'
-import { Route as LegacyUsersRouteImport } from './routes/legacy-users'
-import { Route as UsersRouteImport } from './routes/users'
-import { Route as UsersIndexRouteImport } from './routes/users.index'
-import { Route as UsersUserIdRouteImport } from './routes/users.$userId'
+import { Route as AssetLabRouteImport } from './routes/asset-lab'
+import { Route as DataRouteImport } from './routes/data'
+import { Route as PostsRouteImport } from './routes/posts'
+import { Route as ViewTransitionsRouteImport } from './routes/view-transitions'
+import { Route as PostsIndexRouteImport } from './routes/posts.index'
+import { Route as PostsPostIdRouteImport } from './routes/posts.$postId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -26,95 +27,107 @@ const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
   getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/about.lazy').then((d) => d.Route))
-const ComponentRedirectRoute = ComponentRedirectRouteImport.update({
-  id: '/component-redirect',
-  path: '/component-redirect',
+} as any)
+const AssetLabRoute = AssetLabRouteImport.update({
+  id: '/asset-lab',
+  path: '/asset-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LegacyUsersRoute = LegacyUsersRouteImport.update({
-  id: '/legacy-users',
-  path: '/legacy-users',
+const DataRoute = DataRouteImport.update({
+  id: '/data',
+  path: '/data',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UsersRoute = UsersRouteImport.update({
-  id: '/users',
-  path: '/users',
+const PostsRoute = PostsRouteImport.update({
+  id: '/posts',
+  path: '/posts',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UsersIndexRoute = UsersIndexRouteImport.update({
+const ViewTransitionsRoute = ViewTransitionsRouteImport.update({
+  id: '/view-transitions',
+  path: '/view-transitions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostsIndexRoute = PostsIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => UsersRoute,
+  getParentRoute: () => PostsRoute,
 } as any)
-const UsersUserIdRoute = UsersUserIdRouteImport.update({
-  id: '/$userId',
-  path: '/$userId',
-  getParentRoute: () => UsersRoute,
+const PostsPostIdRoute = PostsPostIdRouteImport.update({
+  id: '/$postId',
+  path: '/$postId',
+  getParentRoute: () => PostsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/component-redirect': typeof ComponentRedirectRoute
-  '/legacy-users': typeof LegacyUsersRoute
-  '/users': typeof UsersRouteWithChildren
-  '/users/$userId': typeof UsersUserIdRoute
-  '/users/': typeof UsersIndexRoute
+  '/asset-lab': typeof AssetLabRoute
+  '/data': typeof DataRoute
+  '/posts': typeof PostsRouteWithChildren
+  '/view-transitions': typeof ViewTransitionsRoute
+  '/posts/$postId': typeof PostsPostIdRoute
+  '/posts/': typeof PostsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/component-redirect': typeof ComponentRedirectRoute
-  '/legacy-users': typeof LegacyUsersRoute
-  '/users/$userId': typeof UsersUserIdRoute
-  '/users': typeof UsersIndexRoute
+  '/asset-lab': typeof AssetLabRoute
+  '/data': typeof DataRoute
+  '/view-transitions': typeof ViewTransitionsRoute
+  '/posts/$postId': typeof PostsPostIdRoute
+  '/posts': typeof PostsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/component-redirect': typeof ComponentRedirectRoute
-  '/legacy-users': typeof LegacyUsersRoute
-  '/users': typeof UsersRouteWithChildren
-  '/users/$userId': typeof UsersUserIdRoute
-  '/users/': typeof UsersIndexRoute
+  '/asset-lab': typeof AssetLabRoute
+  '/data': typeof DataRoute
+  '/posts': typeof PostsRouteWithChildren
+  '/view-transitions': typeof ViewTransitionsRoute
+  '/posts/$postId': typeof PostsPostIdRoute
+  '/posts/': typeof PostsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/about'
-    | '/component-redirect'
-    | '/legacy-users'
-    | '/users'
-    | '/users/$userId'
-    | '/users/'
+    | '/asset-lab'
+    | '/data'
+    | '/posts'
+    | '/view-transitions'
+    | '/posts/$postId'
+    | '/posts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
-    | '/component-redirect'
-    | '/legacy-users'
-    | '/users/$userId'
-    | '/users'
+    | '/asset-lab'
+    | '/data'
+    | '/view-transitions'
+    | '/posts/$postId'
+    | '/posts'
   id:
     | '__root__'
     | '/'
     | '/about'
-    | '/component-redirect'
-    | '/legacy-users'
-    | '/users'
-    | '/users/$userId'
-    | '/users/'
+    | '/asset-lab'
+    | '/data'
+    | '/posts'
+    | '/view-transitions'
+    | '/posts/$postId'
+    | '/posts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
-  ComponentRedirectRoute: typeof ComponentRedirectRoute
-  LegacyUsersRoute: typeof LegacyUsersRoute
-  UsersRoute: typeof UsersRouteWithChildren
+  AssetLabRoute: typeof AssetLabRoute
+  DataRoute: typeof DataRoute
+  PostsRoute: typeof PostsRouteWithChildren
+  ViewTransitionsRoute: typeof ViewTransitionsRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -133,62 +146,70 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/component-redirect': {
-      id: '/component-redirect'
-      path: '/component-redirect'
-      fullPath: '/component-redirect'
-      preLoaderRoute: typeof ComponentRedirectRouteImport
+    '/asset-lab': {
+      id: '/asset-lab'
+      path: '/asset-lab'
+      fullPath: '/asset-lab'
+      preLoaderRoute: typeof AssetLabRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/legacy-users': {
-      id: '/legacy-users'
-      path: '/legacy-users'
-      fullPath: '/legacy-users'
-      preLoaderRoute: typeof LegacyUsersRouteImport
+    '/data': {
+      id: '/data'
+      path: '/data'
+      fullPath: '/data'
+      preLoaderRoute: typeof DataRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/users': {
-      id: '/users'
-      path: '/users'
-      fullPath: '/users'
-      preLoaderRoute: typeof UsersRouteImport
+    '/posts': {
+      id: '/posts'
+      path: '/posts'
+      fullPath: '/posts'
+      preLoaderRoute: typeof PostsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/users/': {
-      id: '/users/'
+    '/view-transitions': {
+      id: '/view-transitions'
+      path: '/view-transitions'
+      fullPath: '/view-transitions'
+      preLoaderRoute: typeof ViewTransitionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/posts/': {
+      id: '/posts/'
       path: '/'
-      fullPath: '/users/'
-      preLoaderRoute: typeof UsersIndexRouteImport
-      parentRoute: typeof UsersRoute
+      fullPath: '/posts/'
+      preLoaderRoute: typeof PostsIndexRouteImport
+      parentRoute: typeof PostsRoute
     }
-    '/users/$userId': {
-      id: '/users/$userId'
-      path: '/$userId'
-      fullPath: '/users/$userId'
-      preLoaderRoute: typeof UsersUserIdRouteImport
-      parentRoute: typeof UsersRoute
+    '/posts/$postId': {
+      id: '/posts/$postId'
+      path: '/$postId'
+      fullPath: '/posts/$postId'
+      preLoaderRoute: typeof PostsPostIdRouteImport
+      parentRoute: typeof PostsRoute
     }
   }
 }
 
-interface UsersRouteChildren {
-  UsersUserIdRoute: typeof UsersUserIdRoute
-  UsersIndexRoute: typeof UsersIndexRoute
+interface PostsRouteChildren {
+  PostsPostIdRoute: typeof PostsPostIdRoute
+  PostsIndexRoute: typeof PostsIndexRoute
 }
 
-const UsersRouteChildren: UsersRouteChildren = {
-  UsersUserIdRoute: UsersUserIdRoute,
-  UsersIndexRoute: UsersIndexRoute,
+const PostsRouteChildren: PostsRouteChildren = {
+  PostsPostIdRoute: PostsPostIdRoute,
+  PostsIndexRoute: PostsIndexRoute,
 }
 
-const UsersRouteWithChildren = UsersRoute._addFileChildren(UsersRouteChildren)
+const PostsRouteWithChildren = PostsRoute._addFileChildren(PostsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
-  ComponentRedirectRoute: ComponentRedirectRoute,
-  LegacyUsersRoute: LegacyUsersRoute,
-  UsersRoute: UsersRouteWithChildren,
+  AssetLabRoute: AssetLabRoute,
+  DataRoute: DataRoute,
+  PostsRoute: PostsRouteWithChildren,
+  ViewTransitionsRoute: ViewTransitionsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

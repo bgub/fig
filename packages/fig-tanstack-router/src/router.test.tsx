@@ -196,6 +196,7 @@ describe("@bgub/fig-tanstack-router", () => {
     const link = container.querySelector<HTMLAnchorElement>("#user-link");
     expect(link?.getAttribute("href")).toBe("/users/42?tab=profile");
     expect(link?.getAttribute("data-status")).toBeNull();
+    expect(link?.hasAttribute("viewtransition")).toBe(false);
 
     const externalLink =
       container.querySelector<HTMLAnchorElement>("#external-link");
@@ -238,6 +239,28 @@ describe("@bgub/fig-tanstack-router", () => {
       .querySelector<HTMLAnchorElement>("#preload-link")
       ?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     expect(preload).toHaveBeenCalledOnce();
+  });
+
+  it("keeps link activity on the resolved route while navigation is pending", async () => {
+    const router = makeRouter();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    const link = container.querySelector<HTMLAnchorElement>("#user-link");
+    const pending = router.buildLocation({
+      params: { id: "42" },
+      search: { tab: "profile" },
+      to: "/users/$id",
+    });
+
+    await act(() => router.stores.location.set(pending));
+    expect(link?.getAttribute("data-status")).toBeNull();
+
+    await act(() => router.stores.resolvedLocation.set(pending));
+    expect(link?.getAttribute("data-status")).toBe("active");
   });
 
   it("omits href and exposes native accessibility state when disabled", async () => {
@@ -557,6 +580,7 @@ function Layout(): FigNode {
         params={{ id: "42" }}
         search={{ tab: "profile" }}
         to="/users/$id"
+        viewTransition
       >
         User
       </Link>

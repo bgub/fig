@@ -38,6 +38,10 @@ const entries = [
     "@bgub/fig-tanstack-start/server",
     "packages/fig-tanstack-start/src/server.tsx",
   ],
+  [
+    "@bgub/fig-tanstack-start/payload",
+    "packages/fig-tanstack-start/src/payload.ts",
+  ],
   ["@bgub/fig-tanstack-start", "packages/fig-tanstack-start/src/data.ts"],
   ["@bgub/fig", "packages/fig/src/index.ts"],
 ] as const;

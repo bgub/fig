@@ -1,71 +1,166 @@
 @import "tailwindcss";
 @source "./src";
 
-@theme {
-  --color-canvas: #fafaf7;
-  --color-ink: #1c1c1f;
-  --color-muted: #77777e;
-  --color-line: #dcdcd4;
-  --color-route: #2f6fed;
-  --color-route-tint: #f3f6fe;
-  --color-data: #d97706;
-  --color-data-tint: #fcf7ef;
-  --color-fig: #059669;
-  --color-fig-tint: #f1f9f5;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
 @layer base {
-  :root {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    --fig-start-bg: #f5f7f8;
+    --fig-start-card: #ffffff;
+    --fig-start-fg: #182025;
+    --fig-start-muted: #64748b;
+    --fig-start-border: #cbd5e1;
+    --fig-start-link: #0f766e;
+    --fig-start-hover: #f1f5f9;
+    --fig-start-selected-bg: #0f766e;
+    --fig-start-selected-fg: #ffffff;
+  }
+
+  html.dark {
+    --fig-start-bg: #101820;
+    --fig-start-card: #18242d;
+    --fig-start-fg: #e7eef2;
+    --fig-start-muted: #a8b7c2;
+    --fig-start-border: #40505b;
+    --fig-start-link: #5eead4;
+    --fig-start-hover: #24333d;
+    --fig-start-selected-bg: #5eead4;
+    --fig-start-selected-fg: #101820;
+    color-scheme: dark;
+  }
+
+  html.light {
     color-scheme: light;
-    color: var(--color-ink);
-    background: var(--color-canvas);
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-synthesis: none;
-    text-rendering: optimizeLegibility;
   }
 
   body {
-    min-width: 320px;
-    min-height: 100vh;
     margin: 0;
-    background-color: var(--color-canvas);
-    background-image:
-      linear-gradient(rgb(28 28 31 / 4%) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(28 28 31 / 4%) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background: var(--fig-start-bg);
+    color: var(--fig-start-fg);
+    font-family:
+      system-ui,
+      -apple-system,
+      sans-serif;
+    line-height: 1.5;
   }
 
-  button,
   a {
-    font: inherit;
+    color: var(--fig-start-link);
+    text-decoration: none;
   }
 
-  button:focus-visible,
-  a:focus-visible {
-    outline: 2px solid var(--color-route);
-    outline-offset: 3px;
+  a:hover {
+    text-decoration: underline;
+  }
+
+  h1,
+  h2 {
+    line-height: 1.2;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+
+  ::view-transition-group(start-vt-page-title),
+  ::view-transition-group(start-vt-router),
+  ::view-transition-group(start-vt-stream),
+  ::view-transition-group(start-vt-hydration),
+  ::view-transition-group(start-vt-detail) {
+    animation-duration: 280ms;
+    animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  ::view-transition-old(start-vt-page-title) {
+    animation: fig-start-title-out 180ms ease-in both;
+  }
+
+  ::view-transition-new(start-vt-page-title) {
+    animation: fig-start-title-in 280ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  @keyframes fig-start-title-out {
+    to {
+      opacity: 0.35;
+    }
+  }
+
+  @keyframes fig-start-title-in {
+    from {
+      opacity: 0.35;
+    }
+  }
+
+  @media (prefers-color-scheme: light) {
+    html.system {
+      color-scheme: light;
+    }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html.system {
+      --fig-start-bg: #101820;
+      --fig-start-card: #18242d;
+      --fig-start-fg: #e7eef2;
+      --fig-start-muted: #a8b7c2;
+      --fig-start-border: #40505b;
+      --fig-start-link: #5eead4;
+      --fig-start-hover: #24333d;
+      --fig-start-selected-bg: #5eead4;
+      --fig-start-selected-fg: #101820;
+      color-scheme: dark;
+    }
   }
 }
 
-@layer components {
-  .frame {
-    @apply relative rounded-lg border-[1.5px] bg-white;
+@layer utilities {
+  .fig-start-shell {
+    background: var(--fig-start-bg);
+    color: var(--fig-start-fg);
   }
 
-  .frame-tag {
-    @apply absolute -top-2.5 left-3.5 rounded-sm bg-canvas px-2 py-0.5 font-mono text-[10px] leading-none font-semibold tracking-[0.14em] uppercase whitespace-nowrap;
+  .fig-start-shell .bg-white {
+    background: var(--fig-start-card);
   }
 
-  .button {
-    @apply inline-flex min-h-9 cursor-pointer items-center justify-center rounded-md border-[1.5px] px-3.5 py-2 font-mono text-[13px] leading-none font-medium no-underline transition-colors;
+  .fig-start-shell .border-slate-300 {
+    border-color: var(--fig-start-border);
   }
 
-  .button-route {
-    @apply border-route bg-route-tint text-route hover:bg-white;
+  .fig-start-shell .text-slate-950,
+  .fig-start-shell .text-slate-800,
+  .fig-start-shell .text-slate-700 {
+    color: var(--fig-start-fg);
   }
 
-  .button-quiet {
-    @apply border-line bg-transparent text-ink hover:border-ink hover:bg-white;
+  .fig-start-shell .text-slate-500 {
+    color: var(--fig-start-muted);
+  }
+
+  .fig-start-shell .text-teal-700,
+  .fig-start-shell .text-teal-800 {
+    color: var(--fig-start-link);
+  }
+
+  .fig-start-shell .bg-teal-50,
+  .fig-start-shell .bg-slate-100 {
+    background: var(--fig-start-hover);
+  }
+
+  [data-theme-choice] + [data-theme-choice] {
+    border-left: 1px solid var(--fig-start-border);
+  }
+
+  [data-theme-choice]:hover {
+    background: var(--fig-start-hover);
+  }
+
+  [data-theme-selected],
+  [data-theme-selected]:hover {
+    background: var(--fig-start-selected-bg);
+    color: var(--fig-start-selected-fg);
   }
 }

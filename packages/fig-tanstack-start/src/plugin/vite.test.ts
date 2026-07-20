@@ -47,6 +47,12 @@ describe("tanstackStart", () => {
     ]);
   });
 
+  it("emits server-only assets for public delivery", () => {
+    const config = compatibilityPlugin().configEnvironment("ssr", {});
+
+    expect(config?.build?.emitAssets).toBe(true);
+  });
+
   it("keeps compiler RPC modules private to the compatibility plugin", () => {
     const plugin = compatibilityPlugin();
     const id = plugin.resolveId("@tanstack/solid-start/client-rpc");

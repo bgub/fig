@@ -3,25 +3,20 @@ import {
   createMiddleware,
   createStart,
 } from "@bgub/fig-tanstack-start";
+import { themeFromCookie } from "./theme.ts";
 
-const requestIdentity = createMiddleware({ type: "request" }).server(
-  async ({ request, next }) => {
-    const requestId =
-      request.headers.get("x-fig-request-id") ?? crypto.randomUUID();
-    const result = await next({ context: { requestId } });
-    result.response.headers.set("x-fig-request-id", requestId);
-    return result;
-  },
-);
-
-const functionContext = createMiddleware({ type: "function" }).server(
-  ({ next }) => next({ context: { functionMiddleware: true as const } }),
+const requestContext = createMiddleware({ type: "request" }).server(
+  ({ request, next }) =>
+    next({
+      context: {
+        serverTheme: themeFromCookie(request.headers.get("cookie")),
+      },
+    }),
 );
 
 export const startInstance = createStart(() => ({
-  functionMiddleware: [functionContext],
   requestMiddleware: [
-    requestIdentity,
+    requestContext,
     createCsrfMiddleware({
       filter: (context) => context.handlerType === "serverFn",
     }),

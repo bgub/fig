@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   START_ENVIRONMENT_NAMES,
@@ -72,6 +74,8 @@ export function tanstackStart(
 }
 
 function compatibilityPlugin(): PluginOption {
+  let clientOutDir: string | undefined;
+  let serverAssetsPrefix = "assets/";
   return {
     name: "fig-tanstack-start:compatibility",
     enforce: "pre",
@@ -97,6 +101,9 @@ function compatibilityPlugin(): PluginOption {
       };
     },
     configEnvironment(environmentName, environment) {
+      if (environmentName === START_ENVIRONMENT_NAMES.server) {
+        return { build: { emitAssets: true } };
+      }
       if (environmentName !== START_ENVIRONMENT_NAMES.client) return undefined;
       return {
         optimizeDeps: {
@@ -108,6 +115,41 @@ function compatibilityPlugin(): PluginOption {
           ],
         },
       };
+    },
+    configResolved(config) {
+      const outDir =
+        config.environments[START_ENVIRONMENT_NAMES.client]?.build.outDir;
+      if (outDir !== undefined) clientOutDir = resolve(config.root, outDir);
+      const assetsDir =
+        config.environments[START_ENVIRONMENT_NAMES.server]?.build.assetsDir;
+      if (assetsDir !== undefined) {
+        const normalized = assetsDir.replace(/\/+$/, "");
+        serverAssetsPrefix = normalized === "" ? "" : `${normalized}/`;
+      }
+    },
+    async writeBundle(_options, bundle) {
+      if (
+        this.environment.name !== START_ENVIRONMENT_NAMES.server ||
+        clientOutDir === undefined
+      ) {
+        return;
+      }
+
+      const publicOutDir = clientOutDir;
+      await Promise.all(
+        Object.values(bundle).map(async (output) => {
+          if (
+            output.type !== "asset" ||
+            !output.fileName.startsWith(serverAssetsPrefix) ||
+            output.fileName.endsWith(".map")
+          ) {
+            return;
+          }
+          const path = resolve(publicOutDir, output.fileName);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, output.source);
+        }),
+      );
     },
     resolveId(source) {
       return compilerRpcModules.find((module) => module.source === source)?.id;
