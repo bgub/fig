@@ -30,6 +30,25 @@ test("hydrates the themed document and persists shell changes", async ({
   expect(errors()).toEqual([]);
 });
 
+test("includes the Fig DevTools overlay", async ({ page }) => {
+  const errors = collectBrowserErrors(page);
+  await page.goto("/");
+
+  const devtools = page.locator("[data-fig-devtools]");
+  await expect(devtools).toBeVisible();
+  await page.getByRole("button", { name: "Show Fig DevTools" }).click();
+  await expect(
+    devtools.getByText("Fig DevTools", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    devtools.getByText("Fig TanStack Start", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    devtools.locator(".fig-devtools__tree-button").first(),
+  ).toBeVisible();
+  expect(errors()).toEqual([]);
+});
+
 test("themes card surfaces in dark mode", async ({ context, page }) => {
   await context.addCookies([
     {

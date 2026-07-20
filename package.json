@@ -18,7 +18,7 @@
     "test:bench": "node --test benchmarks/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mts",
     "test:dom": "turbo run test --filter=@bgub/fig-dom",
-    "test:e2e": "turbo run test:e2e --concurrency=1 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-start --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
+    "test:e2e": "turbo run test:e2e --concurrency=1 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
     "tegami": "node scripts/tegami.mts",

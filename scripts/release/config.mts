@@ -33,7 +33,6 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-hmr",
       "@bgub/fig-demo-payload",
       "@bgub/fig-demo-ssr",
-      "@bgub/fig-demo-start",
       "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-demo-tanstack-start",
       "@bgub/fig-devtools",

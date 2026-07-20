@@ -184,28 +184,6 @@ importers:
         specifier: ^20.19.0
         version: 20.19.43
 
-  apps/demo-start:
-    dependencies:
-      '@bgub/fig':
-        specifier: workspace:*
-        version: link:../../packages/fig
-      '@bgub/fig-dom':
-        specifier: workspace:*
-        version: link:../../packages/fig-dom
-      '@bgub/fig-server':
-        specifier: workspace:*
-        version: link:../../packages/fig-server
-      '@bgub/fig-start':
-        specifier: workspace:*
-        version: link:../../packages/fig-start
-    devDependencies:
-      '@playwright/test':
-        specifier: ^1.61.1
-        version: 1.61.1
-      '@types/node':
-        specifier: ^20.19.0
-        version: 20.19.43
-
   apps/demo-tanstack-router:
     dependencies:
       '@bgub/fig':
@@ -236,6 +214,9 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../../packages/fig
+      '@bgub/fig-devtools':
+        specifier: workspace:*
+        version: link:../../packages/fig-devtools
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom

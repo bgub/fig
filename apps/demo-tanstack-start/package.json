@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vite --config vite.config.cjs build",
-    "build:e2e": "turbo run build --filter=@bgub/fig-demo-tanstack-start...",
+    "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-tanstack-start...",
     "dev": "portless",
     "dev:app": "vite --config vite.config.cjs",
     "serve": "vite --config vite.config.cjs preview",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@bgub/fig": "workspace:*",
+    "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
     "@bgub/fig-tanstack-start": "workspace:*",

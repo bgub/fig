@@ -1,7 +1,6 @@
 import { relative } from "node:path";
 import { defineConfig } from "tsdown";
 import type { UserConfig } from "tsdown";
-import { figStart } from "./packages/fig-start/src/vite/index.ts";
 import {
   figSourceAliases,
   workspacePath,
@@ -180,40 +179,6 @@ function packConfigFor(path: string): PackConfig | undefined {
           deps: {
             alwaysBundle: [figPackages],
           },
-          sourcemap: true,
-          clean: false,
-        },
-      ];
-    case "apps/demo-start":
-      return [
-        {
-          entry: {
-            "dev-server": "./src/dev-server.ts",
-            server: "virtual:fig-start/server-entry",
-          },
-          alias: isDevSourcePack ? sourceAliases : undefined,
-          define: figDevDefine,
-          deps: figServerDeps(),
-          platform: "node",
-          plugins: [figStart({ tailwind: true, target: "server" })],
-          sourcemap: true,
-        },
-        {
-          entry: { client: "virtual:fig-start/client-entry" },
-          alias: sourceAliases,
-          define: figDevDefine,
-          onSuccess: assertDevBundle("dist"),
-          platform: "browser",
-          deps: {
-            alwaysBundle: [figPackages],
-          },
-          plugins: [
-            figStart({
-              clientNodeEnv: "development",
-              tailwind: true,
-              target: "client",
-            }),
-          ],
           sourcemap: true,
           clean: false,
         },

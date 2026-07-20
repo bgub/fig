@@ -36,11 +36,8 @@
     "//#quality:fix": {
       "dependsOn": ["//#lint:fix", "//#format:fix"]
     },
-    "//#lint": {
-      "dependsOn": ["@bgub/fig-start#build"]
-    },
+    "//#lint": {},
     "//#lint:fix": {
-      "dependsOn": ["@bgub/fig-start#build"],
       "cache": false
     },
     "//#format": {},

@@ -170,7 +170,6 @@ The demo sites run through Portless:
 - `https://fig-demo-client.localhost`
 - `https://fig-demo-ssr.localhost`
 - `https://fig-demo-payload.localhost`
-- `https://fig-demo-start.localhost`
 - `https://fig-demo-tanstack-router.localhost`
 - `https://fig-demo-tanstack-start.localhost`
 

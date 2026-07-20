@@ -5,6 +5,10 @@ module.exports = async () => {
   const port = Number(process.env.PORT ?? 4185);
 
   return {
+    define: {
+      __FIG_DEV__: JSON.stringify(true),
+      "process.env.NODE_ENV": JSON.stringify("development"),
+    },
     plugins: [tanstackStart(), tailwindcss()],
     preview: { host: "127.0.0.1", port },
     server: { host: "127.0.0.1", port },
