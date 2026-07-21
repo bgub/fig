@@ -23,9 +23,7 @@ export function updateStyle(
     );
   }
 
-  const style = (element as HTMLElement).style as unknown as
-    | StyleTarget
-    | undefined;
+  const style = (element as Element & { style?: StyleTarget }).style;
   if (style === undefined) return;
 
   const previousStyle = styleProps(previous);
@@ -62,9 +60,7 @@ export function extraHydratedStyleNames(
 }
 
 export function hydratedStyleNames(element: Element): string[] {
-  const style = (element as HTMLElement).style as unknown as
-    | StyleTarget
-    | undefined;
+  const style = (element as Element & { style?: StyleTarget }).style;
   if (style === undefined) return [];
 
   if (typeof style.length === "number" && typeof style.item === "function") {

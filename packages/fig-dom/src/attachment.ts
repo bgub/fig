@@ -7,14 +7,14 @@ import { visitElementSubtree } from "./tree.ts";
 // (a hook calling one without the other leaks signals or listeners) and
 // halves the traversal per insertion/removal.
 
-export function attachSubtree(node: Element | Text): void {
+export function attachSubtree(node: Node): void {
   visitElementSubtree(node, (element) => {
     attachElementBind(element);
     attachElementEvents(element);
   });
 }
 
-export function detachSubtree(node: Element | Text): void {
+export function detachSubtree(node: Node): void {
   visitElementSubtree(node, (element) => {
     detachElementBind(element);
     detachElementEvents(element);

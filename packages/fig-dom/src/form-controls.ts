@@ -142,7 +142,7 @@ function setDefaultValue(
   const attributeValue = formValue(value);
   const next = attributeValue ?? "";
   if ("defaultValue" in element) {
-    (element as unknown as { defaultValue: string }).defaultValue = next;
+    (element as Element & { defaultValue: string }).defaultValue = next;
   }
   if (type === "textarea") element.textContent = next;
   else setAttribute(element, "value", attributeValue);
@@ -157,7 +157,7 @@ function setFormValue(element: Element, value: unknown): void {
 }
 
 function setLiveValue(element: Element, value: string): void {
-  const target = element as unknown as { value: string };
+  const target = element as Element & { value: string };
   if (target.value !== value) target.value = value;
 }
 
@@ -169,8 +169,7 @@ function setDefaultChecked(
   const checked = value === true;
 
   if ("defaultChecked" in element) {
-    (element as unknown as { defaultChecked: boolean }).defaultChecked =
-      checked;
+    (element as Element & { defaultChecked: boolean }).defaultChecked = checked;
   }
   setAttribute(element, "checked", checked);
   if (live) setLiveChecked(element, value);
@@ -179,7 +178,7 @@ function setDefaultChecked(
 function setLiveChecked(element: Element, value: unknown): void {
   const checked = value === true;
   if ("checked" in element) {
-    (element as unknown as { checked: boolean }).checked = checked;
+    (element as Element & { checked: boolean }).checked = checked;
   } else {
     setAttribute(element, "checked", checked);
   }
@@ -210,7 +209,7 @@ function setOptionSelected(
   const explicitValue = option.getAttribute("value");
   const value =
     explicitValue ?? (option.textContent ?? "").replace(/\s+/g, " ").trim();
-  (option as unknown as { selected: boolean }).selected =
+  (option as Element & { selected: boolean }).selected =
     typeof values === "string" ? value === values : values.has(value);
 }
 

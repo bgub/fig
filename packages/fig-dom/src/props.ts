@@ -257,7 +257,7 @@ function setUnsafeHTML(element: Element, value: unknown): void {
   const html = unsafeHTMLValue(value);
   if (!("innerHTML" in element)) return;
 
-  (element as unknown as { innerHTML: string }).innerHTML = html ?? "";
+  (element as Element & { innerHTML: string }).innerHTML = html ?? "";
 }
 
 function unsafeHTMLValue(value: unknown): string | null {

@@ -3,13 +3,10 @@ export const mathNamespace = "http://www.w3.org/1998/Math/MathML";
 export const svgNamespace = "http://www.w3.org/2000/svg";
 
 export function visitElementSubtree(
-  node: Element | Text,
+  node: Node,
   visitor: (element: Element) => void,
 ): void {
-  if (!("childNodes" in node) || node.firstChild === null) {
-    if (isElementNode(node)) visitor(node);
-    return;
-  }
+  if (!isElementNode(node)) return;
 
   // Visitors run user bind callbacks and abort listeners synchronously.
   // Snapshot the entire original element set before the first callback so a
@@ -21,15 +18,11 @@ export function visitElementSubtree(
   }
 }
 
-function collectElementSubtree(
-  node: Element | Text,
-  elements: Element[],
-): void {
-  if (isElementNode(node)) elements.push(node);
-  if (!("childNodes" in node)) return;
+function collectElementSubtree(node: Element, elements: Element[]): void {
+  elements.push(node);
 
   for (let child = node.firstChild; child !== null; child = child.nextSibling) {
-    collectElementSubtree(child as Element | Text, elements);
+    if (isElementNode(child)) collectElementSubtree(child, elements);
   }
 }
 
@@ -54,9 +47,7 @@ export function elementName(node: unknown): string {
 
 export function isHtmlElement(element: Element): boolean {
   return (
-    !("namespaceURI" in element) ||
-    element.namespaceURI === null ||
-    element.namespaceURI === htmlNamespace
+    element.namespaceURI === null || element.namespaceURI === htmlNamespace
   );
 }
 

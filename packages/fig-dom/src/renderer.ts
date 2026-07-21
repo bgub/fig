@@ -128,7 +128,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     while (child !== null) {
       const next = child.nextSibling as HydrationNode | null;
       if (child.nodeType !== 10) {
-        detachSubtree(child as Element | Text);
+        detachSubtree(child);
         container.removeChild(child);
       }
       child = next;
@@ -144,10 +144,10 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     // re-apply an uncontrolled default — the user owns the live selection
     // (defaults are mount-time only, matching React).
     if (isElementNode(child) && optionLike(child)) updateParentSelect(child);
-    attachSubtree(child as Element | Text);
+    attachSubtree(child);
   },
   removeChild: (parent, child) => {
-    detachSubtree(child as Element | Text);
+    detachSubtree(child);
     parent.removeChild(child);
   },
   commitTextUpdate: (text, value) => {
@@ -176,8 +176,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     (instance as HTMLElement).style.setProperty("display", "none", "important");
   },
   unhideInstance: (instance, props) => {
-    const style = (props.style ?? {}) as Record<string, unknown>;
-    const display = style.display;
+    const display = props.style?.display;
     (instance as HTMLElement).style.setProperty(
       "display",
       typeof display === "string" ? display : "",
@@ -216,7 +215,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     queueMicrotask(replayQueuedEvents);
   },
   completeRootHydration: (container) => {
-    disableRootHydration(container as Container);
+    disableRootHydration(container);
     // Non-discrete early events blocked on the pre-commit shell have no
     // boundary hook to re-drain them; root completion is their backstop.
     queueMicrotask(replayQueuedEvents);
@@ -233,14 +232,12 @@ configureDomRefreshScheduler(domRenderer.scheduleRefresh);
 // Real templates hold children in a content fragment; test doubles hold
 // them directly.
 function activityTemplateContent(boundary: Element): ParentNode {
-  return "content" in boundary
-    ? (boundary.content as ParentNode)
-    : (boundary as ParentNode);
+  return "content" in boundary ? (boundary.content as ParentNode) : boundary;
 }
 
 function activityBoundary(node: Element | TextLike): Element | null {
-  return elementName(node) === "template" &&
-    "getAttribute" in node &&
+  return isElementNode(node) &&
+    elementName(node) === "template" &&
     node.getAttribute(ACTIVITY_TEMPLATE_ATTRIBUTE) !== null
     ? node
     : null;
@@ -329,11 +326,7 @@ function isServerOwnedNode(node: HydrationNode): boolean {
 }
 
 function isTextSeparator(node: HydrationNode): boolean {
-  return (
-    "nodeType" in node &&
-    node.nodeType === 8 &&
-    (node as Comment).data === TEXT_SEPARATOR_DATA
-  );
+  return node.nodeType === 8 && node.nodeValue === TEXT_SEPARATOR_DATA;
 }
 
 function hasManagedTextareaContent(props: Props): boolean {
@@ -351,8 +344,7 @@ function hasMatchingUnsafeHTML(element: Element, props: Props): boolean {
 }
 
 function isHydratableText(node: Element | TextLike): boolean {
-  if ("nodeType" in node && node.nodeType !== 3) return false;
-  return !("setAttribute" in node) && "nodeValue" in node;
+  return node.nodeType === 3;
 }
 
 function optionLike(element: Element): boolean {

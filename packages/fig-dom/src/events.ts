@@ -32,7 +32,6 @@ interface EventSlot {
   slot: string;
   type: string;
 }
-type EventSlotList = EventSlot[];
 
 type EventAttachment =
   | {
@@ -105,7 +104,7 @@ interface ContainerRecord {
   run: RootRun | null;
 }
 
-const eventSlots = new WeakMap<Element, EventSlotList>();
+const eventSlots = new WeakMap<Element, EventSlot[]>();
 const containerRecords = new WeakMap<Container, ContainerRecord>();
 // Keyed per (event, root): each root resolves selective hydration against
 // its own tree, so an outer root's "none" must not shadow a nested root's
@@ -356,23 +355,14 @@ export function updateEvents(
     let slot = previousBySlot.get(descriptor.slot);
     previousBySlot.delete(descriptor.slot);
 
-    if (slot === undefined) {
-      location ??= eventLocationFor(element);
-      slot = addEventSlot(
-        element,
-        location.root,
-        location.listenerTarget,
-        descriptor,
-        capture,
-        passive,
-      );
-    } else if (
+    if (
+      slot === undefined ||
       slot.type !== descriptor.type ||
       slot.capture !== capture ||
       slot.passive !== passive
     ) {
       location ??= eventLocationFor(element);
-      removeEventSlot(slot);
+      if (slot !== undefined) removeEventSlot(slot);
       slot = addEventSlot(
         element,
         location.root,
@@ -487,8 +477,8 @@ export function registerPortalContainer(
 
 export function removePortalContainer(container: Container): void {
   const record = containerRecords.get(container);
-  const owner = record?.portalOwner ?? null;
-  if (record === undefined || owner === null) return;
+  if (!record?.portalOwner) return;
+  const owner = record.portalOwner;
 
   record.portalOwner = null;
 
@@ -803,7 +793,7 @@ function attachEventSlot(
   listenerTarget: Container | null,
   slot: EventSlot,
 ): void {
-  if (direct(slot.type)) {
+  if (nonDelegatedEvents.has(slot.type)) {
     attachDirectEventSlot(element, root, slot);
   } else {
     attachDelegatedEventSlot(root, listenerTarget, slot);
@@ -1060,10 +1050,6 @@ function passiveHydrationEvent(type: string): boolean {
   return (
     continuousEvents.has(type) || type === "touchstart" || type === "touchend"
   );
-}
-
-function direct(type: string): boolean {
-  return nonDelegatedEvents.has(type);
 }
 
 function isContainer(node: unknown): node is Container {

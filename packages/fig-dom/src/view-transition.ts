@@ -24,19 +24,13 @@ type ViewTransitionDocument = Document & {
   [VIEW_TRANSITION_PENDING_PROPERTY]?: RunningViewTransition | null;
 };
 
-interface CssGlobal {
-  CSS?: {
-    escape?: (value: string) => string;
-  };
-}
-
 function commitViewTransition(
   container: Container,
   prepareSnapshot: () => void,
   mutate: () => ViewTransitionMutationResult,
   cleanup: () => void,
 ): ViewTransitionCommitResult {
-  const owner = ownerDocument(container) as ViewTransitionDocument;
+  const owner = ownerDocument(container);
   const start = owner.startViewTransition;
   if (typeof start !== "function") return false;
 
@@ -129,12 +123,8 @@ function commitViewTransition(
 function cancelRootViewTransitionName(
   owner: ViewTransitionDocument,
 ): () => void {
-  const element = owner.documentElement as HTMLElement | null;
-  if (element === null) return () => undefined;
-
-  const style = element.style as CSSStyleDeclaration & {
-    viewTransitionName?: string;
-  };
+  const element = owner.documentElement;
+  const style = element.style;
   const previous = style.viewTransitionName ?? "";
   style.viewTransitionName = "none";
 
@@ -264,7 +254,7 @@ function suspendOnActiveViewTransition(
   container: Container,
   onFinished: () => void,
 ): boolean {
-  const owner = ownerDocument(container) as ViewTransitionDocument;
+  const owner = ownerDocument(container);
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
   const settled = pending?.finished ?? pending?.ready;
   if (pending == null || settled === undefined) return false;
@@ -311,21 +301,15 @@ function applyViewTransitionName(
   name: string,
   className: string | null,
 ): void {
-  const style = (element as HTMLElement).style as CSSStyleDeclaration & {
-    viewTransitionClass?: string;
-    viewTransitionName?: string;
-  };
+  const style = (element as HTMLElement).style;
 
   style.viewTransitionName = escapeViewTransitionName(name);
   if (className !== null) style.viewTransitionClass = className;
 }
 
 function restoreViewTransitionName(element: Element, props: Props): void {
-  const style = (element as HTMLElement).style as CSSStyleDeclaration & {
-    viewTransitionClass?: string;
-    viewTransitionName?: string;
-  };
-  const styleProp = props.style as Record<string, unknown> | undefined;
+  const style = (element as HTMLElement).style;
+  const styleProp = props.style;
   const name =
     styleProp?.viewTransitionName ?? styleProp?.["view-transition-name"];
   const className =
@@ -335,14 +319,12 @@ function restoreViewTransitionName(element: Element, props: Props): void {
   style.viewTransitionClass = styleValue(className);
 }
 
-function ownerDocument(container: Container): Document {
-  return "ownerDocument" in container && container.ownerDocument !== null
-    ? container.ownerDocument
-    : document;
+function ownerDocument(container: Container): ViewTransitionDocument {
+  return (container.ownerDocument ?? document) as ViewTransitionDocument;
 }
 
 function escapeViewTransitionName(name: string): string {
-  const escape = (globalThis as CssGlobal).CSS?.escape;
+  const escape = globalThis.CSS?.escape;
   return escape === undefined ? name : escape(name);
 }
 

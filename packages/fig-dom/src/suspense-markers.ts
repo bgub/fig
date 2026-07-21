@@ -73,9 +73,9 @@ function suspenseBoundaryEnd(start: TextLike): TextLike | null {
   let depth = 0;
 
   for (
-    let node = start.nextSibling as Element | TextLike | null;
+    let node: Node | null = start.nextSibling;
     node !== null;
-    node = node.nextSibling as Element | TextLike | null
+    node = node.nextSibling
   ) {
     if (!isComment(node)) continue;
 
@@ -154,18 +154,14 @@ export function isWithinSuspenseBoundary(
     if (node === boundary.start || node === boundary.end) return false;
 
     if (startParent !== null && node.parentNode === startParent) {
-      return isSiblingAfterStartBeforeEnd(
-        node as Element | TextLike,
-        boundary.start,
-        boundary.end,
-      );
+      return isSiblingAfterStartBeforeEnd(node, boundary.start, boundary.end);
     }
     if (
       endParent !== null &&
       endParent !== startParent &&
       node.parentNode === endParent
     ) {
-      return isSiblingBeforeEnd(node as Element | TextLike, boundary.end);
+      return isSiblingBeforeEnd(node, boundary.end);
     }
   }
 
@@ -173,9 +169,9 @@ export function isWithinSuspenseBoundary(
 }
 
 function isSiblingAfterStartBeforeEnd(
-  node: Element | TextLike,
-  start: Element | TextLike,
-  end: Element | TextLike,
+  node: Node,
+  start: Node,
+  end: Node,
 ): boolean {
   for (
     let sibling: Node | null = node;
@@ -189,10 +185,7 @@ function isSiblingAfterStartBeforeEnd(
   return false;
 }
 
-function isSiblingBeforeEnd(
-  node: Element | TextLike,
-  end: Element | TextLike,
-): boolean {
+function isSiblingBeforeEnd(node: Node, end: Node): boolean {
   for (
     let sibling: Node | null = node;
     sibling !== null;
@@ -207,15 +200,15 @@ function isSiblingBeforeEnd(
 export function removeSuspenseBoundaryRange(
   boundary: DehydratedSuspenseBoundary<Element, TextLike>,
 ): void {
-  for (let node: Element | TextLike | null = boundary.start; node !== null;) {
-    const next = node.nextSibling as Element | TextLike | null;
+  for (let node: Node | null = boundary.start; node !== null;) {
+    const next: Node | null = node.nextSibling;
     removeNode(node);
     if (node === boundary.end) return;
     node = next;
   }
 }
 
-export function removeNode(node: Element | TextLike): void {
+export function removeNode(node: Node): void {
   node.parentNode?.removeChild(node);
 }
 

@@ -116,8 +116,5 @@ export function payloadDataLoader<TArgs extends unknown[]>(
 }
 
 function abortReason(signal: AbortSignal): unknown {
-  return (
-    (signal as { reason?: unknown }).reason ??
-    new Error("Payload request aborted.")
-  );
+  return signal.reason ?? new Error("Payload request aborted.");
 }
