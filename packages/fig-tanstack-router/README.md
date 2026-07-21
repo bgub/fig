@@ -127,6 +127,19 @@ function Document() {
 }
 ```
 
+Route stylesheets, preload hints, preconnects, font preloads, and async scripts
+are translated into Fig asset resources owned by the matched route. Title,
+meta, inline styles, JSON-LD, and synchronous scripts retain their document
+position. Configure manifest cross-origin behavior on the router so it is
+available before the root document renders:
+
+```tsx
+const router = createRouter({
+  assetCrossOrigin: { script: "anonymous", stylesheet: "use-credentials" },
+  routeTree,
+});
+```
+
 `getRouteApi(routeId)` provides a route-bound interface outside the route's
 own module. `useMatches` reads or selects the active match list;
 `useMatchRoute` and `MatchRoute` test locations reactively; `Navigate`

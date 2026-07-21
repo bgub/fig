@@ -62,6 +62,14 @@ On the server, `ssr: false` skips both the route loader and component, while `ss
 
 When `scrollRestoration` is enabled at router construction or through `RouterProvider`, setup is idempotent and restoration runs after `onRendered`. Start SSR emits one nonce-aware restoration bootstrap inside the root match subtree; no public `ScrollRestoration` component is exposed.
 
+## Route Asset Ownership
+
+Each active match owns the Fig asset resources derived from its route metadata and Start manifest entry. Stylesheets, preloads, module preloads, preconnects, font preloads, and external async scripts become descriptors on an `assets(...)` boundary around that match. A root match is therefore registered before its document component renders, while a nested or streamed match emits its assets before the segment that depends on them. The shared Fig registry deduplicates equivalent keys across route metadata, the Start manifest, ordinary Fig trees, and Payload trees; stylesheet discovery order and `precedence` continue to define bucket order.
+
+`HeadContent` owns document state and explicitly positioned head markup: title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` retains synchronous body scripts plus Start's buffered bootstrap scripts. Tags that Fig cannot represent remain native at their declared position and carry the private no-hoist marker, while representable tags are not rendered a second time.
+
+Manifest-wide `assetCrossOrigin` is a router option because route assets must be translated before the root document and its `HeadContent` render. The option may be one value or separate `script` and `stylesheet` values. `router.options.ssr.nonce` flows to registry-emitted assets and positioned tags on the server; native attribute casing is normalized before descriptor translation.
+
 ## Route Data Contract
 
 Fig data resources are the default external cache for route data. Applications place the root's `FigDataStoreHandle` at `router.context.data`; its presence makes `createRouter` default `defaultPreloadStaleTime` to `0`, while an explicit option remains authoritative. A blocking loader calls `ensureRouteData(context, resource, ...args)`, which awaits the store's `ensureData` but resolves to `void`. The component calls `readData` for the same key. Router Core therefore controls when loaders run without retaining a second copy in `loaderData`; the Fig store exclusively owns identity, deduplication, freshness, errors, and the value.

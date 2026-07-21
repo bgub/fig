@@ -6,7 +6,6 @@ import {
   type DataResource,
   ErrorBoundary,
   type ErrorInfo,
-  type FigAssetResource,
   type FigDataStoreHandle,
   type FigNode,
   type Props,
@@ -21,11 +20,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "@bgub/fig";
-import {
-  assetResourceDestination,
-  assetResourceFromHostProps,
-  preventAssetResourceHoist,
-} from "@bgub/fig/internal";
 import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   createBrowserHistory,
@@ -54,9 +48,7 @@ import {
   type Expand,
   type FileRoutesByPath as CoreFileRoutesByPath,
   type FromPathOption,
-  getAssetCrossOrigin,
   getLocationChangeInfo,
-  getScriptPreloadAttrs,
   isDangerousProtocol,
   isNotFound,
   type LinkOptions,
@@ -72,7 +64,6 @@ import {
   type NotFoundError,
   type NotFoundRouteProps,
   removeTrailingSlash,
-  resolveManifestCssLink,
   type RegisteredRouter,
   type Register,
   type ResolveFullPath,
@@ -107,6 +98,11 @@ import {
 } from "@tanstack/router-core";
 import { getScrollRestorationScriptForRouter } from "@tanstack/router-core/scroll-restoration-script";
 import { batch } from "@tanstack/store";
+import {
+  collectRouteAssets,
+  renderPositionedRouterTag,
+  renderRouterHeadTags,
+} from "./route-assets.ts";
 import { getStoreConfig } from "./store.ts";
 
 declare module "@tanstack/router-core" {
@@ -346,6 +342,7 @@ declare module "@tanstack/router-core" {
   }
 
   interface RouterOptionsExtensions {
+    assetCrossOrigin?: AssetCrossOriginConfig;
     defaultComponent?: RouteComponent;
     defaultErrorComponent?: ErrorRouteComponent;
     defaultNotFoundComponent?: NotFoundRouteComponent;
@@ -1395,10 +1392,17 @@ function Match({ matchId }: { matchId: string }): FigNode {
         )
       : content,
   );
+  const matchAssets = collectRouteAssets(
+    router,
+    match,
+    router.ssr?.manifest,
+  ).resources;
+  const ownedMatchContent =
+    matchAssets.length === 0 ? matchContent : assets(matchAssets, matchContent);
 
-  if (route.parentRoute?.id !== rootRouteId) return matchContent;
+  if (route.parentRoute?.id !== rootRouteId) return ownedMatchContent;
   return [
-    matchContent,
+    ownedMatchContent,
     createElement(OnRendered),
     router.options.scrollRestoration && router.isServer
       ? renderScrollRestorationScript(router)
@@ -1512,7 +1516,7 @@ function renderScrollRestorationScript(router: AnyRouter): FigNode {
   const script = getScrollRestorationScriptForRouter(router);
   return script === null
     ? null
-    : renderManagedTag({
+    : renderPositionedRouterTag({
         attrs: { nonce: router.options.ssr?.nonce },
         children: `${script};document.currentScript.remove()`,
         tag: "script",
@@ -1543,19 +1547,14 @@ export function Outlet(): FigNode {
     : createElement(Match, { matchId: childMatchId });
 }
 
-export interface HeadContentProps {
-  assetCrossOrigin?: AssetCrossOriginConfig;
-}
-
-export function HeadContent({ assetCrossOrigin }: HeadContentProps): FigNode {
+export function HeadContent(): FigNode {
   const router = useRouter<AnyRouter>();
   const selectTags = useCallback(
-    (matches: AnyRouteMatch[]) =>
-      buildHeadTags(router, matches, assetCrossOrigin),
-    [assetCrossOrigin, router],
+    (matches: AnyRouteMatch[]) => buildHeadTags(router, matches),
+    [router],
   );
   const tags = useReadableStore(router.stores.matches, selectTags, deepEqual);
-  return renderHeadTags(tags);
+  return renderRouterHeadTags(tags);
 }
 
 export function Scripts(): FigNode {
@@ -1573,44 +1572,25 @@ export function Scripts(): FigNode {
 
   const buffered = router.serverSsr?.takeBufferedScripts();
   if (buffered !== undefined) tags.unshift(buffered);
-  return tags.map(renderManagedTag);
+  return tags.map(renderPositionedRouterTag);
 }
 
 function buildScriptTags(
   router: AnyRouter,
   matches: AnyRouteMatch[],
 ): RouterManagedTag[] {
-  const nonce = router.options.ssr?.nonce;
-  const tags: RouterManagedTag[] = matches.flatMap((match) =>
-    (match.scripts ?? [])
-      .filter((script) => script !== undefined)
-      .map(({ children, ...attrs }) => ({
-        tag: "script" as const,
-        attrs: { ...attrs, nonce, suppressHydrationWarning: true },
-        children: children as string | undefined,
-      })),
-  );
   const manifest = router.ssr?.manifest;
-  if (manifest === undefined) return tags;
-
-  for (const match of matches) {
-    for (const script of manifest.routes[match.routeId]?.scripts ?? []) {
-      tags.push({
-        tag: "script",
-        attrs: { ...script.attrs, nonce },
-        children: script.children,
-      });
-    }
-  }
-  return tags;
+  return matches.flatMap(
+    (match) => collectRouteAssets(router, match, manifest).scripts,
+  );
 }
 
 function buildHeadTags(
   router: AnyRouter,
   matches: AnyRouteMatch[],
-  assetCrossOrigin?: AssetCrossOriginConfig,
 ): RouterManagedTag[] {
   const nonce = router.options.ssr?.nonce;
+  const manifest = router.ssr?.manifest;
   const metaTags: RouterManagedTag[] = [];
   const seenMeta = new Set<string>();
   let selectedTitle: RouterManagedTag | undefined;
@@ -1660,57 +1640,19 @@ function buildHeadTags(
 
   const tags: RouterManagedTag[] = [];
   appendUniqueUserTags(tags, metaTags);
-  const manifest = router.ssr?.manifest;
-  if (manifest !== undefined) {
-    for (const match of matches) {
-      for (const link of manifest.routes[match.routeId]?.preloads ?? []) {
-        tags.push({
-          tag: "link",
-          attrs: {
-            ...getScriptPreloadAttrs(manifest, link, assetCrossOrigin),
-            nonce,
-          },
-        });
-      }
-    }
-  }
   appendUniqueUserTags(
     tags,
-    matches.flatMap((match) =>
-      (match.links ?? [])
-        .filter((link) => link !== undefined)
-        .map((link) => ({
-          tag: "link" as const,
-          attrs: { ...link, nonce },
-        })),
+    matches.flatMap(
+      (match) => collectRouteAssets(router, match, manifest).links,
     ),
   );
-  if (manifest !== undefined) {
-    for (const match of matches) {
-      for (const link of manifest.routes[match.routeId]?.css ?? []) {
-        const resolvedLink = resolveManifestCssLink(link);
-        tags.push({
-          tag: "link",
-          attrs: {
-            rel: "stylesheet",
-            ...resolvedLink,
-            crossOrigin:
-              getAssetCrossOrigin(assetCrossOrigin, "stylesheet") ??
-              resolvedLink.crossOrigin,
-            nonce,
-            suppressHydrationWarning: true,
-          },
-        });
-      }
-    }
-    if (manifest.inlineStyle !== undefined) {
-      tags.push({
-        tag: "style",
-        attrs: { ...manifest.inlineStyle.attrs, nonce },
-        children: manifest.inlineStyle.children,
-        inlineCss: true,
-      });
-    }
+  if (manifest?.inlineStyle !== undefined) {
+    tags.push({
+      tag: "style",
+      attrs: { ...manifest.inlineStyle.attrs, nonce },
+      children: manifest.inlineStyle.children,
+      inlineCss: true,
+    });
   }
   appendUniqueUserTags(
     tags,
@@ -1726,70 +1668,11 @@ function buildHeadTags(
   );
   appendUniqueUserTags(
     tags,
-    matches.flatMap((match) =>
-      (match.headScripts ?? [])
-        .filter((script) => script !== undefined)
-        .map(({ children, ...attrs }) => ({
-          tag: "script" as const,
-          attrs: { ...attrs, nonce },
-          children: children as string | undefined,
-        })),
+    matches.flatMap(
+      (match) => collectRouteAssets(router, match, manifest).headScripts,
     ),
   );
   return tags;
-}
-
-function renderHeadTags(tags: RouterManagedTag[]): FigNode {
-  const resources: FigAssetResource[] = [];
-  const nodes: FigNode[] = [];
-  for (const tag of tags) {
-    const resource = assetResourceFromHostProps(tag.tag, {
-      ...nativeAttributes(tag.attrs),
-      children: tag.children,
-    });
-    if (resource === null || assetResourceDestination(resource) !== "head") {
-      nodes.push(renderManagedTag(tag));
-    } else {
-      resources.push(resource);
-    }
-  }
-  return resources.length === 0 ? nodes : assets(resources, nodes);
-}
-
-function renderManagedTag(tag: RouterManagedTag): FigNode {
-  const attrs = nativeAttributes(tag.attrs);
-  return createElement(
-    tag.tag,
-    preventAssetResourceHoist({
-      ...attrs,
-      ...(tag.children === undefined ? {} : { unsafeHTML: tag.children }),
-    }),
-  );
-}
-
-function nativeAttributes(
-  attrs: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  if (attrs === undefined) return {};
-  const result = { ...attrs };
-  renameAttribute(result, "charSet", "charset");
-  renameAttribute(result, "className", "class");
-  renameAttribute(result, "crossOrigin", "crossorigin");
-  renameAttribute(result, "fetchPriority", "fetchpriority");
-  renameAttribute(result, "httpEquiv", "http-equiv");
-  renameAttribute(result, "referrerPolicy", "referrerpolicy");
-  return result;
-}
-
-function renameAttribute(
-  attrs: Record<string, unknown>,
-  from: string,
-  to: string,
-): void {
-  if (attrs[from] !== undefined && attrs[to] === undefined) {
-    attrs[to] = attrs[from];
-  }
-  delete attrs[from];
 }
 
 function stringAttribute(value: unknown): string | undefined {

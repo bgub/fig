@@ -59,12 +59,17 @@ describe("TanStack Start server payload resources", () => {
           "html",
           null,
           createElement("head"),
-          createElement("body", null, node),
+          createElement(
+            "body",
+            null,
+            assets(stylesheet("/payload.css", { precedence: "payload" }), node),
+          ),
         ),
       );
       await render.shellReady;
       const html = await readStream(render.stream);
       expect(html).toContain('rel="stylesheet" href="/payload.css"');
+      expect(html.match(/href="\/payload\.css"/g)).toHaveLength(1);
       expect(html.indexOf('href="/payload.css"')).toBeLessThan(
         html.indexOf("styled"),
       );

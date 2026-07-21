@@ -26,6 +26,7 @@ export async function hydrateStart(
   options: HydrateStartOptions = {},
 ): Promise<HydratedStart> {
   const { container = document, ...rootOptions } = options;
+  await waitForRouterBootstrap();
   const router = await hydrateTanStackStart();
   const dataStore = hydrateStartDataStore(router.options.context, document);
 
@@ -36,4 +37,13 @@ export async function hydrateStart(
   );
   window.$_TSR?.h();
   return { root, router };
+}
+
+async function waitForRouterBootstrap(): Promise<void> {
+  if (window.$_TSR !== undefined || document.readyState !== "loading") return;
+  await new Promise<void>((resolve) =>
+    document.addEventListener("DOMContentLoaded", () => resolve(), {
+      once: true,
+    }),
+  );
 }

@@ -22,6 +22,7 @@ import {
   createRouter,
   ensureRouteData,
   getRouteApi,
+  HeadContent,
   lazyRouteComponent,
   Link,
   MatchRoute,
@@ -31,6 +32,7 @@ import {
   type RouteDataContext,
   type RouteErrorComponentProps,
   RouterProvider,
+  Scripts,
   useLocation,
   useMatches,
   useMatchRoute,
@@ -1005,7 +1007,117 @@ describe("@bgub/fig-tanstack-router", () => {
     );
     expect(loads).toBe(2);
   });
+
+  it("owns route assets per match while keeping synchronous scripts positioned", async () => {
+    const rootRoute = createRootRoute({ component: AssetDocument });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      head: () => ({
+        links: [
+          {
+            href: "data:text/css,/*router-home*/",
+            precedence: "route",
+            rel: "stylesheet",
+          },
+        ],
+        meta: [
+          { title: "Home assets" },
+          { content: "home", name: "description" },
+        ],
+        scripts: [{ id: "home-ordered", src: "/router-home-ordered.js" }],
+      }),
+      path: "/",
+    });
+    const awayRoute = createRoute({
+      component: () => createElement("h1", null, "away"),
+      getParentRoute: () => rootRoute,
+      head: () => ({
+        links: [
+          {
+            href: "data:text/css,/*router-away*/",
+            precedence: "route",
+            rel: "stylesheet",
+          },
+        ],
+        meta: [
+          { title: "Away assets" },
+          { content: "away", name: "description" },
+        ],
+        scripts: [{ id: "away-ordered", src: "/router-away-ordered.js" }],
+      }),
+      path: "away",
+    });
+    const bareRoute = createRoute({
+      component: () => createElement("h1", null, "bare"),
+      getParentRoute: () => rootRoute,
+      path: "bare",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, awayRoute, bareRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+
+    expect(document.title).toBe("Home assets");
+    expect(
+      document.head
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content"),
+    ).toBe("home");
+    expect(
+      document.head.querySelectorAll(
+        'link[href="data:text/css,/*router-home*/"]',
+      ),
+    ).toHaveLength(1);
+    expect(container.querySelector("#home-ordered")?.parentElement).toBe(
+      container.firstElementChild,
+    );
+
+    await act(() => router.navigate({ to: "/away" } as never));
+
+    expect(document.title).toBe("Away assets");
+    expect(
+      document.head
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content"),
+    ).toBe("away");
+    expect(
+      document.head.querySelectorAll(
+        'link[href="data:text/css,/*router-away*/"]',
+      ),
+    ).toHaveLength(1);
+    expect(container.querySelector("#home-ordered")).toBeNull();
+    expect(container.querySelector("#away-ordered")).not.toBeNull();
+
+    await act(() => router.navigate({ to: "/bare" } as never));
+
+    expect(document.title).toBe("");
+    expect(document.head.querySelector('meta[name="description"]')).toBeNull();
+    expect(container.querySelector("#away-ordered")).toBeNull();
+
+    for (const asset of document.head.querySelectorAll(
+      '[href^="data:text/css,/*router-"], [src^="/router-"]',
+    )) {
+      asset.remove();
+    }
+  });
 });
+
+function AssetDocument(): FigNode {
+  return createElement(
+    "div",
+    null,
+    createElement(HeadContent, {}),
+    createElement(Outlet),
+    createElement(Scripts),
+  );
+}
 
 function makeRouter(initialEntry = "/") {
   const rootRoute = createRootRoute({ component: Layout });
