@@ -143,7 +143,11 @@ const router = createRouter({
 `getRouteApi(routeId)` provides a route-bound interface outside the route's
 own module. `useMatches` reads or selects the active match list;
 `useMatchRoute` and `MatchRoute` test locations reactively; `Navigate`
-performs declarative post-commit navigation.
+performs declarative post-commit navigation. Selector hooks accept
+`structuralSharing`, falling back to the router's `defaultStructuralSharing`;
+location hooks accept selectors, loose hooks accept `strict: false`, and
+match, params, and search reads can return `undefined` with
+`shouldThrow: false`.
 
 ## Provider and navigation lifecycle
 
@@ -244,12 +248,12 @@ invalidated, refreshed, or streamed.
 
 ## Support policy
 
-| Tier                 | Contract                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Guaranteed           | Generated file and lazy routes; typed route APIs and selectors; Router creation/provider; native links, navigation blocking, and back-history state; loaders, redirects, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
-| Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                                                                                                                              |
-| Deferred             | Element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                                                                                                                                                                                                                                                        |
-| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                                                                                                                              |
+| Tier                 | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Guaranteed           | Generated file and lazy routes; typed route APIs and structural-sharing selectors; Router creation/provider; native links with active/inactive props and render-function children; navigation blocking and back-history state; loaders, redirects, route masks, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
+| Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                                                                                                                                                                                                                     |
+| Deferred             | `useElementScrollRestoration`, parent/child match selectors, custom-link construction through `useLinkProps` or `createLink`, and proximity preloading.                                                                                                                                                                                                                                                                                                                          |
+| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                                                                                                                                                                                                                     |
 
 The adapter is pinned and tested against `@tanstack/router-core@1.171.15`.
 Upgrades are conformance changes: generated-route, navigation, SSR, data, and
@@ -261,7 +265,10 @@ document tests must pass against the new version before the pin moves.
 downloads, external URLs, modifier keys, and non-`_self` targets retain native
 browser behavior. Disabled links omit `href` and expose `aria-disabled`.
 Preloading supports `intent`, `render`, and `viewport`, and active links expose
-`aria-current="page"` plus `data-status="active"`. Unsupported
+`aria-current="page"` plus `data-status="active"`. `activeProps` and
+`inactiveProps` compose native anchor state, while render-function children
+receive `isActive` and `isTransitioning`. `linkOptions` and `createRouteMask`
+provide reusable typed options without runtime wrappers. Unsupported
 `preloadIntentProximity` is rejected by `LinkProps` rather than silently ignored.
 
 ## Code-created route trees

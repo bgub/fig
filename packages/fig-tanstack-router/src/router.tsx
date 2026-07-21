@@ -40,6 +40,7 @@ import {
   BaseRootRoute,
   BaseRoute,
   BaseRouteApi,
+  type Constrain,
   createControlledPromise,
   type ConstrainLiteral,
   type CreateFileRoute,
@@ -52,6 +53,10 @@ import {
   type FileRoutesByPath as CoreFileRoutesByPath,
   type FromPathOption,
   getLocationChangeInfo,
+  type InferFrom,
+  type InferMaskFrom,
+  type InferMaskTo,
+  type InferTo,
   isDangerousProtocol,
   isNotFound,
   type LinkOptions,
@@ -70,6 +75,7 @@ import {
   removeTrailingSlash,
   type RegisteredRouter,
   type Register,
+  replaceEqualDeep,
   type ResolveFullPath,
   type ResolveId,
   type ResolveUseLoaderData,
@@ -80,6 +86,7 @@ import {
   type ResolveParams,
   type RootRouteId,
   type RootRouteOptions,
+  type RouteMask,
   rootRouteId,
   RouterCore,
   type RouterConstructorOptions,
@@ -91,6 +98,10 @@ import {
   type RouteOptions,
   type RouteTypesById,
   setupScrollRestoration,
+  type StrictOrFrom,
+  type ThrowConstraint,
+  type ThrowOrOptional,
+  type ToMaskOptions,
   type ToSubOptionsProps,
   type TrailingSlashOption,
   type UseLoaderDataResult,
@@ -146,6 +157,48 @@ export type {
 } from "@tanstack/router-core";
 export type { RouterHistory } from "@tanstack/history";
 
+type ValidateLinkOptions<
+  TRouter extends AnyRouter,
+  TOptions,
+  TDefaultFrom extends string = string,
+> = Constrain<
+  TOptions,
+  LinkOptions<
+    TRouter,
+    InferFrom<TOptions, TDefaultFrom>,
+    InferTo<TOptions>,
+    InferMaskFrom<TOptions>,
+    InferMaskTo<TOptions>
+  >
+>;
+
+type ValidateLinkOptionsArray<
+  TRouter extends AnyRouter,
+  TOptions extends ReadonlyArray<unknown>,
+  TDefaultFrom extends string = string,
+> = {
+  [TIndex in keyof TOptions]: ValidateLinkOptions<
+    TRouter,
+    TOptions[TIndex],
+    TDefaultFrom
+  >;
+};
+
+export type LinkOptionsFnOptions<
+  TOptions,
+  TRouter extends AnyRouter = RegisteredRouter,
+> =
+  TOptions extends ReadonlyArray<unknown>
+    ? ValidateLinkOptionsArray<TRouter, TOptions>
+    : ValidateLinkOptions<TRouter, TOptions>;
+
+export function linkOptions<
+  const TOptions,
+  TRouter extends AnyRouter = RegisteredRouter,
+>(options: LinkOptionsFnOptions<TOptions, TRouter>): TOptions {
+  return options as TOptions;
+}
+
 export interface FileRoutesByPath extends CoreFileRoutesByPath {}
 
 export interface RouteErrorComponentProps {
@@ -169,16 +222,23 @@ export type RouteComponent = ComponentType;
 export type ErrorRouteComponent = ComponentType<RouteErrorComponentProps>;
 export type NotFoundRouteComponent = ComponentType<NotFoundRouteProps>;
 
-interface SelectRouteValue<TValue, TSelected> {
+interface StructuralSharingOptions {
+  structuralSharing?: boolean;
+}
+
+interface SelectRouteValue<TValue, TSelected> extends StructuralSharingOptions {
   select?: (value: TValue) => TSelected;
 }
 
 type RouteMatchResult<
   TRouter extends AnyRouter,
   TFrom,
+  TStrict extends boolean,
   TSelected,
 > = unknown extends TSelected
-  ? MakeRouteMatch<TRouter["routeTree"], TFrom, true>
+  ? TStrict extends true
+    ? MakeRouteMatch<TRouter["routeTree"], TFrom, true>
+    : MakeRouteMatchUnion<TRouter>
   : TSelected;
 
 export type UseMatchRoute<out TFrom> = <
@@ -189,7 +249,7 @@ export type UseMatchRoute<out TFrom> = <
     MakeRouteMatch<TRouter["routeTree"], TFrom, true>,
     TSelected
   >,
-) => RouteMatchResult<TRouter, TFrom, TSelected>;
+) => RouteMatchResult<TRouter, TFrom, true, TSelected>;
 
 export type UseParamsRoute<out TFrom> = <
   TRouter extends AnyRouter = RegisteredRouter,
@@ -265,39 +325,65 @@ function bindRouteApi<TId extends string, TFullPath extends string>(
     notFound: (options) =>
       createNotFound({ routeId: getId(), ...options } as never),
     useLoaderData: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined
-          ? match.loaderData
-          : options.select(match.loaderData as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match.loaderData
+            : options.select(match.loaderData as never),
+        true,
+        options?.structuralSharing,
       ) as never,
     useLoaderDeps: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined
-          ? match.loaderDeps
-          : options.select(match.loaderDeps as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match.loaderDeps
+            : options.select(match.loaderDeps as never),
+        true,
+        options?.structuralSharing,
       ) as never,
     useMatch: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined ? match : options.select(match as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match
+            : options.select(match as never),
+        true,
+        options?.structuralSharing,
       ) as never,
     useNavigate: () => useNavigateFrom(useFullPath()) as never,
     useParams: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined
-          ? match.params
-          : options.select(match.params as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match.params
+            : options.select(match.params as never),
+        true,
+        options?.structuralSharing,
       ) as never,
     useRouteContext: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined
-          ? match.context
-          : options.select(match.context as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match.context
+            : options.select(match.context as never),
+        true,
+        options?.structuralSharing,
       ) as never,
     useSearch: (options) =>
-      useMatchSelection(getId(), (match) =>
-        options?.select === undefined
-          ? match.search
-          : options.select(match.search as never),
+      useMatchSelection(
+        getId(),
+        (match) =>
+          options?.select === undefined
+            ? match.search
+            : options.select(match.search as never),
+        true,
+        options?.structuralSharing,
       ) as never,
   };
 }
@@ -385,6 +471,20 @@ class Router<
       getStoreConfig,
     );
   }
+}
+
+export function createRouteMask<
+  TRouteTree extends AnyRoute,
+  TFrom extends string,
+  TTo extends string,
+>(
+  options: { routeTree: TRouteTree } & ToMaskOptions<
+    RouterCore<TRouteTree, "never", boolean>,
+    TFrom,
+    TTo
+  >,
+): RouteMask<TRouteTree> {
+  return options as RouteMask<TRouteTree>;
 }
 
 export function createRouter<
@@ -663,6 +763,10 @@ export function createRootRouteWithContext<TRouterContext extends object>() {
 const RouterContext = createContext<AnyRouter | null>(null);
 const MatchContext = createContext<string | null>(null);
 const missingMatch = Symbol("missing route match");
+const missingMatchStore: RouterReadableStore<AnyRouteMatch | undefined> = {
+  get: () => undefined,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 type HistoryUpdate = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
 
 export function useRouter<
@@ -679,9 +783,48 @@ function requireRouter(router: AnyRouter | null): AnyRouter {
   return router;
 }
 
-interface UseRouterStateOptions<TRouter extends AnyRouter, TSelected> {
+interface StoreSelectionOptions<
+  TValue,
+  TSelected,
+> extends StructuralSharingOptions {
+  select?: (value: TValue) => TSelected;
+}
+
+function useStoreSelector<TValue, TSelected = TValue>(
+  router: AnyRouter,
+  options?: StoreSelectionOptions<TValue, TSelected>,
+): (value: TValue) => TSelected {
+  const previous = useMemo<{ initialized: boolean; value: TSelected }>(
+    () => ({ initialized: false, value: undefined as TSelected }),
+    [],
+  );
+  const select = options?.select;
+  const structuralSharing =
+    options?.structuralSharing ??
+    router.options.defaultStructuralSharing ??
+    false;
+  return useCallback(
+    (value: TValue) => {
+      let selected = (
+        select === undefined ? value : select(value)
+      ) as TSelected;
+      if (structuralSharing && previous.initialized) {
+        selected = replaceEqualDeep(previous.value, selected);
+      }
+      previous.initialized = true;
+      previous.value = selected;
+      return selected;
+    },
+    [previous, select, structuralSharing],
+  );
+}
+
+interface UseRouterStateOptions<
+  TRouter extends AnyRouter,
+  TSelected,
+> extends StructuralSharingOptions {
   router?: TRouter;
-  select: (state: RouterState<TRouter["routeTree"]>) => TSelected;
+  select?: (state: RouterState<TRouter["routeTree"]>) => TSelected;
 }
 
 export function useRouterState<
@@ -695,20 +838,24 @@ export function useRouterState(
   options?: UseRouterStateOptions<AnyRouter, unknown>,
 ): unknown {
   const router = requireRouter(options?.router ?? readContext(RouterContext));
-  const select = options?.select ?? selectRouterState;
+  const select = useStoreSelector(router, options);
   return useReadableStore(router.stores.__store, select);
-}
-
-function selectRouterState(
-  state: RouterState<AnyRoute>,
-): RouterState<AnyRoute> {
-  return state;
 }
 
 export function useLocation<
   TRouter extends AnyRouter = RegisteredRouter,
->(): RouterState<TRouter["routeTree"]>["location"] {
-  return useReadableStore(useRouter<TRouter>().stores.location);
+  TSelected = unknown,
+>(
+  options?: StoreSelectionOptions<
+    RouterState<TRouter["routeTree"]>["location"],
+    TSelected
+  >,
+): unknown extends TSelected
+  ? RouterState<TRouter["routeTree"]>["location"]
+  : TSelected {
+  const router = useRouter<TRouter>();
+  const select = useStoreSelector(router, options);
+  return useReadableStore(router.stores.location, select) as never;
 }
 
 interface BlockerLocation<
@@ -870,10 +1017,26 @@ const idleBlockerResolver: BlockerResolver<AnyRouter> = {
   status: "idle",
 };
 
-interface MatchOptions<TSelected> {
+interface MatchOptions<TSelected> extends StructuralSharingOptions {
   from?: string;
   select?: (match: AnyRouteMatch) => TSelected;
+  shouldThrow?: boolean;
+  strict?: boolean;
 }
+
+type TypedMatchOptions<
+  TRouter extends AnyRouter,
+  TFrom,
+  TStrict extends boolean,
+  TThrow extends boolean,
+  TSelected,
+> = StrictOrFrom<TRouter, TFrom, TStrict> &
+  SelectRouteValue<
+    MakeRouteMatch<TRouter["routeTree"], TFrom, TStrict>,
+    TSelected
+  > & {
+    shouldThrow?: TThrow;
+  };
 
 interface FromRouteOptions<
   TFrom extends string,
@@ -886,17 +1049,22 @@ interface FromRouteOptions<
 export function useMatch(): AnyRouteMatch;
 export function useMatch<
   TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
-    TRouter["routeTree"]
-  >,
+  const TFrom extends string | undefined = undefined,
+  TStrict extends boolean = true,
+  TThrow extends boolean = true,
   TSelected = unknown,
 >(
-  options: FromRouteOptions<
+  options: TypedMatchOptions<
+    TRouter,
     TFrom,
-    MakeRouteMatch<TRouter["routeTree"], TFrom, true>,
+    TStrict,
+    ThrowConstraint<TStrict, TThrow>,
     TSelected
   >,
-): RouteMatchResult<TRouter, TFrom, TSelected>;
+): ThrowOrOptional<
+  RouteMatchResult<TRouter, TFrom, TStrict, TSelected>,
+  TThrow
+>;
 export function useMatch(options?: MatchOptions<AnyRouteMatch>): AnyRouteMatch;
 export function useMatch<TSelected>(
   options: MatchOptions<TSelected> & {
@@ -904,12 +1072,19 @@ export function useMatch<TSelected>(
   },
 ): TSelected;
 export function useMatch(options?: MatchOptions<unknown>): unknown {
-  return useMatchSelection(options?.from, options?.select);
+  return useMatchSelection(
+    options?.from,
+    options?.select,
+    options?.shouldThrow,
+    options?.structuralSharing,
+  );
 }
 
 function useMatchSelection(
   from: string | undefined,
   select: ((match: AnyRouteMatch) => unknown) | undefined,
+  shouldThrow = true,
+  structuralSharing?: boolean,
 ): unknown {
   const router = useRouter<AnyRouter>();
   const nearestMatchId = readContext(MatchContext);
@@ -918,14 +1093,21 @@ function useMatchSelection(
     : nearestMatchId === null
       ? undefined
       : router.stores.matchStores.get(nearestMatchId);
+  const selectMatch = useStoreSelector(router, { select, structuralSharing });
 
-  if (store === undefined) throwMissingMatch(from);
-
-  const selected = useReadableStore(store, (match) => {
-    if (match === undefined) return missingMatch;
-    return select === undefined ? match : select(match);
-  });
-  if (selected === missingMatch) throwMissingMatch(from);
+  const selectPresentMatch = useCallback(
+    (match: AnyRouteMatch | undefined) =>
+      match === undefined ? missingMatch : selectMatch(match),
+    [selectMatch],
+  );
+  const selected = useReadableStore(
+    store ?? missingMatchStore,
+    selectPresentMatch,
+  );
+  if (selected === missingMatch) {
+    if (shouldThrow) throwMissingMatch(from);
+    return undefined;
+  }
   return selected;
 }
 
@@ -934,82 +1116,102 @@ function throwMissingMatch(from?: string): never {
   throw new Error(`Could not find an active match for ${target}.`);
 }
 
+type TypedRouteValueOptions<
+  TRouter extends AnyRouter,
+  TFrom,
+  TStrict extends boolean,
+  TValue,
+  TSelected,
+> = StrictOrFrom<TRouter, TFrom, TStrict> & SelectRouteValue<TValue, TSelected>;
+
+interface RuntimeRouteValueOptions extends StructuralSharingOptions {
+  from?: string;
+  select?: (value: unknown) => unknown;
+  shouldThrow?: boolean;
+  strict?: boolean;
+}
+
 export function useParams(): AnyRouteMatch["params"];
 export function useParams<
   TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
-    TRouter["routeTree"]
-  >,
+  const TFrom extends string | undefined = undefined,
+  TStrict extends boolean = true,
+  TThrow extends boolean = true,
   TSelected = unknown,
 >(
-  options: FromRouteOptions<
+  options: TypedRouteValueOptions<
+    TRouter,
     TFrom,
-    ResolveUseParams<TRouter, TFrom, true>,
+    TStrict,
+    ResolveUseParams<TRouter, TFrom, TStrict>,
     TSelected
-  >,
-): UseParamsResult<TRouter, TFrom, true, TSelected>;
-export function useParams(
-  options?: FromRouteOptions<string, unknown, unknown>,
-): unknown {
-  return useMatch({
-    from: options?.from,
-    select: (match) =>
+  > & { shouldThrow?: ThrowConstraint<TStrict, TThrow> },
+): ThrowOrOptional<UseParamsResult<TRouter, TFrom, TStrict, TSelected>, TThrow>;
+export function useParams(options?: RuntimeRouteValueOptions): unknown {
+  return useMatchSelection(
+    options?.from,
+    (match) =>
       options?.select === undefined
         ? match.params
         : options.select(match.params),
-  });
+    options?.shouldThrow,
+    options?.structuralSharing,
+  );
 }
 
 export function useSearch(): AnyRouteMatch["search"];
 export function useSearch<
   TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
-    TRouter["routeTree"]
-  >,
+  const TFrom extends string | undefined = undefined,
+  TStrict extends boolean = true,
+  TThrow extends boolean = true,
   TSelected = unknown,
 >(
-  options: FromRouteOptions<
+  options: TypedRouteValueOptions<
+    TRouter,
     TFrom,
-    ResolveUseSearch<TRouter, TFrom, true>,
+    TStrict,
+    ResolveUseSearch<TRouter, TFrom, TStrict>,
     TSelected
-  >,
-): UseSearchResult<TRouter, TFrom, true, TSelected>;
-export function useSearch(
-  options?: FromRouteOptions<string, unknown, unknown>,
-): unknown {
-  return useMatch({
-    from: options?.from,
-    select: (match) =>
+  > & { shouldThrow?: ThrowConstraint<TStrict, TThrow> },
+): ThrowOrOptional<UseSearchResult<TRouter, TFrom, TStrict, TSelected>, TThrow>;
+export function useSearch(options?: RuntimeRouteValueOptions): unknown {
+  return useMatchSelection(
+    options?.from,
+    (match) =>
       options?.select === undefined
         ? match.search
         : options.select(match.search),
-  });
+    options?.shouldThrow,
+    options?.structuralSharing,
+  );
 }
 
 export function useLoaderData(): AnyRouteMatch["loaderData"];
 export function useLoaderData<
   TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
-    TRouter["routeTree"]
-  >,
+  const TFrom extends string | undefined = undefined,
+  TStrict extends boolean = true,
   TSelected = unknown,
 >(
-  options: FromRouteOptions<
+  options: TypedRouteValueOptions<
+    TRouter,
     TFrom,
-    ResolveUseLoaderData<TRouter, TFrom, true>,
+    TStrict,
+    ResolveUseLoaderData<TRouter, TFrom, TStrict>,
     TSelected
   >,
-): UseLoaderDataResult<TRouter, TFrom, true, TSelected>;
-export function useLoaderData(
-  options?: FromRouteOptions<string, unknown, unknown>,
-): unknown {
-  return useMatch({
-    from: options?.from,
-    select: (match) =>
+): UseLoaderDataResult<TRouter, TFrom, TStrict, TSelected>;
+export function useLoaderData(options?: RuntimeRouteValueOptions): unknown {
+  return useMatchSelection(
+    options?.from,
+    (match) =>
       options?.select === undefined
         ? match.loaderData
         : options.select(match.loaderData),
-  });
+    true,
+    options?.structuralSharing,
+  );
 }
 
 export function useLoaderDeps(): AnyRouteMatch["loaderDeps"];
@@ -1026,42 +1228,43 @@ export function useLoaderDeps<
     TSelected
   >,
 ): UseLoaderDepsResult<TRouter, TFrom, TSelected>;
-export function useLoaderDeps(
-  options?: FromRouteOptions<string, unknown, unknown>,
-): unknown {
-  return useMatch({
-    from: options?.from,
-    select: (match) =>
+export function useLoaderDeps(options?: RuntimeRouteValueOptions): unknown {
+  return useMatchSelection(
+    options?.from,
+    (match) =>
       options?.select === undefined
         ? match.loaderDeps
         : options.select(match.loaderDeps),
-  });
+    true,
+    options?.structuralSharing,
+  );
 }
 
 export function useRouteContext(): AnyRouteMatch["context"];
 export function useRouteContext<
   TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends RouteIds<TRouter["routeTree"]> = RouteIds<
-    TRouter["routeTree"]
-  >,
+  const TFrom extends string | undefined = undefined,
+  TStrict extends boolean = true,
   TSelected = unknown,
 >(
-  options: FromRouteOptions<
+  options: TypedRouteValueOptions<
+    TRouter,
     TFrom,
-    UseRouteContextResult<TRouter, TFrom, true, unknown>,
+    TStrict,
+    UseRouteContextResult<TRouter, TFrom, TStrict, unknown>,
     TSelected
   >,
-): UseRouteContextResult<TRouter, TFrom, true, TSelected>;
-export function useRouteContext(
-  options?: FromRouteOptions<string, unknown, unknown>,
-): unknown {
-  return useMatch({
-    from: options?.from,
-    select: (match) =>
+): UseRouteContextResult<TRouter, TFrom, TStrict, TSelected>;
+export function useRouteContext(options?: RuntimeRouteValueOptions): unknown {
+  return useMatchSelection(
+    options?.from,
+    (match) =>
       options?.select === undefined
         ? match.context
         : options.select(match.context),
-  });
+    true,
+    options?.structuralSharing,
+  );
 }
 
 export function useNavigate<
@@ -1107,7 +1310,10 @@ export function Navigate<
   return null;
 }
 
-export interface UseMatchesOptions<TRouter extends AnyRouter, TSelected> {
+export interface UseMatchesOptions<
+  TRouter extends AnyRouter,
+  TSelected,
+> extends StructuralSharingOptions {
   select?: (matches: Array<MakeRouteMatchUnion<TRouter>>) => TSelected;
 }
 
@@ -1123,13 +1329,10 @@ export function useMatches<
   options?: UseMatchesOptions<TRouter, TSelected>,
 ): UseMatchesResult<TRouter, TSelected> {
   const router = useRouter<TRouter>();
+  const select = useStoreSelector(router, options);
   return useReadableStore(
     router.stores.matches,
-    (matches) =>
-      options?.select === undefined
-        ? matches
-        : options.select(matches as Array<MakeRouteMatchUnion<TRouter>>),
-    deepEqual,
+    select as (matches: AnyRouteMatch[]) => TSelected,
   ) as UseMatchesResult<TRouter, TSelected>;
 }
 
@@ -1891,14 +2094,25 @@ function dataStoreFromContext(context: unknown): FigDataStoreHandle | null {
 }
 
 type AnchorProps = HostIntrinsicElements["a"];
+type LinkStateProps = Partial<
+  Omit<AnchorProps, "children" | "href" | "target">
+>;
+
+export interface LinkRenderState {
+  isActive: boolean;
+  isTransitioning: boolean;
+}
 
 export type LinkProps<
   TFrom extends string = string,
   TTo extends string | undefined = ".",
   TMaskFrom extends string = TFrom,
   TMaskTo extends string = ".",
-> = AnchorProps &
+> = Omit<AnchorProps, "children"> &
   LinkOptions<RegisteredRouter, TFrom, TTo, TMaskFrom, TMaskTo> & {
+    activeProps?: LinkStateProps | (() => LinkStateProps);
+    children?: FigNode | ((state: LinkRenderState) => FigNode);
+    inactiveProps?: LinkStateProps | (() => LinkStateProps);
     preloadIntentProximity?: never;
   };
 
@@ -1916,9 +2130,26 @@ export function Link<
   const router = useRouter<RegisteredRouter>();
   const resolvedLocation = useReadableStore(router.stores.resolvedLocation);
   const currentLocation = resolvedLocation ?? router.stores.location.get();
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionSubscription = useMemo<{ unsubscribe?: () => void }>(
+    () => ({}),
+    [],
+  );
+  useBeforePaint(
+    (signal) => {
+      signal.addEventListener(
+        "abort",
+        () => transitionSubscription.unsubscribe?.(),
+        { once: true },
+      );
+      return undefined;
+    },
+    [transitionSubscription],
+  );
   const {
     _fromLocation,
     activeOptions,
+    activeProps,
     children,
     disabled,
     from: _from,
@@ -1926,6 +2157,7 @@ export function Link<
     hashScrollIntoView: _hashScrollIntoView,
     href: explicitHref,
     ignoreBlocker: _ignoreBlocker,
+    inactiveProps,
     mask: _mask,
     mix,
     params: _params,
@@ -1988,6 +2220,23 @@ export function Link<
         partial: !(activeOptions?.exact ?? false),
       })) &&
     (!activeOptions?.includeHash || currentLocation.hash === next.hash);
+  const stateProps = resolveLinkStateProps(
+    isActive ? activeProps : inactiveProps,
+  );
+  const {
+    bind: stateBind,
+    class: stateClass,
+    mix: stateMix,
+    style: stateStyle,
+    ...stateAnchorProps
+  } = stateProps;
+  const linkBind = composeBind(anchorProps.bind, stateBind);
+  const linkClass = mergeLinkClass(anchorProps.class, stateClass);
+  const linkStyle = mergeLinkStyle(anchorProps.style, stateStyle);
+  const renderedChildren =
+    typeof children === "function"
+      ? children({ isActive, isTransitioning })
+      : children;
 
   const preloadRoute = useCallback(() => {
     void router
@@ -2047,16 +2296,18 @@ export function Link<
     "a",
     {
       ...anchorProps,
+      ...stateAnchorProps,
       "aria-current": isActive ? "page" : undefined,
       "aria-disabled": disabled ? true : undefined,
       "data-status": isActive ? "active" : undefined,
+      "data-transitioning": isTransitioning ? "transitioning" : undefined,
       bind:
-        preload === "viewport"
-          ? composeBind(anchorProps.bind, viewportBind)
-          : anchorProps.bind,
+        preload === "viewport" ? composeBind(linkBind, viewportBind) : linkBind,
+      class: linkClass,
       href: dangerous ? undefined : href,
       mix: [
         mix,
+        stateMix,
         on("click", (event) => {
           const elementTarget =
             event.currentTarget instanceof Element
@@ -2082,6 +2333,14 @@ export function Link<
             return;
           }
           event.preventDefault();
+          transitionSubscription.unsubscribe?.();
+          setIsTransitioning(true);
+          const unsubscribe = router.subscribe("onResolved", () => {
+            unsubscribe();
+            transitionSubscription.unsubscribe = undefined;
+            setIsTransitioning(false);
+          });
+          transitionSubscription.unsubscribe = unsubscribe;
           void router.navigate<
             RegisteredRouter,
             TTo,
@@ -2099,11 +2358,43 @@ export function Link<
             if (!disabled) preloadRoute();
           }),
       ],
-      role: disabled ? "link" : anchorProps.role,
+      role: disabled ? "link" : (stateAnchorProps.role ?? anchorProps.role),
+      style: linkStyle,
       target,
     },
-    children,
+    renderedChildren,
   );
+}
+
+function resolveLinkStateProps(
+  props: LinkStateProps | (() => LinkStateProps) | undefined,
+): LinkStateProps {
+  return (typeof props === "function" ? props() : props) ?? {};
+}
+
+function mergeLinkClass(
+  base: AnchorProps["class"],
+  state: AnchorProps["class"],
+): AnchorProps["class"] {
+  if (typeof base === "string" && typeof state === "string") {
+    return `${base} ${state}`;
+  }
+  return state ?? base;
+}
+
+function mergeLinkStyle(
+  base: AnchorProps["style"],
+  state: AnchorProps["style"],
+): AnchorProps["style"] {
+  if (
+    typeof base === "object" &&
+    base !== null &&
+    typeof state === "object" &&
+    state !== null
+  ) {
+    return { ...base, ...state };
+  }
+  return state ?? base;
 }
 
 function selectStoreValue<TValue>(value: TValue): TValue {

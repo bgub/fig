@@ -17,6 +17,7 @@ import {
   createFileRoute,
   createLazyFileRoute,
   createMemoryHistory,
+  createRouteMask,
   createRootRoute,
   createRootRouteWithContext,
   createRoute,
@@ -26,6 +27,7 @@ import {
   HeadContent,
   lazyRouteComponent,
   Link,
+  linkOptions,
   type LinkProps,
   MatchRoute,
   Navigate,
@@ -38,6 +40,7 @@ import {
   useBlocker,
   useCanGoBack,
   useLocation,
+  useMatch,
   useMatches,
   useMatchRoute,
   useParams,
@@ -86,6 +89,19 @@ describe("@bgub/fig-tanstack-router", () => {
       component: User,
       id: "/generated",
     });
+  });
+
+  it("validates reusable links and route masks without wrapping them", () => {
+    const router = makeRouter();
+    const reusableLink = { params: { id: "42" }, to: "/users/$id" } as const;
+    const maskOptions = {
+      from: "/users/$id",
+      routeTree: router.routeTree,
+      to: "/",
+    } as const;
+
+    expect(linkOptions(reusableLink)).toBe(reusableLink);
+    expect(createRouteMask(maskOptions)).toBe(maskOptions);
   });
 
   it("preloads and suspends for a lazy route component once", async () => {
@@ -630,8 +646,26 @@ describe("@bgub/fig-tanstack-router", () => {
       }>();
       expectTypeOf(userRouteApi.useLoaderData()).toEqualTypeOf<string>();
       expectTypeOf(
-        userRouteApi.useMatch({ select: (match) => match.id }),
+        userRouteApi.useMatch({
+          select: (match) => match.id,
+          structuralSharing: true,
+        }),
       ).toEqualTypeOf<string>();
+
+      const optionalMatch = useMatch({
+        from: "/users/$id",
+        shouldThrow: false,
+      });
+      if (optionalMatch !== undefined) {
+        expectTypeOf(optionalMatch.params.id).toEqualTypeOf<string>();
+      }
+      void useParams({ shouldThrow: false, strict: false });
+
+      const reusableLink = linkOptions({
+        params: { id: "42" },
+        to: "/users/$id",
+      });
+      userRouteApi.Link(reusableLink);
 
       userRouteApi.Link({ params: { id: "42" }, to: "/users/$id" });
       void userRouteApi.useNavigate()({ to: "/" });
@@ -821,6 +855,10 @@ describe("@bgub/fig-tanstack-router", () => {
     const link = container.querySelector<HTMLAnchorElement>("#user-link");
     expect(link?.getAttribute("href")).toBe("/users/42?tab=profile");
     expect(link?.getAttribute("data-status")).toBeNull();
+    expect(link?.getAttribute("data-link-state")).toBe("inactive");
+    expect(link?.className).toBe("base inactive");
+    expect(link?.textContent).toBe("inactive:idle");
+    expect(link?.style.color).toBe("gray");
     expect(link?.hasAttribute("viewtransition")).toBe(false);
 
     const externalLink =
@@ -857,6 +895,10 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(click.defaultPrevented).toBe(true);
     expect(container.querySelector("h1")?.textContent).toBe("User 42");
     expect(link?.getAttribute("data-status")).toBe("active");
+    expect(link?.getAttribute("data-link-state")).toBe("active");
+    expect(link?.className).toBe("base active");
+    expect(link?.textContent).toBe("active:idle");
+    expect(link?.style.color).toBe("green");
     expect(router.stores.status.get()).toBe("idle");
 
     const preload = vi.spyOn(router, "preloadRoute");
@@ -950,6 +992,85 @@ describe("@bgub/fig-tanstack-router", () => {
     });
 
     expect(renders).toBe(rendersBeforeUpdate);
+  });
+
+  it("honors default structural sharing for selected router state", async () => {
+    const stableValues: object[] = [];
+    const rootRoute = createRootRoute({
+      component: () => {
+        const selected = useRouterState({
+          select: (state) => ({
+            loadedAt: state.loadedAt,
+            stable: { label: "stable" },
+          }),
+        });
+        stableValues.push(selected.stable);
+        return createElement("span", null, String(selected.loadedAt));
+      },
+    });
+    const router = createRouter({
+      defaultStructuralSharing: true,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute,
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    const stableBeforeUpdate = stableValues.at(-1);
+
+    await act(() => {
+      router.stores.loadedAt.set((loadedAt) => loadedAt + 1);
+    });
+
+    expect(stableValues.at(-1)).toBe(stableBeforeUpdate);
+  });
+
+  it("selects locations and optionally reads inactive matches", async () => {
+    const rootRoute = createRootRoute({
+      component: () => {
+        const pathname = useLocation({
+          select: (location) => location.pathname,
+        });
+        const userMatch = useMatch({
+          from: "/users/$id",
+          shouldThrow: false,
+        });
+        return createElement(
+          "span",
+          { id: "selected-location" },
+          `${pathname}:${userMatch?.params.id ?? "inactive"}`,
+        );
+      },
+    });
+    const homeRoute = createRoute({
+      component: () => null,
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const userRoute = createRoute({
+      component: () => null,
+      getParentRoute: () => rootRoute,
+      path: "users/$id",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, userRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    expect(container.textContent).toBe("/:inactive");
+
+    await act(() =>
+      router.navigate({ params: { id: "42" }, to: "/users/$id" }),
+    );
+    expect(container.textContent).toBe("/users/42:42");
   });
 
   it("subscribes framework hooks to narrow signal stores", async () => {
@@ -1317,13 +1438,28 @@ function Layout(): FigNode {
   return (
     <main data-router-status={status}>
       <Link
+        activeProps={{
+          class: "active",
+          "data-link-state": "active",
+          style: { color: "green" },
+        }}
+        class="base"
         id="user-link"
+        inactiveProps={() => ({
+          class: "inactive",
+          "data-link-state": "inactive",
+          style: { color: "gray" },
+        })}
         params={{ id: "42" }}
         search={{ tab: "profile" }}
         to="/users/$id"
         viewTransition
       >
-        User
+        {({ isActive, isTransitioning }) =>
+          `${isActive ? "active" : "inactive"}:${
+            isTransitioning ? "transitioning" : "idle"
+          }`
+        }
       </Link>
       <Link
         id="preload-link"
