@@ -18,7 +18,8 @@ const plugins = [tanstackStart()];
 ```
 
 The plugin supplies the default client and server entries, including streamed
-Fig SSR and full-document hydration. It currently uses TanStack's Solid target
+Fig SSR, full-document hydration, and state-preserving Fig Fast Refresh. It
+currently uses TanStack's Solid target
 as a private compiler compatibility layer because plugin core has no custom
 framework target. The generator currently normalizes file-route constructor
 imports to its Solid package ID; the plugin maps that ID directly to Fig, and no

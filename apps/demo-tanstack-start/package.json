@@ -7,6 +7,7 @@
     "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-tanstack-start...",
     "dev": "portless",
     "dev:app": "vite --config vite.config.cjs",
+    "probe:hmr": "node scripts/hmr-probe.mjs",
     "serve": "vite --config vite.config.cjs preview",
     "test": "vitest run --config ../../vite.config.ts --passWithNoTests",
     "test:e2e": "sh ../../scripts/free-port.sh 4185 && playwright test"

@@ -289,7 +289,7 @@ signal-only — aborting `options.signal` (or cancelling the stream) cancels the
 render and rejects `allReady`. Pass the stream and content type directly to a `Response`. Browser
 code decodes it with `decodePayloadStream` from `@bgub/fig/payload`, normally
 through fig-dom's `payloadDataLoader` adapter. Rows, codecs, value encoding, and
-Fig Start's inline document-frame transport are internal implementation details.
+framework document transports are internal implementation details.
 
 The public options cover error sanitization (`onError`), manifest-provided
 client assets (`clientReferenceAssets`), data-store partitioning, byte

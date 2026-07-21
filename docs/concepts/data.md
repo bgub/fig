@@ -21,7 +21,7 @@ Variants: `dataResource(options)` may omit `load` to declare a key-only resource
 
 `serverDataResource` can only be imported from `.server.ts(x)` files. The `figData` transform (`@bgub/fig-vite`) is the packaging contract: browser imports of server-file resources become key-only stubs (the browser-safe `key` survives; the server loader is stripped). Server-file modules imported without that transform must fail before server code enters the client bundle.
 
-`@bgub/fig-vite` is currently a private workspace preview rather than part of the synchronized public release group. Fig Start uses it in-repo; standalone consumers cannot yet rely on this transform from the public release set.
+`@bgub/fig-vite` is the public bundler home for that transform. Framework adapters may install it automatically; standalone Vite applications can add `figData()` directly.
 
 Those two loader placements — loader-backed and hydrate-only — are the only resource kinds the store knows. There is deliberately no third "remote" kind: see Remote Refresh Is A Framework Layer.
 
@@ -33,21 +33,13 @@ The load context also carries one non-public, symbol-keyed capability object (re
 
 The data layer does not own app/request context or dependency injection; frameworks and adapters that need request state should close over it when defining per-request server resources, or route remote data requests through their own endpoint code.
 
-Exploring: remote loaders run inside the framework data endpoint, which owns the request — so whether those loaders get an ambient per-request context (e.g. `AsyncLocalStorage`-backed) or keep auth and services in module scope is Fig Start's decision, not a core data contract (`docs/plans/open-questions.md`).
-
 ## Remote Refresh Is A Framework Layer
 
-"Refresh this server value directly from the browser" is deliberately not a core data concept: an endpoint must exist to serve the refresh, and endpoints belong to frameworks. Fig Start owns that layer with `remoteDataResource` (from `@bgub/fig-start/server`, declared in `.server.ts(x)` files exactly like `serverDataResource`).
+"Refresh this server value directly from the browser" is deliberately not a core data concept: an endpoint must exist to serve the refresh, and endpoints belong to frameworks. Compose an ordinary loader-backed `dataResource` with the framework's endpoint primitive. In TanStack Start, that primitive is `createServerFn`; without a framework, it can be a normal `fetch` call.
 
-Fig Start is currently an implemented private workspace preview, so this is the framework contract under development rather than a public install surface.
+The store sees only an ordinary loader-backed resource. Reads prefer hydrated values, cache misses and explicit refreshes call the endpoint loader, generation guarding and abort semantics apply unchanged, and a transport failure is a normal `rejected` refresh result with the stale value kept. There is no generated resource registry, remote resource kind, or resource-specific wire authority.
 
-On the server, a `remoteDataResource` is an ordinary server resource that Fig Start additionally registers behind its data endpoint under a stable generated id: `<root-relative-server-module>#<exportName>`, mirroring payload client references — no user-authored name registry. On the client, Fig Start's transform compiles it into a plain isomorphic `dataResource` whose loader closes over that id and calls the framework transport with the original arguments. The id is the wire authority, not the key, because `key(args)` is not invertible.
-
-The store never learns any of this: it sees an ordinary loader-backed resource. Reads prefer hydrated values, cache misses and explicit refreshes run the transport loader, generation guarding and abort semantics apply unchanged, and a transport failure is a normal `rejected` refresh result with the stale value kept.
-
-Remote arguments must be serializable by the framework transport, and remote resources must not rely on `debugArgs` to hide non-serializable loader inputs: the endpoint runs `load(...args)` with the actual client-controlled arguments. Remote loaders are public request handlers — they must authenticate, authorize, and validate exactly like any hand-written API route, using module scope or whatever request context the framework endpoint provides (see Loader Inputs).
-
-Without a framework, the same shape is a one-liner: an isomorphic `dataResource` whose client loader fetches an endpoint the app owns.
+Endpoint arguments must be serializable by the chosen transport. The endpoint is a public request handler and must authenticate, authorize, and validate client-controlled input exactly like any hand-written API route, using whatever request context the framework provides.
 
 ## Reads
 
@@ -83,7 +75,7 @@ The store exposes `snapshot()` and `hydrate(entries)` as the symmetric server/cl
 
 Hydration into a live store is a completed refresh pushed by the server: create the entry if missing, abort any in-flight load for that key as superseded, bump the entry generation, clear stale/error/refresh-error state, store the incoming value, and publish subscribers. Only settled values hydrate; a local refreshing entry's transient stale value never wins over the incoming fresh value.
 
-Payload navigation does not make a second data request: data read while rendering the server route segment streams in the same payload response as `data` rows. The framework data endpoint (Fig Start's `remoteDataResource` — see Remote Refresh Is A Framework Layer) serves only client-side cache misses and refreshes outside a route payload render.
+Payload navigation does not make a second data request: data read while rendering the server route segment streams in the same payload response as `data` rows. A resource's endpoint-backed loader serves client-side cache misses and refreshes outside a route payload render.
 
 ## Serialized Components As Data Resources
 

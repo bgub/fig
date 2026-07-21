@@ -4,7 +4,6 @@ packages:
   npm:@bgub/fig-dom: patch
   npm:@bgub/fig-reconciler: minor
   npm:@bgub/fig-server: minor
-  npm:@bgub/fig-start: patch
 ---
 
 ## Asset descriptors use native names and preserve native ordering

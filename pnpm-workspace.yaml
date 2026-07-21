@@ -4,14 +4,8 @@ packages:
 
 autoInstallPeers: false
 
-peerDependencyRules:
-  ignoreMissing:
-    # Fig Start only imports NodeRuntime; it does not expose Effect's Redis adapter.
-    - ioredis
-
 allowBuilds:
   esbuild: true
-  msgpackr-extract: false
 
 minimumReleaseAgeExclude:
   - "@tanstack/router-generator@1.167.21"

@@ -2,7 +2,7 @@ import * as babel from "@babel/core";
 import type { NodePath, PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 
-export interface TransformResult {
+interface TransformResult {
   code: string;
   map: unknown;
 }

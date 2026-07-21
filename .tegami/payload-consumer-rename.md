@@ -1,7 +1,6 @@
 ---
 packages:
   npm:@bgub/fig-server: minor
-  npm:@bgub/fig-start: patch
 ---
 
 ## Rename the payload decoding API to `createPayloadConsumer`

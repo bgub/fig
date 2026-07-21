@@ -51,11 +51,11 @@ function ViewTransitionLab(): FigNode {
       <header class="space-y-2">
         <h1 class="text-3xl font-semibold">
           <ViewTransition
-            default="fig-start-route-title"
+            default="fig-tanstack-route-title"
             enter="none"
             exit="none"
             name="start-vt-page-title"
-            share="fig-start-route-title"
+            share="fig-tanstack-route-title"
           >
             <span
               class="inline-block"
@@ -67,7 +67,7 @@ function ViewTransitionLab(): FigNode {
         </h1>
         <p class="text-slate-700">
           TanStack owns navigation while Fig owns the same structural
-          `ViewTransition` surfaces used by the original Fig Start demo.
+          `ViewTransition` surfaces used throughout the TanStack Start demo.
         </p>
       </header>
       <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
@@ -95,12 +95,12 @@ function ViewTransitionLab(): FigNode {
           <div class={dense ? "grid gap-2" : "grid gap-3"}>
             {ordered.map((surface) => (
               <ViewTransition
-                default="fig-start-vt"
+                default="fig-tanstack-vt"
                 enter="none"
                 key={surface.id}
                 name={`start-vt-${surface.id}`}
-                share="fig-start-vt"
-                update="fig-start-vt"
+                share="fig-tanstack-vt"
+                update="fig-tanstack-vt"
               >
                 <button
                   class={
@@ -126,11 +126,11 @@ function ViewTransitionLab(): FigNode {
           </div>
         </article>
         <ViewTransition
-          default="fig-start-vt-detail"
+          default="fig-tanstack-vt-detail"
           enter="none"
           name="start-vt-detail"
-          share="fig-start-vt-detail"
-          update="fig-start-vt-detail"
+          share="fig-tanstack-vt-detail"
+          update="fig-tanstack-vt-detail"
         >
           <aside class="space-y-3 rounded-lg border border-slate-300 bg-white p-5">
             <span class="inline-flex rounded bg-teal-50 px-2 py-1 text-sm font-medium text-teal-800">

@@ -92,7 +92,7 @@ export {
   setCurrentDispatcher,
   type StableEventCallerArgs,
 } from "./hooks.ts";
-// The private payload-format seam shared by fig-server, fig-dom, and Fig Start.
+// The private payload-format seam shared by renderers and framework adapters.
 export {
   assertPayloadCodecMatches,
   checkpointPayloadGraph,

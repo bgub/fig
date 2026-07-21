@@ -720,7 +720,7 @@ describe("decodePayloadStream", () => {
   });
 
   it("keeps gated references identity-stable across decodes sharing a stateful resolver", async () => {
-    // The fig-start shape: the row carries the reference's own stylesheet
+    // The initial-document shape: the row carries the reference's stylesheet
     // and prepareAssets returns a gate. With a plain function the decoder
     // mints a fresh gate wrapper per decode, so a stable resolve callback
     // alone cannot keep the island's identity — the stateful resolver is
@@ -766,7 +766,7 @@ describe("decodePayloadStream", () => {
   });
 
   it("keeps cached identity stable across gated and ungated decodes", async () => {
-    // fig-start's initial segment decodes ungated while navigations gate, so
+    // An initial document decodes ungated while navigations gate, so
     // the same reference id must resolve to one component either way.
     const Widget = () => createElement("em", null, "island");
     const resolver = createPayloadClientReferenceResolver(() => Widget);

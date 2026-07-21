@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { type TransformResult, transformModule } from "./transform.ts";
+import { transformModule } from "./transform.ts";
 
 const VIRTUAL_ID = "virtual:fig-refresh";
 const RESOLVED_VIRTUAL_ID = "\0virtual:fig-refresh";
@@ -17,7 +17,7 @@ export interface FigRefreshOptions {
 }
 
 // Minimal structural shape of a Vite plugin (avoids a hard dep on vite types).
-export interface FigVitePlugin {
+export interface FigRefreshPlugin {
   apply: "serve";
   enforce: "pre";
   load(id: string): string | null;
@@ -27,10 +27,10 @@ export interface FigVitePlugin {
     code: string,
     id: string,
     options?: { ssr?: boolean },
-  ): Promise<TransformResult | null>;
+  ): Promise<{ code: string; map: unknown } | null>;
 }
 
-export function figRefresh(options: FigRefreshOptions = {}): FigVitePlugin {
+export function figRefresh(options: FigRefreshOptions = {}): FigRefreshPlugin {
   const include = options.include ?? /\.[jt]sx?$/;
 
   return {
@@ -86,17 +86,3 @@ export {
   type FigDataPluginOptions,
   figData,
 } from "./data/index.ts";
-export type {
-  ClientDataResourceStub,
-  ServerDataClientStubResult,
-  ServerDataResourceRef,
-} from "./data/transform.ts";
-export {
-  assertNoServerDataResourceImport,
-  collectServerDataResourceStubs,
-  dataResourceId,
-  discoverServerDataResources,
-  rootRelative,
-  transformServerDataClientStub,
-} from "./data/transform.ts";
-export { transformModule };

@@ -1,7 +1,6 @@
 ---
 packages:
   npm:@bgub/fig: patch
-  npm:@bgub/fig-start: patch
 ---
 
 ## Server-route navigations commit content in one pass
@@ -13,8 +12,8 @@ promises still suspended on their first render read:
 
 - payload element gates are now tracked at creation, so a gate that settles
   before its first read resolves synchronously;
-- fig-start's client-reference module resolutions are tracked the same way;
-- fig-start's pre-commit `prepare()` now reveals the island hydration gate,
+- client-reference module resolutions are tracked the same way;
+- pre-commit asset preparation now reveals the island hydration gate,
   so navigations mount real islands instead of paying a placeholder →
   reveal follow-up commit.
 

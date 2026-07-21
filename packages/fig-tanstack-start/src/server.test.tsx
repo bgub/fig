@@ -37,7 +37,7 @@ describe("@bgub/fig-tanstack-start server", () => {
       head: () => ({
         links: [{ href: "/route.css", precedence: "route", rel: "stylesheet" }],
         meta: [
-          { title: "Fig Start" },
+          { title: "Fig App" },
           { "script:ld+json": { name: "</script>" } },
         ],
       }),
@@ -66,7 +66,7 @@ describe("@bgub/fig-tanstack-start server", () => {
     });
     const html = await result.response.text();
 
-    expect(html).toContain("<title data-fig-hydration-skip>Fig Start</title>");
+    expect(html).toContain("<title data-fig-hydration-skip>Fig App</title>");
     expect(html).toContain('href="/route.css"');
     expect(html).toContain('rel="stylesheet"');
     expect(html.indexOf("<!doctype html>")).toBeLessThan(

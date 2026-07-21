@@ -10,8 +10,8 @@ packages:
 The payload packages now present two primary operations:
 `renderToPayloadStream` on the server and `decodePayloadStream` in the
 browser-safe core entry. Row/model types, value encoding, codec machinery,
-content-type negotiation helpers, and Fig Start's inline document-frame
-transport are internal implementation details.
+content-type negotiation helpers, and framework document transports are
+internal implementation details.
 
 Client references use one `resolveClientReference(reference)` seam that may
 return a component synchronously or asynchronously. It replaces the separate

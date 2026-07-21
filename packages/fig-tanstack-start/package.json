@@ -65,6 +65,7 @@
   },
   "sideEffects": false,
   "dependencies": {
+    "@bgub/fig-vite": "workspace:*",
     "@tanstack/router-core": "1.171.15",
     "@tanstack/start-client-core": "1.170.14",
     "@tanstack/start-plugin-core": "1.171.22",

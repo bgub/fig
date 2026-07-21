@@ -17,7 +17,7 @@ test("hydrates the themed document and persists shell changes", async ({
 
   await page.goto("/", { waitUntil: "commit" });
   await expect(page.locator("html")).toHaveClass(/(^| )dark( |$)/);
-  await expect(page.locator(".fig-start-shell")).toHaveAttribute(
+  await expect(page.locator(".fig-tanstack-shell")).toHaveAttribute(
     "data-theme",
     "dark",
   );

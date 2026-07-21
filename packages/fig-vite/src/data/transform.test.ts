@@ -30,17 +30,16 @@ export const userResource = serverDataResource({
     expect(out.code).not.toContain("db.user");
   });
 
-  it("collects stubs for framework-provided callees", async () => {
+  it("collects browser-safe server resource stubs", async () => {
     const stubs = await collectServerDataResourceStubs(
-      `import { remoteDataResource } from "@bgub/fig-start/server";
+      `import { serverDataResource } from "@bgub/fig/server";
 import { db } from "./db.server.ts";
-export const userResource = remoteDataResource({
+export const userResource = serverDataResource({
   key: (id: string) => ["user", id],
   load: async (id: string) => db.user(id),
 });`,
       "/project/src/data/user.server.ts",
       root,
-      "remoteDataResource",
     );
 
     expect(stubs).toEqual([
@@ -54,32 +53,17 @@ export const userResource = remoteDataResource({
     ]);
   });
 
-  it("discovers declarations of the requested callee only", async () => {
+  it("discovers exported server data resource declarations", async () => {
     const code = `import { serverDataResource } from "@bgub/fig/server";
-import { remoteDataResource } from "@bgub/fig-start/server";
 export const localResource = serverDataResource({
   key: () => ["local"],
   load: () => "local",
 });
-export const remoteResource = remoteDataResource({
-  key: () => ["remote"],
-  load: () => "remote",
+export const unrelated = dataResource({
+  key: () => ["unrelated"],
+  load: () => "unrelated",
 });`;
 
-    await expect(
-      discoverServerDataResources(
-        code,
-        "/project/src/data/user.server.ts",
-        root,
-        "remoteDataResource",
-      ),
-    ).resolves.toEqual([
-      {
-        exportName: "remoteResource",
-        id: "/src/data/user.server.ts#remoteResource",
-        specifier: "/src/data/user.server.ts",
-      },
-    ]);
     await expect(
       discoverServerDataResources(
         code,

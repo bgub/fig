@@ -22,7 +22,7 @@ function Chart({ points }: { points: Point[] }) {
 
 The full creator set: `stylesheet`, `preload`, `modulepreload`, `script`, `font`, `preconnect`, `title`, `meta`. Each returns plain data — `stylesheet("/chart.css")` is just `{ kind: "stylesheet", href: "/chart.css" }`. Options use native HTML attribute names such as `crossorigin`, `fetchpriority`, and `http-equiv`, not React's DOM-property casing. Nothing registers or hoists at creation time; discovery happens when a render actually reaches the `assets(...)` element, which is what "render-discovered" means: an asset ships only if the UI that needs it ships.
 
-Client references carry assets too: `clientReference({ assets })` declares what a client component needs, and Fig Start's generated asset manifest feeds the render-level `clientReferenceAssets` resolver so only rendered client components contribute their CSS and preload assets.
+Client references carry assets too: `clientReference({ assets })` declares what a client component needs, and bundler-generated asset metadata feeds the render-level `clientReferenceAssets` resolver so only rendered client components contribute their CSS and preload assets.
 
 Raw tags still work. HTML `<link>`, `<title>`, `<meta>`, and explicitly `async` `<script>` elements are lowered into the same registry (`assetResourceFromHostProps`), so raw-tag authoring participates in dedupe like everything else. SVG/MathML titles and HTML titles or meta tags carrying `itemprop` stay in their native tree. Non-async host scripts stay in their native document position; use `script()` to opt other script modes into asset delivery. This is what replaces React 19's implicit hoistable behavior: data plus one documented mechanism, as doc 1 promised.
 

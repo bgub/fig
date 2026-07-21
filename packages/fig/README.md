@@ -324,16 +324,14 @@ payload or framework refresh path.
 
 Browser bundles need the `figData` transform from `@bgub/fig-vite` so imports of
 `.server.ts(x)` modules become loader-free client stubs instead of bundling the
-server loader. Fig Start includes this transform automatically.
+server loader.
 
 Direct client refreshes of server data are a framework feature, not a core
-data one: an endpoint has to exist to serve them. Fig Start provides
-`remoteDataResource` (from `@bgub/fig-start/server`), whose browser import
-compiles into a plain `dataResource` with a loader that calls the framework
-data endpoint. Without a framework, define an isomorphic `dataResource` whose
-loader fetches an endpoint you own. Server route payload navigations do not
-make an extra data request either way — data read during the payload render
-streams in that same payload response.
+data one: an endpoint has to exist to serve them. Define an isomorphic
+`dataResource` whose loader calls the framework endpoint; with TanStack Start,
+compose it with `createServerFn`. Server route payload navigations do not make
+an extra data request either way — data read during the payload render streams
+in that same payload response.
 
 ### Activity, Errors, And DevTools
 

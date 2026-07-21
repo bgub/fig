@@ -29,7 +29,7 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 - **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
 - **Promise-valued children** — the intended authoring story (`{loadComments(slug).then(...)}` as a Suspense child) needs thenable children accepted by the payload serializer and the client reconciler; today only suspending server components and promise-valued props outline holes.
 - **Optimistic-state primitive** — needs lane awareness so it cannot live in a framework. Capture in its own plan.
-- **Payload codec productization** — whether Fig Start exposes codec selection as a first-class option, when to ship a binary codec, and whether binary codec ids need explicit versioning beyond the opaque implementation id.
+- **Payload codec productization** — whether framework adapters expose codec selection as a first-class option, when to ship a binary codec, and whether binary codec ids need explicit versioning beyond the opaque implementation id.
 
 ## Asset Resources
 
@@ -45,16 +45,12 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 
 ## TanStack Adapters
 
-fig-start predates the adapter direction and now serves as a reference implementation; the metaframework bet is the shipped `@bgub/fig-tanstack-router` and `@bgub/fig-tanstack-start` adapters. Data resources are the external cache for route data (`ensureRouteData` delegates to `ensureData` without creating `loaderData`, and data-backed routers default `defaultPreloadStaleTime` to `0` — see `docs/concepts/data.md` and the adapter README).
+The metaframework bet is the shipped `@bgub/fig-tanstack-router` and `@bgub/fig-tanstack-start` adapters. Data resources are the external cache for route data (`ensureRouteData` delegates to `ensureData` without creating `loaderData`, and data-backed routers default `defaultPreloadStaleTime` to `0` — see `docs/concepts/data.md` and the adapter README).
 
 - **Native TanStack Start framework target** — generated and lazy file routes are shipped, but plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Upstream needs an extensible framework descriptor (package ids, route templates, compiler imports, refresh behavior) before Fig can remove its private Solid package-id mappings. The route objects, runtime, store, and hydration contracts do not depend on that change.
-- **TanStack Query adapter** — a Query-flavored API over data resources would layer freshness policy (stale timers, refetch-on-focus) above the two core verbs, the same core/framework split as `remoteDataResource`. Build when demand appears.
-
-## fig-start
-
-- **Server action transport and temporary references** — server action transport is deliberately left out of `useActionState` core, and both server actions and temporary references are absent from the payload row model; the framework layer owns the wire (`docs/concepts/hooks.md`, `docs/concepts/payload.md`).
-- **Request state for remote data loaders** — `remoteDataResource` loaders run inside fig-start's data endpoint, which owns the request; loaders receive only `(...args, { signal })`. Open: whether fig-start provides an ambient per-request context (e.g. `AsyncLocalStorage`-backed) for those loaders, or keeps auth and services in module scope. → `docs/concepts/data.md`
-- **Nested-segment routing (Next-style parallel segments)** — a segment router mostly falls out of shipped primitives: segments as keyed payload resources, composition via client-reference outlets, manifest-driven eager loads on navigation via `preloadData`, transitions for atomic commits. The open design piece is cold-load composition — one request delivering several segment entries. `data` rows deliberately use the value codec (no `element`/`client` models, no holes), so sibling segments cannot ride one stream today; candidate shapes are element-valued data rows (heavy: holes and asset gates span the whole stream), multi-root streams whose loader publishes each addressable root into its own entry, or serving initial segments over the existing document frame path and reserving per-segment requests for navigations. The former identity prerequisite is shipped: a caller-owned stateful resolver (`createPayloadClientReferenceResolver`) keeps gated and asynchronously resolved references identity-stable across decodes (`docs/concepts/payload.md`), and fig-start already passes one. Nothing shipped depends on the rest — address when a segment router is planned.
+- **TanStack Query adapter** — a Query-flavored API over data resources would layer freshness policy (stale timers, refetch-on-focus) above the two core verbs. Build when demand appears.
+- **Server action transport and temporary references** — server action transport is deliberately left out of `useActionState` core, and both server actions and temporary references are absent from the Payload row model; the framework layer owns the wire (`docs/concepts/hooks.md`, `docs/concepts/payload.md`).
+- **Nested-segment routing (Next-style parallel segments)** — a segment router mostly falls out of shipped primitives: segments as keyed Payload resources, composition via client-reference outlets, manifest-driven eager loads on navigation via `preloadData`, and transitions for atomic commits. The open design piece is cold-load composition — one request delivering several segment entries. Address it when a segment router is planned.
 
 ## View Transitions
 

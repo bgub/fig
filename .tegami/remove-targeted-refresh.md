@@ -6,9 +6,8 @@ packages:
 
 ## The targeted-refresh protocol and payload consumer are gone
 
-The serialized-components deletion gate passed (fig-start's tests plus the
-demo e2e suites all run on the resource model), so the legacy architecture
-is removed rather than deprecated:
+The serialized-components deletion gate passed across the demo e2e suites,
+so the legacy architecture is removed rather than deprecated:
 
 - `@bgub/fig-server/payload` no longer exports `createPayloadConsumer`,
   `PayloadConsumer`, `PayloadBoundary`, `PAYLOAD_BOUNDARY_HEADER`,

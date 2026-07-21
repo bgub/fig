@@ -2,7 +2,6 @@
 packages:
   npm:@bgub/fig: minor
   npm:@bgub/fig-dom: minor
-  npm:@bgub/fig-start: patch
 ---
 
 ## Stable client-reference identity across decodes
@@ -27,7 +26,5 @@ per-element gating.
 `@bgub/fig-dom`'s `payloadDataLoader` accepts the stateful resolver through
 its existing `resolveClientReference` option.
 
-`@bgub/fig-start` passes one from `hydrateStart`, fixing a state-loss bug:
-an island whose client row carried assets remounted on every segment
-re-decode (refresh, child navigation) because the per-decode gate wrapper
-defeated the framework's own reference-id cache, which this replaces.
+Framework adapters can retain one resolver across refreshes and navigations,
+preventing asset-gated islands from remounting on every re-decode.

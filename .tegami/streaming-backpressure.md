@@ -1,7 +1,6 @@
 ---
 packages:
   npm:@bgub/fig-server: minor
-  npm:@bgub/fig-start: patch
 ---
 
 ## Streaming HTML and payload respect consumer backpressure
@@ -20,7 +19,3 @@ single staged piece with one reveal op instead of partial fills.
 
 Cancelling the stream mid-render (`reader.cancel()`) now aborts the render
 cleanly instead of throwing from an enqueue into the cancelled stream.
-
-Fig Start's document injection layer reads the HTML render pull-by-pull
-instead of eagerly draining it, so renderer flow control propagates through
-`injectDocumentStreams` to the response.

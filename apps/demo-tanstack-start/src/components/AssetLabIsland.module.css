@@ -1,9 +1,9 @@
 .root {
   align-items: center;
-  background: var(--fig-start-card);
-  border: 1px solid var(--fig-start-link);
+  background: var(--fig-tanstack-card);
+  border: 1px solid var(--fig-tanstack-link);
   border-radius: 8px;
-  color: var(--fig-start-fg);
+  color: var(--fig-tanstack-fg);
   cursor: pointer;
   display: inline-grid;
   font: inherit;
@@ -16,8 +16,8 @@
 }
 
 .root:hover {
-  background: var(--fig-start-hover);
-  border-color: var(--fig-start-link);
+  background: var(--fig-tanstack-hover);
+  border-color: var(--fig-tanstack-link);
 }
 
 .mark {
@@ -37,6 +37,6 @@
 }
 
 .count {
-  color: var(--fig-start-link);
+  color: var(--fig-tanstack-link);
   font-size: 0.875rem;
 }

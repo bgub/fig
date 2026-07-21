@@ -171,7 +171,7 @@ export const userServerResource = serverDataResource({
 
 Browser components import and read `userResource`. Server code imports and preloads or reads `userServerResource`. Because both resources return the same key, they address the same store entry.
 
-If you import a `.server.ts(x)` module from browser code, the `figData` plugin from `@bgub/fig-vite` replaces the server loader with a client stub. Fig Start includes this transform. Both packages are currently private workspace previews, so this is the in-repo framework path rather than a standalone public install surface.
+If you import a `.server.ts(x)` module from browser code, the public `figData` plugin from `@bgub/fig-vite` replaces the server loader with a client stub.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed a value for that key, `readData(userResource, id)` can read it. If the client tries to refresh it directly, the result is:
 
@@ -185,28 +185,36 @@ Fresh data for hydrate-only resources must come through a server render, payload
 
 Sometimes the client should be able to refresh a server value directly — outside a document render or payload navigation. Fig's data layer deliberately has no verb for this: an HTTP endpoint has to exist to serve the refresh, and endpoints belong to the framework layer.
 
-In the private Fig Start workspace preview, declare the resource with `remoteDataResource` instead of `serverDataResource`:
+With TanStack Start, define the endpoint as a server function:
 
 ```ts
-// user-data.server.ts
-import { remoteDataResource } from "@bgub/fig-start/server";
+// user-function.ts
+import { createServerFn } from "@bgub/fig-tanstack-start";
 import { db } from "./db.server.ts";
 
-export const userResource = remoteDataResource({
+export const getUser = createServerFn({ method: "GET" })
+  .validator((input: { id: string }) => input)
+  .handler(({ data }) => db.users.find(data.id));
+```
+
+Then use that endpoint as an ordinary isomorphic resource loader:
+
+```ts
+// user-data.ts
+import { dataResource } from "@bgub/fig";
+import { getUser } from "./user-function.ts";
+
+export const userResource = dataResource({
   key: (id: string) => ["user", id],
-  load: async (id, { signal }) => db.users.find(id, { signal }),
+  load: (id, { signal }) => getUser({ data: { id }, signal }),
 });
 ```
 
-On the server it behaves exactly like `serverDataResource`, and Fig Start additionally registers it behind the framework data endpoint under a generated id (root-relative module path plus export name — no manual `name` registry). In the browser bundle, the transform compiles it into a plain `dataResource` whose loader calls that endpoint with the original arguments. The store never learns it's remote: reads prefer hydrated values, a cache miss or explicit refresh runs the transport loader, and a failed transport call is an ordinary `rejected` refresh result that keeps the stale value visible.
-
-The choice between `serverDataResource` and `remoteDataResource` is the security decision. A `serverDataResource` value can only change through a server render or payload refresh; a `remoteDataResource` is a public endpoint. Validate and authorize the client-controlled arguments inside the loader like any hand-written API route.
-
-Remote arguments must survive the transport, so they must be serializable. Don't use `debugArgs` to hide non-serializable arguments — the endpoint runs `load(...args)` with the real client-sent values.
+The store never learns that the loader is remote: reads prefer hydrated values, a cache miss or explicit refresh runs the transport loader, and a failed transport call is an ordinary `rejected` refresh result that keeps the stale value visible. Server functions are public endpoints, so validate and authorize their client-controlled arguments. Arguments must also be serializable by the framework transport.
 
 Payload navigations are separate. If the new route reads server data while rendering its payload, that data should stream in the payload response itself, not through an extra remote data request.
 
-Outside Fig Start, a "remote resource" is nothing special: define an isomorphic `dataResource` whose loader fetches an endpoint you wrote yourself.
+Outside TanStack Start, the same resource can call an endpoint you wrote yourself.
 
 ## Errors
 

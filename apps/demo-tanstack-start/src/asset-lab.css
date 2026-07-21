@@ -1,6 +1,6 @@
 .asset-lab-root {
-  background: var(--fig-start-card);
-  border: 1px solid var(--fig-start-border);
+  background: var(--fig-tanstack-card);
+  border: 1px solid var(--fig-tanstack-border);
   border-radius: 8px;
   display: grid;
   gap: 18px;
@@ -14,6 +14,6 @@
 }
 
 .asset-lab-copy {
-  color: var(--fig-start-muted);
+  color: var(--fig-tanstack-muted);
   margin: 6px 0 0;
 }

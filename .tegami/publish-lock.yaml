@@ -37,8 +37,6 @@ npm:packages:
   - id: npm:@bgub/fig-demo-client
   - id: npm:@bgub/fig-demo-payload
   - id: npm:@bgub/fig-demo-ssr
-  - id: npm:@bgub/fig-demo-start
   - id: npm:@bgub/fig-devtools
-  - id: npm:@bgub/fig-start
   - id: npm:@bgub/fig-demo-hmr
   - id: npm:@bgub/fig-vite

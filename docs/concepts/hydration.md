@@ -20,15 +20,15 @@ Blocked-boundary lookup is target-instance based, not tree-search based: the hos
 
 ## Mismatch Policy
 
-Server-only attributes and styles are preserved (extensions and edge-injected markers survive), with a dev warning when they diverge from the client render; text mismatches recover with a root client render (reported through `onRecoverableError`, digests included). Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary. When the boundary encloses a `Document`'s `documentElement`, fig-dom classifies local replacement as impossible and escalates to root recovery: a document cannot temporarily contain both the server and client document elements. `unsafeHTML` is trusted as an opaque server subtree during hydration: Fig validates the client prop shape but does not raw-compare or reassign `innerHTML`, because browser serialization is not stable across equivalent HTML. Host elements support React's `suppressHydrationWarning` prop as a one-level escape hatch for intentional direct text/attribute divergence on that host element; it does not suppress structural mismatches, descendant component output, or deeper host children, and is not rendered as a DOM attribute. Fig Start owns the document shell and lets apps supply per-request `<html>` props; request-known shell state like a cookie-backed theme should be rendered there instead of patched by a hydration script.
+Server-only attributes and styles are preserved (extensions and edge-injected markers survive), with a dev warning when they diverge from the client render; text mismatches recover with a root client render (reported through `onRecoverableError`, digests included). Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary. When the boundary encloses a `Document`'s `documentElement`, fig-dom classifies local replacement as impossible and escalates to root recovery: a document cannot temporarily contain both the server and client document elements. `unsafeHTML` is trusted as an opaque server subtree during hydration: Fig validates the client prop shape but does not raw-compare or reassign `innerHTML`, because browser serialization is not stable across equivalent HTML. Host elements support React's `suppressHydrationWarning` prop as a one-level escape hatch for intentional direct text/attribute divergence on that host element; it does not suppress structural mismatches, descendant component output, or deeper host children, and is not rendered as a DOM attribute. Framework app shells own per-request `<html>` props; request-known shell state like a cookie-backed theme should be rendered there instead of patched by a hydration script.
 
 ## Exploring: Hydration-Stable Environment
 
 Environment-dependent first renders (time, locale, time zone, viewport) are the legitimate mismatch class. The direction is a hydration-stable environment primitive rather than a mismatch opt-out: the app captures the environment values that affect HTML on the server, serializes them with the document, and the client's hydration render reads that same snapshot; after hydration, browser-backed stores publish live values through normal subscription flow (the `useSyncExternalStore` server-snapshot pattern, made first-class).
 
-Values the server can already know from the request should stay outside this primitive. For example, color scheme should usually be a cookie-backed app preference rendered into the Fig Start document shell, with `system` resolved by CSS media queries.
+Values the server can already know from the request should stay outside this primitive. For example, color scheme should usually be a cookie-backed app preference rendered into the framework document shell, with `system` resolved by CSS media queries.
 
-Sketch (fig-start level):
+Sketch (framework-adapter level):
 
 ```ts
 createRequestHandler({
@@ -41,8 +41,8 @@ createRequestHandler({
 });
 ```
 
-Open questions: ownership (fig-start vs fig-dom vs a core primitive), one app-wide snapshot vs nested scopes, how the client learns hydration finished (to switch to live values), whether the snapshot rides the fig-start bootstrap path or a renderer-level slot, and whether bare `hydrateRoot` should accept a snapshot option.
+Open questions: ownership (framework adapter vs fig-dom vs a core primitive), one app-wide snapshot vs nested scopes, how the client learns hydration finished (to switch to live values), whether the snapshot rides framework bootstrap state or a renderer-level slot, and whether bare `hydrateRoot` should accept a snapshot option.
 
-Provisional stance: keep `suppressHydrationWarning` compatible but narrow. Prototype the environment snapshot in fig-start first; if a divergence class remains that cannot be modeled as snapshot-plus-post-hydration-update or a one-level host escape hatch, add a smaller, named escape hatch for that class rather than a broader mismatch silencer.
+Provisional stance: keep `suppressHydrationWarning` compatible but narrow. Prototype the environment snapshot in the TanStack Start adapter first; if a divergence class remains that cannot be modeled as snapshot-plus-post-hydration-update or a one-level host escape hatch, add a smaller, named escape hatch for that class rather than a broader mismatch silencer.
 
 Prior art surveyed: React/Next (placeholder-until-mount, client-only, `suppressHydrationWarning`), Vue 3.5 (`data-allow-mismatch` — the explicit escape-hatch model), Nuxt (steering toward server/client-stable sources), and `useSyncExternalStore`'s dual-snapshot pattern, which is the closest shape to the proposal.

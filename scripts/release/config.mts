@@ -12,6 +12,7 @@ export const jsrPackageNames = [
 
 export const publicPackageNames = [
   ...jsrPackageNames,
+  "@bgub/fig-vite",
   "@bgub/fig-tanstack-router",
   "@bgub/fig-tanstack-start",
 ] as const;
@@ -36,8 +37,6 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-demo-tanstack-start",
       "@bgub/fig-devtools",
-      "@bgub/fig-start",
-      "@bgub/fig-vite",
     ],
     npm: {
       client: "pnpm",
@@ -54,6 +53,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-reconciler": { group: "fig" },
       "@bgub/fig-refresh": { group: "fig" },
       "@bgub/fig-server": { group: "fig" },
+      "@bgub/fig-vite": { group: "fig" },
       "@bgub/fig-tanstack-router": { group: "fig" },
       "@bgub/fig-tanstack-start": { group: "fig" },
     },

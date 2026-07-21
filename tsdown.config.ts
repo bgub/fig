@@ -47,15 +47,6 @@ const libraryEntries: Record<string, string[] | Record<string, string>> = {
     "./src/html-entry.ts",
     "./src/payload.ts",
   ],
-  "packages/fig-start": [
-    "./src/cli.ts",
-    "./src/index.ts",
-    "./src/server.ts",
-    "./src/client.ts",
-    "./src/dev-server.ts",
-    "./src/internal.ts",
-    "./src/vite/index.ts",
-  ],
   "packages/fig-tanstack-router": ["./src/router.tsx"],
   "packages/fig-tanstack-start": {
     data: "./src/data.ts",
@@ -101,9 +92,9 @@ function packConfigFor(path: string): PackConfig | undefined {
       entry: libraryEntry,
       dts: true,
       // Monorepo dev (FIG_DEV_SOURCE=1) builds the libraries with __DEV__ on so
-      // the fig-start dev server — which consumes these built packages — gets
-      // strict diagnostics and DevTools commit emission. Publishing builds
-      // (flag unset) stay production, preserving dead-code elimination.
+      // workspace demos that consume these built packages get strict
+      // diagnostics and DevTools commit emission. Publishing builds (flag
+      // unset) stay production, preserving dead-code elimination.
       define: isDevSourcePack ? figDevDefine : figProductionDefine,
       minify: browser ? true : undefined,
       platform: browser ? "browser" : undefined,

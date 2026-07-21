@@ -88,7 +88,7 @@ Some things are deliberately absent from the row model: server actions and tempo
 
 Payload data is not just `JSON.stringify` with crossed fingers. The shared value codec round-trips JSON scalars/arrays, plain objects (including a user-authored `$fig` key), shared references and cyclic graphs, `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global `Symbol.for` symbols. It rejects functions, class instances/non-plain objects, and non-global symbols.
 
-Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. Fig Start uses the same helpers for data hydration and remote data resource args/results, so data values don't silently degrade to JSON.
+Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. The TanStack Start adapter uses the same helpers for document-data hydration, so data values don't silently degrade to JSON.
 
 ## Suspense holes fill by row id
 

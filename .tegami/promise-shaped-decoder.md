@@ -2,7 +2,6 @@
 packages:
   npm:@bgub/fig: minor
   npm:@bgub/fig-dom: patch
-  npm:@bgub/fig-start: patch
 ---
 
 ## Promise-shaped payload decoder
@@ -19,8 +18,8 @@ decode teardown or leak an unhandled rejection. The
 `PayloadDecode` interface and its non-thenable caveat are deleted;
 `PayloadDecodeCompletion` remains as the callback's result type.
 
-`@bgub/fig-dom`'s `payloadDataLoader` and `@bgub/fig-start`'s document
-segment decode migrate internally; their public APIs are unchanged.
+`@bgub/fig-dom`'s `payloadDataLoader` migrates internally; its public API is
+unchanged.
 
 Also considered and declined: narrowing `ResolveClientReference` to an
 opaque id. The reference's `exportName`/`ssr`/`assets` mirror the `client`

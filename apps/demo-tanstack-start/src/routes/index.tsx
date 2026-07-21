@@ -11,9 +11,8 @@ function Home(): FigNode {
         Welcome to Fig TanStack Start
       </h1>
       <p class="text-slate-700">
-        The Fig Start demo rebuilt on TanStack orchestration: typed routes,
-        nested layouts, route loaders, Payload server trees, and data that
-        streams in over Suspense.
+        Fig on TanStack orchestration: typed routes, nested layouts, route
+        loaders, Payload server trees, and data that streams in over Suspense.
       </p>
       <p>
         <Link class="font-medium text-teal-700" to="/data">
@@ -26,11 +25,11 @@ function Home(): FigNode {
           to="/view-transitions"
         >
           <ViewTransition
-            default="fig-start-route-title"
+            default="fig-tanstack-route-title"
             enter="none"
             exit="none"
             name="start-vt-page-title"
-            share="fig-start-route-title"
+            share="fig-tanstack-route-title"
           >
             <span class="inline-block" data-view-transition-surface="home-link">
               View transitions

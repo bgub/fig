@@ -1,7 +1,6 @@
 {
   "name": "@bgub/fig-vite",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0-alpha.0",
   "description": "Fig Vite plugins (Fast Refresh / HMR and data-resource transforms)",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
@@ -11,15 +10,20 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "prepack": "pnpm build",
     "test": "vitest run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",
@@ -32,6 +36,9 @@
     "url": "https://github.com/bgub/fig/issues"
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@babel/core": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
@@ -40,5 +47,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

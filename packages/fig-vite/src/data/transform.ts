@@ -4,14 +4,15 @@ import type { PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
 
 const SERVER_DATA_RESOURCE_MODULE = "@bgub/fig/server";
+const SERVER_DATA_RESOURCE_CALLEE = "serverDataResource";
 
-export interface ServerDataResourceRef {
+interface ServerDataResourceRef {
   exportName: string;
   id: string;
   specifier: string;
 }
 
-export interface ClientDataResourceStub {
+interface ClientDataResourceStub {
   debugArgsCode?: string;
   exportName: string;
   id: string;
@@ -19,7 +20,7 @@ export interface ClientDataResourceStub {
   keyCode: string;
 }
 
-export interface ServerDataClientStubResult {
+interface ServerDataClientStubResult {
   code: string;
   map: unknown;
   stubs: ClientDataResourceStub[];
@@ -41,14 +42,12 @@ export async function discoverServerDataResources(
   code: string,
   id: string,
   root: string,
-  callee = "serverDataResource",
 ): Promise<ServerDataResourceRef[]> {
   const serverDataResources: ServerDataResourceRef[] = [];
 
   await transformTypeScript(code, id, {
     plugins: [
       serverDataDiscoveryBabelPlugin({
-        callee,
         filename: id,
         root,
         serverDataResources,
@@ -60,23 +59,18 @@ export async function discoverServerDataResources(
   return serverDataResources;
 }
 
-// Extracts the browser-safe pieces (key, debugArgs, their imports) of every
-// exported `<callee>({...})` declaration. The default collects fig-data's own
-// serverDataResource declarations; frameworks with their own server-resource
-// callees (Fig Start's remoteDataResource) pass theirs and emit their own
-// stub code from the result.
+// Extracts the browser-safe pieces (key, debugArgs, and their imports) of every
+// exported serverDataResource declaration.
 export async function collectServerDataResourceStubs(
   code: string,
   id: string,
   root: string,
-  callee = "serverDataResource",
 ): Promise<ClientDataResourceStub[]> {
   const stubs: ClientDataResourceStub[] = [];
 
   await transformTypeScript(code, id, {
     plugins: [
       clientStubDiscoveryBabelPlugin({
-        callee,
         filename: id,
         root,
         stubs,
@@ -148,7 +142,6 @@ function stubOptionFields(stub: ClientDataResourceStub): string[] {
 }
 
 function serverDataDiscoveryBabelPlugin(state: {
-  callee: string;
   filename: string;
   root: string;
   serverDataResources: ServerDataResourceRef[];
@@ -165,7 +158,6 @@ function serverDataDiscoveryBabelPlugin(state: {
             t,
             state.root,
             state.filename,
-            state.callee,
           );
           if (declaration === null) return;
           state.serverDataResources.push({
@@ -180,7 +172,6 @@ function serverDataDiscoveryBabelPlugin(state: {
 }
 
 function clientStubDiscoveryBabelPlugin(state: {
-  callee: string;
   filename: string;
   root: string;
   stubs: ClientDataResourceStub[];
@@ -198,7 +189,6 @@ function clientStubDiscoveryBabelPlugin(state: {
             t,
             state.root,
             state.filename,
-            state.callee,
           );
           if (stub !== null) state.stubs.push(stub);
         },
@@ -232,15 +222,8 @@ function clientDataResourceStubFromDeclarator(
   t: typeof babel.types,
   root: string,
   filename: string,
-  callee: string,
 ): ClientDataResourceStub | null {
-  const declaration = serverDataResourceDeclaration(
-    path,
-    t,
-    root,
-    filename,
-    callee,
-  );
+  const declaration = serverDataResourceDeclaration(path, t, root, filename);
   if (declaration === null) return null;
   const { exportName, id, options } = declaration;
 
@@ -268,13 +251,14 @@ function serverDataResourceDeclaration(
   t: typeof babel.types,
   root: string,
   filename: string,
-  callee: string,
 ): ServerDataResourceDeclaration | null {
   const exportName = exportedConstName(path, t);
   if (exportName === null) return null;
   const init = path.get("init");
   if (!init.isCallExpression()) return null;
-  if (!t.isIdentifier(init.node.callee, { name: callee })) {
+  if (
+    !t.isIdentifier(init.node.callee, { name: SERVER_DATA_RESOURCE_CALLEE })
+  ) {
     return null;
   }
 

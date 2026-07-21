@@ -4,21 +4,13 @@ packages:
   npm:@bgub/fig-dom: minor
 ---
 
-## fig-start moves to the serialized-components resource model
+## Serialized components move to the data-resource model
 
-Server routes are now ordinary data resources: fig-start serves plain
-payload streams per URL (no `PayloadBoundary`, no `x-fig-payload-boundary`
-header), and the client consumes them through a `[routeId, url]`-keyed
-`dataResource` with `payloadDataLoader` — refresh is `refreshData`, child
-navigation is a new URL key, and back/forward navigations reuse cached
-entries. Navigation commits wait for the incoming payload, its island
-modules, and its stylesheet gates.
-
-The initial document binds without a fetch: the segment's loader serves the
-inline payload frame stream as a synthetic `Response` (frames now carry an
-`end` marker), so streamed holes keep filling after the shell flush through
-the same generation-guarded decode as any navigation. The document's
-server-side render also uses `decodePayloadStream` now.
+Serialized trees are now ordinary data resources: servers return plain
+Payload streams, and clients consume them through keyed `dataResource`
+instances with `payloadDataLoader`. Refresh is `refreshData`, navigation can
+select a new key, and back/forward navigations reuse cached entries. Commits
+wait for the incoming Payload, island modules, and stylesheet gates.
 
 Supporting API additions: `payloadDataLoader` accepts a `prepareAssets`
 override (defaults to `insertAssetResources`), and `decodePayloadStream`

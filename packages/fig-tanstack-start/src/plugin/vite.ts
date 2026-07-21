@@ -6,14 +6,21 @@ import {
   tanStackStartVite,
   type TanStackStartViteInputConfig,
 } from "@tanstack/start-plugin-core/vite";
+import { figRefresh } from "@bgub/fig-vite";
 import type { PluginOption } from "vite";
 
 const compatibilityFramework = "solid";
 const figRouterPackage = "@bgub/fig-tanstack-router";
-const figStartPackage = "@bgub/fig-tanstack-start";
+const figTanStackStartPackage = "@bgub/fig-tanstack-start";
 const tanstackStartPackage = "@tanstack/solid-start";
+const tanstackStartClientPackage = "@tanstack/start-client-core";
 const resolveDependency = (id: string) =>
   fileURLToPath(import.meta.resolve(id));
+const tanstackStartClientEntries = {
+  root: resolveDependency(tanstackStartClientPackage),
+  client: resolveDependency(`${tanstackStartClientPackage}/client`),
+  clientRpc: resolveDependency(`${tanstackStartClientPackage}/client-rpc`),
+} as const;
 const storageContextPath = fileURLToPath(
   new URL("../storage-context.js", import.meta.url),
 );
@@ -28,9 +35,7 @@ const compilerRpcModules = [
   {
     source: `${tanstackStartPackage}/client-rpc`,
     id: "\0fig-tanstack-start:client-rpc",
-    code: `export { createClientRpc } from ${JSON.stringify(
-      resolveDependency("@tanstack/start-client-core/client-rpc"),
-    )};`,
+    code: `export { createClientRpc } from "${tanstackStartClientPackage}/client-rpc";`,
   },
   {
     source: `${tanstackStartPackage}/server-rpc`,
@@ -70,12 +75,24 @@ export function tanstackStart(
       },
       startOptions,
     ),
+    // Route splitting must run first: it moves component declarations into
+    // virtual modules. Refresh then registers the declarations where they
+    // actually remain instead of leaving references in the route shell.
+    figRefresh(),
   ];
 }
 
 function compatibilityPlugin(): PluginOption {
   let clientOutDir: string | undefined;
   let serverAssetsPrefix = "assets/";
+  const applicationEntryUrls = new Map<string, string>();
+  const optimizerApplicationEntries = {
+    name: "fig-tanstack-start:optimizer-application-entries",
+    resolveId(source: string) {
+      const id = applicationEntryUrls.get(source);
+      return id === undefined ? null : { external: true, id };
+    },
+  };
   return {
     name: "fig-tanstack-start:compatibility",
     enforce: "pre",
@@ -83,6 +100,18 @@ function compatibilityPlugin(): PluginOption {
       return {
         resolve: {
           alias: [
+            {
+              find: new RegExp(`^${tanstackStartClientPackage}$`),
+              replacement: tanstackStartClientEntries.root,
+            },
+            {
+              find: new RegExp(`^${tanstackStartClientPackage}/client$`),
+              replacement: tanstackStartClientEntries.client,
+            },
+            {
+              find: new RegExp(`^${tanstackStartClientPackage}/client-rpc$`),
+              replacement: tanstackStartClientEntries.clientRpc,
+            },
             {
               find: /^@tanstack\/start-storage-context$/,
               replacement: storageContextPath,
@@ -93,10 +122,10 @@ function compatibilityPlugin(): PluginOption {
             },
             {
               find: /^@tanstack\/solid-start$/,
-              replacement: figStartPackage,
+              replacement: figTanStackStartPackage,
             },
           ],
-          dedupe: [figStartPackage, figRouterPackage],
+          dedupe: [figTanStackStartPackage, figRouterPackage],
         },
       };
     },
@@ -107,16 +136,41 @@ function compatibilityPlugin(): PluginOption {
       if (environmentName !== START_ENVIRONMENT_NAMES.client) return undefined;
       return {
         optimizeDeps: {
+          include: [
+            ...(environment.optimizeDeps?.include ?? []),
+            tanstackStartClientPackage,
+            `${tanstackStartClientPackage}/client`,
+            `${tanstackStartClientPackage}/client-rpc`,
+            "@tanstack/router-core/ssr/client",
+          ],
           exclude: [
             ...(environment.optimizeDeps?.exclude ?? []),
-            figStartPackage,
+            figTanStackStartPackage,
             figRouterPackage,
-            "@tanstack/start-client-core",
           ],
+          rolldownOptions: {
+            ...environment.optimizeDeps?.rolldownOptions,
+            plugins:
+              environment.optimizeDeps?.rolldownOptions?.plugins === undefined
+                ? [optimizerApplicationEntries]
+                : [
+                    environment.optimizeDeps.rolldownOptions.plugins,
+                    optimizerApplicationEntries,
+                  ],
+          },
         },
       };
     },
     configResolved(config) {
+      for (const alias of config.resolve.alias) {
+        if (
+          typeof alias.find === "string" &&
+          (alias.find === "#tanstack-router-entry" ||
+            alias.find === "#tanstack-start-entry")
+        ) {
+          applicationEntryUrls.set(alias.find, viteFsImport(alias.replacement));
+        }
+      }
       const outDir =
         config.environments[START_ENVIRONMENT_NAMES.client]?.build.outDir;
       if (outDir !== undefined) clientOutDir = resolve(config.root, outDir);
@@ -162,7 +216,7 @@ function compatibilityPlugin(): PluginOption {
       if (id === defaultEntryPaths.server) {
         return [
           'import { createStartHandler } from "@tanstack/start-server-core";',
-          `import { defaultStreamHandler } from ${JSON.stringify(`${figStartPackage}/server`)};`,
+          `import { defaultStreamHandler } from ${JSON.stringify(`${figTanStackStartPackage}/server`)};`,
           "const fetch = createStartHandler(defaultStreamHandler);",
           "export default { fetch };",
         ].join("\n");
@@ -182,4 +236,8 @@ function rewriteFrameworkImports(code: string): string {
     (_match, keyword: string, parenthesis: string | undefined, quote: string) =>
       `${keyword}${parenthesis === undefined ? " " : parenthesis}${quote}${tanstackStartPackage}${quote}`,
   );
+}
+
+function viteFsImport(path: string): string {
+  return `/@fs/${path.replaceAll("\\", "/").replace(/^\/+/, "")}`;
 }

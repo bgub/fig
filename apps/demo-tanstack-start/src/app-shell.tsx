@@ -20,7 +20,7 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
             element.setAttribute("data-fig-tanstack-start-hydrated", "");
             return undefined;
           }}
-          class="fig-start-shell min-h-screen"
+          class="fig-tanstack-shell min-h-screen"
           data-theme={theme}
         >
           <div class="mx-auto max-w-3xl p-6">

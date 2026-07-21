@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { figRefresh } from "./index.ts";
+import * as figVite from "./index.ts";
+
+const { figRefresh } = figVite;
 
 describe("@bgub/fig-vite plugin", () => {
+  it("exposes only the application plugin interface", () => {
+    expect(Object.keys(figVite).sort()).toEqual(["figData", "figRefresh"]);
+  });
+
   it("loads the refresh runtime through Vite file imports", () => {
     const plugin = figRefresh();
     const id = plugin.resolveId("virtual:fig-refresh");

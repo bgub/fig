@@ -65,17 +65,3 @@ function transformTarget(
 function isServerModuleId(id: string): boolean {
   return id.endsWith(".server.ts") || id.endsWith(".server.tsx");
 }
-
-export type {
-  ClientDataResourceStub,
-  ServerDataClientStubResult,
-  ServerDataResourceRef,
-} from "./transform.ts";
-export {
-  assertNoServerDataResourceImport,
-  collectServerDataResourceStubs,
-  dataResourceId,
-  discoverServerDataResources,
-  rootRelative,
-  transformServerDataClientStub,
-} from "./transform.ts";

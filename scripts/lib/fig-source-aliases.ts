@@ -23,12 +23,6 @@ const entries = [
   ["@bgub/fig-server/html", "packages/fig-server/src/html-entry.ts"],
   ["@bgub/fig-server/payload", "packages/fig-server/src/payload.ts"],
   ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
-  ["@bgub/fig-start/server", "packages/fig-start/src/server.ts"],
-  ["@bgub/fig-start/client", "packages/fig-start/src/client.ts"],
-  ["@bgub/fig-start/dev-server", "packages/fig-start/src/dev-server.ts"],
-  ["@bgub/fig-start/internal", "packages/fig-start/src/internal.ts"],
-  ["@bgub/fig-start/vite", "packages/fig-start/src/vite/index.ts"],
-  ["@bgub/fig-start", "packages/fig-start/src/index.ts"],
   ["@bgub/fig-tanstack-router", "packages/fig-tanstack-router/src/router.tsx"],
   [
     "@bgub/fig-tanstack-start/client",

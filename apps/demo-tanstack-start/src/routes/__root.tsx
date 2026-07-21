@@ -12,7 +12,7 @@ export const Route = createRootRouteWithContext<StartDataContext>()({
     meta: [
       { title: "Fig TanStack Start" },
       {
-        content: "Fig Start reimplemented on TanStack Start.",
+        content: "Fig running on TanStack Start.",
         name: "description",
       },
     ],
