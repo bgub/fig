@@ -56,7 +56,9 @@ import {
 } from "@bgub/fig/internal";
 import {
   type ContextValues,
+  type StackFrame,
   cloneContextValues,
+  componentStack,
   createStaticDispatcher,
   type Deferred,
   deferred,
@@ -108,6 +110,7 @@ class PayloadRequestCancelledError extends Error {
 
 type PayloadRequest = {
   allReady: Deferred<void>;
+  cleanupAbortListener(): void;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
@@ -122,7 +125,6 @@ type PayloadRequest = {
   pendingTasks: number;
   pingedTasks: Task[];
   queuedRows: Uint8Array[];
-  removeAbortListener: (() => void) | null;
   // Reentrancy guard: enqueueing inside flushRows can synchronously invoke
   // the stream's pull handler, which must not restart the drain — queuedRows
   // is spliced only after the loop, so a reentrant pass would re-enqueue the
@@ -135,12 +137,16 @@ type PayloadRequest = {
 type Task = {
   contextValues: ContextValues;
   id: number;
-  kind: "node" | "promise";
   stack: StackFrame | null;
-  value: unknown;
-};
+} & TaskValue;
 
-type Component = (props: Props & { children?: FigNode }) => unknown;
+type TaskValue =
+  | { kind: "node"; value: FigNode }
+  | { kind: "promise"; value: Thenable };
+
+type Component = (
+  props: Props & { children?: FigNode },
+) => FigNode | Thenable<FigNode>;
 
 type RenderFrame = {
   contextValues: ContextValues;
@@ -157,11 +163,6 @@ type RenderFrame = {
   request: PayloadRequest;
   stack: StackFrame | null;
 };
-
-interface StackFrame {
-  name: string;
-  parent: StackFrame | null;
-}
 
 const errorStacks = new WeakMap<object, StackFrame>();
 const childrenTreeProps = new Set(["children"]);
@@ -189,6 +190,7 @@ function createPayloadRequest(
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
     allReady: deferred<void>(),
+    cleanupAbortListener: () => undefined,
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
     controller: null,
@@ -210,7 +212,6 @@ function createPayloadRequest(
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
-    removeAbortListener: null,
     flushingRows: false,
     status: "open",
     workScheduled: false,
@@ -222,7 +223,7 @@ function createPayloadRequest(
   void request.allReady.promise.catch(() => undefined);
 
   request.pingedTasks.push(
-    createTask(request, 0, "node", node, new Map(), null),
+    createTask(request, 0, { kind: "node", value: node }, new Map(), null),
   );
 
   const stream = new ReadableStream<Uint8Array>(
@@ -249,8 +250,10 @@ function createPayloadRequest(
   if (signal !== undefined) {
     const abortListener = () => abortPayloadRequest(request, signal.reason);
     signal.addEventListener("abort", abortListener, { once: true });
-    request.removeAbortListener = () =>
+    request.cleanupAbortListener = () => {
       signal.removeEventListener("abort", abortListener);
+      request.cleanupAbortListener = () => undefined;
+    };
   }
 
   scheduleWork(request);
@@ -261,13 +264,12 @@ function createPayloadRequest(
 function createTask(
   request: PayloadRequest,
   id: number,
-  kind: Task["kind"],
-  value: unknown,
+  value: TaskValue,
   contextValues: ContextValues,
   stack: StackFrame | null,
 ): Task {
   request.pendingTasks += 1;
-  return { contextValues, id, kind, stack, value };
+  return { contextValues, id, stack, ...value };
 }
 
 function performWork(request: PayloadRequest): void {
@@ -293,8 +295,8 @@ function retryTask(request: PayloadRequest, task: Task): void {
   try {
     const value =
       task.kind === "node"
-        ? serializeNode(task.value as FigNode, frame)
-        : serializeValue(readThenable(task.value as Thenable), frame);
+        ? serializeNode(task.value, frame)
+        : serializeValue(readThenable(task.value), frame);
     flushFrameAssets(frame, task.id);
     emitDataRows(request);
     emitRow(request, { id: task.id, tag: "model", value });
@@ -440,7 +442,13 @@ function serializeNodeOrLazy(
     // reveal on stylesheets only the hole's content needs.
     const scopedAssets = frame.pendingAssets.splice(assetCheckpoint);
     if (isThenable(error)) {
-      return outlineTask(frame, "node", node, "lazy", error, scopedAssets);
+      return outlineTask(
+        frame,
+        { kind: "node", value: node },
+        "lazy",
+        error,
+        scopedAssets,
+      );
     }
     return outlineError(frame, error, "lazy", scopedAssets);
   }
@@ -520,7 +528,7 @@ function serializeElement(
   }
 
   if (typeof type === "function") {
-    return serializeFunctionComponent(type as Component, element.props, frame);
+    return serializeFunctionComponent(type, element.props, frame);
   }
 
   throw new Error("Unsupported Fig element type during payload render.");
@@ -566,7 +574,7 @@ function serializeFunctionComponent(
   try {
     const result = type(props);
     const node = isThenable(result) ? readThenable(result) : result;
-    return serializeNode(node as FigNode, frame);
+    return serializeNode(node, frame);
   } catch (error) {
     recordErrorStack(error, frame.stack);
     throw error;
@@ -621,7 +629,7 @@ function serializeProps(
     if (hostElement && name === "mix") continue;
     const child = props[name];
     value[name] = treeProps.has(name)
-      ? serializeTreeProp(child as FigNode, frame)
+      ? serializeTreeProp(child, frame)
       : serializeValue(child, frame);
   }
   return {
@@ -655,7 +663,7 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
   }
 
   if (isThenable(value)) {
-    return outlineTask(frame, "promise", value, "promise", value);
+    return outlineTask(frame, { kind: "promise", value }, "promise", value);
   }
   if (isValidElement(value)) return serializeNodeOrLazy(value, frame, true);
   if (isPortal(value)) return null;
@@ -694,8 +702,7 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
 }
 function outlineTask(
   frame: RenderFrame,
-  kind: Task["kind"],
-  value: unknown,
+  value: TaskValue,
   referenceKind: "lazy" | "promise",
   wakeable: Thenable,
   scopedAssets: SerializedAssetResource[] = [],
@@ -708,7 +715,6 @@ function outlineTask(
   const task = createTask(
     request,
     id,
-    kind,
     value,
     cloneContextValues(frame.contextValues),
     stackForError(wakeable, frame.stack),
@@ -781,19 +787,10 @@ function stackForError(
   return errorStacks.get(error) ?? fallback;
 }
 
-function componentStack(stack: StackFrame | null): string {
-  const frames: string[] = [];
-  for (let frame = stack; frame !== null; frame = frame.parent) {
-    frames.push(`    at ${frame.name}`);
-  }
-  return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
-}
-
 function clientReferenceExportName(id: string): string | undefined {
   const hashIndex = id.lastIndexOf("#");
   if (hashIndex === -1) return undefined;
-  const exportName = id.slice(hashIndex + 1);
-  return exportName === "" ? undefined : exportName;
+  return id.slice(hashIndex + 1) || undefined;
 }
 
 function emitClientReference(
@@ -883,9 +880,13 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossorigin", resource.crossorigin);
-      assignDefined(model, "media", resource.media);
-      assignDefined(model, "precedence", resource.precedence);
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
+      if (resource.media !== undefined) model.media = resource.media;
+      if (resource.precedence !== undefined) {
+        model.precedence = resource.precedence;
+      }
       return model;
     }
     case "preload": {
@@ -894,9 +895,13 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossorigin", resource.crossorigin);
-      assignDefined(model, "fetchpriority", resource.fetchpriority);
-      assignDefined(model, "type", resource.type);
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
+      if (resource.fetchpriority !== undefined) {
+        model.fetchpriority = resource.fetchpriority;
+      }
+      if (resource.type !== undefined) model.type = resource.type;
       return model;
     }
     case "modulepreload": {
@@ -904,8 +909,12 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossorigin", resource.crossorigin);
-      assignDefined(model, "fetchpriority", resource.fetchpriority);
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
+      if (resource.fetchpriority !== undefined) {
+        model.fetchpriority = resource.fetchpriority;
+      }
       return model;
     }
     case "script": {
@@ -913,10 +922,12 @@ function serializeAssetResource(
         kind: resource.kind,
         src: resource.src,
       };
-      assignDefined(model, "async", resource.async);
-      assignDefined(model, "crossorigin", resource.crossorigin);
-      assignDefined(model, "defer", resource.defer);
-      assignDefined(model, "module", resource.module);
+      if (resource.async !== undefined) model.async = resource.async;
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
+      if (resource.defer !== undefined) model.defer = resource.defer;
+      if (resource.module !== undefined) model.module = resource.module;
       return model;
     }
     case "font": {
@@ -925,8 +936,12 @@ function serializeAssetResource(
         kind: resource.kind,
         type: resource.type,
       };
-      assignDefined(model, "crossorigin", resource.crossorigin);
-      assignDefined(model, "fetchpriority", resource.fetchpriority);
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
+      if (resource.fetchpriority !== undefined) {
+        model.fetchpriority = resource.fetchpriority;
+      }
       return model;
     }
     case "preconnect": {
@@ -934,7 +949,9 @@ function serializeAssetResource(
         href: resource.href,
         kind: resource.kind,
       };
-      assignDefined(model, "crossorigin", resource.crossorigin);
+      if (resource.crossorigin !== undefined) {
+        model.crossorigin = resource.crossorigin;
+      }
       return model;
     }
     case "title":
@@ -942,16 +959,6 @@ function serializeAssetResource(
       throw new Error(
         "Head-only resources cannot be serialized into the payload.",
       );
-  }
-}
-
-function assignDefined(
-  target: SerializedAssetResource,
-  name: string,
-  value: unknown,
-): void {
-  if (value !== undefined) {
-    (target as Record<string, unknown>)[name] = value;
   }
 }
 
@@ -1006,7 +1013,7 @@ function flushRows(request: PayloadRequest): void {
   // queue, so a full queue with no rows left to write still closes here.
   if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
     request.status = "closed";
-    cleanupPayloadAbortListener(request);
+    request.cleanupAbortListener();
     request.dataStore.dispose();
     request.controller.close();
   }
@@ -1014,7 +1021,7 @@ function flushRows(request: PayloadRequest): void {
 
 function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.status === "closed") return;
-  cleanupPayloadAbortListener(request);
+  request.cleanupAbortListener();
   request.status = "closed";
   request.dataStore.dispose();
   request.allReady.reject(error);
@@ -1023,11 +1030,6 @@ function closeWithError(request: PayloadRequest, error: unknown): void {
 
 function abortPayloadRequest(request: PayloadRequest, reason?: unknown): void {
   closeWithError(request, reason ?? new PayloadRequestCancelledError());
-}
-
-function cleanupPayloadAbortListener(request: PayloadRequest): void {
-  request.removeAbortListener?.();
-  request.removeAbortListener = null;
 }
 
 // Wire-format flattening only: unlike the shared collectChildren, this keeps

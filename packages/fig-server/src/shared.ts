@@ -17,6 +17,11 @@ import { escapeAttribute } from "./escaping.ts";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
+export interface StackFrame {
+  name: string;
+  parent: StackFrame | null;
+}
+
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
@@ -182,9 +187,9 @@ export function createStaticDispatcher(
     useStableEvent<Args extends unknown[], Result>(
       _handler: (...args: Args) => Result,
     ): (...args: StableEventCallerArgs<Args>) => Result {
-      return (() => {
+      return (..._args: StableEventCallerArgs<Args>): Result => {
         throw new Error("Stable events cannot be called during server render.");
-      }) as (...args: StableEventCallerArgs<Args>) => Result;
+      };
     },
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
@@ -209,6 +214,14 @@ export function createStaticDispatcher(
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function componentStack(stack: StackFrame | null): string {
+  const frames: string[] = [];
+  for (let frame = stack; frame !== null; frame = frame.parent) {
+    frames.push(`    at ${frame.name}`);
+  }
+  return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
 }
 
 export function nonceAttribute(nonce: string | undefined): string {
