@@ -2,26 +2,23 @@ import { describe, expect, it } from "vitest";
 import {
   clearQueueLanes,
   cloneQueue,
-  type HookUpdate,
+  HookUpdate,
   mergeQueues,
 } from "./hook-queue.ts";
 import { DefaultLane, NoLane, SyncLane } from "./lanes.ts";
 
 function update(action: number, lane: number): HookUpdate<number> {
-  const value: HookUpdate<number> = {
-    action,
-    lane,
-    next: null as never,
-  };
-  value.next = value;
-  return value;
+  return new HookUpdate(action, lane);
 }
 
 function actions(queue: HookUpdate<number>): number[] {
   const values: number[] = [];
   let current = queue.next;
   do {
-    values.push(current.action as number);
+    if (typeof current.action !== "number") {
+      throw new Error("Expected a numeric update.");
+    }
+    values.push(current.action);
     current = current.next;
   } while (current !== queue.next);
   return values;
@@ -43,11 +40,12 @@ describe("hook queues", () => {
 
     expect(clone).not.toBeNull();
     expect(clone).not.toBe(merged);
-    expect(actions(clone as HookUpdate<number>)).toEqual([1, 2]);
+    if (clone === null) throw new Error("Expected a cloned queue.");
+    expect(actions(clone)).toEqual([1, 2]);
 
-    clearQueueLanes(clone as HookUpdate<unknown>);
-    expect((clone as HookUpdate<number>).lane).toBe(NoLane);
-    expect((clone as HookUpdate<number>).next.lane).toBe(NoLane);
+    clearQueueLanes(clone);
+    expect(clone.lane).toBe(NoLane);
+    expect(clone.next.lane).toBe(NoLane);
     expect(merged.lane).toBe(DefaultLane);
     expect(merged.next.lane).toBe(SyncLane);
   });

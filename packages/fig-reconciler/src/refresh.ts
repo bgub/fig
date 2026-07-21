@@ -1,4 +1,4 @@
-import { setRefreshHandlerState } from "./refresh-state.ts";
+import { setRefreshHandlerState } from "./refresh-internal.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 

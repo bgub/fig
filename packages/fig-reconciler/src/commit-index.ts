@@ -4,25 +4,7 @@ interface CommitIndexNode {
   flags: Flag;
 }
 
-declare const CommitIndexCheckpointBrand: unique symbol;
-
-export type CommitIndexCheckpoint = number & {
-  readonly [CommitIndexCheckpointBrand]: true;
-};
-
 export type CommitIndex<Node extends CommitIndexNode> = Node[];
-
-export function createCommitIndex<
-  Node extends CommitIndexNode,
->(): CommitIndex<Node> {
-  return [];
-}
-
-export function commitIndexCheckpoint<Node extends CommitIndexNode>(
-  index: CommitIndex<Node>,
-): CommitIndexCheckpoint {
-  return index.length as CommitIndexCheckpoint;
-}
 
 export function recordCommitWork<Node extends CommitIndexNode>(
   index: CommitIndex<Node>,
@@ -37,11 +19,10 @@ export function recordCommitWork<Node extends CommitIndexNode>(
 
 export function rollbackCommitIndex<Node extends CommitIndexNode>(
   index: CommitIndex<Node>,
-  checkpoint: CommitIndexCheckpoint | undefined,
+  checkpoint: number | undefined,
 ): void {
   if (checkpoint === undefined || checkpoint >= index.length) return;
-  const start: number = checkpoint;
-  for (let offset = start; offset < index.length; offset += 1) {
+  for (let offset = checkpoint; offset < index.length; offset += 1) {
     index[offset].flags &= ~CommitIndexedFlag;
   }
   index.length = checkpoint;

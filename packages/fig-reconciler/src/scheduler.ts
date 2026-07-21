@@ -148,15 +148,10 @@ export function scheduleCallback(
 
   if (actQueue !== null) {
     actQueue.push(task);
-    return {
-      cancel() {
-        task.callback = null;
-      },
-    };
+  } else {
+    taskQueue.push(task);
+    requestHostCallback();
   }
-
-  taskQueue.push(task);
-  requestHostCallback();
 
   return {
     cancel() {
@@ -180,20 +175,13 @@ export async function act<T>(
 
     actScopeDepth = previousActScopeDepth;
     if (previousActScopeDepth === 0) {
-      try {
-        await flushActQueueUntilSettled(queue);
-      } finally {
-        actQueue = previousActQueue;
-      }
-    } else {
-      actQueue = previousActQueue;
+      await flushActQueueUntilSettled(queue);
     }
 
     return result;
-  } catch (error) {
+  } finally {
     actScopeDepth = previousActScopeDepth;
     actQueue = previousActQueue;
-    throw error;
   }
 }
 

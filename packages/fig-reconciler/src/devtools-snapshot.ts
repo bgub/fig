@@ -130,7 +130,10 @@ export function emitDevtoolsCommit(renderer: object, root: DevtoolsRoot): void {
       devtoolsRendererIds.set(renderer, rendererId);
     }
 
-    const inspection = createDevtoolsInspectionState();
+    const inspection: DevtoolsInspectionState = {
+      hostFibers: new WeakMap(),
+      fiberElements: new Map(),
+    };
     const snapshot = snapshotDevtoolsRoot(root, rendererId, inspection);
     hook.onCommitRoot(
       rendererId,
@@ -274,14 +277,9 @@ function devtoolsRootId(root: object): number {
   const existing = devtoolsRootIds.get(root);
   if (existing !== undefined) return existing;
 
-  const id = nextDevtoolsRootId;
-  nextDevtoolsRootId += 1;
+  const id = nextDevtoolsRootId++;
   devtoolsRootIds.set(root, id);
   return id;
-}
-
-function createDevtoolsInspectionState(): DevtoolsInspectionState {
-  return { hostFibers: new WeakMap(), fiberElements: new Map() };
 }
 
 function createDevtoolsCommitInspection(
@@ -325,8 +323,7 @@ function devtoolsFiberId(node: DevtoolsFiber): number {
     return existing;
   }
 
-  const id = nextDevtoolsFiberId;
-  nextDevtoolsFiberId += 1;
+  const id = nextDevtoolsFiberId++;
   devtoolsFiberIds.set(node, id);
   if (node.alternate !== null) devtoolsFiberIds.set(node.alternate, id);
   return id;

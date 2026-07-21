@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   clearCommitIndex,
-  commitIndexCheckpoint,
-  createCommitIndex,
   recordCommitWork,
   rollbackCommitIndex,
 } from "./commit-index.ts";
@@ -24,7 +22,7 @@ function node(name: string): Node {
 
 describe("commit index", () => {
   it("records accumulating work while indexing each fiber once", () => {
-    const index = createCommitIndex<Node>();
+    const index: Node[] = [];
     const fiber = node("fiber");
 
     recordCommitWork(index, fiber, PlacementFlag);
@@ -35,11 +33,11 @@ describe("commit index", () => {
   });
 
   it("rolls back entries recorded after a checkpoint", () => {
-    const index = createCommitIndex<Node>();
+    const index: Node[] = [];
     const kept = node("kept");
     const discarded = node("discarded");
     recordCommitWork(index, kept);
-    const checkpoint = commitIndexCheckpoint(index);
+    const checkpoint = index.length;
     recordCommitWork(index, discarded);
 
     rollbackCommitIndex(index, checkpoint);
@@ -50,7 +48,7 @@ describe("commit index", () => {
   });
 
   it("clears membership from every indexed fiber", () => {
-    const index = createCommitIndex<Node>();
+    const index: Node[] = [];
     const first = node("first");
     const second = node("second");
     recordCommitWork(index, first);

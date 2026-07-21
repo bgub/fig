@@ -41,10 +41,7 @@ import {
 } from "@bgub/fig/internal";
 import {
   clearCommitIndex,
-  commitIndexCheckpoint,
   type CommitIndex,
-  type CommitIndexCheckpoint,
-  createCommitIndex,
   recordCommitWork,
   rollbackCommitIndex,
 } from "./commit-index.ts";
@@ -113,7 +110,7 @@ import {
   cloneQueueNodes,
   cloneUpdateNode,
   type HookQueue,
-  type HookUpdate,
+  HookUpdate,
   mergeQueues,
   type StateUpdate,
 } from "./hook-queue.ts";
@@ -212,6 +209,7 @@ setTransitionHandler(runWithTransition);
 type Component = (props: Props & { children?: FigNode }) => FigNode;
 type HostNode<Instance, TextInstance> = Instance | TextInstance;
 type Parent<Container, Instance> = Container | Instance;
+type FiberType = ElementType | FigContext<unknown> | null;
 
 export interface DehydratedSuspenseError {
   digest?: string;
@@ -524,8 +522,6 @@ export interface FigRenderer<Container> {
   scheduleRefresh(this: void, update: RefreshUpdate): void;
 }
 
-type RequiredHydrationHostConfig<Container, Instance, TextInstance> =
-  HostHydrationConfig<Container, Instance, TextInstance>;
 // A commit may animate only when every rendered lane is transition-shaped:
 // transitions, retries (client Suspense reveals), deferred follow-ups, idle.
 // Hydration lanes are excluded on purpose — hydration changes no pixels, so
@@ -597,6 +593,7 @@ const NoActionStateError = Symbol();
 
 interface ActionStateInstance<S, Args extends unknown[]> extends RunInstance {
   action: ActionStateAction<S, Args>;
+  runner: ActionStateRunner<Args> | null;
   value: S;
 }
 
@@ -683,7 +680,7 @@ interface PendingSuspenseRetry<Container, Instance, TextInstance> {
 
 interface Fiber<Container, Instance, TextInstance> {
   tag: Tag;
-  type: ElementType | null;
+  type: FiberType;
   key: string | number | null;
   props: Props;
   memoizedProps: Props | null;
@@ -716,7 +713,7 @@ interface Fiber<Container, Instance, TextInstance> {
   suspenseQueueStart?: number;
   // Suspense/ErrorBoundary only: root commit-index length when this boundary
   // began, so a capture can truncate entries queued by its discarded subtree.
-  commitIndexCheckpoint?: CommitIndexCheckpoint;
+  commitIndexCheckpoint?: number;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
 }
 
@@ -862,25 +859,23 @@ export function createRenderer<Container, Instance, TextInstance>(
     Instance,
     TextInstance
   >[] = [];
-  type ActivityHydrationHostConfig = HostConfig<
-    Container,
-    Instance,
-    TextInstance
-  > &
-    Required<
-      Pick<
-        HostConfig<Container, Instance, TextInstance>,
-        | "getActivityBoundary"
-        | "getFirstActivityHydratable"
-        | "commitHydratedActivityBoundary"
-      >
-    >;
-  type RequiredHoistedAssetHostConfig = HostConfig<
-    Container,
-    Instance,
-    TextInstance
-  > &
-    HostHoistedAssetConfig<Container, Instance, TextInstance>;
+  type ActivityHydrationHostConfig = Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      | "getActivityBoundary"
+      | "getFirstActivityHydratable"
+      | "commitHydratedActivityBoundary"
+    >
+  >;
+  type ActivityVisibilityHostConfig = Required<
+    Pick<
+      HostConfig<Container, Instance, TextInstance>,
+      | "hideInstance"
+      | "unhideInstance"
+      | "hideTextInstance"
+      | "unhideTextInstance"
+    >
+  >;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -906,10 +901,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   // both fiber generations share) makes membership generation-agnostic.
   let hasHiddenBoundaries = false;
   const hiddenStates = new Set<ActivityState<Instance>>();
-  let activityHostConfig: ReturnType<typeof requireActivityHostConfig> | null =
-    null;
+  let activityHostConfig: ActivityVisibilityHostConfig | null = null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
-  let hoistedAssetHostConfig: RequiredHoistedAssetHostConfig | null = null;
+  let hoistedAssetHostConfig: HostHoistedAssetConfig<
+    Container,
+    Instance,
+    TextInstance
+  > | null = null;
   const viewTransitionHost = host.viewTransition ?? null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
@@ -980,7 +978,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     container: Container,
     request: {
       kind: "client" | "hydration";
-      options?: FigRootOptions;
+      options: FigRootOptions;
     },
   ): R {
     if (roots.has(container as object)) {
@@ -989,7 +987,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (request.kind === "hydration") requireHydrationHostConfig();
 
-    const root = createFiberRoot(container, request.options ?? {});
+    const root = createFiberRoot(container, request.options);
     roots.set(container as object, root);
     if (__DEV__) {
       if (hasRefreshHandler()) mountedRoots.add(root);
@@ -1057,7 +1055,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      commitIndex: createCommitIndex(),
+      commitIndex: [],
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1617,7 +1615,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
     if (node.tag === SuspenseTag || node.tag === ErrorBoundaryTag) {
-      node.commitIndexCheckpoint = commitIndexCheckpoint(root.commitIndex);
+      node.commitIndexCheckpoint = root.commitIndex.length;
     }
 
     if (canBailout(node, root)) {
@@ -2030,7 +2028,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return requireHydrationHostConfig().getNextHydratableSibling(boundary.end);
   }
 
-  function requireHydrationHostConfig(): RequiredHydrationHostConfig<
+  function requireHydrationHostConfig(): HostHydrationConfig<
     Container,
     Instance,
     TextInstance
@@ -2045,11 +2043,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw new Error("Hydration is not supported by this renderer.");
     }
 
-    return host as RequiredHydrationHostConfig<
-      Container,
-      Instance,
-      TextInstance
-    >;
+    return host as HostHydrationConfig<Container, Instance, TextInstance>;
   }
 
   // The message and the recoverable-error fields derive from two facts: what
@@ -2181,7 +2175,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     return node.tag === HostTag && (node.flags & HoistedStaticFlag) !== 0;
   }
 
-  function requireHoistedAssetHostConfig(): RequiredHoistedAssetHostConfig {
+  function requireHoistedAssetHostConfig(): HostHoistedAssetConfig<
+    Container,
+    Instance,
+    TextInstance
+  > {
     if (hoistedAssetHostConfig !== null) return hoistedAssetHostConfig;
 
     if (
@@ -2193,7 +2191,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw new Error("Hoisted assets are not supported by this renderer.");
     }
 
-    hoistedAssetHostConfig = host as RequiredHoistedAssetHostConfig;
+    hoistedAssetHostConfig = host as HostHoistedAssetConfig<
+      Container,
+      Instance,
+      TextInstance
+    >;
     return hoistedAssetHostConfig;
   }
 
@@ -2648,7 +2650,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       hook.baseState = { ...hook.baseState, action };
     }
 
-    if (queue.dispatch === null) {
+    if (instance.runner === null) {
       const updatePending = (delta: 1 | -1, lane: Lane) => {
         scheduleHookUpdate(
           fiber,
@@ -2674,7 +2676,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         );
       };
 
-      queue.dispatch = ((...args: Args) => {
+      instance.runner = (...args: Args) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Action state updates are not allowed during render.",
@@ -2695,7 +2697,7 @@ export function createRenderer<Container, Instance, TextInstance>(
             else finish(lane, NoActionStateError, value as S);
           },
         );
-      }) as unknown as StateSetter<ActionState<S, Args>>;
+      };
     }
 
     if (hook.memoizedState.error !== NoActionStateError) {
@@ -2704,7 +2706,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     return [
       hook.memoizedState.value,
-      queue.dispatch as unknown as ActionStateRunner<Args>,
+      instance.runner,
       hook.memoizedState.pending > 0,
     ];
   }
@@ -2786,7 +2788,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
     const queue = hook.queue;
 
-    if (hook.memoizedState.start === null) {
+    let start = hook.memoizedState.start;
+    if (start === null) {
       const fiber = requireRenderingFiber();
       const updatePending = (delta: 1 | -1, lane: Lane) => {
         scheduleHookUpdate(
@@ -2801,9 +2804,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
 
       const instance = hook.memoizedState.instance;
-      hook.memoizedState.start = (
-        callback: (signal: AbortSignal) => void | PromiseLike<void>,
-      ) => {
+      start = (callback: (signal: AbortSignal) => void | PromiseLike<void>) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Transitions cannot be started while rendering a component.",
@@ -2832,14 +2833,10 @@ export function createRenderer<Container, Instance, TextInstance>(
           },
         );
       };
+      hook.memoizedState.start = start;
     }
 
-    // Assigned above when null; queued updates spread the previous state, so
-    // the starter is always carried forward.
-    return [
-      hook.memoizedState.pendingCount > 0,
-      hook.memoizedState.start as StartTransition,
-    ];
+    return [hook.memoizedState.pendingCount > 0, start];
   }
 
   // A transition and an action are the same cancellable effect up to how
@@ -3084,8 +3081,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     lane = hiddenSubtreeLane(fiber, lane);
-    const update: HookUpdate<S> = { action, lane, next: null as never };
-    update.next = update;
+    const update = new HookUpdate(action, lane);
     queue.pending = mergeQueues(queue.pending, update);
     scheduleFiber(fiber, lane);
   }
@@ -3100,7 +3096,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     for (let parent = node.return; parent !== null; parent = parent.return) {
       if (
-        isHiddenBoundaryTag(parent) &&
+        parent.tag === ActivityTag &&
         fiberActivityState(parent)?.hidden === true
       ) {
         return OffscreenLane;
@@ -3205,7 +3201,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function pushContextProvider(node: F, root = rootOf(node)): void {
-    const context = node.type as unknown as FigContext<unknown>;
+    const context = node.type as FigContext<unknown>;
     const values = root.contextValues;
     const hadPrevious = values.has(context);
     const previous = values.get(context);
@@ -5878,7 +5874,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function changedParentContexts(node: F): FigContext<unknown>[] | null {
     let seen =
       node.tag === ContextProviderTag
-        ? [node.type as unknown as FigContext<unknown>]
+        ? [node.type as FigContext<unknown>]
         : null;
     let changed: FigContext<unknown>[] | null = null;
 
@@ -5886,7 +5882,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if ((parent.flags & ContextPropagationFlag) !== 0) break;
       if (parent.tag !== ContextProviderTag) continue;
 
-      const context = parent.type as unknown as FigContext<unknown>;
+      const context = parent.type as FigContext<unknown>;
       if (contextListIncludes(seen, context)) continue;
       seen = appendContext(seen, context);
       if (changedContextProvider(parent)) {
@@ -5903,10 +5899,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     context: FigContext<unknown>,
     lanes: Lanes,
   ): void {
-    if (
-      node.tag === ContextProviderTag &&
-      node.type === (context as unknown as ElementType | null)
-    ) {
+    if (node.tag === ContextProviderTag && node.type === context) {
       return;
     }
 
@@ -6040,7 +6033,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function fiber(
     tag: Tag,
-    type: ElementType | null,
+    type: FiberType,
     key: string | number | null,
     props: Props,
     stateNode: F["stateNode"],
@@ -6234,27 +6227,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isHiddenBoundary(node: F): boolean {
-    return isHiddenBoundaryTag(node) && activityHidden(node.props);
+    return node.tag === ActivityTag && activityHidden(node.props);
   }
 
-  function isHiddenBoundaryTag(node: F): boolean {
-    return node.tag === ActivityTag;
-  }
-
-  function requireActivityHostConfig(): HostConfig<
-    Container,
-    Instance,
-    TextInstance
-  > &
-    Required<
-      Pick<
-        HostConfig<Container, Instance, TextInstance>,
-        | "hideInstance"
-        | "unhideInstance"
-        | "hideTextInstance"
-        | "unhideTextInstance"
-      >
-    > {
+  function requireActivityHostConfig(): ActivityVisibilityHostConfig {
     if (activityHostConfig !== null) return activityHostConfig;
 
     if (
@@ -6266,7 +6242,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       throw new Error("Activity is not supported by this renderer.");
     }
 
-    activityHostConfig = host as ReturnType<typeof requireActivityHostConfig>;
+    activityHostConfig = host as ActivityVisibilityHostConfig;
     return activityHostConfig;
   }
 
@@ -6282,7 +6258,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         continue;
       }
 
-      const boundary = isHiddenBoundaryTag(cursor);
+      const boundary = cursor.tag === ActivityTag;
       const boundaryHidden = boundary && activityHidden(cursor.props);
 
       if (boundary && (cursor.flags & VisibilityFlag) !== 0) {
@@ -6364,7 +6340,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       if (
-        isHiddenBoundaryTag(cursor) &&
+        cursor.tag === ActivityTag &&
         (cursor.flags & VisibilityFlag) !== 0 &&
         !activityHidden(cursor.props) &&
         cursor.child !== null
@@ -6924,7 +6900,7 @@ function createActionState<S, Args extends unknown[]>(
   return {
     action,
     error: NoActionStateError,
-    instance: { action, controller: null, generation: 0, value },
+    instance: { action, controller: null, generation: 0, runner: null, value },
     pending: 0,
     value,
   };

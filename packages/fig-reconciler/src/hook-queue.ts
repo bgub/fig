@@ -3,10 +3,13 @@ import { type Lane, NoLane } from "./lanes.ts";
 
 export type StateUpdate<S> = S | ((previous: S) => S);
 
-export interface HookUpdate<S> {
-  action: StateUpdate<S>;
-  lane: Lane;
-  next: HookUpdate<S>;
+export class HookUpdate<S> {
+  next: HookUpdate<S> = this;
+
+  constructor(
+    readonly action: StateUpdate<S>,
+    public lane: Lane,
+  ) {}
 }
 
 export interface HookQueue<S> {
@@ -31,13 +34,7 @@ export function mergeQueues<S>(
 }
 
 export function cloneUpdateNode<S>(update: HookUpdate<S>): HookUpdate<S> {
-  const clone: HookUpdate<S> = {
-    action: update.action,
-    lane: update.lane,
-    next: null as never,
-  };
-  clone.next = clone;
-  return clone;
+  return new HookUpdate(update.action, update.lane);
 }
 
 export function cloneQueue<S>(
@@ -47,18 +44,19 @@ export function cloneQueue<S>(
 }
 
 export function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
-  let clone: HookUpdate<S> | null = null;
-  let update = queue.next;
+  const first = queue.next;
+  let clone = cloneUpdateNode(first);
+  let update = first.next;
 
-  do {
+  while (update !== first) {
     clone = mergeQueues(clone, cloneUpdateNode(update));
     update = update.next;
-  } while (update !== queue.next);
+  }
 
-  return clone as HookUpdate<S>;
+  return clone;
 }
 
-export function clearQueueLanes(queue: HookUpdate<unknown>): void {
+export function clearQueueLanes<S>(queue: HookUpdate<S>): void {
   let update = queue.next;
   do {
     update.lane = NoLane;
