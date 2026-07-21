@@ -16,11 +16,23 @@ const tanstackStartPackage = "@tanstack/solid-start";
 const tanstackStartClientPackage = "@tanstack/start-client-core";
 const resolveDependency = (id: string) =>
   fileURLToPath(import.meta.resolve(id));
-const tanstackStartClientEntries = {
-  root: resolveDependency(tanstackStartClientPackage),
-  client: resolveDependency(`${tanstackStartClientPackage}/client`),
-  clientRpc: resolveDependency(`${tanstackStartClientPackage}/client-rpc`),
-} as const;
+const tanstackStartClientModules = [
+  tanstackStartClientPackage,
+  `${tanstackStartClientPackage}/client`,
+  `${tanstackStartClientPackage}/client-rpc`,
+] as const;
+const tanstackStartClientAliases = tanstackStartClientModules.map((id) => ({
+  find: new RegExp(`^${id}$`),
+  replacement: resolveDependency(id),
+}));
+const optimizedClientModules = [
+  ...tanstackStartClientModules,
+  "@tanstack/router-core/ssr/client",
+] as const;
+const applicationEntryIds = new Set([
+  "#tanstack-router-entry",
+  "#tanstack-start-entry",
+]);
 const storageContextPath = fileURLToPath(
   new URL("../storage-context.js", import.meta.url),
 );
@@ -100,18 +112,7 @@ function compatibilityPlugin(): PluginOption {
       return {
         resolve: {
           alias: [
-            {
-              find: new RegExp(`^${tanstackStartClientPackage}$`),
-              replacement: tanstackStartClientEntries.root,
-            },
-            {
-              find: new RegExp(`^${tanstackStartClientPackage}/client$`),
-              replacement: tanstackStartClientEntries.client,
-            },
-            {
-              find: new RegExp(`^${tanstackStartClientPackage}/client-rpc$`),
-              replacement: tanstackStartClientEntries.clientRpc,
-            },
+            ...tanstackStartClientAliases,
             {
               find: /^@tanstack\/start-storage-context$/,
               replacement: storageContextPath,
@@ -134,14 +135,13 @@ function compatibilityPlugin(): PluginOption {
         return { build: { emitAssets: true } };
       }
       if (environmentName !== START_ENVIRONMENT_NAMES.client) return undefined;
+      const optimizerPlugins =
+        environment.optimizeDeps?.rolldownOptions?.plugins;
       return {
         optimizeDeps: {
           include: [
             ...(environment.optimizeDeps?.include ?? []),
-            tanstackStartClientPackage,
-            `${tanstackStartClientPackage}/client`,
-            `${tanstackStartClientPackage}/client-rpc`,
-            "@tanstack/router-core/ssr/client",
+            ...optimizedClientModules,
           ],
           exclude: [
             ...(environment.optimizeDeps?.exclude ?? []),
@@ -150,13 +150,10 @@ function compatibilityPlugin(): PluginOption {
           ],
           rolldownOptions: {
             ...environment.optimizeDeps?.rolldownOptions,
-            plugins:
-              environment.optimizeDeps?.rolldownOptions?.plugins === undefined
-                ? [optimizerApplicationEntries]
-                : [
-                    environment.optimizeDeps.rolldownOptions.plugins,
-                    optimizerApplicationEntries,
-                  ],
+            plugins: [
+              ...(optimizerPlugins === undefined ? [] : [optimizerPlugins]),
+              optimizerApplicationEntries,
+            ],
           },
         },
       };
@@ -165,8 +162,7 @@ function compatibilityPlugin(): PluginOption {
       for (const alias of config.resolve.alias) {
         if (
           typeof alias.find === "string" &&
-          (alias.find === "#tanstack-router-entry" ||
-            alias.find === "#tanstack-start-entry")
+          applicationEntryIds.has(alias.find)
         ) {
           applicationEntryUrls.set(alias.find, viteFsImport(alias.replacement));
         }

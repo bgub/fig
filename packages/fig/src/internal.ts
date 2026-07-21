@@ -37,6 +37,7 @@ export {
   currentDataStore,
   type DataStore,
   type DataStoreHost,
+  isDataStoreController,
   normalizeDataResourceKey,
   runWithDataStore,
 } from "./data-store.ts";

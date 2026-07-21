@@ -1,1 +1,6 @@
-export { escapeAttribute, escapeText } from "./html.ts";
+export {
+  escapeAttribute,
+  escapeScriptJson,
+  escapeScriptText,
+  escapeText,
+} from "./escaping.ts";

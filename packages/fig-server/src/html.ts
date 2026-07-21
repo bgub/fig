@@ -1,5 +1,13 @@
 import type { Props } from "@bgub/fig";
 import { isPortal } from "@bgub/fig/internal";
+import { escapeAttribute, escapeText } from "./escaping.ts";
+
+export {
+  escapeAttribute,
+  escapeScriptJson,
+  escapeScriptText,
+  escapeText,
+} from "./escaping.ts";
 
 interface HtmlSink {
   write(chunk: string): void;
@@ -247,21 +255,4 @@ function validateAttributeName(name: string): void {
   if (/[\s"'<>/=]/.test(name)) {
     throw new Error(`Invalid HTML attribute name "${name}".`);
   }
-}
-
-export function escapeText(value: string): string {
-  return value.replace(/[&<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
-}
-
-export function escapeAttribute(value: string): string {
-  return value.replace(/[&"<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === '"') return "&quot;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
 }

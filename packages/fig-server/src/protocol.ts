@@ -11,8 +11,8 @@ import {
   VIEW_TRANSITION_NAME_ATTRIBUTE,
   VIEW_TRANSITION_PENDING_PROPERTY,
 } from "@bgub/fig/internal";
-import { escapeAttribute } from "./html.ts";
-import { escapeScriptJson, nonceAttribute } from "./shared.ts";
+import { escapeAttribute, escapeScriptJson } from "./escaping.ts";
+import { nonceAttribute } from "./shared.ts";
 
 interface ProtocolRequest {
   identifierPrefix: string;

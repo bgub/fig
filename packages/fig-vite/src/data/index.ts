@@ -1,11 +1,9 @@
 import {
   assertNoServerDataResourceImport,
-  discoverServerDataResources,
   transformServerDataClientStub,
 } from "./transform.ts";
 
 export interface FigDataPlugin {
-  configResolved(config: { root?: string }): void;
   enforce: "pre";
   name: string;
   transform(
@@ -15,20 +13,10 @@ export interface FigDataPlugin {
   ): Promise<{ code: string; map: unknown } | null>;
 }
 
-export interface FigDataPluginOptions {
-  target?: "auto" | "client" | "server";
-}
-
-export function figData(options: FigDataPluginOptions = {}): FigDataPlugin {
-  let root = process.cwd();
-  const target = options.target ?? "auto";
-
+export function figData(): FigDataPlugin {
   return {
     name: "fig-data",
     enforce: "pre",
-    configResolved(config) {
-      if (typeof config.root === "string") root = config.root;
-    },
     async transform(code, id, options) {
       const clean = id.split("?")[0] ?? id;
       if (clean.startsWith("\0") || clean.includes("/node_modules/")) {
@@ -42,24 +30,10 @@ export function figData(options: FigDataPluginOptions = {}): FigDataPlugin {
         return null;
       }
 
-      if (transformTarget(target, options) === "client") {
-        const result = await transformServerDataClientStub(code, clean, root);
-        return { code: result.code, map: result.map };
-      }
-
-      if (!code.includes("serverDataResource")) return null;
-      await discoverServerDataResources(code, clean, root);
-      return null;
+      if (options?.ssr === true) return null;
+      return transformServerDataClientStub(code, clean);
     },
   };
-}
-
-function transformTarget(
-  target: "auto" | "client" | "server",
-  options: { ssr?: boolean } | undefined,
-): "client" | "server" {
-  if (target !== "auto") return target;
-  return options?.ssr === true ? "server" : "client";
 }
 
 function isServerModuleId(id: string): boolean {

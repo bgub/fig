@@ -1,4 +1,3 @@
-import { relative, sep } from "node:path";
 import * as babel from "@babel/core";
 import type { PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
@@ -6,16 +5,9 @@ import presetTypescript from "@babel/preset-typescript";
 const SERVER_DATA_RESOURCE_MODULE = "@bgub/fig/server";
 const SERVER_DATA_RESOURCE_CALLEE = "serverDataResource";
 
-interface ServerDataResourceRef {
-  exportName: string;
-  id: string;
-  specifier: string;
-}
-
 interface ClientDataResourceStub {
   debugArgsCode?: string;
   exportName: string;
-  id: string;
   importCodes: string[];
   keyCode: string;
 }
@@ -23,71 +15,19 @@ interface ClientDataResourceStub {
 interface ServerDataClientStubResult {
   code: string;
   map: unknown;
-  stubs: ClientDataResourceStub[];
 }
 
-interface ServerDataResourceDeclaration extends ServerDataResourceRef {
+interface ServerDataResourceDeclaration {
+  exportName: string;
   options: babel.NodePath<babel.types.ObjectExpression>;
-}
-
-export function rootRelative(root: string, absolutePath: string): string {
-  return `/${relative(root, absolutePath).split(sep).join("/")}`;
-}
-
-export function dataResourceId(specifier: string, exportName: string): string {
-  return `${specifier}#${exportName}`;
-}
-
-export async function discoverServerDataResources(
-  code: string,
-  id: string,
-  root: string,
-): Promise<ServerDataResourceRef[]> {
-  const serverDataResources: ServerDataResourceRef[] = [];
-
-  await transformTypeScript(code, id, {
-    plugins: [
-      serverDataDiscoveryBabelPlugin({
-        filename: id,
-        root,
-        serverDataResources,
-      }),
-    ],
-    sourceMaps: false,
-  });
-
-  return serverDataResources;
-}
-
-// Extracts the browser-safe pieces (key, debugArgs, and their imports) of every
-// exported serverDataResource declaration.
-export async function collectServerDataResourceStubs(
-  code: string,
-  id: string,
-  root: string,
-): Promise<ClientDataResourceStub[]> {
-  const stubs: ClientDataResourceStub[] = [];
-
-  await transformTypeScript(code, id, {
-    plugins: [
-      clientStubDiscoveryBabelPlugin({
-        filename: id,
-        root,
-        stubs,
-      }),
-    ],
-    sourceMaps: false,
-  });
-
-  return stubs;
 }
 
 export async function transformServerDataClientStub(
   code: string,
   id: string,
-  root: string,
 ): Promise<ServerDataClientStubResult> {
-  const stubs = await collectServerDataResourceStubs(code, id, root);
+  const stubs: ClientDataResourceStub[] = [];
+  await visitTypeScript(code, id, [clientStubDiscoveryBabelPlugin(stubs)]);
 
   const stubCode =
     stubs.length === 0
@@ -99,7 +39,6 @@ export async function transformServerDataClientStub(
   return {
     code: stubCode,
     map: generatedSourceMap(id, stubCode),
-    stubs,
   };
 }
 
@@ -107,10 +46,9 @@ export async function assertNoServerDataResourceImport(
   code: string,
   id: string,
 ): Promise<void> {
-  await transformTypeScript(code, id, {
-    plugins: [serverDataResourceImportGuardBabelPlugin(id)],
-    sourceMaps: false,
-  });
+  await visitTypeScript(code, id, [
+    serverDataResourceImportGuardBabelPlugin(id),
+  ]);
 }
 
 function clientStubCode(stubs: readonly ClientDataResourceStub[]): string {
@@ -141,41 +79,9 @@ function stubOptionFields(stub: ClientDataResourceStub): string[] {
   return fields;
 }
 
-function serverDataDiscoveryBabelPlugin(state: {
-  filename: string;
-  root: string;
-  serverDataResources: ServerDataResourceRef[];
-}): (api: typeof babel) => PluginObject {
-  return (api) => {
-    const t = api.types;
-
-    return {
-      name: "fig-data-server-resource-discovery",
-      visitor: {
-        VariableDeclarator(path) {
-          const declaration = serverDataResourceDeclaration(
-            path,
-            t,
-            state.root,
-            state.filename,
-          );
-          if (declaration === null) return;
-          state.serverDataResources.push({
-            exportName: declaration.exportName,
-            id: declaration.id,
-            specifier: declaration.specifier,
-          });
-        },
-      },
-    };
-  };
-}
-
-function clientStubDiscoveryBabelPlugin(state: {
-  filename: string;
-  root: string;
-  stubs: ClientDataResourceStub[];
-}): (api: typeof babel) => PluginObject {
+function clientStubDiscoveryBabelPlugin(
+  stubs: ClientDataResourceStub[],
+): (api: typeof babel) => PluginObject {
   return (api) => {
     const t = api.types;
 
@@ -184,13 +90,8 @@ function clientStubDiscoveryBabelPlugin(state: {
       visitor: {
         VariableDeclarator(path) {
           assertNoIsomorphicDataResourceExport(path, t);
-          const stub = clientDataResourceStubFromDeclarator(
-            path,
-            t,
-            state.root,
-            state.filename,
-          );
-          if (stub !== null) state.stubs.push(stub);
+          const stub = clientDataResourceStubFromDeclarator(path, t);
+          if (stub !== null) stubs.push(stub);
         },
       },
     };
@@ -220,12 +121,10 @@ function assertNoIsomorphicDataResourceExport(
 function clientDataResourceStubFromDeclarator(
   path: babel.NodePath<babel.types.VariableDeclarator>,
   t: typeof babel.types,
-  root: string,
-  filename: string,
 ): ClientDataResourceStub | null {
-  const declaration = serverDataResourceDeclaration(path, t, root, filename);
+  const declaration = serverDataResourceDeclaration(path, t);
   if (declaration === null) return null;
-  const { exportName, id, options } = declaration;
+  const { exportName, options } = declaration;
 
   const key = propertyValue(options, "key");
   if (key === null) {
@@ -237,7 +136,6 @@ function clientDataResourceStubFromDeclarator(
   return {
     debugArgsCode: propertyValue(options, "debugArgs")?.getSource(),
     exportName,
-    id,
     importCodes: dependencyImportsForClientStub(path, [
       key,
       propertyValue(options, "debugArgs"),
@@ -249,8 +147,6 @@ function clientDataResourceStubFromDeclarator(
 function serverDataResourceDeclaration(
   path: babel.NodePath<babel.types.VariableDeclarator>,
   t: typeof babel.types,
-  root: string,
-  filename: string,
 ): ServerDataResourceDeclaration | null {
   const exportName = exportedConstName(path, t);
   if (exportName === null) return null;
@@ -265,12 +161,9 @@ function serverDataResourceDeclaration(
   const [options] = init.get("arguments");
   if (options === undefined || !options.isObjectExpression()) return null;
 
-  const specifier = rootRelative(root, filename);
   return {
     exportName,
-    id: dataResourceId(specifier, exportName),
     options,
-    specifier,
   };
 }
 
@@ -407,19 +300,16 @@ function propertyValue(
   return null;
 }
 
-function transformTypeScript(
+async function visitTypeScript(
   code: string,
   id: string,
-  options: {
-    plugins: Array<(api: typeof babel) => PluginObject>;
-    sourceMaps: boolean;
-  },
-): Promise<babel.FileResult | null> {
-  return babel.transformAsync(code, {
+  plugins: Array<(api: typeof babel) => PluginObject>,
+): Promise<void> {
+  await babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
     filename: id,
-    sourceMaps: options.sourceMaps,
+    sourceMaps: false,
     presets: [
       [
         presetTypescript,
@@ -427,7 +317,7 @@ function transformTypeScript(
       ],
     ],
     parserOpts: { plugins: ["jsx"] },
-    plugins: options.plugins,
+    plugins,
   });
 }
 

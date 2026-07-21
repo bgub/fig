@@ -214,6 +214,16 @@ export function createDataStore(
   return store;
 }
 
+export function isDataStoreController(
+  value: unknown,
+): value is FigDataStoreController {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    Object.hasOwn(value, DataStoreControllerSymbol)
+  );
+}
+
 export function attachDataStore(
   controller: FigDataStoreController,
   host: FigDataStoreHost,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createDataStore,
   dataResource,
   ensureData,
   invalidateData,
@@ -14,6 +15,7 @@ import {
   dataResourceKeysForError,
   type LoadContextAttributeError,
   type LoadContextHydrate,
+  isDataStoreController,
   loadContextCapabilities,
   normalizeDataResourceKey,
 } from "./internal.ts";
@@ -21,6 +23,19 @@ import {
 const never = new Promise<never>(() => undefined);
 
 describe("@bgub/fig", () => {
+  it("recognizes root-neutral data store controllers", () => {
+    expect(isDataStoreController(createDataStore())).toBe(true);
+    expect(
+      isDataStoreController(
+        createRendererDataStore({
+          getLane: () => null,
+          schedule: () => undefined,
+        }),
+      ),
+    ).toBe(false);
+    expect(isDataStoreController({})).toBe(false);
+  });
+
   it("encodes data keys structurally without delimiter collisions", () => {
     const keys = [
       ["key", "a,b"],

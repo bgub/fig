@@ -4,10 +4,11 @@ import {
   jsonPayloadCodec,
   normalizeDataResourceKey,
 } from "@bgub/fig/internal";
+import { escapeAttribute, escapeScriptText } from "@bgub/fig-server/html";
+import { getStartContext } from "./start-context.ts";
 
 const hydrationBarrierMarker = '<script id="$tsr-stream-barrier"';
 const payloadKeyAttribute = "data-fig-tanstack-payload-key";
-const startStorageKey = Symbol.for("tanstack-start:start-storage-context");
 
 interface PayloadDocumentEntry {
   contentType: string;
@@ -205,7 +206,7 @@ function collectPayload(entry: RegisteredPayloadStream): PayloadCollector {
 function currentRequestPayloadState(
   create: boolean,
 ): RequestPayloadState | undefined {
-  const context = currentStartContext();
+  const context = getStartContext({ throwIfNotFound: false });
   if (
     (typeof context !== "object" && typeof context !== "function") ||
     context === null
@@ -221,15 +222,6 @@ function currentRequestPayloadState(
   return state;
 }
 
-function currentStartContext(): unknown {
-  const storage = Reflect.get(globalThis, startStorageKey);
-  if (typeof storage !== "object" || storage === null) return undefined;
-  const getStore = Reflect.get(storage, "getStore");
-  return typeof getStore === "function"
-    ? Reflect.apply(getStore, storage, [])
-    : undefined;
-}
-
 function payloadDocumentScripts(
   entries: readonly PayloadDocumentEntry[],
   nonce: string | undefined,
@@ -238,7 +230,7 @@ function payloadDocumentScripts(
   return entries
     .map(
       (entry) =>
-        `<script type="${escapeAttribute(entry.contentType)}" ${payloadKeyAttribute}="${escapeAttribute(entry.key)}" ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute}>${escapePayload(entry.payload)}</script>`,
+        `<script type="${escapeAttribute(entry.contentType)}" ${payloadKeyAttribute}="${escapeAttribute(entry.key)}" ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute}>${escapeScriptText(entry.payload)}</script>`,
     )
     .join("");
 }
@@ -246,16 +238,4 @@ function payloadDocumentScripts(
 function scriptNonceAttribute(nonce: string | undefined): string {
   if (nonce === undefined) return "";
   return ` nonce="${escapeAttribute(nonce)}"`;
-}
-
-function escapeAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function escapePayload(value: string): string {
-  return value.replaceAll("<", "\\u003c");
 }

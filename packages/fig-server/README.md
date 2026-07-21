@@ -142,6 +142,21 @@ static `script-src` hashes), so streamed Suspense requires the nonce. If you
 cannot attach one, use `prerender`: fragment mode emits no scripts at all, and
 document mode emits only the nonce-carrying early event-capture script.
 
+Framework adapters that add companion markup use the focused HTML helpers:
+
+```ts
+import {
+  escapeAttribute,
+  escapeScriptJson,
+  escapeScriptText,
+  escapeText,
+} from "@bgub/fig-server/html";
+```
+
+`escapeScriptText` preserves raw script content while preventing a literal
+`</script>` terminator; `escapeScriptJson` serializes a value and applies the
+same protection.
+
 ## Data Resources
 
 Server render requests have their own data-resource store by default. Reads

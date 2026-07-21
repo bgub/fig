@@ -1,26 +1,16 @@
-interface StartStorage {
-  getStore(): unknown;
-  run<T>(context: unknown, callback: () => T): T;
-}
+import {
+  getStartContext,
+  type StartStorage,
+  startStorageKey,
+} from "./start-context.ts";
 
-const storageKey = Symbol.for("tanstack-start:start-storage-context");
 const globalObject = globalThis as typeof globalThis & {
-  [storageKey]?: StartStorage;
+  [startStorageKey]?: StartStorage;
 };
 
-const storage = (globalObject[storageKey] ??= await createStorage());
+const storage = (globalObject[startStorageKey] ??= await createStorage());
 
-export function getStartContext(options?: {
-  throwIfNotFound?: boolean;
-}): unknown {
-  const context = storage.getStore();
-  if (context === undefined && options?.throwIfNotFound !== false) {
-    throw new Error(
-      "No TanStack Start context is available outside the server runtime.",
-    );
-  }
-  return context;
-}
+export { getStartContext };
 
 export async function runWithStartContext<T>(
   context: unknown,

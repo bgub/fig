@@ -4,6 +4,7 @@ import {
   encodePayloadDataEntries,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
+import { escapeScriptJson } from "@bgub/fig-server/html";
 import { serializableStartData } from "./payload-internal.ts";
 import { requireStartDataStore } from "./store.ts";
 
@@ -31,7 +32,7 @@ export function hydrateStartDataStore(
 export function serializeStartDataStore(
   dataStore: FigDataStoreController,
 ): string {
-  return escapeJson(
+  return escapeScriptJson(
     encodePayloadDataEntries(serializableStartData(dataStore.snapshot())),
   );
 }
@@ -48,11 +49,4 @@ function hydrateDataStore(
   ) as PayloadDataHydrationEntry[];
   dataStore.hydrate(decodePayloadDataEntries(serialized));
   hydratedStores.add(dataStore);
-}
-
-function escapeJson(value: unknown): string {
-  return JSON.stringify(value)
-    .replaceAll("<", "\\u003c")
-    .replaceAll("\u2028", "\\u2028")
-    .replaceAll("\u2029", "\\u2029");
 }

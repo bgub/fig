@@ -17,3 +17,9 @@ development while leaving its application-bound router and Start imports as
 external Vite modules. This reduces the module-request waterfall without
 freezing generated app entries or the linked Fig adapter packages. Production
 continues to use Vite's normal application bundling.
+
+## Data transforms use Vite's environment
+
+`figData()` now uses Vite's transform environment directly instead of exposing
+a manual `target` override. The unused server-resource discovery IDs and root
+path bookkeeping have also been removed.
