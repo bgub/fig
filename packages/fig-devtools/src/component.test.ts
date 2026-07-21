@@ -11,6 +11,96 @@ import { FIG_DEVTOOLS_HOOK_KEY } from "./hook.ts";
 // DevTools publishing disabled) before any app root commits, then updates as
 // app commits arrive through the global hook.
 describe("FigDevtools panel", () => {
+  it("portals inspection highlights outside an embedded panel", async () => {
+    const hook = createFigDevtoolsGlobalHook();
+    const rendererId = hook.inject({
+      name: "Fig",
+      packageName: "@bgub/fig-reconciler",
+    });
+    const inspectedElement = document.createElement("main");
+    inspectedElement.getBoundingClientRect = () =>
+      new DOMRect(12, 34, 320, 180);
+    hook.onCommitRoot(
+      rendererId,
+      {
+        id: 1,
+        rendererId,
+        committedAt: 1,
+        dataResources: [],
+        pendingWork: [],
+        suspendedWork: [],
+        pingedWork: [],
+        expiredWork: [],
+        tree: {
+          id: 1,
+          parentId: null,
+          name: "Root",
+          kind: "root",
+          key: null,
+          index: 0,
+          props: {},
+          pendingWork: [],
+          childWork: [],
+          hooks: [],
+          contextDependencies: [],
+          dataResourceCanonicalKeys: [],
+          children: [
+            {
+              id: 2,
+              parentId: 1,
+              name: "main",
+              kind: "host",
+              key: null,
+              index: 0,
+              props: {},
+              pendingWork: [],
+              childWork: [],
+              hooks: [],
+              contextDependencies: [],
+              dataResourceCanonicalKeys: [],
+              children: [],
+            },
+          ],
+        },
+      },
+      {
+        inspectElement: () => null,
+        elementForFiber: (fiberId) => (fiberId === 2 ? inspectedElement : null),
+      },
+    );
+    const container = document.createElement("aside");
+    document.body.append(container);
+
+    await act(() => {
+      createRoot(container, { devtools: false }).render(
+        createElement(FigDevtools, {
+          hook,
+          overlayTarget: document.body,
+          overlayZIndex: 99998,
+          placement: "panel",
+        }),
+      );
+    });
+
+    const rootRow = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("Root"),
+    );
+    await act(() => {
+      rootRow?.dispatchEvent(new Event("pointerenter"));
+    });
+
+    const overlay = document.body.querySelector<HTMLElement>(
+      ":scope > .fig-devtools__inspect-overlay",
+    );
+    expect(overlay).not.toBeNull();
+    expect(
+      container.querySelector(".fig-devtools__inspect-overlay"),
+    ).toBeNull();
+    expect(overlay?.style.zIndex).toBe("99998");
+    expect(overlay?.style.left).toBe("12px");
+    expect(overlay?.style.top).toBe("34px");
+  });
+
   it("renders committed app roots published to the global hook", async () => {
     const hook = createFigDevtoolsGlobalHook();
     const target = globalThis as FigDevtoolsGlobalTarget;

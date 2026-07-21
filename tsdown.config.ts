@@ -27,6 +27,7 @@ const libraryEntries: Record<string, string[] | Record<string, string>> = {
     "./src/index.ts",
     "./src/server.ts",
     "./src/client.ts",
+    "./src/tanstack.ts",
   ],
   "packages/fig-dom": [
     "./src/index.ts",

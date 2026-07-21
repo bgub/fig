@@ -22,6 +22,11 @@
       "import": "./dist/client.js",
       "default": "./dist/client.js"
     },
+    "./tanstack": {
+      "types": "./dist/tanstack.d.ts",
+      "import": "./dist/tanstack.js",
+      "default": "./dist/tanstack.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
@@ -49,14 +54,19 @@
     "@bgub/fig-reconciler": "workspace:*"
   },
   "peerDependencies": {
-    "@bgub/fig-server": "workspace:*"
+    "@bgub/fig-server": "workspace:*",
+    "@tanstack/devtools": "0.12.5"
   },
   "peerDependenciesMeta": {
     "@bgub/fig-server": {
       "optional": true
+    },
+    "@tanstack/devtools": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@bgub/fig-server": "workspace:*"
+    "@bgub/fig-server": "workspace:*",
+    "@tanstack/devtools": "0.12.5"
   }
 }

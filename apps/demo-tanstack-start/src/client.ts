@@ -1,13 +1,21 @@
-import {
-  ensureFigDevtoolsGlobalHook,
-  installFigDevtools,
-} from "@bgub/fig-devtools";
+import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
+import { createFigDevtoolsPlugin } from "@bgub/fig-devtools/tanstack";
 import { hydrateStart } from "@bgub/fig-tanstack-start/client";
+import { TanStackDevtoolsCore } from "@tanstack/devtools";
 
 ensureFigDevtoolsGlobalHook();
 await hydrateStart();
 await hydrationFinished();
-installFigDevtools({ banner: "Fig TanStack Start", open: false });
+
+const figDevtoolsPlugin = createFigDevtoolsPlugin({
+  banner: "Fig TanStack Start",
+});
+const tanstackDevtools = new TanStackDevtoolsCore({
+  plugins: [figDevtoolsPlugin],
+});
+const tanstackDevtoolsHost = document.createElement("div");
+document.body.appendChild(tanstackDevtoolsHost);
+tanstackDevtools.mount(tanstackDevtoolsHost);
 
 function hydrationFinished(): Promise<void> {
   if (document.querySelector("[data-fig-tanstack-start-hydrated]") !== null) {

@@ -585,6 +585,55 @@ export const DevtoolsStyle = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.fig-devtools[data-theme="dark"] {
+  --fig-devtools-panel: #111827;
+  --fig-devtools-surface: #0f172a;
+  --fig-devtools-ink: #e5e7eb;
+  --fig-devtools-muted: #94a3b8;
+  --fig-devtools-line: #334155;
+  --fig-devtools-accent: #60a5fa;
+  border-color: #334155;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__header {
+  border-color: #334155;
+  background: #020617;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__button,
+.fig-devtools[data-theme="dark"] .fig-devtools__tt-badge,
+.fig-devtools[data-theme="dark"] .fig-devtools__hook,
+.fig-devtools[data-theme="dark"] .fig-devtools__data,
+.fig-devtools[data-theme="dark"] .fig-devtools__value-chip,
+.fig-devtools[data-theme="dark"] .fig-devtools__html {
+  border-color: var(--fig-devtools-line);
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__footer,
+.fig-devtools[data-theme="dark"] .fig-devtools__banner,
+.fig-devtools[data-theme="dark"] .fig-devtools__hook-index {
+  border-color: var(--fig-devtools-line);
+  background: #172033;
+  color: #cbd5e1;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__tree-button,
+.fig-devtools[data-theme="dark"] .fig-devtools__chip,
+.fig-devtools[data-theme="dark"] .fig-devtools__tab-button,
+.fig-devtools[data-theme="dark"] .fig-devtools__section-title,
+.fig-devtools[data-theme="dark"] .fig-devtools__tt-position,
+.fig-devtools[data-theme="dark"] .fig-devtools__row-value {
+  color: #cbd5e1;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__tree-button:hover {
+  background: #1e293b;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__tree-button.is-selected,
+.fig-devtools[data-theme="dark"] .fig-devtools__button.is-active {
+  background: #1e3a5f;
+  color: #bfdbfe;
+}
+.fig-devtools[data-theme="dark"] .fig-devtools__row-value {
+  background: rgba(255, 255, 255, 0.06);
+}
 @media (max-width: 760px) {
   .fig-devtools {
     left: 8px;

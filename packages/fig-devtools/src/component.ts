@@ -7,7 +7,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
-import { type Bind, on } from "@bgub/fig-dom";
+import { createPortal, type Bind, on } from "@bgub/fig-dom";
 import type {
   FigDevtoolsFiberKind,
   FigDevtoolsFiberSnapshot,
@@ -22,16 +22,21 @@ import {
 import { DevtoolsStyle } from "./style.ts";
 
 export interface FigDevtoolsProps {
+  collapsible?: boolean;
   hook?: FigDevtoolsHook;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  overlayTarget?: Element;
+  overlayZIndex?: number;
   placement?: FigDevtoolsPlacement;
   position?: FigDevtoolsPosition;
+  theme?: FigDevtoolsTheme;
   banner?: string;
 }
 
 export type FigDevtoolsPlacement = "overlay" | "panel" | "sidebar";
+export type FigDevtoolsTheme = "dark" | "light";
 export type FigDevtoolsPosition =
   | "BottomRight"
   | "BottomLeft"
@@ -82,12 +87,16 @@ const InitialSelection: Selection = {
 };
 
 export function FigDevtools({
+  collapsible = true,
   hook = ensureFigDevtoolsGlobalHook(),
   open,
   defaultOpen = true,
   onOpenChange,
+  overlayTarget,
+  overlayZIndex,
   placement = "overlay",
   position = "BottomRight",
+  theme = "light",
   banner,
 }: FigDevtoolsProps): FigNode {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
@@ -119,7 +128,7 @@ export function FigDevtools({
     revealSelectedFiber(treePaneRef.current);
   }, [scrollToken]);
 
-  const isOpen = open ?? uncontrolledOpen;
+  const isOpen = !collapsible || (open ?? uncontrolledOpen);
   const snapshot = currentSnapshot(hook, selection);
 
   const setOpen = (nextOpen: boolean) => {
@@ -158,6 +167,7 @@ export function FigDevtools({
       "data-fig-devtools": "",
       "data-placement": placement,
       "data-position": position,
+      "data-theme": theme,
       class: classNames(
         "fig-devtools",
         !isOpen && "is-closed",
@@ -170,6 +180,7 @@ export function FigDevtools({
       ? devtoolsHeader({
           selectMode,
           selection,
+          showClose: collapsible,
           setOpen,
           setSelectMode,
           setSelection,
@@ -190,14 +201,19 @@ export function FigDevtools({
           snapshot,
         })
       : null,
-    selectMode && hover !== null ? inspectOverlay(hover) : null,
-    !selectMode && treeHover !== null ? inspectOverlay(treeHover) : null,
+    inspectionOverlay(
+      selectMode ? hover : treeHover,
+      overlayTarget,
+      overlayZIndex,
+      theme,
+    ),
   );
 }
 
 interface DevtoolsHeaderOptions {
   selectMode: boolean;
   selection: Selection;
+  showClose: boolean;
   setOpen: (open: boolean) => void;
   setSelectMode: (selectMode: boolean) => void;
   setSelection: SetSelection;
@@ -209,6 +225,7 @@ interface DevtoolsHeaderOptions {
 function devtoolsHeader({
   selectMode,
   selection,
+  showClose,
   setOpen,
   setSelectMode,
   setSelection,
@@ -250,11 +267,13 @@ function devtoolsHeader({
       snapshot.live
         ? null
         : button("Resume", () => setSelection(liveSelection(selection))),
-      button("✕", () => setOpen(false), {
-        ariaLabel: "Hide Fig DevTools",
-        className: "fig-devtools__hide",
-        title: "Hide Fig DevTools",
-      }),
+      showClose
+        ? button("✕", () => setOpen(false), {
+            ariaLabel: "Hide Fig DevTools",
+            className: "fig-devtools__hide",
+            title: "Hide Fig DevTools",
+          })
+        : null,
     ),
   );
 }
@@ -359,16 +378,34 @@ function useInspectMode(
   );
 }
 
-function inspectOverlay(hover: InspectHover): FigNode {
+function inspectionOverlay(
+  hover: InspectHover | null,
+  target: Element | undefined,
+  zIndex: number | undefined,
+  theme: FigDevtoolsTheme,
+): FigNode {
+  if (hover === null) return null;
+
+  const overlay = inspectOverlay(hover, zIndex, theme);
+  return target === undefined ? overlay : createPortal(overlay, target);
+}
+
+function inspectOverlay(
+  hover: InspectHover,
+  zIndex: number | undefined,
+  theme: FigDevtoolsTheme,
+): FigNode {
   return h(
     "div",
     {
       class: "fig-devtools__inspect-overlay",
       style: {
+        "--fig-devtools-accent": theme === "dark" ? "#60a5fa" : "#2563eb",
         height: `${hover.rect.height}px`,
         left: `${hover.rect.left}px`,
         top: `${hover.rect.top}px`,
         width: `${hover.rect.width}px`,
+        zIndex: zIndex === undefined ? undefined : String(zIndex),
       },
     },
     h(

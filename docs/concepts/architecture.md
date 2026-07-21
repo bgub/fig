@@ -16,7 +16,7 @@ Every app-facing export has exactly one home: behavior lives in the package whos
 - `@bgub/fig-vite` — the published Vite integration for Fast Refresh and `serverDataResource` packaging.
 - `@bgub/fig-tanstack-router` — the TanStack Router framework adapter: Fig route components and hooks, the private reactive-store bridge supplied to `RouterCore`, and native anchor navigation. Matching, loading, and history remain owned by `@tanstack/router-core`.
 - `@bgub/fig-tanstack-start` — the TanStack Start runtime adapter: one Fig-owned request/root data store, Fig document-data serialization, Payload route serving/adoption, and Fig server/client rendering around Start's request and hydration cores.
-- `@bgub/fig-devtools` — the private DevTools workspace preview.
+- `@bgub/fig-devtools` — the private DevTools workspace preview. Its `./tanstack` subpath adapts the existing hook-backed panel to TanStack Devtools' DOM plugin seam; it mounts an isolated non-publishing Fig root per host container and owns explicit teardown, while commit snapshots continue to flow directly through Fig's global hook rather than a second event transport. Inspection highlights portal into the host's owner document below the outer shell's stacking context so transformed or clipped plugin panels cannot change their viewport geometry.
 
 fig-server is a fully separate render implementation (it depends only on `@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never grew a server mode.
 
