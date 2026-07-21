@@ -191,11 +191,7 @@ export function createElement<P extends Props>(
 }
 
 export function isValidElement(value: unknown): value is FigElement {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as FigElement).$$typeof === FigElementSymbol
-  );
+  return hasObjectBrand(value, FigElementSymbol);
 }
 
 export function createPortalNode<Target>(
@@ -207,28 +203,25 @@ export function createPortalNode<Target>(
 }
 
 export function isPortal(value: unknown): value is FigPortal {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as FigPortal).$$typeof === FigPortalSymbol
-  );
+  return hasObjectBrand(value, FigPortalSymbol);
 }
 
 export function clientReference<P extends Props = Props>(
   options: ClientReferenceOptions<P>,
 ): FigClientReference<P> {
-  const reference = (() => {
-    throw new Error(
-      `Client reference "${options.id}" cannot be rendered on the server directly.`,
-    );
-  }) as unknown as FigClientReference<P>;
-
-  return Object.assign(reference, {
-    $$typeof: FigClientReferenceSymbol,
-    assets: options.assets,
-    id: options.id,
-    ssr: options.ssr,
-  });
+  return Object.assign(
+    (): never => {
+      throw new Error(
+        `Client reference "${options.id}" cannot be rendered on the server directly.`,
+      );
+    },
+    {
+      $$typeof: FigClientReferenceSymbol,
+      assets: options.assets,
+      id: options.id,
+      ssr: options.ssr,
+    },
+  );
 }
 
 export function lazy<T extends ComponentType<any>>(
@@ -237,7 +230,7 @@ export function lazy<T extends ComponentType<any>>(
   let promise: PromiseLike<T> | null = null;
   let rejected = false;
 
-  const Lazy = (props: Props & { children?: FigNode }): FigNode => {
+  const Lazy: ComponentType<ComponentProps<T>> = (props) => {
     if (promise === null) {
       rejected = false;
       const next = Promise.resolve(load()).then(
@@ -251,7 +244,7 @@ export function lazy<T extends ComponentType<any>>(
     }
 
     try {
-      return createElement(readPromise(promise) as ElementType, props);
+      return createElement(readPromise(promise), props);
     } catch (error) {
       if (rejected) {
         promise = null;
@@ -261,47 +254,46 @@ export function lazy<T extends ComponentType<any>>(
     }
   };
 
-  return Lazy as ComponentType<ComponentProps<T>>;
+  return Lazy;
 }
 
 export function isClientReference(value: unknown): value is FigClientReference {
-  return (
-    typeof value === "function" &&
-    (value as FigClientReference).$$typeof === FigClientReferenceSymbol
-  );
+  return hasFunctionBrand(value, FigClientReferenceSymbol);
 }
 
 export function isSuspense(value: unknown): value is FigSuspense {
-  return (
-    typeof value === "function" &&
-    (value as FigSuspense).$$typeof === FigSuspenseSymbol
-  );
+  return hasFunctionBrand(value, FigSuspenseSymbol);
 }
 
 export function isActivity(value: unknown): value is FigActivity {
-  return (
-    typeof value === "function" &&
-    (value as FigActivity).$$typeof === FigActivitySymbol
-  );
+  return hasFunctionBrand(value, FigActivitySymbol);
 }
 
 export function isErrorBoundary(value: unknown): value is FigErrorBoundary {
-  return (
-    typeof value === "function" &&
-    (value as FigErrorBoundary).$$typeof === FigErrorBoundarySymbol
-  );
+  return hasFunctionBrand(value, FigErrorBoundarySymbol);
 }
 
 export function isViewTransition(value: unknown): value is FigViewTransition {
-  return (
-    typeof value === "function" &&
-    (value as FigViewTransition).$$typeof === FigViewTransitionSymbol
-  );
+  return hasFunctionBrand(value, FigViewTransitionSymbol);
 }
 
 export function isAssets(value: unknown): value is FigAssets {
+  return hasFunctionBrand(value, FigAssetsSymbol);
+}
+
+function hasObjectBrand(value: unknown, brand: symbol): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "$$typeof" in value &&
+    value.$$typeof === brand
+  );
+}
+
+function hasFunctionBrand(value: unknown, brand: symbol): boolean {
   return (
     typeof value === "function" &&
-    (value as FigAssets).$$typeof === FigAssetsSymbol
+    "$$typeof" in value &&
+    value.$$typeof === brand
   );
 }

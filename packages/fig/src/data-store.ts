@@ -121,21 +121,18 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
-const dataStoreFactory = createRendererDataStore as FigDataStoreFactory;
+const dataStoreFactory: FigDataStoreFactory = createRendererDataStore;
 
 export function dataResource<TArgs extends unknown[], TValue>(
   options: DataResourceOptions<TArgs, TValue>,
 ): DataResource<TArgs, TValue> {
   const resource = {
     $$typeof: DataResourceSymbol,
+    [DataStoreFactorySymbol]: dataStoreFactory,
     debugArgs: options.debugArgs,
     key: options.key,
     load: options.load,
   };
-  (
-    resource as DataResource<TArgs, TValue> &
-      Record<symbol, FigDataStoreFactory>
-  )[DataStoreFactorySymbol] = dataStoreFactory;
   return resource;
 }
 
@@ -187,28 +184,18 @@ export function readDataStore(): FigDataStoreHandle {
 }
 
 interface DataStoreControllerState {
-  attached: boolean;
-  host: FigDataStoreHost;
+  host: FigDataStoreHost | null;
 }
 
 export function createDataStore(
   options: FigDataStoreOptions = {},
 ): FigDataStoreController {
-  const detachedHost: FigDataStoreHost = {
-    getLane: () => null,
+  const state: DataStoreControllerState = { host: null };
+  const store = createRendererDataStore<object, unknown>({
+    getLane: () => (state.host === null ? null : state.host.getLane()),
     partition: options.partition,
-    schedule: () => undefined,
-  };
-  const state: DataStoreControllerState = {
-    attached: false,
-    host: detachedHost,
-  };
-  const forwardingHost: FigDataStoreHost = {
-    getLane: () => state.host.getLane(),
-    partition: options.partition,
-    schedule: (owner, lane) => state.host.schedule(owner, lane),
-  };
-  const store = createRendererDataStore(forwardingHost);
+    schedule: (owner, lane) => state.host?.schedule(owner, lane),
+  });
   Object.defineProperty(store, DataStoreControllerSymbol, { value: state });
   if (options.initialData !== undefined) store.hydrate(options.initialData);
   return store;
@@ -241,10 +228,9 @@ export function attachDataStore(
   if (state === undefined) {
     throw new Error("dataStore must be created with createDataStore().");
   }
-  if (state.attached) {
+  if (state.host !== null) {
     throw new Error("A data store can only be adopted by one Fig renderer.");
   }
-  state.attached = true;
   state.host = host;
   return controller as FigDataStore;
 }
@@ -501,7 +487,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): void {
     if (this.disposed) return;
 
-    const { entry } = this.entryFor(resource, args, false);
+    const entry = this.entryFor(resource, args, false);
     if (entry === null) return;
 
     this.invalidateEntry(entry, this.host.getLane());
@@ -557,26 +543,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         );
       }
 
-      const { entry } = this.entryFor(resource, args, true);
+      const entry = this.entryFor(resource, args, true);
       this.clearInactiveTimer(entry);
       this.retainPreload(entry);
 
       if (entryHasValue(entry)) {
-        if (
-          entry.status === "fulfilled" &&
-          entry.stale &&
-          entry.pending === null &&
-          entry.refreshError === undefined &&
-          resource.load !== undefined
-        ) {
-          // Same stale-read semantics as readData: serve the stale value now,
-          // revalidate in the background. A recorded refreshError blocks the
-          // auto-retry until an explicit invalidate/refresh re-arms it.
-          void this.startLoad(entry, resource, args, {
-            lane: this.host.getLane(),
-            refresh: true,
-          });
-        }
+        this.revalidateIfStale(entry, resource, args);
         return entry.value as TValue;
       }
 
@@ -612,7 +584,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): void {
     if (this.disposed || resource.load === undefined) return;
 
-    const { entry } = this.entryFor(resource, args, true);
+    const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.retainPreload(entry);
     if (entry.pending !== null) return;
@@ -629,27 +601,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     args: TArgs,
     owner: Owner,
   ): TValue {
-    const { entry, key } = this.entryFor(resource, args, true);
+    const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    this.addOwnerKey(owner, key);
-
-    if (
-      entry.status === "fulfilled" &&
-      entry.stale &&
-      entry.pending === null &&
-      entry.refreshError === undefined &&
-      resource.load !== undefined
-    ) {
-      // A failed background refresh keeps the stale value and records
-      // refreshError; do not auto-retry on every subsequent read or a
-      // persistently-failing loader becomes a render/fetch storm. An explicit
-      // invalidateData/refreshData clears refreshError to retry.
-      void this.startLoad(entry, resource, args, {
-        lane: this.host.getLane(),
-        refresh: true,
-      });
-    }
+    this.addOwnerKey(owner, entry.storeKey);
+    this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
       void this.startLoad(entry, resource, args, {
@@ -674,7 +630,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
 
     if (resource.load === undefined) {
-      const { entry } = this.entryFor(resource, args, false);
+      const entry = this.entryFor(resource, args, false);
       if (entry === null) {
         return Promise.resolve(unsupportedRefreshResult<TValue>());
       }
@@ -683,7 +639,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
-    const { entry } = this.entryFor(resource, args, true);
+    const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
 
     if (entry.pending !== null && entry.status !== "refreshing") {
@@ -693,7 +649,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     return this.startLoad(entry, resource, args, {
       lane: this.host.getLane(),
       refresh: entry.status === "fulfilled" || entry.status === "refreshing",
-    }) as Promise<DataRefreshResult<TValue>>;
+    });
   }
 
   run<T>(callback: () => T): T {
@@ -719,17 +675,17 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: true,
-  ): { entry: Entry<Owner, Lane>; key: string };
+  ): Entry<Owner, Lane>;
   private entryFor<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: false,
-  ): { entry: Entry<Owner, Lane> | null; key: string };
+  ): Entry<Owner, Lane> | null;
   private entryFor<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
     create: boolean,
-  ): { entry: Entry<Owner, Lane> | null; key: string } {
+  ): Entry<Owner, Lane> | null {
     const normalized = normalizeKey(resource.key(...args));
     // The fingerprint feeds only the dev drift diagnostics below, so
     // production never pays for encoding the args on every read.
@@ -746,10 +702,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           fingerprint,
         );
       }
-      return { entry: current, key };
+      return current;
     }
 
-    if (!create) return { entry: null, key };
+    if (!create) return null;
 
     const entry = this.createEntry(
       normalized,
@@ -761,11 +717,34 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     );
     // A disposed store is terminal: hand back a transient entry but never
     // register it, so post-dispose reads cannot resurrect the cache.
-    if (this.disposed) return { entry, key };
+    if (this.disposed) return entry;
 
     this.entries.set(key, entry);
     this.notifyEntryChange(entry);
-    return { entry, key };
+    return entry;
+  }
+
+  private revalidateIfStale<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+  ): void {
+    if (
+      entry.status !== "fulfilled" ||
+      !entry.stale ||
+      entry.pending !== null ||
+      entry.refreshError !== undefined ||
+      resource.load === undefined
+    ) {
+      return;
+    }
+
+    // Serve the stale value and revalidate in the background. A recorded
+    // refreshError blocks retries until an explicit invalidate/refresh.
+    void this.startLoad(entry, resource, args, {
+      lane: this.host.getLane(),
+      refresh: true,
+    });
   }
 
   private entryForKey(key: DataResourceKey): Entry<Owner, Lane> | null {
@@ -1404,7 +1383,8 @@ function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
   return (
     (typeof value === "object" || typeof value === "function") &&
     value !== null &&
-    typeof (value as PromiseLike<T>).then === "function"
+    "then" in value &&
+    typeof value.then === "function"
   );
 }
 

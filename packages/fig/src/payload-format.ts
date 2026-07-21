@@ -281,11 +281,10 @@ export function assertPayloadCodecMatches(
 export function errorFromPayloadValue(value: PayloadErrorValue): Error & {
   digest?: string;
 } {
-  const error = new Error(
-    value.message ?? "The server render failed.",
-  ) as Error & { digest?: string };
-  if (value.digest !== undefined) error.digest = value.digest;
-  return error;
+  const error = new Error(value.message ?? "The server render failed.");
+  return value.digest === undefined
+    ? error
+    : Object.assign(error, { digest: value.digest });
 }
 
 export interface PayloadGraphEncodeContext {
@@ -548,10 +547,7 @@ function decodeModelValue(
     return decodePayloadValueTag(model, graph.refs, graph.decodeChild);
   }
 
-  return decodePayloadRecord(
-    model as Record<string, PayloadModel>,
-    graph.decodeChild,
-  );
+  return decodePayloadRecord(model, graph.decodeChild);
 }
 
 export function isPayloadValueSpecialModel(
@@ -588,9 +584,9 @@ export function decodePayloadValueTag(
 ): unknown {
   switch (model.$fig) {
     case "array":
-      return refs.define(
+      return refs.define<unknown[]>(
         model.id,
-        () => [] as unknown[],
+        () => [],
         (value) => {
           for (const item of model.value) value.push(decodeChild(item));
         },
@@ -602,7 +598,7 @@ export function decodePayloadValueTag(
     case "map":
       return refs.define(
         model.id,
-        () => new Map(),
+        () => new Map<unknown, unknown>(),
         (value) => {
           for (const [key, item] of model.entries) {
             value.set(decodeChild(key), decodeChild(item));
@@ -617,14 +613,10 @@ export function decodePayloadValueTag(
       }
       return refs.define(
         model.id,
-        () => ({}) as Record<string, unknown>,
+        () => ({}),
         (value) => {
-          for (const name of Object.keys(model.value)) {
-            definePayloadProperty(
-              value,
-              name,
-              decodeChild(model.value[name] as PayloadModel),
-            );
+          for (const [name, child] of Object.entries(model.value)) {
+            definePayloadProperty(value, name, decodeChild(child));
           }
         },
       );
@@ -634,7 +626,7 @@ export function decodePayloadValueTag(
     case "set":
       return refs.define(
         model.id,
-        () => new Set(),
+        () => new Set<unknown>(),
         (value) => {
           for (const item of model.values) value.add(decodeChild(item));
         },
@@ -651,12 +643,8 @@ export function decodePayloadRecord(
   decodeChild: (model: PayloadModel) => unknown,
 ): Record<string, unknown> {
   const decoded: Record<string, unknown> = {};
-  for (const name of Object.keys(value)) {
-    definePayloadProperty(
-      decoded,
-      name,
-      decodeChild(value[name] as PayloadModel),
-    );
+  for (const [name, child] of Object.entries(value)) {
+    definePayloadProperty(decoded, name, decodeChild(child));
   }
   return decoded;
 }
@@ -722,7 +710,7 @@ export function isPayloadSpecialModel(
 ): model is PayloadElementModel | PayloadSpecialModel {
   if (!("$fig" in model)) return false;
 
-  switch ((model as { $fig: unknown }).$fig) {
+  switch (model.$fig) {
     case "array":
     case "bigint":
     case "client":

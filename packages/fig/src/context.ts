@@ -21,6 +21,7 @@ export function createContext<T>(defaultValue: T): FigContext<T> {
 export function isContext(value: unknown): value is FigContext<unknown> {
   return (
     typeof value === "function" &&
-    (value as FigContext<unknown>).$$typeof === FigContextSymbol
+    "$$typeof" in value &&
+    value.$$typeof === FigContextSymbol
   );
 }

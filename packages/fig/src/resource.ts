@@ -10,6 +10,9 @@ import {
 const PreventAssetResourceHoistSymbol = Symbol.for(
   "fig.prevent-asset-resource-hoist",
 );
+type AssetResourceHostProps = Props & {
+  [PreventAssetResourceHoistSymbol]?: true;
+};
 
 export type AssetResourceBlocking = "reveal" | "none";
 export type CrossOrigin = "anonymous" | "use-credentials" | "";
@@ -195,13 +198,15 @@ export function title(value: string): TitleResource {
 }
 
 export function meta(options: MetaResourceOptions): MetaResource {
-  return { ...options, kind: "meta" } as MetaResource;
+  return { ...options, kind: "meta" };
 }
 
 export function isFigAssetResource(value: unknown): value is FigAssetResource {
-  if (typeof value !== "object" || value === null) return false;
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return false;
+  }
 
-  switch ((value as { kind?: unknown }).kind) {
+  switch (value.kind) {
     case "stylesheet":
     case "preload":
     case "modulepreload":
@@ -279,7 +284,11 @@ export function assetResourceFromHostProps(
   type: string,
   props: Props,
 ): FigAssetResource | null {
-  if (Reflect.get(props, PreventAssetResourceHoistSymbol) === true) return null;
+  if (
+    (props as AssetResourceHostProps)[PreventAssetResourceHoistSymbol] === true
+  ) {
+    return null;
+  }
   return resourceFromHost(type, (name) => props[name], props.children, true);
 }
 
@@ -395,7 +404,10 @@ function resourceFromHost(
   children?: FigNode,
   requireAsyncScript = false,
 ): FigAssetResource | null {
-  const withKey = (resource: FigAssetResource): FigAssetResource => {
+  const withKey = (
+    resource: FigAssetResource | null,
+  ): FigAssetResource | null => {
+    if (resource === null) return null;
     const key = readProp(prop, "data-fig-resource-key");
     return key === undefined ? resource : { ...resource, key };
   };
@@ -406,9 +418,9 @@ function resourceFromHost(
       return withKey({ kind: "title", value: textResourceValue(children) });
     case "meta":
       if (readProp(prop, "itemprop") !== undefined) return null;
-      return withNullableKey(metaResourceFromHost(prop), withKey);
+      return withKey(metaResourceFromHost(prop));
     case "link":
-      return withNullableKey(linkResourceFromHost(prop), withKey);
+      return withKey(linkResourceFromHost(prop));
     case "script": {
       const src = readProp(prop, "src");
       // A raw script keeps native placement and execution semantics unless the
@@ -456,13 +468,6 @@ function metaResourceFromHost(
 
 function hasBooleanAttribute(value: unknown): boolean {
   return value !== undefined && value !== null && value !== false;
-}
-
-function withNullableKey(
-  resource: FigAssetResource | null,
-  withKey: (resource: FigAssetResource) => FigAssetResource,
-): FigAssetResource | null {
-  return resource === null ? null : withKey(resource);
 }
 
 function linkResourceFromHost(

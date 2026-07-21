@@ -5,14 +5,7 @@ import type {
   DataResourceLoadContext,
   DataResourceLoader,
 } from "./data.ts";
-import type { DataResourceOptions } from "./data-store.ts";
-
-interface ServerDataResourceOptions<
-  TArgs extends unknown[],
-  TValue,
-> extends DataResourceOptions<TArgs, TValue> {
-  load: DataResourceLoader<TArgs, TValue>;
-}
+import type { ServerDataResourceOptions } from "./server.ts";
 
 export function serverDataResource<TArgs extends unknown[], TValue>(
   _options: ServerDataResourceOptions<TArgs, TValue>,

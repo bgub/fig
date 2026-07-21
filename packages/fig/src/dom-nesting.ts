@@ -85,7 +85,7 @@ function validWithParent(child: string, parent: string): boolean {
         scriptLike(child)
       );
     case "head":
-      return headChild(child);
+      return tagIn(headChildren, child);
     case "html":
       return child === "head" || child === "body";
     case "frameset":
@@ -190,10 +190,6 @@ function normalizedTag(type: string): string {
 
 function scriptLike(tag: string): boolean {
   return tag === "script" || tag === "style" || tag === "template";
-}
-
-function headChild(tag: string): boolean {
-  return tagIn(headChildren, tag);
 }
 
 function hintFor(child: string, parent: string): string {

@@ -168,12 +168,6 @@ export function useSyncExternalStore<T>(
 }
 
 export function useStableEvent<Args extends unknown[], Result>(
-  handler: (...args: [...Args, signal: AbortSignal]) => Result,
-): (...args: Args) => Result;
-export function useStableEvent<Args extends unknown[], Result>(
-  handler: (...args: Args) => Result,
-): (...args: Args) => Result;
-export function useStableEvent<Args extends unknown[], Result>(
   handler: (...args: Args) => Result,
 ): (...args: StableEventCallerArgs<Args>) => Result {
   return resolveDispatcher().useStableEvent(handler);

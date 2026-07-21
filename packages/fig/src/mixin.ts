@@ -49,6 +49,9 @@ const FigMixinSlotSymbol = Symbol.for("fig.mixin-slot");
 const FigClientOnlyHostBehaviorSymbol = Symbol.for(
   "fig.client-only-host-behavior",
 );
+type ClientOnlyHostProps = object & {
+  [FigClientOnlyHostBehaviorSymbol]?: string;
+};
 
 /** Creates a render-time host behavior for the `mix` prop. */
 export function createMixin<TArgs extends unknown[]>(
@@ -104,7 +107,11 @@ export function resolveHostMix<P extends Props>(type: string, input: P): P {
       resolve(result, `${slot}.result`);
       return;
     }
-    if (typeof result !== "object") throwInvalidMixinResult(type);
+    if (typeof result !== "object") {
+      throw new Error(
+        `A mixin on <${type}> must return host props, more mixins, or nothing.`,
+      );
+    }
     const returnedProps = result as Props;
 
     if (
@@ -139,11 +146,8 @@ export function markClientOnlyHostBehavior(
   context: MixinContext,
   behavior: string,
 ): void {
-  if (
-    Reflect.get(context.props, FigClientOnlyHostBehaviorSymbol) !== undefined
-  ) {
-    return;
-  }
+  const props = context.props as ClientOnlyHostProps;
+  if (props[FigClientOnlyHostBehaviorSymbol] !== undefined) return;
   Object.defineProperty(context.props, FigClientOnlyHostBehaviorSymbol, {
     configurable: true,
     value: behavior,
@@ -151,7 +155,9 @@ export function markClientOnlyHostBehavior(
 }
 
 export function clientOnlyHostBehavior(props: object): string | undefined {
-  const behavior = Reflect.get(props, FigClientOnlyHostBehaviorSymbol);
+  const behavior = (props as ClientOnlyHostProps)[
+    FigClientOnlyHostBehaviorSymbol
+  ];
   return typeof behavior === "string" ? behavior : undefined;
 }
 
@@ -170,13 +176,8 @@ function isMixinDescriptor(value: unknown): value is MixinDescriptor {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as MixinDescriptor).$$typeof === FigMixinSymbol
-  );
-}
-
-function throwInvalidMixinResult(type: string): never {
-  throw new Error(
-    `A mixin on <${type}> must return host props, more mixins, or nothing.`,
+    "$$typeof" in value &&
+    value.$$typeof === FigMixinSymbol
   );
 }
 

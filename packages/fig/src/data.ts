@@ -159,6 +159,9 @@ export interface LoadContextCapabilities {
 }
 
 const LoadContextCapabilitiesSymbol = Symbol.for("fig.data-load-context");
+type DataResourceLoadContextWithCapabilities = DataResourceLoadContext & {
+  [LoadContextCapabilitiesSymbol]?: LoadContextCapabilities;
+};
 
 export function defineLoadContextCapabilities(
   context: DataResourceLoadContext,
@@ -174,9 +177,9 @@ export function defineLoadContextCapabilities(
 export function loadContextCapabilities(
   context: DataResourceLoadContext,
 ): LoadContextCapabilities | undefined {
-  return (
-    context as unknown as Record<symbol, LoadContextCapabilities | undefined>
-  )[LoadContextCapabilitiesSymbol];
+  return (context as DataResourceLoadContextWithCapabilities)[
+    LoadContextCapabilitiesSymbol
+  ];
 }
 
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
