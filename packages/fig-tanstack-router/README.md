@@ -132,6 +132,28 @@ own module. `useMatches` reads or selects the active match list;
 `useMatchRoute` and `MatchRoute` test locations reactively; `Navigate`
 performs declarative post-commit navigation.
 
+## Provider and navigation lifecycle
+
+`RouterProvider` can merge partial router options and route context into an
+existing router. Initial loaders see these values on their first run, and
+later provider renders preserve context fields they do not replace:
+
+```tsx
+<RouterProvider context={{ session }} defaultPreload="intent" router={router} />
+```
+
+Browser navigation runs in a Fig transition, keeping the previously resolved
+match tree visible until loading settles. Router lifecycle subscriptions fire
+in commit order: `onLoad`, `onBeforeRouteMount`, `onResolved`, then
+`onRendered`. The provider skips a duplicate initial load during hydration,
+normalizes validated locations in browser history, and cleans up its history
+and transition bindings on unmount. A superseded navigation cannot publish a
+late resolved state.
+
+Ordinary route changes do not use `Activity`: the previous tree is replaced
+after the transition. Retaining inactive route trees would require a separate
+keep-alive contract for their state, effects, and data ownership.
+
 ## Route data: delegate keyed values to Fig
 
 Fig data resources are the external cache for keyed route data — TanStack's
@@ -182,7 +204,7 @@ invalidated, refreshed, or streamed.
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Guaranteed           | Generated file and lazy routes; typed route APIs and selectors; Router creation/provider; native links and navigation; loaders, redirects, not-found and route errors; ordinary Start SSR/hydration; head and script output; search/history helpers; Fig data-resource delegation. |
 | Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                       |
-| Deferred             | Advanced SSR modes, exact pending/remount lifecycle parity, scroll-restoration integration, blockers/back navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                     |
+| Deferred             | Advanced SSR modes, pending-delay/minimum and remount semantics, scroll-restoration integration, blockers/back navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                |
 | Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                       |
 
 The adapter is pinned and tested against `@tanstack/router-core@1.171.15`.

@@ -30,7 +30,6 @@ import {
   createBrowserHistory,
   createHashHistory,
   createMemoryHistory,
-  type HistoryAction,
   type RouterHistory,
 } from "@tanstack/history";
 import {
@@ -655,12 +654,8 @@ export function createRootRouteWithContext<TRouterContext extends object>() {
 
 const RouterContext = createContext<AnyRouter | null>(null);
 const MatchContext = createContext<string | null>(null);
-const initialLoads = new WeakSet<AnyRouter>();
 const missingMatch = Symbol("missing route match");
-
-interface HistoryUpdate {
-  action: { type: HistoryAction };
-}
+type HistoryUpdate = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
 
 export function useRouter<
   TRouter extends AnyRouter = RegisteredRouter,
@@ -1047,77 +1042,223 @@ export function MatchRoute<
   return params === false ? null : children;
 }
 
-export interface RouterProviderProps {
-  router: AnyRouter;
-}
+export type RouterProviderProps<TRouter extends AnyRouter = RegisteredRouter> =
+  Partial<Omit<TRouter["options"], "context">> & {
+    context?: Partial<TRouter["options"]["context"]>;
+    router: TRouter;
+  };
 
-export function RouterProvider({ router }: RouterProviderProps): FigNode {
+export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
+  router,
+  ...options
+}: RouterProviderProps<TRouter>): FigNode {
+  if (Object.keys(options).length > 0) {
+    if ("context" in options) {
+      options.context = {
+        ...router.options.context,
+        ...options.context,
+      };
+    }
+    router.update(options as never);
+  }
+
   return createElement(
     RouterContext,
     { value: router },
     createElement(Transitioner),
     createElement(Matches),
+    createElement(OnRendered),
   );
+}
+
+interface RouterTransitionState {
+  active: boolean;
+  generation: number;
+  initialLoadStarted: boolean;
+  phase: "idle" | "loading" | "loaded" | "mounting";
 }
 
 function Transitioner(): FigNode {
   const router = useRouter<AnyRouter>();
-
-  router.startTransition = (callback) => {
-    transition(callback);
-  };
-
-  useReactive(
-    (signal) => {
-      const unsubscribe = router.history.subscribe((update: HistoryUpdate) => {
-        void loadAndSettleRouter(router, update).catch((error: unknown) => {
-          console.error("Error loading route", error);
-        });
-      });
-      signal.addEventListener("abort", unsubscribe, { once: true });
-    },
-    [router, router.history],
+  const state = useMemo<RouterTransitionState>(
+    () => ({
+      active: false,
+      generation: 0,
+      initialLoadStarted: false,
+      phase: "idle",
+    }),
+    [router],
   );
-
-  useBeforePaint(() => {
-    if (router.stores.matchesId.get().length === 0) {
-      if (initialLoads.has(router)) return;
-      initialLoads.add(router);
-      void loadAndSettleRouter(router).catch((error: unknown) => {
-        initialLoads.delete(router);
-        console.error("Error loading initial route", error);
+  const settleLifecycle = useCallback(() => {
+    if (state.phase === "idle") return;
+    const isLoading = router.stores.isLoading.get();
+    const hasPending = router.stores.hasPending.get();
+    const isTransitioning = router.stores.isTransitioning.get();
+    const changeInfo = getLocationChangeInfo(
+      router.stores.location.get(),
+      router.stores.resolvedLocation.get(),
+    );
+    if (!isLoading && state.phase === "loading") {
+      state.phase = "loaded";
+      router.emit({ type: "onLoad", ...changeInfo });
+    }
+    if (!isLoading && !hasPending && state.phase === "loaded") {
+      state.phase = "mounting";
+      router.emit({ type: "onBeforeRouteMount", ...changeInfo });
+    }
+    if (!isLoading && !hasPending && !isTransitioning) {
+      state.phase = "idle";
+      router.emit({ type: "onResolved", ...changeInfo });
+      batch(() => {
+        router.stores.status.set("idle");
+        router.stores.resolvedLocation.set(router.stores.location.get());
       });
     }
-  }, [router]);
+  }, [router, state]);
+  const runRouterTransition = useCallback(
+    (callback: () => void) => {
+      const startsPending = !router.stores.isTransitioning.get();
+      if (startsPending) router.stores.isTransitioning.set(true);
+
+      let result: unknown;
+      try {
+        result = transition(callback);
+      } catch (error) {
+        if (startsPending) {
+          router.stores.isTransitioning.set(false);
+        }
+        throw error;
+      }
+
+      if (!(result instanceof Promise)) {
+        if (startsPending) {
+          router.stores.isTransitioning.set(false);
+        }
+        return;
+      }
+
+      const generation = (state.generation += 1);
+      state.phase = "loading";
+      const finish = () => {
+        if (state.active && state.generation === generation) {
+          router.stores.isTransitioning.set(false);
+        }
+      };
+      void result.then(finish, (error: unknown) => {
+        finish();
+        queueMicrotask(() => {
+          throw error;
+        });
+      });
+    },
+    [router, state],
+  );
+
+  useBeforePaint(
+    (signal) => {
+      const previousStartTransition = router.startTransition;
+      const subscriptions = [
+        router.stores.isLoading.subscribe(settleLifecycle),
+        router.stores.hasPending.subscribe(settleLifecycle),
+        router.stores.isTransitioning.subscribe(settleLifecycle),
+      ];
+      state.active = true;
+      router.startTransition = runRouterTransition;
+      signal.addEventListener(
+        "abort",
+        () => {
+          for (const subscription of subscriptions) {
+            subscription.unsubscribe();
+          }
+          state.active = false;
+          state.generation += 1;
+          if (router.startTransition === runRouterTransition) {
+            router.startTransition = previousStartTransition;
+          }
+          if (router.stores.isTransitioning.get()) {
+            router.stores.isTransitioning.set(false);
+          }
+        },
+        { once: true },
+      );
+      return undefined;
+    },
+    [router, runRouterTransition, settleLifecycle, state],
+  );
+
+  useBeforePaint(
+    (signal) => {
+      const unsubscribe = router.history.subscribe((update: HistoryUpdate) => {
+        void router.load(update).catch(logRouterLoadError);
+      });
+      signal.addEventListener("abort", unsubscribe, { once: true });
+
+      if (state.initialLoadStarted) return undefined;
+      state.initialLoadStarted = true;
+      const nextLocation = router.buildLocation({
+        _includeValidateSearch: true,
+        hash: true,
+        params: true,
+        search: true,
+        state: true,
+        to: router.latestLocation.pathname,
+      });
+      if (router.latestLocation.publicHref !== nextLocation.publicHref) {
+        void router
+          .commitLocation({ ...nextLocation, replace: true })
+          .catch(logRouterLoadError);
+      } else if (
+        !router.isServer &&
+        router.ssr === undefined &&
+        router.stores.matchesId.get().length === 0
+      ) {
+        void router.load().catch(logRouterLoadError);
+      }
+      return undefined;
+    },
+    [router, router.history, state],
+  );
 
   return null;
 }
 
-async function loadAndSettleRouter(
-  router: AnyRouter,
-  update?: HistoryUpdate,
-): Promise<void> {
-  await router.load(update);
-  settleRouter(router);
+function logRouterLoadError(error: unknown): void {
+  console.error("Error loading route", error);
 }
 
-function settleRouter(router: AnyRouter): void {
-  const location = router.stores.location.get();
-  const resolvedLocation = router.stores.resolvedLocation.get();
-  const locationChanged = resolvedLocation?.href !== location.href;
+function OnRendered(): FigNode {
+  const router = useRouter<AnyRouter>();
+  type ResolvedLocation = ReturnType<typeof router.stores.resolvedLocation.get>;
+  const state = useMemo<{ previous: ResolvedLocation }>(
+    () => ({ previous: undefined }),
+    [router],
+  );
+  const resolvedLocationKey = useReadableStore(
+    router.stores.resolvedLocation,
+    (location) => location?.state.__TSR_key,
+  );
 
-  if (locationChanged) {
-    router.emit({
-      type: "onResolved",
-      ...getLocationChangeInfo(location, resolvedLocation ?? location),
-    });
-  }
-  batch(() => {
-    if (router.stores.status.get() !== "idle") {
-      router.stores.status.set("idle");
+  useBeforePaint(() => {
+    if (router.isServer) return undefined;
+    const current = router.stores.resolvedLocation.get();
+    const previous = state.previous;
+    if (
+      current !== undefined &&
+      (previous === undefined || previous.href !== current.href)
+    ) {
+      router.emit({
+        type: "onRendered",
+        ...getLocationChangeInfo(
+          router.stores.location.get(),
+          previous ?? current,
+        ),
+      });
     }
-    if (locationChanged) router.stores.resolvedLocation.set(location);
-  });
+    state.previous = current;
+    return undefined;
+  }, [resolvedLocationKey, router, state]);
+
+  return null;
 }
 
 export function Matches(): FigNode {
@@ -1174,8 +1315,10 @@ function Match({ matchId }: { matchId: string }): FigNode {
                     error,
                   );
                   void router.invalidate().then(() => {
-                    settleRouter(router);
-                    if (match.status !== "error") {
+                    const updatedMatch = router.stores.matchStores
+                      .get(match.id)
+                      ?.get();
+                    if (updatedMatch?.status !== "error") {
                       setManualResetKey((key) => key + 1);
                     }
                   });

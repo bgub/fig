@@ -147,6 +147,239 @@ describe("@bgub/fig-tanstack-router", () => {
     );
   });
 
+  it("merges RouterProvider options and partial context before loading", async () => {
+    interface ProviderContext {
+      label: string;
+      preserved: string;
+    }
+
+    const rootRoute = createRootRouteWithContext<ProviderContext>()({
+      component: Outlet,
+    });
+    const indexRoute = createRoute({
+      component: () => createElement("h1", null, "provider"),
+      getParentRoute: () => rootRoute,
+      loader: ({ context }) => `${context.label}:${context.preserved}`,
+      path: "/",
+    });
+    const router = createRouter({
+      context: { label: "router", preserved: "kept" },
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([indexRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() =>
+      root.render(
+        createElement(RouterProvider, {
+          context: { label: "provider" },
+          defaultPreload: "render",
+          router,
+        }),
+      ),
+    );
+    await act(() => waitForRouterIdle(router));
+
+    expect(router.options.context).toEqual({
+      label: "provider",
+      preserved: "kept",
+    });
+    expect(router.options.defaultPreload).toBe("render");
+    expect(router.stores.getRouteMatchStore("/").get()?.loaderData).toBe(
+      "provider:kept",
+    );
+
+    await act(() =>
+      root.render(
+        createElement(RouterProvider, {
+          context: { label: "updated" },
+          router,
+        }),
+      ),
+    );
+    await act(() => router.invalidate());
+    await act(() => waitForRouterIdle(router));
+
+    expect(router.options.context).toEqual({
+      label: "updated",
+      preserved: "kept",
+    });
+    expect(router.stores.getRouteMatchStore("/").get()?.loaderData).toBe(
+      "updated:kept",
+    );
+  });
+
+  it("settles navigation lifecycle events after the winning transition", async () => {
+    let resolveSlow: (() => void) | undefined;
+    const slow = new Promise<void>((resolve) => {
+      resolveSlow = resolve;
+    });
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const slowRoute = createRoute({
+      component: () => createElement("h1", null, "slow"),
+      getParentRoute: () => rootRoute,
+      loader: () => slow,
+      path: "slow",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, slowRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+
+    const events: string[] = [];
+    const unsubscribe = recordNavigationLifecycle(router, events);
+
+    const navigation = router.navigate({ to: "/slow" } as never);
+    await act(() => waitForRouterLoading(router));
+
+    expect(container.querySelector("h1")?.textContent).toBe("home");
+    expect(router.stores.isTransitioning.get()).toBe(true);
+
+    resolveSlow?.();
+    await act(() => navigation);
+    await act(() => waitForNavigationLifecycle(router, events));
+
+    expect(container.querySelector("h1")?.textContent).toBe("slow");
+    expect(events).toEqual(navigationLifecycle);
+    expect(router.stores.status.get()).toBe("idle");
+    expect(router.stores.isTransitioning.get()).toBe(false);
+    expect(router.stores.resolvedLocation.get()?.pathname).toBe("/slow");
+
+    unsubscribe();
+  });
+
+  it("settles only the latest superseding navigation", async () => {
+    let slowAborted = false;
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const slowRoute = createRoute({
+      component: () => createElement("h1", null, "slow"),
+      getParentRoute: () => rootRoute,
+      loader: ({ abortController }) =>
+        new Promise<void>((resolve) => {
+          abortController.signal.addEventListener(
+            "abort",
+            () => {
+              slowAborted = true;
+              resolve();
+            },
+            { once: true },
+          );
+        }),
+      path: "slow",
+    });
+    const fastRoute = createRoute({
+      component: () => createElement("h1", null, "fast"),
+      getParentRoute: () => rootRoute,
+      path: "fast",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, slowRoute, fastRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+
+    const events: string[] = [];
+    const unsubscribe = recordNavigationLifecycle(router, events);
+
+    const slowNavigation = router.navigate({ to: "/slow" } as never);
+    await act(() => waitForRouterLoading(router));
+    const fastNavigation = router.navigate({ to: "/fast" } as never);
+    await act(() => Promise.all([slowNavigation, fastNavigation]));
+    await act(() => waitForNavigationLifecycle(router, events));
+
+    expect(slowAborted).toBe(true);
+    expect(container.querySelector("h1")?.textContent).toBe("fast");
+    expect(router.stores.resolvedLocation.get()?.pathname).toBe("/fast");
+    expect(events).toEqual(navigationLifecycle);
+
+    unsubscribe();
+  });
+
+  it("replaces a noncanonical initial browser location", async () => {
+    let loads = 0;
+    const rootRoute = createRootRoute({ component: Outlet });
+    const userRoute = createRoute({
+      component: () => createElement("h1", null, "user"),
+      getParentRoute: () => rootRoute,
+      loader: () => {
+        loads += 1;
+      },
+      path: "users/$id",
+      validateSearch: (search): { tab?: "profile" } => ({
+        tab: search.tab === "profile" ? "profile" : undefined,
+      }),
+    });
+    const router = createRouter({
+      history: createMemoryHistory({
+        initialEntries: ["/users/42/?tab=invalid"],
+      }),
+      routeTree: rootRoute.addChildren([userRoute]),
+      trailingSlash: "never",
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForHref(router, "/users/42"));
+    await act(() => waitForRouterIdle(router));
+
+    expect(router.history.location.href).toBe("/users/42");
+    expect(router.stores.resolvedLocation.get()?.publicHref).toBe("/users/42");
+    expect(loads).toBe(1);
+  });
+
+  it("skips hydration loads and restores router integration on unmount", async () => {
+    const router = makeRouter();
+    router.ssr = { manifest: undefined };
+    const load = vi.spyOn(router, "load");
+    const unsubscribe = vi.fn();
+    vi.spyOn(router.history, "subscribe").mockReturnValue(unsubscribe);
+    const previousStartTransition = router.startTransition;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => Promise.resolve());
+
+    expect(load).not.toHaveBeenCalled();
+    expect(router.history.subscribe).toHaveBeenCalled();
+    expect(router.startTransition).not.toBe(previousStartTransition);
+
+    root.unmount();
+    mountedRoots.pop();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(
+      vi.mocked(router.history.subscribe).mock.calls.length,
+    );
+    expect(router.startTransition).toBe(previousStartTransition);
+    expect(router.stores.isTransitioning.get()).toBe(false);
+  });
+
   it("navigates after commit with the Navigate component", async () => {
     const router = makeRouter("/users/42?tab=redirect");
     const container = document.createElement("div");
@@ -642,12 +875,39 @@ function LazyContent({ label }: { label: string }): FigNode {
   return createElement("span", null, label);
 }
 
+const navigationLifecycle = [
+  "onLoad",
+  "onBeforeRouteMount",
+  "onResolved",
+  "onRendered",
+] as const;
+
+function recordNavigationLifecycle(
+  router: AnyRouter,
+  events: string[],
+): () => void {
+  const unsubscribes = navigationLifecycle.map((type) =>
+    router.subscribe(type, (event) => events.push(event.type)),
+  );
+  return () => {
+    for (const unsubscribe of unsubscribes) unsubscribe();
+  };
+}
+
 async function waitForPath(router: AnyRouter, pathname: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (router.stores.location.get().pathname === pathname) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error(`Router did not navigate to ${pathname}.`);
+}
+
+async function waitForHref(router: AnyRouter, href: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (router.latestLocation.publicHref === href) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`Router did not navigate to ${href}.`);
 }
 
 async function waitForMatches(router: AnyRouter): Promise<void> {
@@ -661,6 +921,61 @@ async function waitForMatches(router: AnyRouter): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("Router did not load its initial matches.");
+}
+
+async function waitForRouterLoading(router: AnyRouter): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (router.stores.isLoading.get()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Router did not start loading.");
+}
+
+async function waitForRouterIdle(router: AnyRouter): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (
+      router.stores.matchesId.get().length > 0 &&
+      !router.stores.isLoading.get() &&
+      !router.stores.isTransitioning.get() &&
+      router.stores.status.get() === "idle" &&
+      router.stores.resolvedLocation.get()?.href ===
+        router.stores.location.get().href
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(
+    `Router did not settle: ${JSON.stringify({
+      isLoading: router.stores.isLoading.get(),
+      isTransitioning: router.stores.isTransitioning.get(),
+      location: router.stores.location.get().href,
+      matches: router.stores.matchesId.get(),
+      resolvedLocation: router.stores.resolvedLocation.get()?.href,
+      status: router.stores.status.get(),
+    })}`,
+  );
+}
+
+async function waitForNavigationLifecycle(
+  router: AnyRouter,
+  events: string[],
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (events.length >= navigationLifecycle.length) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(
+    `Router emitted ${events.length} of ${navigationLifecycle.length} events: ${JSON.stringify(
+      {
+        events,
+        isLoading: router.stores.isLoading.get(),
+        isTransitioning: router.stores.isTransitioning.get(),
+        resolvedLocation: router.stores.resolvedLocation.get()?.href,
+        status: router.stores.status.get(),
+      },
+    )}`,
+  );
 }
 
 async function waitForText(

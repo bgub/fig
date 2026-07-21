@@ -10,7 +10,7 @@ The adapter is designed for TanStack Start's generated file routes rather than e
 
 - **Guaranteed:** generated file and lazy routes; the generated-tree mutation and type-registration contract; route-bound and targeted hooks; router creation and provision; native links and navigation; loaders, redirects, not-found and route errors; ordinary Start SSR and hydration; route head/script output; search and history helpers; and Fig data-resource delegation.
 - **Compatibility:** `createRootRoute` and `createRoute` remain supported for code-created route trees. They share Router Core's route implementation with generated routes, so removing their factories would simplify the name list without materially shrinking the runtime. They are not the recommended Start authoring path.
-- **Deferred:** advanced SSR modes, exact pending/remount lifecycle parity, scroll-restoration integration, blockers and back-navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
+- **Deferred:** advanced SSR modes, pending-delay/minimum and remount semantics, scroll-restoration integration, blockers and back-navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
 - **Deliberately omitted:** additional deprecated compatibility classes and aliases, plus public clones of `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration`. Fig's `readPromise`, `Suspense`, `ErrorBoundary`, renderer lifecycle, and internal adapter behavior own those concerns. Ordinary navigation does not use `Activity`; retaining inactive route trees would be a separate keep-alive contract with different state and effect lifetimes.
 
 This policy is a compatibility boundary, not a bundle-size mechanism. File and code routes share `BaseRoute`, runtime route-tree processing, match loading, and `RouterCore`; the Start-shaped bundle is therefore governed primarily by Router Core rather than the number of factories re-exported by Fig.
@@ -34,6 +34,23 @@ The adapter follows Router Core's [signal-graph architecture](https://tanstack.c
 Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, `useMatches` reads the match-list store, `useMatchRoute` reads the match-route dependency store, each rendered match reads its own match store, and targeted or route-bound hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
 
 `Navigate` runs after commit through Fig's before-paint lifecycle. It compares navigation option values rather than props-object identity, preventing a still-active redirect route from restarting the same navigation when Router state changes during loading.
+
+## Navigation Lifecycle
+
+`RouterProvider` accepts partial router options and a partial route context. It merges both with the router's existing options before rendering the match tree, so an initial loader observes provider context without waiting for a later commit. A provider update preserves context fields it does not replace.
+
+In the browser, the provider installs a Fig transition at Router Core's `startTransition` seam. The outer asynchronous navigation owns the transition; Core's nested synchronous transition callbacks join it. The adapter keeps the previously resolved match tree visible while the navigation settles, sets `router.state.isTransitioning` for that asynchronous lifetime, and ignores completion from a superseded navigation. Unmount restores the router's previous transition function and invalidates any outstanding completion.
+
+For a successful navigation, framework lifecycle events have this order:
+
+1. `onLoad` after route loading finishes.
+2. `onBeforeRouteMount` after loading and pending matches finish, immediately before the resolved route is published.
+3. `onResolved` when the router becomes idle and `resolvedLocation` advances.
+4. `onRendered` after the newly resolved match subtree commits.
+
+History changes start route loading and normalize the browser URL to Router Core's canonical validated location with a replace operation. A hydrated router, or a router whose match list is already populated, does not start a duplicate initial load. History subscriptions and transition overrides are scoped to the provider lifetime.
+
+Ordinary navigation replaces the visible match tree after the transition resolves; it does not retain the prior tree through `Activity`. Activity-based keep-alive routing would need an explicit contract for retained route state, effects, and data ownership and remains deliberately omitted.
 
 ## Route Data Contract
 
