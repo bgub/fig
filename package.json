@@ -41,6 +41,16 @@
     {
       "path": "packages/fig-reconciler/dist/index.js",
       "limit": "20.25 kB"
+    },
+    {
+      "name": "Fig TanStack Router Start surface",
+      "path": "packages/fig-tanstack-router/dist/router.js",
+      "import": "{ createFileRoute, createRootRouteWithContext, createRouter, RouterProvider, Link, Outlet, HeadContent, Scripts, ensureRouteData }",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "24 kB"
     }
   ],
   "devDependencies": {

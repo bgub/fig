@@ -2,7 +2,11 @@
 
 The Fig framework adapter for TanStack Router. Route matching, loaders,
 navigation, and history come from `@tanstack/router-core`; this package adds
-Fig components, hooks, native links, and the reactive store bridge.
+the Fig components, hooks, native links, asset mapping, and reactive store
+bridge used by TanStack Start.
+
+Generated file routes are the recommended interface. Code-created route trees
+remain supported for standalone use, but they are not the design center.
 
 ## Installation
 
@@ -10,63 +14,49 @@ Fig components, hooks, native links, and the reactive store bridge.
 pnpm add @bgub/fig-tanstack-router @bgub/fig @bgub/fig-dom @tanstack/router-core
 ```
 
-## Usage
+For TanStack Start, also install `@bgub/fig-tanstack-start` and use its Vite
+plugin and default entries. See the
+[`@bgub/fig-tanstack-start` guide](../fig-tanstack-start/README.md) for the
+complete build and hydration setup.
+
+## Recommended: generated file routes
+
+TanStack Start generates `routeTree.gen.ts` from the files under `src/routes`.
+Create one router and one root-neutral Fig data store around that generated
+tree:
 
 ```tsx
-import { createRoot } from "@bgub/fig-dom";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Link,
-  Outlet,
-  RouterProvider,
-} from "@bgub/fig-tanstack-router";
+// src/router.tsx
+import { createStartDataContext } from "@bgub/fig-tanstack-start";
+import { createRouter } from "@bgub/fig-tanstack-router";
+import { routeTree } from "./routeTree.gen.ts";
 
-const rootRoute = createRootRoute({
-  component: () => (
-    <main>
-      <Link to="/">Home</Link>
-      <Outlet />
-    </main>
-  ),
-});
+export function getRouter() {
+  return createRouter({
+    ...createStartDataContext(),
+    isServer: typeof document === "undefined",
+    routeTree,
+  });
+}
 
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/",
-  component: () => <h1>Home</h1>,
-});
-
-const routeTree = rootRoute.addChildren([indexRoute]);
-const router = createRouter({ routeTree });
+export type AppRouter = ReturnType<typeof getRouter>;
 
 declare module "@tanstack/router-core" {
   interface Register {
-    router: typeof router;
+    router: AppRouter;
   }
 }
-
-const container = document.getElementById("root");
-if (container === null) throw new Error("Missing root.");
-
-createRoot(container).render(<RouterProvider router={router} />);
 ```
 
-`Link` renders a native anchor. It only intercepts unmodified primary clicks;
-downloads, external URLs, modifier keys, and non-`_self` targets keep their
-browser behavior. Preloading supports `intent`, `render`, and `viewport`.
-Pass `{ from: routeId }` to the params, search, loader-data, or route-context
-hook to target an active route and infer its value from the registered tree.
-
-Routes expose the same hooks already bound to their id and full path:
+A route file exports the generated route's configuration and receives bound,
+fully typed hooks from that route:
 
 ```tsx
+// src/routes/users.$id.tsx
 import { on } from "@bgub/fig-dom";
+import { createFileRoute } from "@tanstack/solid-router";
 
-const userRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "users/$id",
+export const Route = createFileRoute("/users/$id")({
   validateSearch: (search): { preview?: boolean } => ({
     preview: search.preview === true,
   }),
@@ -75,13 +65,13 @@ const userRoute = createRoute({
 });
 
 function User() {
-  const { id } = userRoute.useParams();
-  const { preview } = userRoute.useLoaderDeps();
-  const navigate = userRoute.useNavigate();
+  const { id } = Route.useParams();
+  const { preview } = Route.useLoaderDeps();
+  const navigate = Route.useNavigate();
 
   return (
     <article>
-      <userRoute.Link to="/">Home</userRoute.Link>
+      <Route.Link to="/">Home</Route.Link>
       <button mix={on("click", () => navigate({ to: "/" }))} type="button">
         Done
       </button>
@@ -91,99 +81,9 @@ function User() {
 }
 ```
 
-`getRouteApi(routeId)` provides that bound interface outside the route's own
-module. `useMatches` reads or selects the active match list; `useMatchRoute`
-and `MatchRoute` test locations reactively; `Navigate` performs declarative
-post-commit navigation.
-
-## Route data: delegate to data resources
-
-Fig data resources are the external cache for route data — TanStack's
-["pass all loader events to an external cache"](https://tanstack.com/router/latest/docs/guide/data-loading#passing-all-loader-events-to-an-external-cache)
-pattern, in the role TanStack Query plays for React. The router decides _when_
-loaders run (navigation, intent/viewport preloads, `router.invalidate()`);
-the data store owns identity, dedup, freshness, and reads.
-
-Two pieces of wiring:
-
-1. Put the root's data handle in router context. `root.data` is a lazy
-   handle, so it can enter context before the first render. The adapter then
-   defaults `defaultPreloadStaleTime` to `0`, ensuring every preload event
-   reaches the external cache; an explicit router option still wins.
-2. Loaders return `ensureRouteData(...)`; components read the same resource
-   with `readData`.
-
-```tsx
-import { dataResource, readData } from "@bgub/fig";
-import { createRoot } from "@bgub/fig-dom";
-import {
-  createRootRouteWithContext,
-  createRoute,
-  createRouter,
-  ensureRouteData,
-  type RouteDataContext,
-  RouterProvider,
-} from "@bgub/fig-tanstack-router";
-
-const userResource = dataResource({
-  key: (id: string) => ["user", id],
-  load: async (id, { signal }) => fetchUser(id, signal),
-});
-
-const rootRoute = createRootRouteWithContext<RouteDataContext>()({
-  component: Layout,
-});
-
-const userRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "users/$id",
-  loader: ({ context, params }) =>
-    ensureRouteData(context, userResource, params.id),
-  component: function User() {
-    const { id } = userRoute.useParams();
-    const user = readData(userResource, id);
-    return <h1>{user.name}</h1>;
-  },
-});
-
-const routeTree = rootRoute.addChildren([userRoute]);
-const root = createRoot(container);
-const router = createRouter({
-  routeTree,
-  context: { data: root.data },
-});
-root.render(<RouterProvider router={router} />);
-```
-
-The loader's `ensureRouteData` and the component's `readData` share one store
-entry, so navigation commits with the data already cached and `Link` preloads
-warm the same entry the component reads. The helper deliberately resolves to
-`void`, preventing TanStack Router from also retaining the value as
-`loaderData`.
-
-Freshness lives in the store, not the router: `invalidateData(userResource,
-id)` re-renders every subscribed route component with the revalidated value —
-no `router.invalidate()` needed. (`router.invalidate()` still composes: it
-re-runs loaders, which hit the cache.) Route error `reset()` first invalidates
-any Fig data keys attributed to the caught error, then re-runs the router.
-
-For streaming instead of blocking, have the loader call
-`context.data.preloadData(resource, ...args)` and return; `readData` then
-suspends into the route's `pendingComponent` until the entry settles.
-
-## Generated file routes
-
-The adapter implements the route-generator surface used by TanStack Start:
-`createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, and `lazyFn`.
-Generated route trees therefore use the same Fig route objects as code-defined
-trees, including typed params, loaders, head entries, lazy chunks, redirects,
-and route error/not-found components.
-
-TanStack's generator still hard-codes its closed framework target when it
-normalizes constructor imports. Until it accepts a native Fig target, the Start
-plugin maps the generated `@tanstack/solid-router` compatibility ID directly to
-this package. Add the equivalent compiler-only mapping to the application's
-`tsconfig.json`:
+`@tanstack/solid-router` is currently a compiler-only compatibility ID. The
+Start plugin maps it directly to this package; no Solid runtime is installed
+or bundled. TypeScript needs the equivalent path mapping:
 
 ```json
 {
@@ -195,5 +95,112 @@ this package. Add the equivalent compiler-only mapping to the application's
 }
 ```
 
-No Solid runtime is installed or bundled. Application components, hooks, links,
-router construction, and generated route behavior remain Fig APIs.
+The root route normally renders Router-managed document state and Start's Fig
+data snapshot before the bootstrap scripts:
+
+```tsx
+import { StartData, type StartDataContext } from "@bgub/fig-tanstack-start";
+import {
+  createRootRouteWithContext,
+  HeadContent,
+  Outlet,
+  Scripts,
+} from "@bgub/fig-tanstack-router";
+
+export const Route = createRootRouteWithContext<StartDataContext>()({
+  component: Document,
+});
+
+function Document() {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        <Outlet />
+        <StartData />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+```
+
+`getRouteApi(routeId)` provides a route-bound interface outside the route's
+own module. `useMatches` reads or selects the active match list;
+`useMatchRoute` and `MatchRoute` test locations reactively; `Navigate`
+performs declarative post-commit navigation.
+
+## Route data: delegate keyed values to Fig
+
+Fig data resources are the external cache for keyed route data — TanStack's
+["pass all loader events to an external cache"](https://tanstack.com/router/latest/docs/guide/data-loading#passing-all-loader-events-to-an-external-cache)
+pattern. Router Core decides _when_ loaders run; the Fig store owns value
+identity, deduplication, freshness, hydration, errors, and render-time reads.
+
+`createStartDataContext()` places the Fig data handle at
+`router.context.data`. A blocking route loader calls `ensureRouteData`, while
+the component reads the same entry with `readData`:
+
+```tsx
+import { dataResource, readData } from "@bgub/fig";
+import { ensureRouteData } from "@bgub/fig-tanstack-router";
+import { createFileRoute } from "@tanstack/solid-router";
+
+const userResource = dataResource({
+  key: (id: string) => ["user", id],
+  load: async (id, { signal }) => fetchUser(id, signal),
+});
+
+export const Route = createFileRoute("/users/$id")({
+  loader: ({ context, params }) =>
+    ensureRouteData(context, userResource, params.id),
+  component: User,
+});
+
+function User() {
+  const { id } = Route.useParams();
+  const user = readData(userResource, id);
+  return <h1>{user.name}</h1>;
+}
+```
+
+`ensureRouteData` deliberately resolves to `void`, so Router Core does not
+retain a second copy in `loaderData`. For non-blocking streaming, call
+`context.data.preloadData(resource, ...args)` and return; the component's
+`readData` suspends through Fig until the entry settles.
+
+`loaderData` is still appropriate for small, navigation-scoped orchestration
+values that do not need their own cache identity or freshness lifecycle. Use a
+data resource when a value is keyed, shared, hydrated, independently
+invalidated, refreshed, or streamed.
+
+## Support policy
+
+| Tier                 | Contract                                                                                                                                                                                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Guaranteed           | Generated file and lazy routes; typed route APIs and selectors; Router creation/provider; native links and navigation; loaders, redirects, not-found and route errors; ordinary Start SSR/hydration; head and script output; search/history helpers; Fig data-resource delegation. |
+| Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                       |
+| Deferred             | Advanced SSR modes, exact pending/remount lifecycle parity, scroll-restoration integration, blockers/back navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                     |
+| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                       |
+
+The adapter is pinned and tested against `@tanstack/router-core@1.171.15`.
+Upgrades are conformance changes: generated-route, navigation, SSR, data, and
+document tests must pass against the new version before the pin moves.
+
+## Native link contract
+
+`Link` renders a native anchor. It intercepts only unmodified primary clicks;
+downloads, external URLs, modifier keys, and non-`_self` targets retain native
+browser behavior. Disabled links omit `href` and expose `aria-disabled`.
+Preloading supports `intent`, `render`, and `viewport`, and active links expose
+`aria-current="page"` plus `data-status="active"`.
+
+## Code-created route trees
+
+Standalone applications may still assemble a tree with `createRootRoute`,
+`createRoute`, and `route.addChildren`. This compatibility surface remains
+tested because it is useful for small routers and focused adapter tests. New
+TanStack Start applications should use generated file routes so the generator
+can provide route typing and automatic code splitting.

@@ -1,8 +1,19 @@
 # TanStack Router Adapter
 
-Status: implemented adapter surface; broader Router feature parity remains incremental
+Status: Start-first file-route contract; code-created routes supported for compatibility
 
 `@bgub/fig-tanstack-router` adapts `@tanstack/router-core` to Fig without forking TanStack's route matching, loading, history, or navigation contracts. The package owns only the framework seam: Fig components and hooks, native DOM link behavior, and the reactive store factory supplied to `RouterCore`.
+
+## Support Policy
+
+The adapter is designed for TanStack Start's generated file routes rather than exhaustive parity with the React adapter. Its interface is divided into explicit tiers:
+
+- **Guaranteed:** generated file and lazy routes; the generated-tree mutation and type-registration contract; route-bound and targeted hooks; router creation and provision; native links and navigation; loaders, redirects, not-found and route errors; ordinary Start SSR and hydration; route head/script output; search and history helpers; and Fig data-resource delegation.
+- **Compatibility:** `createRootRoute` and `createRoute` remain supported for code-created route trees. They share Router Core's route implementation with generated routes, so removing their factories would simplify the name list without materially shrinking the runtime. They are not the recommended Start authoring path.
+- **Deferred:** advanced SSR modes, exact pending/remount lifecycle parity, scroll-restoration integration, blockers and back-navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
+- **Deliberately omitted:** additional deprecated compatibility classes and aliases, plus public clones of `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration`. Fig's `readPromise`, `Suspense`, `ErrorBoundary`, renderer lifecycle, and internal adapter behavior own those concerns. Ordinary navigation does not use `Activity`; retaining inactive route trees would be a separate keep-alive contract with different state and effect lifetimes.
+
+This policy is a compatibility boundary, not a bundle-size mechanism. File and code routes share `BaseRoute`, runtime route-tree processing, match loading, and `RouterCore`; the Start-shaped bundle is therefore governed primarily by Router Core rather than the number of factories re-exported by Fig.
 
 ## Initial Surface
 
@@ -14,7 +25,7 @@ Route objects, root-route objects, and `RouteApi` expose the canonical bound int
 
 The current generator accepts only React, Solid, and Vue targets and hard-codes the corresponding constructor import during route-file normalization. The Start plugin therefore uses the Solid package ID as a build-time alias to Fig; no Solid runtime participates. A native framework target removes that source-level compatibility ID but does not change the route object or rendering contracts.
 
-The adapter pins the Router core version it is built and tested against. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
+The conformance target is `@tanstack/router-core@1.171.15`, pinned in the package that implements and tests the adapter. Moving the pin requires the generated-route, navigation, SSR, data, and document suites to pass against the new version. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
 
 ## Signal Graph
 
@@ -27,6 +38,8 @@ Framework internals subscribe to the narrowest available store. `useLocation` an
 ## Route Data Contract
 
 Fig data resources are the default external cache for route data. Applications place the root's `FigDataStoreHandle` at `router.context.data`; its presence makes `createRouter` default `defaultPreloadStaleTime` to `0`, while an explicit option remains authoritative. A blocking loader calls `ensureRouteData(context, resource, ...args)`, which awaits the store's `ensureData` but resolves to `void`. The component calls `readData` for the same key. Router Core therefore controls when loaders run without retaining a second copy in `loaderData`; the Fig store exclusively owns identity, deduplication, freshness, errors, and the value.
+
+Router `loaderData` remains appropriate for small navigation-scoped orchestration values that do not need independent cache identity, hydration, invalidation, refresh, or streaming. Keyed or shared values use data resources; the adapter does not reproduce a second query/cache vocabulary on top of them.
 
 For non-blocking streaming, a loader calls the explicit `context.data.preloadData` handle and returns. Route error reset invalidates keys attributed to the caught Fig data error before invalidating Router Core, so the same reset affordance retries both layers. Root/global not-found state renders the root route's not-found component through its `Outlet`, preserving the root shell in accordance with Router Core's match contract.
 
