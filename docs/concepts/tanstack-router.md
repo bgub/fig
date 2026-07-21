@@ -8,9 +8,9 @@ Status: Start-first file-route contract; code-created routes supported for compa
 
 The adapter is designed for TanStack Start's generated file routes rather than exhaustive parity with the React adapter. Its interface is divided into explicit tiers:
 
-- **Guaranteed:** generated file and lazy routes; the generated-tree mutation and type-registration contract; route-bound and targeted hooks; router creation and provision; native links and navigation; loaders, redirects, not-found and route errors; ordinary Start SSR and hydration; route head/script output; search and history helpers; and Fig data-resource delegation.
+- **Guaranteed:** generated file and lazy routes; the generated-tree mutation and type-registration contract; route-bound and targeted hooks; router creation and provision; native links and navigation; loaders, redirects, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies and hydration; route head/script output; scroll restoration; search and history helpers; and Fig data-resource delegation.
 - **Compatibility:** `createRootRoute` and `createRoute` remain supported for code-created route trees. They share Router Core's route implementation with generated routes, so removing their factories would simplify the name list without materially shrinking the runtime. They are not the recommended Start authoring path.
-- **Deferred:** advanced SSR modes, pending-delay/minimum and remount semantics, scroll-restoration integration, blockers and back-navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
+- **Deferred:** blockers and back-navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
 - **Deliberately omitted:** additional deprecated compatibility classes and aliases, plus public clones of `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration`. Fig's `readPromise`, `Suspense`, `ErrorBoundary`, renderer lifecycle, and internal adapter behavior own those concerns. Ordinary navigation does not use `Activity`; retaining inactive route trees would be a separate keep-alive contract with different state and effect lifetimes.
 
 This policy is a compatibility boundary, not a bundle-size mechanism. File and code routes share `BaseRoute`, runtime route-tree processing, match loading, and `RouterCore`; the Start-shaped bundle is therefore governed primarily by Router Core rather than the number of factories re-exported by Fig.
@@ -39,7 +39,7 @@ Framework internals subscribe to the narrowest available store. `useLocation` an
 
 `RouterProvider` accepts partial router options and a partial route context. It merges both with the router's existing options before rendering the match tree, so an initial loader observes provider context without waiting for a later commit. A provider update preserves context fields it does not replace.
 
-In the browser, the provider installs a Fig transition at Router Core's `startTransition` seam. The outer asynchronous navigation owns the transition; Core's nested synchronous transition callbacks join it. The adapter keeps the previously resolved match tree visible while the navigation settles, sets `router.state.isTransitioning` for that asynchronous lifetime, and ignores completion from a superseded navigation. Unmount restores the router's previous transition function and invalidates any outstanding completion.
+In the browser, the provider installs a Fig transition at Router Core's `startTransition` seam. The outer navigation starts in a transition so the resolved tree remains visible while its replacement loads. Core's later pending-match commit is urgent: after `pendingMs`, it may intentionally replace the prior tree with the route fallback. The adapter tracks the full asynchronous lifetime in `router.state.isTransitioning`, ignores completion from a superseded navigation, and restores the router's previous transition function on unmount.
 
 For a successful navigation, framework lifecycle events have this order:
 
@@ -51,6 +51,16 @@ For a successful navigation, framework lifecycle events have this order:
 History changes start route loading and normalize the browser URL to Router Core's canonical validated location with a replace operation. A hydrated router, or a router whose match list is already populated, does not start a duplicate initial load. History subscriptions and transition overrides are scoped to the provider lifetime.
 
 Ordinary navigation replaces the visible match tree after the transition resolves; it does not retain the prior tree through `Activity`. Activity-based keep-alive routing would need an explicit contract for retained route state, effects, and data ownership and remains deliberately omitted.
+
+## Match Rendering and SSR
+
+Router Core owns match status and the promises that govern display delay. A pending match reads its load promise through Fig Suspense; `pendingMs` determines when Core publishes that match, and the adapter creates Core's minimum-pending promise only when a visible pending component needs `pendingMinMs`. `wrapInSuspense` selects the route boundary, while the root client boundary protects initial client routing. Redirected matches suspend instead of rendering stale content. Loader and component errors flow to route error boundaries, `onCatch` or `defaultOnCatch`, and route reset invalidates attributed Fig data errors before reloading.
+
+`remountDeps`, falling back to `defaultRemountDeps`, supplies the route component key. A changed result resets component state; loader invalidation with the same result preserves it.
+
+On the server, `ssr: false` skips both the route loader and component, while `ssr: "data-only"` runs loader work but renders the pending shell instead of the component. The same internal hydration gate reveals either route after hydration without exporting a public `ClientOnly` clone. Server error components render directly because Fig error boundaries intentionally do not catch server-render errors.
+
+When `scrollRestoration` is enabled at router construction or through `RouterProvider`, setup is idempotent and restoration runs after `onRendered`. Start SSR emits one nonce-aware restoration bootstrap inside the root match subtree; no public `ScrollRestoration` component is exposed.
 
 ## Route Data Contract
 

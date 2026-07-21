@@ -5,8 +5,9 @@ import {
   type FigNode,
   readData,
   Suspense,
+  useState,
 } from "@bgub/fig";
-import { createRoot } from "@bgub/fig-dom";
+import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
@@ -26,6 +27,7 @@ import {
   MatchRoute,
   Navigate,
   Outlet,
+  redirect,
   type RouteDataContext,
   type RouteErrorComponentProps,
   RouterProvider,
@@ -62,6 +64,7 @@ const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
 const externalUrl: string = "https://example.com/";
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const root of mountedRoots.splice(0)) root.unmount();
   document.body.replaceChildren();
   vi.restoreAllMocks();
@@ -380,6 +383,224 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(router.stores.isTransitioning.get()).toBe(false);
   });
 
+  it("delays pending UI and preserves its minimum display duration", async () => {
+    let resolveLoader: (() => void) | undefined;
+    const loader = new Promise<void>((resolve) => {
+      resolveLoader = resolve;
+    });
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const slowRoute = createRoute({
+      component: () => createElement("h1", null, "ready"),
+      getParentRoute: () => rootRoute,
+      loader: () => loader,
+      path: "slow",
+      pendingComponent: () => createElement("h1", null, "loading"),
+      pendingMinMs: 100,
+      pendingMs: 50,
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, slowRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+    const realSetTimeout = globalThis.setTimeout;
+    const yieldToScheduler = () =>
+      new Promise<void>((resolve) => realSetTimeout(resolve, 0));
+    vi.useFakeTimers();
+
+    const navigation = router.navigate({ to: "/slow" } as never);
+    await yieldToScheduler();
+    expect(container.textContent).toBe("home");
+
+    await vi.advanceTimersByTimeAsync(49);
+    await yieldToScheduler();
+    expect(container.textContent).toBe("home");
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.runOnlyPendingTimersAsync();
+    await yieldToScheduler();
+    expect(container.textContent).toBe("loading");
+
+    resolveLoader?.();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(99);
+    await yieldToScheduler();
+    expect(container.textContent).toBe("loading");
+
+    await vi.advanceTimersByTimeAsync(1);
+    await navigation;
+    await vi.runAllTimersAsync();
+    expect(container.textContent).toBe("ready");
+  });
+
+  it.each(["route", "router default"] as const)(
+    "remounts components only when %s remount dependencies change",
+    async (source) => {
+      let mounts = 0;
+      const rootRoute = createRootRoute({ component: Outlet });
+      const itemRoute = createRoute({
+        component: () => {
+          const [mount] = useState(() => (mounts += 1));
+          return createElement("h1", null, `mount ${mount}`);
+        },
+        getParentRoute: () => rootRoute,
+        path: "items/$id",
+        remountDeps: source === "route" ? ({ params }) => params.id : undefined,
+      });
+      const router = createRouter({
+        defaultRemountDeps:
+          source === "router default"
+            ? ({ params }) => ("id" in params ? params.id : undefined)
+            : undefined,
+        history: createMemoryHistory({ initialEntries: ["/items/1"] }),
+        routeTree: rootRoute.addChildren([itemRoute]),
+      });
+      const container = document.createElement("div");
+      const root = createRoot(container);
+      mountedRoots.push(root);
+
+      await act(() => root.render(createElement(RouterProvider, { router })));
+      await act(() => waitForRouterIdle(router));
+      const initialContent = container.textContent;
+      const initialMounts = mounts;
+
+      await act(() =>
+        router.navigate({ params: { id: "2" }, to: "/items/$id" } as never),
+      );
+      expect(mounts).toBeGreaterThan(initialMounts);
+      expect(container.textContent).not.toBe(initialContent);
+
+      const remountedContent = container.textContent;
+      const remountedCount = mounts;
+      await act(() => router.invalidate());
+      expect(mounts).toBe(remountedCount);
+      expect(container.textContent).toBe(remountedContent);
+    },
+  );
+
+  it("abandons redirected matches without rendering stale route content", async () => {
+    let resolveRedirect: (() => void) | undefined;
+    let redirectedRenders = 0;
+    const redirectReady = new Promise<void>((resolve) => {
+      resolveRedirect = resolve;
+    });
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const redirectedRoute = createRoute({
+      component: () => {
+        redirectedRenders += 1;
+        return createElement("h1", null, "stale");
+      },
+      getParentRoute: () => rootRoute,
+      loader: async () => {
+        await redirectReady;
+        throw redirect({ to: "/target" } as never);
+      },
+      path: "redirected",
+      pendingComponent: () => createElement("h1", null, "loading"),
+      pendingMinMs: 0,
+      pendingMs: 0,
+    });
+    const targetRoute = createRoute({
+      component: () => createElement("h1", null, "target"),
+      getParentRoute: () => rootRoute,
+      path: "target",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([
+        homeRoute,
+        redirectedRoute,
+        targetRoute,
+      ]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+    const navigation = router.navigate({ to: "/redirected" } as never);
+    await waitForText(container, "loading");
+    resolveRedirect?.();
+    await navigation;
+    await act(() => waitForRouterIdle(router));
+
+    expect(container.textContent).toBe("target");
+    expect(redirectedRenders).toBe(0);
+  });
+
+  it("reveals non-SSR route components after hydration", async () => {
+    const rootRoute = createRootRoute({ component: Outlet });
+    const clientRoute = createRoute({
+      component: () => createElement("h1", null, "client"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+      pendingComponent: () => createElement("h1", null, "server"),
+      ssr: false,
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([clientRoute]),
+    });
+    await router.load();
+    router.ssr = { manifest: undefined };
+    const container = document.createElement("div");
+    container.innerHTML = "<h1>server</h1>";
+
+    const root = await act(() =>
+      hydrateRoot(container, createElement(RouterProvider, { router })),
+    );
+    mountedRoots.push(root);
+    await act(() => waitForText(container, "client"));
+
+    expect(container.textContent).toBe("client");
+  });
+
+  it("installs scroll restoration once when enabled by the provider", async () => {
+    const rootRoute = createRootRoute({
+      component: () => createElement("h1", null, "home"),
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute,
+    });
+    const addEventListener = vi.spyOn(document, "addEventListener");
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() =>
+      root.render(
+        createElement(RouterProvider, { router, scrollRestoration: true }),
+      ),
+    );
+    await act(() => waitForRouterIdle(router));
+    await act(() =>
+      root.render(
+        createElement(RouterProvider, { router, scrollRestoration: true }),
+      ),
+    );
+
+    expect(
+      addEventListener.mock.calls.filter(([type]) => type === "scroll"),
+    ).toHaveLength(1);
+  });
+
   it("navigates after commit with the Navigate component", async () => {
     const router = makeRouter("/users/42?tab=redirect");
     const container = document.createElement("div");
@@ -648,9 +869,10 @@ describe("@bgub/fig-tanstack-router", () => {
     );
   });
 
-  it("invalidates attributed data errors before resetting a route", async () => {
+  it("reports and invalidates attributed data errors before reset", async () => {
     let loads = 0;
     let resetRoute: (() => void) | undefined;
+    const onCatch = vi.fn();
     const resource = dataResource<[], string>({
       key: () => ["route-reset"],
       load: async () => {
@@ -679,6 +901,7 @@ describe("@bgub/fig-tanstack-router", () => {
     mountedRoots.push(root);
     const router = createRouter({
       context: { data: root.data },
+      defaultOnCatch: onCatch,
       history: createMemoryHistory({ initialEntries: ["/"] }),
       routeTree: rootRoute.addChildren([route]),
     });
@@ -689,13 +912,17 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.querySelector("#route-error")?.textContent).toBe(
       "failed once",
     );
+    expect(onCatch).toHaveBeenCalledOnce();
+    expect(onCatch.mock.calls[0]?.[1]).toMatchObject({
+      componentStack: expect.any(String),
+    });
     expect(loads).toBe(1);
 
     await act(() => resetRoute?.());
+    expect(loads).toBe(2);
     await act(() => waitForText(container, "recovered"));
 
     expect(container.textContent).toBe("recovered");
-    expect(loads).toBe(2);
   });
 
   it("delegates route data to the fig data store as the external cache", async () => {
@@ -986,5 +1213,7 @@ async function waitForText(
     if (container.textContent === text) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  throw new Error(`Container did not render ${JSON.stringify(text)}.`);
+  throw new Error(
+    `Container did not render ${JSON.stringify(text)}; received ${JSON.stringify(container.textContent)}.`,
+  );
 }

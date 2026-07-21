@@ -5,6 +5,7 @@ import {
   type ComponentType,
   type DataResource,
   ErrorBoundary,
+  type ErrorInfo,
   type FigAssetResource,
   type FigDataStoreHandle,
   type FigNode,
@@ -42,6 +43,7 @@ import {
   BaseRootRoute,
   BaseRoute,
   BaseRouteApi,
+  createControlledPromise,
   type ConstrainLiteral,
   type CreateFileRoute,
   type CreateLazyFileRoute,
@@ -56,6 +58,7 @@ import {
   getLocationChangeInfo,
   getScriptPreloadAttrs,
   isDangerousProtocol,
+  isNotFound,
   type LinkOptions,
   type MakeOptionalPathParams,
   type MakeOptionalSearchParams,
@@ -82,6 +85,7 @@ import {
   type ResolveParams,
   type RootRouteId,
   type RootRouteOptions,
+  rootRouteId,
   RouterCore,
   type RouterConstructorOptions,
   type RouterReadableStore,
@@ -91,6 +95,7 @@ import {
   type RouteIds,
   type RouteOptions,
   type RouteTypesById,
+  setupScrollRestoration,
   type ToSubOptionsProps,
   type TrailingSlashOption,
   type UseLoaderDataResult,
@@ -100,6 +105,7 @@ import {
   type UseRouteContextResult,
   type UseSearchResult,
 } from "@tanstack/router-core";
+import { getScrollRestorationScriptForRouter } from "@tanstack/router-core/scroll-restoration-script";
 import { batch } from "@tanstack/store";
 import { getStoreConfig } from "./store.ts";
 
@@ -343,6 +349,7 @@ declare module "@tanstack/router-core" {
     defaultComponent?: RouteComponent;
     defaultErrorComponent?: ErrorRouteComponent;
     defaultNotFoundComponent?: NotFoundRouteComponent;
+    defaultOnCatch?: (error: Error, info: ErrorInfo) => void;
     defaultPendingComponent?: RouteComponent;
   }
 }
@@ -1067,7 +1074,6 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     { value: router },
     createElement(Transitioner),
     createElement(Matches),
-    createElement(OnRendered),
   );
 }
 
@@ -1122,7 +1128,16 @@ function Transitioner(): FigNode {
 
       let result: unknown;
       try {
-        result = transition(callback);
+        const publishesPending = router.stores.pendingMatches
+          .get()
+          .some((match) => match.status === "pending");
+        if (startsPending || !publishesPending) {
+          transition(() => {
+            result = callback();
+          });
+        } else {
+          result = callback();
+        }
       } catch (error) {
         if (startsPending) {
           router.stores.isTransitioning.set(false);
@@ -1130,7 +1145,8 @@ function Transitioner(): FigNode {
         throw error;
       }
 
-      if (!(result instanceof Promise)) {
+      const promise = result as PromiseLike<unknown>;
+      if (typeof promise?.then !== "function") {
         if (startsPending) {
           router.stores.isTransitioning.set(false);
         }
@@ -1144,7 +1160,7 @@ function Transitioner(): FigNode {
           router.stores.isTransitioning.set(false);
         }
       };
-      void result.then(finish, (error: unknown) => {
+      void promise.then(finish, (error: unknown) => {
         finish();
         queueMicrotask(() => {
           throw error;
@@ -1188,6 +1204,7 @@ function Transitioner(): FigNode {
 
   useBeforePaint(
     (signal) => {
+      setupScrollRestoration(router);
       const unsubscribe = router.history.subscribe((update: HistoryUpdate) => {
         void router.load(update).catch(logRouterLoadError);
       });
@@ -1216,7 +1233,7 @@ function Transitioner(): FigNode {
       }
       return undefined;
     },
-    [router, router.history, state],
+    [router, router.history, router.options.scrollRestoration, state],
   );
 
   return null;
@@ -1264,9 +1281,24 @@ function OnRendered(): FigNode {
 export function Matches(): FigNode {
   const router = useRouter<AnyRouter>();
   const firstMatchId = useReadableStore(router.stores.firstId);
-  return firstMatchId === undefined
-    ? null
-    : createElement(Match, { matchId: firstMatchId });
+  const content =
+    firstMatchId === undefined
+      ? null
+      : createElement(Match, { matchId: firstMatchId });
+  if (router.isServer || router.ssr !== undefined) return content;
+
+  const rootRoute = router.routesById[rootRouteId];
+  const PendingComponent =
+    rootRoute.options.pendingComponent ??
+    router.options.defaultPendingComponent;
+  return createElement(
+    Suspense,
+    {
+      fallback:
+        PendingComponent === undefined ? null : createElement(PendingComponent),
+    },
+    content,
+  );
 }
 
 function Match({ matchId }: { matchId: string }): FigNode {
@@ -1286,20 +1318,30 @@ function Match({ matchId }: { matchId: string }): FigNode {
     route.options.pendingComponent ?? router.options.defaultPendingComponent;
   const ErrorComponent =
     route.options.errorComponent ?? router.options.defaultErrorComponent;
+  const NotFoundComponent =
+    route.options.notFoundComponent ??
+    (route.isRoot ? router.options.defaultNotFoundComponent : undefined);
+  const noSsr = match.ssr === false || match.ssr === "data-only";
+  const shouldWrapInSuspense =
+    (!route.isRoot || route.options.wrapInSuspense || noSsr) &&
+    (route.options.wrapInSuspense ??
+      (PendingComponent !== undefined ||
+        (ErrorComponent as AsyncRouteComponent | undefined)?.preload ||
+        noSsr));
 
-  const content = createElement(
-    Suspense,
-    {
-      fallback:
-        PendingComponent === undefined ? null : createElement(PendingComponent),
-    },
-    createElement(MatchContent, { match, route }),
-  );
+  const pending = PendingComponent ? createElement(PendingComponent) : null;
+  let content: FigNode = createElement(MatchContent, { match, route });
+  if (noSsr || match._displayPending) {
+    content = createElement(ClientOnly, { fallback: pending }, content);
+  }
+  if (shouldWrapInSuspense) {
+    content = createElement(Suspense, { fallback: pending }, content);
+  }
 
-  return createElement(
+  const matchContent = createElement(
     MatchContext,
     { value: match.id },
-    ErrorComponent
+    ErrorComponent || NotFoundComponent
       ? createElement(
           ErrorBoundary,
           {
@@ -1307,8 +1349,22 @@ function Match({ matchId }: { matchId: string }): FigNode {
               match.status === "error"
                 ? `route-error:${match.fetchCount}`
                 : `route:${manualResetKey}`,
-            fallback: (error) =>
-              createElement(ErrorComponent, {
+            fallback: (error) => {
+              if (isNotFound(error)) {
+                error.routeId ??= match.routeId;
+                if (
+                  NotFoundComponent === undefined ||
+                  error.routeId !== match.routeId
+                ) {
+                  throw error;
+                }
+                return createElement(NotFoundComponent, {
+                  ...error,
+                  isNotFound: true,
+                });
+              }
+              if (!ErrorComponent) throw error;
+              return createElement(ErrorComponent, {
                 error,
                 reset: () => {
                   dataStoreFromContext(match.context)?.invalidateDataError(
@@ -1323,12 +1379,31 @@ function Match({ matchId }: { matchId: string }): FigNode {
                     }
                   });
                 },
-              }),
+              });
+            },
+            onError: (error, info) => {
+              if (!isNotFound(error)) {
+                if (route.options.onCatch) {
+                  route.options.onCatch(error as Error);
+                } else {
+                  router.options.defaultOnCatch?.(error as Error, info);
+                }
+              }
+            },
           },
           content,
         )
       : content,
   );
+
+  if (route.parentRoute?.id !== rootRouteId) return matchContent;
+  return [
+    matchContent,
+    createElement(OnRendered),
+    router.options.scrollRestoration && router.isServer
+      ? renderScrollRestorationScript(router)
+      : null,
+  ];
 }
 
 function MatchContent({
@@ -1340,21 +1415,108 @@ function MatchContent({
 }): FigNode {
   const router = useRouter<AnyRouter>();
 
+  if (match._displayPending)
+    return readMatchPromise(router, match, "displayPendingPromise");
+  if (match._forcePending)
+    return readMatchPromise(router, match, "minPendingPromise");
   if (match.status === "pending") {
+    const pendingMinMs =
+      route.options.pendingMinMs ?? router.options.defaultPendingMinMs;
     const PendingComponent =
       route.options.pendingComponent ?? router.options.defaultPendingComponent;
-    return PendingComponent === undefined
-      ? null
-      : createElement(PendingComponent);
+    const currentMatch = router.getMatch(match.id);
+    if (
+      pendingMinMs &&
+      PendingComponent &&
+      !router.isServer &&
+      currentMatch !== undefined &&
+      currentMatch._nonReactive.minPendingPromise === undefined
+    ) {
+      const minPendingPromise = createControlledPromise<void>();
+      currentMatch._nonReactive.minPendingPromise = minPendingPromise;
+      setTimeout(() => {
+        minPendingPromise.resolve();
+        currentMatch._nonReactive.minPendingPromise = undefined;
+      }, pendingMinMs);
+    }
+    return readMatchPromise(router, match, "loadPromise");
   }
-  if (match.status === "error") throw match.error;
-  if (match.status === "redirected") return null;
+  if (match.status === "error") {
+    const ErrorComponent =
+      route.options.errorComponent ?? router.options.defaultErrorComponent;
+    if (router.isServer && ErrorComponent) {
+      return createElement(ErrorComponent, {
+        error: match.error,
+        reset: () => undefined,
+      });
+    }
+    throw match.error;
+  }
+  if (match.status === "redirected") {
+    return readMatchPromise(router, match, "loadPromise");
+  }
   if (match.status === "notFound") return renderNotFound(router, route, match);
 
   const Component = route.options.component ?? router.options.defaultComponent;
+  const remount =
+    route.options.remountDeps ?? router.options.defaultRemountDeps;
+  const remountDeps = remount?.({
+    loaderDeps: match.loaderDeps,
+    params: match._strictParams,
+    routeId: match.routeId,
+    search: match._strictSearch,
+  });
   return Component === undefined
     ? createElement(Outlet)
-    : createElement(Component);
+    : createElement(Component, {
+        key: remountDeps ? JSON.stringify(remountDeps) : undefined,
+      });
+}
+
+type MatchPromiseKey =
+  | "displayPendingPromise"
+  | "loadPromise"
+  | "minPendingPromise";
+
+function readMatchPromise(
+  router: AnyRouter,
+  match: AnyRouteMatch,
+  key: MatchPromiseKey,
+): FigNode {
+  const promise =
+    router.getMatch(match.id)?._nonReactive[key] ?? match._nonReactive[key];
+  if (promise !== undefined) readPromise(promise);
+  return null;
+}
+
+function ClientOnly({
+  children,
+  fallback,
+}: {
+  children?: FigNode;
+  fallback: FigNode;
+}): FigNode {
+  const hydrated = useSyncExternalStore(
+    subscribeHydration,
+    () => true,
+    () => false,
+  );
+  return hydrated ? children : fallback;
+}
+
+function subscribeHydration(): () => void {
+  return () => undefined;
+}
+
+function renderScrollRestorationScript(router: AnyRouter): FigNode {
+  const script = getScrollRestorationScriptForRouter(router);
+  return script === null
+    ? null
+    : renderManagedTag({
+        attrs: { nonce: router.options.ssr?.nonce },
+        children: `${script};document.currentScript.remove()`,
+        tag: "script",
+      });
 }
 
 export function Outlet(): FigNode {

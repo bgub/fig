@@ -14,6 +14,7 @@ import {
   ensureRouteData,
   HeadContent,
   Outlet,
+  type AnyRouter,
   type RouteDataContext,
   Scripts,
 } from "@bgub/fig-tanstack-router";
@@ -54,17 +55,10 @@ describe("@bgub/fig-tanstack-start server", () => {
       ...startData,
       history: createMemoryHistory({ initialEntries: ["/users/42"] }),
       routeTree: rootRoute.addChildren([userRoute]),
+      scrollRestoration: true,
     });
 
-    await router.load();
-    attachRouterServerSsrUtils({ router, manifest: undefined });
-    await router.serverSsr?.dehydrate();
-    const result = await renderRouterToStream({
-      request: new Request("https://example.test/users/42"),
-      responseHeaders: new Headers(),
-      router,
-    });
-    const html = await result.response.text();
+    const html = await renderRouterHtml(router, "/users/42");
 
     expect(html).toContain("<title data-fig-hydration-skip>Fig App</title>");
     expect(html).toContain('href="/route.css"');
@@ -79,6 +73,7 @@ describe("@bgub/fig-tanstack-start server", () => {
     expect(html).toContain(
       'data-fig-hydration-skip id="__fig_tanstack_start_data__"',
     );
+    expect(html.match(/tsr-scroll-restoration-v1_3/g)).toHaveLength(1);
     expect(loads).toBe(1);
     expect(
       router.stores.getRouteMatchStore("/users/$id").get()?.loaderData,
@@ -91,7 +86,62 @@ describe("@bgub/fig-tanstack-start server", () => {
       );
     }
   });
+
+  it.each([
+    { expectedLoads: 0, label: "disabled", ssr: false as const },
+    { expectedLoads: 1, label: "data-only", ssr: "data-only" as const },
+  ])(
+    "renders a pending shell when route SSR is $label",
+    async ({ expectedLoads, ssr }) => {
+      let components = 0;
+      let loads = 0;
+      const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+        component: Document,
+      });
+      const pageRoute = createRoute({
+        component: () => {
+          components += 1;
+          return createElement("main", null, "page");
+        },
+        getParentRoute: () => rootRoute,
+        loader: () => {
+          loads += 1;
+          return "loaded";
+        },
+        path: "page",
+        pendingComponent: () => createElement("main", null, "pending"),
+        ssr,
+      });
+      const router = createRouter({
+        ...createStartDataContext(),
+        history: createMemoryHistory({ initialEntries: ["/page"] }),
+        routeTree: rootRoute.addChildren([pageRoute]),
+      });
+
+      const html = await renderRouterHtml(router, "/page");
+
+      expect(html).toContain("<main>pending</main>");
+      expect(html).not.toContain("<main>page</main>");
+      expect(components).toBe(0);
+      expect(loads).toBe(expectedLoads);
+    },
+  );
 });
+
+async function renderRouterHtml(
+  router: AnyRouter,
+  pathname: string,
+): Promise<string> {
+  await router.load();
+  attachRouterServerSsrUtils({ router, manifest: undefined });
+  await router.serverSsr?.dehydrate();
+  const result = await renderRouterToStream({
+    request: new Request(`https://example.test${pathname}`),
+    responseHeaders: new Headers(),
+    router,
+  });
+  return result.response.text();
+}
 
 function Document(): FigNode {
   return createElement(
