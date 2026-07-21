@@ -20,7 +20,8 @@
   "types": "./dist/router.d.ts",
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "COMPATIBILITY.md"
   ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",

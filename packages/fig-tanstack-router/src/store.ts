@@ -1,3 +1,4 @@
+import { useCallback, useMemo, useSyncExternalStore } from "@bgub/fig";
 import {
   createNonReactiveMutableStore,
   createNonReactiveReadonlyStore,
@@ -24,3 +25,44 @@ export const getStoreConfig: GetStoreConfig = (options) => {
     createReadonlyStore: createAtom,
   };
 };
+
+function selectStoreValue<TValue>(value: TValue): TValue {
+  return value;
+}
+
+type ReadableRouterStore<TValue> = {
+  get: () => TValue;
+  subscribe?: Readable<TValue>["subscribe"];
+};
+
+function doNothing(): void {}
+
+export function useReadableStore<TValue, TSelected = TValue>(
+  store: ReadableRouterStore<TValue>,
+  select: (value: TValue) => TSelected = selectStoreValue as (
+    value: TValue,
+  ) => TSelected,
+  equal: (previous: TSelected, next: TSelected) => boolean = Object.is,
+): TSelected {
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      store.subscribe?.(onChange).unsubscribe ?? doNothing,
+    [store],
+  );
+  const getSnapshot = useMemo(() => {
+    let source: TValue | undefined;
+    let selected: TSelected;
+    let initialized = false;
+    return () => {
+      const nextSource = store.get();
+      if (initialized && Object.is(source, nextSource)) return selected;
+      const nextSelected = select(nextSource);
+      source = nextSource;
+      if (initialized && equal(selected, nextSelected)) return selected;
+      selected = nextSelected;
+      initialized = true;
+      return selected;
+    };
+  }, [equal, select, store]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}

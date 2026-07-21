@@ -248,6 +248,9 @@ invalidated, refreshed, or streamed.
 
 ## Support policy
 
+See [TanStack Router compatibility](./COMPATIBILITY.md) for the feature-level
+matrix and Fig equivalents for intentionally omitted adapter conveniences.
+
 | Tier                 | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Guaranteed           | Generated file and lazy routes; typed route APIs and structural-sharing selectors; Router creation/provider; native links with active/inactive props and render-function children; navigation blocking and back-history state; loaders, redirects, route masks, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
