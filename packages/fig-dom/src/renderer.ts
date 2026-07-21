@@ -2,6 +2,7 @@ import type { Props } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
   HYDRATION_SKIP_ATTRIBUTE,
+  TEXT_SEPARATOR_DATA,
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
@@ -291,19 +292,16 @@ function hydratableFirstChild(
   return nextHydratableNode(parent.firstChild as HydrationNode | null);
 }
 
-// The server writes a `<!--,-->` comment between adjacent text nodes that
-// come from different fibers (browser parsing would otherwise merge them
-// into a single DOM text node while the client keeps one text fiber each —
-// see TEXT_SEPARATOR in @bgub/fig-server). The hydration cursor steps over
-// separators when advancing; only comments with exactly this data are
-// skipped, so the fig:suspense marker comments are never affected.
+// The server writes a text-separator comment (TEXT_SEPARATOR_DATA, the
+// shared protocol constant) between adjacent text nodes that come from
+// different fibers. The hydration cursor steps over separators when
+// advancing; only comments with exactly this data are skipped, so the
+// fig:suspense marker comments are never affected.
 // A DocumentType is document metadata rather than content represented by a
 // fiber, so full-document hydration advances through it to the existing html
 // element. This also matters when a root Suspense marker precedes the doctype.
 // Server-owned elements carrying the shared skip marker likewise have no
 // in-tree hydration fiber; the DOM renderer need not know why each exists.
-const TEXT_SEPARATOR_DATA = ",";
-
 function nextHydratableNode(
   node: HydrationNode | null,
 ): Element | TextLike | null {

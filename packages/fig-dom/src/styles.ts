@@ -1,3 +1,5 @@
+import { isEmptyPropValue } from "./tree.ts";
+
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
@@ -34,7 +36,7 @@ export function updateStyle(
   }
 
   for (const [name, value] of Object.entries(nextStyle)) {
-    if (value === null || value === undefined || value === false) {
+    if (isEmptyPropValue(value)) {
       clearStyle(style, name);
     } else {
       setStyle(style, name, value);

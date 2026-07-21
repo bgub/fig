@@ -80,10 +80,7 @@ export function updateSelect(
   };
   selectStates.set(element, state);
 
-  if (
-    !hydratingDefault &&
-    (controlled || (!controlled && options.initial === true))
-  ) {
+  if (!hydratingDefault && (controlled || options.initial === true)) {
     applySelectValue(element, state.selectedValues);
   }
 }

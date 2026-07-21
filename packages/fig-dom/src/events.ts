@@ -399,15 +399,6 @@ export function detachElementEvents(element: Element): void {
   eventSlots.delete(element);
 }
 
-// Derived from listenerTargetFor so the two walks cannot disagree about
-// which container a node belongs to: the dispatch origin is the nearest
-// registered container, and its root is itself or its portal owner's root.
-export function rootFor(
-  node: Element | Text | Comment | Container,
-): Container | null {
-  return eventLocationFor(node).root;
-}
-
 interface EventLocation {
   listenerTarget: Container | null;
   root: Container | null;
@@ -806,9 +797,9 @@ function attachDirectEventSlot(
   slot: EventSlot,
 ): void {
   // The root scopes dispatch (root.data.run and friends), same as the
-  // delegated path. The first attach can run before insertion, when
-  // rootFor() is still null, so a re-attach on the same element refreshes
-  // the root without re-adding the DOM listener.
+  // delegated path. The first attach can run before insertion, when the
+  // element's root lookup still resolves null, so a re-attach on the same
+  // element refreshes the root without re-adding the DOM listener.
   const attachment = slot.attachment;
   if (attachment !== null) {
     if ("element" in attachment && attachment.element === element) {

@@ -38,6 +38,7 @@ import {
   setCurrentDataStore,
   setCurrentDispatcher,
   type Thenable,
+  TEXT_SEPARATOR_DATA,
   validateInstanceNesting,
   validateTextNesting,
   VIEW_TRANSITION_CLASS_ATTRIBUTE,
@@ -232,10 +233,10 @@ const errorStacks = new WeakMap<object, StackFrame>();
 // The HTML parser merges back-to-back character data into ONE DOM text node,
 // while the client tree keeps one text fiber per normalized child (see
 // collectChildren in @bgub/fig) — the comment keeps the nodes apart so each
-// fiber can claim its own during hydration. fig-dom's hydration cursor skips
-// comments whose data is exactly "," (and only those; suspense markers use
-// the fig:suspense prefixes).
-const TEXT_SEPARATOR = "<!--,-->";
+// fiber can claim its own during hydration. The comment data is the shared
+// TEXT_SEPARATOR_DATA protocol constant that fig-dom's hydration cursor
+// skips (and only that; suspense markers use the fig:suspense prefixes).
+const TEXT_SEPARATOR = `<!--${TEXT_SEPARATOR_DATA}-->`;
 let nextRuntimeId = 0;
 
 export function createServerRenderRequest(

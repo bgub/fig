@@ -10,6 +10,13 @@ export const SUSPENSE_CLIENT_MARKER = "fig:suspense:client";
 export const SUSPENSE_PENDING_PREFIX = "fig:suspense:pending:";
 export const SUSPENSE_END_MARKER = "/fig:suspense";
 
+// The server emits a comment with exactly this data between adjacent text
+// writes that come from different normalized text children: the HTML parser
+// would otherwise merge them into one DOM text node while the client keeps
+// one text fiber each. fig-dom's hydration cursor skips only comments whose
+// data matches this value (fig:suspense markers use their own prefixes).
+export const TEXT_SEPARATOR_DATA = ",";
+
 // Hidden Activity content streams inside an inert template carrying this
 // attribute; the client treats such templates as dehydrated boundaries.
 export const ACTIVITY_TEMPLATE_ATTRIBUTE = "data-fig-activity";
