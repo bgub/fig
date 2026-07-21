@@ -101,6 +101,13 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   canHydrateTextInstance: (node, text, suppressHydrationWarning) =>
     isHydratableText(node) &&
     (suppressHydrationWarning === true || node.nodeValue === text),
+  // Password managers and other browser extensions can append their own roots
+  // before hydration. Html, head, and body are document singletons, so retain
+  // an unmatched tail instead of clearing the document and its stylesheets.
+  canRetainHydrationTail: (instance) => {
+    const name = elementName(instance);
+    return name === "html" || name === "head" || name === "body";
+  },
   // Hoisted asset resources never appear at their fiber's server position
   // (the server registers them and emits nothing inline): hydration must not
   // match them against the DOM cursor, and commit acquires/releases them in

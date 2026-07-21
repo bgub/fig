@@ -25,10 +25,7 @@ const tanstackStartClientAliases = tanstackStartClientModules.map((id) => ({
   find: new RegExp(`^${id}$`),
   replacement: resolveDependency(id),
 }));
-const optimizedClientModules = [
-  ...tanstackStartClientModules,
-  "@tanstack/router-core/ssr/client",
-] as const;
+const optimizedClientModules = ["@tanstack/router-core/ssr/client"] as const;
 const applicationEntryIds = new Set([
   "#tanstack-router-entry",
   "#tanstack-start-entry",
@@ -145,6 +142,10 @@ function compatibilityPlugin(): PluginOption {
           ],
           exclude: [
             ...(environment.optimizeDeps?.exclude ?? []),
+            // Start's compiler must rewrite createIsomorphicFn branches per
+            // environment; prebundling these first freezes server code into
+            // the client graph and makes client-side server functions crash.
+            ...tanstackStartClientModules,
             figTanStackStartPackage,
             figRouterPackage,
           ],

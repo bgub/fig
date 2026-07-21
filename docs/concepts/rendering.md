@@ -31,6 +31,10 @@ There is no `StrictMode` component and no opt-out: development always strict-ren
 
 Render diagnostics throw before commit rather than warning after it: duplicate sibling keys, invalid children, render-phase state updates, and invalid DOM nesting. Nesting rules live in `@bgub/fig/internal` (`dom-nesting.ts`) and run on both sides — the client validates at fiber creation (ancestors seeded from portal targets and root containers via the `containerType` host hook); the server threads an ancestor stack through render frames so suspended segments validate against their logical position. The checks model HTML parser scoping (button/table scope boundaries, li/dd/dt implied end tags); whitespace-only text and hoisted asset resources are exempt.
 
+## Hydration
+
+Hydration requires every ordinary host subtree to consume its server DOM; an unexpected remaining node is a recoverable mismatch. Renderers may retain an unmatched tail for host-owned singleton containers through `canRetainHydrationTail`. Fig DOM does so for `<html>`, `<head>`, and `<body>` because browser extensions can append out-of-band roots before client code runs; clearing a full document for that external mutation would also discard its server-delivered asset resources. The retained nodes remain outside the Fig tree and are not updated or removed by later reconciliation.
+
 ## Commit And Batching
 
 Batching is automatic with no opt-in API: same-tick updates and root renders coalesce into one pass; `flushSync` is the only escape hatch. After host mutations land, commit calls the scheduler's `requestPaint()` so the work loop yields before further scheduled work runs.

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement, Suspense } from "@bgub/fig";
+import { assets, createElement, stylesheet, Suspense } from "@bgub/fig";
 import {
   HYDRATION_SKIP_ATTRIBUTE,
   preventAssetResourceHoist,
@@ -11,40 +11,52 @@ import { afterEach, describe, expect, it } from "vitest";
 describe("document hydration", () => {
   afterEach(() => {
     if (document.doctype !== null) document.removeChild(document.doctype);
+    document.querySelector("browser-overlay-root")?.remove();
     document.head.replaceChildren();
     document.body.replaceChildren();
   });
 
-  it("hydrates a full document around server-only and adopted head nodes", () => {
+  it("preserves out-of-band document nodes through hydration and updates", () => {
     const doctype = document.implementation.createDocumentType("html", "", "");
     document.insertBefore(doctype, document.documentElement);
-    document.head.innerHTML = `<script ${HYDRATION_SKIP_ATTRIBUTE}=""></script><link rel="preconnect" href="https://example.com"><meta ${HYDRATION_SKIP_ATTRIBUTE}="" charset="utf-8">`;
-    document.body.innerHTML = `<main>Ready</main><script ${HYDRATION_SKIP_ATTRIBUTE}="">globalThis.__figSSR={}</script>`;
+    const stylesheetHref = "data:text/css,/*app*/";
+    document.head.innerHTML = `<script ${HYDRATION_SKIP_ATTRIBUTE}=""></script><link rel="preconnect" href="https://example.com"><meta ${HYDRATION_SKIP_ATTRIBUTE}="" charset="utf-8"><link ${HYDRATION_SKIP_ATTRIBUTE}="" rel="stylesheet" href="${stylesheetHref}">`;
+    document.body.innerHTML = `<main>Ready</main><script ${HYDRATION_SKIP_ATTRIBUTE}="">globalThis.__figSSR={}</script><password-manager-root></password-manager-root>`;
+    document.documentElement.appendChild(
+      document.createElement("browser-overlay-root"),
+    );
     const serverHtml = document.documentElement;
     const recoverableErrors: unknown[] = [];
-
-    flushSync(() =>
-      hydrateRoot(
-        document,
+    const renderDocument = (label: string) =>
+      createElement(
+        "html",
+        null,
         createElement(
-          "html",
+          "head",
           null,
+          createElement("meta", { charset: "utf-8" }),
           createElement(
-            "head",
-            null,
-            createElement("meta", { charset: "utf-8" }),
-            createElement(
-              "link",
-              preventAssetResourceHoist({
-                href: "https://example.com",
-                rel: "preconnect",
-              }),
-            ),
+            "link",
+            preventAssetResourceHoist({
+              href: "https://example.com",
+              rel: "preconnect",
+            }),
           ),
-          createElement("body", null, createElement("main", null, "Ready")),
         ),
-        { onRecoverableError: (error) => recoverableErrors.push(error) },
-      ),
+        createElement(
+          "body",
+          null,
+          assets(
+            stylesheet(stylesheetHref),
+            createElement("main", null, label),
+          ),
+        ),
+      );
+
+    const root = flushSync(() =>
+      hydrateRoot(document, renderDocument("Ready"), {
+        onRecoverableError: (error) => recoverableErrors.push(error),
+      }),
     );
 
     expect(recoverableErrors).toEqual([]);
@@ -52,7 +64,17 @@ describe("document hydration", () => {
     expect(document.doctype).toBe(doctype);
     expect(document.querySelectorAll("html")).toHaveLength(1);
     expect(document.querySelector("main")?.textContent).toBe("Ready");
-    expect(document.body.lastElementChild?.tagName).toBe("SCRIPT");
+    expect(document.body.querySelector("script")).not.toBeNull();
+    expect(document.querySelector("password-manager-root")).not.toBeNull();
+    expect(document.querySelector("browser-overlay-root")).not.toBeNull();
+
+    flushSync(() => root.render(renderDocument("Updated")));
+
+    expect(document.documentElement).toBe(serverHtml);
+    expect(
+      document.querySelector(`link[href="${stylesheetHref}"]`),
+    ).not.toBeNull();
+    expect(document.querySelector("main")?.textContent).toBe("Updated");
   });
 
   it("hydrates a document whose first DOM element follows a doctype", () => {

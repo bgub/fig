@@ -61,7 +61,7 @@ describe("tanstackStart", () => {
     );
   });
 
-  it("prebundles the stable Start graph but not application-bound entries", () => {
+  it("keeps compiler-sensitive Start modules out of dependency prebundling", () => {
     const plugin = compatibilityPlugin();
     const config = plugin.configEnvironment("client", {
       optimizeDeps: {
@@ -72,13 +72,13 @@ describe("tanstackStart", () => {
 
     expect(config?.optimizeDeps?.include).toEqual([
       "existing-include",
-      "@tanstack/start-client-core",
-      "@tanstack/start-client-core/client",
-      "@tanstack/start-client-core/client-rpc",
       "@tanstack/router-core/ssr/client",
     ]);
     expect(config?.optimizeDeps?.exclude).toEqual([
       "existing-exclude",
+      "@tanstack/start-client-core",
+      "@tanstack/start-client-core/client",
+      "@tanstack/start-client-core/client-rpc",
       "@bgub/fig-tanstack-start",
       "@bgub/fig-tanstack-router",
     ]);

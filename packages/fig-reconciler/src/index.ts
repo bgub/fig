@@ -314,6 +314,9 @@ export interface HostConfig<Container, Instance, TextInstance> {
     text: string,
     suppressHydrationWarning?: boolean,
   ): boolean;
+  // True when unmatched DOM siblings at the end of this hydrated host belong
+  // to an out-of-band owner and must remain outside the reconciled tree.
+  canRetainHydrationTail?(instance: Instance): boolean;
   // Resolve an out-of-band host instance using the real host parent. Returning
   // an instance fixes the fiber's placement as hoisted for its lifetime: it
   // does not consume a hydration cursor node and commit acquires/releases it
@@ -1953,7 +1956,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (!root.isHydrating || root.hydrationParent !== node) return;
 
-    if (root.nextHydratableInstance !== null) {
+    if (
+      root.nextHydratableInstance !== null &&
+      !(
+        node.tag === HostTag &&
+        host.canRetainHydrationTail?.(node.stateNode as Instance) === true
+      )
+    ) {
       throwHydrationMismatch(root, node);
     }
 
