@@ -23,6 +23,7 @@ function Home(): FigNode {
         <Link
           class="inline-block font-medium text-teal-700"
           to="/view-transitions"
+          viewTransition
         >
           <ViewTransition
             default="fig-tanstack-route-title"

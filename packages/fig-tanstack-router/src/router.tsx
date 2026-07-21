@@ -25,6 +25,9 @@ import {
   createBrowserHistory,
   createHashHistory,
   createMemoryHistory,
+  type BlockerFnArgs,
+  type HistoryAction,
+  type HistoryLocation,
   type RouterHistory,
 } from "@tanstack/history";
 import {
@@ -63,6 +66,7 @@ import {
   notFound as createNotFound,
   type NotFoundError,
   type NotFoundRouteProps,
+  type ParseRoute,
   removeTrailingSlash,
   type RegisteredRouter,
   type Register,
@@ -351,7 +355,7 @@ declare module "@tanstack/router-core" {
   }
 }
 
-export class Router<
+class Router<
   in out TRouteTree extends AnyRoute,
   in out TTrailingSlashOption extends TrailingSlashOption = "never",
   in out TDefaultStructuralSharingOption extends boolean = false,
@@ -408,7 +412,7 @@ export function getRouteApi<
   return new RouteApi<TId, TRouter>({ id });
 }
 
-export class RouteApi<
+class RouteApi<
   TId extends string,
   TRouter extends AnyRouter = RegisteredRouter,
 > extends BaseRouteApi<TId, TRouter> {
@@ -706,6 +710,165 @@ export function useLocation<
 >(): RouterState<TRouter["routeTree"]>["location"] {
   return useReadableStore(useRouter<TRouter>().stores.location);
 }
+
+interface BlockerLocation<
+  out TRouteId = string,
+  out TFullPath = string,
+  out TParams = unknown,
+  out TSearch = unknown,
+> {
+  fullPath: TFullPath;
+  params: TParams;
+  pathname: string;
+  routeId: TRouteId;
+  search: TSearch;
+}
+
+type BlockerLocationUnion<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TRoute extends AnyRoute = ParseRoute<TRouter["routeTree"]>,
+> = TRoute extends AnyRoute
+  ? BlockerLocation<
+      TRoute["id"],
+      TRoute["fullPath"],
+      TRoute["types"]["allParams"],
+      TRoute["types"]["fullSearchSchema"]
+    >
+  : never;
+
+type BlockerResolver<TRouter extends AnyRouter = RegisteredRouter> =
+  | {
+      action: HistoryAction;
+      current: BlockerLocationUnion<TRouter>;
+      next: BlockerLocationUnion<TRouter>;
+      proceed: () => void;
+      reset: () => void;
+      status: "blocked";
+    }
+  | {
+      action: undefined;
+      current: undefined;
+      next: undefined;
+      proceed: undefined;
+      reset: undefined;
+      status: "idle";
+    };
+
+interface ShouldBlockArgs<TRouter extends AnyRouter = RegisteredRouter> {
+  action: HistoryAction;
+  current: BlockerLocationUnion<TRouter>;
+  next: BlockerLocationUnion<TRouter>;
+}
+
+export type ShouldBlockFn<TRouter extends AnyRouter = RegisteredRouter> = (
+  args: ShouldBlockArgs<TRouter>,
+) => boolean | Promise<boolean>;
+
+export interface UseBlockerOpts<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TWithResolver extends boolean = boolean,
+> {
+  disabled?: boolean;
+  enableBeforeUnload?: boolean | (() => boolean);
+  shouldBlockFn: ShouldBlockFn<TRouter>;
+  withResolver?: TWithResolver;
+}
+
+export function useBlocker<
+  TRouter extends AnyRouter = RegisteredRouter,
+  TWithResolver extends boolean = false,
+>(
+  options: UseBlockerOpts<TRouter, TWithResolver>,
+): TWithResolver extends true ? BlockerResolver<TRouter> : void;
+export function useBlocker(
+  options: UseBlockerOpts<AnyRouter>,
+): BlockerResolver<AnyRouter> | void {
+  const {
+    disabled = false,
+    enableBeforeUnload = true,
+    shouldBlockFn,
+    withResolver = false,
+  } = options;
+  const router = useRouter<AnyRouter>();
+  const [resolver, setResolver] =
+    useState<BlockerResolver<AnyRouter>>(idleBlockerResolver);
+
+  useBeforePaint(
+    (signal) => {
+      if (disabled) return undefined;
+      let settlePending: ((shouldBlock: boolean) => void) | undefined;
+      const unblock = router.history.block({
+        enableBeforeUnload,
+        blockerFn: async (args: BlockerFnArgs) => {
+          const current = blockerLocation(router, args.currentLocation);
+          const next = blockerLocation(router, args.nextLocation);
+          const shouldBlock = await shouldBlockFn({
+            action: args.action,
+            current,
+            next,
+          });
+          if (!withResolver || !shouldBlock) return shouldBlock;
+
+          const resolved = await new Promise<boolean>((resolve) => {
+            settlePending = resolve;
+            setResolver({
+              action: args.action,
+              current,
+              next,
+              proceed: () => resolve(false),
+              reset: () => resolve(true),
+              status: "blocked",
+            });
+          });
+          settlePending = undefined;
+          setResolver(idleBlockerResolver);
+          return resolved;
+        },
+      });
+      signal.addEventListener(
+        "abort",
+        () => {
+          unblock();
+          settlePending?.(false);
+        },
+        { once: true },
+      );
+      return undefined;
+    },
+    [disabled, enableBeforeUnload, router, shouldBlockFn, withResolver],
+  );
+
+  return withResolver ? resolver : undefined;
+}
+
+export function useCanGoBack(): boolean {
+  const router = useRouter<AnyRouter>();
+  return useReadableStore(router.stores.location, router.history.canGoBack);
+}
+
+function blockerLocation(
+  router: AnyRouter,
+  location: HistoryLocation,
+): BlockerLocation<string, string> {
+  const parsed = router.parseLocation(location);
+  const matched = router.getMatchedRoutes(parsed.pathname);
+  return {
+    fullPath: matched.foundRoute?.fullPath ?? parsed.pathname,
+    params: matched.routeParams,
+    pathname: parsed.pathname,
+    routeId: matched.foundRoute?.id ?? "__notFound__",
+    search: parsed.search,
+  };
+}
+
+const idleBlockerResolver: BlockerResolver<AnyRouter> = {
+  action: undefined,
+  current: undefined,
+  next: undefined,
+  proceed: undefined,
+  reset: undefined,
+  status: "idle",
+};
 
 interface MatchOptions<TSelected> {
   from?: string;
@@ -1166,10 +1329,18 @@ function Transitioner(): FigNode {
     },
     [router, state],
   );
+  const commitWithoutRouterViewTransition = useCallback(
+    (commit: () => Promise<void>) => {
+      router.shouldViewTransition = undefined;
+      void commit();
+    },
+    [router],
+  );
 
   useBeforePaint(
     (signal) => {
       const previousStartTransition = router.startTransition;
+      const previousStartViewTransition = router.startViewTransition;
       const subscriptions = [
         router.stores.isLoading.subscribe(settleLifecycle),
         router.stores.hasPending.subscribe(settleLifecycle),
@@ -1177,6 +1348,7 @@ function Transitioner(): FigNode {
       ];
       state.active = true;
       router.startTransition = runRouterTransition;
+      router.startViewTransition = commitWithoutRouterViewTransition;
       signal.addEventListener(
         "abort",
         () => {
@@ -1188,6 +1360,11 @@ function Transitioner(): FigNode {
           if (router.startTransition === runRouterTransition) {
             router.startTransition = previousStartTransition;
           }
+          if (
+            router.startViewTransition === commitWithoutRouterViewTransition
+          ) {
+            router.startViewTransition = previousStartViewTransition;
+          }
           if (router.stores.isTransitioning.get()) {
             router.stores.isTransitioning.set(false);
           }
@@ -1196,7 +1373,13 @@ function Transitioner(): FigNode {
       );
       return undefined;
     },
-    [router, runRouterTransition, settleLifecycle, state],
+    [
+      commitWithoutRouterViewTransition,
+      router,
+      runRouterTransition,
+      settleLifecycle,
+      state,
+    ],
   );
 
   useBeforePaint(
@@ -1714,7 +1897,10 @@ export type LinkProps<
   TTo extends string | undefined = ".",
   TMaskFrom extends string = TFrom,
   TMaskTo extends string = ".",
-> = AnchorProps & LinkOptions<RegisteredRouter, TFrom, TTo, TMaskFrom, TMaskTo>;
+> = AnchorProps &
+  LinkOptions<RegisteredRouter, TFrom, TTo, TMaskFrom, TMaskTo> & {
+    preloadIntentProximity?: never;
+  };
 
 const preloadTimeouts = new WeakMap<
   EventTarget,
@@ -1745,7 +1931,6 @@ export function Link<
     params: _params,
     preload: requestedPreload,
     preloadDelay: requestedPreloadDelay,
-    preloadIntentProximity: _preloadIntentProximity,
     reloadDocument,
     replace: _replace,
     resetScroll: _resetScroll,

@@ -200,9 +200,28 @@ function ProfileRoute() {
 }
 ```
 
+When the route does not need the tree before commit, preload it and return
+`void`; Fig Suspense then owns the pending UI and stream:
+
+```tsx
+import { Suspense } from "@bgub/fig";
+
+export const Route = createFileRoute("/profiles/$id")({
+  loader: ({ context, params }) => {
+    context.data.preloadData(profilePayload, { id: params.id });
+  },
+  component: () => (
+    <Suspense fallback={<p>Streaming profile…</p>}>
+      <ProfileRoute />
+    </Suspense>
+  ),
+});
+```
+
 On SSR, Fig decodes and renders the root once, retains Payload-discovered asset
 resources on the rows that declared them, and embeds the response bytes for
-hydration. The document renderer emits each asset before its dependent HTML
+hydration. This includes Payload resources registered after the document shell
+starts. The document renderer emits each asset before its dependent HTML
 segment, including streamed Suspense holes. The browser adopts the embedded
 bytes without a second server-function call. Shell HTML streams while Suspense
 holes settle; TanStack starts full-document hydration after each complete

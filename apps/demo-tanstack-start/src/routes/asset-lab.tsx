@@ -1,19 +1,30 @@
-import { type FigNode, readData } from "@bgub/fig";
-import { ensureRouteData } from "@bgub/fig-tanstack-router";
+import { type FigNode, readData, Suspense } from "@bgub/fig";
 import { createFileRoute } from "@tanstack/solid-router";
 import { assetLabPayload, assetNotePayload } from "../payload-resource.ts";
 
 export const Route = createFileRoute("/asset-lab")({
   component: AssetLabRoute,
-  loader: async ({ context }) => {
-    await Promise.all([
-      ensureRouteData(context, assetLabPayload, undefined),
-      ensureRouteData(context, assetNotePayload, undefined),
-    ]);
+  loader: ({ context }) => {
+    context.data.preloadData(assetLabPayload, undefined);
+    context.data.preloadData(assetNotePayload, undefined);
   },
 });
 
 function AssetLabRoute(): FigNode {
+  return (
+    <Suspense
+      fallback={
+        <p class="italic text-slate-500" data-asset-lab-pending>
+          Streaming asset payload…
+        </p>
+      }
+    >
+      <AssetLabContent />
+    </Suspense>
+  );
+}
+
+function AssetLabContent(): FigNode {
   return (
     <>
       {readData(assetLabPayload, undefined)}

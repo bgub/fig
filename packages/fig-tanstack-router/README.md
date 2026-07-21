@@ -163,9 +163,38 @@ normalizes validated locations in browser history, and cleans up its history
 and transition bindings on unmount. A superseded navigation cannot publish a
 late resolved state.
 
+Fig structural `<ViewTransition>` boundaries own route animations. The adapter
+suppresses Router Core's document wrapper, so a `viewTransition` navigation
+option cannot create a second nested browser transition.
+
 Ordinary route changes do not use `Activity`: the previous tree is replaced
 after the transition. Retaining inactive route trees would require a separate
 keep-alive contract for their state, effects, and data ownership.
+
+## Navigation blocking
+
+`useBlocker` supports TanStack's modern object contract without its deprecated
+positional overloads. Set `withResolver: true` to render explicit proceed/reset
+controls; `useCanGoBack` reacts to the current history index:
+
+```tsx
+const blocker = useBlocker({
+  shouldBlockFn: () => formIsDirty,
+  withResolver: true,
+});
+const canGoBack = useCanGoBack();
+
+return blocker.status === "blocked" ? (
+  <nav>
+    <button mix={on("click", blocker.proceed)}>Discard and leave</button>
+    <button mix={on("click", blocker.reset)}>Stay</button>
+  </nav>
+) : (
+  <button disabled={!canGoBack} mix={on("click", () => history.back())}>
+    Back
+  </button>
+);
+```
 
 ## Route data: delegate keyed values to Fig
 
@@ -204,7 +233,9 @@ function User() {
 `ensureRouteData` deliberately resolves to `void`, so Router Core does not
 retain a second copy in `loaderData`. For non-blocking streaming, call
 `context.data.preloadData(resource, ...args)` and return; the component's
-`readData` suspends through Fig until the entry settles.
+`readData` suspends through Fig until the entry settles. Returning `void` lets
+the route commit its Suspense fallback independently and keeps resource values
+out of Router dehydration.
 
 `loaderData` is still appropriate for small, navigation-scoped orchestration
 values that do not need their own cache identity or freshness lifecycle. Use a
@@ -213,12 +244,12 @@ invalidated, refreshed, or streamed.
 
 ## Support policy
 
-| Tier                 | Contract                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Guaranteed           | Generated file and lazy routes; typed route APIs and selectors; Router creation/provider; native links and navigation; loaders, redirects, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
-| Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                                                                                                |
-| Deferred             | Blockers/back navigation hooks, element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                                                                                                                                                                                          |
-| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                                                                                                |
+| Tier                 | Contract                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Guaranteed           | Generated file and lazy routes; typed route APIs and selectors; Router creation/provider; native links, navigation blocking, and back-history state; loaders, redirects, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
+| Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                                                                                                                              |
+| Deferred             | Element-scroll helpers, parent/child match selectors, and uncommon link conveniences such as proximity preloading.                                                                                                                                                                                                                                                                        |
+| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                                                                                                                              |
 
 The adapter is pinned and tested against `@tanstack/router-core@1.171.15`.
 Upgrades are conformance changes: generated-route, navigation, SSR, data, and
@@ -230,7 +261,8 @@ document tests must pass against the new version before the pin moves.
 downloads, external URLs, modifier keys, and non-`_self` targets retain native
 browser behavior. Disabled links omit `href` and expose `aria-disabled`.
 Preloading supports `intent`, `render`, and `viewport`, and active links expose
-`aria-current="page"` plus `data-status="active"`.
+`aria-current="page"` plus `data-status="active"`. Unsupported
+`preloadIntentProximity` is rejected by `LinkProps` rather than silently ignored.
 
 ## Code-created route trees
 
@@ -239,3 +271,6 @@ Standalone applications may still assemble a tree with `createRootRoute`,
 tested because it is useful for small routers and focused adapter tests. New
 TanStack Start applications should use generated file routes so the generator
 can provide route typing and automatic code splitting.
+
+Construct routers and standalone route APIs with `createRouter` and
+`getRouteApi`; their concrete classes are adapter internals.

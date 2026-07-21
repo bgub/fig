@@ -94,20 +94,36 @@ export function serializableStartData(
 export function injectPayloadDocument(
   html: ReadableStream<Uint8Array>,
   nonce: string | undefined,
+  ready: PromiseLike<void> = Promise.resolve(),
 ): ReadableStream<Uint8Array> {
-  const entries = currentRequestPayloadState(false)?.entries.values();
-  if (entries === undefined) return html;
-  const registered = [...entries];
-  if (registered.length === 0) return html;
-
-  const collectors = registered.map(collectPayload);
-  const payloads = Promise.all(collectors.map((collector) => collector.result));
-  void payloads.catch(() => undefined);
+  const payloadState = currentRequestPayloadState(true);
+  if (payloadState === undefined) return html;
+  const { entries: payloadEntries } = payloadState;
+  const collectors = new Map<string, PayloadCollector>();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
   let injected = false;
   let htmlReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  function collectRegisteredPayloads(): void {
+    for (const entry of payloadEntries.values()) {
+      if (collectors.has(entry.key)) continue;
+      const collector = collectPayload(entry);
+      collectors.set(entry.key, collector);
+      void collector.result.catch(() => undefined);
+    }
+  }
+
+  async function payloads(): Promise<PayloadDocumentEntry[]> {
+    await ready;
+    collectRegisteredPayloads();
+    return Promise.all(
+      [...collectors.values()].map((collector) => collector.result),
+    );
+  }
+
+  collectRegisteredPayloads();
 
   function enqueue(
     controller: ReadableStreamDefaultController<Uint8Array>,
@@ -130,7 +146,7 @@ export function injectPayloadDocument(
     if (barrier !== -1) {
       enqueue(controller, buffer.slice(0, barrier));
       buffer = buffer.slice(barrier);
-      enqueue(controller, payloadDocumentScripts(await payloads, nonce));
+      enqueue(controller, payloadDocumentScripts(await payloads(), nonce));
       injected = true;
       enqueue(controller, buffer);
       buffer = "";
@@ -141,7 +157,7 @@ export function injectPayloadDocument(
       const bodyClose = buffer.toLowerCase().indexOf("</body>");
       const offset = bodyClose === -1 ? buffer.length : bodyClose;
       enqueue(controller, buffer.slice(0, offset));
-      enqueue(controller, payloadDocumentScripts(await payloads, nonce));
+      enqueue(controller, payloadDocumentScripts(await payloads(), nonce));
       enqueue(controller, buffer.slice(offset));
       buffer = "";
       injected = true;
@@ -171,7 +187,8 @@ export function injectPayloadDocument(
     },
     cancel(reason) {
       void htmlReader?.cancel(reason).catch(() => undefined);
-      for (const collector of collectors) collector.cancel(reason);
+      collectRegisteredPayloads();
+      for (const collector of collectors.values()) collector.cancel(reason);
     },
   });
 }

@@ -40,6 +40,7 @@ export async function renderRouterToStream({
   const documentStream = injectPayloadDocument(
     render.stream,
     router.options.ssr?.nonce,
+    render.allReady,
   );
   const routerStream = documentStream as unknown as Parameters<
     typeof transformReadableStreamWithRouter

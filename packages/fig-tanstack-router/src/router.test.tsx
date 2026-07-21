@@ -6,6 +6,7 @@ import {
   readData,
   Suspense,
   useState,
+  ViewTransition,
 } from "@bgub/fig";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
@@ -25,6 +26,7 @@ import {
   HeadContent,
   lazyRouteComponent,
   Link,
+  type LinkProps,
   MatchRoute,
   Navigate,
   Outlet,
@@ -33,6 +35,8 @@ import {
   type RouteErrorComponentProps,
   RouterProvider,
   Scripts,
+  useBlocker,
+  useCanGoBack,
   useLocation,
   useMatches,
   useMatchRoute,
@@ -637,7 +641,172 @@ describe("@bgub/fig-tanstack-router", () => {
     }
     void checkTypes;
 
+    expectTypeOf<
+      LinkProps["preloadIntentProximity"]
+    >().toEqualTypeOf<undefined>();
+
     expect(userRouteApi.id).toBe("/users/$id");
+  });
+
+  it("blocks navigation with the modern resolver contract", async () => {
+    let resolver: ReturnType<typeof useBlocker<AnyRouter, true>> | undefined;
+    const shouldBlockFn = vi.fn(() => true);
+    const rootRoute = createRootRoute({
+      component: () => {
+        resolver = useBlocker({ shouldBlockFn, withResolver: true });
+        return createElement(
+          "main",
+          null,
+          createElement("span", { id: "blocker-status" }, resolver.status),
+          createElement(Outlet),
+        );
+      },
+    });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const nextRoute = createRoute({
+      component: () => createElement("h1", null, "next"),
+      getParentRoute: () => rootRoute,
+      path: "next",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, nextRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+    const blockerStatus =
+      container.querySelector<HTMLElement>("#blocker-status");
+    if (blockerStatus === null) throw new Error("Missing blocker status.");
+
+    router.history.push("/next");
+    await waitForText(blockerStatus, "blocked");
+
+    expect(shouldBlockFn).toHaveBeenCalledWith({
+      action: "PUSH",
+      current: expect.objectContaining({ pathname: "/", routeId: "/" }),
+      next: expect.objectContaining({ pathname: "/next", routeId: "/next" }),
+    });
+    runBlockerAction(resolver, "reset");
+    await waitForText(blockerStatus, "idle");
+    expect(router.history.location.pathname).toBe("/");
+
+    router.history.push("/next");
+    await waitForText(blockerStatus, "blocked");
+    runBlockerAction(resolver, "proceed");
+    await act(() => waitForPath(router, "/next"));
+    await act(() => waitForRouterIdle(router));
+
+    expect(router.history.location.pathname).toBe("/next");
+    expect(container.querySelector("h1")?.textContent).toBe("next");
+  });
+
+  it("reacts when browser history gains and loses a back entry", async () => {
+    const rootRoute = createRootRoute({
+      component: () =>
+        createElement(
+          "main",
+          null,
+          createElement("span", { id: "can-go-back" }, String(useCanGoBack())),
+          createElement(Outlet),
+        ),
+    });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const nextRoute = createRoute({
+      component: () => createElement("h1", null, "next"),
+      getParentRoute: () => rootRoute,
+      path: "next",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, nextRoute]),
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+    expect(container.querySelector("#can-go-back")?.textContent).toBe("false");
+
+    router.history.push("/next");
+    await act(() => waitForPath(router, "/next"));
+    await act(() => waitForRouterIdle(router));
+    expect(container.querySelector("#can-go-back")?.textContent).toBe("true");
+
+    router.history.back();
+    await act(() => waitForPath(router, "/"));
+    await act(() => waitForRouterIdle(router));
+    expect(container.querySelector("#can-go-back")?.textContent).toBe("false");
+  });
+
+  it("leaves document view transitions to Fig structural boundaries", async () => {
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () =>
+        createElement(
+          ViewTransition,
+          { default: "auto", name: "route-title" },
+          createElement("h1", null, "home"),
+        ),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const nextRoute = createRoute({
+      component: () =>
+        createElement(
+          ViewTransition,
+          { default: "auto", name: "route-title" },
+          createElement("h1", null, "next"),
+        ),
+      getParentRoute: () => rootRoute,
+      path: "next",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, nextRoute]),
+    });
+    const nativeViewTransition = vi.fn((update: () => void | Promise<void>) => {
+      const finished = Promise.resolve(update()).then(() => undefined);
+      return { finished, ready: Promise.resolve() };
+    });
+    const viewTransitionDocument = document as unknown as {
+      startViewTransition: typeof nativeViewTransition | undefined;
+    };
+    const previousStartViewTransition =
+      viewTransitionDocument.startViewTransition;
+    viewTransitionDocument.startViewTransition = nativeViewTransition;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    try {
+      await act(() => root.render(createElement(RouterProvider, { router })));
+      await act(() => waitForRouterIdle(router));
+      nativeViewTransition.mockClear();
+      await act(() =>
+        router.navigate({ to: "/next", viewTransition: true } as never),
+      );
+      await act(() => waitForRouterIdle(router));
+
+      expect(container.querySelector("h1")?.textContent).toBe("next");
+      expect(nativeViewTransition).toHaveBeenCalledOnce();
+      expect(router.shouldViewTransition).toBeUndefined();
+    } finally {
+      viewTransitionDocument.startViewTransition = previousStartViewTransition;
+    }
   });
 
   it("uses a native anchor and only hijacks unmodified primary clicks", async () => {
@@ -1328,4 +1497,14 @@ async function waitForText(
   throw new Error(
     `Container did not render ${JSON.stringify(text)}; received ${JSON.stringify(container.textContent)}.`,
   );
+}
+
+function runBlockerAction(
+  resolver: ReturnType<typeof useBlocker<AnyRouter, true>> | undefined,
+  action: "proceed" | "reset",
+): void {
+  if (resolver?.status !== "blocked") {
+    throw new Error(`Cannot ${action} an idle blocker.`);
+  }
+  resolver[action]();
 }

@@ -186,6 +186,36 @@ describe("TanStack Start server payload resources", () => {
     });
   });
 
+  it("embeds a payload registered after the document shell starts", async () => {
+    await runWithStartContext({}, async () => {
+      let markReady = (): void => undefined;
+      const ready = new Promise<void>((resolve) => {
+        markReady = resolve;
+      });
+      const document = injectPayloadDocument(
+        streamFromString(
+          '<html><body><main>shell</main><script id="$tsr-stream-barrier"></script></body></html>',
+        ),
+        undefined,
+        ready,
+      );
+      const htmlPromise = readStream(document);
+      await Promise.resolve();
+      registerPayloadResponse(
+        ["late-payload"],
+        renderPayloadResponse(createElement("p", null, "late-ready")),
+      );
+      markReady();
+
+      const html = await htmlPromise;
+
+      expect(html).toContain("late-ready");
+      expect(html.indexOf("late-ready")).toBeLessThan(
+        html.indexOf("$tsr-stream-barrier"),
+      );
+    });
+  });
+
   it("errors the document stream when a registered payload stream fails", async () => {
     await runWithStartContext({}, async () => {
       registerPayloadResponse(

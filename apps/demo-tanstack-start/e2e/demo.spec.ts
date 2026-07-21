@@ -119,15 +119,35 @@ test("renders and refreshes isomorphic and remote data resources", async ({
   expect(errors()).toEqual([]);
 });
 
+test("commits a nonblocking payload route without publishing stale UI", async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page);
+  await page.goto("/");
+
+  await page.getByRole("link", { name: "Assets" }).click();
+  await expect(page).toHaveURL(/\/asset-lab$/);
+  await expect(page.locator("[data-asset-lab-pending]")).toBeVisible();
+
+  await page.getByRole("link", { name: "Data" }).click();
+  await expect(page.getByRole("heading", { name: "Data lab" })).toBeVisible();
+  await page.waitForTimeout(600);
+
+  await expect(page.locator("[data-asset-lab]")).toHaveCount(0);
+  expect(errors()).toEqual([]);
+});
+
 test("adopts two embedded Payload resources and hydrates the asset island", async ({
   page,
   request,
 }) => {
   const response = await request.get("/asset-lab");
   const html = await response.text();
+  const assetSegment = '<section class="asset-lab-root" data-asset-lab';
   expect(html.match(/data-fig-tanstack-payload-key/g)).toHaveLength(2);
+  expect(html).toContain(assetSegment);
   expect(html.indexOf('data-precedence="payload"')).toBeLessThan(
-    html.indexOf("data-asset-lab"),
+    html.indexOf(assetSegment),
   );
 
   const errors = collectBrowserErrors(page);
