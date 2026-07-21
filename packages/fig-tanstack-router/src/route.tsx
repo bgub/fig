@@ -34,7 +34,6 @@ import {
   type ResolveFullPath,
   type ResolveId,
   type ResolveParams,
-  type ResolveUseLoaderData,
   type ResolveUseLoaderDeps,
   type ResolveUseParams,
   type ResolveUseSearch,
@@ -49,7 +48,6 @@ import {
   type RouterConstructorOptions,
   type ToMaskOptions,
   type TrailingSlashOption,
-  type UseLoaderDataResult,
   type UseLoaderDepsResult,
   type UseNavigateResult,
   type UseParamsResult,
@@ -144,16 +142,6 @@ export type UseSearchRoute<out TFrom> = <
   options?: SelectRouteValue<ResolveUseSearch<TRouter, TFrom, true>, TSelected>,
 ) => UseSearchResult<TRouter, TFrom, true, TSelected>;
 
-export type UseLoaderDataRoute<out TFrom> = <
-  TRouter extends AnyRouter = RegisteredRouter,
-  TSelected = unknown,
->(
-  options?: SelectRouteValue<
-    ResolveUseLoaderData<TRouter, TFrom, true>,
-    TSelected
-  >,
-) => UseLoaderDataResult<TRouter, TFrom, true, TSelected>;
-
 export type UseLoaderDepsRoute<out TFrom> = <
   TRouter extends AnyRouter = RegisteredRouter,
   TSelected = unknown,
@@ -182,7 +170,6 @@ export type LinkComponentRoute<TFrom extends string> = <
 export type RouteApiMethods<TId extends string, TFullPath extends string> = {
   Link: LinkComponentRoute<TFullPath>;
   notFound: (options?: NotFoundError) => NotFoundError;
-  useLoaderData: UseLoaderDataRoute<TId>;
   useLoaderDeps: UseLoaderDepsRoute<TId>;
   useMatch: UseMatchRoute<TId>;
   useNavigate: () => UseNavigateResult<TFullPath>;
@@ -203,8 +190,6 @@ function bindRouteApi<TId extends string, TFullPath extends string>(
       } as never),
     notFound: (options) =>
       createNotFound({ routeId: getId(), ...options } as never),
-    useLoaderData: (options) =>
-      useMatchValue(getId(), options, (match) => match.loaderData) as never,
     useLoaderDeps: (options) =>
       useMatchValue(getId(), options, (match) => match.loaderDeps) as never,
     useMatch: (options) =>
@@ -246,7 +231,6 @@ declare module "@tanstack/router-core" {
   > {
     Link: LinkComponentRoute<TFullPath>;
     notFound: (options?: NotFoundError) => NotFoundError;
-    useLoaderData: UseLoaderDataRoute<TId>;
     useLoaderDeps: UseLoaderDepsRoute<TId>;
     useMatch: UseMatchRoute<TId>;
     useNavigate: () => UseNavigateResult<TFullPath>;
@@ -322,7 +306,6 @@ class RouteApi<
   TRouter extends AnyRouter = RegisteredRouter,
 > extends BaseRouteApi<TId, TRouter> {
   declare Link: LinkComponentRoute<RouteTypesById<TRouter, TId>["fullPath"]>;
-  declare useLoaderData: UseLoaderDataRoute<TId>;
   declare useLoaderDeps: UseLoaderDepsRoute<TId>;
   declare useMatch: UseMatchRoute<TId>;
   declare useNavigate: () => UseNavigateResult<

@@ -31,7 +31,6 @@ import {
   replaceEqualDeep,
   type RegisteredRouter,
   type ResolveRoute,
-  type ResolveUseLoaderData,
   type ResolveUseLoaderDeps,
   type ResolveUseParams,
   type ResolveUseSearch,
@@ -41,7 +40,6 @@ import {
   type ThrowConstraint,
   type ThrowOrOptional,
   type ToSubOptionsProps,
-  type UseLoaderDataResult,
   type UseLoaderDepsResult,
   type UseNavigateResult,
   type UseParamsResult,
@@ -459,28 +457,6 @@ export function useSearch<
     UseSearchResult<TRouter, TFrom, TStrict, TSelected>,
     TThrow
   >;
-}
-
-export function useLoaderData<
-  TRouter extends AnyRouter = RegisteredRouter,
-  const TFrom extends string | undefined = undefined,
-  TStrict extends boolean = true,
-  TSelected = unknown,
->(
-  options?: TypedRouteValueOptions<
-    TRouter,
-    TFrom,
-    TStrict,
-    ResolveUseLoaderData<TRouter, TFrom, TStrict>,
-    TSelected
-  >,
-): UseLoaderDataResult<TRouter, TFrom, TStrict, TSelected> {
-  return useMatchValue(
-    options?.from,
-    options,
-    (match) =>
-      match.loaderData as ResolveUseLoaderData<TRouter, TFrom, TStrict>,
-  ) as UseLoaderDataResult<TRouter, TFrom, TStrict, TSelected>;
 }
 
 export function useLoaderDeps<

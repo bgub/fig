@@ -241,10 +241,15 @@ retain a second copy in `loaderData`. For non-blocking streaming, call
 the route commit its Suspense fallback independently and keeps resource values
 out of Router dehydration.
 
-`loaderData` is still appropriate for small, navigation-scoped orchestration
-values that do not need their own cache identity or freshness lifecycle. Use a
-data resource when a value is keyed, shared, hydrated, independently
-invalidated, refreshed, or streamed.
+Loaders return `void`, and the adapter exposes no `useLoaderData`: a loader
+value would be a second cache with a second wire format (Router Core retains
+it per match; TanStack Start dehydrates it through its own transport). In dev
+builds, a match that commits with `loaderData` set while `router.context.data`
+is configured throws a diagnostic naming the route. Derive navigation-scoped
+values from `useLoaderDeps`, search params, or `beforeLoad`-returned route
+context; use a data resource when a value is keyed, shared, hydrated,
+independently invalidated, refreshed, or streamed. Routers created without
+`context.data` keep Router Core's native loader semantics untouched.
 
 ## Support policy
 
@@ -256,7 +261,7 @@ matrix and Fig equivalents for intentionally omitted adapter conveniences.
 | Guaranteed           | Generated file and lazy routes; typed route APIs and structural-sharing selectors; Router creation/provider; native links with active/inactive props and render-function children; navigation blocking and back-history state; loaders, redirects, route masks, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies/hydration; scroll restoration; head and script output; search/history helpers; Fig data-resource delegation. |
 | Compatibility        | `createRootRoute` and `createRoute` for code-created route trees. These use the same Router Core machinery but are not the recommended Start authoring path.                                                                                                                                                                                                                                                                                                                     |
 | Deferred             | `useElementScrollRestoration`, parent/child match selectors, custom-link construction through `useLinkProps` or `createLink`, and proximity preloading.                                                                                                                                                                                                                                                                                                                          |
-| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing. Fig primitives or internal adapter behavior cover these concerns.                                                                                                                                                                                                                                     |
+| Deliberately omitted | Additional deprecated compatibility classes and aliases; public `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration` clones; Activity-based keep-alive routing; `useLoaderData` (the Fig data store is the single route-data cache — read with `readData`). Fig primitives or internal adapter behavior cover these concerns.                                                                                                                                         |
 
 The adapter is pinned and tested against `@tanstack/router-core@1.171.15`.
 Upgrades are conformance changes: generated-route, navigation, SSR, data, and

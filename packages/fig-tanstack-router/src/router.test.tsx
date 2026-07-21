@@ -644,7 +644,6 @@ describe("@bgub/fig-tanstack-router", () => {
       expectTypeOf(userRouteApi.useLoaderDeps()).toEqualTypeOf<{
         tab: string;
       }>();
-      expectTypeOf(userRouteApi.useLoaderData()).toEqualTypeOf<string>();
       expectTypeOf(
         userRouteApi.useMatch({
           select: (match) => match.id,
@@ -1298,6 +1297,40 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(loads).toBe(2);
   });
 
+  it("rejects loader return values in dev when the fig store is the cache", async () => {
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      errorComponent: ({ error }: RouteErrorComponentProps) =>
+        createElement(
+          "p",
+          { id: "loader-data-error" },
+          error instanceof Error ? error.message : "unknown",
+        ),
+    });
+    const route = createRoute({
+      component: () => createElement("h1", null, "leaked"),
+      getParentRoute: () => rootRoute,
+      loader: () => "navigation-scoped value",
+      path: "/",
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const router = createRouter({
+      context: { data: root.data },
+      defaultOnCatch: () => undefined,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([route]),
+    });
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForMatches(router));
+
+    expect(
+      container.querySelector("#loader-data-error")?.textContent,
+    ).toContain("loader returned a value while router.context.data");
+    expect(container.querySelector("h1")).toBeNull();
+  });
+
   it("owns route assets per match while keeping synchronous scripts positioned", async () => {
     const rootRoute = createRootRoute({ component: AssetDocument });
     const homeRoute = createRoute({
@@ -1487,7 +1520,6 @@ function User(): FigNode {
   const params = userRouteApi.useParams();
   const search = userRouteApi.useSearch();
   const loaderDeps = userRouteApi.useLoaderDeps();
-  const loaderData = userRouteApi.useLoaderData();
   const routeId = userRouteApi.useMatch({ select: (match) => match.id });
   const matchCount = useMatches({ select: (matches) => matches.length });
   const matchRoute = useMatchRoute();
@@ -1498,7 +1530,6 @@ function User(): FigNode {
   return createElement(
     "section",
     {
-      "data-loader-data": loaderData,
       "data-loader-tab": loaderDeps.tab,
       "data-route-id": routeId,
       "data-route-matched": String(matched !== false),

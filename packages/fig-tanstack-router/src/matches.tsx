@@ -43,6 +43,10 @@ import {
 import type { AsyncRouteComponent } from "./route.tsx";
 import { useReadableStore } from "./store.ts";
 
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
+
 declare module "@tanstack/router-core" {
   interface RouteMatchExtensions {
     headScripts?: Array<HostIntrinsicElements["script"] | undefined>;
@@ -338,6 +342,20 @@ function Match({ matchId }: { matchId: string }): FigNode {
   const route = router.routesById[match.routeId];
   if (route === undefined) {
     throw new Error(`Could not find route ${JSON.stringify(match.routeId)}.`);
+  }
+  if (
+    __DEV__ &&
+    match.loaderData !== undefined &&
+    dataStoreFromContext(match.context) !== undefined
+  ) {
+    throw new Error(
+      `Route ${JSON.stringify(match.routeId)} loader returned a value while ` +
+        "router.context.data is configured. Fig data resources are the single " +
+        "route-data cache: load with ensureRouteData or " +
+        "context.data.preloadData in the loader, read with readData in the " +
+        "component, and return void. For navigation-scoped values, derive " +
+        "them from loaderDeps, search params, or beforeLoad context instead.",
+    );
   }
 
   const PendingComponent =

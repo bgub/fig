@@ -168,7 +168,6 @@ describe("@bgub/fig-tanstack-start server", () => {
         getParentRoute: () => rootRoute,
         loader: () => {
           loads += 1;
-          return "loaded";
         },
         path: "page",
         pendingComponent: () => createElement("main", null, "pending"),

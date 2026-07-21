@@ -1,6 +1,7 @@
 import { dataResource, type DataResourceKey } from "@bgub/fig";
 import { delay, posts } from "./posts.ts";
-import { getRemotePostStatus } from "./server-functions.ts";
+import { getInitialTheme, getRemotePostStatus } from "./server-functions.ts";
+import type { ThemePreference } from "./theme.ts";
 
 export interface PostSummary {
   id: string;
@@ -43,4 +44,9 @@ export const remotePostStatusResource = dataResource<
 >({
   key: (id) => ["remote-post-status", id],
   load: (id, { signal }) => getRemotePostStatus({ data: { id }, signal }),
+});
+
+export const initialThemeResource = dataResource<[], ThemePreference>({
+  key: () => ["initial-theme"],
+  load: ({ signal }) => getInitialTheme({ signal }),
 });

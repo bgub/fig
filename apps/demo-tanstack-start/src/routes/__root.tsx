@@ -1,9 +1,12 @@
-import type { FigNode } from "@bgub/fig";
-import { createRootRouteWithContext } from "@bgub/fig-tanstack-router";
+import { type FigNode, readData } from "@bgub/fig";
+import {
+  createRootRouteWithContext,
+  ensureRouteData,
+} from "@bgub/fig-tanstack-router";
 import type { StartDataContext } from "@bgub/fig-tanstack-start";
 import styleUrl from "../../style.css?url";
 import { Document, NotFound } from "../app-shell.tsx";
-import { getInitialTheme } from "../server-functions.ts";
+import { initialThemeResource } from "../data.ts";
 
 export const Route = createRootRouteWithContext<StartDataContext>()({
   component: RootDocument,
@@ -17,11 +20,11 @@ export const Route = createRootRouteWithContext<StartDataContext>()({
       },
     ],
   }),
-  loader: () => getInitialTheme(),
+  loader: ({ context }) => ensureRouteData(context, initialThemeResource),
   notFoundComponent: NotFound,
 });
 
 function RootDocument(): FigNode {
-  const initialTheme = Route.useLoaderData();
+  const initialTheme = readData(initialThemeResource);
   return <Document initialTheme={initialTheme} />;
 }
