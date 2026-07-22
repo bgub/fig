@@ -19,8 +19,13 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm build:e2e && pnpm serve",
+    command:
+      process.env.FIG_E2E_PREBUILT === "1"
+        ? "pnpm serve"
+        : "pnpm build:e2e && pnpm serve",
     env: {
+      FIG_PAYLOAD_DEMO_DELAY_SCALE: "0.25",
+      FIG_PAYLOAD_DEMO_E2E: "1",
       PORT: String(port),
     },
     reuseExistingServer: false,

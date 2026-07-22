@@ -5,6 +5,7 @@
   "scripts": {
     "bench": "turbo run build --filter=@bgub/fig-server... --filter=@bgub/fig-reconciler... && node benchmarks/reconciler.mjs",
     "build": "turbo run build",
+    "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-ssr... --filter=@bgub/fig-demo-client... --filter=@bgub/fig-demo-payload... --filter=@bgub/fig-demo-tanstack-start...",
     "check": "turbo run quality",
     "dev": "FIG_DEV_SOURCE=1 turbo run dev --filter='./apps/*' --ui=tui --concurrency=14",
     "fix": "turbo run quality:fix",
@@ -17,7 +18,7 @@
     "test:bench": "node --test benchmarks/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mts",
     "test:dom": "turbo run test --filter=@bgub/fig-dom",
-    "test:e2e": "turbo run test:e2e --concurrency=1 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
+    "test:e2e": "pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
     "tegami": "node scripts/tegami.mts",

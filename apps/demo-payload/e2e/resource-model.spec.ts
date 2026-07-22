@@ -7,6 +7,7 @@ import { expect, type Page, test } from "@playwright/test";
 test("streams a serialized post as a data resource with progressive holes and islands", async ({
   page,
 }) => {
+  const commentsGate = "initial-resource-comments";
   const errors = collectBrowserErrors(page);
   const payloadRequests: string[] = [];
   page.on("request", (request) => {
@@ -15,7 +16,9 @@ test("streams a serialized post as a data resource with progressive holes and is
     }
   });
 
-  await page.goto("/", { waitUntil: "commit" });
+  await page.goto(`/?fig-e2e-comments-gate=${commentsGate}`, {
+    waitUntil: "commit",
+  });
   await expect(page.locator("body")).toHaveAttribute(
     "data-fig-resource-demo",
     "ready",
@@ -24,9 +27,13 @@ test("streams a serialized post as a data resource with progressive holes and is
   await expect(devtools).toBeVisible();
 
   // Root row reveals the post while the comments hole is still streaming.
-  // waitFor is event-driven where expect polls on fixed intervals; the
-  // pending phase is a ~400ms window that interval polling can straddle.
+  // The e2e gate keeps this transient phase open until the browser observes
+  // it, so concurrent suites cannot batch the pending and ready rows together.
   await page.locator('[data-resource-comments="pending"]').waitFor();
+  const release = await page.request.post(
+    `/fig-e2e/release?gate=${commentsGate}`,
+  );
+  expect(release.ok()).toBe(true);
   const post = page.locator("[data-resource-seed]");
   await expect(post).toHaveAttribute("data-resource-seed", "1");
   await expect(page.locator("[data-resource-audit]")).toContainText(

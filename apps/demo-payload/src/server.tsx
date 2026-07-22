@@ -26,6 +26,9 @@ import { styles } from "./styles.ts";
 // stream, one client consuming it as an ordinary data resource.
 
 const port = Number(process.env.PORT ?? 5174);
+const e2eGatesEnabled = process.env.FIG_PAYLOAD_DEMO_E2E === "1";
+const payloadDelayScale =
+  Number(process.env.FIG_PAYLOAD_DEMO_DELAY_SCALE ?? "1") || 1;
 const clientScriptUrl = new URL("../dist/client.js", import.meta.url);
 const noStore = { "cache-control": "no-store" } as const;
 const textCss = { ...noStore, "content-type": "text/css; charset=utf-8" };
@@ -76,6 +79,9 @@ async function handleRequest(
       response.writeHead(204);
       response.end();
       return;
+    case "/fig-e2e/release":
+      releaseE2eGate(response, url);
+      return;
     case "/resource-payload":
       await sendResourcePayload(response, url);
       return;
@@ -107,7 +113,7 @@ function delay(ms: number): Promise<void> {
 let dashboardRenders = 0;
 
 async function sendDashboardPayload(response: ServerResponse): Promise<void> {
-  await delay(DASHBOARD_PAYLOAD_DELAY_MS);
+  await delay(scaledPayloadDelay(DASHBOARD_PAYLOAD_DELAY_MS));
   await sendPayload(response, <Dashboard render={++dashboardRenders} />);
 }
 
@@ -119,7 +125,7 @@ async function sendResourcePayload(
   url: URL,
 ): Promise<void> {
   const seed = seedFor(url);
-  await delay(POST_PAYLOAD_DELAY_MS);
+  await delay(scaledPayloadDelay(POST_PAYLOAD_DELAY_MS));
   if (seed === brokenResourceSeed) {
     send(response, 500, "Resource payload unavailable", textPlain);
     return;
@@ -127,7 +133,7 @@ async function sendResourcePayload(
 
   await sendPayload(
     response,
-    <ResourcePost comments={resourceComments(seed)} seed={seed} />,
+    <ResourcePost comments={commentsForRequest(seed, url)} seed={seed} />,
   );
 }
 
@@ -138,7 +144,7 @@ let weatherReadings = 0;
 const weatherConditions = ["sunny", "partly cloudy", "rainy", "windy"];
 
 async function sendWeatherPayload(response: ServerResponse): Promise<void> {
-  await delay(WEATHER_PAYLOAD_DELAY_MS);
+  await delay(scaledPayloadDelay(WEATHER_PAYLOAD_DELAY_MS));
   const weather: WeatherReading = {
     condition:
       weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
@@ -147,6 +153,61 @@ async function sendWeatherPayload(response: ServerResponse): Promise<void> {
   };
 
   await sendPayload(response, <WeatherReport weather={weather} />);
+}
+
+function scaledPayloadDelay(ms: number): number {
+  return Math.max(1, Math.round(ms * payloadDelayScale));
+}
+
+const e2eGateWaiters = new Map<string, () => void>();
+const releasedE2eGates = new Set<string>();
+
+function commentsForRequest(seed: number, url: URL): Promise<string[]> {
+  const gate = e2eGatesEnabled
+    ? url.searchParams.get("fig-e2e-comments-gate")
+    : null;
+  if (gate === null) return resourceComments(seed);
+
+  return waitForE2eGate(gate).then(() => [
+    `First comment ${seed}`,
+    `Second comment ${seed}`,
+  ]);
+}
+
+function waitForE2eGate(gate: string): Promise<void> {
+  if (releasedE2eGates.delete(gate)) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    if (e2eGateWaiters.has(gate)) {
+      reject(new Error(`Duplicate e2e payload gate: ${gate}`));
+      return;
+    }
+    e2eGateWaiters.set(gate, () => resolve());
+  });
+}
+
+function releaseE2eGate(response: ServerResponse, url: URL): void {
+  if (!e2eGatesEnabled) {
+    send(response, 404, "Not found", textPlain);
+    return;
+  }
+
+  const gate = url.searchParams.get("gate");
+  if (gate === null) {
+    send(response, 400, "Missing gate", textPlain);
+    return;
+  }
+
+  const resolve = e2eGateWaiters.get(gate);
+  if (resolve === undefined) {
+    releasedE2eGates.add(gate);
+  } else {
+    e2eGateWaiters.delete(gate);
+    resolve();
+  }
+
+  response.writeHead(204, noStore);
+  response.end();
 }
 
 async function sendPayload(

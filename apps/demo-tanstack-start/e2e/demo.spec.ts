@@ -32,7 +32,8 @@ test("hydrates the themed document and persists shell changes", async ({
 
 test("includes the Fig DevTools overlay", async ({ page }) => {
   const errors = collectBrowserErrors(page);
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "commit" });
+  await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
 
   await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
   const devtools = page.locator("[data-fig-devtools]");

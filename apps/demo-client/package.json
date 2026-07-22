@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:e2e": "turbo run build --filter=@bgub/fig-demo-client...",
+    "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-client...",
     "build": "tsdown --config ../../tsdown.config.ts",
     "dev": "portless",
     "dev:app": "node ../dev/static-server-cli.mjs",

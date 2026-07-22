@@ -35,11 +35,24 @@ const resolveClientReference: ResolveClientReference = (metadata) =>
 const postResource = dataResource<[number], FigNode>({
   key: (seed: number) => ["resource-post", seed],
   load: payloadDataLoader<[number]>({
-    request: (seed, { signal }) =>
-      fetch(`/resource-payload?seed=${seed}`, { signal }),
+    request: (seed, { signal }) => fetch(resourcePayloadUrl(seed), { signal }),
     resolveClientReference,
   }),
 });
+
+function resourcePayloadUrl(seed: number): string {
+  const url = new URL("/resource-payload", window.location.origin);
+  url.searchParams.set("seed", String(seed));
+
+  const commentsGate = new URLSearchParams(window.location.search).get(
+    "fig-e2e-comments-gate",
+  );
+  if (commentsGate !== null) {
+    url.searchParams.set("fig-e2e-comments-gate", commentsGate);
+  }
+
+  return `${url.pathname}${url.search}`;
+}
 
 // A second serialized slot with its own key: refreshing one resource leaves
 // the other's entry untouched, which is the whole refresh story — the unit

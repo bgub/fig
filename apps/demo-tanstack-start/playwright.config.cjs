@@ -7,6 +7,7 @@ module.exports = defineConfig({
     timeout: 7_000,
   },
   fullyParallel: true,
+  workers: process.env.CI === "true" ? 1 : 4,
   outputDir: "test-results",
   reporter: process.env.CI === "true" ? "github" : "list",
   testDir: "./e2e",
@@ -16,7 +17,10 @@ module.exports = defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm build:e2e && pnpm serve",
+    command:
+      process.env.FIG_E2E_PREBUILT === "1"
+        ? "pnpm serve"
+        : "pnpm build:e2e && pnpm serve",
     env: {
       PORT: String(port),
     },

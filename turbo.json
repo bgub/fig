@@ -28,7 +28,7 @@
     },
     "test:e2e": {
       "cache": false,
-      "passThroughEnv": ["CI"]
+      "passThroughEnv": ["CI", "FIG_E2E_PREBUILT"]
     },
     "//#quality": {
       "dependsOn": ["//#lint", "//#format"]

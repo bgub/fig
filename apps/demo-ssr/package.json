@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts",
-    "build:e2e": "turbo run build --filter=@bgub/fig-demo-ssr...",
+    "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-ssr...",
     "dev": "portless",
     "dev:app": "node --watch --watch-preserve-output dist/server.js",
     "dev:build": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
