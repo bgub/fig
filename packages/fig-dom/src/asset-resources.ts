@@ -10,15 +10,22 @@ import {
   assetResourceKey,
   isFigAssetResource,
 } from "@bgub/fig/internal";
+import type { AssetResourceOwner } from "@bgub/fig-reconciler";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
+import { MetadataClaims } from "./metadata-claims.ts";
 import { updateElement } from "./props.ts";
 import { elementName, isElementNode } from "./tree.ts";
 
-interface DocumentResourceEntry {
+interface PersistentResourceEntry {
   count: number;
   element: Element;
+  kind: "persistent";
   ready: Promise<void> | null;
 }
+
+type MetadataResource = Extract<FigAssetResource, { kind: "title" | "meta" }>;
+
+type DocumentResourceEntry = PersistentResourceEntry | MetadataClaims;
 
 interface DocumentResourceMeta {
   key: string;
@@ -36,6 +43,7 @@ const resourceMeta = new WeakMap<Element, DocumentResourceMeta>();
 export function commitAssetResources(
   previous: FigAssetResourceList | null,
   next: FigAssetResourceList | null,
+  owner: AssetResourceOwner,
 ): void {
   const registry = currentDocumentResources();
   if (registry === null) return;
@@ -44,20 +52,21 @@ export function commitAssetResources(
   const nextByKey = canonicalResources(next);
 
   for (const [key] of previousByKey) {
-    if (!nextByKey.has(key)) releaseDeclaredResource(registry, key);
+    if (!nextByKey.has(key)) releaseDeclaredResource(registry, key, owner);
   }
 
   for (const [key, resource] of nextByKey) {
     if (!previousByKey.has(key)) {
-      acquireDeclaredResource(registry, resource);
+      acquireDeclaredResource(registry, resource, owner);
     } else if (resource.kind === "title" || resource.kind === "meta") {
-      updateDeclaredMetadata(registry, key, resource);
+      updateDeclaredMetadata(registry, key, resource, owner);
     }
   }
 }
 
-// Render-phase find-or-create only. Acquisition waits for commit because a
-// render can be discarded; the zero-count entry still dedupes sibling work.
+// Render-phase construction only. Acquisition waits for commit because a
+// render can be discarded. Persistent assets reserve a zero-count entry to
+// dedupe sibling work; metadata stays detached so it cannot mutate a winner.
 export function adoptDocumentResource(
   type: string,
   props: Props,
@@ -67,23 +76,53 @@ export function adoptDocumentResource(
   if (registry === null || resource === null) return null;
 
   const key = assetResourceKey(resource);
+  if (isMetadataResource(resource)) {
+    const element = document.createElement(type);
+    resourceMeta.set(element, { key, kind: resource.kind });
+    return element;
+  }
+
   const entry = registry.entries.get(key);
+  if (entry?.kind === "metadata") {
+    throw new Error("Expected a persistent resource entry.");
+  }
   const element =
     entry?.element ??
     findDocumentResource(registry, key) ??
     document.createElement(type);
 
   if (entry === undefined) {
-    registry.entries.set(key, { count: 0, element, ready: null });
+    registry.entries.set(key, {
+      count: 0,
+      element,
+      kind: "persistent",
+      ready: null,
+    });
     resourceMeta.set(element, { key, kind: resource.kind });
   }
   return element;
 }
 
-export function acquireDocumentResource(element: Element): Element {
+export function acquireDocumentResource(
+  element: Element,
+  props: Props,
+  owner: AssetResourceOwner,
+): Element {
   const registry = currentDocumentResources();
   if (registry === null) return element;
 
+  const hostResource = assetResourceFromHostProps(elementName(element), props);
+  if (hostResource !== null && isMetadataResource(hostResource)) {
+    return acquireMetadataClaim(registry, hostResource, props, owner, element);
+  }
+
+  return acquirePersistentResource(registry, element);
+}
+
+function acquirePersistentResource(
+  registry: DocumentResources,
+  element: Element,
+): Element {
   // Deletions commit before placements, so a sibling's release in the same
   // commit may have dropped the element from the registry; re-derive its
   // identity from its attributes and revive it.
@@ -96,6 +135,9 @@ export function acquireDocumentResource(element: Element): Element {
   }
 
   const entry = registry.entries.get(meta.key);
+  if (entry?.kind === "metadata") {
+    throw new Error("Expected a persistent resource entry.");
+  }
 
   // A payload insertion may have claimed the key while this render was
   // suspended. Its live element is authoritative.
@@ -105,59 +147,124 @@ export function acquireDocumentResource(element: Element): Element {
   }
 
   if (entry === undefined) {
-    registry.entries.set(meta.key, { count: 1, element, ready: null });
+    registry.entries.set(meta.key, {
+      count: 1,
+      element,
+      kind: "persistent",
+      ready: null,
+    });
   } else {
     entry.count += 1;
   }
   return attachDocumentResource(registry, element);
 }
 
-export function releaseDocumentResource(element: Element): void {
+export function releaseDocumentResource(
+  element: Element,
+  owner: AssetResourceOwner,
+): void {
   const registry = currentDocumentResources();
   const meta = resourceMeta.get(element);
   if (registry === null || meta === undefined) return;
 
   const entry = registry.entries.get(meta.key);
 
-  // An element displaced by a rekey collision is untracked. Remove it with
-  // its owner unless another key still references it.
-  if (entry === undefined || entry.element !== element) {
-    if (registryReferencesElement(registry, element)) return;
+  if (entry?.kind === "metadata") {
+    releaseMetadataClaim(registry, meta.key, entry, owner);
+    return;
+  }
+  if (meta.kind === "title" || meta.kind === "meta") {
     resourceMeta.delete(element);
-    if (removableResourceKind(meta.kind)) removeReleasedResource(element);
+    removeReleasedResource(element);
     return;
   }
 
-  if (entry.count > 0) entry.count -= 1;
-  if (entry.count > 0 || !removableResourceKind(meta.kind)) return;
+  releasePersistentResource(registry, element);
+}
 
-  // Loads, scripts, and styles persist; removal cannot undo their effects.
-  registry.entries.delete(meta.key);
-  resourceMeta.delete(element);
-  removeReleasedResource(element);
+function releasePersistentResource(
+  registry: DocumentResources,
+  element: Element,
+): void {
+  const meta = resourceMeta.get(element);
+  if (meta === undefined) return;
+  const entry = registry.entries.get(meta.key);
+
+  // An element displaced by a rekey collision is untracked. Forget it unless
+  // another key still references it; persistent browser effects stay live.
+  if (entry === undefined || entry.element !== element) {
+    if (registryReferencesElement(registry, element)) return;
+    resourceMeta.delete(element);
+    return;
+  }
+
+  if (entry.kind !== "persistent") {
+    throw new Error("Expected a persistent resource entry.");
+  }
+  if (entry.count > 0) entry.count -= 1;
 }
 
 export function updateHoistedResource(
   element: Element,
   previousProps: Props,
   nextProps: Props,
+  owner: AssetResourceOwner,
 ): Element {
   const type = elementName(element);
   const resource = assetResourceFromHostProps(type, nextProps);
   const meta = resourceMeta.get(element);
   const key = resource === null ? null : assetResourceKey(resource);
+  const registry = currentDocumentResources();
+  if (registry === null) {
+    updateElement(element, previousProps, nextProps);
+    return element;
+  }
+
+  const entry = meta === undefined ? undefined : registry.entries.get(meta.key);
+  if (entry?.kind === "metadata") {
+    if (
+      resource === null ||
+      !isMetadataResource(resource) ||
+      key === meta?.key
+    ) {
+      entry.update(
+        owner,
+        resource !== null && isMetadataResource(resource)
+          ? metadataClaimProps(resource, nextProps)
+          : nextProps,
+      );
+      return entry.element;
+    }
+
+    releaseDocumentResource(element, owner);
+    const candidate = document.createElement(type);
+    updateElement(candidate, {}, nextProps);
+    if (resource.kind === "title") candidate.textContent = resource.value;
+    resourceMeta.set(candidate, {
+      key: assetResourceKey(resource),
+      kind: resource.kind,
+    });
+    return acquireMetadataClaim(
+      registry,
+      resource,
+      nextProps,
+      owner,
+      candidate,
+    );
+  }
 
   if (key === null || meta === undefined || key === meta.key) {
     updateElement(element, previousProps, nextProps);
     return element;
   }
 
-  releaseDocumentResource(element);
+  releaseDocumentResource(element, owner);
 
-  const registry = currentDocumentResources();
-  const entry = registry?.entries.get(key);
+  const nextEntry = registry.entries.get(key);
   const claimed =
-    entry !== undefined && entry.count > 0 ? entry.element : undefined;
+    nextEntry?.kind === "persistent" && nextEntry.count > 0
+      ? nextEntry.element
+      : undefined;
   const next = adoptDocumentResource(type, nextProps) ?? element;
   if (next === element) {
     updateElement(element, previousProps, nextProps);
@@ -167,7 +274,7 @@ export function updateHoistedResource(
   // A shared committed element is key-authoritative; only style a fresh or
   // otherwise unclaimed element.
   if (claimed !== next) updateElement(next, {}, nextProps);
-  return acquireDocumentResource(next);
+  return acquireDocumentResource(next, nextProps, owner);
 }
 
 /**
@@ -206,8 +313,16 @@ export function insertAssetResources(
       // reveal waits for the stylesheet instead of committing a blank
       // payload slot.
       let entry = registry.entries.get(key);
+      if (entry?.kind === "metadata") {
+        throw new Error("Expected a persistent resource entry.");
+      }
       if (entry?.element !== existing) {
-        entry = { count: 1, element: existing, ready: null };
+        entry = {
+          count: 1,
+          element: existing,
+          kind: "persistent",
+          ready: null,
+        };
         registry.entries.set(key, entry);
         resourceMeta.set(existing, { key, kind: asset.kind });
       }
@@ -216,10 +331,11 @@ export function insertAssetResources(
       continue;
     }
 
-    const element = createAssetResourceElement(asset);
-    const entry: DocumentResourceEntry = {
+    const element = createDeliveryResourceElement(asset);
+    const entry: PersistentResourceEntry = {
       count: 1,
       element,
+      kind: "persistent",
       ready: null,
     };
     entry.ready = isCriticalStylesheet(asset)
@@ -270,44 +386,141 @@ function canonicalResources(
 function acquireDeclaredResource(
   registry: DocumentResources,
   resource: FigAssetResource,
+  owner: AssetResourceOwner,
 ): void {
+  if (isMetadataResource(resource)) {
+    acquireMetadataClaim(
+      registry,
+      resource,
+      metadataResourceProps(resource),
+      owner,
+    );
+    return;
+  }
+
   const key = assetResourceKey(resource);
-  const tracked = registry.entries.get(key)?.element;
+  const entry = registry.entries.get(key);
+  if (entry?.kind === "metadata") {
+    throw new Error("Expected a persistent resource entry.");
+  }
+  const tracked = entry?.element;
   const element =
     tracked ??
     findDocumentResource(registry, key) ??
-    createAssetResourceElement(resource);
+    createDeliveryResourceElement(resource);
 
   if (tracked === undefined) {
-    registry.entries.set(key, { count: 0, element, ready: null });
+    registry.entries.set(key, {
+      count: 0,
+      element,
+      kind: "persistent",
+      ready: null,
+    });
     resourceMeta.set(element, { key, kind: resource.kind });
   }
 
-  if (resource.kind === "title" || resource.kind === "meta") {
-    applyMetadataResource(element, resource);
-  }
-  acquireDocumentResource(element);
+  acquirePersistentResource(registry, element);
 }
 
 function updateDeclaredMetadata(
   registry: DocumentResources,
   key: string,
-  resource: FigAssetResource & { kind: "title" | "meta" },
+  resource: MetadataResource,
+  owner: AssetResourceOwner,
 ): void {
   const entry = registry.entries.get(key);
   if (entry === undefined) {
-    acquireDeclaredResource(registry, resource);
+    acquireDeclaredResource(registry, resource, owner);
     return;
   }
-  applyMetadataResource(entry.element, resource);
+  if (entry.kind !== "metadata") {
+    throw new Error("Expected a metadata resource entry.");
+  }
+  entry.update(owner, metadataResourceProps(resource));
 }
 
 function releaseDeclaredResource(
   registry: DocumentResources,
   key: string,
+  owner: AssetResourceOwner,
 ): void {
   const entry = registry.entries.get(key);
-  if (entry !== undefined) releaseDocumentResource(entry.element);
+  if (entry === undefined) return;
+  if (entry.kind === "metadata") {
+    releaseMetadataClaim(registry, key, entry, owner);
+  } else {
+    releasePersistentResource(registry, entry.element);
+  }
+}
+
+function acquireMetadataClaim(
+  registry: DocumentResources,
+  resource: MetadataResource,
+  props: Props,
+  owner: AssetResourceOwner,
+  candidate?: Element,
+): Element {
+  const key = assetResourceKey(resource);
+  const claimProps = metadataClaimProps(resource, props);
+  let entry = registry.entries.get(key);
+
+  if (entry?.kind === "persistent") {
+    throw new Error("Expected a metadata resource entry.");
+  }
+
+  if (entry === undefined) {
+    const element =
+      findDocumentResource(registry, key) ??
+      candidate ??
+      document.createElement(resource.kind);
+    entry = new MetadataClaims(element, resource.kind, owner, claimProps);
+    registry.entries.set(key, entry);
+    resourceMeta.set(element, { key, kind: resource.kind });
+  } else {
+    entry.acquire(owner, claimProps);
+  }
+
+  return attachDocumentResource(registry, entry.element);
+}
+
+function releaseMetadataClaim(
+  registry: DocumentResources,
+  key: string,
+  entry: MetadataClaims,
+  owner: AssetResourceOwner,
+): void {
+  if (entry.release(owner) === "retained") return;
+  registry.entries.delete(key);
+  resourceMeta.delete(entry.element);
+  removeReleasedResource(entry.element);
+}
+
+function metadataResourceProps(resource: MetadataResource): Props {
+  if (resource.kind === "title") return { children: resource.value };
+
+  return {
+    charset: resource.charset,
+    content: resource.content,
+    "data-fig-resource-key": resource.key,
+    "http-equiv": resource["http-equiv"],
+    name: resource.name,
+    property: resource.property,
+  };
+}
+
+function metadataClaimProps(resource: MetadataResource, props: Props): Props {
+  // The resource parser has already read promise-valued title children. Store
+  // that resolved value so applying a claim cannot overwrite it with empty
+  // text by inspecting the original thenable again during commit.
+  return resource.kind === "title"
+    ? { ...props, children: resource.value }
+    : props;
+}
+
+function isMetadataResource(
+  resource: FigAssetResource,
+): resource is MetadataResource {
+  return resource.kind === "title" || resource.kind === "meta";
 }
 
 function attachDocumentResource(
@@ -382,7 +595,7 @@ function gateExistingStylesheet(
   registry: DocumentResources,
   resource: FigAssetResource,
   key: string,
-  entry: DocumentResourceEntry,
+  entry: PersistentResourceEntry,
 ): Promise<void> | null {
   if (!isCriticalStylesheet(resource)) return null;
   if (entry.ready !== null) return entry.ready;
@@ -404,10 +617,6 @@ function resourceFromElement(element: Element): FigAssetResource | null {
 function removeReleasedResource(element: Element): void {
   detachSubtree(element);
   element.parentNode?.removeChild(element);
-}
-
-function removableResourceKind(kind: FigAssetResource["kind"]): boolean {
-  return kind === "title" || kind === "meta";
 }
 
 function stylesheetPrecedence(element: Element): string | null {
@@ -464,13 +673,7 @@ function whenResourceSettled(element: Element): Promise<void> {
   });
 }
 
-function createAssetResourceElement(resource: FigAssetResource): Element {
-  if (resource.kind === "title" || resource.kind === "meta") {
-    const element = document.createElement(resource.kind);
-    applyMetadataResource(element, resource);
-    return element;
-  }
-
+function createDeliveryResourceElement(resource: FigAssetResource): Element {
   const element = document.createElement(
     resource.kind === "script" ? "script" : "link",
   );
@@ -478,36 +681,4 @@ function createAssetResourceElement(resource: FigAssetResource): Element {
     element.setAttribute(name, value === true ? "" : value);
   }
   return element;
-}
-
-function applyMetadataResource(
-  element: Element,
-  resource: FigAssetResource & { kind: "title" | "meta" },
-): void {
-  if (resource.kind === "title") {
-    element.textContent = resource.value;
-    return;
-  }
-
-  const names = [
-    "charset",
-    "name",
-    "property",
-    "http-equiv",
-    "content",
-    "data-fig-resource-key",
-  ];
-  for (const name of names) element.removeAttribute(name);
-
-  const attributes = [
-    ["charset", resource.charset],
-    ["name", resource.name],
-    ["property", resource.property],
-    ["http-equiv", resource["http-equiv"]],
-    ["content", resource.content],
-    ["data-fig-resource-key", resource.key],
-  ] as const;
-  for (const [name, value] of attributes) {
-    if (value !== undefined) element.setAttribute(name, value);
-  }
 }

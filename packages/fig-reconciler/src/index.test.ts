@@ -889,10 +889,12 @@ describe("reconciler", () => {
 
   it("commits declarative asset ownership through the host lifecycle", () => {
     const changes: Array<readonly [unknown, unknown]> = [];
+    const owners: object[] = [];
     const { createRoot, flushSync } = createRenderer({
       ...host,
-      commitAssetResources(previous, next) {
+      commitAssetResources(previous, next, owner) {
         changes.push([previous, next]);
+        owners.push(owner);
       },
     });
     const container = new TestElement("root");
@@ -925,6 +927,33 @@ describe("reconciler", () => {
       [first, second],
       [second, null],
     ]);
+    expect(owners[1]).toBe(owners[0]);
+    expect(owners[2]).toBe(owners[0]);
+  });
+
+  it("gives sibling asset owners distinct stable identities", () => {
+    const acquisitions: object[] = [];
+    const releases: object[] = [];
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      commitAssetResources(previous, next, owner) {
+        if (previous === null) acquisitions.push(owner);
+        if (next === null) releases.push(owner);
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() =>
+      root.render(
+        createElement("main", null, assets(title("One")), assets(title("Two"))),
+      ),
+    );
+    flushSync(() => root.render(null));
+
+    expect(acquisitions).toHaveLength(2);
+    expect(acquisitions[1]).not.toBe(acquisitions[0]);
+    expect(new Set(releases)).toEqual(new Set(acquisitions));
   });
 
   it("does not acquire assets from a discarded suspended render", async () => {
@@ -1139,6 +1168,52 @@ describe("reconciler", () => {
     );
 
     expect(resolveHoistedInstance).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets the hoisted host own canonical text and preserves its owner", () => {
+    const owners: object[] = [];
+    let genericTextWrites = 0;
+    let hoistedUpdates = 0;
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      finalizeInitialInstance(instance, props) {
+        instance.textContent = String(props.children ?? "");
+      },
+      setTextContent(instance, text) {
+        genericTextWrites += 1;
+        instance.textContent = text;
+      },
+      resolveHoistedInstance(type) {
+        return type === "asset" ? new TestElement(type) : null;
+      },
+      commitHoistedInstance(instance, _props, owner) {
+        owners.push(owner);
+        return instance;
+      },
+      updateHoistedInstance(instance, _previousProps, nextProps, owner) {
+        owners.push(owner);
+        hoistedUpdates += 1;
+        instance.textContent = String(nextProps.children ?? "");
+        return instance;
+      },
+      removeHoistedInstance(_instance, owner) {
+        owners.push(owner);
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    flushSync(() => root.render(createElement("asset", null, "One")));
+    flushSync(() => root.render(createElement("asset", null, "Two")));
+    flushSync(() => root.render(null));
+
+    expect(hoistedUpdates).toBe(1);
+    // Initial detached construction uses the generic seam; the committed
+    // shared instance's update is entirely host-owned.
+    expect(genericTextWrites).toBe(1);
+    expect(owners).toHaveLength(3);
+    expect(owners[1]).toBe(owners[0]);
+    expect(owners[2]).toBe(owners[0]);
   });
 
   it("coalesces adjacent text children into one host text node", () => {
