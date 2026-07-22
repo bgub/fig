@@ -22,8 +22,10 @@ import {
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
 import { describe, expect, it } from "vitest";
+import { renderToStream } from "./index.ts";
 import { renderToPayloadStream } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
+import { readStream } from "./test-utils.ts";
 
 // Render → decode round trips: the decoder's own row-level semantics are
 // unit-tested in @bgub/fig (packages/fig/src/payload.test.ts); these tests
@@ -184,6 +186,54 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     const button = rendered.props.children as FigElement;
     expect(button.type).toBe("button");
     expect(button.props.children).toBe("island:count");
+  });
+
+  it("delivers reference assets before the segment while the module still loads", async () => {
+    const island = deferred<ElementType<{ label: string }>>();
+    const Island = clientReference<{ label: string }>({
+      id: "src/Island.tsx#Island",
+    });
+
+    function Page() {
+      return createElement(
+        "section",
+        { "data-island-page": true },
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "island pending") },
+          createElement(Island, { label: "count" }),
+        ),
+      );
+    }
+
+    const { decode, done } = decodeRender(createElement(Page, null), {
+      render: {
+        clientReferenceAssets: () => [
+          stylesheet("/island.css", { precedence: "isomorphic" }),
+        ],
+      },
+      resolveClientReference: () => island.promise,
+      retainAssets: true,
+    });
+
+    const root = (await decode) as FigNode;
+    const result = renderToStream(root);
+    // A cold module load: the island's chunk settles only after the shell
+    // has flushed. Its stylesheet must not wait for the late fill.
+    await result.shellReady;
+    island.resolve((props: { label: string }) =>
+      createElement("button", null, `island:${props.label}`),
+    );
+    const html = await readStream(result.stream);
+    await done;
+
+    const link = html.indexOf('href="/island.css"');
+    const hole = html.indexOf("island pending");
+    const fill = html.indexOf("island:count");
+    expect(link).toBeGreaterThanOrEqual(0);
+    // The stylesheet ships with the shell, not with the island's late fill.
+    expect(link).toBeLessThan(hole);
+    expect(fill).toBeGreaterThan(hole);
   });
 
   it("hydrates data read by server components through the capability", async () => {

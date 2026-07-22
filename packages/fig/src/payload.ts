@@ -91,13 +91,6 @@ export function createPayloadClientReferenceResolver(
 const elementGates = new WeakMap<Props, Promise<void>>();
 const elementAssets = new WeakMap<Props, readonly FigAssetResource[]>();
 
-function readElementGate(props: Props): void {
-  const gate = elementGates.get(props);
-  // Suspends while pending; gates never reject (prepareAssets results
-  // settle through noop handlers).
-  if (gate !== undefined) readPromise(gate);
-}
-
 export type PayloadDecodeCompletion =
   | { status: "aborted" }
   | { status: "complete" }
@@ -721,35 +714,59 @@ function PayloadStreamHole(props: {
   return props.decode.readChunkForRender(props.id) as FigNode;
 }
 
-// The one client-reference wrapper: reads the per-element reveal gate
-// (elementGates), resolves the component, renders it. Owned by a stateful
-// resolver it is reused across decodes, so island identity survives
-// re-decodes whether a given decode arrives gated or not; otherwise it
-// lives for a single decode. Asynchronous resolution starts at
-// row arrival — overlapping the rest of the stream instead of serializing
-// behind it — and latches its type; thenable tracking lets a resolution
-// settled before its first render read synchronously instead of suspending
-// for a retry beat.
+// The one client-reference wrapper: attaches the per-element asset
+// declarations, reads the per-element reveal gate (elementGates), resolves
+// the component, renders it. Owned by a stateful resolver it is reused
+// across decodes, so island identity survives re-decodes whether a given
+// decode arrives gated or not; otherwise it lives for a single decode.
+// Asynchronous resolution starts at row arrival — overlapping the rest of
+// the stream instead of serializing behind it — and latches its type;
+// thenable tracking lets a resolution settled before its first render read
+// synchronously instead of suspending for a retry beat.
+//
+// Assets attach above the suspension points: the outer component always
+// completes, so a renderer delivers the declarations with the segment that
+// contains the reference even while the module load or reveal gate still
+// suspends the content below. The reveal gate and the reference's own
+// props ride explicit content props — createElement clones props objects,
+// so the per-element WeakMaps cannot be read through the inner element.
 function clientReferenceWrapper(
   resolved: ElementType<any> | PromiseLike<ElementType<any>>,
   referenceId: string,
 ): ElementType<any> {
+  let render: (props: Props) => FigNode;
   if (!isThenable(resolved)) {
-    return function PayloadClientComponent(props: Props): FigNode {
-      readElementGate(props);
-      return attachElementAssets(props, createElement(resolved, props));
+    render = (props) => createElement(resolved, props);
+  } else {
+    const pending = Promise.resolve(resolved);
+    trackThenable(pending);
+    let type: ElementType<any> | null = null;
+    render = (props) => {
+      if (type === null) {
+        type = clientReferenceType(readPromise(pending), referenceId);
+      }
+      return createElement(type, props);
     };
   }
 
-  const pending = Promise.resolve(resolved);
-  trackThenable(pending);
-  let type: ElementType<any> | null = null;
+  function PayloadClientContent(content: {
+    gate?: Promise<void>;
+    props: Props;
+  }): FigNode {
+    // Suspends while pending; gates never reject (prepareAssets results
+    // settle through noop handlers).
+    if (content.gate !== undefined) readPromise(content.gate);
+    return render(content.props);
+  }
+
   return function PayloadClientComponent(props: Props): FigNode {
-    readElementGate(props);
-    if (type === null) {
-      type = clientReferenceType(readPromise(pending), referenceId);
-    }
-    return attachElementAssets(props, createElement(type, props));
+    return attachElementAssets(
+      props,
+      createElement(PayloadClientContent, {
+        gate: elementGates.get(props),
+        props,
+      }),
+    );
   };
 }
 
