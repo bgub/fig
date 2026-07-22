@@ -526,6 +526,38 @@ describe("@bgub/fig-dom", () => {
     expect(head.childNodes).toHaveLength(0);
   });
 
+  it("does not let a discarded metadata render mutate the live winner", () => {
+    const { head, root } = documentResourceRoot();
+    const pending = deferred<string>();
+
+    function Reader() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          null,
+          createElement("title", null, "Current"),
+          createElement(
+            Suspense,
+            { fallback: "Loading" },
+            createElement(
+              "div",
+              null,
+              createElement("title", null, "Pending"),
+              createElement(Reader, null),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).textContent).toBe("Current");
+  });
+
   it("dedupes a resource rekeyed into an existing identity", () => {
     const { head, root } = documentResourceRoot();
     const app = (firstName: string) =>
@@ -548,7 +580,7 @@ describe("@bgub/fig-dom", () => {
     expect(head.childNodes).toHaveLength(0);
   });
 
-  it("keeps the shared title updatable after another owner unmounts", () => {
+  it("restores the latest value from the previous title owner", () => {
     const { head, root } = documentResourceRoot();
     const app = (first: string, modal: boolean) =>
       createElement(
@@ -562,11 +594,73 @@ describe("@bgub/fig-dom", () => {
     expect(head.childNodes).toHaveLength(1);
     expect((head.childNodes[0] as FakeElement).textContent).toBe("Modal");
 
-    flushSync(() => root.render(app("Home", false)));
+    // Updating a shadowed owner changes its fallback without stealing the
+    // winner's priority.
+    flushSync(() => root.render(app("Dashboard", true)));
+    expect((head.childNodes[0] as FakeElement).textContent).toBe("Modal");
+
     flushSync(() => root.render(app("Dashboard", false)));
 
     expect(head.childNodes).toHaveLength(1);
     expect((head.childNodes[0] as FakeElement).textContent).toBe("Dashboard");
+  });
+
+  it("restores the previous metadata claim after the winner unmounts", () => {
+    const { head, root } = documentResourceRoot();
+    const description = (content: string, source: string) =>
+      createElement("meta", {
+        content,
+        "data-source": source,
+        name: "description",
+      });
+    const app = (base: string, overlay: boolean) =>
+      createElement(
+        "main",
+        null,
+        description(base, "base"),
+        overlay ? description("Overlay", "overlay") : null,
+      );
+
+    flushSync(() => root.render(app("Base", true)));
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).getAttribute("content")).toBe(
+      "Overlay",
+    );
+
+    flushSync(() => root.render(app("Updated base", true)));
+    expect((head.childNodes[0] as FakeElement).getAttribute("content")).toBe(
+      "Overlay",
+    );
+
+    flushSync(() => root.render(app("Updated base", false)));
+    expect(head.childNodes).toHaveLength(1);
+    expect((head.childNodes[0] as FakeElement).getAttribute("content")).toBe(
+      "Updated base",
+    );
+    expect(
+      (head.childNodes[0] as FakeElement).getAttribute("data-source"),
+    ).toBe("base");
+  });
+
+  it("applies claim precedence to declarative metadata owners", () => {
+    const { head, root } = documentResourceRoot();
+    const app = (base: string, overlay: boolean) =>
+      createElement(
+        "main",
+        null,
+        assets(title(base)),
+        overlay ? assets(title("Overlay")) : null,
+      );
+
+    flushSync(() => root.render(app("Base", true)));
+    expect(head.textContent).toBe("Overlay");
+
+    flushSync(() => root.render(app("Updated base", true)));
+    expect(head.textContent).toBe("Overlay");
+
+    flushSync(() => root.render(app("Updated base", false)));
+    expect(head.childNodes).toHaveLength(1);
+    expect(head.textContent).toBe("Updated base");
   });
 
   it("keeps stylesheets in the head after their owner unmounts", () => {

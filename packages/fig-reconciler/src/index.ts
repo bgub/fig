@@ -279,6 +279,13 @@ export interface ViewTransitionHostConfig<Container, Instance> {
   suspend?(this: void, container: Container, onFinished: () => void): boolean;
 }
 
+declare const AssetResourceOwnerBrand: unique symbol;
+
+/** Stable opaque identity for one fiber's asset-resource ownership. */
+export interface AssetResourceOwner {
+  readonly [AssetResourceOwnerBrand]: true;
+}
+
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
     type: string,
@@ -332,8 +339,12 @@ export interface HostConfig<Container, Instance, TextInstance> {
   // May return a different instance when the fiber's identity already
   // resolves to a live shared instance (e.g. one inserted while this render
   // was suspended); the fiber adopts the returned instance.
-  commitHoistedInstance?(instance: Instance): Instance | void;
-  removeHoistedInstance?(instance: Instance): void;
+  commitHoistedInstance?(
+    instance: Instance,
+    props: Props,
+    owner: AssetResourceOwner,
+  ): Instance | void;
+  removeHoistedInstance?(instance: Instance, owner: AssetResourceOwner): void;
   // Hoisted instances are shared by identity (key), so an update that
   // changes the identity must not mutate the shared instance in place; the
   // host releases the old identity and returns the instance to use, which
@@ -342,6 +353,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
     instance: Instance,
     previousProps: Props,
     nextProps: Props,
+    owner: AssetResourceOwner,
   ): Instance;
   // Assets fibers are transparent to host placement. This commit-time diff is
   // their complete lifecycle: null means the owner did not exist on that side
@@ -349,6 +361,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitAssetResources?(
     previous: FigAssetResourceList | null,
     next: FigAssetResourceList | null,
+    owner: AssetResourceOwner,
   ): void;
   shouldCommitUpdate?(
     type: string,
@@ -709,8 +722,10 @@ interface Fiber<Container, Instance, TextInstance> {
   contextDependencies: ContextDependency[] | null;
   contextSubtreeDependencies: FigContext<unknown>[] | null;
   dataDependenciesDirty: boolean;
-  // The fiber tag discriminates this union. Keep this cold slot after the
-  // topology and work fields: changing their object offsets slows hot paths.
+  // Lazily allocated only for hoisted hosts and Assets fibers. Keep cold
+  // lifecycle state after the topology and work fields.
+  assetResourceOwner: AssetResourceOwner | null;
+  // The fiber tag discriminates this union.
   // Activity state is shared by both generations so stale return chains see
   // the committed visibility state.
   boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
@@ -5059,27 +5074,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     const previousProps = previousCommittedProps(node);
     const instance = node.stateNode as Instance;
     const next =
-      hoistedHost.updateHoistedInstance(instance, previousProps, node.props) ??
-      instance;
+      hoistedHost.updateHoistedInstance(
+        instance,
+        previousProps,
+        node.props,
+        assetResourceOwner(node),
+      ) ?? instance;
 
-    if (next !== instance) {
-      adoptSwappedHoistedInstance(node, next);
-      return;
-    }
-
-    if ((node.flags & TextContentFlag) !== 0) {
-      commitHostTextContent(node, previousProps);
-    }
+    if (next !== instance) adoptSwappedHoistedInstance(node, next);
   }
 
-  // The swapped-in instance starts fresh; adopt it on both alternates and
-  // re-apply the fiber's text so updates target the live node.
+  // The host returns a fully updated shared instance. Adopt it on both
+  // alternates so subsequent updates and release target the live node.
   function adoptSwappedHoistedInstance(node: F, next: Instance): void {
     node.stateNode = next;
     if (node.alternate !== null) node.alternate.stateNode = next;
-
-    const text = hostTextContent(node.props.children);
-    if (text !== null) host.setTextContent?.(next, text);
   }
 
   function commitHydratedSuspenseBoundary(node: F): void {
@@ -5139,7 +5148,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   function acquireHoistedInstance(node: F): void {
     const hoistedHost = requireHoistedAssetHostConfig();
     const instance = node.stateNode as Instance;
-    const resolved = hoistedHost.commitHoistedInstance(instance) ?? instance;
+    const resolved =
+      hoistedHost.commitHoistedInstance(
+        instance,
+        node.props,
+        assetResourceOwner(node),
+      ) ?? instance;
     if (resolved === instance) return;
 
     // The identity resolved to a shared live instance (e.g. inserted while
@@ -5260,6 +5274,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           (cursor.committedProps?.assets as FigAssetResourceList | undefined) ??
             null,
           cursor.props.assets as FigAssetResourceList,
+          assetResourceOwner(cursor),
         ),
       );
       cursor.committedProps = cursor.props;
@@ -5367,6 +5382,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (node.committedProps !== null) {
         requireHoistedAssetHostConfig().removeHoistedInstance(
           node.stateNode as Instance,
+          assetResourceOwner(node),
         );
       }
       return;
@@ -5404,6 +5420,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (child.committedProps !== null && child.stateNode !== null) {
           requireHoistedAssetHostConfig().removeHoistedInstance(
             child.stateNode as Instance,
+            assetResourceOwner(child),
           );
         }
         continue;
@@ -5424,6 +5441,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     host.commitAssetResources(
       node.committedProps.assets as FigAssetResourceList,
       null,
+      assetResourceOwner(node),
     );
     node.committedProps = null;
     if (node.alternate !== null) node.alternate.committedProps = null;
@@ -5969,6 +5987,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.props = props;
     next.memoizedProps = current.memoizedProps;
     next.committedProps = current.committedProps;
+    next.assetResourceOwner = current.assetResourceOwner;
     next.memoizedState = current.memoizedState;
     next.stateNode = current.stateNode;
     next.return = current.return;
@@ -6079,9 +6098,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       contextDependencies: null,
       contextSubtreeDependencies: null,
       dataDependenciesDirty: false,
+      assetResourceOwner: null,
       boundaryState: null,
       hiddenState: null,
     };
+  }
+
+  function assetResourceOwner(node: F): AssetResourceOwner {
+    return (node.assetResourceOwner ??= {} as AssetResourceOwner);
   }
 
   function rootOf(node: F): R {

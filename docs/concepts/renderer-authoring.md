@@ -10,6 +10,10 @@ A deliberate cleanup of react-reconciler's config, not a clone. The required cor
 
 `resolveHoistedInstance` is the hoisted-asset classification seam and factory in one operation. Returning `null` leaves the fiber on the ordinary hydrate/create path; returning an instance fixes that fiber's placement as hoisted for its lifetime, bypasses the hydration cursor, and activates the commit/remove/update hoisted lifecycle. The reconciler stores the resolved placement as static fiber state rather than reinterpreting host props during later traversals.
 
+Each committed hoisted host and `Assets` fiber receives an opaque `AssetResourceOwner`. It is stable across updates and moves, distinct per live fiber, and appears on acquire/update/release callbacks so a renderer can maintain claims rather than only reference counts. `commitAssetResources(previous, next, owner)` provides the equivalent lifecycle for descriptor lists. Owners are created lazily and never exposed to applications.
+
+The hoisted host owns the complete update of the canonical instance, including direct text content. `updateHoistedInstance(instance, previousProps, nextProps, owner)` may return a different shared instance, but either result must already represent the renderer's chosen canonical state. The reconciler adopts a returned instance on both fiber generations and does not apply a second generic text update, since an individual fiber's text may belong to a shadowed claim rather than the live winner.
+
 Hydration is split into capability groups:
 
 - General host adoption requires `getFirstHydratableChild`, `getNextHydratableSibling`, `canHydrateInstance`, `canHydrateTextInstance`, and `clearContainer`; `commitHydratedInstance` is optional within that group.
