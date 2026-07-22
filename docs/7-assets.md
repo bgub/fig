@@ -57,6 +57,7 @@ The reveal gate is the part you've already seen from the other side: doc 4's inl
 
 - `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode. There is no automatic warning when no handler is configured. Prerender avoids the class entirely by sealing late.
 - The HTML server registry throws `AssetResourceConflictError` for conflicting definitions; payload and DOM insertion dedupe by key as described above.
+- A raw hoisted host element cannot update into a non-asset element. Development throws and directs the author to replace it with a different Fig element key. Production ignores the update; for title/meta, that preserves the owner's last valid claim.
 
 ---
 

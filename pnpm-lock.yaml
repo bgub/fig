@@ -20,6 +20,9 @@ importers:
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:packages/fig-server
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
       '@size-limit/preset-small-lib':
         specifier: ^12.1.0
         version: 12.1.0(size-limit@12.1.0(jiti@2.7.0))

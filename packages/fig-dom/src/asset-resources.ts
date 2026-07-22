@@ -16,6 +16,10 @@ import { MetadataClaims } from "./metadata-claims.ts";
 import { updateElement } from "./props.ts";
 import { elementName, isElementNode } from "./tree.ts";
 
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
+
 interface PersistentResourceEntry {
   count: number;
   element: Element;
@@ -213,7 +217,23 @@ export function updateHoistedResource(
   const type = elementName(element);
   const resource = assetResourceFromHostProps(type, nextProps);
   const meta = resourceMeta.get(element);
-  const key = resource === null ? null : assetResourceKey(resource);
+
+  // Hoisted placement is static fiber state. Never let props that stop
+  // classifying mutate either a shared delivery asset or a metadata claim.
+  if (resource === null) {
+    if (__DEV__) {
+      const previous = assetResourceFromHostProps(type, previousProps);
+      const identity =
+        meta?.key ?? (previous === null ? null : assetResourceKey(previous));
+      const label = identity === null ? "" : ` (asset "${identity}")`;
+      throw new Error(
+        `A hoisted <${type}>${label} cannot update into an ordinary in-tree element. Keep its asset classification stable or replace it with a different Fig element key.`,
+      );
+    }
+    return element;
+  }
+
+  const key = assetResourceKey(resource);
   const registry = currentDocumentResources();
   if (registry === null) {
     updateElement(element, previousProps, nextProps);
@@ -222,14 +242,10 @@ export function updateHoistedResource(
 
   const entry = meta === undefined ? undefined : registry.entries.get(meta.key);
   if (entry?.kind === "metadata") {
-    if (
-      resource === null ||
-      !isMetadataResource(resource) ||
-      key === meta?.key
-    ) {
+    if (!isMetadataResource(resource) || key === meta?.key) {
       entry.update(
         owner,
-        resource !== null && isMetadataResource(resource)
+        isMetadataResource(resource)
           ? metadataClaimProps(resource, nextProps)
           : nextProps,
       );
@@ -253,7 +269,7 @@ export function updateHoistedResource(
     );
   }
 
-  if (key === null || meta === undefined || key === meta.key) {
+  if (meta === undefined || key === meta.key) {
     updateElement(element, previousProps, nextProps);
     return element;
   }

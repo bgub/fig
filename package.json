@@ -59,6 +59,7 @@
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
+    "@playwright/test": "^1.61.1",
     "@size-limit/preset-small-lib": "^12.1.0",
     "@tsdown/css": "0.22.7",
     "@types/node": "^20.19.0",
