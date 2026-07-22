@@ -6105,7 +6105,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function assetResourceOwner(node: F): AssetResourceOwner {
-    return (node.assetResourceOwner ??= {} as AssetResourceOwner);
+    // Lifecycle walks can retain either fiber generation. Normalize the
+    // identity on every access so acquisition and release cannot disagree.
+    const owner =
+      node.assetResourceOwner ??
+      node.alternate?.assetResourceOwner ??
+      ({} as AssetResourceOwner);
+    node.assetResourceOwner = owner;
+    if (node.alternate !== null) node.alternate.assetResourceOwner = owner;
+    return owner;
   }
 
   function rootOf(node: F): R {

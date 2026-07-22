@@ -227,7 +227,12 @@ export function updateHoistedResource(
       !isMetadataResource(resource) ||
       key === meta?.key
     ) {
-      entry.update(owner, nextProps);
+      entry.update(
+        owner,
+        resource !== null && isMetadataResource(resource)
+          ? metadataClaimProps(resource, nextProps)
+          : nextProps,
+      );
       return entry.element;
     }
 
@@ -456,6 +461,7 @@ function acquireMetadataClaim(
   candidate?: Element,
 ): Element {
   const key = assetResourceKey(resource);
+  const claimProps = metadataClaimProps(resource, props);
   let entry = registry.entries.get(key);
 
   if (entry?.kind === "persistent") {
@@ -467,11 +473,11 @@ function acquireMetadataClaim(
       findDocumentResource(registry, key) ??
       candidate ??
       document.createElement(resource.kind);
-    entry = new MetadataClaims(element, resource.kind, owner, props);
+    entry = new MetadataClaims(element, resource.kind, owner, claimProps);
     registry.entries.set(key, entry);
     resourceMeta.set(element, { key, kind: resource.kind });
   } else {
-    entry.acquire(owner, props);
+    entry.acquire(owner, claimProps);
   }
 
   return attachDocumentResource(registry, entry.element);
@@ -500,6 +506,15 @@ function metadataResourceProps(resource: MetadataResource): Props {
     name: resource.name,
     property: resource.property,
   };
+}
+
+function metadataClaimProps(resource: MetadataResource, props: Props): Props {
+  // The resource parser has already read promise-valued title children. Store
+  // that resolved value so applying a claim cannot overwrite it with empty
+  // text by inspecting the original thenable again during commit.
+  return resource.kind === "title"
+    ? { ...props, children: resource.value }
+    : props;
 }
 
 function isMetadataResource(

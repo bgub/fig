@@ -2,6 +2,10 @@ import type { Props } from "@bgub/fig";
 import type { AssetResourceOwner } from "@bgub/fig-reconciler";
 import { updateElement } from "./props.ts";
 
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
+
 export class MetadataClaims {
   readonly kind = "metadata" as const;
   private readonly byOwner = new Map<AssetResourceOwner, Props>();
@@ -35,7 +39,10 @@ export class MetadataClaims {
   }
 
   release(owner: AssetResourceOwner): "empty" | "retained" {
-    if (!this.byOwner.delete(owner)) return "retained";
+    if (!this.byOwner.delete(owner)) {
+      if (__DEV__) throw new Error("Expected a live metadata claim.");
+      return "retained";
+    }
     if (this.byOwner.size === 0) return "empty";
     if (this.winner !== owner) return "retained";
 

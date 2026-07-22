@@ -558,6 +558,25 @@ describe("@bgub/fig-dom", () => {
     expect((head.childNodes[0] as FakeElement).textContent).toBe("Current");
   });
 
+  it("renders promise-valued text in a hoisted title", async () => {
+    const { head, root } = documentResourceRoot();
+    const pending = deferred<string>();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: null },
+          createElement("title", null, pending.promise),
+        ),
+      ),
+    );
+    pending.resolve("Async title");
+    await waitForHostTurns();
+
+    expect(head.textContent).toBe("Async title");
+  });
+
   it("dedupes a resource rekeyed into an existing identity", () => {
     const { head, root } = documentResourceRoot();
     const app = (firstName: string) =>
