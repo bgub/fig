@@ -20,7 +20,7 @@ export async function runWithStartContext<T>(
 }
 
 async function createStorage(): Promise<StartStorage> {
-  if (typeof document === "undefined") {
+  if (typeof process !== "undefined" && process.release?.name === "node") {
     const { AsyncLocalStorage } = await import("node:async_hooks");
     return new AsyncLocalStorage();
   }

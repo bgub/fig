@@ -65,6 +65,8 @@
   },
   "sideEffects": false,
   "dependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
     "@bgub/fig-vite": "workspace:*",
     "@tanstack/router-core": "1.171.15",
     "@tanstack/start-client-core": "1.170.14",

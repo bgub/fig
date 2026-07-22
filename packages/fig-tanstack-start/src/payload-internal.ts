@@ -18,12 +18,7 @@ interface PayloadDocumentEntry {
 
 interface RegisteredPayloadStream {
   contentType: string;
-  key: string;
   stream: ReadableStream<Uint8Array>;
-}
-
-interface RequestPayloadState {
-  entries: Map<string, RegisteredPayloadStream>;
 }
 
 interface PayloadCollector {
@@ -31,7 +26,10 @@ interface PayloadCollector {
   result: Promise<PayloadDocumentEntry>;
 }
 
-const requestPayloads = new WeakMap<object, RequestPayloadState>();
+const requestPayloads = new WeakMap<
+  object,
+  Map<string, RegisteredPayloadStream>
+>();
 const consumedPayloads = new WeakSet<Element>();
 
 export function initialPayloadResponse(
@@ -60,17 +58,16 @@ export function registerPayloadResponse(
   response: Response,
 ): Response {
   if (!response.ok || response.body === null) return response;
-  const state = currentRequestPayloadState(true);
-  if (state === undefined) return response;
+  const payloads = currentRequestPayloads(true);
+  if (payloads === undefined) return response;
 
   const canonicalKey = normalizeDataResourceKey(key);
-  if (state.entries.has(canonicalKey)) return response;
+  if (payloads.has(canonicalKey)) return response;
 
   const [decodeStream, documentStream] = response.body.tee();
-  state.entries.set(canonicalKey, {
+  payloads.set(canonicalKey, {
     contentType:
       response.headers.get("content-type") ?? jsonPayloadCodec.contentType,
-    key: canonicalKey,
     stream: documentStream,
   });
 
@@ -84,7 +81,7 @@ export function registerPayloadResponse(
 export function serializableStartData(
   entries: readonly FigDataHydrationEntry[],
 ): readonly FigDataHydrationEntry[] {
-  const payloads = currentRequestPayloadState(false)?.entries;
+  const payloads = currentRequestPayloads(false);
   if (payloads === undefined || payloads.size === 0) return entries;
   return entries.filter(
     (entry) => !payloads.has(normalizeDataResourceKey(entry.key)),
@@ -96,9 +93,9 @@ export function injectPayloadDocument(
   nonce: string | undefined,
   ready: PromiseLike<void> = Promise.resolve(),
 ): ReadableStream<Uint8Array> {
-  const payloadState = currentRequestPayloadState(true);
-  if (payloadState === undefined) return html;
-  const { entries: payloadEntries } = payloadState;
+  const requestPayloads = currentRequestPayloads(true);
+  if (requestPayloads === undefined) return html;
+  const registeredPayloads = requestPayloads;
   const collectors = new Map<string, PayloadCollector>();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -107,10 +104,10 @@ export function injectPayloadDocument(
   let htmlReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   function collectRegisteredPayloads(): void {
-    for (const entry of payloadEntries.values()) {
-      if (collectors.has(entry.key)) continue;
-      const collector = collectPayload(entry);
-      collectors.set(entry.key, collector);
+    for (const [key, entry] of registeredPayloads) {
+      if (collectors.has(key)) continue;
+      const collector = collectPayload(key, entry);
+      collectors.set(key, collector);
       void collector.result.catch(() => undefined);
     }
   }
@@ -202,7 +199,10 @@ export function injectPayloadDocument(
   });
 }
 
-function collectPayload(entry: RegisteredPayloadStream): PayloadCollector {
+function collectPayload(
+  key: string,
+  entry: RegisteredPayloadStream,
+): PayloadCollector {
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   const result = (async (): Promise<PayloadDocumentEntry> => {
     reader = entry.stream.getReader();
@@ -214,7 +214,7 @@ function collectPayload(entry: RegisteredPayloadStream): PayloadCollector {
       if (next.done) {
         return {
           contentType: entry.contentType,
-          key: entry.key,
+          key,
           payload: chunks.join(""),
         };
       }
@@ -229,9 +229,9 @@ function collectPayload(entry: RegisteredPayloadStream): PayloadCollector {
   };
 }
 
-function currentRequestPayloadState(
+function currentRequestPayloads(
   create: boolean,
-): RequestPayloadState | undefined {
+): Map<string, RegisteredPayloadStream> | undefined {
   const context = getStartContext({ throwIfNotFound: false });
   if (
     (typeof context !== "object" && typeof context !== "function") ||
@@ -240,12 +240,12 @@ function currentRequestPayloadState(
     return undefined;
   }
 
-  let state = requestPayloads.get(context);
-  if (state === undefined && create) {
-    state = { entries: new Map() };
-    requestPayloads.set(context, state);
+  let payloads = requestPayloads.get(context);
+  if (payloads === undefined && create) {
+    payloads = new Map();
+    requestPayloads.set(context, payloads);
   }
-  return state;
+  return payloads;
 }
 
 function payloadDocumentScripts(

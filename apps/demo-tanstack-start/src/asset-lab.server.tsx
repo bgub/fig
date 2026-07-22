@@ -1,20 +1,20 @@
-import { assets, type FigNode, stylesheet } from "@bgub/fig";
-import styleUrl from "./asset-lab.css?url";
-import { AssetLabIslandReference } from "./payload-reference.ts";
+import type { FigNode } from "@bgub/fig";
+import "./asset-lab.css";
+import { AssetLabIsland } from "./components/AssetLabIsland.tsx";
 
 export function AssetLabPayload(): FigNode {
-  return assets(
-    stylesheet(styleUrl, { precedence: "payload" }),
+  return (
     <section class="asset-lab-root" data-asset-lab>
       <div>
         <h1 class="asset-lab-title">Asset lab</h1>
         <p class="asset-lab-copy">
           This server-only Payload component imports its own stylesheet, then
-          renders a client island with a separate CSS module and SVG asset.
+          renders an isomorphic component with a separate CSS module and SVG
+          asset.
         </p>
       </div>
-      <AssetLabIslandReference />
-    </section>,
+      <AssetLabIsland />
+    </section>
   );
 }
 

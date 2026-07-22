@@ -149,6 +149,10 @@ test("adopts two embedded Payload resources and hydrates the asset island", asyn
   expect(html.indexOf('data-precedence="payload"')).toBeLessThan(
     html.indexOf(assetSegment),
   );
+  expect(html.indexOf('data-precedence="isomorphic"')).toBeLessThan(
+    html.indexOf(assetSegment),
+  );
+  expect(html).toMatch(/href="\/assets\/AssetLabIsland-[^"]+\.css"/);
 
   const errors = collectBrowserErrors(page);
   const serverFunctionRequests: string[] = [];

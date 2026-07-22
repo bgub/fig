@@ -10,7 +10,15 @@ const packagePath =
 
 export default defineConfig({
   resolve: {
-    alias: figSourceResolveAliases(),
+    alias: [
+      {
+        find: /^virtual:fig-tanstack-start\/payload-manifest$/,
+        replacement: workspacePath(
+          "packages/fig-tanstack-start/src/payload-manifest-test-runtime.ts",
+        ),
+      },
+      ...figSourceResolveAliases(),
+    ],
   },
   define: {
     __FIG_DEV__: JSON.stringify(true),

@@ -92,6 +92,10 @@ function packConfigFor(path: string): PackConfig | undefined {
     return {
       entry: libraryEntry,
       dts: true,
+      deps:
+        path === "packages/fig-tanstack-start"
+          ? { neverBundle: [/^virtual:fig-tanstack-start\//] }
+          : undefined,
       // Monorepo dev (FIG_DEV_SOURCE=1) builds the libraries with __DEV__ on so
       // workspace demos that consume these built packages get strict
       // diagnostics and DevTools commit emission. Publishing builds (flag

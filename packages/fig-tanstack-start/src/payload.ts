@@ -7,7 +7,7 @@ import {
   type FigNode,
 } from "@bgub/fig";
 import { payloadDataLoader } from "@bgub/fig-dom";
-import type { ResolveClientReference } from "@bgub/fig/payload";
+import { resolveIsomorphicReference } from "virtual:fig-tanstack-start/payload-manifest";
 import {
   initialPayloadResponse,
   registerPayloadResponse,
@@ -20,7 +20,6 @@ export interface PayloadResourceOptions<TInput> {
     input: TInput,
     context: DataResourceLoadContext,
   ) => Response | PromiseLike<Response>;
-  resolveClientReference?: ResolveClientReference;
 }
 
 /**
@@ -41,7 +40,7 @@ export function payloadResource<TInput>(
         const response = await options.request(input, context);
         return registerPayloadResponse(key, response);
       },
-      resolveClientReference: options.resolveClientReference,
+      resolveClientReference: resolveIsomorphicReference,
       retainAssets: typeof document === "undefined",
     }),
   });

@@ -327,6 +327,12 @@ importers:
 
   packages/fig-tanstack-start:
     dependencies:
+      '@babel/core':
+        specifier: ^8.0.1
+        version: 8.0.1
+      '@babel/preset-typescript':
+        specifier: ^8.0.1
+        version: 8.0.1(@babel/core@8.0.1)
       '@bgub/fig-vite':
         specifier: workspace:*
         version: link:../fig-vite

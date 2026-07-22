@@ -9,10 +9,11 @@ import {
   createSsrStreamResponse,
   transformReadableStreamWithRouter,
 } from "@tanstack/router-core/ssr/server";
-import { defineHandlerCallback } from "@tanstack/start-server-core";
 import type { AnyRouter } from "@tanstack/router-core";
+import { compiledPayloadAssets } from "./payload-assets.ts";
 import { injectPayloadDocument } from "./payload-internal.ts";
 import { requireStartDataStore } from "./store.ts";
+import { compiledIsomorphicReferenceAssets } from "virtual:fig-tanstack-start/payload-manifest";
 
 export interface RenderRouterToStreamOptions {
   request: Request;
@@ -60,13 +61,18 @@ export async function renderRouterToStream({
 
 export function renderPayloadResponse(
   node: FigNode,
-  options: PayloadRenderOptions = {},
+  options: Omit<
+    PayloadRenderOptions,
+    "clientReferenceAssets" | "componentAssets"
+  > = {},
 ): Response {
-  const payload = renderToPayloadStream(node, options);
+  const payload = renderToPayloadStream(node, {
+    ...options,
+    clientReferenceAssets: compiledIsomorphicReferenceAssets,
+    componentAssets: compiledPayloadAssets,
+  });
   void payload.allReady.catch(() => undefined);
   return new Response(payload.stream, {
     headers: { "content-type": payload.contentType },
   });
 }
-
-export const defaultStreamHandler = defineHandlerCallback(renderRouterToStream);

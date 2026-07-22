@@ -79,8 +79,15 @@ export interface PayloadRenderResult {
   stream: ReadableStream<Uint8Array>;
 }
 
+export type PayloadComponent = (
+  props: Props & { children?: FigNode },
+) => FigNode | PromiseLike<FigNode>;
+
 export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
+  componentAssets?: (
+    type: PayloadComponent,
+  ) => FigAssetResourceList | undefined;
   dataPartition?: DataResourceKeyInput;
   /**
    * Encoded bytes the result stream buffers before row flushing pauses until
@@ -113,6 +120,7 @@ type PayloadRequest = {
   cleanupAbortListener(): void;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
+  componentAssets: PayloadRenderOptions["componentAssets"];
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedAssetKeys: Set<string>;
@@ -144,9 +152,7 @@ type TaskValue =
   | { kind: "node"; value: FigNode }
   | { kind: "promise"; value: Thenable };
 
-type Component = (
-  props: Props & { children?: FigNode },
-) => FigNode | Thenable<FigNode>;
+type Component = PayloadComponent;
 
 type RenderFrame = {
   contextValues: ContextValues;
@@ -193,6 +199,7 @@ function createPayloadRequest(
     cleanupAbortListener: () => undefined,
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
+    componentAssets: options.componentAssets,
     controller: null,
     dataStore: createRendererDataStore<object, null>({
       getLane: () => null,
@@ -565,6 +572,12 @@ function serializeFunctionComponent(
   props: Props,
   frame: RenderFrame,
 ): PayloadModel {
+  frame.pendingAssets.push(
+    ...serializeAssetResources(
+      frame.request,
+      frame.request.componentAssets?.(type),
+    ),
+  );
   frame.dispatcher ??= createPayloadDispatcher(frame);
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);

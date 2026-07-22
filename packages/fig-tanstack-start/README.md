@@ -144,40 +144,48 @@ data.invalidateData(userResource, id);
 ## Payload routes
 
 Payload routes keep server-only component trees out of the client bundle while
-using the same Fig data store as ordinary route data. Serve the tree from a raw
-TanStack server-function response:
+using the same Fig data store as ordinary route data. Keep the transport
+private beside the exported resource:
 
 ```tsx
 import { createServerFn } from "@bgub/fig-tanstack-start";
+import { payloadResource } from "@bgub/fig-tanstack-start/payload";
 import { renderPayloadResponse } from "@bgub/fig-tanstack-start/server";
 import { Profile } from "./profile.server.tsx";
 
-export const getProfile = createServerFn({ method: "GET" })
+const getProfile = createServerFn()
   .validator((input: { id: string }) => input)
   .handler(({ data }) => renderPayloadResponse(<Profile id={data.id} />));
-```
-
-Adapt that response into a keyed Payload data resource. A shared stateful
-resolver keeps interactive client-reference islands mounted across re-decodes:
-
-```ts
-import { createPayloadClientReferenceResolver } from "@bgub/fig/payload";
-import { payloadResource } from "@bgub/fig-tanstack-start/payload";
-import { getProfile } from "./profile-function.tsx";
-
-const resolveClientReference = createPayloadClientReferenceResolver(
-  (reference) =>
-    reference.id === "src/LikeButton.tsx#LikeButton"
-      ? import("./LikeButton.tsx").then((module) => module.LikeButton)
-      : undefined,
-);
 
 export const profilePayload = payloadResource<{ id: string }>({
   key: ({ id }) => ["profile-payload", id],
   request: (input, { signal }) => getProfile({ data: input, signal }),
-  resolveClientReference,
 });
 ```
+
+The server function remains a separate private constant because TanStack's
+compiler requires `createServerFn()` calls to be assigned to identifiers. The
+adapter's shared stateful reference resolver is generated automatically.
+
+There are only two component categories. Components declared in a
+`.server.ts(x)` module render through Payload and serialize as elements.
+Ordinary components are isomorphic: they may use state and events, render
+during document SSR, and hydrate in the browser. Import an isomorphic component
+directly into the server module:
+
+```tsx
+import type { FigNode } from "@bgub/fig";
+import { LikeButton } from "./LikeButton.tsx";
+
+export function Profile(): FigNode {
+  return <LikeButton />;
+}
+```
+
+The Vite plugin compiles that import into an opaque Payload reference and
+generates its server/browser module resolver. Applications do not use a
+`.client.tsx` suffix, `clientReference`,
+`createPayloadClientReferenceResolver`, reference ids, or dynamic imports.
 
 The route uses the same loader/read split as any other data resource:
 
@@ -185,7 +193,7 @@ The route uses the same loader/read split as any other data resource:
 import { readData } from "@bgub/fig";
 import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
-import { profilePayload } from "../profile-payload.ts";
+import { profilePayload } from "../profile-payload.tsx";
 
 export const Route = createFileRoute("/profiles/$id")({
   loader: ({ context, params }) =>
@@ -227,9 +235,13 @@ holes settle; TanStack starts full-document hydration after each complete
 initial Payload response is embedded in a keyed carrier. Client navigation and
 refresh use the same raw response path.
 
-The Vite adapter emits assets imported only by server modules and copies those
-files into the client output, so `stylesheet(styleUrl)` may use a CSS `?url`
-import from a server-only Payload component in both development and production.
+The Vite adapter compiles static stylesheet imports in named `.server.ts(x)`
+components and imported isomorphic components into Payload asset dependencies.
+Import CSS normally; no manual `assets(stylesheet(...))` wrapper or `?url`
+import is needed. A server-component stylesheet is copied from the server build
+into the public client output. An isomorphic component's hashed client CSS is
+attached through the generated manifest. Both use the existing Payload asset
+row and reveal gate and are emitted only when their component renders.
 
 The [`demo-tanstack-start`](../../apps/demo-tanstack-start) app exercises the
 adapter through Vite's production client and SSR builds: generated and split
@@ -237,5 +249,5 @@ file routes, streamed SSR, Router dehydration, Fig-owned data serialization,
 full-document hydration, request-derived themes, view transitions, live
 data-resource invalidation, nested routes, and server-only post and asset trees
 all run through public adapter entries. The asset route embeds two independent
-Payload resources and hydrates an interactive client-reference island whose
-CSS and SVG are emitted through the production builds.
+Payload resources and hydrates an interactive isomorphic component whose CSS
+and SVG are emitted through the production builds.

@@ -534,6 +534,31 @@ describe("payload rendering", () => {
     expect(rows.indexOf(assetsRow)).toBeLessThan(gatedIndex);
   });
 
+  it("discovers assets attached to server component types", async () => {
+    function Card() {
+      return createElement("section", null, "Card");
+    }
+
+    const rows = await renderToPayloadRows(createElement(Card), {
+      componentAssets: (type) =>
+        type === Card
+          ? stylesheet("/assets/Card.css", { precedence: "payload" })
+          : undefined,
+    });
+
+    expect(rows).toContainEqual({
+      for: 0,
+      tag: "assets",
+      value: [
+        {
+          href: "/assets/Card.css",
+          kind: "stylesheet",
+          precedence: "payload",
+        },
+      ],
+    });
+  });
+
   it("sends and dedupes assets only for client references that render", async () => {
     const shared = stylesheet("/assets/shared.css");
     const Header = clientReference({

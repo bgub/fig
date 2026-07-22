@@ -49,8 +49,8 @@ export function createDefaultServerEntry(): string {
   const { figStart, startServer } = tanStackCompatibilityProfile.packages;
   return [
     `import { createStartHandler } from "${startServer}";`,
-    `import { defaultStreamHandler } from ${JSON.stringify(`${figStart}/server`)};`,
-    "const fetch = createStartHandler(defaultStreamHandler);",
+    `import { renderRouterToStream } from ${JSON.stringify(`${figStart}/server`)};`,
+    "const fetch = createStartHandler(renderRouterToStream);",
     "export default { fetch };",
   ].join("\n");
 }

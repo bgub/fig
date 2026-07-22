@@ -306,9 +306,10 @@ code decodes it with `decodePayloadStream` from `@bgub/fig/payload`, normally
 through fig-dom's `payloadDataLoader` adapter. Rows, codecs, value encoding, and
 framework document transports are internal implementation details.
 
-The public options cover error sanitization (`onError`), manifest-provided
-client assets (`clientReferenceAssets`), data-store partitioning, byte
-backpressure (`highWaterMark`), and cancellation (`signal`).
+The public options cover error sanitization (`onError`), bundler-provided
+server-component assets (`componentAssets`), manifest-provided client assets
+(`clientReferenceAssets`), data-store partitioning, byte backpressure
+(`highWaterMark`), and cancellation (`signal`).
 
 The server renderer supports function components, fragments, context providers,
 `useState` initial values, `useSyncExternalStore` server snapshots, no-op server

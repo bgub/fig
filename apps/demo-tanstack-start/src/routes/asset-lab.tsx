@@ -1,6 +1,6 @@
 import { type FigNode, readData, Suspense } from "@bgub/fig";
 import { createFileRoute } from "@tanstack/solid-router";
-import { assetLabPayload, assetNotePayload } from "../payload-resource.ts";
+import { assetLabPayload, assetNotePayload } from "../asset-lab-payload.tsx";
 
 export const Route = createFileRoute("/asset-lab")({
   component: AssetLabRoute,

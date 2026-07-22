@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { Alias, EnvironmentOptions, UserConfig } from "vite";
 import {
   createCompilerRpcModules,
+  createDefaultServerEntry,
   incompatibleRuntimeModules,
   rewriteFrameworkImports,
   tanStackCompatibilityProfile,
@@ -37,6 +38,13 @@ interface CompatibilityPlugin {
   }): void;
 }
 
+interface PayloadPlugin {
+  configEnvironment(
+    environmentName: string,
+    environment: EnvironmentOptions,
+  ): { build?: EnvironmentOptions["build"] } | undefined;
+}
+
 interface OptimizerPlugin {
   resolveId(source: string): { external: true; id: string } | null;
 }
@@ -46,6 +54,13 @@ describe("tanstackStart", () => {
     expect(tanstackStart().at(-1)).toEqual(
       expect.objectContaining({ name: "fig:refresh" }),
     );
+  });
+
+  it("keeps compatibility and Payload build concerns in separate plugins", () => {
+    expect(tanstackStart().slice(0, 2)).toEqual([
+      expect.objectContaining({ name: "fig-tanstack-start:compatibility" }),
+      expect.objectContaining({ name: "fig-tanstack-start:payload" }),
+    ]);
   });
 
   it("keeps Solid compatibility behind Fig module aliases", () => {
@@ -137,7 +152,7 @@ describe("tanstackStart", () => {
   });
 
   it("emits server-only assets for public delivery", () => {
-    const config = compatibilityPlugin().configEnvironment("ssr", {});
+    const config = payloadPlugin().configEnvironment("ssr", {});
 
     expect(config?.build?.emitAssets).toBe(true);
   });
@@ -171,8 +186,19 @@ describe("tanstackStart", () => {
       source: "@tanstack/solid-start/client-rpc",
     });
   });
+
+  it("builds the default handler directly from the public renderer", () => {
+    const code = createDefaultServerEntry();
+
+    expect(code).toContain("createStartHandler(renderRouterToStream)");
+    expect(code).not.toContain("defaultStreamHandler");
+  });
 });
 
 function compatibilityPlugin(): CompatibilityPlugin {
   return tanstackStart()[0] as unknown as CompatibilityPlugin;
+}
+
+function payloadPlugin(): PayloadPlugin {
+  return tanstackStart()[1] as unknown as PayloadPlugin;
 }
