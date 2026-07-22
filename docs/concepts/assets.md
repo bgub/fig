@@ -39,3 +39,5 @@ Each `precedence` value names a stylesheet bucket. Bucket order is fixed by the 
 ## Diagnostics
 
 `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode; no handler means no automatic warning. Prerender mode avoids the class entirely by sealing late. The HTML server registry throws `AssetResourceConflictError` for conflicting same-key definitions, except `title`, whose singleton slot uses the latest value. Payload insertion and persistent DOM delivery assets treat the first live definition for a key as authoritative and dedupe later definitions without signature comparison. Client title/meta conflicts use the claim precedence and restoration rules above.
+
+A raw host fiber whose initial props classify it as hoisted keeps that lifecycle permanently. If later props no longer classify, Fig throws in development and ignores the update in production. The no-op never mutates a shared delivery asset; for title/meta it preserves the owner's last valid claim, including while another owner shadows it. Replace the host element with a different Fig element key to change its placement.

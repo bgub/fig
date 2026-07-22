@@ -1,6 +1,7 @@
 import {
   assets,
   createElement,
+  type FigNode,
   meta,
   readPromise,
   type StateSetter,
@@ -329,6 +330,54 @@ describe("@bgub/fig-dom", () => {
 
     expect(head.childNodes).toHaveLength(1);
     expect(head.textContent).toBe("Two");
+  });
+
+  it("rejects updates that declassify a hoisted script", () => {
+    expectHoistedDeclassification(
+      "script",
+      "script:/app.js",
+      createElement("script", { async: true, src: "/app.js" }),
+      createElement("script", { async: false, src: "/app.js" }),
+    );
+  });
+
+  it("rejects updates that declassify a hoisted stylesheet", () => {
+    expectHoistedDeclassification(
+      "link",
+      "stylesheet:/theme.css",
+      createElement("link", {
+        href: "/theme.css",
+        precedence: "default",
+        rel: "stylesheet",
+      }),
+      createElement("link", {
+        href: "/theme.css",
+        precedence: "default",
+        rel: "alternate",
+      }),
+    );
+  });
+
+  it("rejects updates that declassify a title claim", () => {
+    expectHoistedDeclassification(
+      "title",
+      "title",
+      createElement("title", null, "Page"),
+      createElement("title", { itemprop: "name" }, "Page"),
+    );
+  });
+
+  it("rejects updates that declassify a meta claim", () => {
+    expectHoistedDeclassification(
+      "meta",
+      "meta:name:description",
+      createElement("meta", { content: "Fig", name: "description" }),
+      createElement("meta", {
+        content: "Fig",
+        itemprop: "description",
+        name: "description",
+      }),
+    );
   });
 
   it("commits declarative title and metadata ownership", () => {
@@ -831,6 +880,22 @@ describe("@bgub/fig-dom", () => {
     });
   });
 });
+
+function expectHoistedDeclassification(
+  type: string,
+  identity: string,
+  initial: FigNode,
+  next: FigNode,
+): void {
+  const { root } = documentResourceRoot();
+  flushSync(() => root.render(createElement("main", null, initial)));
+
+  expect(() =>
+    flushSync(() => root.render(createElement("main", null, next))),
+  ).toThrow(
+    `A hoisted <${type}> (asset "${identity}") cannot update into an ordinary in-tree element. Keep its asset classification stable or replace it with a different Fig element key.`,
+  );
+}
 
 function documentResourceRoot(): {
   container: FakeElement;
