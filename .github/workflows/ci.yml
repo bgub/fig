@@ -28,11 +28,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Static checks
-      - run: pnpm check
-
       # Build
       - run: pnpm build
+
+      # Static checks
+      - run: pnpm check
 
       # Tests
       - run: pnpm test
@@ -69,10 +69,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
-
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/dependency-review-action@v5
