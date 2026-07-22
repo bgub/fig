@@ -7,8 +7,10 @@ import { HYDRATION_SKIP_ATTRIBUTE } from "@bgub/fig/internal";
 import {
   type AnyRouter,
   type RouteDataContext,
+  Scripts as RouterScripts,
   useRouter,
 } from "@bgub/fig-tanstack-router";
+import { payloadTransportMarkerId } from "./document-markers.ts";
 import { requireStartDataStore } from "./store.ts";
 import {
   createStartDataStore,
@@ -28,30 +30,31 @@ export interface StartDataContext extends RouteDataContext {
   data: FigDataStoreController;
 }
 
-export interface StartDataRouterOptions<TContext extends object> {
-  context: TContext & StartDataContext;
-}
-
-export function createStartDataContext<TContext extends object = {}>(
-  context?: TContext,
-): StartDataRouterOptions<TContext> {
+export function createStartDataContext(): { context: StartDataContext } {
   return {
     context: {
-      ...context,
       data: createStartDataStore(),
-    } as TContext & StartDataContext,
+    },
   };
 }
 
-export function StartData(): FigNode {
+export function StartScripts(): FigNode {
   const router = useRouter<AnyRouter>();
-  if (!router.isServer) return null;
+  const routerScripts = createElement(RouterScripts);
+  if (!router.isServer) return routerScripts;
 
   const dataStore = requireStartDataStore(router.options.context);
-  return createElement("script", {
-    [HYDRATION_SKIP_ATTRIBUTE]: true,
-    id: startDataScriptId,
-    type: "application/json",
-    unsafeHTML: serializeStartDataStore(dataStore),
-  });
+  return [
+    createElement("script", {
+      [HYDRATION_SKIP_ATTRIBUTE]: true,
+      id: startDataScriptId,
+      type: "application/json",
+      unsafeHTML: serializeStartDataStore(dataStore),
+    }),
+    createElement("template", {
+      id: payloadTransportMarkerId,
+      [HYDRATION_SKIP_ATTRIBUTE]: true,
+    }),
+    routerScripts,
+  ];
 }

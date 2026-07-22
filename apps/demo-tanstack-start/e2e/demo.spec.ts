@@ -34,9 +34,9 @@ test("includes the Fig DevTools overlay", async ({ page }) => {
   const errors = collectBrowserErrors(page);
   await page.goto("/");
 
+  await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
   const devtools = page.locator("[data-fig-devtools]");
   await expect(devtools).toBeVisible();
-  await page.getByRole("button", { name: "Show Fig DevTools" }).click();
   await expect(
     devtools.getByText("Fig DevTools", { exact: true }),
   ).toBeVisible();

@@ -5,9 +5,9 @@ import {
   normalizeDataResourceKey,
 } from "@bgub/fig/internal";
 import { escapeAttribute, escapeScriptText } from "@bgub/fig-server/html";
+import { payloadTransportMarker } from "./document-markers.ts";
 import { getStartContext } from "./start-context.ts";
 
-const hydrationBarrierMarker = '<script id="$tsr-stream-barrier"';
 const payloadKeyAttribute = "data-fig-tanstack-payload-key";
 
 interface PayloadDocumentEntry {
@@ -128,45 +128,52 @@ export function injectPayloadDocument(
   function enqueue(
     controller: ReadableStreamDefaultController<Uint8Array>,
     value: string,
-  ): void {
-    if (value.length > 0) controller.enqueue(encoder.encode(value));
+  ): boolean {
+    if (value.length === 0) return false;
+    controller.enqueue(encoder.encode(value));
+    return true;
   }
 
   async function flush(
     controller: ReadableStreamDefaultController<Uint8Array>,
     final: boolean,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (injected) {
-      enqueue(controller, buffer);
+      const emitted = enqueue(controller, buffer);
       buffer = "";
-      return;
+      return emitted;
     }
 
-    const barrier = buffer.indexOf(hydrationBarrierMarker);
-    if (barrier !== -1) {
-      enqueue(controller, buffer.slice(0, barrier));
-      buffer = buffer.slice(barrier);
-      enqueue(controller, payloadDocumentScripts(await payloads(), nonce));
+    const marker = buffer.indexOf(payloadTransportMarker);
+    if (marker !== -1) {
+      let emitted = enqueue(controller, buffer.slice(0, marker));
+      buffer = buffer.slice(marker);
+      emitted =
+        enqueue(controller, payloadDocumentScripts(await payloads(), nonce)) ||
+        emitted;
       injected = true;
-      enqueue(controller, buffer);
+      emitted = enqueue(controller, buffer) || emitted;
       buffer = "";
-      return;
+      return emitted;
     }
 
     if (final) {
-      const bodyClose = buffer.toLowerCase().indexOf("</body>");
-      const offset = bodyClose === -1 ? buffer.length : bodyClose;
-      enqueue(controller, buffer.slice(0, offset));
-      enqueue(controller, payloadDocumentScripts(await payloads(), nonce));
-      enqueue(controller, buffer.slice(offset));
+      const entries = await payloads();
+      if (entries.length > 0) {
+        throw new Error(
+          "Initial TanStack Start Payload responses require <StartScripts /> in the root document.",
+        );
+      }
+      const emitted = enqueue(controller, buffer);
       buffer = "";
       injected = true;
-      return;
+      return emitted;
     }
 
-    const length = Math.max(0, buffer.length - hydrationBarrierMarker.length);
-    enqueue(controller, buffer.slice(0, length));
+    const length = Math.max(0, buffer.length - payloadTransportMarker.length);
+    const emitted = enqueue(controller, buffer.slice(0, length));
     buffer = buffer.slice(length);
+    return emitted;
   }
 
   return new ReadableStream<Uint8Array>({
@@ -175,15 +182,17 @@ export function injectPayloadDocument(
     },
     async pull(controller) {
       if (htmlReader === null) return;
-      const result = await htmlReader.read();
-      if (result.done) {
-        buffer += decoder.decode();
-        await flush(controller, true);
-        controller.close();
-        return;
+      for (;;) {
+        const result = await htmlReader.read();
+        if (result.done) {
+          buffer += decoder.decode();
+          await flush(controller, true);
+          controller.close();
+          return;
+        }
+        buffer += decoder.decode(result.value, { stream: true });
+        if (await flush(controller, false)) return;
       }
-      buffer += decoder.decode(result.value, { stream: true });
-      await flush(controller, false);
     },
     cancel(reason) {
       void htmlReader?.cancel(reason).catch(() => undefined);

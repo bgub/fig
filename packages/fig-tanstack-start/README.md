@@ -23,7 +23,7 @@ currently uses TanStack's Solid target
 as a private compiler compatibility layer because plugin core has no custom
 framework target. The generator currently normalizes file-route constructor
 imports to its Solid package ID; the plugin maps that ID directly to Fig, and no
-Solid runtime is installed or bundled. TypeScript needs the corresponding
+Solid Router or Start adapter runtime is installed or bundled. TypeScript needs the corresponding
 compiler-only `paths` entry:
 
 ```json
@@ -60,11 +60,11 @@ export const router = createRouter({
 });
 ```
 
-The root document renders route-managed assets, Fig data, and TanStack's scripts in that order:
+The root document renders route-managed assets followed by Start's combined Fig data and TanStack script transport:
 
 ```tsx
-import { StartData } from "@bgub/fig-tanstack-start";
-import { HeadContent, Outlet, Scripts } from "@bgub/fig-tanstack-router";
+import { StartScripts } from "@bgub/fig-tanstack-start";
+import { HeadContent, Outlet } from "@bgub/fig-tanstack-router";
 
 function Document() {
   return (
@@ -74,15 +74,14 @@ function Document() {
       </head>
       <body>
         <Outlet />
-        <StartData />
-        <Scripts />
+        <StartScripts />
       </body>
     </html>
   );
 }
 ```
 
-`StartData` serializes the Fig store into the server document with Fig's value codec, then renders nothing in the browser. Because it appears before `Scripts`, client router creation decodes it before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
+`StartScripts` serializes the Fig store into the server document with Fig's value codec, establishes the adapter's Payload insertion point, and then renders TanStack's bootstrap scripts. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
 ## Request and function middleware
 

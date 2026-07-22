@@ -9,6 +9,7 @@ import {
 } from "@bgub/fig";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import { describe, expect, it } from "vitest";
+import { payloadTransportMarkerId } from "./document-markers.ts";
 import {
   injectPayloadDocument,
   registerPayloadResponse,
@@ -89,15 +90,13 @@ describe("TanStack Start server payload resources", () => {
       await createDataStore().ensureData(resource, undefined);
       const html = await readStream(
         injectPayloadDocument(
-          streamFromString(
-            '<html><body><main>shell</main><script id="$tsr-stream-barrier"></script></body></html>',
-          ),
+          streamFromString(payloadDocument("<main>shell</main>")),
           undefined,
         ),
       );
 
       expect(html.indexOf("data-fig-tanstack-payload-key")).toBeLessThan(
-        html.indexOf("$tsr-stream-barrier"),
+        html.indexOf(payloadTransportMarkerId),
       );
       expect(html).toContain("ready");
     });
@@ -124,21 +123,19 @@ describe("TanStack Start server payload resources", () => {
     await runWithStartContext({}, async () => {
       await createDataStore().ensureData(resource, undefined);
       const stream = injectPayloadDocument(
-        streamFromString(
-          '<html><body><main>shell</main><script id="$tsr-stream-barrier"></script></body></html>',
-        ),
+        streamFromString(payloadDocument("<main>shell</main>")),
         undefined,
       );
       const reader = stream.getReader();
       const shell = await readUntil(reader, "shell");
 
       expect(shell).not.toContain("data-fig-tanstack-payload-key");
-      expect(shell).not.toContain("$tsr-stream-barrier");
+      expect(shell).not.toContain(payloadTransportMarkerId);
       resolveGreeting("streamed-ready");
       const html = shell + (await readReader(reader));
       expect(html).toContain("streamed-ready");
       expect(html.indexOf("streamed-ready")).toBeLessThan(
-        html.indexOf("$tsr-stream-barrier"),
+        html.indexOf(payloadTransportMarkerId),
       );
     });
 
@@ -172,12 +169,7 @@ describe("TanStack Start server payload resources", () => {
 
       expect(serializableStartData(store.snapshot())).toEqual([]);
       const html = await readStream(
-        injectPayloadDocument(
-          streamFromString(
-            '<html><body><script id="$tsr-stream-barrier"></script></body></html>',
-          ),
-          "nonce-1",
-        ),
+        injectPayloadDocument(streamFromString(payloadDocument()), "nonce-1"),
       );
       expect(html.match(/data-fig-tanstack-payload-key/g)).toHaveLength(2);
       expect(html.match(/nonce="nonce-1"/g)).toHaveLength(2);
@@ -193,9 +185,7 @@ describe("TanStack Start server payload resources", () => {
         markReady = resolve;
       });
       const document = injectPayloadDocument(
-        streamFromString(
-          '<html><body><main>shell</main><script id="$tsr-stream-barrier"></script></body></html>',
-        ),
+        streamFromString(payloadDocument("<main>shell</main>")),
         undefined,
         ready,
       );
@@ -211,7 +201,7 @@ describe("TanStack Start server payload resources", () => {
 
       expect(html).toContain("late-ready");
       expect(html.indexOf("late-ready")).toBeLessThan(
-        html.indexOf("$tsr-stream-barrier"),
+        html.indexOf(payloadTransportMarkerId),
       );
     });
   });
@@ -232,14 +222,31 @@ describe("TanStack Start server payload resources", () => {
 
       await expect(
         readStream(
+          injectPayloadDocument(streamFromString(payloadDocument()), undefined),
+        ),
+      ).rejects.toThrow("payload transport failed");
+    });
+  });
+
+  it("rejects initial payloads when the root omits StartScripts", async () => {
+    await runWithStartContext({}, async () => {
+      const decodeResponse = registerPayloadResponse(
+        ["missing-start-scripts"],
+        new Response(streamFromString("payload"), {
+          headers: { "content-type": "text/x-component" },
+        }),
+      );
+      const decoded = decodeResponse.text();
+
+      await expect(
+        readStream(
           injectPayloadDocument(
-            streamFromString(
-              '<html><body><script id="$tsr-stream-barrier"></script></body></html>',
-            ),
+            streamFromString("<html><body></body></html>"),
             undefined,
           ),
         ),
-      ).rejects.toThrow("payload transport failed");
+      ).rejects.toThrow(/require <StartScripts \/>/);
+      await decoded;
     });
   });
 
@@ -287,6 +294,10 @@ function streamFromString(value: string): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function payloadDocument(body = ""): string {
+  return `<html><body>${body}<template id="${payloadTransportMarkerId}"></template></body></html>`;
 }
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {

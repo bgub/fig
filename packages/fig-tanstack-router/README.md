@@ -82,8 +82,8 @@ function User() {
 ```
 
 `@tanstack/solid-router` is currently a compiler-only compatibility ID. The
-Start plugin maps it directly to this package; no Solid runtime is installed
-or bundled. TypeScript needs the equivalent path mapping:
+Start plugin maps it directly to this package; no Solid Router adapter runtime
+is installed or bundled. TypeScript needs the equivalent path mapping:
 
 ```json
 {
@@ -99,12 +99,11 @@ The root route normally renders Router-managed document state and Start's Fig
 data snapshot before the bootstrap scripts:
 
 ```tsx
-import { StartData, type StartDataContext } from "@bgub/fig-tanstack-start";
+import { StartScripts, type StartDataContext } from "@bgub/fig-tanstack-start";
 import {
   createRootRouteWithContext,
   HeadContent,
   Outlet,
-  Scripts,
 } from "@bgub/fig-tanstack-router";
 
 export const Route = createRootRouteWithContext<StartDataContext>()({
@@ -119,8 +118,7 @@ function Document() {
       </head>
       <body>
         <Outlet />
-        <StartData />
-        <Scripts />
+        <StartScripts />
       </body>
     </html>
   );

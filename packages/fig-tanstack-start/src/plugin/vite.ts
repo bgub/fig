@@ -1,5 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   START_ENVIRONMENT_NAMES,
@@ -8,12 +7,22 @@ import {
 } from "@tanstack/start-plugin-core/vite";
 import { figRefresh } from "@bgub/fig-vite";
 import type { PluginOption } from "vite";
+import {
+  createCompilerRpcModules,
+  createDefaultServerEntry,
+  incompatibleRuntimeModules,
+  rewriteFrameworkImports,
+  tanStackCompatibilityProfile,
+} from "./compatibility-profile.ts";
+import { writePublicAsset } from "./public-assets.ts";
 
-const compatibilityFramework = "solid";
-const figRouterPackage = "@bgub/fig-tanstack-router";
-const figTanStackStartPackage = "@bgub/fig-tanstack-start";
-const tanstackStartPackage = "@tanstack/solid-start";
-const tanstackStartClientPackage = "@tanstack/start-client-core";
+const {
+  figRouter: figRouterPackage,
+  figStart: figTanStackStartPackage,
+  frameworkRouter: tanstackRouterPackage,
+  frameworkStart: tanstackStartPackage,
+  startClient: tanstackStartClientPackage,
+} = tanStackCompatibilityProfile.packages;
 const resolveDependency = (id: string) =>
   fileURLToPath(import.meta.resolve(id));
 const tanstackStartClientModules = [
@@ -40,27 +49,7 @@ const defaultEntryPaths = {
   start: fileURLToPath(new URL("../default-entry/start.js", import.meta.url)),
 } as const;
 
-const compilerRpcModules = [
-  {
-    source: `${tanstackStartPackage}/client-rpc`,
-    id: "\0fig-tanstack-start:client-rpc",
-    code: `export { createClientRpc } from "${tanstackStartClientPackage}/client-rpc";`,
-  },
-  {
-    source: `${tanstackStartPackage}/server-rpc`,
-    id: "\0fig-tanstack-start:server-rpc",
-    code: `export { createServerRpc } from ${JSON.stringify(
-      resolveDependency("@tanstack/start-server-core/createServerRpc"),
-    )};`,
-  },
-  {
-    source: `${tanstackStartPackage}/ssr-rpc`,
-    id: "\0fig-tanstack-start:ssr-rpc",
-    code: `export { createSsrRpc } from ${JSON.stringify(
-      resolveDependency("@tanstack/start-server-core/createSsrRpc"),
-    )};`,
-  },
-] as const;
+const compilerRpcModules = createCompilerRpcModules(resolveDependency);
 
 export function tanstackStart(
   options?: TanStackStartViteInputConfig,
@@ -77,7 +66,7 @@ export function tanstackStart(
     tanStackStartVite(
       {
         defaultEntryPaths,
-        framework: compatibilityFramework,
+        framework: tanStackCompatibilityProfile.framework,
         providerEnvironmentName: START_ENVIRONMENT_NAMES.server,
         ssrIsProvider: true,
         ssrResolverStrategy: { type: "default" },
@@ -115,11 +104,11 @@ function compatibilityPlugin(): PluginOption {
               replacement: storageContextPath,
             },
             {
-              find: /^@tanstack\/solid-router$/,
+              find: new RegExp(`^${tanstackRouterPackage}$`),
               replacement: figRouterPackage,
             },
             {
-              find: /^@tanstack\/solid-start$/,
+              find: new RegExp(`^${tanstackStartPackage}$`),
               replacement: figTanStackStartPackage,
             },
           ],
@@ -197,9 +186,23 @@ function compatibilityPlugin(): PluginOption {
             return;
           }
           const path = resolve(publicOutDir, output.fileName);
-          await mkdir(dirname(path), { recursive: true });
-          await writeFile(path, output.source);
+          await writePublicAsset(path, output.source);
         }),
+      );
+    },
+    generateBundle(_options, bundle) {
+      if (this.environment.name !== START_ENVIRONMENT_NAMES.client) return;
+      const emittedModuleIds = Object.values(bundle).flatMap((output) =>
+        output.type === "chunk"
+          ? Object.entries(output.modules).flatMap(([id, module]) =>
+              module.renderedLength === 0 ? [] : [id],
+            )
+          : [],
+      );
+      const incompatible = incompatibleRuntimeModules(emittedModuleIds);
+      if (incompatible.length === 0) return;
+      throw new Error(
+        `${tanStackCompatibilityProfile.id} resolved compatibility-only Solid modules into the client runtime:\n${incompatible.join("\n")}`,
       );
     },
     resolveId(source) {
@@ -211,12 +214,7 @@ function compatibilityPlugin(): PluginOption {
         return rpcModule.code;
       }
       if (id === defaultEntryPaths.server) {
-        return [
-          'import { createStartHandler } from "@tanstack/start-server-core";',
-          `import { defaultStreamHandler } from ${JSON.stringify(`${figTanStackStartPackage}/server`)};`,
-          "const fetch = createStartHandler(defaultStreamHandler);",
-          "export default { fetch };",
-        ].join("\n");
+        return createDefaultServerEntry();
       }
       return undefined;
     },
@@ -225,14 +223,6 @@ function compatibilityPlugin(): PluginOption {
       return rewritten === code ? undefined : { code: rewritten, map: null };
     },
   };
-}
-
-function rewriteFrameworkImports(code: string): string {
-  return code.replace(
-    /\b(from|import)\s*(\(\s*)?(["'])@bgub\/fig-tanstack-start\3/g,
-    (_match, keyword: string, parenthesis: string | undefined, quote: string) =>
-      `${keyword}${parenthesis === undefined ? " " : parenthesis}${quote}${tanstackStartPackage}${quote}`,
-  );
 }
 
 function viteFsImport(path: string): string {

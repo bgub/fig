@@ -10,11 +10,10 @@ import {
   ensureRouteData,
   Outlet,
   type RouteDataContext,
-  Scripts,
 } from "@bgub/fig-tanstack-router";
 import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import { afterEach, describe, expect, it } from "vitest";
-import { createStartDataContext, StartData } from "./data.ts";
+import { createStartDataContext, StartScripts } from "./data.ts";
 import { renderRouterToStream } from "./server.tsx";
 
 const roots: Array<ReturnType<typeof hydrateRoot>> = [];
@@ -53,8 +52,7 @@ describe("TanStack Start data round trip", () => {
           "body",
           null,
           createElement("div", { id: "app" }, createElement(Outlet)),
-          createElement(StartData),
-          createElement(Scripts),
+          createElement(StartScripts),
         ),
       );
     }

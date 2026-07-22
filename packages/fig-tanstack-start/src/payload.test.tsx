@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { createDataStore, createElement, isValidElement } from "@bgub/fig";
 import { afterEach, describe, expect, it } from "vitest";
+import { payloadTransportMarkerId } from "./document-markers.ts";
 import { injectPayloadDocument } from "./payload-internal.ts";
 import { payloadResource } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
@@ -31,7 +32,9 @@ describe("TanStack Start payload resources", () => {
       await createDataStore().ensureData(resource, "ada");
       return readStream(
         injectPayloadDocument(
-          streamFromString("<!doctype html><html><body></body></html>"),
+          streamFromString(
+            `<!doctype html><html><body><template id="${payloadTransportMarkerId}"></template></body></html>`,
+          ),
           undefined,
         ),
       );

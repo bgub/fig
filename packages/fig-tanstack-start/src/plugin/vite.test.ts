@@ -1,5 +1,15 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Alias, EnvironmentOptions, UserConfig } from "vite";
+import {
+  createCompilerRpcModules,
+  incompatibleRuntimeModules,
+  rewriteFrameworkImports,
+  tanStackCompatibilityProfile,
+} from "./compatibility-profile.ts";
+import { writePublicAsset } from "./public-assets.ts";
 import { tanstackStart } from "./vite.ts";
 
 interface CompatibilityPlugin {
@@ -25,8 +35,6 @@ interface CompatibilityPlugin {
     resolve: { alias: Alias[] };
     root: string;
   }): void;
-  load(id: string): string | undefined;
-  resolveId(source: string): string | undefined;
 }
 
 interface OptimizerPlugin {
@@ -59,6 +67,30 @@ describe("tanstackStart", () => {
         }),
       ]),
     );
+  });
+
+  it("pins the compatibility profile to the installed Start core contract", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { dependencies: Record<string, string> };
+
+    expect(tanStackCompatibilityProfile.versions).toEqual({
+      routerCore: packageJson.dependencies["@tanstack/router-core"],
+      startClientCore: packageJson.dependencies["@tanstack/start-client-core"],
+      startPluginCore: packageJson.dependencies["@tanstack/start-plugin-core"],
+      startServerCore: packageJson.dependencies["@tanstack/start-server-core"],
+    });
+  });
+
+  it("rewrites generated Start imports without admitting Solid runtime modules", () => {
+    const transformed = rewriteFrameworkImports(
+      'import { createServerFn } from "@bgub/fig-tanstack-start";',
+    );
+    const solidModule =
+      "/app/node_modules/@tanstack/solid-start/dist/client.js";
+
+    expect(transformed).toContain('from "@tanstack/solid-start"');
+    expect(incompatibleRuntimeModules([solidModule])).toEqual([solidModule]);
   });
 
   it("keeps compiler-sensitive Start modules out of dependency prebundling", () => {
@@ -110,12 +142,34 @@ describe("tanstackStart", () => {
     expect(config?.build?.emitAssets).toBe(true);
   });
 
-  it("keeps compiler RPC modules private to the compatibility plugin", () => {
-    const plugin = compatibilityPlugin();
-    const id = plugin.resolveId("@tanstack/solid-start/client-rpc");
+  it("rejects conflicting server and client assets at one public path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fig-start-assets-"));
+    try {
+      const assetPath = join(root, "client/assets/shared.css");
+      await writePublicAsset(assetPath, "client");
 
-    expect(id).toBe("\0fig-tanstack-start:client-rpc");
-    expect(plugin.load(id!)).toMatch(/start-client-core.*client-rpc/);
+      await expect(
+        writePublicAsset(assetPath, "client"),
+      ).resolves.toBeUndefined();
+      await expect(writePublicAsset(assetPath, "server")).rejects.toThrow(
+        /conflicts with a different client asset/,
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps compiler RPC modules private to the compatibility plugin", () => {
+    const modules = createCompilerRpcModules((id) => `/resolved/${id}`);
+    const clientRpc = modules.find(
+      (module) => module.source === "@tanstack/solid-start/client-rpc",
+    );
+
+    expect(clientRpc).toEqual({
+      code: expect.stringMatching(/start-client-core.*client-rpc/),
+      id: "\0fig-tanstack-start:client-rpc",
+      source: "@tanstack/solid-start/client-rpc",
+    });
   });
 });
 

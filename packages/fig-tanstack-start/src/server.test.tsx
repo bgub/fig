@@ -16,12 +16,11 @@ import {
   Outlet,
   type AnyRouter,
   type RouteDataContext,
-  Scripts,
 } from "@bgub/fig-tanstack-router";
 import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import type { ServerManifest } from "@tanstack/router-core";
 import { describe, expect, it } from "vitest";
-import { createStartDataContext, StartData } from "./data.ts";
+import { createStartDataContext, StartScripts } from "./data.ts";
 import { renderRouterToStream } from "./server.tsx";
 
 describe("@bgub/fig-tanstack-start server", () => {
@@ -132,6 +131,9 @@ describe("@bgub/fig-tanstack-start server", () => {
     expect(html).toContain(
       'data-fig-hydration-skip id="__fig_tanstack_start_data__"',
     );
+    expect(html).toContain(
+      'id="__fig_tanstack_payloads__" data-fig-hydration-skip',
+    );
     expect(html.match(/tsr-scroll-restoration-v1_3/g)).toHaveLength(1);
     expect(loads).toBe(1);
     expect(
@@ -214,8 +216,7 @@ function Document(): FigNode {
       "body",
       null,
       createElement(Outlet),
-      createElement(StartData),
-      createElement(Scripts),
+      createElement(StartScripts),
     ),
   );
 }

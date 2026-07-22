@@ -1,7 +1,7 @@
 import { type FigNode, Suspense, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import { HeadContent, Link, Outlet, Scripts } from "@bgub/fig-tanstack-router";
-import { StartData } from "@bgub/fig-tanstack-start";
+import { HeadContent, Link, Outlet } from "@bgub/fig-tanstack-router";
+import { StartScripts } from "@bgub/fig-tanstack-start";
 import { setBrowserThemePreference, type ThemePreference } from "./theme.ts";
 
 export function Document(props: { initialTheme: ThemePreference }): FigNode {
@@ -61,8 +61,7 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
             </main>
           </div>
         </div>
-        <StartData />
-        <Scripts />
+        <StartScripts />
       </body>
     </html>
   );
