@@ -1,7 +1,7 @@
 import {
   assets,
   createDataStore,
-  createElement,
+  type DataResourceLoadContext,
   isValidElement,
   readPromise,
   stylesheet,
@@ -15,19 +15,18 @@ import {
   registerPayloadResponse,
   serializableStartData,
 } from "./payload-internal.ts";
-import { payloadResource } from "./payload.ts";
+import { payloadResource, type PayloadResourceOptions } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
 
 describe("TanStack Start server payload resources", () => {
   it("registers initial payloads instead of serializing element values", async () => {
-    const resource = payloadResource<string>({
+    const resource = compiledPayloadResource<string>({
       key: (id) => ["payload-profile", id],
       request: (id, { signal }) =>
-        renderPayloadResponse(
-          createElement("main", { "data-profile": id }, `profile-${id}`),
-          { signal },
-        ),
+        renderPayloadResponse(<main data-profile={id}>profile-{id}</main>, {
+          signal,
+        }),
     });
 
     await runWithStartContext({}, async () => {
@@ -39,14 +38,14 @@ describe("TanStack Start server payload resources", () => {
   });
 
   it("retains payload assets for the document render", async () => {
-    const resource = payloadResource<void>({
+    const resource = compiledPayloadResource<void>({
       key: () => ["payload-assets"],
       request: (_input, { signal }) =>
         runWithStartContext({}, () =>
           renderPayloadResponse(
             assets(
               stylesheet("/payload.css", { precedence: "payload" }),
-              createElement("main", null, "styled"),
+              <main>styled</main>,
             ),
             { signal },
           ),
@@ -56,16 +55,15 @@ describe("TanStack Start server payload resources", () => {
     await runWithStartContext({}, async () => {
       const node = await createDataStore().ensureData(resource, undefined);
       const render = renderToDocumentStream(
-        createElement(
-          "html",
-          null,
-          createElement("head"),
-          createElement(
-            "body",
-            null,
-            assets(stylesheet("/payload.css", { precedence: "payload" }), node),
-          ),
-        ),
+        <html>
+          <head />
+          <body>
+            {assets(
+              stylesheet("/payload.css", { precedence: "payload" }),
+              node,
+            )}
+          </body>
+        </html>,
       );
       await render.shellReady;
       const html = await readStream(render.stream);
@@ -78,10 +76,10 @@ describe("TanStack Start server payload resources", () => {
   });
 
   it("delivers the initial payload before TanStack starts hydration", async () => {
-    const resource = payloadResource<void>({
+    const resource = compiledPayloadResource<void>({
       key: () => ["ordering"],
       request: (_input, { signal }) =>
-        renderPayloadResponse(createElement("main", null, "ready"), {
+        renderPayloadResponse(<main>ready</main>, {
           signal,
         }),
     });
@@ -102,20 +100,45 @@ describe("TanStack Start server payload resources", () => {
     });
   });
 
+  it("aborts payload renders with the request signal from the Start context", async () => {
+    const pending = new Promise<string>(() => undefined);
+    const controller = new AbortController();
+    const request = new Request("http://localhost/_serverFn/payload", {
+      signal: controller.signal,
+    });
+
+    function Slow() {
+      return <p>{readPromise(pending)}</p>;
+    }
+
+    const response = await runWithStartContext({ request }, () =>
+      renderPayloadResponse(
+        <Suspense fallback={<p>pending</p>}>
+          <Slow />
+        </Suspense>,
+      ),
+    );
+    if (response.body === null) throw new Error("Expected a payload body.");
+    const read = readStream(response.body);
+    read.catch(() => undefined);
+
+    controller.abort(new Error("request closed"));
+
+    await expect(read).rejects.toThrow("request closed");
+  });
+
   it("streams the shell while payload holes hold hydration", async () => {
     let resolveGreeting = (_value: string): void => undefined;
     const greeting = new Promise<string>((resolve) => {
       resolveGreeting = resolve;
     });
-    const resource = payloadResource<void>({
+    const resource = compiledPayloadResource<void>({
       key: () => ["streaming-payload"],
       request: (_input, { signal }) =>
         renderPayloadResponse(
-          createElement(
-            Suspense,
-            { fallback: createElement("p", null, "pending") },
-            createElement(Greeting),
-          ),
+          <Suspense fallback={<p>pending</p>}>
+            <Greeting />
+          </Suspense>,
           { signal },
         ),
     });
@@ -140,22 +163,22 @@ describe("TanStack Start server payload resources", () => {
     });
 
     function Greeting() {
-      return createElement("p", null, readPromise(greeting));
+      return <p>{readPromise(greeting)}</p>;
     }
   });
 
   it("embeds multiple registered payload resources before hydration", async () => {
-    const first = payloadResource<void>({
+    const first = compiledPayloadResource<void>({
       key: () => ["multiple", "first"],
       request: (_input, { signal }) =>
-        renderPayloadResponse(createElement("p", null, "first-payload"), {
+        renderPayloadResponse(<p>first-payload</p>, {
           signal,
         }),
     });
-    const second = payloadResource<void>({
+    const second = compiledPayloadResource<void>({
       key: () => ["multiple", "second"],
       request: (_input, { signal }) =>
-        renderPayloadResponse(createElement("p", null, "second-payload"), {
+        renderPayloadResponse(<p>second-payload</p>, {
           signal,
         }),
     });
@@ -193,7 +216,7 @@ describe("TanStack Start server payload resources", () => {
       await Promise.resolve();
       registerPayloadResponse(
         ["late-payload"],
-        renderPayloadResponse(createElement("p", null, "late-ready")),
+        renderPayloadResponse(<p>late-ready</p>),
       );
       markReady();
 
@@ -285,6 +308,17 @@ describe("TanStack Start server payload resources", () => {
     expect(payloadCancelled).toBe(true);
   });
 });
+
+function compiledPayloadResource<TInput>(
+  options: Omit<PayloadResourceOptions<TInput>, "render"> & {
+    request: (
+      input: TInput,
+      context: DataResourceLoadContext,
+    ) => Response | PromiseLike<Response>;
+  },
+) {
+  return payloadResource(Object.assign({ render: () => null }, options));
+}
 
 function streamFromString(value: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(value);

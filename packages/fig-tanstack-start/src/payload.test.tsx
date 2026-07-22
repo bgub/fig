@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
-import { createDataStore, createElement, isValidElement } from "@bgub/fig";
+import {
+  clientReference,
+  createDataStore,
+  isValidElement,
+  type FigNode,
+} from "@bgub/fig";
 import { afterEach, describe, expect, it } from "vitest";
 import { payloadTransportMarkerId } from "./document-markers.ts";
 import { injectPayloadDocument } from "./payload-internal.ts";
-import { payloadResource } from "./payload.ts";
+import { Isomorphic, payloadResource } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
 
@@ -13,21 +18,49 @@ afterEach(() => {
 });
 
 describe("TanStack Start payload resources", () => {
+  it("renders a compiled Isomorphic client reference with component props", () => {
+    const Counter = clientReference<{ initial: number }>({ id: "counter" });
+    const node = Isomorphic({ component: Counter, initial: 3 });
+
+    expect(isValidElement(node)).toBe(true);
+    if (!isValidElement(node)) throw new Error("Expected a Fig element.");
+    expect(node.type).toBe(Counter);
+    expect(node.props).toEqual({ initial: 3 });
+  });
+
+  it("rejects an Isomorphic boundary missed by the compiler", () => {
+    function Counter(): FigNode {
+      return null;
+    }
+
+    expect(() => Isomorphic({ component: Counter })).toThrow(
+      /through the Fig TanStack Start compiler/,
+    );
+  });
+
+  it("rejects a payload resource missed by the compiler", () => {
+    expect(() =>
+      payloadResource<void>({
+        key: () => ["payload"],
+        render: () => null,
+      }),
+    ).toThrow(/must be compiled/);
+  });
+
   it("adopts the initial payload stream from the document without refetching", async () => {
     let requests = 0;
-    const resource = payloadResource<string>({
-      key: (id) => ["payload-profile", id],
-      request: (id) => {
+    const resource = compiledPayloadResource(
+      {
+        key: (id: string) => ["payload-profile", id],
+        render: (id: string) => <main data-profile={id} />,
+      },
+      (id: string) => {
         requests += 1;
         return renderPayloadResponse(
-          createElement(
-            "main",
-            { "data-profile": id },
-            `profile-${id}</script>`,
-          ),
+          <main data-profile={id}>{`profile-${id}</script>`}</main>,
         );
       },
-    });
+    );
     const html = await runWithStartContext({}, async () => {
       await createDataStore().ensureData(resource, "ada");
       return readStream(
@@ -53,6 +86,16 @@ describe("TanStack Start payload resources", () => {
     expect(node.props.children).toBe("profile-ada</script>");
   });
 });
+
+function compiledPayloadResource<TInput>(
+  options: Parameters<typeof payloadResource<TInput>>[0],
+  request: (
+    input: TInput,
+    context: { signal: AbortSignal },
+  ) => Response | PromiseLike<Response>,
+) {
+  return payloadResource(Object.assign(options, { request }));
+}
 
 function streamFromString(value: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(value);

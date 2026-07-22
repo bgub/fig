@@ -128,16 +128,14 @@ Superseded and unmounted runs are aborted and retired: their pending slot releas
 
 Fig handles SSR and streaming similarly to React, but there are some implementation differences.
 
-### Server components and directives
+### Payload components and directives
 
-In Fig, all code is _isomorphic_ (meaning it can run on either server or client) unless it ends in `.server.ts(x)`. There are no `"use client"` or `"use server"` directives.
-
-A server component is a Fig component that renders into a Payload stream instead of HTML. Payload is Fig's own wire format; its encoding stays internal while Fig exposes focused APIs for rendering and decoding the stream.
+Fig does not use a filename or `"use client"`/`"use server"` directive to decide how a component renders. A Payload component is simply a Fig component reached by a Payload render instead of an HTML or browser render. Payload is Fig's own wire format; its encoding stays internal while Fig exposes focused APIs for rendering and decoding the stream.
 
 Here is the complete server-to-client path using `payloadDataLoader`.
 
 ```tsx
-// profile.server.tsx
+// profile.payload.tsx
 import { clientReference } from "@bgub/fig";
 
 const Counter = clientReference<{ initial: number }>({
@@ -175,9 +173,9 @@ export function Counter({ initial }: { initial: number }) {
 Serve the payload stream from any request handler:
 
 ```tsx
-// server.tsx
+// profile-endpoint.tsx
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
-import { Profile } from "./profile.server.tsx";
+import { Profile } from "./profile.payload.tsx";
 
 export function handleProfile(): Response {
   const payload = renderToPayloadStream(<Profile />);

@@ -1,4 +1,3 @@
-import { createElement } from "@bgub/fig";
 import {
   type Container,
   type FigRoot,
@@ -30,11 +29,10 @@ export async function hydrateStart(
   const router = await hydrateTanStackStart();
   const dataStore = hydrateStartDataStore(router.options.context, document);
 
-  const root = hydrateRoot(
-    container,
-    createElement(RouterProvider, { router }),
-    { ...rootOptions, dataStore },
-  );
+  const root = hydrateRoot(container, <RouterProvider router={router} />, {
+    ...rootOptions,
+    dataStore,
+  });
   window.$_TSR?.h();
   return { root, router };
 }

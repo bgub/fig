@@ -12,7 +12,7 @@ Payload is a **data format, not an architecture**. A server serializes a rendere
 - `@bgub/fig-server/payload` — the server half: `renderToPayloadStream` and its result/options types.
 - `@bgub/fig` — `clientReference`, the one escape hatch for interactivity inside a serialized tree.
 - `@bgub/fig-dom` — `payloadDataLoader`, the web adapter that turns a payload endpoint into an ordinary data-resource loader: HTTP/content-type validation, `insertAssetResources` as `prepareAssets`, the store's generation-guarded hydration capability, and the generation-lifetime signal wired into `decodePayloadStream` (data.md).
-- `@bgub/fig-tanstack-start` — the framework transport for carrying initial-document Payload bytes through streamed HTML, exposed through `payloadResource` and `renderPayloadResponse` as its serving/cache seam.
+- `@bgub/fig-tanstack-start` — the framework transport for carrying initial-document Payload bytes through streamed HTML. Applications declare the serving/cache seam with `payloadResource`; its compiler generates the low-level `renderPayloadResponse` call.
 
 ## Wire Format
 
@@ -51,13 +51,13 @@ Payload values are not plain `JSON.stringify` payloads. The shared value codec r
 - `NaN`, `Infinity`, `-Infinity`, and `-0`
 - global symbols created with `Symbol.for`
 
-It rejects functions, class instances/non-plain objects, and non-global symbols. Server component values can additionally contain Fig elements, client references, and promises; those are serialized by the payload renderer into row references before the value codec handles ordinary data. Nested containers recurse through the same serializer rather than becoming opaque values, so any new container/value type must ship with tests nesting client references, promises, server elements, shared objects, and cycles inside it.
+It rejects functions, class instances/non-plain objects, and non-global symbols. Payload-rendered values can additionally contain Fig elements, client references, and promises; those are serialized by the payload renderer into row references before the value codec handles ordinary data. Nested containers recurse through the same serializer rather than becoming opaque values, so any new container/value type must ship with tests nesting client references, promises, Payload-rendered elements, shared objects, and cycles inside it.
 
 The model format carries request-wide object ids. The first occurrence of a supported graph object defines it inline; later occurrences in the same payload request use a graph reference. Definitions always precede references in the row stream, so a streaming decoder never sees a dangling reference in a well-formed stream.
 
 The same internal value encoding backs payload data rows and the TanStack Start document-data carrier, so both preserve the same value fidelity.
 
-## Server Components Are Render-Only
+## Payload-Rendered Components Are Render-Only
 
 The server/client line is statefulness, not reads. During `renderToPayloadStream`, the read verbs are server-safe — `readContext`, `readPromise`, `readData` (the render has a per-request store; a pending read suspends that subtree into an outlined streaming hole) — along with `useMemo` and `useId`, and `useSyncExternalStore`'s `getServerSnapshot` path (a read, not a subscription). State, effects, and interactivity **throw at dev time**: `useState`, `useActionState`, `useTransition`, `useStableEvent`, `useReactive`, `useBeforePaint`, `useBeforeLayout`. A serialized component never re-runs on the client, so those APIs would silently freeze initial state into the wire. `bind` props are functions and already fail serialization. A host element's `mix` resolved into its props at element creation, so the serializer strips the marker from host props and ships server-safe results such as aria and styling; client-only behavior such as `on()` throws instead of disappearing from the payload. `mix` passed to a component still fails serialization like any function-bearing prop. Interactivity belongs to client references.
 
@@ -65,9 +65,9 @@ Context is render-scoped and erased by serialization: `renderToPayloadStream(<Se
 
 ## Client References
 
-`clientReference({ id, assets?, ssr? })` marks a component that serializes as a reference instead of rendering on the server. Ids are opaque unique keys; Fig's bundler tooling authors them as `"<module>#<export>"`, and only the server splits that convention — it derives `exportName` once at serialization, so resolvers and the client never string-parse ids. `resolveClientReference(reference)` receives `{ id, exportName?, ssr?, assets? }` as soon as the reference row arrives and returns a component, a promise for one, or `undefined`. Async resolution starts at row arrival so module fetches overlap the stream; a synchronous component preserves element-type identity across decodes. `ssr`-capable references server-render through their registered server component when a server-side decode resolves them.
+`clientReference({ id, assets?, ssr? })` marks a component that serializes as a reference instead of rendering on the server. Ids are opaque unique keys; Fig's bundler tooling authors them as `"<module>#<export>"`, and only the server splits that convention — it derives `exportName` once at serialization, so resolvers and the client never string-parse ids. `resolveClientReference(reference)` receives `{ id, exportName?, ssr?, assets? }` as soon as the reference row arrives and returns a component, a promise for one, or `undefined`. Async resolution starts at row arrival so module fetches overlap the stream; a synchronous component preserves element-type identity across decodes. `ssr`-capable references server-render through their registered server implementation when a server-side decode resolves them.
 
-This is the low-level format seam, not the Fig TanStack Start authoring model. Start's compiler derives references for ordinary components imported into `.server.ts(x)` modules, generates their server/browser manifest, owns the shared resolver, and supplies their CSS assets. Start users author only server components and isomorphic components and do not call these APIs.
+This is the low-level format seam, not the Fig TanStack Start authoring model. A `payloadResource` render callback Payload-renders its ordinary component tree regardless of source filenames; the compiler lowers that boundary to `renderPayloadResponse`. Start applications conventionally keep the shared resource declaration in `.payload.tsx`, but the filename does not cause Payload rendering. Start applications use `<Isomorphic component={Counter} ... />` at the exceptional hydration boundary; the compiler turns that static import into a reference, generates its server/browser manifest, owns the shared resolver, and supplies its CSS assets. Start users do not call these low-level APIs.
 
 ## Server API
 

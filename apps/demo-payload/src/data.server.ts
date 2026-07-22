@@ -1,4 +1,4 @@
-import { serverDataResource } from "@bgub/fig/server";
+import { dataResource } from "@bgub/fig";
 
 export interface PostStats {
   source: "server-only";
@@ -7,7 +7,7 @@ export interface PostStats {
 
 // Server-only data: the loader lives in a .server.ts module, runs during the
 // payload render, and never ships to the client bundle.
-export const payloadAuditResource = serverDataResource<[number], PostStats>({
+export const payloadAuditResource = dataResource<[number], PostStats>({
   key: (seed: number) => ["payload-audit", seed],
   load: (seed: number) => ({
     source: "server-only",

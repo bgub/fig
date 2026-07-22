@@ -154,6 +154,50 @@ test("adopts two embedded Payload resources and hydrates the asset island", asyn
   );
   expect(html).toMatch(/href="\/assets\/AssetLabIsland-[^"]+\.css"/);
 
+  const payloadImageHref = tagAssetUrl(html, "img", "data-payload-image");
+  expect(payloadImageHref).toMatch(/^\/assets\/payload-mark-[^/]+\.svg$/);
+  const payloadStylesheetHref = tagAssetUrl(
+    html,
+    "link",
+    'data-precedence="payload"',
+    "asset-lab-",
+  );
+  const stylesheetResponse = await request.get(payloadStylesheetHref);
+  expect(stylesheetResponse.ok()).toBe(true);
+  expect(stylesheetResponse.headers()["content-type"]).toMatch(/^text\/css/);
+  const stylesheet = await stylesheetResponse.text();
+  const stylesheetAssetHrefs = [...stylesheet.matchAll(/url\(["']?([^"')]+)/g)]
+    .map((match) => match[1])
+    .filter((href): href is string => href?.includes("/payload-") === true);
+  const payloadFontHref = stylesheetAssetHrefs.find((href) =>
+    /^\/assets\/payload-font-[^/]+\.woff2$/.test(href),
+  );
+  const payloadBackgroundHref = stylesheetAssetHrefs.find((href) =>
+    /^\/assets\/payload-background-[^/]+\.svg$/.test(href),
+  );
+  expect(payloadFontHref).toBeDefined();
+  expect(payloadBackgroundHref).toBeDefined();
+  if (payloadFontHref === undefined || payloadBackgroundHref === undefined) {
+    throw new Error("Expected emitted font and background-image asset URLs.");
+  }
+
+  const emittedAssets = [
+    payloadImageHref,
+    payloadFontHref,
+    payloadBackgroundHref,
+  ];
+  const emittedResponses = await Promise.all(
+    emittedAssets.map((href) => request.get(href)),
+  );
+  expect(emittedResponses.every((asset) => asset.ok())).toBe(true);
+  expect(
+    emittedResponses.map((asset) => asset.headers()["content-type"]),
+  ).toEqual([
+    expect.stringMatching(/^image\/svg\+xml/),
+    expect.stringMatching(/^font\/woff2/),
+    expect.stringMatching(/^image\/svg\+xml/),
+  ]);
+
   const errors = collectBrowserErrors(page);
   const serverFunctionRequests: string[] = [];
   page.on("request", (request) => {
@@ -196,6 +240,29 @@ test("navigates nested, split, and not-found routes", async ({ page }) => {
     page.getByRole("heading", { level: 1, name: "404" }),
   ).toBeVisible();
 });
+
+function tagAssetUrl(
+  markup: string,
+  tagName: "img" | "link",
+  marker: string,
+  urlMarker?: string,
+): string {
+  const attribute = tagName === "img" ? "src" : "href";
+  const tag = [...markup.matchAll(new RegExp(`<${tagName}\\b[^>]*>`, "g"))]
+    .map((match) => match[0])
+    .find(
+      (candidate) =>
+        candidate.includes(marker) &&
+        (urlMarker === undefined || candidate.includes(urlMarker)),
+    );
+  const url = tag?.match(new RegExp(`\\s${attribute}="([^"]+)"`))?.[1];
+  if (url === undefined) {
+    throw new Error(
+      `Expected a ${tagName} with ${marker} and a ${attribute} asset URL.`,
+    );
+  }
+  return url;
+}
 
 test("morphs the homepage link into the view-transition title", async ({
   page,

@@ -3,19 +3,16 @@ import {
   cleanModuleId,
   decodeOpaqueId,
   encodeOpaqueId,
-  isServerComponentModuleId,
   moduleQueryValue,
   toViteModulePath,
   withModuleQuery,
 } from "./module-ids.ts";
 
 describe("Vite module ids", () => {
-  it("owns module cleanup and server-component classification", () => {
+  it("removes module query strings", () => {
     expect(cleanModuleId("/app/card.server.tsx?import")).toBe(
       "/app/card.server.tsx",
     );
-    expect(isServerComponentModuleId("/app/card.server.tsx?import")).toBe(true);
-    expect(isServerComponentModuleId("/app/card.tsx")).toBe(false);
   });
 
   it("round-trips opaque query values without disturbing fragments", () => {

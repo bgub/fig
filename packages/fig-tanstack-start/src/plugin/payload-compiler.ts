@@ -1,59 +1,84 @@
 import * as babel from "@babel/core";
 import type { NodePath, PluginObject } from "@babel/core";
-import presetTypescript from "@babel/preset-typescript";
 import { payloadStylesheetsSymbolKey } from "../payload-assets.ts";
-import { cleanModuleId } from "./module-ids.ts";
+import {
+  babelOptions,
+  isComponentName,
+  isImportedBinding,
+  isSourceModule,
+  serverPackageId,
+} from "./compiler-options.ts";
+import {
+  type CompiledIsomorphicImport,
+  type IsomorphicImport,
+  isomorphicBoundaryAnalysisPlugin,
+  rewriteIsomorphicBoundaries,
+} from "./isomorphic-compiler.ts";
+import {
+  cleanModuleId,
+  hasModuleQuery,
+  payloadModuleQuery,
+  withModuleQuery,
+} from "./module-ids.ts";
+import {
+  collectComponentNames,
+  isStylesheetSpecifier,
+  rewriteStylesheetImports,
+  stylesheetImportAnalysisPlugin,
+} from "./payload-stylesheet-compiler.ts";
 
 export const payloadRuntimeId = "virtual:fig-tanstack-start/payload-runtime";
 export const resolvedPayloadRuntimeId = `\0${payloadRuntimeId}`;
 
-export interface IsomorphicImport {
-  importedName: string;
-  localName: string;
-  source: string;
-}
-
-export interface CompiledIsomorphicImport extends IsomorphicImport {
-  referenceId: string;
-}
+const figRuntimePackageIds: readonly string[] = [
+  "@bgub/fig",
+  "@bgub/fig-devtools",
+  "@bgub/fig-dom",
+  "@bgub/fig-reconciler",
+  "@bgub/fig-refresh",
+  "@bgub/fig-server",
+  "@bgub/fig-tanstack-router",
+  "@bgub/fig-tanstack-start",
+  "@bgub/fig-vite",
+];
 
 export async function analyzeStylesheetImports(
   code: string,
   id: string,
 ): Promise<string[]> {
   const clean = cleanModuleId(id);
-  if (!/\.[cm]?[jt]sx?$/.test(clean)) return [];
+  if (!isSourceModule(clean)) return [];
   const stylesheets: string[] = [];
   await babel.transformAsync(code, {
     ...babelOptions(clean),
-    plugins: [
-      (): PluginObject => ({
-        name: "fig-tanstack-start-stylesheet-import-analysis",
-        visitor: {
-          ImportDeclaration(path) {
-            const source = path.node.source.value;
-            if (isStylesheetSpecifier(source)) stylesheets.push(source);
-          },
-        },
-      }),
-    ],
+    plugins: [stylesheetImportAnalysisPlugin(stylesheets)],
   });
   return stylesheets;
 }
 
-export async function analyzePayloadModule(
+export async function analyzeIsomorphicBoundaries(
   code: string,
   id: string,
 ): Promise<IsomorphicImport[]> {
   const clean = cleanModuleId(id);
-  if (!isPayloadModule(clean)) return [];
+  if (!isSourceModule(clean) || !code.includes("Isomorphic")) return [];
 
   const imports: IsomorphicImport[] = [];
   await babel.transformAsync(code, {
     ...babelOptions(clean),
-    plugins: [isomorphicImportAnalysisPlugin(imports)],
+    plugins: [isomorphicBoundaryAnalysisPlugin(imports)],
   });
   return imports;
+}
+
+// Cheap pre-parse gate shared with the Vite transform hook, so callers can
+// skip boundary analysis for modules this transform cannot apply to.
+export function mayBePayloadModule(code: string, id: string): boolean {
+  return (
+    isSourceModule(cleanModuleId(id)) &&
+    (hasModuleQuery(id, payloadModuleQuery) ||
+      code.includes("renderPayloadResponse"))
+  );
 }
 
 export async function transformPayloadModule(
@@ -61,18 +86,22 @@ export async function transformPayloadModule(
   id: string,
   isomorphicImports: readonly CompiledIsomorphicImport[] = [],
 ) {
-  const clean = cleanModuleId(id);
-  if (!isPayloadModule(clean)) return null;
+  if (!mayBePayloadModule(code, id)) return null;
 
+  const state = { changed: false };
   const result = await babel.transformAsync(code, {
-    ...babelOptions(clean),
+    ...babelOptions(cleanModuleId(id)),
     sourceMaps: true,
-    plugins: [payloadBabelPlugin(isomorphicImports)],
+    plugins: [
+      payloadBabelPlugin(
+        isomorphicImports,
+        hasModuleQuery(id, payloadModuleQuery),
+        state,
+      ),
+    ],
   });
 
-  if (result?.code == null || !result.code.includes(payloadRuntimeId)) {
-    return null;
-  }
+  if (!state.changed || result?.code == null) return null;
   return {
     code: result.code,
     map: result.map == null ? null : JSON.stringify(result.map),
@@ -94,91 +123,10 @@ export function registerPayloadStylesheets(components, hrefs) {
 }`;
 }
 
-function babelOptions(
-  filename: string,
-): NonNullable<Parameters<typeof babel.transformAsync>[1]> {
-  return {
-    babelrc: false,
-    configFile: false,
-    filename,
-    presets: [
-      [
-        presetTypescript,
-        { ignoreExtensions: true, onlyRemoveTypeImports: true },
-      ],
-    ],
-    parserOpts: { plugins: filename.endsWith("x") ? ["jsx"] : [] },
-  };
-}
-
-function isomorphicImportAnalysisPlugin(
-  imports: IsomorphicImport[],
-): () => PluginObject {
-  return () => ({
-    name: "fig-tanstack-start-isomorphic-import-analysis",
-    visitor: {
-      Program(path) {
-        const componentBindings = new Set<string>();
-        path.traverse({
-          JSXOpeningElement(elementPath) {
-            const name =
-              elementPath.node.name.type === "JSXNamespacedName"
-                ? undefined
-                : rootJsxIdentifier(elementPath.node.name);
-            if (name !== undefined) componentBindings.add(name);
-          },
-          CallExpression(callPath) {
-            if (
-              callPath.node.callee.type !== "Identifier" ||
-              callPath.node.callee.name !== "createElement"
-            ) {
-              return;
-            }
-            const [type] = callPath.node.arguments;
-            if (type?.type === "Identifier" && isComponentName(type.name)) {
-              componentBindings.add(type.name);
-            }
-          },
-        });
-
-        for (const statement of path.get("body")) {
-          if (!statement.isImportDeclaration()) continue;
-          if (statement.node.importKind === "type") continue;
-          const source = statement.node.source.value;
-          if (isStylesheetSpecifier(source) || source === "@bgub/fig") {
-            continue;
-          }
-
-          for (const specifier of statement.node.specifiers) {
-            if (
-              ("importKind" in specifier && specifier.importKind === "type") ||
-              !componentBindings.has(specifier.local.name)
-            ) {
-              continue;
-            }
-            const importedName =
-              specifier.type === "ImportDefaultSpecifier"
-                ? "default"
-                : specifier.type === "ImportSpecifier"
-                  ? specifier.imported.type === "Identifier"
-                    ? specifier.imported.name
-                    : specifier.imported.value
-                  : undefined;
-            if (importedName === undefined) continue;
-            imports.push({
-              importedName,
-              localName: specifier.local.name,
-              source,
-            });
-          }
-        }
-      },
-    },
-  });
-}
-
 function payloadBabelPlugin(
   isomorphicImports: readonly CompiledIsomorphicImport[],
+  compiledPayloadModule: boolean,
+  state: { changed: boolean },
 ): (api: typeof babel) => PluginObject {
   return (api: typeof babel) => {
     const t = api.types;
@@ -188,21 +136,22 @@ function payloadBabelPlugin(
       visitor: {
         Program: {
           exit(path: NodePath<babel.types.Program>) {
+            if (!compiledPayloadModule && !callsRenderPayloadResponse(path)) {
+              return;
+            }
             const components = collectComponentNames(path, t);
-            const hrefs = rewriteStylesheetImports(path, t);
-            const references = rewriteIsomorphicImports(
+            const hrefs =
+              components.length === 0 ? [] : rewriteStylesheetImports(path, t);
+            const createReference = rewriteIsomorphicBoundaries(
               path,
               t,
               isomorphicImports,
             );
-            if (hrefs.length === 0 && references.length === 0) return;
+
+            if (rewritePayloadComponentImports(path) > 0) state.changed = true;
 
             const runtimeSpecifiers: babel.types.ImportSpecifier[] = [];
-            let createReference: babel.types.Identifier | undefined;
-            if (references.length > 0) {
-              createReference = path.scope.generateUidIdentifier(
-                "createIsomorphicReference",
-              );
+            if (createReference !== undefined) {
               runtimeSpecifiers.push(
                 t.importSpecifier(
                   createReference,
@@ -211,7 +160,7 @@ function payloadBabelPlugin(
               );
             }
             let registerStylesheets: babel.types.Identifier | undefined;
-            if (hrefs.length > 0 && components.length > 0) {
+            if (hrefs.length > 0) {
               registerStylesheets = path.scope.generateUidIdentifier(
                 "registerPayloadStylesheets",
               );
@@ -223,6 +172,7 @@ function payloadBabelPlugin(
               );
             }
             if (runtimeSpecifiers.length === 0) return;
+            state.changed = true;
 
             path.node.body.unshift(
               t.importDeclaration(
@@ -230,25 +180,6 @@ function payloadBabelPlugin(
                 t.stringLiteral(payloadRuntimeId),
               ),
             );
-            if (createReference !== undefined) {
-              const lastImport = path.node.body.findLastIndex((statement) =>
-                t.isImportDeclaration(statement),
-              );
-              path.node.body.splice(
-                lastImport + 1,
-                0,
-                ...references.map(({ localName, referenceId }) =>
-                  t.variableDeclaration("const", [
-                    t.variableDeclarator(
-                      t.identifier(localName),
-                      t.callExpression(createReference, [
-                        t.stringLiteral(referenceId),
-                      ]),
-                    ),
-                  ]),
-                ),
-              );
-            }
             if (registerStylesheets !== undefined) {
               path.node.body.push(
                 t.expressionStatement(
@@ -268,98 +199,90 @@ function payloadBabelPlugin(
   };
 }
 
-function rewriteStylesheetImports(
+function callsRenderPayloadResponse(
   path: NodePath<babel.types.Program>,
-  t: typeof babel.types,
-): babel.types.Identifier[] {
-  const hrefs: babel.types.Identifier[] = [];
+): boolean {
+  let found = false;
+  path.traverse({
+    CallExpression(callPath) {
+      if (
+        callPath.node.callee.type === "Identifier" &&
+        isImportedBinding(
+          callPath,
+          callPath.node.callee.name,
+          "renderPayloadResponse",
+          serverPackageId,
+        )
+      ) {
+        found = true;
+        callPath.stop();
+      }
+    },
+  });
+  return found;
+}
+
+// Returns the number of import declarations marked with the payload query.
+function rewritePayloadComponentImports(
+  path: NodePath<babel.types.Program>,
+): number {
+  const componentBindings = new Set<string>();
+  path.traverse({
+    JSXOpeningElement(elementPath) {
+      if (elementPath.node.name.type === "JSXNamespacedName") return;
+      const name = rootJsxIdentifier(elementPath.node.name);
+      if (name !== undefined) componentBindings.add(name);
+    },
+    CallExpression(callPath) {
+      if (
+        callPath.node.callee.type !== "Identifier" ||
+        !isImportedBinding(
+          callPath,
+          callPath.node.callee.name,
+          "createElement",
+          "@bgub/fig",
+        )
+      ) {
+        return;
+      }
+      const [type] = callPath.node.arguments;
+      if (type?.type === "Identifier" && isComponentName(type.name)) {
+        componentBindings.add(type.name);
+      }
+    },
+  });
+
+  let count = 0;
   for (const statement of path.get("body")) {
     if (!statement.isImportDeclaration()) continue;
     const source = statement.node.source.value;
-    if (!isStylesheetSpecifier(source)) continue;
-
-    const existingUrl = hasUrlQuery(source);
-    const defaultSpecifier = statement.node.specifiers.find(
-      (specifier): specifier is babel.types.ImportDefaultSpecifier =>
-        t.isImportDefaultSpecifier(specifier),
-    );
-    if (existingUrl && defaultSpecifier !== undefined) {
-      hrefs.push(defaultSpecifier.local);
+    if (
+      statement.node.importKind === "type" ||
+      isStylesheetSpecifier(source) ||
+      isFigRuntimeSpecifier(source) ||
+      hasModuleQuery(source, payloadModuleQuery) ||
+      !statement.node.specifiers.some(
+        (specifier) =>
+          !("importKind" in specifier && specifier.importKind === "type") &&
+          componentBindings.has(specifier.local.name),
+      )
+    ) {
       continue;
     }
-
-    const local = path.scope.generateUidIdentifier("figPayloadStylesheet");
-    if (statement.node.specifiers.length === 0) {
-      statement.node.source = t.stringLiteral(withUrlQuery(source));
-      statement.node.specifiers.push(t.importDefaultSpecifier(local));
-    } else {
-      statement.insertAfter(
-        t.importDeclaration(
-          [t.importDefaultSpecifier(local)],
-          t.stringLiteral(withUrlQuery(source)),
-        ),
-      );
-    }
-    hrefs.push(local);
+    statement.node.source.value = withModuleQuery(
+      source,
+      payloadModuleQuery,
+      "1",
+    );
+    count += 1;
   }
-  return hrefs;
+  return count;
 }
 
-function rewriteIsomorphicImports(
-  path: NodePath<babel.types.Program>,
-  t: typeof babel.types,
-  references: readonly CompiledIsomorphicImport[],
-): CompiledIsomorphicImport[] {
-  if (references.length === 0) return [];
-  const byLocalName = new Map(
-    references.map((reference) => [reference.localName, reference]),
+function isFigRuntimeSpecifier(source: string): boolean {
+  return figRuntimePackageIds.some(
+    (packageId) => source === packageId || source.startsWith(`${packageId}/`),
   );
-
-  for (const statement of path.get("body")) {
-    if (!statement.isImportDeclaration()) continue;
-    const before = statement.node.specifiers.length;
-    statement.node.specifiers = statement.node.specifiers.filter(
-      (specifier) => !byLocalName.has(specifier.local.name),
-    );
-    if (before > 0 && statement.node.specifiers.length === 0) {
-      statement.remove();
-    }
-  }
-  return [...references];
-}
-
-function collectComponentNames(
-  path: NodePath<babel.types.Program>,
-  t: typeof babel.types,
-): string[] {
-  const names = new Set<string>();
-  for (const statement of path.get("body")) {
-    const declaration =
-      statement.isExportNamedDeclaration() ||
-      statement.isExportDefaultDeclaration()
-        ? statement.get("declaration")
-        : statement;
-    if (Array.isArray(declaration)) continue;
-
-    if (declaration.isFunctionDeclaration()) {
-      const name = declaration.node.id?.name;
-      if (name !== undefined && isComponentName(name)) names.add(name);
-      continue;
-    }
-    if (!declaration.isVariableDeclaration()) continue;
-
-    for (const declarator of declaration.node.declarations) {
-      if (
-        t.isIdentifier(declarator.id) &&
-        isComponentName(declarator.id.name) &&
-        (t.isArrowFunctionExpression(declarator.init) ||
-          t.isFunctionExpression(declarator.init))
-      ) {
-        names.add(declarator.id.name);
-      }
-    }
-  }
-  return [...names];
 }
 
 function rootJsxIdentifier(
@@ -370,27 +293,4 @@ function rootJsxIdentifier(
   return current.type === "JSXIdentifier" && isComponentName(current.name)
     ? current.name
     : undefined;
-}
-
-function isPayloadModule(id: string): boolean {
-  return id.endsWith(".server.ts") || id.endsWith(".server.tsx");
-}
-
-function isComponentName(name: string): boolean {
-  const first = name.codePointAt(0);
-  return first !== undefined && first >= 65 && first <= 90;
-}
-
-export function isStylesheetSpecifier(source: string): boolean {
-  const path = cleanModuleId(source);
-  return /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss)$/.test(path);
-}
-
-function hasUrlQuery(source: string): boolean {
-  return /[?&]url(?:[=&]|$)/.test(source);
-}
-
-function withUrlQuery(source: string): string {
-  if (hasUrlQuery(source)) return source;
-  return `${source}${source.includes("?") ? "&" : "?"}url`;
 }

@@ -135,17 +135,6 @@ describe("@bgub/fig", () => {
     );
   });
 
-  it("routes browser imports of serverDataResource to a throwing stub", async () => {
-    const serverPackage = await import("./server.browser.ts");
-
-    expect(() =>
-      serverPackage.serverDataResource({
-        key: () => ["server-only"],
-        load: () => "secret",
-      }),
-    ).toThrow("serverDataResource may only be imported from server-only code.");
-  });
-
   it("supports fragments as element types", () => {
     const element = createElement(Fragment, null, "child");
 

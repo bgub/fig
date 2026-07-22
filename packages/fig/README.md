@@ -301,16 +301,22 @@ For server-only data, split the browser-safe key resource from the server
 loader:
 
 ```ts
+// user-data.ts
 import { dataResource } from "@bgub/fig";
-import { serverDataResource } from "@bgub/fig/server";
 
 export const userKey = (id: string) => ["user", id];
 
 export const userResource = dataResource<[string], User>({
   key: userKey,
 });
+```
 
-export const userServerResource = serverDataResource({
+```ts
+// user-data.server.ts
+import { dataResource } from "@bgub/fig";
+import { userKey } from "./user-data.ts";
+
+export const userServerResource = dataResource({
   key: userKey,
   load: async (id, { signal }) => fetchUser(id, signal),
 });
@@ -322,9 +328,11 @@ resource has no client loader, `refreshData(userResource, id)` resolves with
 `{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs a
 payload or framework refresh path.
 
-Browser bundles need the `figData` transform from `@bgub/fig-vite` so imports of
-`.server.ts(x)` modules become loader-free client stubs instead of bundling the
-server loader.
+Place the loader-backed definition behind the host framework's server-only
+module boundary. Browser code imports only the explicit loader-free resource;
+Fig joins the two definitions by key during hydration without a bundler
+transform. If only server-rendered code reads the value, the single
+loader-backed definition is sufficient.
 
 Direct client refreshes of server data are a framework feature, not a core
 data one: an endpoint has to exist to serve them. Define an isomorphic

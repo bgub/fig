@@ -1,6 +1,6 @@
 # @bgub/fig-server
 
-Fig server renderer.
+Fig server renderer for HTML and Payload component trees.
 
 ## Installation
 
@@ -164,11 +164,10 @@ through `@bgub/fig` dedupe by key within the request and fulfilled entries are
 available through `result.getData()`:
 
 ```tsx
-import { readData } from "@bgub/fig";
-import { serverDataResource } from "@bgub/fig/server";
+import { dataResource, readData } from "@bgub/fig";
 import { renderToStream } from "@bgub/fig-server";
 
-const userResource = serverDataResource<[string], { name: string }>({
+const userResource = dataResource<[string], { name: string }>({
   key: (id) => ["user", id],
   load: async (id, { signal }) => fetchUser(id, signal),
 });
@@ -292,13 +291,13 @@ renderToStream(<Page />, {
 Manifest assets use the same registry, destination rules, dedupe checks, and
 Suspense reveal gating as explicit `assets(...)` wrappers.
 
-## Payload (server components)
+## Payload components
 
 ```ts
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
 ```
 
-`renderToPayloadStream(node, options?)` renders a server-component payload. The
+`renderToPayloadStream(node, options?)` renders a component tree to Payload. The
 result exposes `stream`, `contentType`, and `allReady`; cancellation is
 signal-only — aborting `options.signal` (or cancelling the stream) cancels the
 render and rejects `allReady`. Pass the stream and content type directly to a `Response`. Browser
@@ -307,7 +306,7 @@ through fig-dom's `payloadDataLoader` adapter. Rows, codecs, value encoding, and
 framework document transports are internal implementation details.
 
 The public options cover error sanitization (`onError`), bundler-provided
-server-component assets (`componentAssets`), manifest-provided client assets
+Payload component assets (`componentAssets`), manifest-provided client assets
 (`clientReferenceAssets`), data-store partitioning, byte backpressure
 (`highWaterMark`), and cancellation (`signal`).
 

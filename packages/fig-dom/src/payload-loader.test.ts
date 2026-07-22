@@ -9,7 +9,6 @@ import {
   stylesheet,
   Suspense,
 } from "@bgub/fig";
-import { serverDataResource } from "@bgub/fig/server";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { describe, expect, it } from "vitest";
 import { createRoot, flushSync, payloadDataLoader } from "./index.ts";
@@ -132,7 +131,7 @@ describe("payloadDataLoader", () => {
   });
 
   it("delivers decoded trees through readData and hydrates server-read data rows", async () => {
-    const userResource = serverDataResource<[string], { name: string }>({
+    const userResource = dataResource<[string], { name: string }>({
       key: (id: string) => ["loader-user", id],
       load: () => ({ name: "Grace" }),
     });

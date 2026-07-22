@@ -1,19 +1,30 @@
 import type { FigNode } from "@bgub/fig";
+import { Isomorphic } from "@bgub/fig-tanstack-start/payload";
 import "./asset-lab.css";
+import payloadMarkHref from "./assets/payload-mark.svg?no-inline";
 import { AssetLabIsland } from "./components/AssetLabIsland.tsx";
 
 export function AssetLabPayload(): FigNode {
   return (
     <section class="asset-lab-root" data-asset-lab>
       <div>
-        <h1 class="asset-lab-title">Asset lab</h1>
+        <div class="asset-lab-heading">
+          <img
+            alt=""
+            class="asset-lab-mark"
+            data-payload-image
+            src={payloadMarkHref}
+          />
+          <h1 class="asset-lab-title">Asset lab</h1>
+        </div>
         <p class="asset-lab-copy">
-          This server-only Payload component imports its own stylesheet, then
-          renders an isomorphic component with a separate CSS module and SVG
+          This Payload-rendered component imports its own stylesheet, then
+          renders server-emitted image, background, and font assets plus an
+          explicitly isomorphic component with a separate CSS module and SVG
           asset.
         </p>
       </div>
-      <AssetLabIsland />
+      <Isomorphic component={AssetLabIsland} />
     </section>
   );
 }

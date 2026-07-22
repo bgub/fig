@@ -2,15 +2,12 @@ import { Buffer } from "node:buffer";
 import { isAbsolute, relative, sep } from "node:path";
 
 export const payloadManifestDefinitionQuery = "fig-payload-manifest";
+export const payloadModuleQuery = "fig-payload-module";
 export const payloadReferenceQuery = "fig-payload-reference";
 
 export function cleanModuleId(id: string): string {
   const query = id.indexOf("?");
   return query === -1 ? id : id.slice(0, query);
-}
-
-export function isServerComponentModuleId(id: string): boolean {
-  return /\.server\.tsx?$/.test(cleanModuleId(id));
 }
 
 export function moduleQueryValue(id: string, name: string): string | undefined {

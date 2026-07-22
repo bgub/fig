@@ -1,4 +1,5 @@
-import type { CompiledIsomorphicImport } from "./payload-compiler.ts";
+import { sourceModuleExtensions } from "./compiler-options.ts";
+import type { CompiledIsomorphicImport } from "./isomorphic-compiler.ts";
 import {
   decodeOpaqueId,
   encodeOpaqueId,
@@ -49,7 +50,15 @@ export function payloadManifestRuntimeCode(
   return `import { stylesheet } from "@bgub/fig";
 import { createPayloadClientReferenceResolver } from "@bgub/fig/payload";
 
-const definitions = import.meta.glob("/**/*.server.{ts,tsx}", {
+const definitions = import.meta.glob([
+  "/**/*.{${sourceModuleExtensions.join(",")}}",
+  "!/**/*.d.ts",
+  "!/**/*.test.*",
+  "!/**/*.spec.*",
+  "!/**/__tests__/**",
+  "!/**/dist/**",
+  "!/**/node_modules/**",
+], {
   eager: true,
   import: "references",
   query: "?${payloadManifestDefinitionQuery}",

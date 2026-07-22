@@ -1,4 +1,4 @@
-import { serverDataResource } from "@bgub/fig/server";
+import { dataResource } from "@bgub/fig";
 import {
   serverInfoKey,
   serverOnlyInfoKey,
@@ -15,7 +15,7 @@ export function createServerInfo(): ServerInfo {
 }
 
 export function createServerInfoResource(info = createServerInfo()) {
-  return serverDataResource<[], ServerInfo>({
+  return dataResource<[], ServerInfo>({
     key: serverInfoKey,
     load: () => info,
   });
@@ -25,7 +25,7 @@ export function createServerOnlyInfoResource(
   requestId: string,
   info = createServerInfo(),
 ) {
-  return serverDataResource<[], ServerOnlyInfo>({
+  return dataResource<[], ServerOnlyInfo>({
     key: serverOnlyInfoKey,
     load: () => ({
       region: info.region,
@@ -35,12 +35,12 @@ export function createServerOnlyInfoResource(
   });
 }
 
-export const serverInfoResource = serverDataResource<[], ServerInfo>({
+export const serverInfoResource = dataResource<[], ServerInfo>({
   key: serverInfoKey,
   load: () => createServerInfo(),
 });
 
-export const serverOnlyInfoResource = serverDataResource<[], ServerOnlyInfo>({
+export const serverOnlyInfoResource = dataResource<[], ServerOnlyInfo>({
   key: serverOnlyInfoKey,
   load: () => ({
     region: "unknown",

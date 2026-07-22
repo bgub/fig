@@ -1,6 +1,10 @@
-import { createDataStore, createElement, readData } from "@bgub/fig";
+import {
+  createDataStore,
+  createElement,
+  dataResource,
+  readData,
+} from "@bgub/fig";
 import { decodePayloadStream } from "@bgub/fig/payload";
-import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
 import { renderToPayloadStream } from "./payload.ts";
@@ -9,7 +13,7 @@ import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
   it("renders data resources and exposes fulfilled entries", async () => {
-    const userResource = serverDataResource<[string], string>({
+    const userResource = dataResource<[string], string>({
       key: (id: string) => ["ssr-user", id],
       load: () => "Ada",
     });
@@ -29,7 +33,7 @@ describe("@bgub/fig-server data resources", () => {
   });
 
   it("returns data hydration entries from prerender", async () => {
-    const userResource = serverDataResource<[string], string>({
+    const userResource = dataResource<[string], string>({
       key: (id: string) => ["prerender-user", id],
       load: () => "Ada",
     });
@@ -48,7 +52,7 @@ describe("@bgub/fig-server data resources", () => {
 
   it("hydrates route-loader data before the first render read", async () => {
     let loads = 0;
-    const userResource = serverDataResource<[string], string>({
+    const userResource = dataResource<[string], string>({
       key: (id: string) => ["initial-user", id],
       load: () => {
         loads += 1;
@@ -73,7 +77,7 @@ describe("@bgub/fig-server data resources", () => {
 
   it("adopts a store populated before rendering without copying entries", async () => {
     let loads = 0;
-    const userResource = serverDataResource<[string], string>({
+    const userResource = dataResource<[string], string>({
       key: (id: string) => ["adopted-user", id],
       load: () => {
         loads += 1;
@@ -106,7 +110,7 @@ describe("@bgub/fig-server data resources", () => {
   });
 
   it("streams payload data rows before the model that may read them on the client", async () => {
-    const userResource = serverDataResource<[string], { name: string }>({
+    const userResource = dataResource<[string], { name: string }>({
       key: (id: string) => ["payload-user", id],
       load: () => ({ name: "Grace" }),
     });

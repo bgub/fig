@@ -1,7 +1,7 @@
 {
   "name": "@bgub/fig-vite",
   "version": "0.1.0-alpha.0",
-  "description": "Fig Vite plugins (Fast Refresh / HMR and data-resource transforms)",
+  "description": "Fig Vite plugin for state-preserving Fast Refresh",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
   "type": "module",

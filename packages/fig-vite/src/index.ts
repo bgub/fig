@@ -80,5 +80,3 @@ export { register, setSignature };
 function viteFileImport(url: string): string {
   return `/@fs/${fileURLToPath(url)}`;
 }
-
-export { type FigDataPlugin, figData } from "./data/index.ts";

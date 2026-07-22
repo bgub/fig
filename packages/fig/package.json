@@ -21,12 +21,6 @@
       "import": "./dist/payload.js",
       "default": "./dist/payload.js"
     },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "browser": "./dist/server.browser.js",
-      "import": "./dist/server.js",
-      "default": "./dist/server.js"
-    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js",

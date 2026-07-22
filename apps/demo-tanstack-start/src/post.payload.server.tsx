@@ -1,8 +1,7 @@
-import { createElement, type FigNode, readData, Suspense } from "@bgub/fig";
-import { serverDataResource } from "@bgub/fig/server";
+import { dataResource, type FigNode, readData, Suspense } from "@bgub/fig";
 import { delay, requirePost, type Post } from "./posts.ts";
 
-const postResource = serverDataResource<[string], Post>({
+const postResource = dataResource<[string], Post>({
   key: (id) => ["server-post", id],
   load: async (id) => {
     await delay(400);
@@ -11,16 +10,16 @@ const postResource = serverDataResource<[string], Post>({
 });
 
 export function PostPayload(props: { id: string }): FigNode {
-  return createElement(
-    Suspense,
-    {
-      fallback: createElement(
-        "p",
-        { class: "italic text-slate-500", "data-post-pending": true },
-        "Loading post…",
-      ),
-    },
-    createElement(PostContent, props),
+  return (
+    <Suspense
+      fallback={
+        <p class="italic text-slate-500" data-post-pending>
+          Loading post…
+        </p>
+      }
+    >
+      <PostContent {...props} />
+    </Suspense>
   );
 }
 

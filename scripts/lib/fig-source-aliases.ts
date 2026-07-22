@@ -5,7 +5,6 @@ const entries = [
   ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
   ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
   ["@bgub/fig/payload", "packages/fig/src/payload.ts"],
-  ["@bgub/fig/server", "packages/fig/src/server.ts"],
   ["@bgub/fig-devtools/server", "packages/fig-devtools/src/server.ts"],
   ["@bgub/fig-devtools/client", "packages/fig-devtools/src/client.ts"],
   ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],

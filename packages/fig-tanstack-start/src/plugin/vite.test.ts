@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,6 +43,31 @@ interface PayloadPlugin {
     environmentName: string,
     environment: EnvironmentOptions,
   ): { build?: EnvironmentOptions["build"] } | undefined;
+  resolveId(
+    this: PayloadPluginContext,
+    source: string,
+    importer?: string,
+  ): Promise<string | null | undefined>;
+  load(this: PayloadPluginContext, id: string): Promise<string | undefined>;
+  hotUpdate(
+    this: {
+      environment: {
+        moduleGraph: {
+          getModuleById(id: string): { id: string } | undefined;
+        };
+      };
+    },
+    options: { file: string; modules: unknown[]; read(): Promise<string> },
+  ): Promise<unknown[] | undefined>;
+}
+
+interface PayloadPluginContext {
+  addWatchFile(id: string): void;
+  resolve(
+    source: string,
+    importer?: string,
+    options?: { skipSelf?: boolean },
+  ): Promise<{ id: string } | null>;
 }
 
 interface OptimizerPlugin {
@@ -56,9 +81,12 @@ describe("tanstackStart", () => {
     );
   });
 
-  it("keeps compatibility and Payload build concerns in separate plugins", () => {
-    expect(tanstackStart().slice(0, 2)).toEqual([
+  it("keeps compatibility and Payload compilation concerns in separate plugins", () => {
+    expect(tanstackStart().slice(0, 3)).toEqual([
       expect.objectContaining({ name: "fig-tanstack-start:compatibility" }),
+      expect.objectContaining({
+        name: "fig-tanstack-start:payload-resource",
+      }),
       expect.objectContaining({ name: "fig-tanstack-start:payload" }),
     ]);
   });
@@ -174,6 +202,94 @@ describe("tanstackStart", () => {
     }
   });
 
+  it("reloads manifest definitions only when Isomorphic boundaries change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fig-start-hotupdate-"));
+    try {
+      const labPath = join(root, "lab.tsx");
+      const plainPath = join(root, "plain.tsx");
+      const islandPath = join(root, "Island.tsx");
+      const boundaryCode = `
+        import { Isomorphic } from "@bgub/fig-tanstack-start/payload";
+        import { Island } from "./Island.tsx";
+        export function Lab() {
+          return <Isomorphic component={Island} />;
+        }
+      `;
+      await writeFile(
+        islandPath,
+        "export function Island() { return null; }\n",
+      );
+      await writeFile(labPath, boundaryCode);
+      await writeFile(plainPath, "export const plain = true;\n");
+
+      const plugin = payloadPlugin();
+      const context: PayloadPluginContext = {
+        addWatchFile: () => undefined,
+        resolve: (source) =>
+          Promise.resolve({
+            id: source.startsWith("./") ? join(root, source.slice(2)) : source,
+          }),
+      };
+      const definitions = new Map<string, { id: string }>();
+      for (const file of [labPath, plainPath]) {
+        const definitionId = await plugin.resolveId.call(
+          context,
+          `${file}?fig-payload-manifest`,
+          file,
+        );
+        if (typeof definitionId !== "string") {
+          throw new Error("Expected a manifest definition id.");
+        }
+        await plugin.load.call(context, definitionId);
+        definitions.set(file, { id: definitionId });
+      }
+
+      const hotUpdate = (file: string, code: string) =>
+        plugin.hotUpdate.call(
+          {
+            environment: {
+              moduleGraph: {
+                getModuleById: (id) =>
+                  [...definitions.values()].find(
+                    (definition) => definition.id === id,
+                  ),
+              },
+            },
+          },
+          { file, modules: [], read: () => Promise.resolve(code) },
+        );
+
+      // Unchanged boundaries keep the loaded definition.
+      await expect(hotUpdate(labPath, boundaryCode)).resolves.toBeUndefined();
+      // Files without a definition module in the graph are untouched.
+      await expect(
+        hotUpdate(join(root, "unknown.tsx"), boundaryCode),
+      ).resolves.toBeUndefined();
+      // The first boundary in a boundary-free file reloads its definition.
+      await expect(hotUpdate(plainPath, boundaryCode)).resolves.toEqual([
+        definitions.get(plainPath),
+      ]);
+      // Removing every boundary reloads the definition too.
+      await expect(
+        hotUpdate(labPath, "export function Lab() { return null; }"),
+      ).resolves.toEqual([definitions.get(labPath)]);
+      // Ordinary edits to a referenced component keep its dependents.
+      await expect(
+        hotUpdate(islandPath, "export function Island() { return <p />; }"),
+      ).resolves.toBeUndefined();
+      // A stylesheet-import change in a referenced component reloads the
+      // definitions that embed its development hrefs.
+      await expect(
+        hotUpdate(
+          islandPath,
+          'import "./island.css";\nexport function Island() { return null; }',
+        ),
+      ).resolves.toEqual([definitions.get(labPath)]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps compiler RPC modules private to the compatibility plugin", () => {
     const modules = createCompilerRpcModules((id) => `/resolved/${id}`);
     const clientRpc = modules.find(
@@ -200,5 +316,5 @@ function compatibilityPlugin(): CompatibilityPlugin {
 }
 
 function payloadPlugin(): PayloadPlugin {
-  return tanstackStart()[1] as unknown as PayloadPlugin;
+  return tanstackStart()[2] as unknown as PayloadPlugin;
 }

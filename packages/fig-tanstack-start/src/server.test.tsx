@@ -1,6 +1,5 @@
 import {
   assets,
-  createElement,
   dataResource,
   type FigNode,
   readData,
@@ -146,7 +145,7 @@ describe("@bgub/fig-tanstack-start server", () => {
           stylesheet("/route.css", { crossorigin: "use-credentials" }),
           stylesheet("/profile.css", { precedence: "route" }),
         ],
-        createElement("main", null, readData(userResource, "42")),
+        <main>{readData(userResource, "42")}</main>,
       );
     }
   });
@@ -165,14 +164,14 @@ describe("@bgub/fig-tanstack-start server", () => {
       const pageRoute = createRoute({
         component: () => {
           components += 1;
-          return createElement("main", null, "page");
+          return <main>page</main>;
         },
         getParentRoute: () => rootRoute,
         loader: () => {
           loads += 1;
         },
         path: "page",
-        pendingComponent: () => createElement("main", null, "pending"),
+        pendingComponent: () => <main>pending</main>,
         ssr,
       });
       const router = createRouter({
@@ -208,15 +207,15 @@ async function renderRouterHtml(
 }
 
 function Document(): FigNode {
-  return createElement(
-    "html",
-    { lang: "en" },
-    createElement("head", null, createElement(HeadContent)),
-    createElement(
-      "body",
-      null,
-      createElement(Outlet),
-      createElement(StartScripts),
-    ),
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        <Outlet />
+        <StartScripts />
+      </body>
+    </html>
   );
 }

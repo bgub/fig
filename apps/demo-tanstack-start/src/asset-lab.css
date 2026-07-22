@@ -1,10 +1,28 @@
+/* This opaque fixture verifies font asset emission and delivery, not glyph rendering. */
+@font-face {
+  font-family: "Fig Payload Asset Fixture";
+  src: url("./assets/payload-font.woff2?no-inline") format("woff2");
+}
+
 .asset-lab-root {
-  background: var(--fig-tanstack-card);
+  background-color: var(--fig-tanstack-card);
+  background-image: url("./assets/payload-background.svg?no-inline");
   border: 1px solid var(--fig-tanstack-border);
   border-radius: 8px;
   display: grid;
   gap: 18px;
   padding: 20px;
+}
+
+.asset-lab-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.asset-lab-mark {
+  height: 40px;
+  width: 40px;
 }
 
 .asset-lab-title {

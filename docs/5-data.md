@@ -159,11 +159,11 @@ export const userResource = dataResource({
 
 ```ts
 // user-data.server.ts
-import { serverDataResource } from "@bgub/fig/server";
+import { dataResource } from "@bgub/fig";
 import { db } from "./db.server.ts";
 import { userKey } from "./user-data.ts";
 
-export const userServerResource = serverDataResource({
+export const userServerResource = dataResource({
   key: userKey,
   load: async (id, { signal }) => db.users.find(id, { signal }),
 });
@@ -171,7 +171,7 @@ export const userServerResource = serverDataResource({
 
 Browser components import and read `userResource`. Server code imports and preloads or reads `userServerResource`. Because both resources return the same key, they address the same store entry.
 
-If you import a `.server.ts(x)` module from browser code, the public `figData` plugin from `@bgub/fig-vite` replaces the server loader with a client stub.
+Fig has no separate server-resource API or data bundler transform. A server-only loader is an ordinary `dataResource` placed behind the host framework's server-only module boundary. Browser code imports the explicit key-only resource from the shared module; it never imports the server module. If only server-rendered code reads the value, the single loader-backed definition is sufficient.
 
 On the client, the loader-less resource is hydrate-only. If the server streamed a value for that key, `readData(userResource, id)` can read it. If the client tries to refresh it directly, the result is:
 
@@ -246,4 +246,4 @@ Fig keeps the surface narrow. It doesn't absorb polling, focus refetch, retry po
 
 ---
 
-The full contract — retention and eviction windows, key encoding rules, every edge case — lives in `docs/concepts/data.md`. Next: doc 6 — payload, the wire these data entries ride during server-component navigation.
+The full contract — retention and eviction windows, key encoding rules, every edge case — lives in `docs/concepts/data.md`. Next: doc 6 — payload, the wire these data entries ride during Payload navigation.

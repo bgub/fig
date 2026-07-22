@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement, dataResource, readData } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig";
 import { hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import {
@@ -36,24 +36,20 @@ describe("TanStack Start data round trip", () => {
     });
 
     function User() {
-      return createElement(
-        "span",
-        { id: "user" },
-        readData(userResource, "42"),
-      );
+      return <span id="user">{readData(userResource, "42")}</span>;
     }
 
     function Document() {
-      return createElement(
-        "html",
-        { lang: "en" },
-        createElement("head", null),
-        createElement(
-          "body",
-          null,
-          createElement("div", { id: "app" }, createElement(Outlet)),
-          createElement(StartScripts),
-        ),
+      return (
+        <html lang="en">
+          <head />
+          <body>
+            <div id="app">
+              <Outlet />
+            </div>
+            <StartScripts />
+          </body>
+        </html>
       );
     }
 
@@ -101,7 +97,7 @@ describe("TanStack Start data round trip", () => {
     if (container === null)
       throw new Error("Missing server-rendered app root.");
     const root = await act(() =>
-      hydrateRoot(container, createElement(User), {
+      hydrateRoot(container, <User />, {
         dataStore: clientData.context.data,
       }),
     );

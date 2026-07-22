@@ -5,7 +5,7 @@ const { figRefresh } = figVite;
 
 describe("@bgub/fig-vite plugin", () => {
   it("exposes only the application plugin interface", () => {
-    expect(Object.keys(figVite).sort()).toEqual(["figData", "figRefresh"]);
+    expect(Object.keys(figVite)).toEqual(["figRefresh"]);
   });
 
   it("loads the refresh runtime through Vite file imports", () => {

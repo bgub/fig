@@ -5,7 +5,6 @@ import {
   payloadManifestRuntimeCode,
   payloadReferenceIds,
 } from "./isomorphic-manifest.ts";
-import { isServerComponentModuleId } from "./module-ids.ts";
 
 describe("TanStack Start Payload manifest", () => {
   it("gives resolved component exports stable application-relative ids", () => {
@@ -16,14 +15,6 @@ describe("TanStack Start Payload manifest", () => {
         "Counter",
       ),
     ).toBe("/src/components/Counter.tsx#Counter");
-  });
-
-  it("classifies server components from resolved module ids", () => {
-    expect(isServerComponentModuleId("/app/src/nested.server.tsx?import")).toBe(
-      true,
-    );
-    expect(isServerComponentModuleId("/app/src/nested.server.ts")).toBe(true);
-    expect(isServerComponentModuleId("/app/src/nested.tsx")).toBe(false);
   });
 
   it("generates tagged component loaders and development stylesheets", () => {
@@ -60,6 +51,9 @@ describe("TanStack Start Payload manifest", () => {
     );
 
     expect(code).toContain("import.meta.glob");
+    expect(code).toContain("/**/*.{js,jsx,ts,tsx,cjs,mjs,cts,mts}");
+    expect(code).toContain('"!/**/*.test.*"');
+    expect(code).toContain('"!/**/*.spec.*"');
     expect(code).toContain("createPayloadClientReferenceResolver");
     expect(code).toContain("/assets/counter-hash.css");
     expect(code).not.toContain("globalThis");

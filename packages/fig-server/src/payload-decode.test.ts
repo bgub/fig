@@ -3,6 +3,7 @@ import {
   clientReference,
   createContext,
   createElement,
+  dataResource,
   type ElementType,
   type FigElement,
   type FigNode,
@@ -20,7 +21,6 @@ import {
   type PayloadDecodeCompletion,
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
-import { serverDataResource } from "@bgub/fig/server";
 import { describe, expect, it } from "vitest";
 import { renderToPayloadStream } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
@@ -187,7 +187,7 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
   });
 
   it("hydrates data read by server components through the capability", async () => {
-    const userResource = serverDataResource<[string], { name: string }>({
+    const userResource = dataResource<[string], { name: string }>({
       key: (id: string) => ["decode-user", id],
       load: () => ({ name: "Grace" }),
     });

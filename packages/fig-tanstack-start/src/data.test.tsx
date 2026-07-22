@@ -1,10 +1,5 @@
 // @vitest-environment happy-dom
-import {
-  createElement,
-  dataResource,
-  type DataResource,
-  readData,
-} from "@bgub/fig";
+import { dataResource, type DataResource, readData } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,9 +31,7 @@ describe("createStartDataContext", () => {
     roots.push(root);
 
     await act(() =>
-      root.render(
-        createElement("span", null, readDataInComponent(resource, "one")),
-      ),
+      root.render(<span>{readDataInComponent(resource, "one")}</span>),
     );
 
     expect(container.textContent).toBe("one-v1");
@@ -58,5 +51,5 @@ function readDataInComponent(
   function Value() {
     return readData(resource, id);
   }
-  return createElement(Value);
+  return <Value />;
 }

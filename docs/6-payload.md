@@ -1,4 +1,4 @@
-# Payload (server components)
+# Payload components
 
 Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the client half (`decodePayloadStream`) lives at the browser-safe `@bgub/fig/payload`; and fig-dom's `payloadDataLoader` turns the whole thing into an ordinary data resource. Rows and encoding stay internal. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
 
@@ -9,7 +9,7 @@ Like docs 3 and 4, this one follows a single scenario end to end.
 A profile page renders on the server. It reads data (doc 5) and includes one interactive island:
 
 ```tsx
-// profile-page.tsx — runs only on the server
+// profile-page.payload.tsx
 import { readData } from "@bgub/fig";
 import { userResource } from "./user-data.server.ts";
 import { LikeButton } from "./like-button-ref.ts";
@@ -88,7 +88,7 @@ Some things are deliberately absent from the row model: server actions and tempo
 
 Payload data is not just `JSON.stringify` with crossed fingers. The shared value codec round-trips JSON scalars/arrays, plain objects (including a user-authored `$fig` key), shared references and cyclic graphs, `undefined`, `Date`, `Map`, `Set`, `BigInt`, non-finite numbers, `-0`, and global `Symbol.for` symbols. It rejects functions, class instances/non-plain objects, and non-global symbols.
 
-Server component values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. The TanStack Start adapter uses the same helpers for document-data hydration, so data values don't silently degrade to JSON.
+Payload-rendered values can additionally contain Fig elements, client references, and promises. The payload renderer turns those into `$fig` row references first; ordinary data then goes through the shared value codec. The TanStack Start adapter uses the same helpers for document-data hydration, so data values don't silently degrade to JSON.
 
 ## Suspense holes fill by row id
 
@@ -127,7 +127,21 @@ Server-side decoders that feed Fig's HTML renderer set `retainAssets: true`. Tha
 
 ### TanStack Start routes
 
-`@bgub/fig-tanstack-start/payload` packages that same pattern for TanStack Start. `payloadResource` wraps a raw Payload-returning server function; route loaders call `ensureRouteData`, and route components call `readData`. On SSR the adapter embeds the response stream into the document and retains asset declarations on their decoded owners, letting the document renderer deliver them before dependent HTML. The browser adopts the embedded root without refetching, then uses the server function normally for navigation and refresh. Shell HTML streams immediately, while TanStack's hydration barrier waits for outlined Payload holes before each completed response enters a keyed carrier. See the [adapter guide](../packages/fig-tanstack-start/README.md#payload-routes) for the complete serving, resource, and route example.
+`@bgub/fig-tanstack-start/payload` packages that same pattern for TanStack Start. A complete Payload resource can be one shared module:
+
+```tsx
+// profile.payload.tsx
+import { payloadResource } from "@bgub/fig-tanstack-start/payload";
+
+export const profilePayload = payloadResource<string>({
+  key: (id) => ["profile-payload", id],
+  render: (id) => <article>Profile: {id}</article>,
+});
+```
+
+The compiler moves the inline `render` callback into a private server function and leaves only the resource handle and RPC stub in the browser bundle. The declaration therefore stays in a client-importable `.tsx` module; `.payload.tsx` is a descriptive convention, not special compiler behavior. Components and other imports referenced only by `render` are omitted from the browser bundle too. `<Isomorphic component={Counter} ... />` marks the exceptional SSR-plus-hydration boundary.
+
+Route loaders call `ensureRouteData`, and route components call `readData`. On SSR the adapter embeds the response stream into the document and retains asset declarations on their decoded owners, letting the document renderer deliver them before dependent HTML. The browser adopts the embedded root without refetching, then uses the generated server function normally for navigation and refresh. Shell HTML streams immediately, while TanStack's hydration barrier waits for outlined Payload holes before each completed response enters a keyed carrier. See the [adapter guide](../packages/fig-tanstack-start/README.md#payload-routes) for the complete route example.
 
 ## Refreshing
 
