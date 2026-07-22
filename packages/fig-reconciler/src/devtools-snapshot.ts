@@ -27,6 +27,7 @@ import {
   SuspenseTag,
   type Tag,
   TextTag,
+  ThenableTag,
   ViewTransitionTag,
 } from "./fiber-tags.ts";
 import {
@@ -257,7 +258,10 @@ function appendDevtoolsChildSnapshots(
   inspection: DevtoolsInspectionState,
   children: FigDevtoolsFiberSnapshot[],
 ): void {
-  if (node.tag === ActivityTag && node.type === null) {
+  if (
+    (node.tag === ActivityTag && node.type === null) ||
+    node.tag === ThenableTag
+  ) {
     for (let child = node.child; child !== null; child = child.sibling) {
       appendDevtoolsChildSnapshots(
         child,
@@ -460,6 +464,8 @@ function devtoolsFiberInfo(node: DevtoolsFiber): {
       return { kind: "portal", name: "Portal" };
     case AssetsTag:
       return { kind: "assets", name: "Assets" };
+    case ThenableTag:
+      return { kind: "fragment", name: "Promise" };
   }
 }
 

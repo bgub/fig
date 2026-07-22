@@ -24,7 +24,7 @@ export type ElementType<P = Props> =
   | FigActivity
   | FigViewTransition
   | ComponentType<P>;
-export type FigNode =
+export type AwaitedFigNode =
   | FigElement<any>
   | FigPortal<any>
   | string
@@ -33,6 +33,7 @@ export type FigNode =
   | null
   | undefined
   | FigNode[];
+export type FigNode = AwaitedFigNode | PromiseLike<AwaitedFigNode>;
 
 export interface FigElement<P = Props> {
   readonly $$typeof: symbol;
@@ -107,8 +108,8 @@ export interface FigViewTransition {
 export interface ErrorBoundaryProps {
   // A function fallback receives the caught error so error UIs can render
   // it (message, retry affordance) without smuggling state above the
-  // boundary through onError. A bare function is never a valid FigNode, so
-  // the two shapes cannot collide.
+  // boundary through onError. Callable thenables are nodes, so the runtime
+  // distinguishes them from render fallbacks before invoking the function.
   fallback?: FigNode | ((error: unknown, info: ErrorInfo) => FigNode);
   onError?: (error: unknown, info: ErrorInfo) => void;
   children?: FigNode;

@@ -358,6 +358,139 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("HeaderLoadedFooter");
   });
 
+  it("renders promise-valued children as distinct child slots", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const pending = deferred<string>();
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Loading") },
+          createElement("main", null, "before", pending.promise, "after"),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("Loading");
+
+    pending.resolve("middle");
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("beforemiddleafter");
+    const main = container.childNodes[0] as TestElement;
+    expect(main.childNodes.map((child) => child.textContent)).toEqual([
+      "before",
+      "middle",
+      "after",
+    ]);
+  });
+
+  it("gives element brands precedence over incidental then methods", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+
+    function thenableElement(value: string) {
+      const element = createElement("span", null, value);
+      // oxlint-disable-next-line unicorn/no-thenable -- verifies brand precedence over structural thenables
+      Reflect.defineProperty(element, "then", { value: () => undefined });
+      return element;
+    }
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          thenableElement("first"),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("first");
+    const instance = container.childNodes[0];
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          thenableElement("second"),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("second");
+    expect(container.childNodes[0]).toBe(instance);
+  });
+
+  it("reuses a memoized promise child across client Suspense retries", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const pending = deferred<string>();
+
+    function App() {
+      const child = useMemo(
+        () =>
+          pending.promise.then((value) => createElement("span", null, value)),
+        [pending.promise],
+      );
+      return createElement(
+        Suspense,
+        { fallback: createElement("span", null, "Loading") },
+        child,
+      );
+    }
+
+    flushSync(() => root.render(createElement(App, null)));
+    expect(container.textContent).toBe("Loading");
+
+    pending.resolve("Ready");
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("Ready");
+  });
+
+  it("routes rejected promise children to the nearest ErrorBoundary", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let reject: (error: unknown) => void = () => undefined;
+    const promise = new Promise<string>((_resolve, fail) => {
+      reject = fail;
+    });
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: (error) =>
+              createElement(
+                "span",
+                null,
+                `Caught: ${(error as Error).message}`,
+              ),
+          },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Loading") },
+            promise,
+          ),
+        ),
+      ),
+    );
+    expect(container.textContent).toBe("Loading");
+
+    reject(new Error("failed"));
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("Caught: failed");
+  });
+
   it("retries a suspended boundary reused in place across a parent bailout", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
@@ -638,6 +771,26 @@ describe("reconciler", () => {
       name: "Suspense",
     });
     expect(suspense?.children[0]?.name).toBe("span");
+  });
+
+  it("flattens promise slots out of DevTools snapshots", async () => {
+    const commits = collectDevtoolsCommits();
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const pending = deferred<ReturnType<typeof createElement>>();
+
+    flushSync(() =>
+      root.render(
+        createElement(Suspense, { fallback: "Loading" }, pending.promise),
+      ),
+    );
+    pending.resolve(createElement("span", null, "Ready"));
+    await waitForHostTurns();
+
+    const suspense = commits.at(-1)?.tree.children[0];
+    expect(suspense?.children[0]?.name).toBe("span");
+    expect(JSON.stringify(suspense)).not.toContain("Promise");
   });
 
   it("publishes data resource entries to DevTools snapshots", () => {

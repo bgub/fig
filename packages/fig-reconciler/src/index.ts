@@ -1,11 +1,13 @@
 import {
   type ActionStateAction,
   type ActionStateRunner,
+  type AwaitedFigNode,
   type DataResource,
   type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
   type ElementType,
+  type ErrorBoundaryProps,
   type ErrorInfo,
   type ExternalStoreSubscribe,
   type FigAssetResourceList,
@@ -37,6 +39,7 @@ import {
   setCurrentDataStore,
   setCurrentDispatcher,
   setTransitionHandler,
+  trackThenable,
   type Thenable,
 } from "@bgub/fig/internal";
 import {
@@ -61,6 +64,7 @@ import {
   tagFor,
   type Tag,
   TextTag,
+  ThenableTag,
   ViewTransitionTag,
 } from "./fiber-tags.ts";
 import { walkFiberForest, walkFiberSubtree } from "./fiber-traversal.ts";
@@ -1652,6 +1656,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (node.tag === ThenableTag) {
+      reconcileCurrentChildren(
+        node,
+        readThenable(node.props.thenable as PromiseLike<AwaitedFigNode>),
+        root,
+      );
+      return;
+    }
+
     if (node.tag === TextTag) {
       if (
         __DEV__ &&
@@ -2217,7 +2230,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
         const consumedBefore = root.consumedPendingQueues.length;
-        (node.type as Component)(node.props);
+        const shadowResult = (node.type as Component)(node.props);
+        // Discarded promise children can still reject. Observe them without
+        // comparing identities: mount-time useMemo intentionally recomputes
+        // between the passes, while the committed result owns rendering.
+        observeDiscardedPromiseChildren(shadowResult);
         if (currentHook !== null) throw hookOrderError("fewer");
         restoreConsumedPendingQueues(root, consumedBefore);
         prepareHookRender(node, root);
@@ -2593,16 +2610,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  // A bare function is never a valid FigNode, so a function fallback is
-  // unambiguously the render-with-error shape.
   function errorBoundaryFallback(node: F, state: ErrorBoundaryState): FigNode {
-    const fallback = node.props.fallback as
-      | FigNode
-      | ((error: unknown, info: ErrorInfo) => FigNode)
-      | undefined;
-    return typeof fallback === "function"
+    const fallback = node.props.fallback as ErrorBoundaryProps["fallback"];
+    return typeof fallback === "function" && !isThenable(fallback)
       ? fallback(state.error, state.info)
-      : fallback;
+      : (fallback as FigNode);
   }
 
   function beginPortal(node: F): void {
@@ -6022,9 +6034,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       return fiber(PortalTag, null, child.key, portalProps(child), null);
     }
 
-    if (!isValidElement(child)) return null;
+    if (isValidElement(child)) {
+      return fiber(tagFor(child), child.type, child.key, child.props, null);
+    }
 
-    return fiber(tagFor(child), child.type, child.key, child.props, null);
+    if (isThenable(child)) {
+      return fiber(ThenableTag, null, null, { thenable: child }, null);
+    }
+
+    return null;
   }
 
   function portalTarget(node: F): Parent<Container, Instance> {
@@ -6860,6 +6878,25 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 }
 
+function observeDiscardedPromiseChildren(node: FigNode): void {
+  if (Array.isArray(node)) {
+    for (const child of node) observeDiscardedPromiseChildren(child);
+    return;
+  }
+
+  if (isValidElement(node)) {
+    observeDiscardedPromiseChildren(node.props.children);
+    return;
+  }
+
+  if (isPortal(node)) {
+    observeDiscardedPromiseChildren(node.children);
+    return;
+  }
+
+  if (isThenable(node)) trackThenable(node);
+}
+
 function activityHidden(props: Props): boolean {
   return props.mode === "hidden";
 }
@@ -6924,13 +6961,15 @@ function sameType<Container, Instance, TextInstance>(
     return fiber.tag === PortalTag && fiber.props.target === child.target;
   }
 
-  if (!isValidElement(child)) return false;
+  if (isValidElement(child)) {
+    if (__DEV__) {
+      return matchesComponentFamily(fiber.type, child.type);
+    }
 
-  if (__DEV__) {
-    return matchesComponentFamily(fiber.type, child.type);
+    return fiber.type === child.type;
   }
 
-  return fiber.type === child.type;
+  return isThenable(child) && fiber.tag === ThenableTag;
 }
 
 function propsFor(child: NormalizedChild): Props {
@@ -6940,6 +6979,7 @@ function propsFor(child: NormalizedChild): Props {
 
   if (isPortal(child)) return portalProps(child);
   if (isValidElement(child)) return child.props;
+  if (isThenable(child)) return { thenable: child };
 
   throw invalidChildError(child);
 }

@@ -32,6 +32,7 @@ export {
   Activity,
   type ActivityMode,
   type ActivityProps,
+  type AwaitedFigNode,
   type ClientReferenceOptions,
   clientReference,
   type ComponentProps,

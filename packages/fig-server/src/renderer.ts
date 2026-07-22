@@ -59,7 +59,10 @@ import { activityId, earlyEventCaptureMarkup } from "./protocol.ts";
 import {
   documentHeadMarker,
   flushCompletedQueues,
+  leadingNewlineEndMarker,
+  leadingNewlineStartMarker,
   sealHead,
+  type SegmentChunk,
 } from "./renderer-flush.ts";
 import {
   type ContextValues,
@@ -94,6 +97,10 @@ export interface Request {
   dataStore: FigDataStore;
   fatalError: unknown;
   identifierPrefix: string;
+  // Flush-time parser state for nested <pre>/<textarea> hosts. Rendering may
+  // complete child segments out of order; only logical flush order can decide
+  // which text is the parser's first child.
+  leadingNewlineStack: boolean[];
   nextBoundaryId: number;
   nextSegmentId: number;
   nextActivityId: number;
@@ -151,6 +158,7 @@ interface RenderScope {
   // ancestry this is runtime semantics: asset lowering applies only to HTML.
   hostNamespace: HostNamespace;
   idPath: string;
+  pendingLeadingNewline: boolean;
   selectProps: Props | null;
   stack: StackFrame | null;
   // Where collected render-tree nodes attach; null when no collector was
@@ -172,7 +180,7 @@ interface Task extends RenderScope {
 export interface Segment {
   boundary: SuspenseBoundary | null;
   children: Segment[];
-  chunks: Array<string | typeof documentHeadMarker>;
+  chunks: SegmentChunk[];
   id: number | null;
   index: number;
   // True when the trailing edge of everything written so far — including the
@@ -187,7 +195,7 @@ export interface Segment {
   // may directly follow their end; when such a segment completes ending in
   // text, it closes with a trailing TEXT_SEPARATOR.
   textEmbedded: boolean;
-  write(chunk: string): void;
+  write(chunk: SegmentChunk): void;
 }
 
 export interface SuspenseBoundary {
@@ -212,7 +220,6 @@ type HostNamespace = "html" | "mathml" | "svg";
 interface RenderFrame extends RenderScope {
   dispatcher: RenderDispatcher | null;
   localIdCounter: number;
-  pendingLeadingNewlineHost: string | null;
   request: Request;
   segment: Segment;
 }
@@ -276,6 +283,7 @@ export function createServerRenderRequest(
     dataStore,
     fatalError: null,
     identifierPrefix: options.identifierPrefix ?? "",
+    leadingNewlineStack: [],
     nextBoundaryId: 0,
     nextSegmentId: 0,
     nextActivityId: 0,
@@ -305,6 +313,9 @@ export function createServerRenderRequest(
     flushing: false,
     writeBuffer: [],
     write(chunk) {
+      if (chunk !== "" && this.leadingNewlineStack.length > 0) {
+        this.leadingNewlineStack[this.leadingNewlineStack.length - 1] = true;
+      }
       this.writeBuffer.push(chunk);
     },
   };
@@ -321,6 +332,7 @@ export function createServerRenderRequest(
     hostAncestors: [],
     hostNamespace: "html",
     idPath: "",
+    pendingLeadingNewline: false,
     selectProps: null,
     stack: null,
     treeParent: options.renderTree?.tree ?? null,
@@ -414,6 +426,7 @@ function forkScope(scope: RenderScope): RenderScope {
     hostAncestors: scope.hostAncestors,
     hostNamespace: scope.hostNamespace,
     idPath: scope.idPath,
+    pendingLeadingNewline: scope.pendingLeadingNewline,
     selectProps: scope.selectProps,
     stack: scope.stack,
     treeParent: scope.treeParent,
@@ -511,7 +524,6 @@ function createRenderFrame(
     ...scope,
     dispatcher: null,
     localIdCounter: 0,
-    pendingLeadingNewlineHost: null,
     request,
     segment,
   };
@@ -571,13 +583,14 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
           props: { nodeValue: text },
         });
       }
-      const output = consumePendingLeadingNewline(frame)
-        ? preserveParserStrippedLeadingNewline(text)
-        : text;
       // Directly adjacent text from a different fiber: separate it so the
       // browser's parser yields one DOM text node per client text fiber.
       if (frame.segment.lastPushedText) frame.segment.write(TEXT_SEPARATOR);
-      writeText(output, frame.segment);
+      if (consumePendingLeadingNewline(frame)) {
+        writeLeadingNewlineText(text, frame.segment);
+      } else {
+        writeText(text, frame.segment);
+      }
       frame.segment.lastPushedText = true;
     }
     return;
@@ -585,9 +598,17 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
 
   if (isPortal(node)) return;
 
-  if (!isValidElement(node)) throw invalidChildError(node);
+  if (isValidElement(node)) {
+    renderElement(node, frame);
+    return;
+  }
 
-  renderElement(node, frame);
+  if (isThenable(node)) {
+    renderChildren(readThenable(node), frame);
+    return;
+  }
+
+  throw invalidChildError(node);
 }
 
 function renderChildren(node: FigNode, frame: RenderFrame): void {
@@ -602,13 +623,12 @@ function renderChildSequence(
   indexBase = 0,
 ): void {
   for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
     try {
-      withIdSegment(frame, indexBase + index, () =>
-        renderNode(children[index], frame),
-      );
+      withIdSegment(frame, indexBase + index, () => renderNode(child, frame));
     } catch (error) {
       if (isThenable(error)) {
-        spawnSuspendedTask(frame, children[index], error, indexBase + index);
+        spawnSuspendedTask(frame, child, error, indexBase + index);
         continue;
       }
 
@@ -1052,10 +1072,9 @@ function renderHostElement(
   }
   if (isVoid) return;
 
-  const previousPendingLeadingNewlineHost = frame.pendingLeadingNewlineHost;
-  frame.pendingLeadingNewlineHost = leadingNewlineStrippedHost(type)
-    ? type
-    : null;
+  const previousPendingLeadingNewline = frame.pendingLeadingNewline;
+  const tracksLeadingNewline = leadingNewlineStrippedHost(type);
+  frame.pendingLeadingNewline = tracksLeadingNewline;
 
   if (unsafeHTML !== null) {
     frame.segment.write(
@@ -1063,7 +1082,7 @@ function renderHostElement(
         ? preserveParserStrippedLeadingNewline(unsafeHTML)
         : unsafeHTML,
     );
-    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
+    frame.pendingLeadingNewline = previousPendingLeadingNewline;
     writeElementEnd(type, frame.segment);
     return;
   }
@@ -1076,7 +1095,7 @@ function renderHostElement(
         : formText,
       frame.segment,
     );
-    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
+    frame.pendingLeadingNewline = previousPendingLeadingNewline;
     writeElementEnd(type, frame.segment);
     return;
   }
@@ -1091,6 +1110,9 @@ function renderHostElement(
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
   frame.hostNamespace = childHostNamespace(type, namespace);
+  if (tracksLeadingNewline) {
+    frame.segment.chunks.push(leadingNewlineStartMarker);
+  }
 
   try {
     // Suspensions are handled inside renderChildSequence (the single suspend
@@ -1101,7 +1123,10 @@ function renderHostElement(
     frame.hostAncestors = previousHostAncestors;
     frame.hostNamespace = previousHostNamespace;
     frame.viewTransition = previousViewTransition;
-    frame.pendingLeadingNewlineHost = previousPendingLeadingNewlineHost;
+    frame.pendingLeadingNewline = previousPendingLeadingNewline;
+  }
+  if (tracksLeadingNewline) {
+    frame.segment.chunks.push(leadingNewlineEndMarker);
   }
   if (document !== null && type === "head") {
     writeDocumentHeadMarker(frame.segment);
@@ -1429,13 +1454,21 @@ function writeDocumentHeadMarker(segment: Segment): void {
 }
 
 function consumePendingLeadingNewline(frame: RenderFrame): boolean {
-  const pending = frame.pendingLeadingNewlineHost !== null;
-  frame.pendingLeadingNewlineHost = null;
+  const pending = frame.pendingLeadingNewline;
+  frame.pendingLeadingNewline = false;
   return pending;
 }
 
 function leadingNewlineStrippedHost(type: string): boolean {
   return type === "pre" || type === "textarea";
+}
+
+function writeLeadingNewlineText(text: string, segment: Segment): void {
+  writeText(text, {
+    write(value) {
+      segment.write({ value });
+    },
+  });
 }
 
 function preserveParserStrippedLeadingNewline(text: string): string {

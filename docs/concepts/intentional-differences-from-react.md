@@ -12,6 +12,7 @@ Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks, Sus
 - Batching is automatic and has no opt-in API: same-tick updates and root renders coalesce into one pass. There is no `batchedUpdates`; `flushSync` is the only escape hatch.
 - Effects receive an `AbortSignal` instead of returning cleanup functions; Fig aborts on dependency change and unmount. Effects must return `undefined`, which makes a React-style returned cleanup a type error. There is no mount-only hook — `useReactive(fn, [])` is the idiom.
 - React's broad `use(resource)` is split into explicit reads: `readContext` (context is a render-time input, not a hook slot), `readPromise` (identity- keyed, not call-position-keyed), and `readData` from `@bgub/fig` (cache-keyed).
+- Promise-valued children are distinct, unkeyed tree slots and implicitly read only in child position. Fig keys them by promise identity and does not reproduce React's call-position thenable tracking; client-created chains must be memoized, and reorderable promise slots need keyed Fragments.
 - Context objects are their own provider (`<Ctx value={...}>`); there is no `Consumer` and no `displayName`.
 - No `useReducer` — reducer abstractions are userland over `useState`. No `memo()` — tiered render bailouts preserve child identity so siblings bail automatically; `useMemo(() => <X/>, deps)` covers the rest. No `useRef` — `useMemo(() => ({ current: null }), [])` for mutable storage, `bind` for DOM access.
 - `lazy(load)` expects the loader to return the component — no `{ default }` unwrapping, no special element type; it is a plain component over `readPromise`.
@@ -36,7 +37,7 @@ Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks, Sus
 - `transition` (startTransition).
 - `useStableEvent` (useEffectEvent): "stable" names the identity guarantee rather than tying the hook to effects — Fig's version is the general escape-from-reactivity primitive (usable from handlers, timers, and subscriptions, not effects-only) and carries the Fig event contract (trailing `AbortSignal`, aborted on re-entry and unmount).
 - `StateSetter<S>` is the one `useState` setter type — there is no `Dispatch`/`SetStateAction` reducer vocabulary.
-- `FigNode` is the one children type — no `FigChild`/`ReactChild`-style duplicate. (Internally, `collectChildren` returns `NormalizedChild`: element | portal | string.)
+- `FigNode` is the one children type — no `FigChild`/`ReactChild`-style duplicate. (Internally, `collectChildren` returns `NormalizedChild`: element | portal | thenable | string.)
 - `bind` (ref), `mix={on(...)}` (the `on*` prop family), `unsafeHTML` (dangerouslySetInnerHTML), `readContext`/`readPromise`/`readData` (use).
 - The server render entry points form one grid — `renderToStream`, `renderToDocumentStream`, `renderToHtml`, `renderToDocumentHtml` — and none reuse React names: `renderToHtml` is honestly "the streamed output, buffered" (runtime scripts included), not React's settled, script-free `renderToString`.
 - `prerender` is the separate static semantic: it waits for all async server work before emitting HTML, so completed Suspense content appears in logical position without streaming reveal scripts.

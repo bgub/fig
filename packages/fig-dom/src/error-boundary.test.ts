@@ -280,6 +280,40 @@ describe("@bgub/fig-dom error boundaries", () => {
     expect(reports).toEqual(["read failed"]);
   });
 
+  it("catches rejected promise-valued children", async () => {
+    const pending = deferred<string>();
+    const container = new FakeElement("root");
+    const reports: string[] = [];
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          ErrorBoundary,
+          {
+            fallback: createElement("span", null, "Crashed"),
+            onError(error) {
+              reports.push((error as Error).message);
+            },
+          },
+          createElement(
+            Suspense,
+            { fallback: createElement("span", null, "Loading") },
+            pending.promise,
+          ),
+        ),
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+
+    pending.reject(new Error("child failed"));
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("Crashed");
+    expect(reports).toEqual(["child failed"]);
+  });
+
   it("catches Fig effect errors with error boundaries", () => {
     const container = new FakeElement("root");
     const reports: string[] = [];

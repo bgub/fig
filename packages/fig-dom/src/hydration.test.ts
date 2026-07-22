@@ -583,6 +583,70 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.textContent).toBe("only");
   });
 
+  it("hydrates text seams around a fulfilled promise child", async () => {
+    const child = Promise.resolve("middle");
+    const app = createElement(
+      Suspense,
+      { fallback: "Loading" },
+      createElement("div", null, "before", child, "after"),
+    );
+    const result = await prerender(app);
+    expect(result.html).toBe(
+      "<!--fig:suspense:completed--><div>before<!--,-->middle<!--,-->after</div><!--/fig:suspense-->",
+    );
+
+    const container = containerFromHtml(result.html);
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.textContent).toBe("beforemiddleafter");
+  });
+
+  it("keeps useId paths stable after an empty promise child", async () => {
+    const pending = deferred<null>();
+    const ids: string[] = [];
+
+    function IdentifiedChild() {
+      const id = useId();
+      ids.push(id);
+      return createElement("span", { id }, "child");
+    }
+
+    const app = createElement(
+      "div",
+      null,
+      pending.promise,
+      createElement(IdentifiedChild, null),
+    );
+    const rendering = prerender(app);
+    await Promise.resolve();
+    pending.resolve(null);
+
+    const { html } = await rendering;
+    const container = containerFromHtml(html);
+    const serverId = (
+      (container.childNodes[0] as FakeElement).childNodes[0] as FakeElement
+    ).attributes.id;
+    ids.length = 0;
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(ids).not.toHaveLength(0);
+    expect(ids.every((id) => id === serverId)).toBe(true);
+  });
+
   it("hydrates component children followed by host siblings", () => {
     const container = new FakeElement("root");
     const span = new FakeElement("span");

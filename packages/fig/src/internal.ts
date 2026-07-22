@@ -45,6 +45,7 @@ export { validateInstanceNesting, validateTextNesting } from "./dom-nesting.ts";
 export {
   type ActivityProps,
   Assets,
+  type AwaitedFigNode,
   type ClientReferenceOptions,
   createPortalNode,
   type ElementType,

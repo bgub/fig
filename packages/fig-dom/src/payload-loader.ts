@@ -1,9 +1,9 @@
 import type {
+  AwaitedFigNode,
   DataResourceLoadContext,
   DataResourceLoader,
-  FigNode,
+  FigAssetResource,
 } from "@bgub/fig";
-import type { FigAssetResource } from "@bgub/fig";
 import {
   assertPayloadCodecMatches,
   jsonPayloadCodec,
@@ -58,7 +58,7 @@ export interface PayloadDataLoaderOptions<TArgs extends unknown[]> {
  */
 export function payloadDataLoader<TArgs extends unknown[]>(
   options: PayloadDataLoaderOptions<TArgs>,
-): DataResourceLoader<TArgs, FigNode> {
+): DataResourceLoader<TArgs, AwaitedFigNode> {
   return async (...argsAndContext) => {
     const context = argsAndContext[
       argsAndContext.length - 1

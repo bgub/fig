@@ -35,7 +35,7 @@ The cross-package protocol registry, versioned together with the sibling package
 - the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `createPortalNode` (renderers wrap it in their container-typed `createPortal`), `collectChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
 - shared HTML knowledge both renderers need: DOM-nesting validation tables, the Suspense/Activity streaming marker constants, the text-separator comment data that keeps adjacent text fibers' DOM nodes apart, and the single `data-fig-hydration-skip` attribute for server-owned DOM nodes that have no client fiber.
 
-Child normalization (`collectChildren`) is shared because the server emits merged text nodes into HTML and hydration matches them against client fiber children — the two sides must not drift. Same for the thenable registry: promise identity keyed suspend/resume must agree between client and server.
+Child normalization (`collectChildren`) is shared because the server emits merged text nodes into HTML and hydration matches them against client fiber children — the two sides must not drift. Its normalized union includes thenables as opaque child slots; neither renderer unwraps them during collection. The process-wide thenable registry is shared for the same reason: promise-identity-keyed suspend/resume must agree between client and server.
 
 ## Lazy Data-Store Installation
 

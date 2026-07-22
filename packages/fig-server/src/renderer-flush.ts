@@ -20,6 +20,15 @@ import type { Request, Segment, SuspenseBoundary } from "./renderer.ts";
 import { streamFlowBlocked } from "./shared.ts";
 
 export const documentHeadMarker = Symbol("fig.document-head");
+export const leadingNewlineStartMarker = Symbol("fig.leading-newline-start");
+export const leadingNewlineEndMarker = Symbol("fig.leading-newline-end");
+
+export type SegmentChunk =
+  | string
+  | typeof documentHeadMarker
+  | typeof leadingNewlineStartMarker
+  | typeof leadingNewlineEndMarker
+  | { value: string };
 
 const RUNTIME_REF = "__figSSR";
 const textEncoder = new TextEncoder();
@@ -380,9 +389,26 @@ function writeScript(request: Request, code: string): void {
 
 function writeChunk(
   request: Request,
-  chunk: string | typeof documentHeadMarker,
+  chunk: SegmentChunk,
   segment: Segment,
 ): void {
+  if (chunk === leadingNewlineStartMarker) {
+    request.leadingNewlineStack.push(false);
+    return;
+  }
+  if (chunk === leadingNewlineEndMarker) {
+    request.leadingNewlineStack.pop();
+    return;
+  }
+  if (typeof chunk === "object") {
+    request.write(
+      request.leadingNewlineStack.at(-1) === false &&
+        chunk.value.startsWith("\n")
+        ? `\n${chunk.value}`
+        : chunk.value,
+    );
+    return;
+  }
   if (chunk !== documentHeadMarker) {
     request.write(chunk);
     return;

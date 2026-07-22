@@ -1,5 +1,6 @@
 import type { DataResourceKeyInput } from "@bgub/fig";
 import {
+  type AwaitedFigNode,
   type FigAssetResource,
   type FigAssetResourceList,
   type FigClientReference,
@@ -81,7 +82,7 @@ export interface PayloadRenderResult {
 
 export type PayloadComponent = (
   props: Props & { children?: FigNode },
-) => FigNode | PromiseLike<FigNode>;
+) => FigNode;
 
 export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
@@ -150,6 +151,7 @@ type Task = {
 
 type TaskValue =
   | { kind: "node"; value: FigNode }
+  | { kind: "node-promise"; value: Thenable<AwaitedFigNode> }
   | { kind: "promise"; value: Thenable };
 
 type Component = PayloadComponent;
@@ -300,10 +302,18 @@ function retryTask(request: PayloadRequest, task: Task): void {
   };
 
   try {
-    const value =
-      task.kind === "node"
-        ? serializeNode(task.value, frame)
-        : serializeValue(readThenable(task.value), frame);
+    let value: PayloadModel;
+    switch (task.kind) {
+      case "node":
+        value = serializeNode(task.value, frame);
+        break;
+      case "node-promise":
+        value = serializeNode(readThenable(task.value), frame);
+        break;
+      case "promise":
+        value = serializeValue(readThenable(task.value), frame);
+        break;
+    }
     flushFrameAssets(frame, task.id);
     emitDataRows(request);
     emitRow(request, { id: task.id, tag: "model", value });
@@ -427,9 +437,17 @@ function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
   }
 
   if (isPortal(node)) return null;
-  if (!isValidElement(node)) throw invalidChildError(node);
+  if (isValidElement(node)) return serializeElement(node, frame, false);
+  if (isThenable(node)) {
+    return outlineTask(
+      frame,
+      { kind: "node-promise", value: node },
+      "promise",
+      node,
+    );
+  }
 
-  return serializeElement(node, frame, false);
+  throw invalidChildError(node);
 }
 
 function serializeNodeOrLazy(
@@ -572,6 +590,7 @@ function serializeFunctionComponent(
   props: Props,
   frame: RenderFrame,
 ): PayloadModel {
+  const assetCheckpoint = frame.pendingAssets.length;
   frame.pendingAssets.push(
     ...serializeAssetResources(
       frame.request,
@@ -586,8 +605,17 @@ function serializeFunctionComponent(
 
   try {
     const result = type(props);
-    const node = isThenable(result) ? readThenable(result) : result;
-    return serializeNode(node, frame);
+    if (isThenable(result)) {
+      const scopedAssets = frame.pendingAssets.splice(assetCheckpoint);
+      return outlineTask(
+        frame,
+        { kind: "node-promise", value: result },
+        "promise",
+        result,
+        scopedAssets,
+      );
+    }
+    return serializeNode(result, frame);
   } catch (error) {
     recordErrorStack(error, frame.stack);
     throw error;
@@ -667,19 +695,18 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
     return encodePayloadValueWithGraph(value, frame.request.graph);
   }
 
-  if (typeof value === "function") {
-    if (isClientReference(value)) {
-      return { $fig: "client", id: emitClientReference(frame.request, value) };
-    }
-
-    throw new Error("Functions cannot be passed to client references.");
+  if (isClientReference(value)) {
+    return { $fig: "client", id: emitClientReference(frame.request, value) };
   }
 
+  if (isValidElement(value)) return serializeNodeOrLazy(value, frame, true);
+  if (isPortal(value)) return null;
   if (isThenable(value)) {
     return outlineTask(frame, { kind: "promise", value }, "promise", value);
   }
-  if (isValidElement(value)) return serializeNodeOrLazy(value, frame, true);
-  if (isPortal(value)) return null;
+  if (typeof value === "function") {
+    throw new Error("Functions cannot be passed to client references.");
+  }
 
   if (typeof value === "object" && value !== null) {
     if (value instanceof Date) {

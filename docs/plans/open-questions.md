@@ -27,7 +27,6 @@
 Payload trees are delivered as ordinary data resources, and the targeted-refresh protocol was removed after its parity gate passed. Remaining follow-ups:
 
 - **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
-- **Promise-valued children** — the intended authoring story (`{loadComments(slug).then(...)}` as a Suspense child) needs thenable children accepted by the payload serializer and the client reconciler; today only suspending Payload-rendered components and promise-valued props outline holes.
 - **Optimistic-state primitive** — needs lane awareness so it cannot live in a framework. Capture in its own plan.
 - **Payload codec productization** — whether framework adapters expose codec selection as a first-class option, when to ship a binary codec, and whether binary codec ids need explicit versioning beyond the opaque implementation id.
 

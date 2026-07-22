@@ -1,5 +1,5 @@
 import { type FigNode, isValidElement, type Props } from "@bgub/fig";
-import { invalidChildError, isPortal } from "@bgub/fig/internal";
+import { invalidChildError, isPortal, isThenable } from "@bgub/fig/internal";
 
 const EmptyHostTextContent = Symbol("fig.empty-host-text-content");
 const NonTextHostContent = Symbol("fig.non-text-host-content");
@@ -64,7 +64,9 @@ function hostTextContentPart(node: FigNode): HostTextContent {
     return String(node);
   }
 
-  if (isValidElement(node) || isPortal(node)) return NonTextHostContent;
+  if (isValidElement(node) || isPortal(node) || isThenable(node)) {
+    return NonTextHostContent;
+  }
 
   throw invalidChildError(node);
 }

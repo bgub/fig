@@ -44,7 +44,7 @@ export function Isomorphic<TComponent extends ComponentType<any>>(
 export interface PayloadResourceOptions<TInput> {
   debugArgs?: (input: TInput) => DataResourceKeyInput;
   key: (input: TInput) => DataResourceKey;
-  render: (input: TInput) => FigNode | PromiseLike<FigNode>;
+  render: (input: TInput) => FigNode;
 }
 
 /**

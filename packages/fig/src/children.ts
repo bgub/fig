@@ -1,14 +1,20 @@
 import {
+  type AwaitedFigNode,
   type FigElement,
   type FigNode,
   type FigPortal,
   isPortal,
   isValidElement,
 } from "./element.ts";
+import { isThenable } from "./thenables.ts";
 
 // What normalization leaves behind: arrays are flattened, null/undefined/
 // booleans are dropped, and numbers are stringified into (merged) text.
-export type NormalizedChild = FigElement<any> | FigPortal<any> | string;
+export type NormalizedChild =
+  | FigElement<any>
+  | FigPortal<any>
+  | PromiseLike<AwaitedFigNode>
+  | string;
 
 // Child normalization shared by the reconciler and the server renderer.
 // Adjacent text merging here MUST match on both sides: the server emits
@@ -38,6 +44,11 @@ function collectChild(node: FigNode, children: NormalizedChild[]): void {
     return;
   }
 
+  if (isThenable(node)) {
+    children.push(node);
+    return;
+  }
+
   throw invalidChildError(node);
 }
 
@@ -53,7 +64,7 @@ function appendTextChild(children: NormalizedChild[], text: string): void {
 
 export function invalidChildError(value: unknown): Error {
   return new Error(
-    `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, array, boolean, null, or undefined.`,
+    `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, promise, array, boolean, null, or undefined.`,
   );
 }
 

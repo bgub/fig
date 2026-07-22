@@ -1,4 +1,5 @@
 import {
+  type AwaitedFigNode,
   assets,
   clientReference,
   createContext,
@@ -144,7 +145,7 @@ function parseTestPayloadRows(input: string): TestPayloadRow[] {
 function decodeTestPayloadRows(
   rows: readonly TestPayloadRow[],
   options?: PayloadDecodeOptions,
-): { decode: Promise<FigNode>; done: Promise<PayloadDecodeCompletion> } {
+): { decode: Promise<AwaitedFigNode>; done: Promise<PayloadDecodeCompletion> } {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       for (const row of rows) {
@@ -778,6 +779,105 @@ describe("payload rendering", () => {
       },
       { id: 2, tag: "model", value: "Ready" },
     ]);
+  });
+
+  it("serializes promise-valued children as node promise rows", async () => {
+    const pending = deferred<string>();
+    const comments = pending.promise.then((value) =>
+      createElement("span", null, value),
+    );
+    const result = renderToPayloadStream(
+      createElement("div", null, "Before", comments, "After"),
+    );
+
+    pending.resolve("Ready");
+    await result.allReady;
+
+    expect(parseTestPayloadRows(await readStream(result.stream))).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "div", {
+          children: ["Before", { $fig: "promise", id: 1 }, "After"],
+        }),
+      },
+      {
+        id: 1,
+        tag: "model",
+        value: graphElement(3, "span", { children: "Ready" }),
+      },
+    ]);
+  });
+
+  it("validates resolved promise children as nodes", async () => {
+    const pending = deferred<AwaitedFigNode>();
+    const result = renderToPayloadStream(
+      createElement("div", null, pending.promise),
+    );
+
+    pending.resolve({ nope: true } as unknown as AwaitedFigNode);
+    await result.allReady;
+
+    expect(parseTestPayloadRows(await readStream(result.stream))).toEqual([
+      {
+        id: 0,
+        tag: "model",
+        value: graphElement(1, "div", {
+          children: { $fig: "promise", id: 1 },
+        }),
+      },
+      {
+        id: 1,
+        tag: "error",
+        value: {
+          message:
+            "Invalid Fig child in payload render: object with keys nope.",
+        },
+      },
+    ]);
+  });
+
+  it("captures an async server component once and scopes its assets to its promise row", async () => {
+    const pending = deferred<void>();
+    let renders = 0;
+
+    async function Card() {
+      renders += 1;
+      await pending.promise;
+      return createElement("section", null, "Ready");
+    }
+
+    const result = renderToPayloadStream(
+      createElement("main", null, createElement(Card)),
+      {
+        componentAssets: (type) =>
+          type === Card ? stylesheet("/assets/Card.css") : undefined,
+      },
+    );
+
+    await Promise.resolve();
+    pending.resolve(undefined);
+    await result.allReady;
+    const rows = parseTestPayloadRows(await readStream(result.stream));
+
+    expect(renders).toBe(1);
+    expect(rows).toContainEqual({
+      for: 1,
+      tag: "assets",
+      value: [{ href: "/assets/Card.css", kind: "stylesheet" }],
+    });
+    expect(rows).toContainEqual({
+      id: 0,
+      tag: "model",
+      value: graphElement(1, "main", {
+        children: { $fig: "promise", id: 1 },
+      }),
+    });
+    expect(rows).toContainEqual({
+      id: 1,
+      tag: "model",
+      value: graphElement(3, "section", { children: "Ready" }),
+    });
   });
 
   it("round-trips built-in payload values through the JSON codec", async () => {

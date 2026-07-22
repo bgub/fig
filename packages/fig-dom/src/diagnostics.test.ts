@@ -1,7 +1,16 @@
 import { createElement, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { createPortal, createRoot, flushSync } from "./index.ts";
-import { FakeElement, installFakeDocument } from "./test-utils.ts";
+import {
+  waitForHostTurns,
+  FakeElement,
+  installFakeDocument,
+} from "./test-utils.ts";
+
+declare const process: {
+  on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+};
 
 installFakeDocument();
 
@@ -51,6 +60,42 @@ describe("@bgub/fig-dom diagnostics", () => {
       createElement(Broken, null),
       "Invalid Fig child: object with keys nope.",
     );
+  });
+
+  it("observes promise children discarded by the strict shadow pass", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      let renders = 0;
+
+      function ShadowRejector() {
+        renders += 1;
+        return renders === 1
+          ? createElement(
+              "div",
+              null,
+              createPortal(
+                [Promise.reject(new Error("shadow rejection"))],
+                new FakeElement("portal") as unknown as Element,
+              ),
+            )
+          : null;
+      }
+
+      const container = new FakeElement("root");
+      const root = createRoot(container as unknown as Element);
+      flushSync(() => root.render(createElement(ShadowRejector, null)));
+      await waitForHostTurns(1);
+
+      expect(renders).toBe(2);
+      expect(container.textContent).toBe("");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
   });
 
   it("throws when unsafeHTML is mixed with children", () => {

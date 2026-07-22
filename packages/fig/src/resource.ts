@@ -6,6 +6,7 @@ import {
   type FigNode,
   type Props,
 } from "./element.ts";
+import { isThenable, readThenable } from "./thenables.ts";
 
 const PreventAssetResourceHoistSymbol = Symbol.for(
   "fig.prevent-asset-resource-hoist",
@@ -582,6 +583,7 @@ function textResourceValue(node: FigNode): string {
   }
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textResourceValue).join("");
+  if (isThenable(node)) return textResourceValue(readThenable(node));
 
   throw new Error("<title> can only contain text during server render.");
 }

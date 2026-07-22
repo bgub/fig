@@ -1,4 +1,5 @@
 import {
+  type AwaitedFigNode,
   assets,
   clientReference,
   createContext,
@@ -91,6 +92,32 @@ function renderNode(node: FigNode): FigNode {
 }
 
 describe("renderToPayloadStream → decodePayloadStream", () => {
+  it("round-trips promise-valued children as thenables in the decoded tree", async () => {
+    const pending = deferred<string>();
+    const child = pending.promise.then((value) =>
+      createElement("span", null, value),
+    );
+    const { decode, done, result } = decodeRender(
+      createElement("div", null, child),
+    );
+
+    const root = (await decode) as FigElement;
+    expect(root.type).toBe("div");
+    expect(typeof (root.props.children as PromiseLike<unknown>).then).toBe(
+      "function",
+    );
+
+    pending.resolve("Ready");
+    await result.allReady;
+    expect(await done).toEqual({ status: "complete" });
+
+    const resolved = await (root.props.children as PromiseLike<AwaitedFigNode>);
+    expect(resolved).toMatchObject({
+      props: { children: "Ready" },
+      type: "span",
+    });
+  });
+
   it("round-trips a tree with a streamed hole that carries cycles and shared references", async () => {
     const comments = deferred<string[]>();
     const shared: { tag: string; self?: unknown } = { tag: "shared" };

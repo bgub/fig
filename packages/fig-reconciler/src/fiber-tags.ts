@@ -20,6 +20,7 @@ export const PortalTag = 8;
 export const AssetsTag = 9;
 export const ActivityTag = 10;
 export const ViewTransitionTag = 11;
+export const ThenableTag = 12;
 
 export type Tag =
   | typeof RootTag
@@ -33,7 +34,8 @@ export type Tag =
   | typeof PortalTag
   | typeof AssetsTag
   | typeof ActivityTag
-  | typeof ViewTransitionTag;
+  | typeof ViewTransitionTag
+  | typeof ThenableTag;
 
 export function tagFor(element: FigElement): Tag {
   if (typeof element.type === "string") return HostTag;
