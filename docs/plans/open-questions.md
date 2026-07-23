@@ -1,5 +1,12 @@
 # Open Questions & Future Plans
 
+## Plans
+
+- **TanStack:** The TanStack Start plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Right now we map internally to Solid names but we should open an upstream PR.
+- **TanStack:** Create a TanStack Query adapter built on data resources
+- **DevTools:** Expose asset-registry ownership, loading, gating, and conflict state through DevTools.
+- **DevTools:** Extend render-tree collection to `renderToPayloadStream` so Payload component names survive into DevTools.
+
 ## React Parity Gaps
 
 - React forms ([https://react.dev/reference/react-dom/components/form](https://react.dev/reference/react-dom/components/form)) with function-valued form action/formAction, useFormStatus, and progressive enhancement
@@ -11,6 +18,7 @@
 ## Hooks
 
 - Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive
+- Does Fig need a lane-aware `useOptimistic` analog for component-local optimistic overlays, or are `useActionState` plus cache-level optimism from the planned TanStack Query adapter sufficient?
 
 ## Hydration
 
@@ -22,13 +30,7 @@
 
 ## Serialized Components
 
-- When we add optimistic-state primitives, they'll need lane awareness
 - Should we add a binary payload codec?
-
-## TanStack Adapters
-
-- The TanStack Start plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Right now we map internally to Solid names but we should open an upstream PR.
-- Create a TanStack Query adapter built on data resources
 
 ## Server Rendering
 
@@ -39,8 +41,3 @@
 ## Performance
 
 - **Compiler-extracted templates** — a complete opt-in experiment lives on [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates), including DOM/SSR/hydration/payload integration, regression coverage, and a real-browser benchmark. The direction is promising, but the compile-time optimization is deliberately outside `main` until its transformation and long-term maintenance contract feel mature enough to adopt. Revisit from the branch rather than rebuilding the spike. → Compiler-extracted templates in `docs/plans/reconciler-explorations.md`
-
-## DevTools
-
-- **Asset-registry inspection** — data-resource entries are already included in reconciler snapshots and rendered by the DevTools panel; equivalent asset-registry ownership, loading, gating, and conflict state is not yet exposed.
-- **Payload render-tree fidelity** — `renderToPayloadStream` could accept a render-tree collector so Payload-rendered component names survive into DevTools; the payload flattening pass is the last layer that knows those names. → `docs/concepts/payload.md`
