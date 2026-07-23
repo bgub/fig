@@ -671,15 +671,18 @@ interface ErrorBoundaryState {
   didReport: boolean;
 }
 
-interface ActivityState<Instance> {
-  hidden: boolean;
+interface DehydratedActivityState<Instance> {
   // The host boundary (an inert template holding server content) while the
-  // boundary is dehydrated, or null; cleared when the content unpacks at
-  // commit.
-  dehydrated: Instance | null;
+  // Activity is dehydrated. Cleared when the content unpacks at commit.
+  boundary: Instance;
   // Same snapshot as dehydrated Suspense, for hidden server content that may
   // hydrate after the surrounding client tree has changed.
-  idPath: string | null;
+  idPath: string;
+}
+
+interface ActivityState<Instance> {
+  hidden: boolean;
+  dehydrated: DehydratedActivityState<Instance> | null;
 }
 
 type BoundaryState<Container, Instance, TextInstance> =
@@ -2558,8 +2561,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     requireActivityHydrationHostConfig();
 
     hasHiddenBoundaries = true;
-    state.dehydrated = boundary;
-    state.idPath = hydrationIdPath(root, node);
+    state.dehydrated = {
+      boundary,
+      idPath: hydrationIdPath(root, node),
+    };
     root.nextHydratableInstance =
       requireHydrationHostConfig().getNextHydratableSibling(boundary);
     return true;
@@ -3168,7 +3173,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const activity = root.hydratingActivityBoundary;
     if (activity !== null) {
-      const base = fiberActivityState(activity)?.idPath ?? null;
+      const base = fiberActivityState(activity)?.dehydrated?.idPath ?? null;
       if (base !== null) {
         return appendIdPath(base, fiberPath(fiber, activity));
       }
@@ -5152,7 +5157,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (state?.dehydrated == null) return;
 
     requireActivityHydrationHostConfig().commitHydratedActivityBoundary(
-      state.dehydrated,
+      state.dehydrated.boundary,
     );
     state.dehydrated = null;
   }
@@ -5399,7 +5404,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function dehydratedActivityBoundary(node: F): Instance | null {
     return node.tag === ActivityTag
-      ? (fiberActivityState(node)?.dehydrated ?? null)
+      ? (fiberActivityState(node)?.dehydrated?.boundary ?? null)
       : null;
   }
 
@@ -5674,11 +5679,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const current = fiberActivityState(node);
     if (current !== null) return current;
 
-    const state: ActivityState<Instance> = {
-      hidden: false,
-      dehydrated: null,
-      idPath: null,
-    };
+    const state: ActivityState<Instance> = { hidden: false, dehydrated: null };
     node.boundaryState = state;
     return state;
   }
