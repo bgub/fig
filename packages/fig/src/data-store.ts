@@ -954,6 +954,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
     defineLoadContextCapabilities(context, {
+      key: entry.key,
       attributeError: (error) => {
         // A fulfilled payload value may reject one of its streamed holes later.
         // Attribute that error for as long as this generation's signal is live —

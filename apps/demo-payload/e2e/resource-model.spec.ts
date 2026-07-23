@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 
 // The resource-model path (docs/concepts/data.md): a
-// serialized post delivered through payloadDataLoader + readData, refreshed
+// serialized post delivered through a Payload component and refreshed
 // with the ordinary freshness verbs — no PayloadBoundary, no refresh header.
 
 test("streams a serialized post as a data resource with progressive holes and islands", async ({
@@ -71,29 +71,28 @@ test("streams a serialized post as a data resource with progressive holes and is
     selectedData.filter({ hasText: '["resource-post",1]' }),
   ).toHaveCount(1);
   await expect(
-    selectedData.filter({ hasText: '["resource-dashboard"]' }),
+    selectedData.filter({ hasText: '["resource-dashboard",' }),
   ).toHaveCount(1);
   await expect(
-    selectedData.filter({ hasText: '["resource-weather"]' }),
+    selectedData.filter({ hasText: '["resource-weather",' }),
   ).toHaveCount(1);
-  // Every client fiber that reads data keeps its green badge once its layer
-  // has streamed in: PostView, DashboardView, and WeatherView (ResourcePost
-  // reads on the server, so it has no client fiber). Bailed-out clones used
-  // to drop committed reads from the snapshot, flickering badges away as
-  // later layers committed.
+  // Every Payload component keeps its green data badge once its layer has
+  // streamed in. Bailed-out clones used to drop committed reads from the
+  // snapshot, flickering badges away as later layers committed.
   await expect(devtools.locator(".fig-devtools__data-count")).toHaveCount(3);
-  // The badge count joins the accessible name, so "WeatherView" alone no
-  // longer matches exactly.
-  const weatherRow = devtools.getByRole("button", { name: /^WeatherView\b/ });
-  await expect(weatherRow.locator(".fig-devtools__data-count")).toHaveText("1");
-  await expect(weatherRow.locator(".fig-devtools__data-count")).toHaveCSS(
-    "background-color",
-    "rgb(236, 253, 245)",
-  );
-  await weatherRow.click();
+  const weatherPayloadRow = devtools.getByRole("button", {
+    name: /^Payload\(resource-weather\)/,
+  });
+  await expect(
+    weatherPayloadRow.locator(".fig-devtools__data-count"),
+  ).toHaveText("1");
+  await expect(
+    weatherPayloadRow.locator(".fig-devtools__data-count"),
+  ).toHaveCSS("background-color", "rgb(236, 253, 245)");
+  await weatherPayloadRow.click();
   await expect(selectedData).toHaveCount(1);
-  await expect(selectedData).toContainText('["resource-weather"]');
-  await expect(selectedData).not.toContainText('["resource-dashboard"]');
+  await expect(selectedData).toContainText('["resource-weather",');
+  await expect(selectedData).not.toContainText('["resource-dashboard",');
   await expect(selectedData).not.toContainText('["resource-post",1]');
   expect(payloadRequests).toHaveLength(1);
   expect(errors()).toEqual([]);

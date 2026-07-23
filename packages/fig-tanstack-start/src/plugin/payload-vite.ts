@@ -32,17 +32,17 @@ import {
   resolvedPayloadRuntimeId,
   transformPayloadModule,
 } from "./payload-compiler.ts";
-import { transformPayloadResourceDefinitions } from "./payload-resource-compiler.ts";
+import { transformServerPayloadDefinitions } from "./server-payload-compiler.ts";
 import { writePublicAsset } from "./public-assets.ts";
 
 const payloadManifestDefinitionPrefix =
   "\0fig-tanstack-start:payload-manifest-definition:";
 
-export function payloadResourcePlugin(): PluginOption {
+export function serverPayloadPlugin(): PluginOption {
   return {
-    name: "fig-tanstack-start:payload-resource",
+    name: "fig-tanstack-start:server-payload",
     enforce: "pre",
-    transform: transformPayloadResourceDefinitions,
+    transform: transformServerPayloadDefinitions,
   };
 }
 

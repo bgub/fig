@@ -1,12 +1,17 @@
 import {
   assets,
   createDataStore,
-  type DataResourceLoadContext,
+  type DataResourceKey,
+  type FigNode,
   isValidElement,
   readPromise,
   stylesheet,
   Suspense,
 } from "@bgub/fig";
+import {
+  createPayloadComponent,
+  type PayloadComponentLoader,
+} from "@bgub/fig-dom";
 import { renderToDocumentStream } from "@bgub/fig-server";
 import { describe, expect, it } from "vitest";
 import { payloadTransportMarkerId } from "./document-markers.ts";
@@ -15,15 +20,15 @@ import {
   registerPayloadResponse,
   serializableStartData,
 } from "./payload-internal.ts";
-import { payloadResource, type PayloadResourceOptions } from "./payload.ts";
+import { serverPayload } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
 
 describe("TanStack Start server payload resources", () => {
   it("registers initial payloads instead of serializing element values", async () => {
-    const resource = compiledPayloadResource<string>({
-      key: (id) => ["payload-profile", id],
-      request: (id, { signal }) =>
+    const resource = compiledPayloadComponent<{ id: string }>({
+      key: ["payload-profile"],
+      request: ({ id }, { signal }) =>
         renderPayloadResponse(<main data-profile={id}>profile-{id}</main>, {
           signal,
         }),
@@ -31,16 +36,16 @@ describe("TanStack Start server payload resources", () => {
 
     await runWithStartContext({}, async () => {
       const store = createDataStore();
-      const node = await store.ensureData(resource, "ada");
+      const node = await store.ensureData(resource, { id: "ada" });
       expect(isValidElement(node)).toBe(true);
       expect(serializableStartData(store.snapshot())).toEqual([]);
     });
   });
 
   it("retains payload assets for the document render", async () => {
-    const resource = compiledPayloadResource<void>({
-      key: () => ["payload-assets"],
-      request: (_input, { signal }) =>
+    const resource = compiledPayloadComponent<Record<string, never>>({
+      key: ["payload-assets"],
+      request: (_props, { signal }) =>
         runWithStartContext({}, () =>
           renderPayloadResponse(
             assets(
@@ -53,7 +58,7 @@ describe("TanStack Start server payload resources", () => {
     });
 
     await runWithStartContext({}, async () => {
-      const node = await createDataStore().ensureData(resource, undefined);
+      const node = await createDataStore().ensureData(resource, {});
       const render = renderToDocumentStream(
         <html>
           <head />
@@ -76,16 +81,16 @@ describe("TanStack Start server payload resources", () => {
   });
 
   it("delivers the initial payload before TanStack starts hydration", async () => {
-    const resource = compiledPayloadResource<void>({
-      key: () => ["ordering"],
-      request: (_input, { signal }) =>
+    const resource = compiledPayloadComponent<Record<string, never>>({
+      key: ["ordering"],
+      request: (_props, { signal }) =>
         renderPayloadResponse(<main>ready</main>, {
           signal,
         }),
     });
 
     await runWithStartContext({}, async () => {
-      await createDataStore().ensureData(resource, undefined);
+      await createDataStore().ensureData(resource, {});
       const html = await readStream(
         injectPayloadDocument(
           streamFromString(payloadDocument("<main>shell</main>")),
@@ -132,9 +137,9 @@ describe("TanStack Start server payload resources", () => {
     const greeting = new Promise<string>((resolve) => {
       resolveGreeting = resolve;
     });
-    const resource = compiledPayloadResource<void>({
-      key: () => ["streaming-payload"],
-      request: (_input, { signal }) =>
+    const resource = compiledPayloadComponent<Record<string, never>>({
+      key: ["streaming-payload"],
+      request: (_props, { signal }) =>
         renderPayloadResponse(
           <Suspense fallback={<p>pending</p>}>
             <Greeting />
@@ -144,7 +149,7 @@ describe("TanStack Start server payload resources", () => {
     });
 
     await runWithStartContext({}, async () => {
-      await createDataStore().ensureData(resource, undefined);
+      await createDataStore().ensureData(resource, {});
       const stream = injectPayloadDocument(
         streamFromString(payloadDocument("<main>shell</main>")),
         undefined,
@@ -168,16 +173,16 @@ describe("TanStack Start server payload resources", () => {
   });
 
   it("embeds multiple registered payload resources before hydration", async () => {
-    const first = compiledPayloadResource<void>({
-      key: () => ["multiple", "first"],
-      request: (_input, { signal }) =>
+    const first = compiledPayloadComponent<Record<string, never>>({
+      key: ["multiple", "first"],
+      request: (_props, { signal }) =>
         renderPayloadResponse(<p>first-payload</p>, {
           signal,
         }),
     });
-    const second = compiledPayloadResource<void>({
-      key: () => ["multiple", "second"],
-      request: (_input, { signal }) =>
+    const second = compiledPayloadComponent<Record<string, never>>({
+      key: ["multiple", "second"],
+      request: (_props, { signal }) =>
         renderPayloadResponse(<p>second-payload</p>, {
           signal,
         }),
@@ -186,8 +191,8 @@ describe("TanStack Start server payload resources", () => {
     await runWithStartContext({}, async () => {
       const store = createDataStore();
       await Promise.all([
-        store.ensureData(first, undefined),
-        store.ensureData(second, undefined),
+        store.ensureData(first, {}),
+        store.ensureData(second, {}),
       ]);
 
       expect(serializableStartData(store.snapshot())).toEqual([]);
@@ -309,15 +314,22 @@ describe("TanStack Start server payload resources", () => {
   });
 });
 
-function compiledPayloadResource<TInput>(
-  options: Omit<PayloadResourceOptions<TInput>, "render"> & {
-    request: (
-      input: TInput,
-      context: DataResourceLoadContext,
-    ) => Response | PromiseLike<Response>;
-  },
-) {
-  return payloadResource(Object.assign({ render: () => null }, options));
+function compiledPayloadComponent<TProps extends object>(options: {
+  key: DataResourceKey;
+  request: PayloadComponentLoader<TProps>;
+}) {
+  return createPayloadComponent<TProps>({
+    key: options.key,
+    load: serverPayload(markCompiled(options.request)),
+  });
+}
+
+function markCompiled<TProps extends object>(
+  request: PayloadComponentLoader<TProps>,
+): (props: TProps) => FigNode {
+  return Object.assign(request, {
+    [Symbol.for("fig.tanstack-start.compiled-server-payload")]: true as const,
+  }) as unknown as (props: TProps) => FigNode;
 }
 
 function streamFromString(value: string): ReadableStream<Uint8Array> {

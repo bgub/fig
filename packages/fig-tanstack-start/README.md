@@ -149,24 +149,27 @@ is one colocated declaration:
 
 ```tsx
 // profile.payload.tsx
-import { payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { serverPayload } from "@bgub/fig-tanstack-start/payload";
+import { Profile } from "./Profile.server.tsx";
 
-export const profilePayload = payloadResource<string>({
-  key: (id) => ["profile-payload", id],
-  render: (id) => <article>Profile: {id}</article>,
+export const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile-payload"],
+  load: serverPayload(Profile),
 });
 ```
 
-`render` must be an inline function; it is the semantic boundary that the
-compiler extracts into a private server function. It may be async. The browser
-bundle keeps the resource key, cache, and RPC stub; it omits the callback's JSX
-and imports used only by the callback. Keep the resource declaration in a
-client-importable module such as `.payload.tsx` because the route imports the
-resource handle.
+`serverPayload` accepts a component or render callback; it is the semantic
+boundary that the compiler extracts into a private server function. It may be
+async. The browser bundle keeps the component handle, cache, and RPC stub; it
+omits the server render and imports used only by it. Keep the Payload component
+declaration in a client-importable module such as `.payload.tsx` because the
+route imports that handle. The rendered component itself may live in a
+TanStack-protected `.server.tsx` module.
 
 When the tree grows, the callback can import ordinary components. Those imports
 also stay out of the browser bundle when only the callback uses them. A filename
-does not cause a component to render through Payload—the `render` callback does.
+does not cause a component to render through Payload—`serverPayload` does.
 Applications do not call `createServerFn` or `renderPayloadResponse` for Payload
 resources.
 
@@ -191,23 +194,22 @@ the boundary. `component` must be a named or default static import.
 Applications do not use a `.client.tsx` suffix, `clientReference`,
 `createPayloadClientReferenceResolver`, reference ids, or dynamic imports.
 
-The route uses the same loader/read split as any other data resource:
+The route can start the load early, then render the component normally:
 
 ```tsx
-import { readData } from "@bgub/fig";
 import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
-import { profilePayload } from "../profile.payload.tsx";
+import { ProfilePage } from "../profile.payload.tsx";
 
 export const Route = createFileRoute("/profiles/$id")({
   loader: ({ context, params }) =>
-    ensureRouteData(context, profilePayload, params.id),
+    ensureRouteData(context, ProfilePage, { id: params.id }),
   component: ProfileRoute,
 });
 
 function ProfileRoute() {
   const { id } = Route.useParams();
-  return readData(profilePayload, id);
+  return <ProfilePage id={id} />;
 }
 ```
 
@@ -219,7 +221,7 @@ import { Suspense } from "@bgub/fig";
 
 export const Route = createFileRoute("/profiles/$id")({
   loader: ({ context, params }) => {
-    context.data.preloadData(profilePayload, params.id);
+    context.data.preloadData(ProfilePage, { id: params.id });
   },
   component: () => (
     <Suspense fallback={<p>Streaming profile…</p>}>
@@ -239,8 +241,8 @@ holes settle; TanStack starts full-document hydration after each complete
 initial Payload response is embedded in a keyed carrier. Client navigation and
 refresh use the same raw response path.
 
-The Vite adapter follows ordinary component imports from each `payloadResource`
-render callback and compiles their static stylesheet imports into Payload asset
+The Vite adapter follows ordinary component imports from each `serverPayload`
+render and compiles their static stylesheet imports into Payload asset
 dependencies. Import CSS normally; no manual
 `assets(stylesheet(...))` wrapper or `?url` import is needed. A Payload-rendered
 component's stylesheet is copied from the server build into the public client

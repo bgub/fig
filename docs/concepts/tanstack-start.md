@@ -30,18 +30,22 @@ The transport uses Fig's Payload value codec, including supported non-JSON value
 
 ## Payload Routes
 
-`payloadResource({ key, render })` wraps a Payload endpoint as a normal Fig data resource whose value is a decoded `FigNode`.
+`createPayloadComponent({ key, load: serverPayload(render) })` makes a Payload tree directly renderable while retaining an ordinary Fig data resource as its cache machinery.
 
 ```tsx
-export const postTree = payloadResource({
-  key: (id: string) => ["post-tree", id],
-  render: (id) => <Post id={id} />,
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { serverPayload } from "@bgub/fig-tanstack-start/payload";
+import { Post } from "./Post.server.tsx";
+
+export const PostPage = createPayloadComponent<{ id: string }>({
+  key: ["post-tree"],
+  load: serverPayload(Post),
 });
 ```
 
-A route loader calls `ensureRouteData(context, postTree, id)`, and the component calls `readData(postTree, id)`. TanStack orchestrates the route; Fig owns the cache entry, streamed tree, data rows, and assets.
+A route loader calls `ensureRouteData(context, PostPage, { id })`, and the route renders `<PostPage id={id} />`. TanStack orchestrates the route; Fig owns the cache entry, streamed tree, data rows, and assets. The same component works with the ordinary data-resource freshness APIs and explicit store methods.
 
-The compiler turns `render` into a private TanStack server function returning `renderPayloadResponse`. Browser output keeps the key and RPC loader but removes server-only JSX and imports. The declaration therefore stays in a client-importable module, conventionally `.payload.tsx`; the filename itself has no runtime meaning.
+The compiler turns the component or callback passed to `serverPayload` into a private TanStack server function. It renders that function as the Payload root rather than calling it before rendering, so root-level data reads, hooks, and suspension use normal server-renderer semantics. Browser output keeps a compiler-marked RPC loader but removes server-only JSX and imports; without that marker, `serverPayload` throws before invoking application code. The declaration therefore stays in a client-importable module, conventionally `.payload.tsx`; the filename itself has no runtime meaning. The extracted component may come from a TanStack-protected `.server.tsx` module.
 
 Start server functions do not expose an abort signal, so `renderPayloadResponse` uses the current request signal unless explicitly overridden. A disconnected client stops the Payload render.
 
@@ -69,9 +73,9 @@ Server-only modules may emit assets that the browser still needs. After the serv
 
 ## Component Assets And `Isomorphic`
 
-Static stylesheet imports in named components reached from a `payloadResource` render are compiled into ordinary Payload asset descriptors. Application code imports CSS normally; it does not write `assets()` calls for compiler-known styles.
+Static stylesheet imports in named components reached from a `serverPayload` render are compiled into ordinary Payload asset descriptors. Application code imports CSS normally; it does not write `assets()` calls for compiler-known styles.
 
-Payload rendering is a use-site behavior. Every ordinary component reached from the resource's `render` result executes through Payload, regardless of filename. A `.server.tsx` file still means TanStack-enforced server-only code and cannot contain a resource handle imported by browser routes.
+Payload rendering is a use-site behavior. Every ordinary component reached from the `serverPayload` result executes through Payload, regardless of filename. A `.server.tsx` file may contain the rendered component because compiler extraction removes that import from the browser graph; the `createPayloadComponent` declaration itself remains client-importable.
 
 `Isomorphic` is the explicit client boundary:
 
@@ -83,7 +87,7 @@ Payload rendering is a use-site behavior. Every ordinary component reached from 
 
 The boundary renders during document SSR and hydrates as a real client component. An ordinary `<Counter />` in the Payload tree remains server-rendered and serialized.
 
-The generated manifest owns one stateful resolver per bundle, keeping component identity stable across decodes. Compiler analysis follows component imports from `payloadResource` and stops at `Isomorphic`. Client build output supplies final hashed asset URLs to the server manifest without a process-global registry.
+The generated manifest owns one stateful resolver per bundle, keeping component identity stable across decodes. Compiler analysis follows component imports from `serverPayload` and stops at `Isomorphic`. Client build output supplies final hashed asset URLs to the server manifest without a process-global registry.
 
 ## Request Context And Redirects
 

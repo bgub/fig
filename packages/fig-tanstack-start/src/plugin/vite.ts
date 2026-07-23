@@ -9,7 +9,7 @@ import {
   defaultEntryPaths,
   startCompatibilityPlugin,
 } from "./compatibility-vite.ts";
-import { payloadPlugin, payloadResourcePlugin } from "./payload-vite.ts";
+import { payloadPlugin, serverPayloadPlugin } from "./payload-vite.ts";
 import { tanStackCompatibilityProfile } from "./compatibility-profile.ts";
 
 export function tanstackStart(
@@ -17,7 +17,7 @@ export function tanstackStart(
 ): PluginOption[] {
   return [
     startCompatibilityPlugin(),
-    payloadResourcePlugin(),
+    serverPayloadPlugin(),
     payloadPlugin(),
     tanStackStartVite(
       {

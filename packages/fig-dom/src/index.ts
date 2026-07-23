@@ -25,9 +25,13 @@ export type {
   HostStyle,
 } from "./jsx.ts";
 export {
-  payloadDataLoader,
-  type PayloadDataLoaderOptions,
-} from "./payload-loader.ts";
+  createPayloadComponent,
+  type PayloadComponent,
+  type PayloadComponentLoadContext,
+  type PayloadComponentLoader,
+  type PayloadComponentOptions,
+  type PayloadSource,
+} from "./payload-component.ts";
 
 export type { Container, FigRoot, FigRootOptions, RecoverableErrorInfo };
 

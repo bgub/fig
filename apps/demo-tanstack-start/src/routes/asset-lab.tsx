@@ -1,12 +1,12 @@
-import { type FigNode, readData, Suspense } from "@bgub/fig";
+import { type FigNode, Suspense } from "@bgub/fig";
 import { createFileRoute } from "@tanstack/solid-router";
-import { assetLabPayload, assetNotePayload } from "../asset-lab-payload.tsx";
+import { AssetLabPage, AssetNote } from "../asset-lab-payload.tsx";
 
 export const Route = createFileRoute("/asset-lab")({
   component: AssetLabRoute,
   loader: ({ context }) => {
-    context.data.preloadData(assetLabPayload, undefined);
-    context.data.preloadData(assetNotePayload, undefined);
+    context.data.preloadData(AssetLabPage, {});
+    context.data.preloadData(AssetNote, {});
   },
 });
 
@@ -27,8 +27,8 @@ function AssetLabRoute(): FigNode {
 function AssetLabContent(): FigNode {
   return (
     <>
-      {readData(assetLabPayload, undefined)}
-      {readData(assetNotePayload, undefined)}
+      <AssetLabPage />
+      <AssetNote />
     </>
   );
 }

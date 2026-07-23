@@ -144,10 +144,10 @@ export interface FigDataStoreHost {
 
 export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 
-// The internal, generation-guarded capabilities a store attaches to each
-// loader context (symbol-keyed: DataResourceLoadContext stays { signal }
-// publicly). Adapters that decode payload streams use them to hydrate `data`
-// rows and attribute rejected holes through the calling store.
+// The internal, generation-guarded metadata a store attaches to each loader
+// context (symbol-keyed: DataResourceLoadContext stays { signal } publicly).
+// Adapters use the resolved key and decode Payload rows through the calling
+// store without recomputing identity or exposing these capabilities to loaders.
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
 ) => void;
@@ -156,6 +156,9 @@ export type LoadContextAttributeError = (error: unknown) => void;
 export interface LoadContextCapabilities {
   attributeError: LoadContextAttributeError;
   hydrate: LoadContextHydrate;
+  // Store contexts always provide this; optional keeps synthetic decoder
+  // contexts usable without pretending they belong to a cache entry.
+  key?: DataResourceKey;
 }
 
 const LoadContextCapabilitiesSymbol = Symbol.for("fig.data-load-context");

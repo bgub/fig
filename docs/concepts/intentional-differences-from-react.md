@@ -69,7 +69,7 @@ Fig calls its server-component format **Payload**, never RSC or Flight. Those ar
 
 - `renderToPayloadStream` serializes a component tree.
 - `decodePayloadStream` reconstructs it in a renderer-neutral client package.
-- `payloadDataLoader` delivers it as an ordinary data-resource value, so the resource key is also the refresh boundary.
+- `createPayloadComponent` delivers it through an ordinary data-resource entry, so the resource key is also the refresh boundary.
 - Client references carry structured ids, export names, SSR capability, and assets.
 - Errors carry only the server's digest/message result.
 - Server actions and temporary references are not part of the row model.

@@ -49,7 +49,7 @@ The returned object is authoritative. Production sends nothing by default; devel
 
 A decoded Payload root may be ready while streamed subtrees inside it are still pending. If one of those holes fails, the nearest `ErrorBoundary` around that slot catches it. The surrounding root value remains usable.
 
-`payloadDataLoader` attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
+Payload component decoding attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
 
 ## Cancellation Is Not An Error
 

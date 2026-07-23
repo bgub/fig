@@ -20,50 +20,50 @@ Fig includes keyed data resources for loading, deduplication, Suspense, invalida
 
 Server components are often delivered as a second application model with their own cache and refresh path. Fig's format is called **payload**, and a payload tree is just another data-resource value.
 
-With TanStack Start, a payload resource is one declaration:
+With TanStack Start, a payload component is one declaration:
 
 ```tsx
 // profile.payload.tsx
-import { Isomorphic, payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { Isomorphic, serverPayload } from "@bgub/fig-tanstack-start/payload";
 import { FollowButton } from "./follow-button.tsx";
 
-export const profilePage = payloadResource<string>({
-  key: (id: string) => ["profile-page", id],
-  render: (id) => (
+export const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile-page"],
+  load: serverPayload(({ id }) => (
     <article>
       <h1>Profile {id}</h1>
       <Isomorphic component={FollowButton} profileId={id} />
     </article>
-  ),
+  )),
 });
 ```
 
 A route loads and renders it like any other data resource:
 
 ```tsx
-import { readData } from "@bgub/fig";
 import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
-import { profilePage } from "../profile.payload.tsx";
+import { ProfilePage } from "../profile.payload.tsx";
 
 export const Route = createFileRoute("/profiles/$id")({
   loader: ({ context, params }) =>
-    ensureRouteData(context, profilePage, params.id),
+    ensureRouteData(context, ProfilePage, { id: params.id }),
   component: ProfileRoute,
 });
 
 function ProfileRoute() {
   const { id } = Route.useParams();
-  return readData(profilePage, id);
+  return <ProfilePage id={id} />;
 }
 ```
 
-The `render` function runs on the server and stays out of the browser bundle. `Isomorphic` marks the part that should also render and hydrate on the client; `FollowButton` itself is still an ordinary component. Refreshing the tree uses `refreshData` like any other resource.
+The function passed to `serverPayload` runs on the server and stays out of the browser bundle. `Isomorphic` marks the part that should also render and hydrate on the client; `FollowButton` itself is still an ordinary component. Refreshing the tree uses the ordinary data-resource API.
 
 ```tsx
 import { refreshData, transition } from "@bgub/fig";
 
-transition(() => refreshData(profilePage, "42"));
+transition(() => refreshData(ProfilePage, { id: "42" }));
 ```
 
 The previous tree stays visible while the server renders and streams its replacement.
@@ -99,28 +99,25 @@ export function handleProfile(id: string): Response {
 }
 ```
 
-The browser side adapts that response into an ordinary data resource:
+The browser side adapts that response into a Payload component:
 
 ```tsx
-import { dataResource } from "@bgub/fig";
-import { payloadDataLoader } from "@bgub/fig-dom";
+import { createPayloadComponent } from "@bgub/fig-dom";
 
-export const profilePage = dataResource({
-  key: (id: string) => ["profile-page", id],
-  load: payloadDataLoader({
-    request: (id, { signal }) => fetch(`/profiles/${id}`, { signal }),
-    resolveClientReference: ({ id }) => {
-      if (id === "./follow-button.tsx#FollowButton") {
-        return import("./follow-button.tsx").then(
-          (module) => module.FollowButton,
-        );
-      }
-    },
-  }),
+export const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile-page"],
+  load: ({ id }, { signal }) => fetch(`/profiles/${id}`, { signal }),
+  resolveClientReference: ({ id }) => {
+    if (id === "./follow-button.tsx#FollowButton") {
+      return import("./follow-button.tsx").then(
+        (module) => module.FollowButton,
+      );
+    }
+  },
 });
 ```
 
-`readData(profilePage, id)` renders the decoded tree, and `refreshData(profilePage, id)` requests a new one. The resource keeps the previous tree visible while the replacement streams in.
+`<ProfilePage id={id} />` renders the decoded tree, and `refreshData(ProfilePage, { id })` requests a new one. The component keeps the previous tree visible while the replacement streams in.
 
 </details>
 
@@ -166,6 +163,8 @@ For a minimal interactive client surface, Fig is roughly half the size of React:
 | React 19.2.7 | 194.1 kB | 60.3 kB         |
 
 Measured with esbuild 0.28.1 in production mode. The Fig entry imports `jsx`, `useState`, `createRoot`, and `on`; the React entry imports `jsx`, `useState`, and `createRoot` from `react` and `react-dom`. Fig is 52% smaller minified and 51% smaller after gzip in this comparison.
+
+Fig publishes ESM and its optional systems are tree-shakeable. For example, the complete `@bgub/fig-dom` export surface includes Payload decoding and the data store used by `createPayloadComponent`, but an application that does not import that API does not bundle those implementations. Repository size-limit checks for complete package entry points are therefore intentionally higher than a minimal application's named-import bundle.
 
 ## Key Design Principles
 

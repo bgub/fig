@@ -1,15 +1,15 @@
-import { type FigNode, readData } from "@bgub/fig";
+import type { FigNode } from "@bgub/fig";
 import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
-import { postPayload } from "../post-payload.tsx";
+import { PostPage } from "../post-payload.tsx";
 
 export const Route = createFileRoute("/posts/$postId")({
   component: PostRoute,
   loader: ({ context, params }) =>
-    ensureRouteData(context, postPayload, params.postId),
+    ensureRouteData(context, PostPage, { id: params.postId }),
 });
 
 function PostRoute(): FigNode {
   const { postId } = Route.useParams();
-  return readData(postPayload, postId);
+  return <PostPage id={postId} />;
 }

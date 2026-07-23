@@ -1,17 +1,14 @@
 import {
   createContext,
-  dataResource,
   ErrorBoundary,
-  type FigNode,
   readContext,
-  readData,
   refreshData,
   Suspense,
   useState,
   useTransition,
 } from "@bgub/fig";
 import type { ResolveClientReference } from "@bgub/fig/payload";
-import { createRoot, on, payloadDataLoader } from "@bgub/fig-dom";
+import { createPayloadComponent, createRoot, on } from "@bgub/fig-dom";
 import { LikeButton } from "./client-components.tsx";
 import {
   brokenResourceSeed,
@@ -29,15 +26,14 @@ const resolveClientReference: ResolveClientReference = (metadata) =>
     [weatherSlotReferenceId]: WeatherSlot,
   })[metadata.id];
 
-// The plan's client half, verbatim in shape: each serialized tree travels as
-// an ordinary data resource; the key is the refresh boundary; freshness uses
-// the existing verbs. No consumer, no boundary protocol, no refresh header.
-const postResource = dataResource<[number], FigNode>({
-  key: (seed: number) => ["resource-post", seed],
-  load: payloadDataLoader<[number]>({
-    request: (seed, { signal }) => fetch(resourcePayloadUrl(seed), { signal }),
-    resolveClientReference,
-  }),
+// Each serialized tree is a component backed by the ordinary data store. Its
+// key is the refresh boundary; there is no separate consumer or refresh
+// protocol.
+const PostPayload = createPayloadComponent<{ seed: number }>({
+  cacheKey: ({ seed }) => seed,
+  key: ["resource-post"],
+  load: ({ seed }, { signal }) => fetch(resourcePayloadUrl(seed), { signal }),
+  resolveClientReference,
 });
 
 function resourcePayloadUrl(seed: number): string {
@@ -57,23 +53,19 @@ function resourcePayloadUrl(seed: number): string {
 // A second serialized slot with its own key: refreshing one resource leaves
 // the other's entry untouched, which is the whole refresh story — the unit
 // of refresh is the data-resource key.
-const weatherResource = dataResource<[], FigNode>({
-  key: () => ["resource-weather"],
-  load: payloadDataLoader<[]>({
-    request: ({ signal }) => fetch("/weather-payload", { signal }),
-    resolveClientReference,
-  }),
+const WeatherPayload = createPayloadComponent<Record<never, never>>({
+  key: ["resource-weather"],
+  load: (_, { signal }) => fetch("/weather-payload", { signal }),
+  resolveClientReference,
 });
 
 // The surrounding server component: its stream carries the dashboard frame
 // with PostSlot/WeatherSlot as client references, so refreshing it re-renders
 // the wrapper on the server without touching the slots' own entries.
-const dashboardResource = dataResource<[], FigNode>({
-  key: () => ["resource-dashboard"],
-  load: payloadDataLoader<[]>({
-    request: ({ signal }) => fetch("/dashboard-payload", { signal }),
-    resolveClientReference,
-  }),
+const DashboardPayload = createPayloadComponent<Record<never, never>>({
+  key: ["resource-dashboard"],
+  load: (_, { signal }) => fetch("/dashboard-payload", { signal }),
+  resolveClientReference,
 });
 
 // The current post's seed reaches PostSlot through context: the slot mounts
@@ -148,11 +140,11 @@ function ResourcePage() {
 function DashboardView() {
   return (
     <div class="dashboard-slot resource-shell">
-      {readData(dashboardResource)}
+      <DashboardPayload />
       <RefreshButton
         label="Refresh dashboard"
         name="dashboard"
-        refresh={() => refreshData(dashboardResource)}
+        refresh={() => refreshData(DashboardPayload, {})}
       />
     </div>
   );
@@ -250,11 +242,11 @@ function PostView({ seed }: { seed: number }) {
   // streaming afterwards.
   return (
     <div class="payload-slot resource-shell">
-      {readData(postResource, seed)}
+      <PostPayload seed={seed} />
       <RefreshButton
         label="Refresh post"
         name="post"
-        refresh={() => refreshData(postResource, seed)}
+        refresh={() => refreshData(PostPayload, { seed })}
       />
     </div>
   );
@@ -263,11 +255,11 @@ function PostView({ seed }: { seed: number }) {
 function WeatherView() {
   return (
     <div class="weather-slot resource-shell">
-      {readData(weatherResource)}
+      <WeatherPayload />
       <RefreshButton
         label="Refresh weather"
         name="weather"
-        refresh={() => refreshData(weatherResource)}
+        refresh={() => refreshData(WeatherPayload, {})}
       />
     </div>
   );

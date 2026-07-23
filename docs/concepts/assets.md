@@ -20,7 +20,7 @@ return assets(
 );
 ```
 
-`assets(list, children)` attaches the descriptors to a subtree. Client references may carry them too, and framework compilers may derive the same descriptors from static imports. TanStack Start does this for components reached by `payloadResource` and for explicit `Isomorphic` boundaries.
+`assets(list, children)` attaches the descriptors to a subtree. Client references may carry them too, and framework compilers may derive the same descriptors from static imports. TanStack Start does this for components reached by `serverPayload` and for explicit `Isomorphic` boundaries.
 
 There is still only one runtime mechanism: every source becomes the same descriptor and enters the same registry.
 

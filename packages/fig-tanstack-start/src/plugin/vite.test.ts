@@ -85,7 +85,7 @@ describe("tanstackStart", () => {
     expect(tanstackStart().slice(0, 3)).toEqual([
       expect.objectContaining({ name: "fig-tanstack-start:compatibility" }),
       expect.objectContaining({
-        name: "fig-tanstack-start:payload-resource",
+        name: "fig-tanstack-start:server-payload",
       }),
       expect.objectContaining({ name: "fig-tanstack-start:payload" }),
     ]);

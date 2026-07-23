@@ -86,6 +86,24 @@ It follows superseding loads and server hydration instead of exposing an interna
 
 TanStack Router's `ensureRouteData` awaits this operation and returns `void`; the component still calls `readData`. This keeps one cache instead of copying the result into Router `loaderData`.
 
+### Payload components
+
+`createPayloadComponent` from `@bgub/fig-dom` returns one callable object that is both a component and a data resource. Rendering it reads the decoded Payload tree; explicit store and route APIs accept the same object directly:
+
+```tsx
+const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile"],
+  load: loadProfilePayload,
+});
+
+await ensureRouteData(context, ProfilePage, { id: "42" });
+return <ProfilePage id="42" />;
+```
+
+The complete props are appended to the namespace key by default using a canonical encoding of Payload-compatible values. Plain-object property order is canonicalized before graph ids are assigned, so equivalent props share an entry even when callers construct them in a different order. `cacheKey(props)` replaces only that props portion and explicitly opts into sharing one entry across unequal props. Development argument-fingerprint diagnostics still report accidental sharing.
+
+Payload components use the same freshness APIs as every other data resource: `preloadData(ProfilePage, props)`, `refreshData(ProfilePage, props)`, and `invalidateData(ProfilePage, props)`. After an `await`, use the corresponding method on a previously captured data-store handle.
+
 ## Invalidating And Refreshing
 
 Fig has two freshness ideas:
@@ -148,7 +166,7 @@ During Payload navigation, data rows travel in the same response as the serializ
 
 ## Serialized Trees As Data
 
-`payloadDataLoader` delivers a serialized component tree as an ordinary data-resource value. The resource key is the refresh boundary. The root value may be fulfilled while nested streamed holes are still pending.
+`createPayloadComponent` delivers a serialized component tree through an ordinary data-resource entry. The resource key is the refresh boundary. The root value may be fulfilled while nested streamed holes are still pending.
 
 Decoding, asset preparation, and data-row hydration remain bound to the load generation. Once a newer generation takes over, late rows from the old stream cannot mutate the store or publish assets.
 

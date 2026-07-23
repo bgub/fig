@@ -1,6 +1,6 @@
 # Payload components
 
-Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the client half (`decodePayloadStream`) lives at the browser-safe `@bgub/fig/payload`; and fig-dom's `payloadDataLoader` turns the whole thing into an ordinary data resource. Rows and encoding stay internal. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
+Docs 4 and 5 kept pointing here. Payload is Fig's server-component wire layer — how a tree rendered on the server becomes rows, crosses the wire, and becomes a live Fig tree in the browser. The server half (`renderToPayloadStream`) lives at `@bgub/fig-server/payload`; the client half (`decodePayloadStream`) lives at the browser-safe `@bgub/fig/payload`; and fig-dom's `createPayloadComponent` turns the whole thing into a component backed by an ordinary data resource. Rows and encoding stay internal. The terminology rule from doc 1 applies: it's _payload_, never "RSC" or "Flight". Those are React brands; the format is Fig's own.
 
 Like docs 3 and 4, this one follows a single scenario end to end.
 
@@ -94,32 +94,30 @@ Payload-rendered values can additionally contain Fig elements, client references
 
 Suppose `userResource` isn't loaded when `ProfilePage` renders. Same trick as everywhere else (doc 4): the read throws, and the payload renderer outlines the not-ready subtree — the model ships with `{"$fig":"lazy","id":2}` in that position and rendering moves on. When the load settles, row 2 arrives with the missing chunk and the hole fills. Suspense boundaries serialize as their own `$fig` nodes, so the client knows where fallbacks belong while holes are outstanding. `allReady` resolves once every outstanding row has been written — the same contract as doc 4's HTML entry points.
 
-## The client side: a serialized tree is a data resource
+## The client side: a serialized tree is a component
 
-The decoded page travels like any other keyed async value (doc 5). fig-dom's `payloadDataLoader` adapts the endpoint into an ordinary loader, and `readData` returns renderable elements:
+The decoded page travels like any other keyed async value (doc 5). fig-dom's `createPayloadComponent` gives that data-resource entry a props-typed component interface:
 
 ```tsx
-import { dataResource, readData, refreshData, transition } from "@bgub/fig";
-import { payloadDataLoader } from "@bgub/fig-dom";
+import { createPayloadComponent } from "@bgub/fig-dom";
 
-const profileResource = dataResource({
-  key: (id: string) => ["profile", id],
-  load: payloadDataLoader({
-    request: (id, { signal }) => fetch(`/profile/${id}`, { signal }),
-    resolveClientReference: (reference) => manifest[reference.id]?.(),
-  }),
+const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile"],
+  load: ({ id }, { signal }) => fetch(`/profile/${id}`, { signal }),
+  resolveClientReference: (reference) => manifest[reference.id]?.(),
 });
 
 function Profile({ id }: { id: string }) {
-  const page = readData(profileResource, id); // suspends until the root row decodes
-  return <main>{page}</main>;
+  return <ProfilePage id={id} />; // suspends until the root row decodes
 }
 ```
 
-- The loader validates the response (status, body, payload content type; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
+- The component validates the response (status, body, payload content type; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
 - Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it.
 - Streamed `data` rows hydrate the same store through a generation-guarded capability — the doc 5 handoff, completed, with no second request.
 - `assets` rows prepare delivery assets as they arrive; stylesheet gates delay only the content that declared them. Title/meta remain declarations on the decoded owner and update the document only when that tree commits.
+
+> **Trust the producer:** Payload is active application content, not an alternative format for untrusted API data. The endpoint above may render elements, hydrate other entries in the same data store, publish delivery assets including scripts and styles, and request client references from the supplied resolver. Its content type validates the Payload codec, not the producer. Ordinary data resources never auto-detect Payload, so an API response becomes active only when application code explicitly passes it to `createPayloadComponent` or `decodePayloadStream`.
 
 Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns the root-value promise directly — it resolves at the root row while background ingestion continues. An `onStreamDone` option reports how ingestion ended (post-root failures reject the holes they strand), and aborting the options `signal` retires unresolved holes with an internal cancellation reason.
 
@@ -127,28 +125,31 @@ Metadata declarations always stay attached to their owning root, outlined hole, 
 
 ### TanStack Start routes
 
-`@bgub/fig-tanstack-start/payload` packages that same pattern for TanStack Start. A complete Payload resource can be one shared module:
+`@bgub/fig-tanstack-start/payload` packages that same pattern for TanStack Start. A complete Payload component can be one shared module:
 
 ```tsx
 // profile.payload.tsx
-import { payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { serverPayload } from "@bgub/fig-tanstack-start/payload";
 
-export const profilePayload = payloadResource<string>({
-  key: (id) => ["profile-payload", id],
-  render: (id) => <article>Profile: {id}</article>,
+export const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile-payload"],
+  load: serverPayload(({ id }) => <article>Profile: {id}</article>),
 });
 ```
 
-The compiler moves the inline `render` callback into a private server function and leaves only the resource handle and RPC stub in the browser bundle. The declaration therefore stays in a client-importable `.tsx` module; `.payload.tsx` is a descriptive convention, not special compiler behavior. Components and other imports referenced only by `render` are omitted from the browser bundle too. `<Isomorphic component={Counter} ... />` marks the exceptional SSR-plus-hydration boundary.
+The compiler moves the component or callback passed to `serverPayload` into a private server function and leaves only the component handle and RPC stub in the browser bundle. The declaration therefore stays in a client-importable `.tsx` module; `.payload.tsx` is a descriptive convention, not special compiler behavior. Server-only imports referenced by `serverPayload` are omitted from the browser bundle too. `<Isomorphic component={Counter} ... />` marks the exceptional SSR-plus-hydration boundary.
 
-Route loaders call `ensureRouteData`, and route components call `readData`. On SSR the adapter embeds the response stream into the document and retains asset declarations on their decoded owners, letting the document renderer deliver them before dependent HTML. The browser adopts the embedded root without refetching, then uses the generated server function normally for navigation and refresh. Shell HTML streams immediately, while TanStack's hydration barrier waits for outlined Payload holes before each completed response enters a keyed carrier. See the [adapter guide](../packages/fig-tanstack-start/README.md#payload-routes) for the complete route example.
+Route loaders call `ensureRouteData(context, ProfilePage, { id })`, and route components render `<ProfilePage id={id} />`. On SSR the adapter embeds the response stream into the document and retains asset declarations on their decoded owners, letting the document renderer deliver them before dependent HTML. The browser adopts the embedded root without refetching, then uses the generated server function normally for navigation and refresh. Shell HTML streams immediately, while TanStack's hydration barrier waits for outlined Payload holes before each completed response enters a keyed carrier. See the [adapter guide](../packages/fig-tanstack-start/README.md#payload-routes) for the complete route example.
 
 ## Refreshing
 
 There is no refresh protocol, because there doesn't need to be one: **the resource key is the refresh boundary.**
 
 ```ts
-transition(() => refreshData(profileResource, "42"));
+import { refreshData, transition } from "@bgub/fig";
+
+transition(() => refreshData(ProfilePage, { id: "42" }));
 ```
 
 The store re-requests the stream; the previous tree stays visible while the refresh is pending; the new root publishes and the reconciler diffs it in. Want finer granularity? Define finer resources — a comments section with its own key refreshes without re-shipping the page around it.

@@ -138,21 +138,22 @@ Fig handles SSR and streaming similarly to React, but there are some implementat
 
 Fig does not use a filename or `"use client"`/`"use server"` directive to decide how a component renders. A Payload component is simply a Fig component reached by a Payload render instead of an HTML or browser render. Payload is Fig's own wire format; its encoding stays internal while Fig exposes focused APIs for rendering and decoding the stream.
 
-With TanStack Start, the server-rendered tree is one payload resource:
+With TanStack Start, the server-rendered tree is one payload component:
 
 ```tsx
 // profile.payload.tsx
-import { Isomorphic, payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { Isomorphic, serverPayload } from "@bgub/fig-tanstack-start/payload";
 import { Counter } from "./counter.tsx";
 
-export const profileResource = payloadResource<string>({
-  key: (id) => ["profile", id],
-  render: (id) => (
+export const ProfilePage = createPayloadComponent<{ id: string }>({
+  key: ["profile"],
+  load: serverPayload(({ id }) => (
     <main>
       <h1>Profile {id}</h1>
       <Isomorphic component={Counter} initial={1} />
     </main>
-  ),
+  )),
 });
 ```
 
@@ -177,34 +178,33 @@ export function Counter({ initial }: { initial: number }) {
 A route loads and renders the tree like any other data resource:
 
 ```tsx
-import { readData } from "@bgub/fig";
 import { ensureRouteData } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
-import { profileResource } from "../profile.payload.tsx";
+import { ProfilePage } from "../profile.payload.tsx";
 
 export const Route = createFileRoute("/profiles/$id")({
   loader: ({ context, params }) =>
-    ensureRouteData(context, profileResource, params.id),
+    ensureRouteData(context, ProfilePage, { id: params.id }),
   component: ProfileRoute,
 });
 
 function ProfileRoute() {
   const { id } = Route.useParams();
-  return readData(profileResource, id);
+  return <ProfilePage id={id} />;
 }
 ```
 
-The `render` callback is compiled into a private server function and stays out of the browser bundle. The route loader requests the stream, and `readData` renders the decoded component tree.
+The `serverPayload` callback is compiled into a private server function and stays out of the browser bundle. The route loader requests the stream, and the Payload component renders the decoded tree.
 
 Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
 
 ```ts
 import { refreshData, transition } from "@bgub/fig";
 
-transition(() => refreshData(profileResource, "42"));
+transition(() => refreshData(ProfilePage, { id: "42" }));
 ```
 
-The current tree stays visible while the server renders and decodes its replacement. Each resource key is its own refresh boundary; keyed resources pass the same arguments to `refreshData` that they pass to `readData`.
+The current tree stays visible while the server renders and decodes its replacement. Each component key is its own refresh boundary.
 
 <details>
 <summary>Using payload without TanStack Start</summary>
@@ -238,29 +238,24 @@ export function handleProfile(): Response {
 }
 ```
 
-Then adapt the response into a data resource and resolve the reference in the browser:
+Then adapt the response into a Payload component and resolve the reference in the browser:
 
 ```tsx
 // client.tsx
-import { dataResource, type FigNode, readData } from "@bgub/fig";
-import { createRoot, payloadDataLoader } from "@bgub/fig-dom";
+import { createPayloadComponent, createRoot } from "@bgub/fig-dom";
 
-const profileResource = dataResource<[], FigNode>({
-  key: () => ["profile"],
-
-  load: payloadDataLoader({
-    request: ({ signal }) => fetch("/profile", { signal }),
-
-    resolveClientReference: ({ id }) => {
-      if (id === "./counter.tsx#Counter") {
-        return import("./counter.tsx").then((module) => module.Counter);
-      }
-    },
-  }),
+const ProfilePage = createPayloadComponent<Record<string, never>>({
+  key: ["profile"],
+  load: (_props, { signal }) => fetch("/profile", { signal }),
+  resolveClientReference: ({ id }) => {
+    if (id === "./counter.tsx#Counter") {
+      return import("./counter.tsx").then((module) => module.Counter);
+    }
+  },
 });
 
 function App() {
-  return readData(profileResource);
+  return <ProfilePage />;
 }
 
 createRoot(document.getElementById("app")!).render(<App />);

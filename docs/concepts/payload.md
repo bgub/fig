@@ -11,20 +11,35 @@ Payload is a format, not an application architecture. Endpoints, caching, refres
 The common browser flow is:
 
 1. A server endpoint calls `renderToPayloadStream(<Profile />)`.
-2. A data-resource loader fetches that stream.
-3. `payloadDataLoader` decodes it into a `FigNode` value.
-4. A component renders that value with `readData`.
-5. Refreshing the data-resource key requests and decodes a replacement tree.
+2. A Payload component loader obtains that stream.
+3. `createPayloadComponent` decodes it into a `FigNode` value backed by the data store.
+4. The application renders the Payload component normally.
+5. Refreshing the component requests and decodes a replacement tree.
 
 Payload itself only defines steps 1 and 3. The data layer and framework own the rest.
+
+## Trust Boundary
+
+Payload is active application content, not an untrusted data format. Decode a stream only when its producer is trusted to provide the application's HTML and JavaScript. The Payload content type selects and validates the codec; it does not establish the stream's authenticity or authority.
+
+Ordinary data resources never inspect a response's content type or decode it as Payload. A data endpoint returning Payload bytes therefore cannot become executable merely because it uses the same data store. Payload decoding begins only through `createPayloadComponent` or an explicit `decodePayloadStream` call.
+
+Decoder authority comes from callbacks supplied by application code; the stream cannot grant itself capabilities. `createPayloadComponent` deliberately supplies broad capabilities for application-owned streams:
+
+- model rows may produce renderable host elements;
+- data rows may hydrate other keys in the component's data store;
+- asset rows may prepare stylesheets, scripts, fonts, and hints; and
+- client rows may resolve only through the supplied client-reference resolver.
+
+Generation guards prevent retired streams from publishing late rows, but they do not make a live malicious stream safe. Payload endpoints must apply the same authentication and authorization as the application page, and applications must not decode user-controlled uploads or third-party API responses as Payload. Content Security Policy and constrained client-reference resolvers provide defense in depth.
 
 ## Package Boundaries
 
 - `@bgub/fig-server/payload` owns `renderToPayloadStream`.
 - `@bgub/fig/payload` owns browser-safe `decodePayloadStream` and the client-reference resolver type. Browser code never imports the server package to decode.
 - `@bgub/fig` owns `clientReference`, the low-level interactivity escape hatch.
-- `@bgub/fig-dom` owns `payloadDataLoader`, which turns a Payload endpoint into a data-resource loader and connects decoding to browser assets and hydration.
-- `@bgub/fig-tanstack-start` owns framework transport, `payloadResource`, and its compiler integration.
+- `@bgub/fig-dom` owns `createPayloadComponent`, which connects decoding to browser assets and hydration.
+- `@bgub/fig-tanstack-start/payload` owns `serverPayload`, framework transport, and compiler integration.
 
 Rows, codecs, and graph encoding remain internal.
 
@@ -48,7 +63,7 @@ Payload `useId` values use the `fig-pl-` prefix. The semantic row kinds are:
 
 Assets discovered by a subtree stay with the row where that subtree lands. If the subtree suspends, its stylesheet belongs to the outlined row rather than blocking the enclosing tree. Metadata also stays with its owner until that owner commits.
 
-There is no refresh row. A Payload tree is delivered as a data-resource value, so refreshing its resource key requests a new stream. Server actions and temporary references are also absent.
+There is no refresh row. A Payload component is backed by an ordinary data-resource entry, so refreshing the component requests a new stream. Server actions and temporary references are also absent.
 
 ## Values
 
@@ -94,7 +109,7 @@ Ids are opaque. Fig tooling commonly authors `"<module>#<export>"`, but the serv
 
 `resolveClientReference(reference)` receives the full decoded object and returns a component, a promise for one, or `undefined`. Resolution starts as soon as the row arrives, overlapping module loading with the rest of the stream. An SSR-capable reference may render through a registered server implementation during server-side decoding.
 
-TanStack Start applications normally use `payloadResource` and `<Isomorphic component={Counter} />` instead. Its compiler creates references, manifests, resolvers, and CSS metadata. A `.payload.tsx` filename is only a convention; the `payloadResource` render callback defines the Payload boundary.
+TanStack Start applications normally combine `createPayloadComponent`, `serverPayload`, and `<Isomorphic component={Counter} />`. Its compiler creates references, manifests, resolvers, and CSS metadata. A `.payload.tsx` filename is only a convention; the `serverPayload` callback defines the Payload boundary.
 
 ## Server API
 
@@ -135,6 +150,14 @@ Important options are:
 Observer callbacks are never awaited. Their own errors and rejected promises are swallowed so reporting cannot break decoder teardown.
 
 Metadata is always retained on its owner and published only by renderer commit. Delivery assets may be prepared eagerly. A client-reference wrapper keeps assets above its module and reveal suspension points, so late content still receives its stylesheet before reveal.
+
+## Payload Component API
+
+`createPayloadComponent({ key, load })` accepts a stable namespace key and a loader receiving `(props, { key, signal })`. The loader returns either a `Response` or `{ stream, contentType }`. Optional `resolveClientReference`, `prepareAssets`, and `retainAssets` settings configure the same decoder behavior described above.
+
+Props become the default cache-key suffix through a canonical encoding of Payload-compatible values. Plain-object keys are traversed in sorted order before graph ids are assigned, so property insertion order does not change cache identity. This both validates the transport boundary and prevents a newly added render-affecting prop from silently sharing an old entry. `cacheKey(props)` is the explicit escape hatch for excluding props. Children are rejected.
+
+The returned function is also the backing `DataResource<[Props], AwaitedFigNode>`. This is why `ensureRouteData`, `FigRoot.data`, and ordinary data freshness and diagnostics work without a second Payload-specific store protocol.
 
 ## Reference Identity And Asset Gates
 

@@ -2,6 +2,8 @@ import {
   assets,
   createElement,
   dataResource,
+  type DataResourceLoadContext,
+  type DataResourceLoader,
   ErrorBoundary,
   type FigNode,
   readData,
@@ -12,7 +14,8 @@ import {
 } from "@bgub/fig";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { describe, expect, it } from "vitest";
-import { createRoot, flushSync, payloadDataLoader } from "./index.ts";
+import { createRoot, flushSync } from "./index.ts";
+import { decodePayloadResponse } from "./payload-decoder.ts";
 import {
   deferred,
   waitForHostTurns,
@@ -42,27 +45,18 @@ function loaderContext(): { signal: AbortSignal } {
   return { signal: new AbortController().signal };
 }
 
-describe("payloadDataLoader", () => {
-  it("passes request callbacks only the public load context", async () => {
-    const privateCapability = Symbol("private capability");
-    const context = loaderContext() as ReturnType<typeof loaderContext> &
-      Record<symbol, unknown>;
-    context[privateCapability] = () => undefined;
-    let requestContext: { signal: AbortSignal } | null = null;
-    const load = payloadDataLoader<[]>({
-      request: (received) => {
-        requestContext = received;
-        return new Response(null, { status: 503 });
-      },
-    });
+function testPayloadLoader<TArgs extends unknown[]>(options: {
+  request: DataResourceLoader<TArgs, Response>;
+}): DataResourceLoader<TArgs, FigNode> {
+  return async (...argsAndContext) => {
+    const context = argsAndContext.at(-1) as DataResourceLoadContext;
+    const args = argsAndContext.slice(0, -1) as TArgs;
+    const response = await options.request(...args, { signal: context.signal });
+    return decodePayloadResponse(response, context);
+  };
+}
 
-    await expect(load(context)).rejects.toThrow(
-      "Payload request failed with status 503.",
-    );
-    expect(requestContext).not.toBe(context);
-    expect(Reflect.ownKeys(requestContext ?? {})).toEqual(["signal"]);
-  });
-
+describe("decodePayloadResponse", () => {
   it("rejects non-2xx responses and cancels the body", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
@@ -70,24 +64,19 @@ describe("payloadDataLoader", () => {
         cancelled = true;
       },
     });
-    const load = payloadDataLoader<[]>({
-      request: () => new Response(body, { status: 503 }),
-    });
-
-    await expect(load(loaderContext())).rejects.toThrow(
-      "Payload request failed with status 503.",
-    );
+    await expect(
+      decodePayloadResponse(
+        new Response(body, { status: 503 }),
+        loaderContext(),
+      ),
+    ).rejects.toThrow("Payload request failed with status 503.");
     expect(cancelled).toBe(true);
   });
 
   it("requires a response body", async () => {
-    const load = payloadDataLoader<[]>({
-      request: () => new Response(null, { status: 200 }),
-    });
-
-    await expect(load(loaderContext())).rejects.toThrow(
-      "Payload response did not include a body.",
-    );
+    await expect(
+      decodePayloadResponse(new Response(null), loaderContext()),
+    ).rejects.toThrow("Payload response did not include a body.");
   });
 
   it("rejects codec mismatches and cancels the body", async () => {
@@ -97,22 +86,20 @@ describe("payloadDataLoader", () => {
         cancelled = true;
       },
     });
-    const load = payloadDataLoader<[]>({
-      request: () =>
+    await expect(
+      decodePayloadResponse(
         new Response(body, {
           headers: {
             "content-type": "text/x-fig-payload; codec=binary",
           },
         }),
-    });
-
-    await expect(load(loaderContext())).rejects.toThrow(
-      'Payload codec mismatch: producer used "binary"',
-    );
+        loaderContext(),
+      ),
+    ).rejects.toThrow('Payload codec mismatch: producer used "binary"');
     expect(cancelled).toBe(true);
   });
 
-  it("cancels the body when the signal aborted during the request", async () => {
+  it("cancels the body when the load signal is already aborted", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
       cancel() {
@@ -120,14 +107,13 @@ describe("payloadDataLoader", () => {
       },
     });
     const controller = new AbortController();
-    const load = payloadDataLoader<[]>({
-      request: () => {
-        controller.abort("gone");
-        return new Response(body);
-      },
-    });
+    controller.abort("gone");
 
-    await expect(load({ signal: controller.signal })).rejects.toBe("gone");
+    await expect(
+      decodePayloadResponse(new Response(body), {
+        signal: controller.signal,
+      }),
+    ).rejects.toBe("gone");
     expect(cancelled).toBe(true);
   });
 
@@ -155,7 +141,7 @@ describe("payloadDataLoader", () => {
 
     const postResource = dataResource<[string], FigNode>({
       key: (slug: string) => ["loader-post", slug],
-      load: payloadDataLoader<[string]>({
+      load: testPayloadLoader<[string]>({
         request: (slug) => {
           requests += 1;
           return payloadResponse(createElement(ServerPost, { slug }));
@@ -205,7 +191,7 @@ describe("payloadDataLoader", () => {
 
     const noteResource = dataResource<[], FigNode>({
       key: () => ["loader-note"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: () => {
           requests += 1;
           return payloadResponse(createElement(ServerNote, null));
@@ -263,7 +249,7 @@ describe("payloadDataLoader", () => {
 
     const pageResource = dataResource<[], FigNode>({
       key: () => ["payload-page"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: () => {
           requests += 1;
           return requests === 1
@@ -339,7 +325,7 @@ describe("payloadDataLoader", () => {
 
     const pageResource = dataResource<[], FigNode>({
       key: () => ["sync-hole-page"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: () => {
           requests += 1;
           return requests === 1
@@ -428,7 +414,7 @@ describe("payloadDataLoader", () => {
 
     const postResource = dataResource<[], FigNode>({
       key: () => ["loader-streaming-refresh"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: async () => {
           requests += 1;
           const revision = requests;
@@ -516,7 +502,7 @@ describe("payloadDataLoader", () => {
     const abortable = new AbortController();
     const postResource = dataResource<[], FigNode>({
       key: () => ["loader-abort"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: (context) => {
           requests += 1;
           signals.push(context.signal);
@@ -567,7 +553,7 @@ describe("payloadDataLoader", () => {
 
     const styledResource = dataResource<[], FigNode>({
       key: () => ["loader-styled"],
-      load: payloadDataLoader<[]>({
+      load: testPayloadLoader<[]>({
         request: () => payloadResponse(createElement(StyledPost, null)),
       }),
     });
