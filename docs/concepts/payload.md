@@ -159,6 +159,8 @@ Props become the default cache-key suffix through a canonical encoding of Payloa
 
 The returned function is also the backing `DataResource<[Props], AwaitedFigNode>`. This is why `ensureRouteData`, `FigRoot.data`, and ordinary data freshness and diagnostics work without a second Payload-specific store protocol.
 
+A Payload component is a client-visible delivery and cache boundary, not a server component to nest inside another Payload render. Development rendering rejects that pattern: otherwise the inner stream would be decoded on the server and flattened into the outer stream, so the browser would not mount the inner component or retain its independent refresh boundary. Compose ordinary server components inside `serverPayload`; mount separate Payload components from the client tree when they need separate keys and refresh lifecycles.
+
 ## Reference Identity And Asset Gates
 
 A synchronously resolved, ungated reference decodes to the component itself, preserving type identity across refreshes. Async or gated references need wrappers.

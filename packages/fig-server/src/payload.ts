@@ -604,6 +604,15 @@ function serializeFunctionComponent(
   frame.stack = { name: type.name || "Anonymous", parent: previousStack };
 
   try {
+    if (
+      __DEV__ &&
+      "$$typeof" in type &&
+      type.$$typeof === Symbol.for("fig.data-resource")
+    ) {
+      throw new Error(
+        "Payload components cannot be rendered inside Payload. Render the underlying server component directly, or mount separate Payload components from the client tree.",
+      );
+    }
     const result = type(props);
     if (isThenable(result)) {
       const scopedAssets = frame.pendingAssets.splice(assetCheckpoint);

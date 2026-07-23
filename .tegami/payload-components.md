@@ -31,3 +31,8 @@ components use their namespace as their DevTools label. TanStack Start renders
 the supplied component inside the Payload renderer so root-level reads and
 suspension work, and rejects uncompiled `serverPayload` calls before invoking
 application code.
+
+Payload rendering also rejects nesting one Payload component inside another in
+development. Payload components are client-visible delivery boundaries;
+compose ordinary server components inside them or mount separate Payload
+components from the client tree to preserve independent refresh keys.

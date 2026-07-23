@@ -154,6 +154,8 @@ transition(() => refreshData(ProfilePage, { id: "42" }));
 
 The store re-requests the stream; the previous tree stays visible while the refresh is pending; the new root publishes and the reconciler diffs it in. Want finer granularity? Define finer resources — a comments section with its own key refreshes without re-shipping the page around it.
 
+Payload components are delivery boundaries rather than server components to nest. Inside `serverPayload`, compose ordinary server components directly. When two trees need independent refresh keys, mount both Payload components from the client tree. Development rendering rejects returning `<InnerPayload />` from another component's `serverPayload` callback because decoding and flattening the inner stream on the server would discard its client-side refresh boundary.
+
 ## Errors
 
 An `error` row carries `{ digest?, message? }` under the same `onError` contract as doc 4: production defaults to empty, dev includes the message. A failing root rejects the resource read — the nearest `ErrorBoundary` handles it with ordinary failed-refresh semantics. A failing _hole_ rejects just that slot while the surrounding fulfilled tree stays published. Aborted decodes retire their holes with a cancellation reason rather than a user error, because cancellation is not an error in Fig.

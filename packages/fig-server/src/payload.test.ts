@@ -5,6 +5,7 @@ import {
   createContext,
   createElement,
   createMixin,
+  dataResource,
   type ElementType,
   type FigElement,
   type FigNode,
@@ -1290,6 +1291,32 @@ describe("payload rendering", () => {
         createElement(Theme, { value: "dark" }, createElement(Badge, null)),
       ),
     ).resolves.toContain('"children":"dark"');
+  });
+
+  it("rejects Payload components nested inside Payload", async () => {
+    const NestedPayload = Object.assign(
+      function NestedPayload() {
+        return createElement("p", null, "nested");
+      },
+      dataResource({ key: () => ["nested-payload"] }),
+    );
+
+    await expect(
+      renderToPayloadRows(createElement(NestedPayload, null), {
+        onError: (error) => ({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      }),
+    ).resolves.toEqual([
+      {
+        id: 0,
+        tag: "error",
+        value: {
+          message:
+            "Payload components cannot be rendered inside Payload. Render the underlying server component directly, or mount separate Payload components from the client tree.",
+        },
+      },
+    ]);
   });
 
   it("uses Suspense as a client-visible element around lazy server children", async () => {

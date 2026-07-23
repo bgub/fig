@@ -196,6 +196,8 @@ function ProfileRoute() {
 
 The `serverPayload` callback is compiled into a private server function and stays out of the browser bundle. The route loader requests the stream, and the Payload component renders the decoded tree.
 
+Payload components are client-visible delivery boundaries. Compose ordinary server components inside `serverPayload`; mount separate Payload components from the client tree when they need independent refresh keys. Rendering one Payload component inside another is rejected in development because the inner boundary would otherwise be flattened into the outer stream.
+
 Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
 
 ```ts
