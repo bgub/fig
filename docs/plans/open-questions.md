@@ -26,8 +26,6 @@
 
 - **Payload:** Should we add a binary codec?
 - **SSR streaming:** Fig inlines every Suspense boundary that has completed when its parent flushes; only genuinely pending content is outlined. Unlike Fizz's `progressiveChunkSize` heuristic, this means a large completed boundary can block later shell siblings in document order. Consider revisiting in the future.
-
-## Server Rendering
-
-- **Early hints / preload headers** — no `onHeaders` equivalent: `headReady` resolves with the shell, too late for 103 Early Hints. Two real constraints shape any design: the Web `Response` API cannot express 103 at all (Node's `writeEarlyHints` is the only seam, so this is inherently a runtime-specific side channel), and a useful trigger point must fire before the shell yet after enough render progress to have discovered assets (first root suspension is the natural candidate — the shell being slow is exactly when 103s pay off). `Link`-header-on-200 preload emission from the asset registry is the milder, runtime-neutral half. → `docs/concepts/server-rendering.md`
-- **Resume / partial prerendering** — `prerender` is all-or-nothing settled and aborting yields static fallbacks; there is no postpone/resume pair, so the slot React canary's `prerender` + `resume` fills (prerender the static shell once, resume the dynamic holes per-request) is empty. The hard part is the parked-state contract: which suspension points can park, what render-scope state serializes across the boundary (id paths, provider values, asset-registry state), and whether the byte-identical-resume invariant extends across processes. A major feature, not an increment. → `docs/concepts/server-rendering.md`
+- Partial pre-rendering?? (we don't have to do bundler dynamic/static analysis like Next does)
+- **Early hints:** Should Fig also report preload discoveries before the shell so runtime adapters can send `103 Early Hints`? The Web `Response` API cannot represent interim responses, so emission would remain adapter-specific.
+- **Preload headers:** Let server adapters obtain a deduplicated `Link` header for render-discovered asset preloads before creating the response.
