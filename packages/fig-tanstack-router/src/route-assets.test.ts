@@ -3,6 +3,30 @@ import { describe, expect, it } from "vitest";
 import { collectRouteAssets } from "./route-assets.ts";
 
 describe("TanStack route asset translation", () => {
+  it("collects blocking styles before generated module preloads", () => {
+    const router = { options: {} } as unknown as AnyRouter;
+    const match = {
+      links: [{ href: "/route.css", rel: "stylesheet" }],
+      routeId: "/route",
+    } as unknown as AnyRouteMatch;
+    const manifest: Manifest = {
+      routes: {
+        "/route": {
+          css: ["/manifest.css"],
+          preloads: ["/manifest.js"],
+        },
+      },
+    };
+
+    const result = collectRouteAssets(router, match, manifest);
+
+    expect(result.resources).toMatchObject([
+      { href: "/route.css", kind: "stylesheet" },
+      { href: "/manifest.css", kind: "stylesheet" },
+      { href: "/manifest.js", kind: "modulepreload" },
+    ]);
+  });
+
   it("separates Fig assets from explicitly positioned tags", () => {
     const router = {
       options: {
@@ -53,11 +77,6 @@ describe("TanStack route asset translation", () => {
     const result = collectRouteAssets(router, match, manifest);
 
     expect(result.resources).toMatchObject([
-      {
-        crossorigin: "anonymous",
-        href: "/manifest.js",
-        kind: "modulepreload",
-      },
       { href: "/route.css", kind: "stylesheet", precedence: "route" },
       { href: "https://assets.example", kind: "preconnect" },
       {
@@ -72,6 +91,11 @@ describe("TanStack route asset translation", () => {
         crossorigin: "use-credentials",
         href: "/manifest.css",
         kind: "stylesheet",
+      },
+      {
+        crossorigin: "anonymous",
+        href: "/manifest.js",
+        kind: "modulepreload",
       },
       { async: true, kind: "script", src: "/head-async.js" },
       { async: true, kind: "script", src: "/body-async.js" },

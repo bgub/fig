@@ -18,6 +18,11 @@ export type MetadataSnapshotEntry =
 type MetadataResource = Extract<FigAssetResource, { kind: "meta" | "title" }>;
 type DeliveryResource = Exclude<FigAssetResource, MetadataResource>;
 
+export interface HeadMetadataHtml {
+  preamble: string;
+  metadata: string;
+}
+
 export class AssetResourceRegistry {
   private readonly emittedResources = new Set<string>();
   private readonly deliveryResources = new Map<string, DeliveryResource>();
@@ -67,19 +72,35 @@ export class AssetResourceRegistry {
   }
 
   headHtml(nonce?: string, streamMetadata = false): string {
-    let html = "";
-    const sink = {
-      nonce,
-      streamMetadata,
-      write(chunk: string) {
-        html += chunk;
-      },
+    const { preamble, metadata } = this.headMetadataHtml(nonce, streamMetadata);
+    return preamble + metadata;
+  }
+
+  headMetadataHtml(nonce?: string, streamMetadata = false): HeadMetadataHtml {
+    const buckets: Record<MetadataPhase, string[]> = {
+      charset: [],
+      parser: [],
+      viewport: [],
+      metadata: [],
     };
 
-    for (const resource of this.visibleMetadata().values())
-      writeAssetTag(sink, resource, null);
+    for (const resource of this.visibleMetadata().values()) {
+      const bucket = buckets[metadataPhase(resource)];
+      writeAssetTag(
+        { nonce, streamMetadata, write: (chunk) => bucket.push(chunk) },
+        resource,
+        null,
+      );
+    }
 
-    return html;
+    return {
+      preamble: [
+        ...buckets.charset,
+        ...buckets.parser,
+        ...buckets.viewport,
+      ].join(""),
+      metadata: buckets.metadata.join(""),
+    };
   }
 
   metadataSnapshot(): MetadataSnapshotEntry[] {
@@ -225,6 +246,24 @@ function isMetadataResource(
   resource: FigAssetResource,
 ): resource is MetadataResource {
   return resource.kind === "title" || resource.kind === "meta";
+}
+
+type MetadataPhase = "charset" | "parser" | "viewport" | "metadata";
+
+function metadataPhase(resource: MetadataResource): MetadataPhase {
+  if (resource.kind === "title") return "metadata";
+  if (resource.charset !== undefined) return "charset";
+  if (
+    normalizedMetadataName(resource["http-equiv"]) === "content-security-policy"
+  ) {
+    return "parser";
+  }
+  if (normalizedMetadataName(resource.name) === "viewport") return "viewport";
+  return "metadata";
+}
+
+function normalizedMetadataName(value: string | undefined): string | undefined {
+  return value?.trim().toLowerCase();
 }
 
 function metadataAttributes(

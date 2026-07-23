@@ -11,6 +11,7 @@ import {
   font,
   lazy,
   meta,
+  modulepreload,
   preconnect,
   preload,
   readContext,
@@ -1126,7 +1127,62 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      `<!doctype html><html lang="en"><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><title data-fig-hydration-skip>Document</title><meta name="description" content="SSR" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"></head><body><main>Ready</main></body></html>`,
+      `<!doctype html><html lang="en"><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/app.css" data-precedence="app" id="r-0"><title data-fig-hydration-skip>Document</title><meta name="description" content="SSR" data-fig-hydration-skip></head><body><main>Ready</main></body></html>`,
+    );
+  });
+
+  it("prioritizes the document preamble before metadata and script hints", async () => {
+    const html = await renderToDocumentHtml(
+      createElement(
+        "html",
+        null,
+        createElement("head", null, createElement("base", { href: "/docs/" })),
+        createElement(
+          "body",
+          null,
+          assets(
+            [
+              title("Document"),
+              modulepreload("/route.js"),
+              script("/app.js", { module: true }),
+              meta({ name: "description", content: "Description" }),
+              stylesheet("/app.css"),
+              preload("/later.js", "script", { fetchpriority: "low" }),
+              preconnect("https://cdn.example.com"),
+              preload("/hero.jpg", "image", { fetchpriority: "high" }),
+              font("/font.woff2", "font/woff2"),
+              meta({ name: "viewport", content: "width=device-width" }),
+              meta({
+                "http-equiv": "content-security-policy",
+                content: "default-src 'self'",
+              }),
+              meta({ charset: "utf-8" }),
+            ],
+            createElement("main", null, "Ready"),
+          ),
+        ),
+      ),
+    );
+
+    const positions = [
+      '<base href="/docs/">',
+      '<meta charset="utf-8"',
+      '<meta http-equiv="content-security-policy"',
+      '<meta name="viewport"',
+      'rel="preconnect"',
+      'href="/hero.jpg"',
+      'href="/font.woff2"',
+      'rel="stylesheet"',
+      "<title data-fig-hydration-skip>Document</title>",
+      '<meta name="description"',
+      'rel="modulepreload"',
+      'src="/app.js"',
+      'href="/later.js"',
+    ].map((value) => html.indexOf(value));
+
+    expect(positions).not.toContain(-1);
+    expect(positions).toEqual(
+      [...positions].sort((left, right) => left - right),
     );
   });
 
@@ -1161,7 +1217,7 @@ describe("@bgub/fig-server", () => {
     }
 
     await expect(renderToDocumentHtml(createElement(Page, null))).resolves.toBe(
-      `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><title data-fig-hydration-skip>Host Tags</title><meta name="description" content="Host" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><script data-fig-hydration-skip src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
+      `<!doctype html><html><head>${EARLY_EVENTS}<meta charset="utf-8" data-fig-hydration-skip><link data-fig-hydration-skip rel="stylesheet" href="/host.css" data-precedence="app" id="r-0"><title data-fig-hydration-skip>Host Tags</title><meta name="description" content="Host" data-fig-hydration-skip><script data-fig-hydration-skip src="/host.js" type="module" async></script></head><body><main>Ready</main></body></html>`,
     );
   });
 

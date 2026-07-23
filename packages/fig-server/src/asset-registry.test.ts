@@ -122,6 +122,25 @@ describe("AssetResourceRegistry", () => {
     );
   });
 
+  it("orders parser metadata and viewport before ordinary metadata", () => {
+    const registry = new AssetResourceRegistry("");
+
+    registry.activateMetadata({}, [
+      title("Document"),
+      meta({ name: "description", content: "Description" }),
+      meta({ name: "viewport", content: "width=device-width" }),
+      meta({
+        "http-equiv": "Content-Security-Policy",
+        content: "default-src 'self'",
+      }),
+      meta({ charset: "utf-8" }),
+    ]);
+
+    expect(registry.headHtml()).toBe(
+      '<meta charset="utf-8" data-fig-hydration-skip><meta http-equiv="Content-Security-Policy" content="default-src \'self\'" data-fig-hydration-skip><meta name="viewport" content="width=device-width" data-fig-hydration-skip><title data-fig-hydration-skip>Document</title><meta name="description" content="Description" data-fig-hydration-skip>',
+    );
+  });
+
   it("dedupes a font against an equivalent preload-as-font under one key", () => {
     const registry = new AssetResourceRegistry("");
 

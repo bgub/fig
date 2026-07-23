@@ -96,12 +96,12 @@ export function sealHead(request: Request): void {
   if (request.headSnapshot !== null) return;
 
   activateVisibleMetadata(request, request.rootSegment);
-  const head = request.assetRegistry.headHtml(
+  const metadata = request.assetRegistry.headMetadataHtml(
     request.nonce,
     !request.prerender && request.pendingTasks > 0,
   );
-  request.headSnapshot = head;
-  request.headReady.resolve(head);
+  request.headSnapshot = metadata;
+  request.headReady.resolve(metadata.preamble + metadata.metadata);
 }
 
 function flushSegment(request: Request, segment: Segment): void {
@@ -473,10 +473,48 @@ function writeChunk(
 
   if (request.document === null) return;
 
-  request.write(
-    request.headSnapshot ?? request.assetRegistry.headHtml(request.nonce),
+  const metadata =
+    request.headSnapshot ??
+    request.assetRegistry.headMetadataHtml(request.nonce);
+  const [beforeMetadata, afterMetadata] = partitionHeadAssets(
+    segment.assetResources,
   );
-  flushAssetList(request, segment.assetResources, new Set());
+  const blockingIds = new Set<string>();
+  request.write(metadata.preamble);
+  flushAssetList(request, beforeMetadata, blockingIds);
+  request.write(metadata.metadata);
+  flushAssetList(request, afterMetadata, blockingIds);
+}
+
+function partitionHeadAssets(
+  resources: Segment["assetResources"],
+): [
+  beforeMetadata: Segment["assetResources"],
+  afterMetadata: Segment["assetResources"],
+] {
+  const preconnects: Segment["assetResources"] = [];
+  const criticalPreloads: Segment["assetResources"] = [];
+  const stylesheets: Segment["assetResources"] = [];
+  const afterMetadata: Segment["assetResources"] = [];
+
+  for (const resource of resources) {
+    if (resource.kind === "preconnect") {
+      preconnects.push(resource);
+    } else if (
+      resource.kind === "font" ||
+      (resource.kind === "preload" &&
+        (resource.as === "font" ||
+          (resource.as === "image" && resource.fetchpriority === "high")))
+    ) {
+      criticalPreloads.push(resource);
+    } else if (resource.kind === "stylesheet") {
+      stylesheets.push(resource);
+    } else {
+      afterMetadata.push(resource);
+    }
+  }
+
+  return [[...preconnects, ...criticalPreloads, ...stylesheets], afterMetadata];
 }
 
 function flushWriteBuffer(request: Request): void {

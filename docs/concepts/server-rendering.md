@@ -45,7 +45,7 @@ export async function handleRequest(): Promise<Response> {
 
 Waiting for `shellReady` lets the handler catch a fatal shell error before committing the HTTP response. The stream object itself exists immediately.
 
-Fragment mode collects head content through `getHead()` and `headReady`. Document mode requires the root to render `<html>` and `<head>` and writes assets directly into that document. Its head begins with the early-event capture script. Every framework-owned script carries `data-fig-hydration-skip` so full-document hydration knows it has no application fiber.
+Fragment mode collects head content through `getHead()` and `headReady`. Document mode requires the root to render `<html>` and `<head>` and writes assets directly into that document. Its head begins with the early-event capture script. Positioned head children retain source order; collected shell assets then prioritize charset/CSP and viewport metadata, connection and critical preload hints, and blocking stylesheets ahead of ordinary metadata, module preloads, and scripts. Every framework-owned script carries `data-fig-hydration-skip` so full-document hydration knows it has no application fiber.
 
 The `data` handle belongs to this request. Passing `dataStore` adopts a store populated before rendering by route loaders; the renderer does not copy it. `initialData` remains the simpler option when no store exists yet. The render owns disposal of an adopted store.
 

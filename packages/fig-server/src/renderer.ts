@@ -42,7 +42,10 @@ import {
   VIEW_TRANSITION_CLASS_ATTRIBUTE,
   VIEW_TRANSITION_NAME_ATTRIBUTE,
 } from "@bgub/fig/internal";
-import { AssetResourceRegistry } from "./asset-registry.ts";
+import {
+  AssetResourceRegistry,
+  type HeadMetadataHtml,
+} from "./asset-registry.ts";
 import {
   escapeAttribute,
   formTextContent,
@@ -114,7 +117,7 @@ export interface Request {
   headReady: Deferred<string>;
   // Set exactly once, when the shell completes and the head is sealed; also
   // the "head is sealed" flag.
-  headSnapshot: string | null;
+  headSnapshot: HeadMetadataHtml | null;
   shellReady: Deferred<void>;
   status: "open" | "aborting" | "closed";
   clientRenderedBoundaries: Set<SuspenseBoundary>;
@@ -385,8 +388,12 @@ export function createServerRenderRequest(
     contentType: "text/html; charset=utf-8",
     data: request.dataStore,
     getData: () => request.dataStore.snapshot(),
-    getHead: () =>
-      request.headSnapshot ?? request.assetRegistry.headHtml(request.nonce),
+    getHead: () => {
+      const snapshot = request.headSnapshot;
+      return snapshot === null
+        ? request.assetRegistry.headHtml(request.nonce)
+        : snapshot.preamble + snapshot.metadata;
+    },
     headReady: headReady.promise,
     shellReady: shellReady.promise,
     stream,

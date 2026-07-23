@@ -38,24 +38,6 @@ export function collectRouteAssets(
   const scripts: RouterManagedTag[] = [];
   const manifestRoute = manifest?.routes[match.routeId];
 
-  for (const link of manifestRoute?.preloads ?? []) {
-    collectTag(
-      {
-        tag: "link",
-        attrs: {
-          ...getScriptPreloadAttrs(
-            manifest,
-            link,
-            router.options.assetCrossOrigin,
-          ),
-          nonce,
-        },
-      },
-      resources,
-      links,
-    );
-  }
-
   for (const link of match.links ?? []) {
     if (link === undefined) continue;
     collectTag({ tag: "link", attrs: { ...link, nonce } }, resources, links);
@@ -76,6 +58,24 @@ export function collectRouteAssets(
             ) ?? resolved.crossOrigin,
           nonce,
           suppressHydrationWarning: true,
+        },
+      },
+      resources,
+      links,
+    );
+  }
+
+  for (const link of manifestRoute?.preloads ?? []) {
+    collectTag(
+      {
+        tag: "link",
+        attrs: {
+          ...getScriptPreloadAttrs(
+            manifest,
+            link,
+            router.options.assetCrossOrigin,
+          ),
+          nonce,
         },
       },
       resources,

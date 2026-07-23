@@ -88,6 +88,8 @@ Scroll restoration installs once and runs after `onRendered`. Start SSR emits on
 
 Each active match owns descriptors derived from route metadata and the Start manifest. An `assets()` boundary around the match delivers stylesheets, preloads, preconnects, fonts, and async scripts before dependent content. Fig's registry deduplicates them against assets from ordinary components and Payload.
 
+Within each match, authored links and manifest stylesheets are discovered before generated module preloads. Render-blocking CSS therefore begins loading before the route's JavaScript dependency hints without changing authored stylesheet order.
+
 `HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker.
 
 `assetCrossOrigin` is a router option because route assets are translated before the document renders. The server nonce applies to both registry assets and positioned tags.

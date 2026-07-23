@@ -72,6 +72,8 @@ Payload carries both groups as descriptors. Browser decoding prepares stream ass
 
 Streaming HTML seals an initial head snapshot with the shell. Metadata discovered in late primary content travels with that Suspense boundary's completion operation.
 
+Full-document shell output keeps positioned head children such as `<base>` in source order, then writes collected assets in browser-critical phases: charset and CSP metadata, viewport metadata, preconnects, font and high-priority image preloads, stylesheets, ordinary metadata, and finally remaining hints and scripts. Order within each phase remains discovery order. Assets discovered after the shell continue to stream beside the content that declared them.
+
 The reveal swaps fallback, content, and the complete visible metadata snapshot atomically. Partial segments never publish metadata. Prerender waits for all content, so its single static head is already final.
 
 ## Loading Before Reveal
