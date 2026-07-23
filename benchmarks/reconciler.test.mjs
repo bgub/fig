@@ -10,8 +10,8 @@ import { describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const workspaceRoot = fileURLToPath(new URL("..", import.meta.url));
 
-describe("bench-reconciler", () => {
-  it(
+void describe("bench-reconciler", () => {
+  void it(
     "writes paired Fig and React runtime results",
     { timeout: 60_000 },
     async () => {
@@ -64,7 +64,7 @@ describe("bench-reconciler", () => {
     },
   );
 
-  it(
+  void it(
     "can filter benchmark groups and scenarios",
     { timeout: 60_000 },
     async () => {

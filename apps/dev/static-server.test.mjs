@@ -5,8 +5,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { contentTypeFor, resolveStaticFile } from "./static-server.mjs";
 
-describe("dev static server helpers", () => {
-  it("resolves root, files, directory indexes, and rejects traversal", async () => {
+void describe("dev static server helpers", () => {
+  void it("resolves root, files, directory indexes, and rejects traversal", async () => {
     const root = await mkdtemp(join(tmpdir(), "fig-dev-static-"));
     await mkdir(join(root, "docs"));
     await writeFile(join(root, "index.html"), "home");
@@ -33,7 +33,7 @@ describe("dev static server helpers", () => {
     }
   });
 
-  it("maps common dev asset content types", () => {
+  void it("maps common dev asset content types", () => {
     assert.equal(contentTypeFor("index.html"), "text/html; charset=utf-8");
     assert.equal(contentTypeFor("style.css"), "text/css; charset=utf-8");
     assert.equal(contentTypeFor("main.js"), "text/javascript; charset=utf-8");
