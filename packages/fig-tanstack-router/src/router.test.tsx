@@ -131,10 +131,12 @@ describe("@bgub/fig-tanstack-router", () => {
     );
 
     expect(container.textContent).toBe("loading");
-    resolveModule?.({ RouteComponent: LazyContent });
-    await preload;
-    await act(() => waitForText(container, "loaded"));
+    await act(async () => {
+      resolveModule?.({ RouteComponent: LazyContent });
+      await preload;
+    });
 
+    expect(container.textContent).toBe("loaded");
     expect(importer).toHaveBeenCalledOnce();
   });
 
