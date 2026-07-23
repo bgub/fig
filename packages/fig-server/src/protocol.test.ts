@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
+import type { MetadataSnapshotEntry } from "./asset-registry.ts";
 import {
   earlyEventCaptureMarkup,
   serverRuntimeCodeFor,
@@ -7,14 +8,23 @@ import {
 } from "./protocol.ts";
 
 interface TestRuntime {
-  ac(activityId: string, boundaryId: string, segmentId: string): void;
+  ac(
+    activityId: string,
+    boundaryId: string,
+    segmentId: string,
+    metadata?: MetadataSnapshotEntry[],
+  ): void;
   ax(
     activityId: string,
     boundaryId: string,
     digest: string,
     message: string,
   ): void;
-  c(boundaryId: string, segmentId: string): void;
+  c(
+    boundaryId: string,
+    segmentId: string,
+    metadata?: MetadataSnapshotEntry[],
+  ): void;
   x(boundaryId: string, digest: string, message: string): void;
 }
 
@@ -82,6 +92,7 @@ function appendCompletedSegment(root: HTMLElement): {
 
 describe("server streaming protocol", () => {
   beforeEach(() => {
+    document.head.replaceChildren();
     document.body.replaceChildren();
     delete (document as unknown as { startViewTransition?: unknown })
       .startViewTransition;
@@ -131,6 +142,54 @@ describe("server streaming protocol", () => {
     expect(boundaryPlaceholder.parentNode).toBeNull();
     expect(fallback.parentNode).toBeNull();
     expect(end.parentNode).toBe(root);
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("updates streamed metadata in the same unhydrated boundary reveal", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { start } = createPendingBoundary(root);
+    delete start.__figRetry;
+    appendCompletedSegment(root);
+    const stale = document.createElement("meta");
+    stale.setAttribute("name", "obsolete");
+    stale.setAttribute("data-fig-streamed-metadata", "meta:name:obsolete");
+    document.head.append(stale);
+
+    installRuntime().c("b", "s", [
+      ["title", "title", "Invoices"],
+      [
+        "meta:name:description",
+        "meta",
+        [
+          ["name", "description"],
+          ["content", "Invoice list"],
+        ],
+      ],
+    ]);
+
+    expect(document.head.querySelector("title")?.textContent).toBe("Invoices");
+    expect(
+      document.head
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content"),
+    ).toBe("Invoice list");
+    expect(document.head.querySelector('meta[name="obsolete"]')).toBeNull();
+  });
+
+  it("leaves metadata to the renderer when the boundary is hydrated", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { calls } = createPendingBoundary(root);
+    appendCompletedSegment(root);
+    const titleElement = document.createElement("title");
+    titleElement.setAttribute("data-fig-streamed-metadata", "title");
+    titleElement.textContent = "Current client title";
+    document.head.append(titleElement);
+
+    installRuntime().c("b", "s", [["title", "title", "Server title"]]);
+
+    expect(titleElement.textContent).toBe("Current client title");
     expect(calls).toEqual(["retry"]);
   });
 

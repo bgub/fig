@@ -77,7 +77,7 @@ The full row vocabulary:
 | `model` | a serialized tree chunk; id 0 is the root |
 | `client` | a client reference: `{ id, exportName?, assets?, ssr? }` |
 | `data` | settled data-resource entries (doc 5's map rows) |
-| `assets` | stream-safe asset descriptors (doc 7) |
+| `assets` | delivery and metadata asset descriptors (doc 7) |
 | `error` | `{ digest?, message? }` under the server `onError` contract (doc 4) |
 
 There is deliberately no refresh row. The refresh unit is the data-resource key that delivers the payload — refreshing is just requesting the same stream again, and the store's ordinary freshness semantics do the rest.
@@ -119,11 +119,11 @@ function Profile({ id }: { id: string }) {
 - The loader validates the response (status, body, payload content type; unusable bodies are cancelled) and resolves with the decoded root as soon as the root row arrives — outlined holes keep streaming in afterwards, for the whole life of the entry (the loader's `signal` is generation-lifetime; doc 5).
 - Module loads start as `client` rows arrive, so fetching `like-button.tsx` overlaps the rest of the stream instead of waiting for it.
 - Streamed `data` rows hydrate the same store through a generation-guarded capability — the doc 5 handoff, completed, with no second request.
-- `assets` rows insert into the document head as they arrive; stylesheet gates delay only the content that declared them.
+- `assets` rows prepare delivery assets as they arrive; stylesheet gates delay only the content that declared them. Title/meta remain declarations on the decoded owner and update the document only when that tree commits.
 
 Underneath sits the renderer-neutral primitive, for callers that own their own transport: `decodePayloadStream(stream, options)` from `@bgub/fig/payload` returns the root-value promise directly — it resolves at the root row while background ingestion continues. An `onStreamDone` option reports how ingestion ended (post-root failures reject the holes they strand), and aborting the options `signal` retires unresolved holes with an internal cancellation reason.
 
-Server-side decoders that feed Fig's HTML renderer set `retainAssets: true`. That keeps each streamed asset declaration attached to its owning root, outlined hole, or client reference, so the HTML renderer emits it before the dependent segment instead of racing a pre-render asset snapshot.
+Metadata declarations always stay attached to their owning root, outlined hole, or client reference. Server-side decoders that feed Fig's HTML renderer additionally set `retainAssets: true` for delivery assets, so the HTML renderer emits them before the dependent segment instead of racing a pre-render asset snapshot.
 
 ### TanStack Start routes
 

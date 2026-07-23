@@ -1,7 +1,6 @@
 import type {
   DataResourceKeyInput,
   ElementType,
-  FigAssetResource,
   FigAssetResourceList,
   FigClientReference,
   FigDataHydrationEntry,
@@ -29,7 +28,6 @@ export interface ServerRenderOptions {
     error: unknown,
     info: ServerErrorInfo,
   ) => ServerErrorPayload | undefined;
-  onAssetError?: (error: unknown, info: ServerAssetErrorInfo) => void;
   clientReferenceFallback?: (
     reference: FigClientReference,
     props: Props,
@@ -70,15 +68,6 @@ export interface ServerErrorPayload {
   digest?: string;
   message?: string;
 }
-
-export interface ServerAssetErrorInfo {
-  componentStack: string;
-  destination: ServerAssetDestination;
-  key: string;
-  resource: FigAssetResource;
-}
-
-export type ServerAssetDestination = "head" | "stream";
 
 interface ServerStreamRenderResult {
   abort(reason?: unknown): void;

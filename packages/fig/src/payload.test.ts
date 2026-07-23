@@ -519,6 +519,44 @@ describe("decodePayloadStream", () => {
     expect(await done).toEqual({ status: "complete" });
   });
 
+  it("prepares delivery assets but retains metadata for owner commit", async () => {
+    const prepared: unknown[] = [];
+    const root = (await decodeRows(
+      [
+        {
+          for: 0,
+          tag: "assets",
+          value: [
+            { href: "/route.css", kind: "stylesheet" },
+            { kind: "title", value: "Invoices" },
+            {
+              content: "Invoice list",
+              kind: "meta",
+              name: "description",
+            },
+          ],
+        } as PayloadRow,
+        model(0, element("main", { children: "invoices" })),
+      ],
+      {
+        prepareAssets: (resources) => {
+          prepared.push(...resources);
+        },
+      },
+    )) as FigElement;
+
+    expect(prepared).toEqual([{ href: "/route.css", kind: "stylesheet" }]);
+    expect(root.props.assets).toEqual([
+      { kind: "title", value: "Invoices" },
+      {
+        content: "Invoice list",
+        kind: "meta",
+        name: "description",
+      },
+    ]);
+    expect((root.props.children as FigElement).type).toBe("main");
+  });
+
   it("retains assets on the decoded row that declared them", async () => {
     const root = (await decodeRows(
       [

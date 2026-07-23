@@ -20,7 +20,7 @@ The start comment carries the boundary state (`pending:N`, then rewritten to `co
 
 Content that settles after its slot flushed streams later as hidden staging segments (`<div hidden id="s-N">`) followed by inline script ops against the document's runtime object (written lazily, once, nonce-compatible, named per `identifierPrefix`):
 
-- `c(boundaryId, segmentId)` — complete a boundary: move the staged segment's children into the slot, delete the fallback range (nested fallback ranges included), rewrite the start marker to `completed`, and invoke the boundary's hydration retry hook (`__figRetry`) if the client already attached one.
+- `c(boundaryId, segmentId, metadata?)` — complete a boundary: move the staged segment's children into the slot, delete the fallback range (nested fallback ranges included), rewrite the start marker to `completed`, and atomically reconcile an optional complete visible title/meta snapshot. If the client already attached the boundary's hydration retry hook (`__figRetry`), the runtime skips metadata reconciliation and invokes the hook so the renderer commit owns it.
 - `s(placeholderId, segmentId)` — fill a partial segment (a placeholder inside still-streaming content).
 - `x(boundaryId, digest, message)` — mark a boundary client-rendered: rewrite the marker to `client`, stash digest/message on the placeholder, ping the retry hook. The client re-renders that boundary locally.
 - `r(ids, fn)` — reveal gating: wait for blocking stylesheets to load before running a completion, so revealed content never flashes unstyled.

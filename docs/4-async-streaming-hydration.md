@@ -54,7 +54,7 @@ Fast path: a boundary that settles before its parent flushes skips all of it and
 
 `render + To + (Document?) + output form`: `renderToStream` / `renderToDocumentStream` / `renderToHtml` / `renderToDocumentHtml`. Streams are web `ReadableStream`s; results return synchronously as `{ stream, shellReady, headReady?, allReady, ... }` — no shell-gated promise, and a shell failure rejects `shellReady` (the one channel for that event). `renderToHtml` is honestly "the streamed output, buffered": it awaits `allReady` and concatenates exactly the bytes a streaming client would have received, inline runtime included. It is not React's `renderToString`.
 
-`prerender` is the separate static semantic: hold every flush until `pendingTasks` hits zero, so every boundary takes the inline fast path — completed content in logical position, no runtime ever written. That's the SSG primitive, and it also seals the head late (head assets discovered inside suspended content still land).
+`prerender` is the separate static semantic: hold every flush until `pendingTasks` hits zero, so every boundary takes the inline fast path — completed content in logical position, no runtime ever written. That's the SSG primitive, and it also seals the head late, after metadata for the final visible tree is known.
 
 ### Errors
 

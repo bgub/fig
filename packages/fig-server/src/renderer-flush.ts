@@ -4,7 +4,7 @@ import {
   SUSPENSE_END_MARKER,
   SUSPENSE_PENDING_PREFIX,
 } from "@bgub/fig/internal";
-import { escapeAttribute } from "./escaping.ts";
+import { escapeAttribute, escapeScriptJson } from "./escaping.ts";
 import {
   boundaryId,
   boundaryPlaceholderMarkup,
@@ -95,12 +95,17 @@ export function flushCompletedQueues(request: Request): void {
 export function sealHead(request: Request): void {
   if (request.headSnapshot !== null) return;
 
-  const head = request.assetRegistry.headHtml(request.nonce);
+  activateVisibleMetadata(request, request.rootSegment);
+  const head = request.assetRegistry.headHtml(
+    request.nonce,
+    !request.prerender && request.pendingTasks > 0,
+  );
   request.headSnapshot = head;
   request.headReady.resolve(head);
 }
 
 function flushSegment(request: Request, segment: Segment): void {
+  if (segment.status === "flushed") return;
   if (segment.boundary !== null) {
     flushSuspenseBoundary(request, segment, segment.boundary);
     return;
@@ -144,13 +149,13 @@ function flushSuspenseBoundary(
   segment: Segment,
   boundary: SuspenseBoundary,
 ): void {
-  segment.boundary = null;
   boundary.parentFlushed = true;
 
   if (boundary.status === "completed") {
     request.write(`<!--${SUSPENSE_COMPLETED_MARKER}-->`);
     flushBoundaryContent(request, boundary);
     request.write(`<!--${SUSPENSE_END_MARKER}-->`);
+    segment.status = "flushed";
     return;
   }
 
@@ -267,6 +272,8 @@ function writeBoundaryRevealScript(
   boundary: SuspenseBoundary,
 ): void {
   const blockingIds = flushSegmentAssets(request, boundary.contentSegment);
+  const metadata = switchBoundaryMetadata(request, boundary);
+  const metadataArgument = metadata === null ? "" : `,${metadata}`;
   writeRuntime(request);
   const boundaryRef = jsString(
     boundaryId(request, ensureBoundaryId(request, boundary)),
@@ -278,9 +285,59 @@ function writeBoundaryRevealScript(
   // template's inert content; reveal the completion there with `ac`.
   const call =
     boundary.activityId === null
-      ? `${RUNTIME_REF}.c(${boundaryRef},${contentRef})`
-      : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef})`;
+      ? `${RUNTIME_REF}.c(${boundaryRef},${contentRef}${metadataArgument})`
+      : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef}${metadataArgument})`;
   writeScript(request, withAssetGate(blockingIds, call));
+}
+
+function switchBoundaryMetadata(
+  request: Request,
+  boundary: SuspenseBoundary,
+): string | null {
+  // A nested boundary may complete while an ancestor's primary content is
+  // still staged. Its segment fill is useful, but its metadata is not visible;
+  // the ancestor reveal traversal will activate the settled branch later.
+  if (!boundary.metadataVisible) return null;
+
+  const before = escapeScriptJson(request.assetRegistry.metadataSnapshot());
+  const fallback = boundary.fallbackSegment;
+  if (fallback !== null) {
+    request.assetRegistry.releaseMetadata(fallback);
+    for (const child of fallback.children) {
+      deactivateMetadataTree(request, child);
+    }
+  }
+  activateVisibleMetadata(request, boundary.contentSegment);
+  const after = escapeScriptJson(request.assetRegistry.metadataSnapshot());
+  return before === after ? null : after;
+}
+
+function activateVisibleMetadata(request: Request, segment: Segment): void {
+  if (segment.status === "pending" || segment.status === "rendering") return;
+
+  const boundary = segment.boundary;
+  if (boundary !== null) {
+    boundary.metadataVisible = true;
+    if (boundary.status === "completed") {
+      activateVisibleMetadata(request, boundary.contentSegment);
+      return;
+    }
+  }
+
+  request.assetRegistry.activateMetadata(segment, segment.assetResources);
+  for (const child of segment.children) {
+    activateVisibleMetadata(request, child);
+  }
+}
+
+function deactivateMetadataTree(request: Request, segment: Segment): void {
+  request.assetRegistry.releaseMetadata(segment);
+  for (const child of segment.children) deactivateMetadataTree(request, child);
+
+  const boundary = segment.boundary;
+  if (boundary === null) return;
+  boundary.metadataVisible = false;
+  deactivateMetadataTree(request, boundary.contentSegment);
 }
 
 function flushSegmentContainer(request: Request, segment: Segment): string[] {
@@ -416,7 +473,9 @@ function writeChunk(
 
   if (request.document === null) return;
 
-  request.write(request.assetRegistry.headHtml(request.nonce));
+  request.write(
+    request.headSnapshot ?? request.assetRegistry.headHtml(request.nonce),
+  );
   flushAssetList(request, segment.assetResources, new Set());
 }
 

@@ -225,10 +225,10 @@ and injects `title()` and `meta()` before `</head>`. With the lower-level
 `renderToStream`, those tags are available through `result.getHead()`
 after `headReady`; they are never emitted into segment HTML. `headReady`
 resolves with the shell and seals the initial document head; `getHead()` keeps
-returning that sealed snapshot afterward. If a new head resource is found
-later, such as behind pending Suspense, Fig reports it through `onAssetError`
-instead of adding it to the already-flushed head, so required shell metadata
-should render before `headReady`.
+returning that sealed snapshot afterward. Metadata discovered later stays staged
+with its Suspense content. When that boundary reveals, Fig replaces the visible
+fallback metadata with the completed branch's title/meta in the same reveal
+operation; failed or abandoned branches never mutate the document head.
 
 ```ts
 const result = renderToStream(<Page />);
@@ -253,12 +253,11 @@ function Page() {
 }
 ```
 
-Metadata discovered before `headReady` is injected into the initial document
-head. Metadata discovered after `headReady`, for example inside pending
-Suspense content, is reported through `onAssetError` and is not added to the
-already-flushed shell. Stylesheets discovered for later Suspense segments remain
-stream-safe: Fig emits them near the segment and gates reveal until they load
-unless `{ blocking: "none" }` opts out.
+Metadata for the shell's visible branch is injected into the initial document
+head. Metadata discovered in pending Suspense content is carried by its final
+boundary reveal; partial segment fills do not publish it. Stylesheets discovered
+for later Suspense segments remain stream-safe: Fig emits them near the segment
+and gates reveal until they load unless `{ blocking: "none" }` opts out.
 
 Stylesheets, preloads, fonts, preconnects, and scripts are body-stream-safe
 resources. Fig hoists them before the HTML segment that depends on them and
@@ -266,13 +265,13 @@ dedupes identical resources. Stylesheets block streamed Suspense reveals by
 default; pass `{ blocking: "none" }` to opt out for non-critical styles.
 
 Resource duplicates are checked by key and behavior. Identical duplicates dedupe
-silently. Conflicting duplicates throw: for example, the same stylesheet `href`
-with a different `media`, the same `title` key with a different value, or the
-same meta `name` with different `content`. Preloads are keyed by `href` plus
-`as`, so the same URL can be preloaded for distinct targets, but behavior fields
-such as `type`, `crossorigin`, and `fetchpriority` must match for duplicates.
-Conflict errors include the resource key plus the existing and incoming
-resources.
+silently. Conflicting delivery assets throw: for example, the same stylesheet
+`href` with a different `media`. Title/meta instead use visible-owner claims, so
+a revealed primary branch can replace its fallback and releasing a claim can
+restore the previous value. Preloads are keyed by `href` plus `as`, so the same
+URL can be preloaded for distinct targets, but behavior fields such as `type`,
+`crossorigin`, and `fetchpriority` must match for duplicates. Conflict errors
+include the resource key plus the existing and incoming resources.
 
 The `assets` option can attach asset resources to component modules without
 wrapping the component tree. It is a string-keyed record intended for

@@ -27,10 +27,6 @@
 - When we add optimistic-state primitives, they'll need lane awareness
 - Should we add a binary payload codec?
 
-## Asset Resources
-
-- **Late head assets are diagnosed, not delivered** — a `title`/`meta` discovered under a pending Suspense boundary after the streaming head seals only triggers `onAssetError`; React's Float runtime inserts into `<head>` client-side at any time. Sketch: a small head-update op in the existing inline runtime (e.g. `t(value)` swapping `document.title`) emitted when a head-destination asset registers after sealing. Must stay visible to the client's key-based asset dedupe (no double titles on later insertions) and have payload-wire parity. Prerender avoids the class by sealing late. → `docs/concepts/assets.md`, `docs/concepts/server-rendering.md`
-
 ## Server Rendering
 
 - **Early hints / preload headers** — no `onHeaders` equivalent: `headReady` resolves with the shell, too late for 103 Early Hints. Two real constraints shape any design: the Web `Response` API cannot express 103 at all (Node's `writeEarlyHints` is the only seam, so this is inherently a runtime-specific side channel), and a useful trigger point must fire before the shell yet after enough render progress to have discovered assets (first root suspension is the natural candidate — the shell being slow is exactly when 103s pay off). `Link`-header-on-200 preload emission from the asset registry is the milder, runtime-neutral half. → `docs/concepts/server-rendering.md`

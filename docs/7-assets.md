@@ -28,11 +28,11 @@ Raw tags still work. HTML `<link>`, `<title>`, `<meta>`, and explicitly `async` 
 
 ## Keys and dedupe
 
-Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion. A stylesheet discovered three ways — an `assets(...)` wrapper, a client reference, a raw `<link>` — renders once. Fonts and equivalent `preload`-as-font entries share a key space, so those dedupe against each other too. `title` collapses to a single head slot, last writer wins.
+Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion. A stylesheet discovered three ways — an `assets(...)` wrapper, a client reference, a raw `<link>` — renders once. Fonts and equivalent `preload`-as-font entries share a key space, so those dedupe against each other too. `title` collapses to a single head slot; its latest visible owner wins.
 
 On client roots, each `assets(...)` wrapper owns its descriptor list through commit and deletion. Fig DOM applies that lifecycle to the same document registry used by raw hoisted tags, so client navigation updates title/meta in place, removes metadata with its last owner, and still dedupes delivery assets globally.
 
-In HTML server rendering, same-key entries with different definitions throw `AssetResourceConflictError`: a shared key is a claim that two descriptors are the same asset. The exception is `title`, where the singleton slot uses the latest value. Payload and DOM insertion use first-live-definition-wins dedupe instead; they do not compare descriptor signatures.
+In HTML server rendering, same-key delivery assets with different definitions throw `AssetResourceConflictError`: a shared key is a claim that two descriptors are the same asset. Title/meta use visible-owner claims instead. Payload and DOM delivery insertion use first-live-definition-wins dedupe; they do not compare descriptor signatures.
 
 ## Destinations
 
@@ -40,23 +40,22 @@ Each kind has a destination:
 
 | Destination | Kinds | Where it lands |
 | --- | --- | --- |
-| head | `title`, `meta` | document state, sealed with the shell |
+| head | `title`, `meta` | commit-owned document state |
 | stream | `stylesheet`, `script`, `preload`, `modulepreload`, `font`, `preconnect` | emitted near the segment that needs them |
 
-The sealing rules differ by mode. In streaming SSR the head is sealed when the shell flushes, so a head-destined asset discovered inside suspended content arrives too late (dev warns; see diagnostics). `prerender` holds every flush until all tasks settle (doc 4), so it seals the head at flush and late-discovered head assets still land.
+Streaming SSR seals the shell's initial head, not metadata for the rest of the render. A visible Suspense fallback controls title/meta until its primary content reveals; the boundary completion then replaces the fallback and reconciles the complete visible metadata snapshot together. Partial, failed, or abandoned work never publishes metadata. `prerender` holds every flush until all tasks settle (doc 4), so its single static head already describes the final visible tree.
 
-Only streamed kinds travel on the payload wire — doc 6's `assets` rows — serialized descriptor-only from a per-kind field table, which is the single source of truth for the wire type. Head-only kinds can't serialize into the payload.
+Both destinations travel on the payload wire — doc 6's `assets` rows — serialized descriptor-only from a per-kind field table, which is the single source of truth for the wire type. Delivery assets insert and begin loading as their row arrives. Title/meta stay attached to the decoded owner and publish only when that tree commits.
 
 ## Loading and reveal gating
 
-On the client, `insertAssetResources` (from `@bgub/fig-dom`) inserts descriptors idempotently by key and returns load tracking.
+On the client, `insertAssetResources` (from `@bgub/fig-dom`) inserts delivery descriptors idempotently by key and returns load tracking. Metadata does not use this imperative path; the decoder retains it on an `assets(...)` owner for reconciliation.
 
 The reveal gate is the part you've already seen from the other side: doc 4's inline runtime has an `r` op that delays a boundary completion until its stylesheets load. That's this system. A streamed boundary's content waits for its blocking stylesheets before the swap runs, so streamed content never flashes unstyled. Payload boundary refreshes use the same gate: old content remains visible until newly discovered blocking stylesheets are ready. Non-blocking kinds (preloads, preconnects, scripts, and fonts) never gate, and a stylesheet inserted directly can opt out with `blocking: "none"`. Payload asset descriptors omit this hint, so payload-delivered stylesheets conservatively gate.
 
 ## Diagnostics
 
-- `onAssetError` reports a head-destined asset discovered after the head was sealed in streaming mode. There is no automatic warning when no handler is configured. Prerender avoids the class entirely by sealing late.
-- The HTML server registry throws `AssetResourceConflictError` for conflicting definitions; payload and DOM insertion dedupe by key as described above.
+- The HTML server registry throws `AssetResourceConflictError` for conflicting delivery-asset definitions; payload and DOM delivery insertion dedupe by key as described above.
 - A raw hoisted host element cannot update into a non-asset element. Development throws and directs the author to replace it with a different Fig element key. Production ignores the update; for title/meta, that preserves the owner's last valid claim.
 
 ---

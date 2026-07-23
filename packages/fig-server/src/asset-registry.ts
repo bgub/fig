@@ -1,29 +1,64 @@
 import { type FigAssetResource, type Props } from "@bgub/fig";
 import {
-  assetResourceDestination,
   assetResourceHostAttributes,
   assetResourceKey,
   HYDRATION_SKIP_ATTRIBUTE,
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
+import { STREAMED_METADATA_ATTRIBUTE } from "./shared.ts";
+
+export type MetadataSnapshotEntry =
+  | readonly [key: string, kind: "title", value: string]
+  | readonly [
+      key: string,
+      kind: "meta",
+      attributes: ReadonlyArray<readonly [name: string, value: string]>,
+    ];
+
+type MetadataResource = Extract<FigAssetResource, { kind: "meta" | "title" }>;
+type DeliveryResource = Exclude<FigAssetResource, MetadataResource>;
 
 export class AssetResourceRegistry {
   private readonly emittedResources = new Set<string>();
-  private readonly resources = new Map<string, FigAssetResource>();
+  private readonly deliveryResources = new Map<string, DeliveryResource>();
+  private readonly metadataByOwner = new Map<
+    object,
+    readonly MetadataResource[]
+  >();
   private readonly stylesheetIds = new Map<string, string>();
   private nextStylesheetId = 0;
 
   constructor(private readonly identifierPrefix: string) {}
 
-  register(resource: FigAssetResource): boolean {
-    return this.canonical(resource).added;
+  register(resource: FigAssetResource): void {
+    if (isMetadataResource(resource)) return;
+    this.canonical(resource);
+  }
+
+  activateMetadata(
+    owner: object,
+    resources: readonly FigAssetResource[],
+  ): void {
+    const metadata = resources.filter(isMetadataResource);
+    if (metadata.length === 0) {
+      this.metadataByOwner.delete(owner);
+      return;
+    }
+    // Map.set preserves an existing key's position, so updating an owner does
+    // not steal precedence from owners activated later.
+    this.metadataByOwner.set(owner, metadata);
+  }
+
+  releaseMetadata(owner: object): void {
+    this.metadataByOwner.delete(owner);
   }
 
   write(resource: FigAssetResource, sink: AssetSink): string | null {
+    if (isMetadataResource(resource)) return null;
+
     const { key, resource: current } = this.canonical(resource);
     const id = this.revealBlockerId(key, current);
 
-    if (assetResourceDestination(current) === "head") return id;
     if (this.emittedResources.has(key)) return id;
 
     this.emittedResources.add(key);
@@ -31,46 +66,61 @@ export class AssetResourceRegistry {
     return id;
   }
 
-  headHtml(nonce?: string): string {
+  headHtml(nonce?: string, streamMetadata = false): string {
     let html = "";
     const sink = {
       nonce,
+      streamMetadata,
       write(chunk: string) {
         html += chunk;
       },
     };
 
-    for (const resource of this.resources.values()) {
-      if (assetResourceDestination(resource) === "head") {
-        writeAssetTag(sink, resource, null);
-      }
-    }
+    for (const resource of this.visibleMetadata().values())
+      writeAssetTag(sink, resource, null);
 
     return html;
   }
 
-  private canonical(resource: FigAssetResource): {
-    added: boolean;
+  metadataSnapshot(): MetadataSnapshotEntry[] {
+    const snapshot: MetadataSnapshotEntry[] = [];
+    for (const [key, resource] of this.visibleMetadata()) {
+      if (resource.kind === "title") {
+        snapshot.push([key, resource.kind, resource.value]);
+      } else {
+        snapshot.push([key, resource.kind, metadataAttributes(resource)]);
+      }
+    }
+    return snapshot;
+  }
+
+  private visibleMetadata(): Map<string, MetadataResource> {
+    const visible = new Map<string, MetadataResource>();
+    for (const metadata of this.metadataByOwner.values()) {
+      for (const resource of metadata) {
+        visible.set(assetResourceKey(resource), resource);
+      }
+    }
+    return visible;
+  }
+
+  private canonical(resource: DeliveryResource): {
     key: string;
-    resource: FigAssetResource;
+    resource: DeliveryResource;
   } {
     const key = assetResourceKey(resource);
-    const current = this.resources.get(key);
+    const current = this.deliveryResources.get(key);
 
     if (current !== undefined) {
       if (assetSignature(current) !== assetSignature(resource)) {
-        if (resource.kind === "title") {
-          this.resources.set(key, resource);
-          return { added: false, key, resource };
-        }
         throw new AssetResourceConflictError(key, current, resource);
       }
 
-      return { added: false, key, resource: current };
+      return { key, resource: current };
     }
 
-    this.resources.set(key, resource);
-    return { added: true, key, resource };
+    this.deliveryResources.set(key, resource);
+    return { key, resource };
   }
 
   private revealBlockerId(
@@ -113,6 +163,7 @@ export class AssetResourceConflictError extends Error {
 
 interface AssetSink {
   nonce?: string;
+  streamMetadata?: boolean;
   write(chunk: string): void;
 }
 
@@ -123,7 +174,16 @@ function writeAssetTag(
 ): void {
   switch (resource.kind) {
     case "title":
-      writeElementStart("title", { [HYDRATION_SKIP_ATTRIBUTE]: true }, sink);
+      writeElementStart(
+        "title",
+        {
+          [HYDRATION_SKIP_ATTRIBUTE]: true,
+          [STREAMED_METADATA_ATTRIBUTE]: sink.streamMetadata
+            ? assetResourceKey(resource)
+            : undefined,
+        },
+        sink,
+      );
       writeText(resource.value, sink);
       writeElementEnd("title", sink);
       return;
@@ -137,6 +197,9 @@ function writeAssetTag(
           "http-equiv": resource["http-equiv"],
           content: resource.content,
           [HYDRATION_SKIP_ATTRIBUTE]: true,
+          [STREAMED_METADATA_ATTRIBUTE]: sink.streamMetadata
+            ? assetResourceKey(resource)
+            : undefined,
           "data-fig-resource-key": resource.key,
         },
         sink,
@@ -156,6 +219,28 @@ function writeAssetTag(
       if (tag === "script") writeElementEnd("script", sink);
     }
   }
+}
+
+function isMetadataResource(
+  resource: FigAssetResource,
+): resource is MetadataResource {
+  return resource.kind === "title" || resource.kind === "meta";
+}
+
+function metadataAttributes(
+  resource: Extract<FigAssetResource, { kind: "meta" }>,
+): Array<readonly [string, string]> {
+  const attributes: Array<readonly [string, string | undefined]> = [
+    ["charset", resource.charset],
+    ["name", resource.name],
+    ["property", resource.property],
+    ["http-equiv", resource["http-equiv"]],
+    ["content", resource.content],
+    ["data-fig-resource-key", resource.key],
+  ];
+  return attributes.filter(
+    (entry): entry is readonly [string, string] => entry[1] !== undefined,
+  );
 }
 
 function withNonce(sink: AssetSink, props: Props): Props {

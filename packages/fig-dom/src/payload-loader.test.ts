@@ -8,6 +8,7 @@ import {
   readPromise,
   stylesheet,
   Suspense,
+  title,
 } from "@bgub/fig";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { describe, expect, it } from "vitest";
@@ -196,7 +197,10 @@ describe("payloadDataLoader", () => {
     function ServerNote() {
       const revision = requests;
       if (revision > 1) readPromise(gate.promise);
-      return createElement("p", null, `note v${revision}`);
+      return assets(
+        title(`Note v${revision}`),
+        createElement("p", null, `note v${revision}`),
+      );
     }
 
     const noteResource = dataResource<[], FigNode>({
@@ -226,16 +230,25 @@ describe("payloadDataLoader", () => {
     );
     await waitForHostTurns();
     expect(container.textContent).toBe("note v1");
+    expect((document.head as unknown as FakeElement).textContent).toBe(
+      "Note v1",
+    );
 
     const refresh = root.data.refreshData(noteResource);
     await waitForHostTurns();
     // The refreshing entry keeps serving the previous tree; no fallback.
     expect(container.textContent).toBe("note v1");
+    expect((document.head as unknown as FakeElement).textContent).toBe(
+      "Note v1",
+    );
 
     gate.resolve(undefined);
     await refresh;
     await waitForHostTurns();
     expect(container.textContent).toBe("note v2");
+    expect((document.head as unknown as FakeElement).textContent).toBe(
+      "Note v2",
+    );
   });
 
   it("attributes rejected payload holes to their fulfilled owner entry", async () => {
