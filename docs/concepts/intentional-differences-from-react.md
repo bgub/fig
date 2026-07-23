@@ -1,61 +1,103 @@
-# Intentional Differences from React
+# Intentional Differences From React
 
 Status: stable orientation
 
-Fig keeps React's modern runtime model — fibers, lanes, scheduling, hooks, Suspense, streaming, selective hydration — and drops the rest. This is the running list of deliberate divergences, written for readers who know React. Each area's full contract and rationale live in the matching file under [`docs/concepts/`](./README.md) — this list is the orientation, not the spec.
+Fig keeps React's modern runtime ideas—fibers, lanes, hooks, Suspense, streaming, and selective hydration—but does not preserve every React API. This page is the quick map for React users. The linked concept files own the full contracts.
 
-## General
+## Component Model
 
-- No legacy APIs: no class components, string refs, legacy context, or synthetic event pooling. Root API only — `createRoot`/`hydrateRoot`; there is no `render(children, container)`.
-- Every export has exactly one home: behavior lives in the package whose domain defines it (`@bgub/fig` the component model, `@bgub/fig-dom` the browser boundary, `@bgub/fig-reconciler` renderer authoring, `@bgub/fig-server` server rendering + payload, `@bgub/fig` runtime data APIs). Renderer packages never mirror core symbols; a package re-exports a _type_ only when it appears in that package's own public signatures.
-- No `StrictMode` component and no opt-out: development always strict-renders. Each pass renders twice (the shadow pass is discarded), and first-time effects and `bind` callbacks run, abort, and run again with a fresh signal. Client-only; production builds strip all of it.
-- Batching is automatic and has no opt-in API: same-tick updates and root renders coalesce into one pass. There is no `batchedUpdates`; `flushSync` is the only escape hatch.
-- Effects receive an `AbortSignal` instead of returning cleanup functions; Fig aborts on dependency change and unmount. Effects must return `undefined`, which makes a React-style returned cleanup a type error. There is no mount-only hook — `useReactive(fn, [])` is the idiom.
-- React's broad `use(resource)` is split into explicit reads: `readContext` (context is a render-time input, not a hook slot), `readPromise` (identity- keyed, not call-position-keyed), and `readData` from `@bgub/fig` (cache-keyed).
-- Promise-valued children are distinct, unkeyed tree slots and implicitly read only in child position. Fig keys them by promise identity and does not reproduce React's call-position thenable tracking; client-created chains must be memoized, and reorderable promise slots need keyed Fragments.
-- Context objects are their own provider (`<Ctx value={...}>`); there is no `Consumer` and no `displayName`.
-- No `useReducer` — reducer abstractions are userland over `useState`. No `memo()` — tiered render bailouts preserve child identity so siblings bail automatically; `useMemo(() => <X/>, deps)` covers the rest. No `useRef` — `useMemo(() => ({ current: null }), [])` for mutable storage, `bind` for DOM access.
-- `lazy(load)` expects the loader to return the component — no `{ default }` unwrapping, no special element type; it is a plain component over `readPromise`.
-- `ErrorBoundary` is a component, not a class protocol: sticky fallback, reset by remount/key change, `fallback` may be `(error, info) => FigNode`. It does not catch promises, event handler errors, async callbacks, server render errors, or host commit failures.
-- Data lives in `@bgub/fig`, but renderers never import the store implementation directly; resources carry the data-store factory on an internal symbol so importing the package has no registration side effect. Keys are explicit arrays with a strict canonical encoder — no `JSON.stringify` traps. The verb set is deliberately narrow: `invalidateData` (mark stale, lazily reload — including resetting cached rejections) and `refreshData` (fetch now; never rejects, returns a result union). The ambient free functions work only while Fig executes synchronously (render, events, actions, effects); async flows capture the explicit handle (`readDataStore()` or `root.data`).
-- Data-protocol _types_ (`FigDataStoreHandle`, `FigDataHydrationEntry`, ...) export from `@bgub/fig`; runtime data APIs export exclusively from `@bgub/fig`.
-- Asset resources replace React 19 hoistables: explicit creators (`stylesheet`, `preload`, `modulepreload`, `font`, `preconnect`, `script`, `title`, `meta`) producing plain data with documented dedupe keys; host `<link>`/`<title>`/`<meta>`/`<script>` tags lower into the same registry in document mode.
-- Server rendering is Web-`ReadableStream`-first with a synchronous result object (`stream` plus `shellReady`/`headReady`/`allReady` promises) — no shell-gated promise like React's `renderToReadableStream`, and no `onShellError` callback — a shell failure rejects `shellReady`, which is the one channel for that event. Server render errors cross the wire only through `onError → { digest?, message? }` (authoritative; production defaults to empty, development includes the message), on both the HTML and payload renderers. Streams respect consumer backpressure through a byte-based `highWaterMark` (rendering never pauses; op-writing resumes on pulls) — there is no `progressiveChunkSize`: the outline-vs-inline choice is flush-time completion state, which consumer pacing shifts naturally.
-- The streaming reveal runtime is inline-script-only and `nonce` is the one CSP mechanism — there is deliberately no equivalent of React's external Fizz runtime for nonce-less strict CSP, and per-render op scripts rule out static hashes. Fragment-mode `prerender` is the script-free path (server-rendering.md, Content Security Policy).
-- Transitions: `transition(callback)` and `useTransition()` are explicit priority scopes; async callbacks keep `isPending` true until they settle and post-`await` updates stay in scope. `useActionState` keeps React's argument order; server action transport is left to framework layers.
-- Async work is cancellable, unlike React 19: `useTransition` callbacks and `useActionState` actions receive an `AbortSignal` (trailing, loader-style for actions) that aborts on supersede, unmount, and Activity hide. Each hook is one cancellation domain. An aborted run is retired: its pending slot releases immediately, its rejection is swallowed (an aborted fetch rejecting is the happy path), and — for actions — its result can never clobber newer state (last-run-wins; no React-style serial action queue). Aborting is a signal, not an unwind: state a transition callback already set stays committed. Top-level `transition()` has no signal — it has no hook identity to supersede or lifetime to unmount.
-- Uncaught render errors rethrow to `flushSync` callers, else go to the root's `onUncaughtError`, else rethrow from a detached task — scheduler ticks never die silently.
-- The cooperative scheduler is an internal fig-reconciler module, not a published package, and exposes no `unstable_` APIs. Renderer boundaries never leak lanes or fibers; priority crosses as `"default" | "continuous" | "discrete"` strings.
-- Host props use native DOM names: `class`, `for`, `tabindex`, `stroke-width`, `xlink:href`. Raw trusted HTML is `unsafeHTML` (a plain, scary-named string prop), not `dangerouslySetInnerHTML`.
-- Form `value` props are authoritative at commit time, not synchronously locked after native input events. `value` controls the live DOM value; `defaultValue` owns the default value and HTML representation. The same split applies to checkboxes and radios: `checked` writes only the live property; `defaultChecked` owns the `checked` content attribute (the `defaultChecked` reflection form reset restores).
-- JSX host-prop types come from the renderer: core's `JSX.IntrinsicElements` is deliberately empty and `@bgub/fig-dom/jsx-runtime` supplies its own per-tag `HostProps<E, AttributeName>` map, so `bind` infers the concrete element type per tag (no `forwardRef` gymnastics), `mix`/`style`/`unsafeHTML` are shape-checked (numeric style values are compile errors, matching the runtime), and React-habit props — `className`, `htmlFor`, `ref`, `dangerouslySetInnerHTML`, and the whole `on*` family — are rejected at compile time. HTML and SVG use closed, natively named, generated per-tag attribute vocabularies; MathML and dashed custom elements remain open.
-- Render diagnostics throw before commit (duplicate keys, invalid children, render-phase updates, invalid DOM nesting) instead of warning after it.
+- There are no class components, string refs, legacy context, or legacy root APIs. Use `createRoot` and `hydrateRoot`.
+- Context objects are their own providers: `<Theme value="dark">`. There is no `.Provider`, `Consumer`, or `displayName`.
+- Development is always strict. There is no `StrictMode` component or opt-out.
+- Batching is automatic. There is no public `batchedUpdates`; use `flushSync` only when work truly must commit now.
+- `lazy(load)` expects the loader to return a component directly, not `{ default: Component }`.
+- `ErrorBoundary` is a component with a sticky fallback. Change its key or remount it to reset.
 
-## Naming
+## Hooks And Async Work
 
-- Effects: `useReactive` (useEffect), `useBeforePaint` (useLayoutEffect), `useBeforeLayout` (useInsertionEffect) — named for _when_ they run. `useBeforePaint` state updates flush synchronously before paint, including any pending `useReactive` effects before the nested render. State updates from `useBeforeLayout` are a dev error because that phase runs before host mutations and is reserved for insertion-style work.
-- `transition` (startTransition).
-- `useStableEvent` (useEffectEvent): "stable" names the identity guarantee rather than tying the hook to effects — Fig's version is the general escape-from-reactivity primitive (usable from handlers, timers, and subscriptions, not effects-only) and carries the Fig event contract (trailing `AbortSignal`, aborted on re-entry and unmount).
-- `StateSetter<S>` is the one `useState` setter type — there is no `Dispatch`/`SetStateAction` reducer vocabulary.
-- `FigNode` is the one children type — no `FigChild`/`ReactChild`-style duplicate. (Internally, `collectChildren` returns `NormalizedChild`: element | portal | thenable | string.)
-- `bind` (ref), `mix={on(...)}` (the `on*` prop family), `unsafeHTML` (dangerouslySetInnerHTML), `readContext`/`readPromise`/`readData` (use).
-- The server render entry points form one grid — `renderToStream`, `renderToDocumentStream`, `renderToHtml`, `renderToDocumentHtml` — and none reuse React names: `renderToHtml` is honestly "the streamed output, buffered" (runtime scripts included), not React's settled, script-free `renderToString`.
-- `prerender` is the separate static semantic: it waits for all async server work before emitting HTML, so completed Suspense content appears in logical position without streaming reveal scripts.
-- The server-component layer is **payload**, never "RSC" or "Flight" — those are React brands (see Payload).
+- Effects are named for when they run: `useReactive`, `useBeforePaint`, and `useBeforeLayout`.
+- Long-lived callbacks receive an `AbortSignal` and return no cleanup. Fig aborts effects, binds, event handlers, stable events, transitions, actions, and data loads when their run loses authority.
+- There is no `useReducer`; reducer helpers can use `useState`.
+- There is no `useRef`. Use `bind` for DOM access and `useMemo(() => ({ current: null }), [])` for mutable storage.
+- There is no `memo()`. Fig's bailouts preserve child identity automatically; memoize a child element when you intentionally want to pin a subtree.
+- React's `use(resource)` is split into `readContext`, `readPromise`, and `readData`.
+- `useStableEvent` is the general stable-callback primitive. It is not limited to effects and receives Fig's trailing signal.
+- Async transitions keep post-`await` updates in the transition. Hook transitions and actions are cancellable; actions are last-run-wins rather than serial.
+- Server action transport belongs to frameworks.
 
-## Events
+See [Hooks](./hooks.md) and [Rendering](./rendering.md).
 
-- Listeners are declared as `mix={on("click", (event, signal) => ...)}` — `on()` is the first built-in host mixin, not an `onClick` prop. Arrays support multiple or conditional listeners. Callbacks receive the **native** event plus an `AbortSignal` that aborts on re-entry and on listener removal.
-- Bubbling events are delegated at the root, mapped to lanes/priorities, and bubble through the _logical_ tree — portals included.
-- Propagation is native with no exceptions: non-bubbling events — `focus` and `blur` included — attach directly and fire only on their target. Fig does not emulate React's bubbling `focus`/`blur`; ancestor focus tracking uses the platform's `focusin`/`focusout` (or a `capture: true` listener, as in the real DOM). No `mouseenter`/`mouseleave` emulation either.
-- `change` and `input` keep native semantics — there is no onChange-that-is-really-onInput remapping (a dev warning steers `onChange` habits to `on("input")`).
-- DOM node access is `bind={(node, signal) => ...}`, forwarded as a normal prop — no `forwardRef`, no ref objects. The signal aborts on identity change and unmount; `composeBind` merges binds and accepts falsy entries.
-- Hydration queues replayable events blocked by pending Suspense hydration and replays them (two-phase, through the logical tree) after the boundary hydrates.
+## DOM And Events
+
+- Host props use native names: `class`, `for`, `tabindex`, `stroke-width`, and `xlink:href`.
+- Trusted raw HTML is `unsafeHTML`, not `dangerouslySetInnerHTML`.
+- Event listeners use `mix={on("click", handler)}`, receive native events, and follow native propagation.
+- `focus` and `blur` do not bubble. Use `focusin`, `focusout`, or capture.
+- `input` and `change` keep their browser meanings. There is no React-style `onChange` remapping.
+- DOM nodes use `bind`, not refs or `forwardRef`.
+- Form `value` and `checked` control live properties. `defaultValue` and `defaultChecked` own the default and reflected HTML state.
+
+Fig DOM's JSX types reject React spellings and event props at compile time. HTML and SVG use closed native attribute sets; MathML and custom elements remain open.
+
+See [Events](./events.md), [Host mixins](./mixins.md), and [JSX](./jsx.md).
+
+## Data And Assets
+
+- Data resources live in `@bgub/fig`. Their array keys are canonical identities shared by reads, mutations, hydration, and Payload.
+- The main freshness operations are `invalidateData` (mark stale) and `refreshData` (fetch now and return a result union).
+- Ambient data functions work only during Fig's synchronous execution window. Capture `readDataStore()` or use `root.data` after `await`.
+- Renderers install the store lazily from a resource; importing Fig does not register a global store.
+- Asset resources replace React's implicit hoistables with plain descriptors such as `stylesheet`, `preload`, `script`, `title`, and `meta`.
+
+See [Data resources](./data.md) and [Asset resources](./assets.md).
+
+## Server Rendering
+
+- Server rendering is Web-`ReadableStream`-first and returns its result object synchronously.
+- Readiness uses `shellReady`, optional `headReady`, and `allReady` promises instead of shell callbacks.
+- `renderToHtml` buffers the exact streamed output, including reveal scripts. It is not React's `renderToString`.
+- `prerender` waits for all async work and produces settled static HTML.
+- Consumer backpressure pauses output between complete chunks, not rendering itself. Fig has no `progressiveChunkSize` heuristic.
+- Server errors cross the wire only through `onError(error, info) => ({ digest, message })`.
+- Streaming Suspense uses inline scripts and a CSP nonce. Fig does not ship an alternate external reveal runtime.
+
+See [Server rendering](./server-rendering.md) and [Suspense streaming](./suspense-streaming.md).
 
 ## Payload
 
-- Fig's server-component layer is `@bgub/fig-server/payload` — its own wire layer, not React Flight: a semantic row model whose byte encoding is internal (currently newline-delimited JSON with MIME `text/x-fig-payload; codec=json; charset=utf-8`); payload-rendered ids use `fig-pl-` prefixes.
-- API: `renderToPayloadStream` (server), `decodePayloadStream` (client, in `@bgub/fig/payload`), and fig-dom's `payloadDataLoader` so a serialized tree travels as an ordinary data resource — the resource key is the refresh boundary, and the existing freshness verbs replace any bespoke refresh protocol (no React equivalent — React pairs Flight with framework-specific routers).
-- Client references travel as structured `{ id, exportName?, ssr?, assets? }` metadata: the server splits the authored `"<module>#<export>"` convention once at serialization; ids stay opaque unique keys, and the client never string-parses them. One `resolveClientReference(reference)` seam returns a component synchronously or asynchronously; `ssr`-capable references server-render through their registered server component.
-- Error rows carry the `onError`-controlled `{ digest?, message? }` payload — raw server exception text never ships in production.
-- Deliberately absent from the row model: server actions and temporary references. The internal encoding can be replaced (e.g. with a binary layout) without exposing codec machinery to applications.
+Fig calls its server-component format **Payload**, never RSC or Flight. Those are React brands.
+
+- `renderToPayloadStream` serializes a component tree.
+- `decodePayloadStream` reconstructs it in a renderer-neutral client package.
+- `payloadDataLoader` delivers it as an ordinary data-resource value, so the resource key is also the refresh boundary.
+- Client references carry structured ids, export names, SSR capability, and assets.
+- Errors carry only the server's digest/message result.
+- Server actions and temporary references are not part of the row model.
+
+See [Payload](./payload.md).
+
+## Renderer Boundaries
+
+- Every public export has one package home. Renderer packages do not mirror core APIs.
+- Fibers and lanes stay private. Event priority crosses renderer boundaries as `"default"`, `"continuous"`, or `"discrete"`.
+- The scheduler is internal and publishes no `unstable_` surface.
+- Development behavior is removed through compile-time `__FIG_DEV__` gates rather than runtime environment checks or separate builds.
+- Invalid render input throws before commit instead of warning afterward.
+
+See [Architecture](./architecture.md) and [Renderer authoring](./renderer-authoring.md).
+
+## Rename Cheat Sheet
+
+| React                          | Fig                          |
+| ------------------------------ | ---------------------------- |
+| `className`, `htmlFor`         | `class`, `for`               |
+| `onClick={fn}`                 | `mix={on("click", fn)}`      |
+| `ref`, `forwardRef`            | `bind`                       |
+| `dangerouslySetInnerHTML`      | `unsafeHTML`                 |
+| `useEffect`                    | `useReactive`                |
+| `useLayoutEffect`              | `useBeforePaint`             |
+| `useInsertionEffect`           | `useBeforeLayout`            |
+| `useEffectEvent`               | `useStableEvent`             |
+| `startTransition`              | `transition`                 |
+| `use(context)`, `use(promise)` | `readContext`, `readPromise` |
+| RSC / Flight                   | Payload                      |

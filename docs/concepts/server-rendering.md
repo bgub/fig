@@ -2,61 +2,133 @@
 
 Status: stable
 
-The streaming model, the entry-point grid, prerender, and the error contract.
+Fig's server renderer writes Web `ReadableStream`s, works across runtimes, and treats streaming and static output as two different semantics.
 
-## The Entry Grid
+## Entry Points
 
-`render + To + (Document?) + output form`:
-
-|          | stream                   | buffered string        |
+|          | Stream                   | Buffered string        |
 | -------- | ------------------------ | ---------------------- |
-| fragment | `renderToStream`         | `renderToHtml`         |
-| document | `renderToDocumentStream` | `renderToDocumentHtml` |
+| Fragment | `renderToStream`         | `renderToHtml`         |
+| Document | `renderToDocumentStream` | `renderToDocumentHtml` |
 
-Streams are Web `ReadableStream`s (same shape across Node, edge, Deno, Bun). Results return **synchronously** — `{ stream, shellReady, headReady?, allReady, data, getHead()?, getData(), abort(), contentType }` — no shell-gated promise. A shell failure rejects `shellReady` (and errors the stream); there is no callback channel. Fragment mode exposes the collected head (`getHead()`/`headReady`); document mode owns the head and injects it itself (the root must render `<html>` with a `<head>`). Document heads open with the inline early-event-capture script, and every inline streaming-runtime or operation script carries the shared `data-fig-hydration-skip` protocol attribute. Full-document hydration recognizes these scripts as server-owned nodes with no application fiber, while pre-bundle interactions replay after hydration (events.md).
+Stream calls return immediately with an object containing `stream`, readiness promises, the request data store, cancellation, content type, and snapshot helpers:
 
-`data` is the request-scoped store handle. `dataStore` adopts a root-neutral store already populated by request or route loaders; the renderer uses that same store rather than copying a snapshot into a second cache. `initialData` remains the value-only hydration option when no pre-created store is needed. A supplied store is owned and disposed by the render lifecycle.
+```ts
+{
+  stream,
+  shellReady,
+  headReady?,
+  allReady,
+  data,
+  getHead?,
+  getData,
+  abort,
+  contentType,
+}
+```
 
-`renderToHtml` is honestly "the streamed output, buffered": it awaits `allReady` and concatenates exactly the bytes a streaming client would have received — including the inline runtime and reveal scripts when the tree suspends past the shell. Right for caching responses and snapshotting wire output; it is **not** React's `renderToString`.
+A shell failure rejects `shellReady` and errors the stream. There is no callback-only error channel and no promise that delays access to the stream.
 
-Function components may return promises in every HTML entry. The returned promise becomes the component's stable child slot, so a pending result suspends without re-invoking the component and its fulfilled node resumes through the ordinary streaming machinery.
+A basic request handler looks like this:
+
+```tsx
+export async function handleRequest(): Promise<Response> {
+  const result = renderToDocumentStream(<App />);
+
+  await result.shellReady;
+
+  return new Response(result.stream, {
+    headers: { "content-type": result.contentType },
+  });
+}
+```
+
+Waiting for `shellReady` lets the handler catch a fatal shell error before committing the HTTP response. The stream object itself exists immediately.
+
+Fragment mode collects head content through `getHead()` and `headReady`. Document mode requires the root to render `<html>` and `<head>` and writes assets directly into that document. Its head begins with the early-event capture script. Every framework-owned script carries `data-fig-hydration-skip` so full-document hydration knows it has no application fiber.
+
+The `data` handle belongs to this request. Passing `dataStore` adopts a store populated before rendering by route loaders; the renderer does not copy it. `initialData` remains the simpler option when no store exists yet. The render owns disposal of an adopted store.
+
+`renderToHtml` buffers the exact streamed output after `allReady`, including reveal scripts. It is useful for response caching and snapshots, but it is not React's settled `renderToString`.
+
+Function components may return promises. The renderer invokes the component once, retains that promise as a child slot, and resumes the slot through normal streaming when it resolves.
 
 ## Prerender
 
-`prerender(node, { document? })` is the settled static semantic: it holds all flushing until every task settles, generalizing the flush-time content-vs-fallback choice — boundaries only enter the op-writing queues once their parent has flushed, so with nothing flushed before `pendingTasks` reaches zero, every boundary inlines in logical position and no streaming runtime is ever written. Returns `{ html, head, data }` — the SSG primitive.
+`prerender(node, { document? })` waits for every server task before it emits HTML. Completed Suspense content therefore appears in its logical position and no reveal runtime is needed.
 
-- Head sealing defers to flush, so the static head describes the final settled visible tree without streamed metadata updates.
-- Server-failed boundaries emit the static client-render shape — marker comment plus `<template data-dgst data-msg>` plus fallback — byte-identical to what the streamed `x` op produces after mutation, so prerendered pages hydrate and retry failed boundaries client-side.
-- Aborting after the shell resolves with static fallbacks; before the shell, it rejects. A hung data source hangs the prerender — pass `signal`.
+It returns `{ html, head, data }` and is Fig's static-generation primitive.
 
-## The Error Contract
+- The head is sealed only after content settles, so it describes the final visible tree.
+- A failed boundary writes the same client-render marker and fallback shape that streaming would produce.
+- Aborting after the shell produces static fallbacks. Aborting before the shell rejects.
+- A source that never settles will keep prerender pending, so callers should pass a signal.
 
-Server render errors cross the wire only through `onError(error, info) => { digest?, message? }` — the handler's payload is authoritative; production defaults to empty, development includes the message. Shared by the HTML renderer and the payload renderer (payload errors never re-execute on the client, so the wire is their only surface). Recoverable boundary errors become client-render markers carrying the digest; fatal shell errors reject the readiness promises. `escapeAttribute`/`escapeText` and `escapeScriptText`/`escapeScriptJson` export from `@bgub/fig-server/html` for frameworks writing companion inline scripts. Script-text escaping preserves raw-text payload bytes except for `<` and JavaScript line separators, which become their `\u` spellings so neither `</script>` nor a line separator can terminate executable source.
+## Error Contract
 
-## Text Separators
+HTML and Payload server errors use one callback:
 
-Adjacent text that comes from different fibers — `<div>{"Hi "}<Name/></div>`, text around a component or promise slot that renders nothing, a resumed suspended segment whose seams touch text — is emitted with a `<!--,-->` comment between the two text writes: the browser's parser would otherwise merge them into a single DOM text node while the client tree keeps one text fiber per normalized child (`collectChildren` merges adjacent strings only within one children array, and thenables interrupt merging). Separators are emitted only where two text writes would actually touch (element tags and Suspense/Activity markers already break adjacency), plus a trailing separator when a resumed segment ends in text — it cannot know what follows its splice point. fig-dom's hydration cursor skips comments whose data is exactly `,` when advancing (and only those; suspense markers are never skipped). Browsers ignore leftover separators at runtime.
+```ts
+onError(error, info) => ({ digest, message })
+```
 
-## Streaming Mechanics
+The returned object is the only error information sent to the client. Production sends nothing by default; development includes the message. A recoverable boundary writes a client-render marker, while a fatal shell error rejects the readiness promises.
 
-Suspense streams fallbacks first; completed content and partial segments follow as hidden staging nodes moved into place by a nonce-compatible inline runtime (no external runtime format) — see suspense-streaming.md for the marker/op protocol. The initial head describes the shell's visible branch. A boundary completion that changes title/meta carries the complete visible metadata snapshot in the same op, so fallback removal, primary reveal, and metadata reconciliation share one callback; partial segments never publish metadata. If hydration has attached to that boundary, the runtime leaves metadata to the renderer retry and commit. Writes buffer per flush pass and leave as one encoded enqueue, and every flushed chunk ends on complete markup — injecting between chunks is parse-safe, a contract the demos' bootstrap and payload-frame interleaving rely on. `identifierPrefix` scopes generated ids; `nonce` flows to every inline script.
+`@bgub/fig-server/html` exports `escapeText`, `escapeAttribute`, `escapeScriptText`, and `escapeScriptJson` for framework-owned companion markup. Script escaping replaces `<` and JavaScript line separators so data cannot end a `<script>` block or change executable source parsing.
 
-Suspended work is task-scoped: every children array renders under a per-child thenable catch, so a suspension can only escape a node before that node has written anything — no write truncation exists or is needed. A promise-valued child is read inside its own child task; the task retains the exact promise and later renders its resolved node beneath the same id-path segment instead of re-running the parent component. The spawned task forks the render scope at the suspension point (cloned provider values, id-path position plus the child's original index, host-ancestor stack, select context, component stack, enclosing hidden-activity id), and a retry renders into a child segment spliced at the parent's cursor. A suspension in one child never blocks starting later siblings, and resumed output — ids and provider values included — is byte-identical to the never-suspending render.
+## Adjacent Text
 
-`<pre>` and `<textarea>` leading-newline preservation is decided in logical flush order, not render-completion order. Their segment chunks bracket parser-sensitive content, and the first flushed text chunk receives the extra newline only when no earlier logical child emitted content. This remains correct when an earlier direct promise or promise-returning component finishes after a later sibling rendered.
+The browser merges neighboring HTML text into one DOM node, but Fig may have separate text fibers on either side of a component or promise slot. The server inserts `<!--,-->` only where two separate text writes would otherwise touch:
+
+```tsx
+<div>
+  {"Hi "}
+  <Name />
+</div>
+```
+
+Hydration skips comments whose content is exactly `,`. It never skips Suspense markers. A resumed segment that ends in text also writes a trailing separator because it cannot know what will later touch that splice point.
+
+## How Streaming Works
+
+Suspense writes a fallback first when needed. Completed content arrives later in hidden staging nodes, and nonce-bearing inline operations move it into place. See [Suspense streaming](./suspense-streaming.md) for the marker format.
+
+The shell head describes the visible fallback branch. When primary content changes title or metadata, its completion operation carries the complete new visible snapshot. Fallback removal, content reveal, and metadata update happen together. Partial segments never publish metadata.
+
+Each flush pass becomes one encoded stream chunk, and every chunk ends on complete HTML markup. Frameworks may safely interleave bootstrap or Payload frames between chunks.
+
+Suspended work has its own task and render scope. A task retains provider values, id path, host ancestors, select state, component stack, and enclosing hidden Activity. When it resumes, it writes into a child segment at the original cursor. Siblings continue rendering while it waits.
+
+This guarantees that resumed output—including ids and context values—matches a render where the promise had already been settled.
+
+`<pre>` and `<textarea>` preserve their parser-sensitive leading newline according to logical flush order, not the order async work happened to finish.
 
 ## Flow Control
 
-Streams respect consumer backpressure. The result stream carries a byte-length queuing strategy (`highWaterMark` option, default 65536 bytes, clamped to ≥ 1); once the internal queue reaches the mark, op-writing pauses **between boundary flushes** — never mid-chunk, so the complete-markup chunk contract holds — and the stream's pull handler resumes flushing as the consumer reads. Rendering itself never pauses: task progress is data-driven, and `shellReady`/`headReady`/`allReady` are task-driven, so readiness settles identically for an unread stream (`renderToHtml` and `prerender` await `allReady` before reading precisely because of this). The shell flushes ungated — the queue is empty before the first write, and shell latency outranks flow control.
+Streams honor consumer backpressure through a byte-sized `highWaterMark`, which defaults to 65,536 and is clamped to at least 1.
 
-Blocked flushing composes with the flush-time content-vs-fallback choice rather than adding a mode: work that settles while the flow is blocked is seen settled by the next flush pass, so boundaries that would have streamed as partial segments plus fill ops instead coalesce into one staged piece with a single reveal op. A fully blocked stream degrades toward the prerender shape; the assembled DOM is identical either way. Cancelling the stream (`stream.cancel()` / `reader.cancel()`) aborts the render and drops undelivered output; `abort(reason)` with a live consumer still delivers the client-render ops for pending boundaries through subsequent pulls.
+When the queue reaches that mark, Fig pauses writing between boundary flushes. It never splits one complete-markup chunk. Rendering itself continues, and `shellReady`, `headReady`, and `allReady` settle independently of whether the consumer is reading.
+
+If work settles while output is blocked, the next flush sees the newer state. A boundary that would have needed several partial operations may therefore collapse into one staged completion. With a completely stalled consumer, output naturally approaches the prerender shape while producing the same final DOM.
+
+Cancelling the stream aborts rendering and drops unsent output. Calling `abort(reason)` while a consumer remains active instead writes client-render operations for boundaries that are still pending.
 
 ## Content Security Policy
 
-The streaming protocol's client side is inline scripts, deliberately: the reveal runtime, the per-boundary op scripts, and document mode's early-event-capture script all ship as inline `<script>` elements, and the `nonce` option threads to every one of them (and to registry-emitted `<script>`/`<link>` asset tags). Under a CSP that restricts `script-src`, generate a per-request nonce, pass it to the render, and include it in the response header — **nonce is the one CSP mechanism; there is intentionally no external-runtime option** (React ships an external Fizz runtime for nonce-less strict CSP). An external runtime would mean a second wire format driven by DOM mutation observation, a versioned runtime asset to serve, cache, and keep compatible across releases, and a second implementation of every op — permanent surface for a constraint the platform already solves with nonces. Static `script-src` hashes cannot cover the op scripts either (they are per-render dynamic), so nonce-less strict CSP and streamed Suspense are simply incompatible in Fig.
+Streaming uses inline scripts for the reveal runtime, boundary operations, and early event capture. Pass a per-request `nonce` to the renderer and include the same nonce in the response's CSP header. Registry-generated scripts and links receive it too.
 
-The script-free tiers: fragment-mode `prerender` emits no scripts at all; document-mode output — `prerender` included — always opens `<head>` with the one early-event-capture inline script (nonce-carrying), and a render whose tree settles before the shell flushes never writes the reveal runtime. Framework layers interleaving companion inline scripts (bootstrap, payload frames) must apply the same nonce and use the companion-markup escaping helpers from `@bgub/fig-server/html`.
+Nonce is the one supported CSP mechanism. Fig does not maintain a second external streaming runtime, and static hashes cannot cover per-render operation scripts.
+
+Fragment `prerender` is completely script-free. Document output always includes early event capture, even when prerendered. A streaming render whose tree settles before the shell needs no reveal runtime.
+
+Frameworks that interleave their own scripts must use the same nonce and the escaping helpers above.
 
 ## Render-Tree Collection
 
-`renderTree: createRenderTreeCollector()` on any render entry makes the renderer record the component structure as it renders — one node per element or text child (name, kind, key, props minus children), attached through a `treeParent` pointer forked into suspended tasks so resumed content lands under its boundary. The collector is caller-owned and readable mid-render: a subtree later in document order (a DevTools panel in an aside) sees everything rendered before it, which is how introspection UI prerenders without a second pass. Hooks, lanes, and fiber ids are client-runtime facts the server never fabricates; consumers converting the tree into a DevTools snapshot replace it with the live hook after the client's first commit. With no collector passed, the threading is a null pointer copy per fork — plain renders record nothing.
+Passing `renderTree: createRenderTreeCollector()` records the component structure as the server renders. Suspended tasks retain their collector parent, so resumed content appears under the correct boundary.
+
+The caller owns the collector and may read it before rendering finishes. This lets a later DevTools panel inspect everything rendered earlier without a second pass.
+
+The server records component names, kinds, keys, and props without children. It does not invent client-only hook state, lanes, or fiber ids. After the client commits, consumers replace the server snapshot with the live DevTools data.
+
+Without a collector, normal renders pay only for copying a null pointer into forked tasks.

@@ -2,86 +2,114 @@
 
 Status: Start-first file-route contract; code-created routes supported for compatibility
 
-`@bgub/fig-tanstack-router` adapts `@tanstack/router-core` to Fig without forking TanStack's route matching, loading, history, or navigation contracts. The package owns only the framework seam: Fig components and hooks, native DOM link behavior, and the reactive store factory supplied to `RouterCore`.
+`@bgub/fig-tanstack-router` connects TanStack Router Core to Fig. TanStack still owns route matching, loading, history, and navigation. Fig supplies components, hooks, native link behavior, and the reactive stores Router Core needs.
 
-## Support Policy
+## What We Support
 
-The adapter is designed for TanStack Start's generated file routes rather than exhaustive parity with the React adapter. Its interface is divided into explicit tiers:
+The adapter is built for TanStack Start's generated file routes, not exhaustive parity with every React adapter convenience.
 
-- **Guaranteed:** generated file and lazy routes; the generated-tree mutation and type-registration contract; route-bound and targeted hooks, including selected locations, loose or optional match reads, and structural sharing; router creation and provision; native links with active/inactive props and render-function children; navigation blocking and back-history state; loaders, redirects, route masks, not-found and route errors; pending timing and remount dependencies; route-level Start SSR policies and hydration; route head/script output; scroll restoration; search and history helpers; and Fig data-resource delegation.
-- **Compatibility:** `createRootRoute` and `createRoute` remain supported for code-created route trees. They share Router Core's route implementation with generated routes, so removing their factories would simplify the name list without materially shrinking the runtime. They are not the recommended Start authoring path.
-- **Deferred:** `useElementScrollRestoration`, `useParentMatches`, `useChildMatches`, custom-link construction through `useLinkProps` or `createLink`, and proximity preloading. A Router Core type is not a promise that every framework-adapter convenience exists.
-- **Deliberately omitted:** additional deprecated compatibility classes and aliases, plus public clones of `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration`. Fig's `readPromise`, `Suspense`, `ErrorBoundary`, renderer lifecycle, and internal adapter behavior own those concerns. Ordinary navigation does not use `Activity`; retaining inactive route trees would be a separate keep-alive contract with different state and effect lifetimes. `useLoaderData` is also omitted: the Fig data store is the single route-data cache, so loader values are read with `readData` rather than through a second match-store copy (see Route Data Contract).
+- **Guaranteed:** generated and lazy routes, route hooks, router creation, providers, links, blockers, redirects, masks, errors, pending UI, SSR policies, hydration, route head/scripts, scroll restoration, and Fig data-resource delegation.
+- **Compatible:** `createRootRoute` and `createRoute` for code-created trees. They use the same Router Core implementation but are not the preferred Start authoring style.
+- **Deferred:** element scroll restoration, parent/child match helpers, custom link factories, and proximity preloading.
+- **Deliberately omitted:** deprecated aliases and public copies of `Await`, `ClientOnly`, `CatchBoundary`, and `ScrollRestoration`. Fig's `readPromise`, Suspense, ErrorBoundary, hydration, and internal adapter behavior already own those jobs.
 
-This policy is a compatibility boundary, not a bundle-size mechanism. File and code routes share `BaseRoute`, runtime route-tree processing, match loading, and `RouterCore`; the Start-shaped bundle is therefore governed primarily by Router Core rather than the number of factories re-exported by Fig.
+There is no `useLoaderData` when a Fig data store is configured. Route values live in one cache and components read them with `readData`.
 
-## Initial Surface
+Removing a convenience factory would not materially shrink the bundle because file and code routes share Router Core's implementation.
 
-The adapter surface consists of `createRootRoute`, `createRootRouteWithContext`, `createRoute`, `createFileRoute`, `createLazyFileRoute`, `lazyRouteComponent`, `lazyFn`, `createRouteMask`, `linkOptions`, `createRouter`, `getRouteApi`, `RouterProvider`, `Matches`, `MatchRoute`, `Navigate`, `Outlet`, `HeadContent`, `Scripts`, `Link`, `ensureRouteData`, `useBlocker`, `useCanGoBack`, and the router, location, match-list, match-route, match, params, search, loader-deps, route-context, and navigation hooks. Targeted hooks accept `{ from: routeId }` and an optional selector to subscribe directly to a specific active match and infer its value from the registered tree. Loose hooks accept `strict: false`; match, params, and search reads accept `shouldThrow: false` when the target may be inactive. Selector hooks honor their `structuralSharing` option, falling back to `defaultStructuralSharing` on the router.
+## Public Surface
 
-Route objects, root-route objects, and the value returned by `getRouteApi` expose the canonical bound interface: `useMatch`, `useParams`, `useSearch`, `useLoaderDeps`, `useRouteContext`, `useNavigate`, `Link`, and `notFound`. Bound hooks close over the route id; navigation and links close over its full path. `getRouteApi(id)` resolves the full path from the registered router at render time, so code outside a route module gets the same interface without retaining a route instance. Generated-tree transforms preserve the interface through Router Core's `RouteExtensions` seam. The concrete `Router` and `RouteApi` constructors are internal: callers use `createRouter` and `getRouteApi`, leaving construction invariants behind two small factory interfaces.
+The package exposes route factories, lazy helpers, masks, router creation, route APIs, provider and match components, head and script components, `Link`, `Navigate`, `Outlet`, data delegation, blockers, history helpers, and the normal router/location/match/params/search/context/navigation hooks.
 
-`createFileRoute` creates an uninitialized non-root `BaseRoute`; TanStack's generated tree supplies its parent, id, and path with `update`, then attaches generated children and file types. `createLazyFileRoute` returns the lazy option record Router Core merges into that route. `lazyRouteComponent` caches one dynamic import, exposes its preload function, and suspends through Fig's `readPromise` until the selected component export resolves. `lazyFn` is Router Core's typed lazy function loader.
+Targeted hooks accept `{ from: routeId }` and may select a smaller value. Loose hooks accept `strict: false`, while match, params, and search reads may use `shouldThrow: false` for an inactive target. Selectors honor route structural-sharing options.
 
-The current generator accepts only React, Solid, and Vue targets and hard-codes the corresponding constructor import during route-file normalization. The Start plugin therefore uses the Solid package ID as a build-time alias to Fig; no Solid runtime participates. A native framework target removes that source-level compatibility ID but does not change the route object or rendering contracts.
+Route objects and `getRouteApi(id)` expose the same bound helpers: match, params, search, loader dependencies, route context, navigation, `Link`, and `notFound`. Bound helpers already know their route id and full path. Concrete `Router` and `RouteApi` constructors stay internal; callers use factories.
 
-The conformance target is `@tanstack/router-core@1.171.15`, pinned in the package that implements and tests the adapter. Moving the pin requires the generated-route, navigation, SSR, data, and document suites to pass against the new version. TanStack's store is an implementation detail: it supplies the dependency graph for Router's atoms and derived stores but is not re-exported as a Fig Store API. The package publishes on npm rather than JSR because TanStack framework adapters require ambient augmentation of `@tanstack/router-core`, which JSR does not accept in source-native packages.
+`createFileRoute` creates the uninitialized route that TanStack's generator later connects to a parent, id, path, children, and registered types. `createLazyFileRoute` supplies lazy options. `lazyRouteComponent` caches one import, exposes preload, and suspends with `readPromise`. `lazyFn` keeps Router Core's typed lazy-function contract.
 
-## Signal Graph
+The package targets its pinned Router Core version. Upgrading requires the generated-route, navigation, SSR, data, and document suites to pass. It publishes on npm because TanStack framework adapters require ambient module augmentation, which JSR source packages do not accept.
 
-The adapter follows Router Core's [signal-graph architecture](https://tanstack.com/blog/tanstack-router-signal-graph): top-level atoms and per-match stores are the sources of truth, while `router.state` is the compatibility snapshot derived from them. Browser routers supply TanStack Store atoms for mutable and derived stores; server routers use Core's non-reactive stores because a server render reads each value once.
+TanStack's generator currently knows only React, Solid, and Vue. The Start integration privately aliases its Solid target to Fig; no Solid runtime is involved. A native Fig target can later replace this build-time compatibility layer without changing route behavior.
 
-Framework internals subscribe to the narrowest available store. `useLocation` and `Link` read the location atom, `Matches` reads the derived first-match ID, `useMatches` reads the match-list store, `useMatchRoute` reads the match-route dependency store, each rendered match reads its own match store, and targeted or route-bound hooks use Core's LRU-cached per-route store. Only the public `useRouterState` compatibility hook subscribes to the aggregate `router.state` store. This topology is an implementation contract rather than an additional application-facing API.
+## Reactive Store Graph
 
-`Navigate` runs after commit through Fig's before-paint lifecycle. It compares navigation option values rather than props-object identity, preventing a still-active redirect route from restarting the same navigation when Router state changes during loading.
+Router Core uses top-level atoms and per-match stores as its sources of truth. `router.state` is a compatibility snapshot derived from that graph.
 
-## Navigation Lifecycle
+The Fig adapter subscribes each feature to the smallest store available:
 
-`RouterProvider` accepts partial router options and a partial route context. It merges both with the router's existing options before rendering the match tree, so an initial loader observes provider context without waiting for a later commit. A provider update preserves context fields it does not replace.
+- `useLocation` and `Link` read the location atom.
+- `Matches` reads the first-match id.
+- `useMatches` reads the match list.
+- Each rendered match reads its own store.
+- Targeted hooks use Router Core's cached per-route store.
+- Only `useRouterState` subscribes to the aggregate snapshot.
 
-In the browser, the provider installs a Fig transition at Router Core's `startTransition` seam. The outer navigation starts in a transition so the resolved tree remains visible while its replacement loads. Core's later pending-match commit is urgent: after `pendingMs`, it may intentionally replace the prior tree with the route fallback. The adapter tracks the full asynchronous lifetime in `router.state.isTransitioning`, ignores completion from a superseded navigation, and restores the router's previous transition function on unmount.
+Browser routers use reactive TanStack Store atoms. Server routers use non-reactive stores because the server reads each value once.
 
-Router Core's document-level `viewTransition` wrapper is disabled at the same provider seam. Route navigation already commits through Fig, so structural `<ViewTransition>` boundaries are the one animation contract; passing TanStack's `viewTransition` navigation option cannot nest a second `document.startViewTransition` around Fig's commit.
+## Navigation
 
-For a successful navigation, framework lifecycle events have this order:
+`RouterProvider` merges supplied options and route context before rendering, so the first loader sees them. Later updates preserve context fields the provider does not replace.
 
-1. `onLoad` after route loading finishes.
-2. `onBeforeRouteMount` after loading and pending matches finish, immediately before the resolved route is published.
-3. `onResolved` when the router becomes idle and `resolvedLocation` advances.
-4. `onRendered` after the newly resolved match subtree commits.
+In the browser, navigation begins inside a Fig transition. The previous route stays visible while the next route loads. If Router Core intentionally publishes pending UI after `pendingMs`, that commit is urgent. The adapter tracks the full async lifetime in `router.state.isTransitioning` and ignores completion from superseded navigation.
 
-History changes start route loading and normalize the browser URL to Router Core's canonical validated location with a replace operation. A hydrated router, or a router whose match list is already populated, does not start a duplicate initial load. History subscriptions and transition overrides are scoped to the provider lifetime.
+TanStack's document-level view-transition wrapper is disabled. Route animation belongs to Fig's structural `<ViewTransition>` boundaries; the two systems must not nest browser transitions.
 
-`useBlocker({ shouldBlockFn, disabled?, enableBeforeUnload?, withResolver? })` is the modern object-only blocker interface. Without a resolver, its boolean or promise result directly decides whether history proceeds. With `withResolver: true`, it returns an idle/blocked state whose `proceed` and `reset` methods settle the pending navigation. Deprecated positional and `condition` overloads are deliberately absent. `useCanGoBack` subscribes to the location index rather than polling browser history.
+A successful navigation reports lifecycle events in this order:
 
-Ordinary navigation replaces the visible match tree after the transition resolves; it does not retain the prior tree through `Activity`. Activity-based keep-alive routing would need an explicit contract for retained route state, effects, and data ownership and remains deliberately omitted.
+1. `onLoad`
+2. `onBeforeRouteMount`
+3. `onResolved`
+4. `onRendered`, after the new subtree commits
 
-## Match Rendering and SSR
+History changes trigger loading and normalize the URL with replace when needed. A hydrated or already-populated router does not repeat its initial load. All subscriptions and transition overrides follow the provider lifetime.
 
-Router Core owns match status and the promises that govern display delay. A pending match reads its load promise through Fig Suspense; `pendingMs` determines when Core publishes that match, and the adapter creates Core's minimum-pending promise only when a visible pending component needs `pendingMinMs`. `wrapInSuspense` selects the route boundary, while the root client boundary protects initial client routing. Redirected matches suspend instead of rendering stale content. Loader and component errors flow to route error boundaries, `onCatch` or `defaultOnCatch`, and route reset invalidates attributed Fig data errors before reloading.
+`useBlocker` uses the modern object form. It may directly return a boolean/promise decision or, with `withResolver: true`, expose `proceed` and `reset`. `useCanGoBack` subscribes to Router's location index.
 
-`remountDeps`, falling back to `defaultRemountDeps`, supplies the route component key. A changed result resets component state; loader invalidation with the same result preserves it.
+Ordinary navigation replaces the route tree. Retaining routes with Activity would require a separate keep-alive contract for state, effects, and data ownership.
 
-On the server, `ssr: false` skips both the route loader and component, while `ssr: "data-only"` runs loader work but renders the pending shell instead of the component. The same internal hydration gate reveals either route after hydration without exporting a public `ClientOnly` clone. Server error components render directly because Fig error boundaries intentionally do not catch server-render errors.
+## Rendering And SSR
 
-When `scrollRestoration` is enabled at router construction or through `RouterProvider`, setup is idempotent and restoration runs after `onRendered`. Start SSR emits one nonce-aware restoration bootstrap inside the root match subtree; no public `ScrollRestoration` component is exposed.
+Router Core owns match status and pending timers. A pending match reads Core's load promise through Suspense. `wrapInSuspense` selects route boundaries, and a root boundary protects initial client routing. Redirected matches suspend instead of rendering stale content.
 
-## Route Asset Ownership
+Route errors reach route error components and `onCatch`. Resetting a route invalidates Fig data keys attributed to the caught error before Router reloads.
 
-Each active match owns the Fig asset resources derived from its route metadata and Start manifest entry. Stylesheets, preloads, module preloads, preconnects, font preloads, and external async scripts become descriptors on an `assets(...)` boundary around that match. A root match is therefore registered before its document component renders, while a nested or streamed match emits its assets before the segment that depends on them. The shared Fig registry deduplicates equivalent keys across route metadata, the Start manifest, ordinary Fig trees, and Payload trees; stylesheet discovery order and `precedence` continue to define bucket order.
+`remountDeps`, or `defaultRemountDeps`, supplies the route component key. A changed result resets component state; invalidation with the same result preserves it.
 
-`HeadContent` owns document state and explicitly positioned head markup: title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` retains synchronous body scripts plus Start's buffered bootstrap scripts. Tags that Fig cannot represent remain native at their declared position and carry the private no-hoist marker, while representable tags are not rendered a second time.
+On the server:
 
-Manifest-wide `assetCrossOrigin` is a router option because route assets must be translated before the root document and its `HeadContent` render. The option may be one value or separate `script` and `stylesheet` values. `router.options.ssr.nonce` flows to registry-emitted assets and positioned tags on the server; native attribute casing is normalized before descriptor translation.
+- `ssr: false` skips the loader and component.
+- `ssr: "data-only"` runs the loader but renders pending UI.
 
-## Route Data Contract
+An internal hydration gate reveals those routes in the browser without exposing a separate `ClientOnly` component. Server error components render directly because Fig ErrorBoundary does not catch server-render failures.
 
-Fig data resources are the default external cache for route data. Applications place the root's `FigDataStoreHandle` at `router.context.data`; its presence makes `createRouter` default `defaultPreloadStaleTime` to `0`, while an explicit option remains authoritative. A blocking loader calls `ensureRouteData(context, resource, ...args)`, which awaits the store's `ensureData` but resolves to `void`. The component calls `readData` for the same key. Router Core therefore controls when loaders run without retaining a second copy in `loaderData`; the Fig store exclusively owns identity, deduplication, freshness, errors, and the value.
+Scroll restoration installs once and runs after `onRendered`. Start SSR emits one nonce-aware restoration bootstrap; there is no public restoration component.
 
-Loaders return `void`; the adapter exposes no `useLoaderData`. A loader value would be a second cache with a second wire format — Router Core retains it per match and TanStack Start dehydrates it through its own transport — so in dev builds a match that commits with `loaderData` set while `router.context.data` is configured throws a diagnostic naming the route. Navigation-scoped values derive from `useLoaderDeps`, search params, or `beforeLoad`-returned route context; anything keyed, shared, hydrated, invalidated, refreshed, or streamed is a data resource. Routers created without `context.data` keep Router Core's native loader semantics untouched.
+## Route Assets
 
-For non-blocking streaming, a loader calls the explicit `context.data.preloadData` handle and returns `void`. Router navigation may then commit a Suspense fallback while `readData` claims the entry and Fig streams its eventual content. The Start demo's asset route exercises this with two Payload data resources, including a delayed tree that discovers a stylesheet; a superseding navigation removes the fallback and cannot publish the late tree. Route error reset invalidates keys attributed to the caught Fig data error before invalidating Router Core, so the same reset affordance retries both layers. Root/global not-found state renders the root route's not-found component through its `Outlet`, preserving the root shell in accordance with Router Core's match contract.
+Each active match owns descriptors derived from route metadata and the Start manifest. An `assets()` boundary around the match delivers stylesheets, preloads, preconnects, fonts, and async scripts before dependent content. Fig's registry deduplicates them against assets from ordinary components and Payload.
 
-## Link Contract
+`HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker.
 
-`Link` always renders a native anchor with an `href`. Fig's `on()` mixin adds client navigation while preserving native behavior for external URLs, reload requests, downloads, non-primary clicks, modifier keys, and non-`_self` targets. Disabled links omit `href` and expose `aria-disabled`. `activeProps` and `inactiveProps` merge native anchor props, with `class`, `style`, `mix`, and `bind` composed rather than replaced; a render-function child receives the link's `isActive` and per-navigation `isTransitioning` state. Intent, render, and viewport preloading delegate to `router.preloadRoute`; `LinkProps` rejects unsupported proximity preloading rather than accepting and ignoring it. `linkOptions` and `createRouteMask` are type-checking identity functions and add no runtime wrapper.
+`assetCrossOrigin` is a router option because route assets are translated before the document renders. The server nonce applies to both registry assets and positioned tags.
+
+## Route Data
+
+Applications place a `FigDataStoreHandle` at `router.context.data`. Router loaders then call:
+
+```ts
+await ensureRouteData(context, userResource, id);
+```
+
+The helper awaits `ensureData` and returns `void`. The component reads the same key with `readData`. Router decides when loading happens; Fig alone owns the value, identity, freshness, error, and hydration.
+
+With a Fig store present, `createRouter` defaults `defaultPreloadStaleTime` to `0` unless the application supplied another value. A development diagnostic catches routes that also publish `loaderData`, which would create a second cache and wire format. Routers without `context.data` keep native Router Core loader behavior.
+
+For non-blocking work, loaders call `context.data.preloadData` and return. Navigation may commit Suspense fallback UI while the component claims the entry. A superseding navigation can then remove that fallback without allowing the old result to publish.
+
+## Links
+
+`Link` always renders a native `<a href>`. Fig's `on()` mixin adds client navigation while preserving normal browser behavior for external URLs, reloads, downloads, modified clicks, non-primary buttons, and non-`_self` targets.
+
+Disabled links omit `href` and set `aria-disabled`. Active and inactive props merge with the base anchor; `class`, `style`, `mix`, and `bind` compose rather than replace. Render-function children receive `isActive` and per-navigation `isTransitioning`.
+
+Intent, render, and viewport preloading delegate to Router Core. Unsupported proximity preloading is rejected rather than silently ignored.

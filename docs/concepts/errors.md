@@ -2,30 +2,55 @@
 
 Status: stable
 
-Boundaries, digests, uncaught routing, and the recovery loop.
+Fig separates errors into three paths: errors a component can recover from, errors the root must report, and cancellations that are not errors at all.
 
 ## ErrorBoundary
 
-A component, not a class protocol. It catches render errors and Fig effect errors with a sticky fallback; reset by remounting/changing the boundary key. `fallback` may be a function receiving `(error, info)` so error UIs render the failure directly (a bare function is never a valid `FigNode`, so the shapes cannot collide); `onError(error, info)` is the side channel for reporting. `ErrorInfo` carries `componentStack` and, for data-originated errors, `dataResourceKeys` (see data.md).
+`ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors, then keeps showing its fallback until the boundary remounts or its key changes.
 
-Boundaries do **not** catch: promises (that is Suspense), event handler errors, async callback errors, server render errors (those recover through client-render markers), or host commit failures.
+The fallback may be a node or a function receiving `(error, info)`. `onError(error, info)` is available for reporting. `ErrorInfo` contains a component stack and, for data errors, the affected `dataResourceKeys`.
 
-## The Recovery Loop
+An `ErrorBoundary` does not catch:
 
-"Fetch failed → show error → retry" composes without side channels: `readData` throws the real error into the boundary; the function `fallback` renders it with a retry affordance; retry calls `invalidateDataError(error)` or `invalidateDataKey(key)` (which reset cached rejections back to pending) and remounts the boundary by key; the fresh read loads afresh.
+- promises, which belong to Suspense;
+- event-handler or other async callback errors;
+- server-render errors, which use client-render markers; or
+- host commit failures.
 
-## Uncaught Routing
+## Retrying Data Errors
 
-Uncaught render errors rethrow to `flushSync` callers; outside `flushSync` they go to the root's `onUncaughtError`, or rethrow from a detached task when no handler exists — scheduler ticks never die silently. Hydration recoveries report through the root's `onRecoverableError` with digests. Fig-dom omits React's root-level `onCaughtError` in favor of the per-boundary `onError` prop.
+The normal recovery loop has no special side channel:
 
-## Server Digests
+1. `readData` throws the loader error.
+2. `ErrorBoundary` renders a retry button.
+3. The button calls `invalidateDataError(error)` or `invalidateDataKey(key)`.
+4. The UI changes the boundary key, remounting it.
+5. The new read starts a fresh load.
 
-Server render errors cross the wire only through `onError(error, info) => { digest?, message? }` — authoritative payload, production-empty by default, shared by the HTML and payload renderers (see server-rendering.md). Client-render markers carry the digest into hydration (`data-dgst`/`data-msg`), and payload error rows reject their chunk with a digest-carrying error.
+Invalidation resets a cached rejection to pending. Remounting resets the boundary's sticky fallback. Both steps matter.
 
-## Payload Holes
+## Uncaught Errors
 
-A decoded payload value can be fulfilled while streamed subtrees inside it are still outlined holes (payload.md). A hole's `error` row — or a post-root transport/protocol failure — rejects that hole, and the nearest `ErrorBoundary` covering the decoded slot catches it, digest contract intact; the surrounding fulfilled value stays published. `payloadDataLoader` attributes the hole error to the still-authoritative owning data-resource generation, so `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root load failure. Invalidating that error retires the broken fulfilled value rather than serving its rejected hole stale; remounting the boundary suspends on a fresh generation. Superseded-generation hole errors carry no attribution. Aborting a decode follows Cancellation Is Not An Error: unresolved holes reject with an internal cancellation reason while `onStreamDone` reports `aborted`.
+An uncaught render error is rethrown to a `flushSync` caller. Outside `flushSync`, it goes to the root's `onUncaughtError`. If the root has no handler, Fig rethrows it from a detached task so a scheduler tick never swallows the failure.
+
+Hydration recovery reports through `onRecoverableError`. Fig DOM does not provide React's root-level `onCaughtError`; a boundary's `onError` prop owns caught-error reporting.
+
+## Server Errors And Digests
+
+Server errors cross the wire only through:
+
+```ts
+onError(error, info) => ({ digest, message })
+```
+
+The returned object is authoritative. Production sends nothing by default; development includes the message. HTML client-render markers carry `data-dgst` and `data-msg`, while Payload error rows reject their chunk with a digest-carrying error.
+
+## Errors Inside Payload Holes
+
+A decoded Payload root may be ready while streamed subtrees inside it are still pending. If one of those holes fails, the nearest `ErrorBoundary` around that slot catches it. The surrounding root value remains usable.
+
+`payloadDataLoader` attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
 
 ## Cancellation Is Not An Error
 
-Across transitions, actions, and data loads, an aborted run is _retired_: its rejection is swallowed (an aborted fetch rejecting is the happy path) and its settlement cannot touch state. Only live-generation failures reach boundaries or rethrow paths. See hooks.md and data.md.
+Transitions, actions, data loads, and Payload decoding all retire aborted work. An expected abort rejection is swallowed, and the retired work cannot publish state later. Only failures from the current live generation reach boundaries or uncaught-error paths.

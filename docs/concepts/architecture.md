@@ -2,49 +2,67 @@
 
 Status: stable
 
-How the packages relate, who owns what, and the cross-package protocol.
+Fig is split into packages by responsibility. The basic rule is simple: every public export has one home, and internal renderer details stay internal.
 
 ## Package Ownership
 
-Every app-facing export has exactly one home: behavior lives in the package whose domain defines it. Renderer packages do not mirror core app APIs, and a package re-exports a _type_ only when that type appears in its own public signatures (types follow signatures — that is what gives consumers semver protection). The one mechanical exception is a renderer's JSX transform subpaths: `@bgub/fig-dom/jsx-runtime` re-exports the core transform functions while supplying the DOM-specific `JSX` namespace required by TypeScript.
+Behavior lives in the package whose domain defines it. Renderer packages do not mirror core APIs. A package re-exports a type only when that type appears in one of its own public signatures; this gives consumers the right semver boundary.
 
-- `@bgub/fig` — the component model: elements and the JSX runtime, host mixin descriptors and `createMixin`, components (`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`, `ViewTransition`), hooks, the read verbs (`readContext`, `readPromise`, `readData`), `transition`, `isValidElement`, `lazy`, `clientReference`, asset-resource creators, and the data layer — `dataResource`, `createDataStore`, the freshness verbs, and the store implementation (which stays out of data-free bundles; see the lazy store installation protocol below). The `./payload` subpath is the browser-safe client decoder home: `decodePayloadStream` plus its narrow result/options and client-reference resolver types (payload.md); rows, codecs, and value encoding remain internal. Browser code never imports `@bgub/fig-server` to decode.
-- `@bgub/fig-dom` — the browser boundary: `createRoot`/`hydrateRoot`/`createPortal`, `flushSync`, the `on()` event mixin, `bind`/`composeBind`, `insertAssetResources`, `payloadDataLoader` (the payload-endpoint → data-resource adapter), host-prop JSX types, the `./refresh` HMR subpath (`scheduleRefresh` plus the `RefreshFamily`/`RefreshUpdate` signature types; scheduler configuration stays internal), and `./test-utils` (`act`).
-- `@bgub/fig-reconciler` — renderer authoring: `createRenderer`/`HostConfig`, `EventPriority`/`runWithEventPriority`, the internal cooperative scheduler, and the `./devtools`, `./refresh`, and `./test-utils` (`act`) subpaths.
-- `@bgub/fig-server` — server rendering (`renderToStream` grid, `prerender`) and the `./payload` server half (`renderToPayloadStream`). The serializer and decoder share their private row/value format through `@bgub/fig/internal`; framework adapters own delivery transports. The `./html` subpath owns `escapeAttribute`/`escapeText` plus `escapeScriptText`/`escapeScriptJson`, whose contract is "consistent with fig-server's own HTML emission".
-- `@bgub/fig-refresh` — the published HMR runtime layer.
-- `@bgub/fig-vite` — the published Vite integration for Fast Refresh.
-- `@bgub/fig-tanstack-router` — the TanStack Router framework adapter: Fig route components and hooks, the private reactive-store bridge supplied to `RouterCore`, and native anchor navigation. Matching, loading, and history remain owned by `@tanstack/router-core`.
-- `@bgub/fig-tanstack-start` — the TanStack Start runtime adapter: one Fig-owned request/root data store, Fig document-data serialization, Payload route serving/adoption, and Fig server/client rendering around Start's request and hydration cores.
-- `@bgub/fig-devtools` — the private DevTools workspace preview. Its `./tanstack` subpath adapts the existing hook-backed panel to TanStack Devtools' DOM plugin seam; it mounts an isolated non-publishing Fig root per host container and owns explicit teardown, while commit snapshots continue to flow directly through Fig's global hook rather than a second event transport. Inspection highlights portal into the host's owner document below the outer shell's stacking context so transformed or clipped plugin panels cannot change their viewport geometry.
+For example, `useState` belongs to core because every renderer uses it. `createRoot` belongs to Fig DOM because it creates a browser root. The DOM package may mention a core type in one of its signatures, but it does not re-export `useState` for convenience.
 
-fig-server is a fully separate render implementation (it depends only on `@bgub/fig`, never on the reconciler) — that split is why `HostConfig` never grew a server mode.
+The one mechanical exception is JSX. `@bgub/fig-dom/jsx-runtime` re-exports the core transform functions while adding the DOM-specific `JSX` namespace TypeScript needs.
 
-### Reconciler internals
+- `@bgub/fig` owns the component model: elements, JSX transforms, components, hooks, read verbs, transitions, mixin descriptors, client references, asset creators, and data resources.
+- `@bgub/fig-dom` owns the browser: roots, hydration, portals, `flushSync`, native events, binds, DOM asset insertion, Payload loading, Fast Refresh wiring, and DOM test utilities.
+- `@bgub/fig-reconciler` owns renderer authoring: `createRenderer`, `HostConfig`, event priority, the scheduler, DevTools, refresh, and test subpaths.
+- `@bgub/fig-server` owns HTML server rendering and the server half of Payload. Its `./html` subpath exports the escaping helpers frameworks need when writing companion markup.
+- `@bgub/fig/payload` owns browser-safe Payload decoding. Browser code never imports `@bgub/fig-server` to decode.
+- `@bgub/fig-refresh` and `@bgub/fig-vite` own the published Fast Refresh runtime and Vite integration.
+- `@bgub/fig-tanstack-router` owns Fig's Router Core adapter. TanStack still owns matching, history, loading, and navigation.
+- `@bgub/fig-tanstack-start` owns the Start integration: one Fig data store per request/root, document-data transport, Payload routes, and Fig rendering around Start's request and hydration cores.
+- `@bgub/fig-devtools` is the private DevTools preview. Its TanStack plugin mounts an isolated Fig root, while snapshots continue to flow through Fig's global DevTools hook.
 
-`createRenderer` is the stateful kernel: render, hydration, Suspense, commit, and effect phases stay together because they share one host configuration and one set of fiber invariants. Pure mechanisms sit behind small internal modules instead: fiber/hook vocabularies, traversal, hook-queue operations, host-content interpretation, lazy root-data installation, lanes/scheduling, refresh, and DevTools snapshotting. New files should hide a complete rule or state machine; do not split the kernel into callback-heavy pass-through layers merely to make the main file shorter.
+The HTML server renderer is a separate implementation that depends on `@bgub/fig`, not on the reconciler. This is why `HostConfig` has no server-rendering mode.
 
-Fiber flags are the source of truth for commit work. Completion folds the subtree-visible flags into a compact descendant summary: order-sensitive work is interpreted through pruned tree walks, while fiber-local work also enters a sparse commit index. That index is only an acceleration structure; captures roll it back to a typed checkpoint, and development parity checks verify it against the tree.
+## Reconciler Shape
 
-## The Internal Entry (`@bgub/fig/internal`)
+`createRenderer` is the reconciler's main stateful module. Rendering, hydration, Suspense, commit, and effects stay together because they share one host configuration and the same fiber rules.
 
-The cross-package protocol registry, versioned together with the sibling packages and never for apps:
+Smaller internal modules should hide a complete rule or state machine: hook queues, lanes, scheduling, traversal, host-content interpretation, lazy data-store installation, refresh, or DevTools snapshots. We do not split the kernel into callback layers merely to shorten one file.
 
-- injection slots: the render dispatcher and transition handler;
-- the lazy data-store protocol: the internal symbol that lets data resources carry their store factory to renderers without import-time registration;
-- the element model: `$$typeof` brand predicates (`isSuspense`, `isPortal`, ...; `isValidElement` is app-facing and lives only on the main entry), `createPortalNode` (renderers wrap it in their container-typed `createPortal`), `collectChildren`/`NormalizedChild`, thenable registry (`readThenable`/`trackThenable`);
-- shared HTML knowledge both renderers need: DOM-nesting validation tables, the Suspense/Activity streaming marker constants, the text-separator comment data that keeps adjacent text fibers' DOM nodes apart, and the single `data-fig-hydration-skip` attribute for server-owned DOM nodes that have no client fiber.
+Fiber flags remain the source of truth for commit work. Completion summarizes descendant flags so commit can skip clean branches. Fiber-local work may also enter a sparse commit index for speed.
 
-Child normalization (`collectChildren`) is shared because the server emits merged text nodes into HTML and hydration matches them against client fiber children — the two sides must not drift. Its normalized union includes thenables as opaque child slots; neither renderer unwraps them during collection. The process-wide thenable registry is shared for the same reason: promise-identity-keyed suspend/resume must agree between client and server.
+When a boundary discards work, it rolls that index back. Development builds compare the index with the normal tree traversal.
 
-## Lazy Data-Store Installation
+## `@bgub/fig/internal`
 
-Renderers never import the store implementation, and no fig entry installs it as an import side effect. Instead, each resource created by `dataResource` carries the store factory on an internal symbol, so the implementation's only bundle reference is `dataResource` itself — a bundle that never defines a resource never ships the store. Roots created before any resource exists hold a stub store that buffers `hydrate()`/`initialData` entries. The first real data operation (`readData`, `preloadData`, `invalidateData`, or `refreshData`) passes a resource to the stub; the stub installs the real store from the resource's factory and replays buffered hydration entries.
+This entry is the versioned protocol shared by sibling Fig packages. Applications must not import it.
 
-The operations that can install the real store (`readData`, `preloadData`, `invalidateData`, and `refreshData`) all take a resource created by `dataResource`, which carries the factory. Exact-key, prefix, and attributed- error invalidation cannot install a store because they have no resource from which to obtain the factory; on an uninstalled stub they are inert (`invalidateDataError` returns `false`). Once any resource-backed operation installs the store, those targeting variants operate normally. Type exports do not weaken the invariant — the data-protocol types have no runtime footprint.
+It contains:
 
-## Boundaries That Never Leak
+- injection slots for the active render dispatcher and transition handler;
+- the lazy data-store factory symbol;
+- element brands and predicates, portal construction, child normalization, and thenable tracking;
+- DOM-nesting tables shared by client and server rendering; and
+- Suspense and Activity markers, the adjacent-text separator, and `data-fig-hydration-skip`.
 
-- Lanes and fibers never cross a public boundary; priority crosses as `EventPriority = "default" | "continuous" | "discrete"` strings.
-- The cooperative scheduler is an internal fig-reconciler module (not a published package) exposing no `unstable_` APIs; `act` is the public testing surface that temporarily routes scheduled callbacks into a test queue. Its work loop prefers `setImmediate` and creates its `MessageChannel` lazily, so importing a renderer can never keep a Node process alive.
-- Dev-only behavior (strict double render, diagnostics, DevTools emission) uses inline `__FIG_DEV__` checks that Fig library builds define away; there are no separate dev builds. `__FIG_DEV__` is the only dev-gating mechanism: runtime `process.env.NODE_ENV` is never consulted (a consumer that wants dev mode must define `__FIG_DEV__: true` at build time, as the monorepo's demos and tests do via `vite.config.ts`). Each gated module carries its own `declare const __FIG_DEV__` plus a module-local `__DEV__` const on purpose: JSR publishes raw source, so ambient declaration files are unavailable, and bundlers only fold gates whose const lives in the same module. Demo builds are asserted dev-mode by `scripts/assert-dev-bundle.mjs` right after pack, because unit tests always run source-linked with the dev define and cannot see a stripped bundle.
+Child normalization is shared because server HTML and client hydration must agree on the exact child shape. It flattens arrays and merges adjacent text while keeping promises as opaque slots. The thenable registry is process-wide for the same reason: promise-identity reads must agree across renderers.
+
+## Lazy Data Stores
+
+Renderers never import the data-store implementation, and importing a Fig entry never installs it as a side effect.
+
+Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `preloadData`, `invalidateData`, or `refreshData`—loads the real store and replays that buffered data.
+
+This keeps data-free bundles data-free. It also explains one edge case: exact-key, prefix, and error-attributed invalidation cannot install the store because they do not receive a resource carrying the factory. Before installation they are inert; afterward they work normally.
+
+## Boundaries That Stay Private
+
+- Fibers and lanes never cross a public API. Renderer packages receive `EventPriority` as `"default"`, `"continuous"`, or `"discrete"`.
+- The scheduler is internal to the reconciler. `act` is the public testing boundary; no `unstable_` scheduler API is published.
+- The scheduler prefers `setImmediate`, creates `MessageChannel` lazily in browsers, and falls back to `setTimeout`. Importing a renderer must not keep a Node process alive.
+- Development behavior uses compile-time `__FIG_DEV__` checks. Fig does not read `process.env.NODE_ENV` at runtime and does not publish separate development builds.
+
+Each gated module declares `__FIG_DEV__` and defines its own local `__DEV__`. JSR publishes source, so those declarations cannot rely on ambient files. Bundlers also remove a gate more reliably when its constant is local.
+
+The demo build runs `scripts/assert-dev-bundle.mjs` after packing because source-linked unit tests cannot verify the stripped bundle.

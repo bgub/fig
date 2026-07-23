@@ -2,18 +2,45 @@
 
 Status: stable
 
-`<Activity mode="visible" | "hidden">` hides a subtree while preserving fiber and hook state.
+`<Activity mode="visible" | "hidden">` hides a subtree without throwing away its fibers, hooks, or state. Think of it as putting an existing UI to sleep and waking it later.
 
-## Hiding And Revealing
+```tsx
+<Activity mode={tab === "settings" ? "visible" : "hidden"}>
+  <Settings />
+</Activity>
+```
 
-Hiding applies the host `hideInstance`/`unhideInstance` hooks (through portals, stopping at nested hidden boundaries) and **aborts** effects, binds, stable events, and in-flight transitions/actions — the aborted signal is the visibility indicator; there is no visibility API. Revealing re-arms deferred effects (kept on `fiber.effects` while hidden and skipped by the commit effect walks) so they run in normal phase order; external-store subscriptions defer until reveal. Trees that mount hidden never run effects until revealed.
+Switching away preserves the Settings state, but its effects and subscriptions stop until the tab becomes visible again.
 
-## Offscreen Scheduling
+## Hiding A Tree
 
-Updates inside hidden trees are downgraded to the offscreen lane at schedule time — visibility is read from a commit-updated `ActivityState` shared by both fiber generations, so stale dispatch chains stay authoritative — and prerender at idle priority into the hidden DOM, with prerendered placements and host updates re-hidden as they commit. A reveal expands the render lanes so pending hidden work commits atomically with the reveal; offscreen work skipped by earlier bailouts is re-marked pending after commit. Retired transition/action pending slots release on hide (scheduled at the hidden tree's downgraded lane) so a revealed tree is never stuck `isPending`.
+When an Activity becomes hidden, Fig:
+
+- hides its host nodes through the renderer's `hideInstance` hooks;
+- aborts effects, binds, stable events, transitions, and actions;
+- pauses external-store subscriptions; and
+- moves future updates onto the offscreen lane.
+
+The aborted signals are the visibility notification. There is no separate visibility API.
+
+Portals are included because Activity follows the logical Fig tree. A nested hidden Activity is its own boundary, so an outer hide does not walk through it.
+
+## Revealing A Tree
+
+Revealing makes the existing nodes visible again and re-arms deferred effects in their normal phase order. External-store subscriptions also start at reveal. A tree that first mounts while hidden does not run effects until it becomes visible.
+
+Hidden updates can prerender at idle priority. Fig keeps the committed visibility in an `ActivityState` shared by both fiber generations, so even an old setter knows that its tree is hidden. Newly placed or updated host nodes are hidden as they commit.
+
+On reveal, Fig includes pending offscreen work in the render and commits it with the visibility change. The user never sees a half-updated hidden tree. Pending transition and action slots are retired when the tree hides, so `isPending` cannot remain stuck after reveal.
 
 ## Server Rendering And Hydration
 
-The server streams hidden Activity content inside an inert `<template data-fig-activity>` so neither elements nor bare text render before hydration. The client keeps such boundaries dehydrated — no fibers, hooks, or hydration work — until reveal (or a visible client mode), when the content hydrates against the template's nodes and the commit unpacks them into the live DOM with node identity preserved. Any throw during Activity hydration abandons the attempt and the boundary stays dehydrated for a clean retry; hydration mismatches recover with a root client render.
+The server places hidden Activity content inside an inert `<template data-fig-activity>`. Its elements and text do not appear on screen before hydration.
 
-Suspense that suspends inside hidden server content still streams its completion: the boundary's markers live in the activity's inert `<template>` (whose content fragment is unreachable by the id-based reveal scripts), so its partial segments stage and fill in light-DOM hidden divs like any boundary, and a final `ac` op moves the assembled content into the template content (falling back to the light DOM if the activity already revealed), leaving a completed boundary that hydrates normally on reveal. A server render error inside such content emits an `ax` client-render marker into the same template content, with the same light-DOM fallback after early reveal.
+The client leaves that template dehydrated: no fibers, hooks, or hydration work are created until the Activity reveals. At reveal, Fig hydrates against the template contents and moves the same nodes into the live DOM. Node identity is preserved.
+
+If Activity hydration throws, Fig abandons the attempt and leaves the template untouched so a later reveal can retry cleanly. A hydration mismatch falls back to root client rendering.
+
+Suspense may continue streaming inside a hidden Activity. Its segments stage in hidden light-DOM containers because normal id lookup cannot reach a template's content fragment.
+
+The final `ac` operation moves completed content into the template, or into the live DOM if the Activity revealed early. Server errors use the matching `ax` operation. Either way, the completed boundary hydrates normally when the Activity becomes visible.

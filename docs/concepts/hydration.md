@@ -2,35 +2,63 @@
 
 Status: stable core; hydration-environment exploring
 
-Selective hydration, event replay, mismatch policy, and the open hydration-environment design.
+Hydration attaches Fig fibers to server-rendered DOM. Suspense boundaries can hydrate independently, events wait for the boundary they need, and recoverable mismatches fall back to client rendering.
 
 ## Selective Hydration
 
-Hydration is Suspense-boundary selective: server markers can stay dehydrated until background work or interaction hydrates that boundary. `hydrateRoot` requires the hydration host hooks at creation (fig-dom parses the streaming markers into `DehydratedSuspenseBoundary` objects — see suspense-streaming.md). The hydration cursor steps over the server's `<!--,-->` text-separator comments when advancing (see the text-separators section of server-rendering.md); suspense marker comments are never skipped. A dehydrated boundary whose hydration attempt suspends **stays dehydrated**: the server DOM is preserved and the attached thenable ping retries hydration; no fallback is ever rendered over server content. Suspense retries after a committed fallback schedule on retry lanes — low priority, excluded from expiration, reusing the boundary's retry lane when a retry suspends again.
+Server Suspense markers let a boundary stay dehydrated after the outer shell becomes interactive. `hydrateRoot` requires the renderer's hydration hooks up front; Fig DOM parses those markers into `DehydratedSuspenseBoundary` objects.
 
-`hydrateRoot` accepts a root-neutral `dataStore` created before router hydration. It adopts that same instance and attaches its scheduler before rendering, so route-loader hydration and component `readData` share one cache without a store-to-store copy. fig-dom accepts `Document` containers for full-document framework hydration in addition to elements and document fragments. Root recovery in a `Document` preserves its doctype, which is document metadata rather than a Fig-owned host node.
+If hydration inside a boundary suspends, Fig leaves its server DOM untouched. The promise wakes another hydration attempt when it settles. Fig never replaces preserved server content with the boundary's fallback.
 
-Dehydrated Suspense and Activity state also captures the canonical `useId` path at the moment its server marker is claimed. A later hydration attempt restores that immutable base rather than deriving ids from the boundary's possibly shifted live fiber index. Updates may therefore insert or move siblings while the boundary remains dehydrated without renumbering its server ids; components mounted by those updates receive client-only `fig-C-*` ids. The private Activity fiber that Suspense uses to retain its primary tree is transparent to the path because it has no server counterpart.
+After a fallback has committed on the client, later Suspense retries use low-priority retry lanes. A retry that suspends again reuses the boundary's retry lane.
 
-Hydration adopts single-text host children as text fibers (they must match the server's text nodes), and re-renders **keep that shape** instead of collapsing to the client's textContent optimization. Collapsing would delete the adopted fiber and rewrite identical text on the first post-hydration commit — wasted DOM work whose flags read as a real content mutation (it made view transitions animate a no-op on the first navigation).
+The hydration cursor skips only Fig's `<!--,-->` adjacent-text separators. It never skips Suspense markers.
+
+`hydrateRoot` may adopt a data store prepared before rendering by a router. The renderer attaches scheduling to that same store, so route loaders and component `readData` calls share one cache. Fig DOM also accepts a `Document` container for full-document hydration and preserves its doctype during recovery.
+
+Dehydrated Suspense and Activity boundaries capture their canonical `useId` path when they claim a server marker. Later hydration restores that path instead of using a live fiber index that intervening updates may have shifted. Suspense's private Activity fiber is transparent because it has no server counterpart, and purely client-mounted components use the separate `fig-C-*` namespace.
+
+Single-text host children hydrate as text fibers and keep that shape. Fig does not collapse them into a `textContent` shortcut on the next update, because doing so would replace identical DOM and create a fake mutation for view transitions.
 
 ## Event Replay
 
-Replayable events (click, key, pointer) that target a still-dehydrated boundary are queued and replayed after that boundary hydrates — a synthetic two-phase dispatch through the logical tree (see events.md). Hydration listeners are separate capture-phase listeners per root, covering the discrete/continuous sets plus focus and enter/leave events, so interacting with dehydrated content triggers its hydration at input priority. Once a root has no remaining dehydrated Suspense boundaries, the host tears down those capture listeners and clears the selective-hydration callback.
+Clicks, key events, and pointer events targeting a dehydrated boundary are queued and replayed after that boundary hydrates. Capture listeners also let an interaction request hydration at the event's priority.
 
-Blocked-boundary lookup is target-instance based, not tree-search based: the host walks outward from the event target — at each ancestor level an unmatched start marker among the preceding siblings encloses the target (`getEnclosingSuspenseBoundaryStart`; passing a start marker back in resumes the search at the next enclosing boundary) — and the reconciler resolves that marker through a per-root map of live dehydrated boundaries keyed by start marker, rebuilt in the same post-commit walk that maintains the dehydrated count. A marker with no live fiber is a boundary nested inside an outer dehydrated one; the lookup resumes outward. Cost is proportional to the target's surroundings, never to app or boundary size. Hosts without the lookup hook fall back to searching the fiber tree with per-boundary host containment checks.
+Once a root has no dehydrated Suspense boundaries, Fig removes those listeners and clears the selective-hydration callback.
 
-## Mismatch Policy
+To find the blocked boundary, Fig DOM walks outward from the event target and matches surrounding marker comments. A per-root map resolves a start marker to its live boundary.
 
-Server-only attributes and styles are preserved (extensions and edge-injected markers survive), with a dev warning when they diverge from the client render; text mismatches recover with a root client render (reported through `onRecoverableError`, digests included). Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary. When the boundary encloses a `Document`'s `documentElement`, fig-dom classifies local replacement as impossible and escalates to root recovery: a document cannot temporarily contain both the server and client document elements. `unsafeHTML` is trusted as an opaque server subtree during hydration: Fig validates the client prop shape but does not raw-compare or reassign `innerHTML`, because browser serialization is not stable across equivalent HTML. Host elements support React's `suppressHydrationWarning` prop as a one-level escape hatch for intentional direct text/attribute divergence on that host element; it does not suppress structural mismatches, descendant component output, or deeper host children, and is not rendered as a DOM attribute. Framework app shells own per-request `<html>` props; request-known shell state like a cookie-backed theme should be rendered there instead of patched by a hydration script.
+If the marker belongs to a boundary nested inside another dehydrated boundary, the search continues outward. This keeps lookup local to the target instead of scanning the application tree.
 
-## Exploring: Hydration-Stable Environment
+Renderers without this host lookup can fall back to searching the fiber tree.
 
-Environment-dependent first renders (time, locale, time zone, viewport) are the legitimate mismatch class. The direction is a hydration-stable environment primitive rather than a mismatch opt-out: the app captures the environment values that affect HTML on the server, serializes them with the document, and the client's hydration render reads that same snapshot; after hydration, browser-backed stores publish live values through normal subscription flow (the `useSyncExternalStore` server-snapshot pattern, made first-class).
+## Mismatch Recovery
 
-Values the server can already know from the request should stay outside this primitive. For example, color scheme should usually be a cookie-backed app preference rendered into the framework document shell, with `system` resolved by CSS media queries.
+Fig handles mismatch types differently:
 
-Sketch (framework-adapter level):
+- Extra server attributes and styles remain in place, with a development warning. Browser extensions and edge middleware may have added them.
+- Text mismatches recover by client-rendering the root and report through `onRecoverableError`.
+- Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary.
+- If that boundary contains a `Document`'s `<html>` element, recovery escalates to the root because a document cannot temporarily contain two document elements.
+
+`unsafeHTML` is an opaque trusted subtree. Fig validates the client prop but does not compare or rewrite `innerHTML` during hydration because browser serialization is not stable across equivalent HTML.
+
+`suppressHydrationWarning` is a narrow compatibility escape hatch. It suppresses direct text and attribute warnings on one host element, but not structural mismatches, component output, or deeper descendants. It never becomes a DOM attribute.
+
+Request-known document state belongs in the server shell. For example, a cookie-backed theme should render on `<html>` rather than be patched by a hydration script.
+
+## Exploring: A Stable Hydration Environment
+
+Time, locale, time zone, and viewport are harder: the server and browser may legitimately compute different first renders.
+
+The likely solution is a hydration-stable environment snapshot:
+
+1. The server captures the environment values that affected its HTML.
+2. The framework serializes that snapshot with the document.
+3. The first client render reads the same values.
+4. After hydration, browser-backed stores publish live values normally.
+
+This is the `useSyncExternalStore` server-snapshot pattern made easier to use.
 
 ```ts
 createRequestHandler({
@@ -43,8 +71,8 @@ createRequestHandler({
 });
 ```
 
-Open questions: ownership (framework adapter vs fig-dom vs a core primitive), one app-wide snapshot vs nested scopes, how the client learns hydration finished (to switch to live values), whether the snapshot rides framework bootstrap state or a renderer-level slot, and whether bare `hydrateRoot` should accept a snapshot option.
+Values already known from the request should not use this mechanism. A color preference can come from a cookie, while `system` color mode can remain a CSS media query.
 
-Provisional stance: keep `suppressHydrationWarning` compatible but narrow. Prototype the environment snapshot in the TanStack Start adapter first; if a divergence class remains that cannot be modeled as snapshot-plus-post-hydration-update or a one-level host escape hatch, add a smaller, named escape hatch for that class rather than a broader mismatch silencer.
+Open decisions include who owns the API, whether snapshots may be nested, how the client switches to live values, and whether bare `hydrateRoot` needs an option.
 
-Prior art surveyed: React/Next (placeholder-until-mount, client-only, `suppressHydrationWarning`), Vue 3.5 (`data-allow-mismatch` — the explicit escape-hatch model), Nuxt (steering toward server/client-stable sources), and `useSyncExternalStore`'s dual-snapshot pattern, which is the closest shape to the proposal.
+The provisional direction is to prototype this in TanStack Start while keeping `suppressHydrationWarning` narrow. Add another escape hatch only if a real mismatch cannot be represented as a snapshot followed by a normal client update.

@@ -2,11 +2,11 @@
 
 Status: stable
 
-The wire shape that lets Suspense content stream out of order and complete in place, and the client runtime that assembles it.
+Suspense lets the server send a fallback now and the completed content later. A small marker format tells the browser where that later content belongs.
 
-## Markers
+## Boundary Markers
 
-A server-rendered Suspense boundary brackets its slot with comments:
+A pending boundary looks like this:
 
 ```html
 <!--fig:suspense:pending:N--><template id="b-N"></template>
@@ -14,19 +14,38 @@ A server-rendered Suspense boundary brackets its slot with comments:
 <!--/fig:suspense-->
 ```
 
-The start comment carries the boundary state (`pending:N`, then rewritten to `completed` or `client` in place); the `<template>` is the boundary placeholder that ops resolve by id (and the carrier for `data-dgst`/`data-msg` on client-rendered boundaries). Completed-inline boundaries (those that settle before their parent flushes — every boundary, in prerender) skip the machinery: `<!--fig:suspense:completed-->content<!--/fig:suspense-->`.
+The start comment records the boundary state. The template marks the insertion point and may carry `data-dgst` and `data-msg` for a client-rendered boundary.
 
-## Segments And Ops
+If the content finishes before its parent flushes, Fig writes it inline and needs no staging machinery:
 
-Content that settles after its slot flushed streams later as hidden staging segments (`<div hidden id="s-N">`) followed by inline script ops against the document's runtime object (written lazily, once, nonce-compatible, named per `identifierPrefix`):
+```html
+<!--fig:suspense:completed-->...content...<!--/fig:suspense-->
+```
 
-- `c(boundaryId, segmentId, metadata?)` — complete a boundary: move the staged segment's children into the slot, delete the fallback range (nested fallback ranges included), rewrite the start marker to `completed`, and atomically reconcile an optional complete visible title/meta snapshot. If the client already attached the boundary's hydration retry hook (`__figRetry`), the runtime skips metadata reconciliation and invokes the hook so the renderer commit owns it.
-- `s(placeholderId, segmentId)` — fill a partial segment (a placeholder inside still-streaming content).
-- `x(boundaryId, digest, message)` — mark a boundary client-rendered: rewrite the marker to `client`, stash digest/message on the placeholder, ping the retry hook. The client re-renders that boundary locally.
-- `r(ids, fn)` — reveal gating: wait for blocking stylesheets to load before running a completion, so revealed content never flashes unstyled.
-- View-transition annotations (`data-fig-vt-name` and `data-fig-vt-class`) on staged/fallback host surfaces make `s`, `c`, and `ac` run their DOM moves inside `document.startViewTransition` when the browser supports it. Without annotations or browser support, the ops take the same non-animated path. Annotated reveals share the per-document `__figViewTransition` mutex with client commits: a reveal chains on a running transition's `finished` instead of skipping it, and registers its own transition while animating (see view-transitions.md).
-- `ac`/`ax` — the Activity-hidden variants: resolve the boundary inside an inert `<template data-fig-activity>` content fragment (unreachable by id-based lookup), falling back to the light DOM if the activity already revealed. See activity.md.
+Prerendered boundaries always use this completed-inline form unless they fail.
 
-## Client Side
+## Staged Segments
 
-Hydration parses the markers into `DehydratedSuspenseBoundary` host objects (marker parsing lives in fig-dom, behind the reconciler's hydration host hooks). Boundaries hydrate selectively and retries ride the `__figRetry` hook — see hydration.md. Server errors recover only through the client-render markers; there is no other server error channel in the document.
+Content that finishes after its slot has flushed arrives in a hidden `<div id="s-N">`. An inline operation moves the staged nodes into place. The runtime is written lazily once per document, uses the render's `identifierPrefix`, and carries the configured CSP nonce.
+
+The operations are:
+
+- `c(boundaryId, segmentId, metadata?)` completes a boundary. It replaces the fallback, marks the boundary completed, and applies an optional title/meta snapshot in the same operation.
+- `s(placeholderId, segmentId)` fills a partial segment inside content that is still streaming.
+- `x(boundaryId, digest, message)` marks a boundary for client rendering and wakes its hydration retry.
+- `r(ids, fn)` waits for blocking stylesheets before revealing content.
+- `ac` and `ax` are the matching completion and error operations for content inside a hidden Activity template.
+
+If hydration already owns a boundary, `c` leaves metadata to the renderer commit and calls the attached `__figRetry` hook instead.
+
+## View Transitions
+
+Staged and fallback surfaces may carry `data-fig-vt-name` and `data-fig-vt-class`. When the browser supports native view transitions, the `s`, `c`, and `ac` DOM moves run inside `document.startViewTransition`.
+
+Streaming reveals share the document's `__figViewTransition` mutex with client commits. A reveal waits for an active transition instead of skipping animation. Without annotations or browser support, the same operations take the normal non-animated path.
+
+## Hydration
+
+Fig DOM parses the comments into `DehydratedSuspenseBoundary` objects and exposes them through the reconciler's hydration hooks. A boundary may remain dehydrated until background work or user interaction asks for it. Retries use the boundary's `__figRetry` hook.
+
+Server errors recover through the `x` client-render marker. There is no second hidden error channel in the document.

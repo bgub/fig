@@ -2,44 +2,94 @@
 
 Status: stable
 
-Render-discovered asset resources: CSS, scripts, module preloads, fonts, preconnects, titles, and meta — discovered, deduped, loaded, retained, and sometimes gated before reveal. (Keyed async _values_ are data resources — see data.md.)
+Asset resources are CSS, scripts, module preloads, fonts, preconnects, titles, and metadata discovered while Fig renders. Fig deduplicates them, sends them to the right place, and sometimes waits for them before revealing UI.
 
-## Creators, Not Hoistable Magic
+They are different from [data resources](./data.md), which represent keyed async values.
 
-Assets are plain data made with explicit creators — `stylesheet`, `preload`, `modulepreload`, `script`, `font`, `preconnect`, `title`, `meta` — attached to a subtree with `assets([...], children)` or carried by low-level client references (`clientReference({ assets })`, plus the render-level `clientReferenceAssets` resolver for bundler manifests). Framework compilers may derive the same descriptors from static module imports through the renderer's component-asset seam and reference manifest; this removes repetitive declarations without creating a second runtime mechanism. Fig TanStack Start derives both styles in the ordinary component graph reached from a `payloadResource` render callback and styles on explicit `Isomorphic` boundaries, so its applications do not declare either manually. Descriptor options use native HTML attribute names (`crossorigin`, `fetchpriority`, `http-equiv`) rather than React's DOM-property casing; the payload wire uses the same names. HTML-namespace host `<link>`/`<title>`/`<meta>` tags and explicitly `async` host `<script>` tags are _lowered_ into the same registry (`assetResourceFromHostProps`), so raw-tag authoring still participates in dedupe. SVG/MathML elements and HTML `<title itemprop>`/`<meta itemprop>` remain native in-tree elements. A non-async host `<script>` keeps its native location and execution semantics; use the explicit `script()` creator to opt other script modes into asset delivery. This replaces React 19's implicit hoistable-element behavior with data plus one documented mechanism.
+## Declaring Assets
 
-Framework adapters that receive already-positioned head/body tags from another runtime use the private `preventAssetResourceHoist` marker before creating the host element. The marker is symbol-backed and never becomes a DOM attribute; it only prevents Fig from reinterpreting that host tag as a descriptor and moving it away from the framework-declared position.
+Assets are plain data created with `stylesheet`, `preload`, `modulepreload`, `script`, `font`, `preconnect`, `title`, or `meta`:
 
-During hydration, registry-owned elements remain out-of-band even when the server emitted them among ordinary document children. The server marks them with the private `data-fig-hydration-skip` attribute shared by every server-owned node that has no client fiber; the DOM hydration cursor understands only that one protocol bit, not why the node exists. An explicitly positioned tag remains unmarked and hydrates as an ordinary node because `preventAssetResourceHoist` keeps it out of the registry.
+```tsx
+return assets(
+  [
+    stylesheet("/chart.css", { precedence: "components" }),
+    preconnect("https://tiles.example.com"),
+  ],
+  <Chart />,
+);
+```
 
-On client roots, an `Assets` fiber owns its descriptor list. The reconciler commits each fiber's previous/next list and stable opaque owner through the renderer's optional `commitAssetResources(previous, next, owner)` seam; discarded renders never reach it, and deletion passes `null` as the next list. Raw hoisted host tags receive the same owner identity through their acquire, update, and release callbacks. The identity is stable across updates and moves and distinct between live fibers. This is the same registry for both authoring forms, so descriptor and host authoring dedupe together.
+`assets(list, children)` attaches the descriptors to a subtree. Client references may carry them too, and framework compilers may derive the same descriptors from static imports. TanStack Start does this for components reached by `payloadResource` and for explicit `Isomorphic` boundaries.
 
-The document registry has two lifecycle policies. Delivery assets — stylesheets, scripts, hints, and fonts — are reference-counted for ownership but remain after their last owner leaves because removing their element cannot undo their browser effect. Document metadata — title and meta — uses claims. Each key has one canonical DOM element and an insertion-ordered map of live claims by owner. The most recently acquired live owner wins; updating a claim does not change its priority. Updating a shadowed claim only changes its stored fallback. When the winner leaves, the registry immediately reapplies the latest remaining claim, and it removes the element when the final claim leaves. The registry diffs from its last rendered claim rather than from an individual fiber's previous props.
+There is still only one runtime mechanism: every source becomes the same descriptor and enters the same registry.
 
-Metadata candidates created while rendering stay detached. Only a client commit or server boundary reveal registers a claim or mutates the canonical element, so suspended, failed, superseded, or otherwise discarded work cannot change live document metadata. A visible Suspense fallback owns its metadata until the primary branch reveals; that reveal releases the fallback claims and activates the completed branch as one operation. Partial segments may deliver markup and delivery assets early, but their metadata remains staged until the enclosing boundary reveals.
+Descriptor options use native HTML names such as `crossorigin`, `fetchpriority`, and `http-equiv`.
 
-`meta(options)` accepts exactly one metadata identity: `{ charset }`, `{ name, content }`, `{ property, content }`, or `{ "http-equiv", content }` (plus an optional explicit asset key). Empty or contradictory descriptors are type errors. Raw host `<meta>` elements are hoisted only when their attributes satisfy the same shape; malformed or multi-identity tags remain ordinary host elements.
+## Raw Host Tags
 
-## Keys And Dedupe
+HTML `<link>`, `<title>`, and `<meta>` elements, plus explicitly async `<script>` elements, enter the same registry. This lets raw tags and descriptor APIs deduplicate against each other.
 
-Every asset has a deterministic dedupe key (`assetResourceKey`), shared across the SSR registry, the payload wire, and client insertion — a stylesheet discovered three ways renders once. Fonts and equivalent `preload-as-font` entries share a key space. `title` collapses to a single head slot. Metadata uses the same claim precedence on client roots and during server streaming: the most recently activated visible owner wins, and releasing it restores the latest remaining claim.
+There are deliberate exceptions:
 
-## Destinations
+- SVG and MathML tags remain ordinary elements.
+- `<title itemprop>` and `<meta itemprop>` remain in place.
+- A non-async `<script>` stays where it was authored because its position affects execution.
 
-Each kind has a destination: **head** (title, meta — commit-owned document state) or **stream** (stylesheets, scripts, preloads, fonts, preconnects — emitted near the segment that needs them). Both destinations travel on the payload wire as descriptor-only data from a per-kind field table (the single source of truth for the wire type). A browser decoder prepares stream-destined assets eagerly, but retains head-destined metadata on its decoded owner so only reconciliation can publish it.
+Frameworks that already positioned a tag may apply the private `preventAssetResourceHoist` marker. The symbol-backed marker never reaches the DOM; it only tells Fig not to reinterpret or move that element.
 
-Streaming HTML seals only the initial head snapshot with the shell. Metadata discovered in later primary content is carried in the boundary's completion op as the complete visible metadata snapshot and reconciled in the same reveal callback. Initial server-owned metadata is marked for that runtime reconciliation; once hydration has attached to a boundary, the runtime leaves metadata to the renderer commit instead. Prerender waits for settled content, so its one static head already describes the final visible tree and needs no metadata op.
+Registry-owned server elements carry `data-fig-hydration-skip` because they have no client fiber. Explicitly positioned elements hydrate normally and do not receive the marker.
 
-## Loading And Reveal Gating
+## Ownership
 
-On the client, committed `assets(...)` declarations insert through the document registry, while `insertAssetResources` is the imperative/gated insertion surface used only for payload delivery assets. Payload metadata is always retained on its decoded owner and follows the ordinary commit lifecycle. A Payload decoder feeding the HTML renderer retains every declaration, so the server renderer emits each delivery asset immediately before its dependent segment and stages metadata with that segment's visible owner. Suspense reveal gates on blocking assets: streamed boundary completions wait for their stylesheets to load before the reveal op runs (the inline runtime's `r()` helper), so content never flashes unstyled. Payload boundary refreshes follow the same rule: refreshed content and its metadata keep the last revealed tree visible until newly required stylesheets load. If a later payload depends on a stylesheet Fig already inserted and that sheet is still loading, it joins the existing gate. Non-blocking kinds (preloads, preconnects, scripts, and fonts) never gate, and a stylesheet may opt out with `blocking: "none"` when inserted directly. Payload asset descriptors omit this authoring hint, so payload-delivered stylesheets conservatively gate.
+On the client, every `Assets` fiber owns its descriptor list. Commit calls the renderer's optional `commitAssetResources(previous, next, owner)` hook. The owner token stays stable across updates and moves and is unique to that live fiber. Deleted fibers pass `null` as the next list.
+
+Raw hoisted tags use the same ownership model through acquire, update, and release callbacks. Work from a suspended, failed, or abandoned render never reaches commit and therefore never changes the live registry.
+
+Delivery assets and metadata have different lifetimes:
+
+- **Delivery assets**—stylesheets, scripts, hints, and fonts—are reference-counted, but remain after their last owner leaves. Removing the element cannot undo a fetch or script execution.
+- **Metadata**—title and meta—uses live claims. Each key has one shared DOM element. The most recently acquired visible owner wins; when it leaves, Fig restores the latest remaining claim. The element disappears when no claims remain.
+
+Updating a shadowed metadata claim changes its fallback value without moving it ahead of the current winner. Suspended and discarded work cannot publish metadata. A visible Suspense fallback owns its metadata until primary content reveals, at which point Fig swaps both the UI and metadata together.
+
+`meta(options)` accepts exactly one identity shape: `{ charset }`, `{ name, content }`, `{ property, content }`, or `{ "http-equiv", content }`, with an optional explicit key. Contradictory shapes are type errors. Raw `<meta>` tags enter the registry only when they satisfy the same rule.
+
+## Keys And Deduplication
+
+Every descriptor has a deterministic key shared by server rendering, Payload, and the browser registry. If a stylesheet is discovered through a route, an `assets()` call, and a client reference, it still renders once.
+
+Fonts share a key space with equivalent `preload(..., "font")` descriptors. `title` has one document slot. Metadata follows the claim rules above rather than ordinary delivery-asset conflict handling.
+
+## Where Assets Go
+
+Assets have two destinations:
+
+- **Head:** title and meta, because they are committed document state.
+- **Stream:** stylesheets, scripts, preloads, fonts, and preconnects, because they should arrive near the content that needs them.
+
+Payload carries both groups as descriptors. Browser decoding prepares stream assets as soon as their row arrives, but keeps metadata attached to its owner until a renderer commit publishes it.
+
+Streaming HTML seals an initial head snapshot with the shell. Metadata discovered in late primary content travels with that Suspense boundary's completion operation.
+
+The reveal swaps fallback, content, and the complete visible metadata snapshot atomically. Partial segments never publish metadata. Prerender waits for all content, so its single static head is already final.
+
+## Loading Before Reveal
+
+Blocking stylesheets must load before dependent streamed content appears. The inline `r()` operation holds a Suspense reveal until those stylesheets settle, preventing a flash of unstyled content.
+
+Payload refreshes use the same rule: the old tree and metadata stay visible until the replacement's blocking stylesheets load. If the stylesheet already exists but is still loading, the new reveal joins that existing gate.
+
+Preloads, preconnects, scripts, and fonts never gate. A directly inserted stylesheet may opt out with `blocking: "none"`. Payload omits that authoring hint and therefore gates conservatively.
 
 ## Stylesheet Precedence
 
-Each `precedence` value names a stylesheet bucket. Bucket order is fixed by the order in which distinct values are first discovered, and discovery order is preserved within a bucket. When a host render or `insertAssetResources` discovers another stylesheet for an existing bucket, Fig inserts it before the next bucket in the document head. An omitted value forms the default bucket. Independently streamed server segments preserve discovery order; defining a stronger cross-segment ordering policy remains an open question.
+Each `precedence` string names a bucket. Buckets appear in the order their names are first discovered, and stylesheets keep discovery order within a bucket. A missing value uses the default bucket.
 
-## Diagnostics
+When a later render discovers a stylesheet for an existing bucket, Fig inserts it before the next bucket. Server-streamed segments preserve their own discovery order; the bundler is responsible for stronger ordering relationships between separately discovered chunks.
 
-The HTML server registry throws `AssetResourceConflictError` for conflicting same-key delivery-asset definitions. Payload insertion and persistent DOM delivery assets treat the first live definition for a key as authoritative and dedupe later definitions without signature comparison. Title/meta use the claim precedence and restoration rules above rather than delivery-asset conflict checking.
+## Conflicts And Invalid Updates
 
-A raw host fiber whose initial props classify it as hoisted keeps that lifecycle permanently. If later props no longer classify, Fig throws in development and ignores the update in production. The no-op never mutates a shared delivery asset; for title/meta it preserves the owner's last valid claim, including while another owner shadows it. Replace the host element with a different Fig element key to change its placement.
+The HTML server registry throws `AssetResourceConflictError` when two delivery assets use one key with incompatible definitions. Payload insertion and persistent browser delivery assets keep the first live definition and deduplicate later ones. Metadata uses claims instead.
+
+Once a raw host fiber is classified as hoisted, it stays hoisted for its lifetime. If an update would make it ordinary, development throws and production ignores the invalid update. Use a different Fig key when changing the element's placement contract.

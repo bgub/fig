@@ -2,38 +2,88 @@
 
 Status: stable
 
-The `@bgub/fig-reconciler` surface for building hosts, and the scheduler behind it.
+`@bgub/fig-reconciler` lets a host connect Fig's component model to its own nodes. A renderer supplies mutation primitives and opts into larger capabilities such as hydration, Activity, and asset hoisting.
 
-## HostConfig
+## `HostConfig`
 
-A deliberate cleanup of react-reconciler's config, not a clone. The required core is six methods (`createInstance`, `createTextInstance`, `insertBefore`, `removeChild`, `commitUpdate`, `commitTextUpdate`); everything else is an optional capability group enforced at runtime with clear errors when the feature is first used (hydration, Activity visibility, hoisted assets). Portal children use the core mutation methods against the explicit target; the optional portal hooks are lifecycle notifications for renderers that need to prepare or release portal containers. There are no mode flags (`supportsMutation`/`supportsPersistence`), no host-context push/pop — `createInstance(type, props, parent)` and the optional `resolveHoistedInstance(type, props, parent)` receive the parent directly (how fig-dom resolves SVG/MathML namespaces) — and no `prepareForCommit`/`getPublicInstance`/microtask hooks.
+The required core is six methods:
 
-`resolveHoistedInstance` is the hoisted-asset classification seam and factory in one operation. Returning `null` leaves the fiber on the ordinary hydrate/create path; returning an instance fixes that fiber's placement as hoisted for its lifetime, bypasses the hydration cursor, and activates the commit/remove/update hoisted lifecycle. The reconciler stores the resolved placement as static fiber state rather than reinterpreting host props during later traversals. A renderer may rekey a hoisted instance through `updateHoistedInstance`, but it cannot turn that fiber back into ordinary in-tree placement; fig-dom throws in development when updated props stop classifying and ignores the update in production.
+- `createInstance`
+- `createTextInstance`
+- `insertBefore`
+- `removeChild`
+- `commitUpdate`
+- `commitTextUpdate`
 
-Each committed hoisted host and `Assets` fiber receives an opaque `AssetResourceOwner`. It is stable across updates and moves, distinct per live fiber, and appears on acquire/update/release callbacks so a renderer can maintain claims rather than only reference counts. `commitAssetResources(previous, next, owner)` provides the equivalent lifecycle for descriptor lists. Owners are created lazily and never exposed to applications.
+Everything else is an optional capability group. Fig validates a group when the application first uses that feature and reports a clear missing-capability error.
 
-The hoisted host owns the complete update of the canonical instance, including direct text content. `updateHoistedInstance(instance, previousProps, nextProps, owner)` may return a different shared instance, but either result must already represent the renderer's chosen canonical state. The reconciler adopts a returned instance on both fiber generations and does not apply a second generic text update, since an individual fiber's text may belong to a shadowed claim rather than the live winner.
+Unlike `react-reconciler`, Fig has no mutation/persistence mode flags, host-context stack, `prepareForCommit`, `getPublicInstance`, or microtask hooks. `createInstance(type, props, parent)` receives its parent directly, which is enough for Fig DOM to choose HTML, SVG, or MathML namespaces.
 
-Hydration is split into capability groups:
+Portal children use the normal mutation methods against their target. Optional portal hooks are lifecycle notifications for hosts that need to prepare and release containers.
 
-- General host adoption requires `getFirstHydratableChild`, `getNextHydratableSibling`, `canHydrateInstance`, `canHydrateTextInstance`, and `clearContainer`; `commitHydratedInstance` is optional within that group.
-- Suspense hydration is seven required methods around the host-owned `DehydratedSuspenseBoundary`: boundary parsing, enclosing-boundary lookup, containment fallback, retry registration, hydrated commit, root-hydration completion, and dehydrated-boundary removal. A host may also classify boundary mismatches that cannot be replaced locally with `shouldRecoverSuspenseMismatchAtRoot`; fig-dom uses this for a boundary that encloses a `Document`'s document element.
-- Activity hydration/visibility is seven methods: boundary parsing and first- child lookup, hydrated commit, and instance/text hide/unhide hooks.
+## Hoisted Assets
 
-Each `HostConfig` member remains optional so a renderer can omit a capability; the exported `HostHydrationConfig`, `HostSuspenseHydrationConfig`, and `HostActivityConfig` types express the complete groups for renderers that implement them. Marker parsing stays in the renderer package where the markup knowledge lives.
+`resolveHoistedInstance(type, props, parent)` classifies and creates hoisted host elements. Returning `null` keeps the ordinary in-tree path. Returning an instance makes that placement permanent for the fiber's lifetime and bypasses the hydration cursor.
+
+Later updates may replace the shared instance through `updateHoistedInstance`, but they cannot turn the fiber back into an ordinary element. Fig DOM reports that invalid update in development and ignores it in production.
+
+Each hoisted host and `Assets` fiber receives an owner token that stays stable across updates and moves. Acquire, update, release, and `commitAssetResources(previous, next, owner)` use it to support metadata claims as well as simple reference counts.
+
+The hoisted update hook owns the complete update, including text. If it returns a different shared instance, the reconciler adopts that instance on both fiber generations and does not apply a second generic text update.
+
+## Hydration Capabilities
+
+General host hydration requires methods for finding hydratable children and siblings, adopting element and text instances, and clearing the container. `commitHydratedInstance` is optional.
+
+Suspense hydration adds a complete group for:
+
+- parsing dehydrated boundaries;
+- finding enclosing boundaries;
+- checking containment;
+- installing retries;
+- committing hydration;
+- finishing root hydration; and
+- removing dehydrated boundaries.
+
+A host may also say that a mismatch must recover at the root. Fig DOM uses this when a boundary contains the document element.
+
+Activity adds boundary parsing, first-child lookup, hydrated commit, and instance/text hide and unhide hooks. Marker parsing stays in the renderer package that owns the markup.
+
+The exported `HostHydrationConfig`, `HostSuspenseHydrationConfig`, and `HostActivityConfig` types describe the complete groups while keeping each member optional on the base `HostConfig`.
 
 ## Root API
 
-`createRenderer(hostConfig)` returns `{ createRoot, hydrateRoot, hydrateTarget, flushSync, batchedUpdates, scheduleRefresh }`. `FigRoot` is `{ data, render, unmount }`. No fiber type or lane constant crosses the boundary: priority crosses as `EventPriority` strings, and `hydrateTarget` takes one. `batchedUpdates` exists as the event-dispatch seam for renderer packages (fig-dom wires it into delegated dispatch) and is not an app-facing API — batching is automatic. Duplicate roots on one container throw; `unmount` tears down synchronously (so per-fiber data cleanup runs against a live store) and frees the container for a fresh root.
+`createRenderer(hostConfig)` returns:
 
-`FigRootOptions`: `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, plus dev `devtools`.
+```ts
+{
+  createRoot,
+  hydrateRoot,
+  hydrateTarget,
+  flushSync,
+  batchedUpdates,
+  scheduleRefresh,
+}
+```
 
-## The Scheduler
+A `FigRoot` exposes `{ data, render, unmount }`. Fibers and lanes never cross this boundary. Event priority uses the public string union, and `hydrateTarget` accepts one of those priorities.
 
-An internal module (not a published package): a macrotask-hopping work loop with five priority tiers mapped from lanes plus starvation timeouts (expiration at the lane level complements yield-budget slicing at the task level). Host-callback preference matches React's rationale: `setImmediate` first (never refs an idle Node event loop), `MessageChannel` in browsers (created lazily — importing a renderer allocates nothing), `setTimeout` last (nested-timeout clamping). Commit calls `requestPaint()` so the loop yields to the host after mutations land. Continuation callbacks (`return () => ...`) resume sliced work.
+`batchedUpdates` exists for renderer event dispatch and is not an application API. Application batching is automatic.
 
-## Subpaths
+Creating two roots on one container throws. `unmount` runs synchronously so fiber cleanup completes while the data store is still alive, then releases the container for reuse.
 
-`@bgub/fig-reconciler/devtools` (commit snapshots for fig-devtools) and `@bgub/fig-reconciler/refresh` (HMR family-swap: updated component families re-render in place with hook state preserved; hook-signature changes remount via the parent) are dev-only seams with exactly the consumers they were built for.
+Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, and the development-only `devtools` option.
 
-`@bgub/fig-reconciler/test-utils` exports `act`, the testing boundary that temporarily routes scheduled callbacks into a test queue. It shares the scheduler instance used by the main renderer entry so work scheduled through either entry is flushed together; renderer construction APIs do not export it.
+## Scheduler
+
+The scheduler is internal. It runs work across macrotasks with five priority levels and starvation timeouts. Lane expiration handles aging at the update level; the scheduler's yield budget slices individual tasks.
+
+It prefers `setImmediate`, then a lazily created browser `MessageChannel`, then `setTimeout`. Commit calls `requestPaint()` so the scheduler yields after visible mutations. A task may return a continuation callback to resume later.
+
+No scheduler package or `unstable_` API is published.
+
+## Development And Testing Subpaths
+
+`@bgub/fig-reconciler/devtools` emits commit snapshots. `@bgub/fig-reconciler/refresh` swaps Fast Refresh component families while preserving state, or remounts when a hook signature changes.
+
+`@bgub/fig-reconciler/test-utils` exports `act`. It shares the same scheduler instance as the renderer, so tests flush work scheduled through either entry.

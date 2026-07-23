@@ -2,9 +2,11 @@
 
 Status: stable
 
-Key-addressable async render inputs: definitions, stores, reads, and the freshness verbs. (Asset delivery is a separate concept — see assets.md.)
+Data resources give async values a stable key, a loader, and a store. Components can read them with Suspense, frameworks can preload them, and server rendering can hand the same values to the browser.
 
-## Definitions And Identity
+Asset delivery is a separate system described in [assets.md](./assets.md).
+
+## Defining A Resource
 
 ```ts
 const userResource = dataResource({
@@ -13,72 +15,143 @@ const userResource = dataResource({
 });
 ```
 
-**Identity is the key.** A resource has no separate id: `key` returns an array whose required string head namespaces the definition and whose tail distinguishes values. One identity concept means a flat store (`Map<canonicalKey, entry>`), free hydration lookup (the client recomputes the same key and finds the streamed entry — no id registry), and the same value flowing through reads, mutations, and the wire.
+The key is the resource's identity. Its first item is a required string namespace; the rest distinguishes values. There is no second resource id.
 
-Keys are canonically encoded with a strict encoder — no `JSON.stringify` traps: it throws on `undefined`, non-finite numbers, and non-plain objects, normalizes `-0`, and sorts object keys. Dev builds fingerprint key/args drift (a `debugArgs` escape hatch exists for intentionally non-serializable args).
+Keys use a strict stable encoder rather than `JSON.stringify`. Object keys are sorted, `-0` is normalized, and unsupported values such as `undefined`, non-finite numbers, and non-plain objects throw.
 
-`dataResource(options)` may include a loader or omit `load` to declare a key-only resource (no client loader — hydrate-only). Loader-backed vs hydrate-only is the entry's refresh mode: hydrate-only entries revalidate only through a server/payload refresh path and report `{ status: "unsupported", reason: "no-client-loader" }` from `refreshData`.
+Development builds also detect cases where one key comes from meaningfully different arguments. `debugArgs` is available when arguments are intentionally non-serializable.
 
-Server-only loaders use the same `dataResource` API inside a module protected by the host framework's server boundary. Fig does not infer server safety from filenames, provide a server-specific resource variant, or rewrite resource modules for the browser. When both environments need the same value, browser code imports an explicit key-only resource from a shared module and server code uses a loader-backed resource with the same key. Key identity joins them during hydration without coupling the data layer to a bundler. A value used only during server rendering needs only the loader-backed definition.
+`dataResource` may omit `load`. This creates a hydrate-only resource: the browser can read values received from a server, but cannot load or refresh them itself. `refreshData` reports `{ status: "unsupported", reason: "no-client-loader" }` for that case.
 
-Those two loader placements — loader-backed and hydrate-only — are the only resource kinds the store knows. There is deliberately no third "remote" kind: see Remote Refresh Is A Framework Layer.
+Server-only loaders use the same API inside a framework-protected server module. When browser and server code need one identity, put a key-only definition in shared code and a loader-backed definition with the same key on the server.
 
-## Loader Inputs
+Fig joins them by key during hydration. It does not infer server safety from filenames or rewrite modules for the browser.
 
-`DataResourceLoader<Args, Value>` names the shared loader signature used by `dataResource` and adapters such as fig-dom's `payloadDataLoader`: resource arguments followed by `DataResourceLoadContext`. The public context is `{ signal }`. The signal's lifetime is the **load generation's authority**, not the pending promise's: it stays live after the loader fulfills and aborts when the generation loses authority — a successor load's value **publishes** (not when the successor merely starts: the visible stale value keeps streaming through the refresh window, and subscribers re-render onto the new tree in the same pass, so retired background work never errors into a mounted reader), a server push hydrates over it, the entry evicts, or the store is disposed. A superseding load that _fails_ leaves the previous generation fully alive — a failed refresh keeps the stale value usable, live holes included. A value-less pending load has no authority to defer and aborts as soon as it is superseded. A rejected load's own signal aborts on settlement, and `invalidateData` does not abort — marking stale never revokes authority.
+Loader-backed and hydrate-only are the only resource kinds. Remote endpoints are a framework concern, not a third store mode.
 
-The load context also carries one non-public, symbol-keyed capability object (read through `@bgub/fig/internal`) with two operations, both guarded by the load generation's signal — the signal's lifetime is the generation's authority, so both keep working through a superseding refresh's window and stop when the generation is retired (a successor's value publishes, a server push hydrates over the entry, the entry evicts, the load rejects, or the store is disposed). fig-dom's `payloadDataLoader` uses `hydrate` to apply a payload stream's `data` rows through the calling store; it skips rows targeting the loading entry's own key (a loader cannot supersede itself with its own data row). `attributeError` attributes a rejected streamed hole to the owning generation; attribution can fire before the loader's own promise settles (a hole's error row can share a network chunk with the root row). A live attribution lets boundary recovery call `invalidateDataError` against a fulfilled entry whose nested value failed, retiring that broken value; retired generations are ignored, and a generation that never publishes cannot make a value it doesn't own invalidatable through its errors.
+## Loader Lifetimes
 
-The data layer does not own app/request context or dependency injection; frameworks and adapters that need request state should close over it when defining per-request server resources, or route remote data requests through their own endpoint code.
+A loader receives its resource arguments followed by `{ signal }`. The signal belongs to the current **load generation**, not merely to its promise.
 
-## Remote Refresh Is A Framework Layer
+After a load fulfills, its generation stays authoritative while that value is visible. Its signal aborts when:
 
-"Refresh this server value directly from the browser" is deliberately not a core data concept: an endpoint must exist to serve the refresh, and endpoints belong to frameworks. Compose an ordinary loader-backed `dataResource` with the framework's endpoint primitive. In TanStack Start, that primitive is `createServerFn`; without a framework, it can be a normal `fetch` call.
+- a newer load successfully publishes;
+- server hydration replaces the value;
+- the entry is evicted;
+- the store is disposed; or
+- that generation rejects.
 
-The store sees only an ordinary loader-backed resource. Reads prefer hydrated values, cache misses and explicit refreshes call the endpoint loader, generation guarding and abort semantics apply unchanged, and a transport failure is a normal `rejected` refresh result with the stale value kept. There is no generated resource registry, remote resource kind, or resource-specific wire authority.
+Starting a refresh does not immediately revoke a visible stale value. If the refresh fails, the previous generation remains authoritative. A pending load with no visible value aborts as soon as another load supersedes it. `invalidateData` only marks an entry stale and does not abort it.
 
-Endpoint arguments must be serializable by the chosen transport. The endpoint is a public request handler and must authenticate, authorize, and validate client-controlled input exactly like any hand-written API route, using whatever request context the framework provides.
+Internal adapters receive two additional generation-guarded capabilities. `hydrate` applies Payload data rows through the current store. `attributeError` associates a streamed hole failure with the owning value.
 
-## Reads
+Both stop working once their generation loses authority. A loader cannot replace its own entry using a data row from its own Payload response.
 
-`readData(resource, ...args)` is a render-time read (dispatcher-routed, like `readContext`/`readPromise`): it subscribes the reading fiber to the key, starts the load if the entry is pending, throws the pending promise to suspend, and throws the real error on rejection (so `ErrorBoundary` catches it; the thrown promise itself always _resolves_ — rejections settle into the entry). Dependency bookkeeping is owner-keyed and commit-aware: abandoned render attempts and strict shadow passes reset cleanly, and unmounting releases subscriptions (orphaned in-flight loads abort). DevTools snapshots preserve each committed fiber's directly read keys, so selecting a component shows its data dependencies rather than every entry in the root store; selecting the root still lists the whole store, including entries with no committed subscriber (unclaimed preloads, hydrated-but-unread rows).
+The data layer does not own request context or dependency injection. A framework can close over request state in a per-request server resource or call its own endpoint from a browser loader.
 
-`preloadData` starts a load without subscribing; unclaimed preloads abort and evict after a grace window (default 30s). Fulfilled entries with no subscribers evict after an inactivity window (default 5 minutes).
+## Remote Refresh
 
-`ensureData(resource, ...args)` is the awaitable read for code outside render — router loaders, async actions. It resolves the value the key would render with: the cached value when the entry has one (a stale entry kicks the same background revalidation a stale `readData` does; a recorded `refreshError` blocks the auto-retry the same way), or the in-flight load's settlement on a cache miss (starting the load if none is pending); it rejects with the error `readData` would throw, including the "no loader and no hydrated value" case. Supersessions are followed, not surfaced: an ensure that loses its load to a newer load or a server hydration resolves with the successor's authoritative value. It never subscribes — the reading component pairs it with `readData`, which claims the settled entry within the preload retention window — but an awaiting caller does retain the entry, so the unclaimed-preload eviction cannot abort a load out from under an ensure. This is the delegation verb for external routers (TanStack Router's "pass loader events to an external cache" pattern). The TanStack adapter's `ensureRouteData` awaits this operation but returns `void`, the component reads with `readData`, and the store stays the single cache instead of also publishing the value as Router `loaderData`.
+Refreshing a server value from the browser requires an endpoint, so frameworks own that transport. Compose a normal loader-backed resource with `createServerFn`, `fetch`, or another endpoint primitive:
 
-## The Freshness Verbs
+```ts
+const postResource = dataResource({
+  key: (id: string) => ["post", id],
+  load: (id, { signal }) =>
+    fetch(`/api/posts/${id}`, { signal }).then((response) => response.json()),
+});
+```
 
-Deliberately narrow — two semantics with crisp meanings, not a react-query vocabulary: **mark stale** (invalidate; the next read reloads lazily) and **fetch now** (refresh). The invalidate variants differ only in targeting — by resource and args, by exact key, by attributed error, by key prefix:
+The store still sees an ordinary resource. It owns caching, generations, stale values, and errors; the endpoint owns serialization, authentication, authorization, and input validation.
 
-- `invalidateData(resource, ...args)` — mark stale; the next read reloads lazily. It also clears a cached _rejection_ (back to pending) so a remounted `ErrorBoundary` retries afresh, and clears a stored `refreshError` so read-triggered revalidation re-arms.
-- `invalidateDataKey(key)` — same invalidation semantics, but targets an exact serialized data-resource key when the resource definition/arguments are not available.
-- `invalidateDataError(error)` — inspect Fig's data-error attribution side table and invalidate every exact key associated with that error. Returns `true` when the error carried data keys, so fallback UIs can decide whether a data retry button is meaningful.
-- `invalidateDataPrefix(prefix)` — mark every existing entry whose structured key starts with `prefix` stale. Prefixes use the same key tuple format, so `["user"]` matches `["user", "42"]`; matching is structural, not string prefix matching.
-- `refreshData(resource, ...args)` — fetch now. **Never rejects**; it resolves a result union: `fulfilled`, `rejected { error, staleValue? }`, `aborted { reason: "superseded" | "store-disposed" | "evicted" }`, or `unsupported`. A failed refresh keeps the stale value visible and records `refreshError` — reads do not auto-retry a persistently failing loader (no refresh storms); an explicit invalidate/refresh re-arms.
+## Reading Data
 
-Loads are generation-guarded: a superseded load's settlement is inert.
+### During render
 
-Invalidating a hydrate-only entry (no client loader) marks it stale but leaves the fulfilled value readable. It revalidates only when a server render or payload refresh hydrates a newer value. It must not self-destruct into a rejected "missing loader" entry just because a client invalidation targeted it.
+`readData(resource, ...args)` subscribes the current fiber to the key. It returns a cached value, throws a pending promise to Suspense, or throws the real loader error to ErrorBoundary.
 
-## Ambient Store Vs Explicit Handle
+The thrown pending promise always resolves; rejection is stored on the entry, and the next render throws the actual error. Subscription bookkeeping is commit-aware, so abandoned renders and strict shadow passes do not leave subscribers behind. Unmounting releases the subscription and may abort orphaned work.
 
-The free functions (`readData` aside) resolve an **ambient store** that is set only while Fig executes synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects (which run inside `dataStore.run`). After an `await` the slot is gone. Async flows capture the **explicit handle** — `readDataStore()` during any synchronous window, or `root.data` — and call the same variadic methods (`ensureData`/`invalidateData`/`invalidateDataKey`/`invalidateDataError`/`invalidateDataPrefix`/`preloadData`/`refreshData`/`hydrate`/`run`) on it.
+DevTools records the keys read directly by each committed fiber. Selecting the root shows the whole store, including hydrated or preloaded entries without a current subscriber.
 
-## Stores, Scopes, And SSR Handoff
+### Before render
 
-Stores are per-root on the client and per-request on the server — no global process cache. `createDataStore({ partition?, initialData? })` creates a root-neutral store for work that must happen before a renderer exists, notably route loaders. A renderer adopts that exact store through `createRoot`/`hydrateRoot`/the server render entries' `dataStore` option, attaches subscriber scheduling, and owns final disposal. Adoption is exclusive: one store cannot back two renderer roots. Renderer-level `dataPartition` and `initialData` are invalid with a pre-created store; supply both when creating the store instead. Framework adapters receiving an unknown context validate root-neutral stores with the internal `isDataStoreController` brand predicate rather than duplicating the controller's method shape.
+`preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default.
 
-The store exposes `snapshot()` and `hydrate(entries)` as the symmetric server/client handoff. Server render results expose the adopted handle as `data` and collect settled entries through `getData()`; payload streams carry the same entries in `data` rows. The client may instead create a root with `initialData` or call `root.data.hydrate(entries)`. Hydrate-only values are readable immediately. Payload stream decoding hydrates through `decodePayloadStream`'s `hydrate` capability (payload.md): the supplier keeps that capability generation-guarded so a superseded decode can no longer mutate the store.
+`ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
-Hydration into a live store is a completed refresh pushed by the server: create the entry if missing, abort any in-flight load for that key as superseded, bump the entry generation, clear stale/error/refresh-error state, store the incoming value, and publish subscribers. Only settled values hydrate; a local refreshing entry's transient stale value never wins over the incoming fresh value.
+- a cached value immediately, while stale data revalidates in the background; or
+- the winning load result on a cache miss.
 
-Payload navigation does not make a second data request: data read while rendering the server route segment streams in the same payload response as `data` rows. A resource's endpoint-backed loader serves client-side cache misses and refreshes outside a route payload render.
+It follows superseding loads and server hydration instead of exposing an internal superseded error. It does not subscribe, but an active caller retains the entry so preload eviction cannot abort its work.
 
-## Serialized Components As Data Resources
+TanStack Router's `ensureRouteData` awaits this operation and returns `void`; the component still calls `readData`. This keeps one cache instead of copying the result into Router `loaderData`.
 
-A server can serialize any component tree (payload.md) and deliver it as an ordinary data-resource value through fig-dom's `payloadDataLoader`. The resource key _is_ the refresh boundary, streaming structure is a property of the value (a tree with thenable holes), and a fulfilled entry may still contain live holes that settle as background decoding continues. Decoding and `data`-row hydration remain bound to the load generation's lifetime and authority described above.
+## Invalidating And Refreshing
+
+Fig has two freshness ideas:
+
+- **Invalidate:** mark stale and reload on the next read.
+- **Refresh:** fetch now.
+
+The invalidation functions differ only in how they find entries:
+
+- `invalidateData(resource, ...args)` targets a resource and arguments.
+- `invalidateDataKey(key)` targets one serialized key.
+- `invalidateDataError(error)` targets every key attributed to an error and returns whether any were found.
+- `invalidateDataPrefix(prefix)` structurally matches every existing key beginning with that tuple.
+
+Invalidation also clears cached rejections and stored refresh errors, allowing the next read to try again.
+
+`refreshData(resource, ...args)` never rejects. It resolves to one of:
+
+- `fulfilled`;
+- `rejected`, with the error and optional stale value;
+- `aborted`, because it was superseded, evicted, or its store was disposed; or
+- `unsupported`, for a resource with no browser loader.
+
+A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
+
+For example, if a profile page already shows Ada and a background refresh fails, the page keeps showing Ada. Fig reports the failed refresh to the caller but does not turn the visible profile into an error screen or retry on every render.
+
+All settlements are generation-guarded. Results from superseded work are inert.
+
+Invalidating a hydrate-only entry leaves its current value readable. Only later server or Payload hydration can replace it.
+
+## Ambient And Explicit Stores
+
+Free data functions use the ambient store only while Fig is running synchronously: render, event dispatch, effects, or the synchronous prefix of an action or transition. That ambient slot is gone after `await`.
+
+Async code captures an explicit handle before yielding:
+
+```ts
+const data = readDataStore();
+
+await save();
+await data.refreshData(userResource, id);
+```
+
+`root.data` exposes the same handle. It supports `ensureData`, invalidation, preloading, refresh, hydration, and `run`.
+
+## Store Ownership And SSR
+
+Client stores belong to one root; server stores belong to one request. Fig has no process-global cache.
+
+`createDataStore({ partition, initialData })` creates a store before a renderer exists, which is useful for route loading. `createRoot`, `hydrateRoot`, or a server render then adopts that exact store and owns its disposal. One store cannot back two roots.
+
+When passing a pre-created store, configure `partition` and `initialData` at store creation rather than on the renderer.
+
+`snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
+
+Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate.
+
+During Payload navigation, data rows travel in the same response as the serialized route tree. A separate endpoint loader is needed only for later browser cache misses and refreshes.
+
+## Serialized Trees As Data
+
+`payloadDataLoader` delivers a serialized component tree as an ordinary data-resource value. The resource key is the refresh boundary. The root value may be fulfilled while nested streamed holes are still pending.
+
+Decoding, asset preparation, and data-row hydration remain bound to the load generation. Once a newer generation takes over, late rows from the old stream cannot mutate the store or publish assets.
 
 ## Error Attribution
 
-Object errors thrown through `readData` are tagged (WeakMap, GC-safe) so `ErrorInfo.dataResourceKeys` reports which keys failed — boundaries can show targeted recovery UI. `invalidateDataError(error)` is the cache-side half of that loop: it resets all keys attributed to the caught error, and the UI still chooses when to reset or remount the boundary.
+Object errors thrown through `readData` are tracked in a garbage-collectable side table. `ErrorInfo.dataResourceKeys` tells a boundary which keys failed, and `invalidateDataError(error)` resets those exact entries. The UI still decides when to remount or reset the boundary.

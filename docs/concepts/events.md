@@ -2,32 +2,62 @@
 
 Status: stable
 
-The `on()` host mixin, delegation through the logical tree, and native propagation semantics.
+Fig uses native browser events. The `on()` mixin declares listeners, the DOM decides how events propagate, and Fig connects that behavior to scheduling and hydration.
 
-## The API
+## Declaring A Listener
 
-Listeners are declared as `mix={on("click", (event, signal) => ...)}` — an `on()` mixin, not an `onClick` prop. Multiple or conditional listeners use an array: `mix={[condition && on("click", first), on("click", second)]}`. Callbacks receive the **native** event plus an `AbortSignal` that aborts on re-entry and on listener removal (enforced even mid-dispatch). `on(type, callback, options?)` supports `capture` and `passive` (`signal` is excluded — Fig owns the signal). Callback identity swaps in place without listener churn.
+```tsx
+<button mix={on("click", (event, signal) => save(event, signal))} />
+```
 
-Nested mix arrays may contain falsy conditional entries without shifting later listener slots. A change to the event type, capture mode, or passive mode tears down and recreates that slot.
+`on()` is a host mixin, not an `onClick` prop. Arrays support multiple and conditional listeners:
 
-## Delegation
+```tsx
+<button mix={[enabled && on("click", save), on("focusin", highlight)]} />
+```
 
-Bubbling events are delegated at the root and dispatched through the _logical_ Fig tree — portals included: portal targets mirror their logical parent's delegated listener keys (cascading through nested portals) so portal-inner events always bubble logically. Handlers run at event-mapped lane priority (`discrete`/`continuous`/`default`) and inside the batching scope, so same-event updates coalesce.
+The callback receives the native event and an `AbortSignal`. The signal aborts when the handler runs again or the listener is removed, even if removal happens during dispatch. `on(type, callback, options?)` supports `capture` and `passive`; Fig owns the signal option.
 
-## Native Propagation, No Exceptions
+Changing only the callback updates the existing listener. Changing its event type, capture mode, or passive mode replaces it. Falsy entries in nested mix arrays keep their structural positions, so toggling one listener does not shift the identities of later listeners.
 
-Non-bubbling events attach directly to their element and fire only on their target — `focus` and `blur` included. Fig does not emulate React's bubbling `focus`/`blur` (nor `mouseenter`/`mouseleave` delegation, nor the onChange-that-is-really-onInput remapping; a dev warning steers `onChange` habits to `on("input")`). Ancestor focus tracking uses the platform's bubbling `focusin`/`focusout` — which delegate through the logical tree like any bubbling event — or a `capture: true` listener, exactly as in the real DOM.
+## Delegation And Priority
 
-## Replay
+Bubbling events are delegated at the root and dispatched through the logical Fig tree. This includes portals: an event inside a portal bubbles through the component that created it, even though the DOM nodes live elsewhere.
 
-Selective hydration queues replayable events (click, key, pointer) that target a still-dehydrated Suspense boundary and replays them after the boundary hydrates — a synthetic two-phase dispatch through the logical tree, with per-dispatch propagation state so a spent native event's stale `cancelBubble` cannot drop the replay. Targets in a shell whose first hydration commit hasn't landed are blocked the same way; a discrete interaction pulls the whole initial hydration forward synchronously.
+Fig maps each event to discrete, continuous, or default priority. Dispatch also runs inside the batching scope, so updates from one event commit together.
 
-## Early Capture (Pre-Bundle Events)
+## Native Propagation
 
-Server-rendered documents open `<head>` with a tiny inline script that queues replayable events fired before the client bundle executes (the `EARLY_EVENT_*` contract in `@bgub/fig/internal`). The server marks that framework-owned script with the shared `data-fig-hydration-skip` protocol attribute so full-document hydration skips it rather than expecting an application fiber. The first hydration root drains the document's queue, removes the capture listeners, and each root claims the events inside its container into the standard replay queue — so a user's first click is honored instead of lost, no matter how slowly the bundle arrives. Unclaimed events (targets outside any root) are dropped at replay time. Documents without a client bundle just carry a small inert array.
+Fig does not rewrite browser semantics:
 
-## bind
+- `focus` and `blur` do not bubble. Use `focusin` and `focusout`, or capture listeners, for ancestor tracking.
+- `mouseenter` and `mouseleave` are not emulated through delegation.
+- `input` fires while a value changes; `change` fires when the platform commits it. There is no React-style `onChange` remapping.
 
-DOM node access is `bind={(node, signal) => ...}`, forwarded as a normal prop — no `forwardRef`, no ref objects. Bind callbacks return `undefined`: cleanup belongs on the signal, and returned cleanup functions or promises are type errors. The signal aborts on identity change and unmount; DOM _moves_ do not re-fire it. `composeBind` merges binds and accepts falsy entries. Strict dev runs first-time binds through the run/abort/re-run cycle like effects. (Note: binds fire during insertion; use `useBeforePaint` for layout measurement.)
+Non-bubbling events attach directly to their target element.
 
-`on()` contributes only event behavior. General host prop composition belongs to `createMixin()` (`mixins.md`); `bind` remains the direct DOM-node lifetime API.
+## Hydration Replay
+
+If a click, key, or pointer event targets a dehydrated Suspense boundary, Fig queues it. After the boundary hydrates, Fig replays the event through the logical tree with fresh propagation state.
+
+The initial hydration shell behaves the same way. A discrete interaction can pull the whole first hydration commit forward synchronously.
+
+## Events Before The Bundle Loads
+
+Server-rendered documents place a small capture script at the start of `<head>`. It records replayable events that happen before the client bundle starts. The script is marked with `data-fig-hydration-skip`, so hydration knows it has no application fiber.
+
+The first hydration root drains the document queue and removes the temporary capture listeners. Each root claims events inside its own container; events outside every root are dropped. This preserves a user's first click even on a slow connection.
+
+## `bind`
+
+DOM access uses a normal prop:
+
+```tsx
+<input bind={(node, signal) => node.focus()} />
+```
+
+The callback returns nothing. Its signal aborts when the callback identity changes or the node unmounts; moving the node does not re-run it. `composeBind` combines several binds and accepts falsy entries.
+
+In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, so use `useBeforePaint` when you need layout measurement.
+
+`on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.

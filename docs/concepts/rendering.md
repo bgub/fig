@@ -2,55 +2,112 @@
 
 Status: stable
 
-Elements, fibers, render bailouts, strict development rendering, and pre-commit diagnostics.
+Rendering turns Fig elements into host nodes. It may pause, restart, or reuse existing work, but commit is the only phase allowed to change the host environment.
 
-## Element Model
+For a gentler introduction to fibers and lanes, read [Fiber architecture](../2-fiber-architecture.md).
 
-Elements are plain objects branded with `$$typeof` (string-keyed symbol values, the JSON-injection defense). `FigNode` is the one public children type — elements, portals, promises of nodes, text, booleans, `null`/`undefined`, and arrays; there is no `FigChild`/`ReactChild`-style duplicate. `AwaitedFigNode` names the non-promise half only for APIs whose outer promise necessarily assimilates a root thenable; it is not a second child input type. `ComponentType<P>` is the callable component contract, and `ComponentProps<T>` extracts its declared props (or `{}` for a zero-parameter component). `Fragment` is a symbol; `Suspense`/`Activity`/`ErrorBoundary`/`Assets`/`ViewTransition` are callable-with-brand objects so they typecheck as ordinary components. `lazy(load)` accepts only a component loader, preserves its props without claiming implementation statics, and expects the loader to return the component itself — no `{ default }` unwrapping, no host strings or special element types; it is a plain component over `readPromise`. `ClientReferenceOptions<P>` likewise constrains an optional `ssr` implementation to the client reference's props.
+## Elements And Children
 
-Portals (`createPortal(children, target, key?)`) render into explicit DOM targets while remaining logical children: context, effects ordering, error propagation, and delegated event bubbling all follow the Fig tree, not the DOM position (see events.md for the delegation mechanics).
+Elements are plain objects branded with a string-keyed `$$typeof` symbol. `FigNode` is the one public children type: elements, portals, promises, text, booleans, empty values, and arrays. `AwaitedFigNode` exists only for APIs whose outer promise must assimilate a root thenable; it is not another children type.
 
-Child normalization (shared verbatim with the server renderer — see architecture.md) flattens arrays, drops `null`/`undefined`/booleans, and merges adjacent text (numbers stringify). It preserves each thenable as a distinct normalized slot, so text on opposite sides never merges. The normalized member type is `NormalizedChild = element | portal | thenable | string`.
+`Fragment` is a symbol. `Suspense`, `Activity`, `ErrorBoundary`, `Assets`, and `ViewTransition` are branded callable values so TypeScript treats them like components.
 
-A promise child is an unkeyed, host-transparent fiber. Rendering reads that exact promise; pending promises suspend to the nearest `Suspense`, fulfilled values reconcile as a subtree below the slot, and rejections or invalid resolved children flow to the nearest `ErrorBoundary`. The resolved value is nested rather than spliced into the parent sibling list, nested promises recurse, and resolving to an empty node still leaves the slot as a reconciliation and text/hydration seam. Promise fibers do not add component-stack or DevTools nodes.
+`lazy(load)` is a component built over `readPromise`. Its loader returns the component itself—there is no `{ default }` unwrapping—and preserves that component's props.
 
-Promise identity is the slot's async identity. A promise encountered by the HTML or Payload server renderer is retained as task state, and a promise decoded from Payload is stable. Client components that construct a promise during render must preserve it across Suspense retries and ordinary parent renders (normally `useMemo(() => load().then(...), deps)` or a keyed data resource); allocating a fresh promise on every retry continually replaces the pending work. Direct async client components have the same limitation and are not supported. Promise slots have no `key`; wrap one in a keyed `Fragment` when promises are members of a reorderable list. These identity rules are deliberate — Fig does not track thenables by render call position.
+Portals render into another host container but remain children in the logical Fig tree. Context, effects, errors, and event bubbling follow that logical position.
 
-## Render Bailouts (Two Tiers)
+## Child Normalization
 
-A fiber with identical props, no own work in the render lanes, and no changed context reads is never re-rendered:
+Client and server rendering share the same normalization code. It:
 
-1. When its `childLanes` are also clean, it **adopts** the committed children without cloning (`AdoptedFlag`); render and the commit mutation/deletion/effect walks all skip the subtree.
-2. When descendants have work, its children are cloned and traversal descends — preserving child props identity so siblings bail too.
+- flattens arrays;
+- removes booleans, `null`, and `undefined`;
+- converts numbers to text;
+- merges adjacent text from one children array; and
+- keeps each promise as its own child slot.
 
-Context propagation is lazy: a provider pushes its new value and renders on without walking its subtree, so the cost lands only where a subtree would otherwise be skipped. Each `readContext` records the value it saw on the consuming fiber, and a consumer whose recorded value no longer matches the current provider value is refused bailout outright. Before tier 1 adopts a subtree, the skip point checks the providers above it for changed values and lane-marks the matching consumers it was about to skip — pruned by per-fiber context aggregates maintained at complete-time like `subtreeFlags`, stopping at nested providers of the same context. A per-render flag records that the skip point ran this check so nested skip points end their upward walk early.
+The internal union is `element | portal | thenable | string`.
 
-Suspense boundaries always run `begin` so hidden-primary retries are handled. Commit clears fiber flags and deletions as it consumes them, so adopted subtrees never re-expose already-committed state. These tiers are why Fig has no `memo()`: identity-preserved children bail automatically, and `useMemo(() => <X/>, deps)` covers deliberate subtree pinning.
+A promise child gets its own fiber but adds no DOM wrapper. Pending promises suspend, fulfilled values render in that slot, and rejected or invalid values reach `ErrorBoundary`. Even an empty result keeps the slot so reconciliation and hydration agree about where it was.
+
+Promise identity is the slot's async identity. Server renderers retain the exact promise in their task, and Payload decoding produces stable promises. Client code must also preserve identity across retries:
+
+```tsx
+const child = useMemo(() => loadPanel(id), [id]);
+return <Suspense fallback={<Spinner />}>{child}</Suspense>;
+```
+
+Creating a new promise on every render continually replaces the pending work. Direct async client components have the same problem and are unsupported. Promise slots have no key, so wrap one in a keyed Fragment when promises can reorder.
+
+## Bailouts
+
+Fig skips a fiber when its props are identical, it has no work in the current lanes, and none of its context reads changed.
+
+There are two cases:
+
+1. If descendants are also clean, Fig adopts the committed children without cloning them. Render and commit walks skip the whole subtree.
+2. If a descendant has work, Fig clones the immediate children and descends. Unchanged siblings keep their prop identity and bail out naturally.
+
+This is why Fig has no `memo()`. Stable child identity already skips unchanged siblings; `useMemo(() => <Panel />, deps)` can deliberately pin a larger subtree.
+
+Context invalidation is lazy. Providers do not eagerly walk their entire subtree. Each consumer records the value it read, and a would-be skip point checks changed providers before adopting the subtree. Per-fiber context summaries prune that search and nested providers stop it.
+
+Suspense boundaries always run their begin phase because hidden primary content may need a retry.
 
 ## Strict Development Rendering
 
-There is no `StrictMode` component and no opt-out: development always strict-renders. Each render pass invokes the component twice — a shadow pass whose hooks, effects, and consumed update queues are discarded and restored, with no reconciliation — and commits only the second invocation. Effects and fig-dom `bind` callbacks run, abort, and run again with a fresh signal once per lifetime (tracked via `strictRan` flags set before the first call so re-entrant runs cannot re-enter the cycle). Strict behavior is client-only — server rendering never double-invokes — and production builds strip all of it through compile-time `__FIG_DEV__` gates.
+Development is always strict; there is no `StrictMode` component or opt-out.
 
-## Pre-Commit Diagnostics
+Each component invocation runs once as a shadow pass and once for real. Fig discards the shadow hooks, effects, and consumed update queues. First-time effects and binds also run, abort, and run again with a fresh signal.
 
-Render diagnostics throw before commit rather than warning after it: duplicate sibling keys, invalid children, render-phase state updates, and invalid DOM nesting. Nesting rules live in `@bgub/fig/internal` (`dom-nesting.ts`) and run on both sides — the client validates at fiber creation (ancestors seeded from portal targets and root containers via the `containerType` host hook); the server threads an ancestor stack through render frames so suspended segments validate against their logical position. The checks model HTML parser scoping (button/table scope boundaries, li/dd/dt implied end tags); whitespace-only text and hoisted asset resources are exempt.
+Server rendering never double-invokes. Production removes the client checks through compile-time `__FIG_DEV__` gates.
 
-## Hydration
+## Diagnostics Before Commit
 
-Hydration requires every ordinary host subtree to consume its server DOM; an unexpected remaining node is a recoverable mismatch. Renderers may retain an unmatched tail for host-owned singleton containers through `canRetainHydrationTail`. Fig DOM does so for `<html>`, `<head>`, and `<body>` because browser extensions can append out-of-band roots before client code runs; clearing a full document for that external mutation would also discard its server-delivered asset resources. The retained nodes remain outside the Fig tree and are not updated or removed by later reconciliation.
+Duplicate keys, invalid children, render-phase state updates, and invalid DOM nesting throw before commit instead of warning afterward.
+
+Client and server rendering share the nesting tables. They model browser parser behavior such as table scope, nested buttons, and implied closing of `li`, `dd`, and `dt`. Whitespace-only text and hoisted assets are exempt.
+
+Portal validation starts from the portal target's host ancestors. Server tasks carry the logical ancestor stack across suspension.
+
+## Hydration Tails
+
+Normally, hydration must consume every ordinary server node. A renderer may allow unmatched nodes in host-owned singleton containers through `canRetainHydrationTail`.
+
+Fig DOM permits this for `<html>`, `<head>`, and `<body>`, where extensions may append unrelated nodes before hydration. Those nodes remain outside Fig and are never updated or removed by reconciliation.
 
 ## Commit And Batching
 
-Batching is automatic with no opt-in API: same-tick updates and root renders coalesce into one pass; `flushSync` is the only escape hatch. After host mutations land, commit calls the scheduler's `requestPaint()` so the work loop yields before further scheduled work runs.
+Batching is automatic. Updates from the same tick and root renders coalesce; `flushSync` is the escape hatch. After mutations, commit calls `requestPaint()` so the scheduler yields before starting more work.
 
-Non-mutation commit work is discovered during render, not by walking the finished tree: every fiber that renders hooks, records deletions, or catches an error is recorded in a per-root sparse commit index in begin order, and the deletion, data-dependency, external-store, live-hook, caught-error, effect, and deleted-view-transition passes iterate that index instead of traversing. Each fiber appears at most once (`CommitIndexedFlag`, invisible to `subtreeFlags`) — effect execution is not idempotent, so the index itself guarantees uniqueness while every other pass additionally re-checks its own per-fiber state, keeping stale entries inert. Commit-time arming of a revealed boundary's deferred effects records their owners the same way. Suspense and error boundaries record the index length when they begin; a capture truncates back to that watermark so work indexed by a discarded subtree never commits (a boundary's own deletions are re-indexed — they belong to the boundary, not the subtree). The index is cleared on render restart and after every commit.
+Fig records fiber-local commit work in a sparse per-root index during render. Effects, data subscriptions, external stores, deletions, caught errors, live hooks, and ordinary host updates can then commit without scanning the entire finished tree.
 
-Steady-state host updates are indexed too, and their bits never enter `subtreeFlags`, so the mutation and flag-clearing walks skip update-only regions entirely. Ownership is split by commit kind: the index pass commits updates on already-committed instances (text included — a hydrated text node's first "update" is how its differing value applies), while hydration commits stay in the walk (an Activity template must unpack before its hydrated children bind; Suspense boundary commits follow their instances) and first commits stay with the placement/assembly paths (an early update would set `committedProps` and defeat hoisted acquisition and placement-time updates). View transitions recover the missing subtree signal from the queue: each pending update is attributed to its innermost enclosing boundary — or to the root snapshot when nothing encloses it, or to nothing when a portal intervenes — replacing the `subtreeFlags & MutationMask` reads. Placements, visibility, and hydration still walk via `flags`/`subtreeFlags`. In development, every commit re-runs the old tree walks as parity assertions that throw if the queue missed or double-ran work, and view-transition classification is checked against an own-flag recomputation. Uncaught render errors rethrow to `flushSync` callers; outside `flushSync` they go to the root's `onUncaughtError`, or rethrow from a detached task when no handler exists — scheduler ticks never die silently.
+The index is an optimization, not a second source of truth:
 
-## Suspension Retries
+- each fiber appears at most once;
+- a Suspense or error capture truncates entries created by its discarded subtree;
+- render restart and commit clear the index; and
+- development builds compare indexed behavior with the original tree walks.
 
-Every suspension gets two pings. At capture time an identity-free root ping is attached: if the render never commits (preserved suspension, restart, interruption), the resolved thenable revives the suspended lanes at the root and the update re-renders whole; once the lanes committed it is a masked no-op. The targeted retry — `scheduleFiber(boundary, retryLane)` — is only recorded at capture and attaches at commit, to the boundary fiber the commit just made current. Fiber identities captured mid-render are never trusted: render-time fibers can be discarded, restarted, or reused in place, and in-place bailout reuse means a fiber's `return` chain cannot prove tree membership (lane marking survives that skew by writing through alternates; a membership test does not — do not add one). Deletion is the one event that invalidates a committed identity, and deletion teardown records it at the source by severing the deleted subtree root's `return` pointers (both generations — every upward chain out of the subtree passes through one of them), so a late retry or a setState from a stale closure fails root lookup and no-ops instead of marking phantom lanes. Severing waits until the subtree's teardown walk finishes, which still resolves roots through those chains. Consequently `rootOf` stays a throwing invariant only on render/commit paths; anything reachable from user code after unmount (transition starters, stable events) must tolerate a rootless fiber.
+Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index.
 
-## Testing Flushes
+View transitions assign indexed mutations to the nearest transition boundary, to the root, or to nothing when a portal breaks ownership. This avoids another subtree walk without changing which mutations count.
 
-`act(callback)` is a scheduler-backed test helper. While an act scope is open, Fig scheduler callbacks are queued instead of posted to host APIs. The outermost scope waits for the callback, drains queued work by scheduler priority, runs continuation callbacks, and repeats after microtask/macrotask turns until no Fig work is scheduled. This covers root renders, state updates after awaited code inside the callback, effect work scheduled by commits, and Suspense retries that ping before `act` resolves. It does not advance arbitrary application timers; tests that depend on timers still own those timers.
+## Suspense Retries
+
+Every suspension installs two kinds of wake-up:
+
+- A root-level ping is attached during render. If that render is restarted or abandoned, resolving the promise can still revive the suspended lanes.
+- A targeted boundary retry is recorded during render but attached only after commit, when the boundary fiber is known to be current.
+
+Fig never trusts a fiber identity captured from unfinished work. A render may restart, reuse a fiber in place, or discard it entirely.
+
+Deletion severs the removed subtree's parent links after cleanup. A late retry or stale setter then fails to find a root and becomes a no-op instead of scheduling phantom work.
+
+Render and commit paths still treat a missing root as an invariant violation. APIs callable after unmount must tolerate it.
+
+## Testing With `act`
+
+While an `act` scope is open, Fig queues scheduler callbacks instead of posting them to the host. The outermost scope waits for the callback, drains work by priority, runs continuations, and repeats across microtask and macrotask turns until Fig has no scheduled work.
+
+This covers renders, effects, updates after awaited code inside the callback, and Suspense retries that ping before `act` finishes. It does not advance arbitrary application timers.

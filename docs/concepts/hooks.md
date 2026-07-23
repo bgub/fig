@@ -2,54 +2,107 @@
 
 Status: stable
 
-The hook surface, the AbortSignal contract, and the deliberate omissions.
+Fig keeps React's hook model but gives long-lived callbacks one consistent cleanup mechanism: `AbortSignal`.
 
 ## The Signal Contract
 
-Every Fig callback that outlives its call site receives an `AbortSignal` instead of returning a cleanup function; the aborted signal is always the indicator. Where each signal aborts:
+A callback that outlives its call site receives a signal and returns nothing. The signal aborts when that particular run no longer owns the work.
 
-| callback | aborts on |
+| Callback | Signal aborts on |
 | --- | --- |
-| effects (`useReactive`/`useBeforePaint`/`useBeforeLayout`) | dependency change, unmount, Activity hide |
-| `bind={(node, signal) => ...}` (fig-dom) | identity change, unmount, Activity suspend |
-| event handlers (`on(type, (event, signal) => ...)`) | re-entry, listener removal |
+| `useReactive`, `useBeforePaint`, `useBeforeLayout` | dependency change, unmount, Activity hide |
+| `bind` | identity change, unmount, Activity hide |
+| `on()` handlers | re-entry, listener removal |
 | `useStableEvent` handlers | re-entry, unmount, Activity hide |
-| `useTransition` callbacks | supersede (same hook), unmount, Activity hide |
-| `useActionState` actions | supersede (same hook), unmount, Activity hide |
-| data loaders (`DataResourceLoadContext.signal`) | superseded load, store dispose, entry eviction |
+| `useTransition` callbacks | superseding run, unmount, Activity hide |
+| `useActionState` actions | superseding run, unmount, Activity hide |
+| data-resource loaders | a newer value publishes, rejection, store disposal, entry eviction |
+
+The signal is always the lifetime indicator. Fig callbacks never return cleanup functions.
 
 ## State
 
-`useState` returns `[S, StateSetter<S>]` — one named setter type, `(next: S | ((previous: S) => S)) => void`. There is no `Dispatch`/`SetStateAction` reducer vocabulary and no `useReducer`: reducer abstractions are userland over `useState`.
+`useState` returns `[state, setState]`. The setter accepts a value or an updater function:
+
+```ts
+type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
+```
+
+`StateSetter` is the one public setter type. Fig has no `Dispatch` or `SetStateAction` vocabulary and no `useReducer`; reducer helpers can be built over `useState` when an application needs them.
 
 ## Effects
 
-`useReactive` (useEffect), `useBeforePaint` (useLayoutEffect), and `useBeforeLayout` (useInsertionEffect) are named for when they run. Commit runs `useBeforeLayout` before host mutations, applies host mutations and publishes the finished tree, then runs `useBeforePaint` before yielding for paint. `useReactive` is scheduled separately at normal priority; if another render starts before it fires, pending reactive effects flush before that render. Effects must return `undefined` — the type makes a React-style returned cleanup a compile error. There is no mount-only hook; `useReactive(fn, [])` is the idiom. Dependency arrays are the honest choice without a compiler; the signal is for cleanup, not tracking. Effects run with the ambient data store set, so data APIs work synchronously inside them.
+The effect names describe when they run:
 
-In development, scheduling state from `useBeforeLayout` throws a diagnostic because that phase runs before host mutations. The diagnostic is raised through the normal effect-error path, so an ancestor ErrorBoundary may capture it; production builds do not include the diagnostic and the update follows normal scheduling.
+- `useBeforeLayout` runs before host mutations. It corresponds to React's `useInsertionEffect`.
+- `useBeforePaint` runs after host mutations but before the browser paints. It corresponds to `useLayoutEffect`.
+- `useReactive` runs later at normal priority. It corresponds to `useEffect`.
+
+```tsx
+useReactive((signal) => {
+  const id = setInterval(tick, 1000);
+  signal.addEventListener("abort", () => clearInterval(id));
+}, []);
+```
+
+Effects must return `undefined`, so returning a React-style cleanup is a type error. There is no separate mount-only hook; use `useReactive(fn, [])`. Dependency arrays remain explicit because Fig does not require a compiler.
+
+If another render starts before pending reactive effects run, Fig flushes those effects first. Effects also run with the ambient data store installed, so data APIs work during their synchronous body.
+
+In development, scheduling state from `useBeforeLayout` throws before commit. That phase exists for insertion-style work, not updates. The error follows the normal effect-error path and may be caught by an ancestor ErrorBoundary.
 
 ## Stable Events
 
-`useStableEvent(handler)` is the general escape-from-reactivity primitive (React's `useEffectEvent` shape with the Fig signal contract; "stable" names the identity guarantee). Its signature treats the handler's trailing `AbortSignal` separately from the returned function's caller-supplied argument tuple: `(...args: [...Args, AbortSignal]) => Result` becomes `(...args: Args) => Result`. The returned function's identity never changes; the handler always sees the latest committed render. Handlers swap at commit before the before-layout effect phase; calls after unmount run the last committed handler with an already-aborted signal; calling one during render or server render throws; the strict shadow pass never publishes. Unlike React's, it is not restricted to effects — handlers, timers, and subscriptions are all valid callers.
+`useStableEvent(handler)` returns a function whose identity never changes but whose implementation always comes from the latest committed render.
 
-## Transitions And Actions
+The handler receives a trailing `AbortSignal`, but callers do not pass it:
 
-`transition(callback)` and `useTransition()` are explicit priority scopes; async callbacks keep `isPending` true until they settle, and post-`await` updates stay in scope (async transition lanes are held until the callback settles so their updates commit atomically).
+```ts
+(...args: [...Args, AbortSignal]) => Result
+// becomes
+(...args: Args) => Result
+```
 
-`useTransition` callbacks receive an `AbortSignal`. Each hook is one cancellation domain: starting a new transition aborts and _retires_ the previous pending run. A retired run's pending slot releases immediately (an ignored signal or hung promise can never pin `isPending`), its rejection is swallowed (an aborted fetch rejecting is the happy path), and state it already set stays committed — aborting is a signal, not an unwind. Retire bookkeeping schedules on the default lane because the retired run's own transition lane may never render. Top-level `transition()` has no signal: no hook identity to supersede, no lifetime to unmount.
+Handlers update at commit before `useBeforeLayout` runs. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
 
-`useActionState(action, initialState)` keeps React's argument order; Fig appends a trailing `AbortSignal` after the runner's args (the data-loader tuple shape — declare the signal parameter; it drives `Args` inference). Runs are last-run-wins, guarded by a generation counter: a retired run's settlement (value or rejection) can never touch state, error, or pending. There is no React-19-style serial action queue. Server action transport is left to framework layers.
+Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effects. Event handlers, timers, and subscriptions may all call them.
+
+## Transitions
+
+`transition(callback)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` remain inside the same transition.
+
+Each `useTransition` hook is one cancellation domain. Starting another run aborts and retires the previous one:
+
+- its pending slot releases immediately;
+- its eventual rejection is swallowed; and
+- state it already committed stays committed.
+
+Abort is a signal to stop, not an undo operation. The top-level `transition()` has no signal because it has no hook identity to supersede and no component lifetime to follow.
+
+## Actions
+
+`useActionState(action, initialState)` keeps React's argument order and adds an `AbortSignal` after the runner's arguments. Declare that final parameter so TypeScript can infer the argument tuple.
+
+Actions are last-run-wins. A generation counter prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. Server action transport belongs to framework integrations.
 
 ## Other Hooks
 
-- `useMemo`/`useCallback` — stable values and callback identities.
-- `useDeferredValue` — deferred render-time values.
-- `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` — server render and hydration require `getServerSnapshot`; subscriptions under hidden Activity defer until reveal.
-- `useId` — SSR-stable ids with the root's `identifierPrefix`. Server render and hydration derive the id from the same canonical element path; private renderer fibers are transparent. A dehydrated Suspense or Activity boundary snapshots that path when the server marker is claimed and restores it when hydration resumes, so intervening client updates cannot renumber its ids. Components mounted purely on the client use a separate `fig-C-*` namespace and therefore cannot claim or collide with server ids.
-- No `useRef`: `useMemo(() => ({ current: null }), [])` for mutable storage, `bind` for DOM access.
+- `useMemo` and `useCallback` preserve values and callback identities.
+- `useDeferredValue` renders a lower-priority version of a value.
+- `useSyncExternalStore` requires `getServerSnapshot` during server rendering and hydration. Hidden Activity subscriptions wait until reveal.
+- `useId` creates SSR-stable ids under the root's `identifierPrefix`. Server rendering and hydration derive ids from the same canonical element path. A dehydrated Suspense or Activity boundary preserves that path across intervening client updates, while purely client-mounted components use the separate `fig-C-*` namespace.
+- There is no `useRef`. Use `useMemo(() => ({ current: null }), [])` for mutable storage and `bind` for DOM access.
 
-## Read Verbs (Not Hooks)
+## Read Verbs Are Not Hooks
 
-React's broad `use(resource)` splits into explicit reads that are render-time inputs, not hook slots: `readContext(context)` (context objects are their own provider; each read records the value seen so changed providers re-render matching consumers even through bailed-out subtrees — propagation is lazy, resolved at render bailouts (rendering.md), and stops at nested providers of the same context), `readPromise` (identity-keyed, not call-position-keyed), and `readData` from `@bgub/fig` (cache-keyed — see data.md).
+React's broad `use(resource)` becomes three explicit operations:
 
-Promise-valued children are the one implicit read: the renderer reads them because a child position already asks Fig to render the eventual node. `readPromise` remains the explicit verb for using a promise's value while computing props, branching, or otherwise outside a child slot. Both forms share the process-wide identity registry. Client-created promise children must be identity-stable across retries; use `useMemo` or a data resource rather than constructing a fresh `.then(...)` chain on every render.
+- `readContext(context)` reads a render-time context value.
+- `readPromise(promise)` reads by promise identity.
+- `readData(resource, ...args)` reads by data-resource key.
+
+They do not consume hook slots. Context reads still participate in bailout invalidation: if a provider value changes, Fig finds and schedules the consumers that would otherwise be skipped, stopping at nested providers of the same context.
+
+A promise used directly as a child is read implicitly because its child position already tells Fig where the result belongs. Use `readPromise` when a promise value affects props or branching instead.
+
+Client-created promises must keep the same identity across retries. Memoize them or use a data resource rather than creating a fresh `.then(...)` chain during every render.

@@ -2,29 +2,44 @@
 
 Status: stable index
 
-The spec: one file per subsystem, each the single authoritative source for that subsystem's contracts, invariants, wire formats, and rationale. Written for someone changing the code; user guides live one directory up. When a contract changes, the owning concept file updates in the same commit.
+This folder is Fig's spec. Each file owns one subsystem: its public contract, important invariants, wire formats, and the reasoning behind them. The guides one directory up explain how to use Fig; these files explain what Fig promises.
 
-The principles every file applies: prefer small runtime concepts over compatibility layers; keep renderer behavior explicit and host-driven; use native platform semantics when they are clearer than React aliases; add APIs because they strengthen Fig, not because React has them; fail early for invalid render inputs instead of warning after commit. Non-goals: matching React's legacy or compatibility behavior, Node-specific streams as the default SSR surface, and adding React APIs before a Fig use case proves they belong.
+When a code change alters a contract, update the matching concept file in the same commit.
 
-Every concept file carries a `Status:` line — `stable` for settled contracts, `exploring` for open designs (Problem → Prior Art → Direction → Open Questions → Provisional Stance), and a qualified status for mixed or living index files.
+## How To Read These Docs
 
-The cross-subsystem living plan index is [open-questions.md](../plans/open-questions.md); items graduate into their owning concept file when resolved.
+Every file has a status:
 
-- [architecture.md](./architecture.md) — package ownership doctrine, the internal protocol registry, lazy data-store installation, boundaries that never leak.
-- [rendering.md](./rendering.md) — element model, bailout tiers, always-strict dev rendering, pre-commit diagnostics, commit/batching.
-- [hooks.md](./hooks.md) — the AbortSignal contract table, state/effects/stable events, transitions and actions (cancellation, action last-run-wins), the read verbs, deliberate omissions.
-- [mixins.md](./mixins.md) — render-time host behavior composition, descriptor identity, prop precedence, and tree boundaries.
-- [events.md](./events.md) — the `on()` mixin, logical-tree delegation, native propagation (focus/blur stance), replay, `bind`.
-- [jsx.md](./jsx.md) — namespace placement, `HostProps`, React-habit traps, the stage-2 external-package plan.
-- [data.md](./data.md) — data resources: key identity, loader inputs, read semantics, the freshness verbs, ambient store vs explicit handle, SSR handoff.
-- [assets.md](./assets.md) — asset resources: creators, dedupe keys, destinations, reveal gating.
-- [server-rendering.md](./server-rendering.md) — the entry grid, streaming results, `prerender`, the `onError` digest contract.
-- [suspense-streaming.md](./suspense-streaming.md) — markers, segments, the inline runtime ops.
-- [activity.md](./activity.md) — visibility model, offscreen scheduling, hidden-template SSR and hydration.
-- [view-transitions.md](./view-transitions.md) — `ViewTransition`, commit transactions, streamed reveal annotations.
-- [hydration.md](./hydration.md) — selective hydration, event replay, mismatch policy, the hydration-environment exploration.
-- [payload.md](./payload.md) — the Payload wire format, `decodePayloadStream`, client references, render-only rules, terminology rule.
-- [errors.md](./errors.md) — boundary contract, the recovery loop, uncaught routing, digests, cancellation-is-not-an-error.
-- [renderer-authoring.md](./renderer-authoring.md) — HostConfig, the root API, the internal scheduler, dev subpaths.
-- [tanstack-router.md](./tanstack-router.md) — the Router-core adapter boundary, initial surface, and native link contract.
-- [tanstack-start.md](./tanstack-start.md) — the Start runtime adapter, single-store ownership, and document-data round trip.
+- `stable` means the contract is settled.
+- `exploring` means the design is still open. These files should explain the problem, prior art, likely direction, and remaining questions.
+- A qualified status describes a file with both settled and open parts.
+
+Across the project, we prefer a small number of explicit runtime concepts over compatibility layers. We use native platform behavior when it is clearer than a React alias and keep renderer behavior host-driven.
+
+Invalid render input fails before commit. React parity alone is not a reason to add an API.
+
+Fig does not aim to preserve React's legacy behavior, make Node-specific streams the default SSR API, or add compatibility APIs before a real Fig use case needs them.
+
+Open work that spans several subsystems lives in [open-questions.md](../plans/open-questions.md). Once a decision is made, its contract belongs in the concept file that owns it.
+
+## Map
+
+- [Architecture](./architecture.md) — package ownership, internal protocols, and boundaries that stay private.
+- [Rendering](./rendering.md) — elements, fibers, bailouts, strict development rendering, diagnostics, and commit.
+- [Hooks](./hooks.md) — state, effects, stable events, transitions, actions, read verbs, and the shared `AbortSignal` contract.
+- [Host mixins](./mixins.md) — render-time host behavior composition.
+- [Events](./events.md) — `on()`, native propagation, logical-tree delegation, replay, and `bind`.
+- [JSX](./jsx.md) — renderer-owned JSX types and native host props.
+- [Data resources](./data.md) — keys, stores, reads, freshness, and SSR handoff.
+- [Asset resources](./assets.md) — asset declarations, deduplication, placement, and reveal gating.
+- [Server rendering](./server-rendering.md) — streaming APIs, prerendering, errors, and flow control.
+- [Suspense streaming](./suspense-streaming.md) — boundary markers, streamed segments, and browser operations.
+- [Activity](./activity.md) — hidden trees, offscreen work, SSR, and hydration.
+- [View transitions](./view-transitions.md) — declarative transition surfaces and commit coordination.
+- [Hydration](./hydration.md) — selective hydration, event replay, mismatch recovery, and environment-stable rendering.
+- [Payload](./payload.md) — Fig's server-component data format and client references.
+- [Errors](./errors.md) — boundaries, recovery, uncaught errors, digests, and cancellation.
+- [Renderer authoring](./renderer-authoring.md) — `HostConfig`, renderer roots, and the scheduler.
+- [TanStack Router](./tanstack-router.md) — the Router Core adapter and route-data contract.
+- [TanStack Start](./tanstack-start.md) — request rendering, shared data ownership, Payload routes, and build integration.
+- [Intentional differences from React](./intentional-differences-from-react.md) — a quick orientation for React users.

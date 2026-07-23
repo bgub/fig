@@ -2,60 +2,99 @@
 
 Status: runtime, Vite plugin, and Payload routes implemented; native TanStack framework target pending
 
-`@bgub/fig-tanstack-start` adapts TanStack Start's request and hydration cores to Fig. TanStack owns request middleware, route loading, redirects, and router-match dehydration. Fig owns component rendering, data-resource identity and freshness, the data store, its document serialization, and asset resources.
+`@bgub/fig-tanstack-start` connects TanStack Start's request and hydration cores to Fig.
 
-## Single-Store Ownership
+TanStack owns requests, middleware, route loading, redirects, manifests, and server-function transport. Fig owns rendering, data-resource identity, the root data store, document-data serialization, and asset resources.
 
-`createStartDataContext()` creates one root-neutral Fig store and returns the router context containing it. Server route loaders call `ensureRouteData` through that handle before rendering. `renderRouterToStream` passes the same store to `renderToDocumentStream`, which adopts it and attaches the server renderer lifecycle. On the client, the adapter decodes the Fig-owned document snapshot into a fresh Fig store before `hydrateRoot` adopts it and attaches reactive scheduling. TanStack never stores the values in `loaderData` and never owns or copies the cache.
+## One Data Store
 
-The application renders `StartScripts` near the end of its document body, after route content. It owns the complete document transport order: a non-executable JSON script containing Fig's encoded data entries, the Fig-owned insertion marker for initial Payload carriers, then Router `Scripts`. The data and marker nodes are server-owned hydration state. In the browser the data carrier renders nothing; it is initial state, not live UI, and must never reserialize the store after Payload trees enter it. Encoding uses Fig's payload value codec, including graph identity and supported non-JSON values; `<` and JavaScript line-separator characters are escaped for safe inline HTML. On the client, `createStartDataContext` eagerly decodes that earlier script while constructing the router, before TanStack hydration can start client-only route loaders. The client entry repeats that step idempotently as a fallback before the first Fig render in case router construction preceded the script. If the client module executes while the HTML parser is still above the positioned bootstrap, hydration waits for `DOMContentLoaded`; the bootstrap remains in its declared body position without racing TanStack's `window.$_TSR` assertion.
+`createStartDataContext()` creates one Fig store before rendering begins and places it in router context.
 
-The contract is covered end to end: a Router loader populates the server store, that exact store renders the document, a fresh client document supplies the serialized snapshot, initial hydration performs no resource load, and invalidating the hydrated entry performs exactly one new load.
+On the server:
 
-`apps/demo-tanstack-start` is the executable proof. Its production Vite build and preview server exercise generated and automatically split file routes, streamed SSR, hydration, request-derived themes, metadata navigation, nested layouts, view transitions, isomorphic and server-function-backed data refresh, and post and asset trees delivered as Payload resources. The data route keeps blocking `ensureRouteData` reads for values needed before commit. The asset route instead preloads two Payload resources, returns `void`, commits its Suspense fallback independently, and rejects a late tree after superseding navigation. Its delayed Payload discovers a stylesheet from an ordinary `.tsx` component, serves image and font files emitted only by the server graph, and hydrates an explicit `Isomorphic` component with its own CSS and SVG asset without a duplicate request.
+1. Route loaders use that handle through `ensureRouteData`.
+2. `renderRouterToStream` passes the same store to `renderToDocumentStream`.
+3. The renderer adopts it for the request and later disposes it.
+
+On the client, the adapter decodes the Fig document snapshot into a fresh store before `hydrateRoot` adopts it. TanStack never copies those values into `loaderData`.
+
+`StartScripts` appears near the end of `<body>`, after route content. It writes, in order:
+
+1. a non-executable script containing Fig's encoded data snapshot;
+2. a marker where initial Payload carriers belong; and
+3. Router's normal `Scripts` output.
+
+The data script is hydration state, not UI. It is decoded while constructing the client router, before client-only loaders can start. The client entry repeats the decode idempotently as a fallback. If the parser has not reached `StartScripts` yet, hydration waits for `DOMContentLoaded`.
+
+The transport uses Fig's Payload value codec, including supported non-JSON values and graph identity. Inline-dangerous characters are escaped.
 
 ## Payload Routes
 
-`payloadResource({ key, render })` is the Start-owned framework adapter around Fig's ordinary `payloadDataLoader`. Its value is a decoded `FigNode` in the same Fig data store used by route loaders and components. A route loader calls `ensureRouteData(context, resource, input)` and its component calls `readData(resource, input)`; TanStack continues to own route orchestration while Fig owns the cache entry, decoded tree, streamed data rows, and asset resources. `render` is an inline function and may be async. Its input type is compile-time information, so server-side data access still validates untrusted values where correctness or security requires it.
+`payloadResource({ key, render })` wraps a Payload endpoint as a normal Fig data resource whose value is a decoded `FigNode`.
 
-The compiler lowers each declaration to a private TanStack server function whose handler returns `renderPayloadResponse(await render(input))`. Application code does not author that transport or import `renderPayloadResponse`; the low-level function remains available to framework integrations. Start's server-function handlers receive no abort signal, so `renderPayloadResponse` defaults its render signal to the incoming request's signal from Start's storage context — a disconnected client aborts the Payload render instead of leaving it running to completion; an explicit `options.signal` overrides the default. The browser form retains `key`, the data-resource cache, and the generated RPC stub while omitting the render callback, its JSX, and imports referenced only by that callback. The resource declaration must therefore live in a client-importable module, conventionally `.payload.tsx`, because route loaders and components import its shared handle. During SSR, the resource registers a request-local companion stream while decoding its root. The element-valued root entry is omitted from the ordinary data snapshot because value encoding deliberately rejects component functions. Server decoding retains each Payload asset list on its owning decoded row, so the normal Fig document renderer emits and deduplicates the asset before the HTML segment that needs it; a one-time pre-render snapshot would race Start's streaming loaders and is deliberately not used.
+```tsx
+export const postTree = payloadResource({
+  key: (id: string) => ["post-tree", id],
+  render: (id) => <Post id={id} />,
+});
+```
 
-The document transport drains Payload streams while shell HTML continues streaming, including resources registered after the shell has started. At the Fig-owned marker emitted by `StartScripts`, it emits one nonce-bearing, non-executable carrier per completed response before Router's scripts, then releases the async client entry. This ordering is required by full-document hydration: once it starts, it may replace parser-pending transport nodes. A slow hole therefore does not delay server HTML or first paint, but it does delay hydration and interactivity. On first hydration, `payloadResource` reconstructs a response from its keyed carrier instead of calling its server function again. Later navigation, refresh, or invalidation uses the same resource loader against the raw server-function `Response`.
+A route loader calls `ensureRouteData(context, postTree, id)`, and the component calls `readData(postTree, id)`. TanStack orchestrates the route; Fig owns the cache entry, streamed tree, data rows, and assets.
 
-Payload `data` rows hydrate the same generation-guarded Fig store. Payload delivery assets use retained declarations on the server and normal insertion gates in the browser, while title/meta remain owner-bound declarations in both environments and publish only with the route tree's reveal or commit. The adapter's generated isomorphic-component manifest owns reference resolution and stable component identity across server decoding, browser decoding, navigation, and refresh; applications never configure a Payload resolver. Companion-stream registration is keyed by Start's request-local async context, so concurrent renders cannot see one another's entries.
+The compiler turns `render` into a private TanStack server function returning `renderPayloadResponse`. Browser output keeps the key and RPC loader but removes server-only JSX and imports. The declaration therefore stays in a client-importable module, conventionally `.payload.tsx`; the filename itself has no runtime meaning.
 
-## Vite and Compiler Boundary
+Start server functions do not expose an abort signal, so `renderPayloadResponse` uses the current request signal unless explicitly overridden. A disconnected client stops the Payload render.
 
-`@bgub/fig-tanstack-start/plugin/vite` delegates environment planning, route manifests, server-function extraction, dev serving, production builds, and preview serving to TanStack's plugin core. It supplies physical default-entry paths so production output has stable client/server entry names. The client entry directly hydrates Fig; the compatibility plugin supplies the generated server request handler.
+During SSR, decoding registers the response as a request-local companion stream. The element-valued root is omitted from the ordinary data snapshot because it may contain component functions.
 
-TanStack's compiler currently accepts only React, Solid, and Vue framework targets and derives package names from that target. The adapter's versioned compatibility profile privately uses the Solid target, pins the exact participating Router and Start core versions, rewrites Fig package-root imports before compilation, and maps the compiler's Solid router, Start, and RPC module ids back to Fig entries. The route generator also hard-codes that target when normalizing `createFileRoute` and `createLazyFileRoute` imports, so those constructor imports retain the compatibility ID; applications mirror the runtime aliases with TypeScript `paths` entries pointing at the Fig Router and Start packages. The Start alias lets the generated registration footer carry `src/start.ts` middleware context types into server functions. The client build rejects compatibility-only Solid modules if they enter its runtime graph.
+Assets remain attached to their decoded owners, allowing the document renderer to emit each one before the HTML segment that needs it.
 
-The plugin also owns Start's storage-context module id. Its adapter uses the same global `AsyncLocalStorage` key and semantics on the server, preserving request isolation across bundled copies and interleaved requests, while the browser implementation is inert. The editable Fig adapters stay out of dependency optimization during development. Vite prebundles TanStack Start client core, but its application-bound router and Start entry imports remain external `/@fs/` modules, so their normal transformation and hot invalidation behavior is preserved. Production uses Vite's normal client and server bundling rather than dependency optimization.
+The document transport keeps accepting companion streams after the shell starts. At the `StartScripts` marker it writes one nonce-bearing, non-executable carrier per completed response, then allows client hydration to begin. Slow nested holes do not block HTML or first paint, but they do delay hydration and interactivity.
 
-The SSR environment emits files imported only by server modules, and the adapter mirrors those emitted asset files into the client output directory after the server build. A stylesheet URL serialized by a server-only Payload component therefore resolves from the public build instead of pointing at an SSR-only or missing file. If a server asset and client asset claim the same public path with different bytes, the build fails instead of silently overwriting the client output; custom asset naming therefore uses content hashes or separate namespaces.
+Initial hydration reconstructs the Payload response from its carrier instead of making another request. Later navigation, invalidation, and refresh use the generated server function normally.
 
-The adapter compiles static stylesheet imports in named components reached from a `payloadResource` render boundary (internally `renderPayloadResponse`) into Payload component-asset annotations. Application code imports the stylesheet normally and returns its Fig tree; it does not import `assets` or `stylesheet`. The server renderer turns the annotation into ordinary `stylesheet` descriptors with `payload` precedence when—and only when—the component renders. Those descriptors then use the existing Payload row ownership, dedupe, streaming, and reveal-gating contracts. Imports with bindings retain their normal module value and gain the same asset annotation.
+Payload data rows hydrate the same generation-guarded store. Browser delivery assets use normal reveal gates; metadata stays attached to its owner until commit. Request-local registration prevents concurrent requests from seeing each other's streams.
 
-Payload rendering is a use-site behavior, not a component category or filename behavior. The `payloadResource` `render` callback defines the root: ordinary components reached from its returned node execute through Payload and serialize as elements regardless of where they are declared. Applications conventionally use `.payload.tsx` for shared resource declarations, but the `.payload` segment has no compiler or runtime meaning. TanStack's `.server.tsx` suffix remains available when an unrelated module needs framework-enforced server-only protection; it is not a Payload convention, and a resource handle imported by a route cannot live there.
+## Compiler And Vite Integration
 
-`Isomorphic` is the one explicit exception. `<Isomorphic component={Counter} initial={3} />` requires `Counter` to be an ordinary named or default static import. The compiler replaces that prop with an opaque Payload reference; the generated manifest supplies matching server and browser imports plus the client build's stylesheet assets. The boundary renders during document SSR and hydrates in the browser, while an ordinary `<Counter />` use remains Payload-rendered. No `.client` suffix, dynamic import, reference id, or manual `clientReference` call exists in the application model.
+The Vite plugin delegates environment planning, routes, server-function extraction, development serving, production builds, and preview to TanStack's plugin core. It supplies Fig's client and server entries and installs `figRefresh()`.
 
-`payloadResource` imports one generated virtual manifest directly. The first compiler pass rewrites its inline render callback into a private, identifier-bound TanStack server function and removes the render-only code from the browser form. In the server graph a second pass marks component imports reached from the generated `renderPayloadResponse`, propagates that private mark through ordinary component uses, and stops at `Isomorphic`. Each generated isomorphic import carries its reference id into the client chunk graph, allowing the completed client build to supply the exact hashed CSS URLs to the server bundle without a process-global registry. The manifest creates one stateful resolver per bundle, so component type identity survives re-decodes without caller coordination. Because Payload rendering is filename-independent, the manifest's eager glob spans every non-test source module; each definition module reads its source — and each referenced component's stylesheet imports — through the filesystem, so the dev server fingerprints both analyzed inputs on hot updates and reloads a definition only when its `Isomorphic` boundary set or a referenced component's stylesheet imports actually change. In development, direct stylesheet imports provide Vite-served fallback URLs. In production, client CSS is attached to its Payload reference row, retained for document SSR, and used as a browser reveal gate.
+TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's versioned compatibility profile privately uses Solid identifiers, pins the participating TanStack versions, and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph.
 
-The compatibility layer does not alter runtime ownership. Fig still owns the data store, document rendering, hydration, and asset resources; TanStack still owns request handling, manifests, redirects, middleware, and server-function transport. A future native framework descriptor can replace the aliases without changing those interfaces.
+Applications mirror the generated compatibility ids with TypeScript paths. A future native Fig target can replace this aliasing without changing runtime ownership.
 
-TanStack's Start plugin runs its file-route generator and code splitter. The Fig router implements the generated route, lazy route, lazy component, and lazy function contracts, so file routes and split route chunks use ordinary Fig route objects. The adapter installs `figRefresh()` from `@bgub/fig-vite`; accepted component edits update in place and preserve hook state, while changes outside a refresh boundary fall back to Vite's normal invalidation. A native Fig framework descriptor can eventually replace the closed target compatibility layer without changing the refresh runtime.
+The adapter shares TanStack's global `AsyncLocalStorage` key on the server so bundled copies still see one request context. Values remain request-local, including across concurrent streaming renders. Browser storage context is inert.
 
-## Request Context, Middleware, and Redirects
+Server-only modules may emit assets that the browser still needs. After the server build, the adapter copies those emitted files into the client output. Conflicting bytes at one public path fail the build; custom naming should therefore use hashes or separate namespaces.
 
-The package root exposes `createStart`, `createMiddleware`, and `createCsrfMiddleware` from Start client core. A user `src/start.ts` can install global request and function middleware. Request middleware executes before router rendering and server functions; the resulting context is stored in Start's request-local async context and is visible to function middleware and handlers. Custom request middleware replaces Start's default request chain, so applications that expose server functions include `createCsrfMiddleware({ filter: context => context.handlerType === "serverFn" })` unless they provide equivalent protection.
+## Component Assets And `Isomorphic`
 
-Each request creates a fresh router and Fig data store. The shared global storage symbol deduplicates the `AsyncLocalStorage` instance across bundled copies without sharing its current value: concurrent SSR requests retain distinct middleware contexts through async route loaders and streamed rendering. The storage-context suite asserts this with interleaved request contexts.
+Static stylesheet imports in named components reached from a `payloadResource` render are compiled into ordinary Payload asset descriptors. Application code imports CSS normally; it does not write `assets()` calls for compiler-known styles.
 
-Redirects remain Router Core values. A redirect thrown from `beforeLoad`, a loader, middleware, or a server function is resolved by Start's handler on the server and by Router Core during client navigation; the Fig renderer adds no redirect protocol.
+Payload rendering is a use-site behavior. Every ordinary component reached from the resource's `render` result executes through Payload, regardless of filename. A `.server.tsx` file still means TanStack-enforced server-only code and cannot contain a resource handle imported by browser routes.
+
+`Isomorphic` is the explicit client boundary:
+
+```tsx
+<Isomorphic component={Counter} initial={3} />
+```
+
+`component` must be a static named or default import. The compiler replaces it with a client reference, generates server and browser manifest entries, and attaches the client build's CSS.
+
+The boundary renders during document SSR and hydrates as a real client component. An ordinary `<Counter />` in the Payload tree remains server-rendered and serialized.
+
+The generated manifest owns one stateful resolver per bundle, keeping component identity stable across decodes. Compiler analysis follows component imports from `payloadResource` and stops at `Isomorphic`. Client build output supplies final hashed asset URLs to the server manifest without a process-global registry.
+
+## Request Context And Redirects
+
+The package exposes Start's `createStart`, `createMiddleware`, and `createCsrfMiddleware`. Request middleware runs before route rendering and server functions, and its context remains available through the request-local async store.
+
+Custom request middleware replaces Start's default chain. Applications exposing server functions should include CSRF protection unless they provide an equivalent policy.
+
+Each request receives a fresh router and Fig data store. Redirects remain Router Core values whether thrown from route loading, middleware, or a server function. Fig adds no redirect protocol.
 
 ## Server Functions
 
-The package root exposes `createServerFn` from Start client core. The plugin compiler turns Fig-authored imports into the standard client, SSR, and server RPC forms. The compatibility plugin resolves those compiler-only module ids directly to TanStack's core transports rather than exposing them as public Fig package entries. Server-only dependencies are removed from the client build.
+The package also exposes `createServerFn`. TanStack's compiler produces the normal client, SSR, and server forms and removes server-only dependencies from browser output.
 
-Server functions do not replace data resources. A mutation performs its remote effect, then invalidates or refreshes the affected Fig keys. Since ambient data mutation functions exist only during Fig's synchronous execution window, an async event captures `readDataStore()` before its first `await` and uses that explicit handle afterward.
+Server functions do not replace data resources. A mutation performs its remote effect, then invalidates or refreshes the affected Fig keys. Because ambient data APIs disappear after `await`, an async handler captures `readDataStore()` before yielding and uses that explicit handle afterward.
