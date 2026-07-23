@@ -1,5 +1,8 @@
 import type { Props } from "@bgub/fig";
-import { VIEW_TRANSITION_PENDING_PROPERTY } from "@bgub/fig/internal";
+import {
+  VIEW_TRANSITION_PENDING_PROPERTY,
+  VIEW_TRANSITION_TIMEOUT_MS,
+} from "@bgub/fig/internal";
 import type {
   ViewTransitionCommitResult,
   ViewTransitionHostConfig,
@@ -104,12 +107,10 @@ function commitViewTransition(
   // reconciler normally parks eligible commits upstream (render-during-wait
   // via the adapter's suspend hook), so for fig-dom this chain is a fallback
   // for renderers that wire commit without suspend — chaining freezes the root
-  // until the previous animation finishes, parking keeps rendering live.
-  const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
-  const pendingSettled = pending?.finished ?? pending?.ready;
-  if (pending != null && pendingSettled !== undefined) {
+  // until the previous animation settles or times out; parking keeps
+  // rendering live.
+  if (waitForActiveViewTransition(owner, run)) {
     chained = true;
-    pendingSettled.then(run, run);
     return "deferred";
   }
 
@@ -255,11 +256,33 @@ function suspendOnActiveViewTransition(
   onFinished: () => void,
 ): boolean {
   const owner = ownerDocument(container);
+  return waitForActiveViewTransition(owner, onFinished);
+}
+
+// React caps suspended commits at 60 seconds. Besides preventing a broken or
+// infinite animation from parking work forever, releasing the document mutex
+// lets the resumed commit start a new transition, which ends the stale one.
+function waitForActiveViewTransition(
+  owner: ViewTransitionDocument,
+  onFinished: () => void,
+): boolean {
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
   const settled = pending?.finished ?? pending?.ready;
   if (pending == null || settled === undefined) return false;
 
-  settled.then(onFinished, onFinished);
+  let waiting = true;
+  function finish(): void {
+    if (!waiting) return;
+    waiting = false;
+    clearTimeout(timeout);
+    if (owner[VIEW_TRANSITION_PENDING_PROPERTY] === pending) {
+      owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
+    }
+    onFinished();
+  }
+
+  const timeout = setTimeout(finish, VIEW_TRANSITION_TIMEOUT_MS);
+  settled.then(finish, finish);
   return true;
 }
 

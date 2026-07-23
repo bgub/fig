@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetadataSnapshotEntry } from "./asset-registry.ts";
 import {
   earlyEventCaptureMarkup,
@@ -309,6 +309,44 @@ describe("server streaming protocol", () => {
 
     expect(started).toBe(1);
     expect(segment.parentNode).toBeNull();
+  });
+
+  it("reveals after 60 seconds when a pending transition never finishes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    const { segment } = appendCompletedSegment(root);
+    let started = 0;
+    const viewTransitionDocument = document as unknown as {
+      __figViewTransition?: unknown;
+      startViewTransition?: (update: () => void) => {
+        finished: Promise<unknown>;
+        ready: Promise<unknown>;
+      };
+    };
+
+    viewTransitionDocument.__figViewTransition = {
+      finished: new Promise<void>(() => undefined),
+    };
+    viewTransitionDocument.startViewTransition = (update) => {
+      started += 1;
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    try {
+      installRuntime().c("b", "s");
+      expect(started).toBe(0);
+      expect(segment.parentNode).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(started).toBe(1);
+      expect(segment.parentNode).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("registers the reveal transition as the document mutex", async () => {

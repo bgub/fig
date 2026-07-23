@@ -11,7 +11,7 @@ import {
   ViewTransition,
   type StateSetter,
 } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
 
@@ -1237,6 +1237,54 @@ describe("ViewTransition", () => {
       expect(commits).toEqual(["B", "D"]);
       expect(container.textContent).toBe("D");
     } finally {
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("commits after 60 seconds when an animation never finishes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    const neverFinished = new Promise<void>(() => undefined);
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+    let started = 0;
+
+    ownerDocument.startViewTransition = (update) => {
+      started += 1;
+      update();
+      return started === 1
+        ? { finished: neverFinished, ready: Promise.resolve() }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, set] = useState("A");
+      setLabel = set;
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("B")));
+      await act(() => transition(() => setLabel?.("C")));
+
+      expect(container.textContent).toBe("B");
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(container.textContent).toBe("C");
+      expect(started).toBe(2);
+    } finally {
+      vi.useRealTimers();
       ownerDocument.startViewTransition = previousStart;
       ownerDocument.__figViewTransition = null;
       container.remove();

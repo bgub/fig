@@ -25,10 +25,11 @@ export const VIEW_TRANSITION_NAME_ATTRIBUTE = "data-fig-vt-name";
 export const VIEW_TRANSITION_CLASS_ATTRIBUTE = "data-fig-vt-class";
 
 // Per-document mutex holding the currently running view transition. Client
-// commits and inline streaming reveals both check it and chain on the
-// previous transition's finished promise, so concurrent transitions never
-// skip each other's animations or clobber temporarily applied names.
+// commits and inline streaming reveals both wait on it before proceeding.
 export const VIEW_TRANSITION_PENDING_PROPERTY = "__figViewTransition";
+// React's maximum suspended-commit wait, shared with streaming reveals so a
+// non-settling transition cannot hold either path indefinitely.
+export const VIEW_TRANSITION_TIMEOUT_MS = 60_000;
 
 // Early-event capture: a tiny inline script at the top of a server-rendered
 // document queues replayable events that fire before the client bundle
