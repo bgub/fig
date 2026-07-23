@@ -1,8 +1,10 @@
 # Fig
 
-Fig is a small TypeScript UI runtime for people who like React's component model but want it rebuilt around browser semantics.
+Fig is a small TypeScript UI runtime for building apps and metaframeworks.
 
-It keeps JSX, function components, hooks, fibers, concurrent rendering, Suspense, transitions, and hydration. It includes keyed data resources, uses native DOM behavior where React adds an abstraction, gives every async lifetime the same cancellation protocol, and treats server-rendered component trees as ordinary values. It leaves behind legacy APIs such as class components.
+It's inspired by React (components, Fiber, hydration, state, etc.), but changes some things to better match platform semantics, such as `AbortSignal` and native prop names.
+
+It also adds simple and intuitive primitives for data (streaming and revalidation), payload components (ordinary components rendered to a stream—you refresh them through the same data APIs), and assets (CSS, fonts, images, and other dependencies declared by the components that need them). You can use these primitives directly or through a framework—the Fig integration for TanStack Start already works!
 
 Fig would not exist without React. I have enormous respect for the React team and their work; Fig deliberately builds on their ideas, often keeps their syntax, and explores what a clean-slate implementation can do differently. Fig also takes inspiration from Remix 3.
 
@@ -16,28 +18,111 @@ Fig includes keyed data resources for loading, deduplication, Suspense, invalida
 
 ### A server-rendered tree should be a value
 
-Server components are often delivered as a second application model with router-owned caching and a special refresh path. Fig's server-component format is called **payload**, and a decoded payload tree is an ordinary data-resource value:
+Server components are often delivered as a second application model with their own cache and refresh path. Fig's format is called **payload**, and a payload tree is just another data-resource value.
+
+With TanStack Start, a payload resource is one declaration:
 
 ```tsx
-import { dataResource, readData, refreshData, transition } from "@bgub/fig";
+// profile.payload.tsx
+import { Isomorphic, payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { FollowButton } from "./follow-button.tsx";
+
+export const profilePage = payloadResource<string>({
+  key: (id: string) => ["profile-page", id],
+  render: (id) => (
+    <article>
+      <h1>Profile {id}</h1>
+      <Isomorphic component={FollowButton} profileId={id} />
+    </article>
+  ),
+});
+```
+
+A route loads and renders it like any other data resource:
+
+```tsx
+import { readData } from "@bgub/fig";
+import { ensureRouteData } from "@bgub/fig-tanstack-router";
+import { createFileRoute } from "@tanstack/solid-router";
+import { profilePage } from "../profile.payload.tsx";
+
+export const Route = createFileRoute("/profiles/$id")({
+  loader: ({ context, params }) =>
+    ensureRouteData(context, profilePage, params.id),
+  component: ProfileRoute,
+});
+
+function ProfileRoute() {
+  const { id } = Route.useParams();
+  return readData(profilePage, id);
+}
+```
+
+The `render` function runs on the server and stays out of the browser bundle. `Isomorphic` marks the part that should also render and hydrate on the client; `FollowButton` itself is still an ordinary component. Refreshing the tree uses `refreshData` like any other resource.
+
+```tsx
+import { refreshData, transition } from "@bgub/fig";
+
+transition(() => refreshData(profilePage, "42"));
+```
+
+The previous tree stays visible while the server renders and streams its replacement.
+
+<details>
+<summary>Using payload without TanStack Start</summary>
+
+The framework adapter is built from the same public APIs. If you own the transport, render the tree into a response yourself:
+
+```tsx
+// profile-endpoint.tsx
+import { clientReference } from "@bgub/fig";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
+
+const FollowButton = clientReference<{ profileId: string }>({
+  id: "./follow-button.tsx#FollowButton",
+});
+
+function Profile({ id }: { id: string }) {
+  return (
+    <article>
+      <h1>Profile {id}</h1>
+      <FollowButton profileId={id} />
+    </article>
+  );
+}
+
+export function handleProfile(id: string): Response {
+  const payload = renderToPayloadStream(<Profile id={id} />);
+  return new Response(payload.stream, {
+    headers: { "content-type": payload.contentType },
+  });
+}
+```
+
+The browser side adapts that response into an ordinary data resource:
+
+```tsx
+import { dataResource } from "@bgub/fig";
 import { payloadDataLoader } from "@bgub/fig-dom";
 
-const pageResource = dataResource({
+export const profilePage = dataResource({
   key: (id: string) => ["profile-page", id],
   load: payloadDataLoader({
     request: (id, { signal }) => fetch(`/profiles/${id}`, { signal }),
-    resolveClientReference,
+    resolveClientReference: ({ id }) => {
+      if (id === "./follow-button.tsx#FollowButton") {
+        return import("./follow-button.tsx").then(
+          (module) => module.FollowButton,
+        );
+      }
+    },
   }),
 });
-
-function ProfilePage({ id }: { id: string }) {
-  return readData(pageResource, id);
-}
-
-transition(() => refreshData(pageResource, "42"));
 ```
 
-`readData` renders the tree. `refreshData` requests a new one. The existing resource handles identity, stale content, cancellation, and Suspense, so payload does not need its own client cache or refresh protocol. Client references are explicit, the row encoding is private, and there are no `"use client"` or `"use server"` directives.
+`readData(profilePage, id)` renders the decoded tree, and `refreshData(profilePage, id)` requests a new one. The resource keeps the previous tree visible while the replacement streams in.
+
+</details>
 
 ### Every lifetime should end the same way
 

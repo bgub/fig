@@ -1,5 +1,11 @@
 # Intro to Fig
 
+Fig is a small TypeScript UI runtime for building apps and metaframeworks.
+
+It's inspired by React (components, Fiber, hydration, state, etc.), but changes some things to better match platform semantics, such as `AbortSignal` and native prop names.
+
+It also adds simple and intuitive primitives for data (streaming and revalidation), payload components (ordinary components rendered to a stream—you refresh them through the same data APIs), and assets (CSS, fonts, images, and other dependencies declared by the components that need them). You can use these primitives directly or through a framework—the Fig integration for TanStack Start already works!
+
 _Note: this doc is for people who already know React! If you don't, skip ahead to the next page which goes into more detail._
 
 In general, Fig follows a simple rule: when syntax is identical to React, use the same API name. When it's different, use a different name.
@@ -132,27 +138,25 @@ Fig handles SSR and streaming similarly to React, but there are some implementat
 
 Fig does not use a filename or `"use client"`/`"use server"` directive to decide how a component renders. A Payload component is simply a Fig component reached by a Payload render instead of an HTML or browser render. Payload is Fig's own wire format; its encoding stays internal while Fig exposes focused APIs for rendering and decoding the stream.
 
-Here is the complete server-to-client path using `payloadDataLoader`.
+With TanStack Start, the server-rendered tree is one payload resource:
 
 ```tsx
 // profile.payload.tsx
-import { clientReference } from "@bgub/fig";
+import { Isomorphic, payloadResource } from "@bgub/fig-tanstack-start/payload";
+import { Counter } from "./counter.tsx";
 
-const Counter = clientReference<{ initial: number }>({
-  id: "./counter.tsx#Counter",
-});
-
-export function Profile() {
-  return (
+export const profileResource = payloadResource<string>({
+  key: (id) => ["profile", id],
+  render: (id) => (
     <main>
-      <h1>Ada</h1>
-      <Counter initial={1} />
+      <h1>Profile {id}</h1>
+      <Isomorphic component={Counter} initial={1} />
     </main>
-  );
-}
+  ),
+});
 ```
 
-The referenced component is ordinary interactive Fig code:
+`Counter` is ordinary interactive Fig code. `Isomorphic` only marks the place where it crosses from the payload tree into the client bundle:
 
 ```tsx
 // counter.tsx
@@ -170,12 +174,60 @@ export function Counter({ initial }: { initial: number }) {
 }
 ```
 
-Serve the payload stream from any request handler:
+A route loads and renders the tree like any other data resource:
+
+```tsx
+import { readData } from "@bgub/fig";
+import { ensureRouteData } from "@bgub/fig-tanstack-router";
+import { createFileRoute } from "@tanstack/solid-router";
+import { profileResource } from "../profile.payload.tsx";
+
+export const Route = createFileRoute("/profiles/$id")({
+  loader: ({ context, params }) =>
+    ensureRouteData(context, profileResource, params.id),
+  component: ProfileRoute,
+});
+
+function ProfileRoute() {
+  const { id } = Route.useParams();
+  return readData(profileResource, id);
+}
+```
+
+The `render` callback is compiled into a private server function and stays out of the browser bundle. The route loader requests the stream, and `readData` renders the decoded component tree.
+
+Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
+
+```ts
+import { refreshData, transition } from "@bgub/fig";
+
+transition(() => refreshData(profileResource, "42"));
+```
+
+The current tree stays visible while the server renders and decodes its replacement. Each resource key is its own refresh boundary; keyed resources pass the same arguments to `refreshData` that they pass to `readData`.
+
+<details>
+<summary>Using payload without TanStack Start</summary>
+
+Without a framework adapter, the same pieces are explicit. First, create the client reference and render the component tree into a response:
 
 ```tsx
 // profile-endpoint.tsx
+import { clientReference } from "@bgub/fig";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
-import { Profile } from "./profile.payload.tsx";
+
+const Counter = clientReference<{ initial: number }>({
+  id: "./counter.tsx#Counter",
+});
+
+function Profile() {
+  return (
+    <main>
+      <h1>Ada</h1>
+      <Counter initial={1} />
+    </main>
+  );
+}
 
 export function handleProfile(): Response {
   const payload = renderToPayloadStream(<Profile />);
@@ -186,7 +238,7 @@ export function handleProfile(): Response {
 }
 ```
 
-Load and render it in the browser as an ordinary data resource:
+Then adapt the response into a data resource and resolve the reference in the browser:
 
 ```tsx
 // client.tsx
@@ -216,15 +268,7 @@ createRoot(document.getElementById("app")!).render(<App />);
 
 The server streams the rendered tree, the client decodes it as the resource value, and `Counter` loads as an interactive client component.
 
-Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
-
-```ts
-import { refreshData, transition } from "@bgub/fig";
-
-transition(() => refreshData(profileResource));
-```
-
-The current tree stays visible while the server renders and decodes its replacement. Each resource key is its own refresh boundary; keyed resources pass the same arguments to `refreshData` that they pass to `readData`.
+</details>
 
 ### Explicit reads instead of `use()`
 
