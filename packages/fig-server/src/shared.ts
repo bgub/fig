@@ -17,6 +17,8 @@ import { escapeAttribute } from "./escaping.ts";
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
+export const STREAMED_METADATA_ATTRIBUTE = "data-fig-streamed-metadata";
+
 export interface StackFrame {
   name: string;
   parent: StackFrame | null;

@@ -14,9 +14,7 @@ import {
 } from "@bgub/fig";
 import {
   ACTIVITY_TEMPLATE_ATTRIBUTE,
-  assetResourceDestination,
   assetResourceFromHostProps,
-  assetResourceKey,
   attachDataStore,
   collectChildren,
   createRendererDataStore,
@@ -107,7 +105,6 @@ export interface Request {
   nextViewTransitionId: number;
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
-  onAssetError?: ServerRenderOptions["onAssetError"];
   pendingRootTasks: number;
   pendingTasks: number;
   pingedTasks: Task[];
@@ -178,7 +175,7 @@ interface Task extends RenderScope {
 }
 
 export interface Segment {
-  boundary: SuspenseBoundary | null;
+  readonly boundary: SuspenseBoundary | null;
   children: Segment[];
   chunks: SegmentChunk[];
   id: number | null;
@@ -206,11 +203,13 @@ export interface SuspenseBoundary {
   completedSegments: Segment[];
   contentSegment: Segment;
   error: ServerErrorPayload | null;
+  fallbackSegment: Segment | null;
   fallbackAbortableTasks: Set<Task>;
   id: number | null;
   parentFlushed: boolean;
   pendingTasks: number;
   status: BoundaryStatus;
+  metadataVisible: boolean;
 }
 
 type BoundaryStatus = "pending" | "completed" | "client-rendered";
@@ -290,7 +289,6 @@ export function createServerRenderRequest(
     nextViewTransitionId: 0,
     nonce: options.nonce,
     onError: options.onError,
-    onAssetError: options.onAssetError,
     pendingRootTasks: 0,
     pendingTasks: 0,
     pingedTasks: [],
@@ -477,11 +475,13 @@ function createBoundary(
     completedSegments: [],
     contentSegment,
     error: null,
+    fallbackSegment: null,
     fallbackAbortableTasks,
     id: null,
     parentFlushed: false,
     pendingTasks: 0,
     status: "pending",
+    metadataVisible: false,
   };
 }
 
@@ -851,44 +851,13 @@ function renderAssetValue(value: unknown, frame: RenderFrame): void {
     }
 
     try {
-      if (frame.request.assetRegistry.register(resource)) {
-        reportLateHeadAsset(frame.request, resource, frame.stack);
-      }
+      frame.request.assetRegistry.register(resource);
     } catch (error) {
       recordErrorStack(error, frame.stack);
       throw error;
     }
 
     frame.segment.assetResources.push(resource);
-  }
-}
-
-function reportLateHeadAsset(
-  request: Request,
-  resource: FigAssetResource,
-  stack: StackFrame | null,
-): void {
-  if (
-    request.headSnapshot === null ||
-    assetResourceDestination(resource) !== "head"
-  ) {
-    return;
-  }
-
-  const key = assetResourceKey(resource);
-  const error = new Error(
-    `Fig head resource "${key}" was discovered after headReady. Move required metadata outside pending Suspense boundaries, or wait for allReady before reading getHead().`,
-  );
-
-  try {
-    request.onAssetError?.(error, {
-      componentStack: componentStack(stack),
-      destination: "head",
-      key,
-      resource,
-    });
-  } catch {
-    // Resource diagnostics are recoverable and should not change render output.
   }
 }
 
@@ -900,6 +869,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   boundary.activityId = frame.hiddenActivityId;
   const parentSegment = frame.segment;
   const boundarySegment = createSegment(parentSegment.chunks.length, boundary);
+  boundary.fallbackSegment = boundarySegment;
   parentSegment.children.push(boundarySegment);
   // The boundary always flushes comment markers around its content, so text
   // on either side of it never merges; no separators needed at this seam.

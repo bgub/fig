@@ -28,6 +28,7 @@ import {
   type SerializedAssetResource,
 } from "./payload-format.ts";
 import {
+  assetResourceDestination,
   assets as attachAssets,
   type FigAssetResource,
   isFigAssetResource,
@@ -121,7 +122,7 @@ export interface PayloadDecodeOptions {
    */
   onStreamDone?: (result: PayloadDecodeCompletion) => unknown;
   /**
-   * Called with stream-safe asset resources as soon as their rows arrive
+   * Called with delivery asset resources as soon as their rows arrive
    * (e.g. fig-dom's insertAssetResources). A returned promise gates the
    * reveal of only the content that declared a dependency on those assets;
    * gate settlement — fulfilled or rejected — releases the reveal, so a
@@ -131,10 +132,10 @@ export interface PayloadDecodeOptions {
     assets: readonly FigAssetResource[],
   ) => void | PromiseLike<void>;
   /**
-   * Retains streamed asset dependencies as `assets(...)` declarations on
-   * their decoded owners. Server document renderers use this to deliver each
-   * asset before the segment that needs it; browser decoders normally leave
-   * this off and prepare assets imperatively instead.
+   * Retains delivery asset dependencies as `assets(...)` declarations on
+   * their decoded owners. Document metadata is always retained because its
+   * owner may mutate the document only when it commits. Server document
+   * renderers enable this option to retain delivery assets too.
    */
   retainAssets?: boolean;
   /**
@@ -233,14 +234,14 @@ class PayloadStreamDecode {
   // Asset gates registered for a row id (assets rows carry `for`); consumed
   // when that row arrives.
   private readonly rowGates = new Map<number, Array<PromiseLike<void>>>();
-  private readonly rowAssets: Map<number, readonly FigAssetResource[]> | null;
+  private readonly rowAssets = new Map<number, readonly FigAssetResource[]>();
   // Unsettled reveal gates for arrived client rows, attached per element as
   // models referencing the row materialize (see elementGates).
   private readonly clientRowGates = new Map<number, Promise<void>>();
-  private readonly clientRowAssets: Map<
+  private readonly clientRowAssets = new Map<
     number,
     readonly FigAssetResource[]
-  > | null;
+  >();
   private readonly rowDecoder: PayloadRowDecoder;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private done = false;
@@ -266,8 +267,6 @@ class PayloadStreamDecode {
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
-    this.rowAssets = options.retainAssets === true ? new Map() : null;
-    this.clientRowAssets = options.retainAssets === true ? new Map() : null;
     this.rowDecoder = jsonPayloadCodec.createDecoder((row) =>
       this.handleRow(row),
     );
@@ -371,9 +370,9 @@ class PayloadStreamDecode {
       case "model": {
         const chunk = this.getChunk(row.id);
         let decoded = this.decodeModel(row.value);
-        const retainedAssets = this.rowAssets?.get(row.id);
+        const retainedAssets = this.rowAssets.get(row.id);
         if (retainedAssets !== undefined) {
-          this.rowAssets?.delete(row.id);
+          this.rowAssets.delete(row.id);
           decoded = attachAssets(retainedAssets, decoded as FigNode);
         }
         chunk.arrived = true;
@@ -398,7 +397,10 @@ class PayloadStreamDecode {
         const assets = decodeAssetResources(row.value.assets);
         if (assets !== null) {
           reference.assets = assets;
-          this.clientRowAssets?.set(row.id, assets);
+        }
+        const retainedAssets = this.retainedAssets(assets);
+        if (retainedAssets !== null) {
+          this.clientRowAssets.set(row.id, retainedAssets);
         }
         const gate = this.prepareAssets(assets);
         if (gate !== null) {
@@ -413,7 +415,11 @@ class PayloadStreamDecode {
             this.clientRowGates.delete(row.id);
           });
         }
-        const component = this.clientReferenceComponent(reference, gate);
+        const component = this.clientReferenceComponent(
+          reference,
+          gate,
+          retainedAssets !== null,
+        );
         chunk.arrived = true;
         this.fulfillChunk(chunk, component);
         return;
@@ -423,6 +429,7 @@ class PayloadStreamDecode {
         chunk.arrived = true;
         // Reveal-gating a failure is pointless; drop any gates aimed here.
         this.rowGates.delete(row.id);
+        this.rowAssets.delete(row.id);
         this.rejectChunk(chunk, errorFromPayloadValue(row.value));
         return;
       }
@@ -434,17 +441,14 @@ class PayloadStreamDecode {
       }
       case "assets": {
         const decodedAssets = decodeAssetResources(row.value);
-        if (
-          decodedAssets !== null &&
-          row.for !== undefined &&
-          this.rowAssets !== null
-        ) {
+        const retainedAssets = this.retainedAssets(decodedAssets);
+        if (retainedAssets !== null && row.for !== undefined) {
           const retained = this.rowAssets.get(row.for);
           this.rowAssets.set(
             row.for,
             retained === undefined
-              ? decodedAssets
-              : [...retained, ...decodedAssets],
+              ? retainedAssets
+              : [...retained, ...retainedAssets],
           );
         }
         const gate = this.prepareAssets(decodedAssets);
@@ -464,10 +468,14 @@ class PayloadStreamDecode {
   ): Promise<void> | null {
     const prepare = this.options.prepareAssets;
     if (prepare === undefined || assets === null) return null;
+    const delivery = assets.filter(
+      (resource) => assetResourceDestination(resource) === "stream",
+    );
+    if (delivery.length === 0) return null;
 
     let result: void | PromiseLike<void>;
     try {
-      result = prepare(assets);
+      result = prepare(delivery);
     } catch {
       return null;
     }
@@ -477,9 +485,23 @@ class PayloadStreamDecode {
     return gate;
   }
 
+  private retainedAssets(
+    assets: readonly FigAssetResource[] | null,
+  ): readonly FigAssetResource[] | null {
+    if (assets === null) return null;
+    const retained =
+      this.options.retainAssets === true
+        ? assets
+        : assets.filter(
+            (resource) => assetResourceDestination(resource) === "head",
+          );
+    return retained.length === 0 ? null : retained;
+  }
+
   private clientReferenceComponent(
     reference: PayloadClientReference,
     gate: Promise<void> | null,
+    retainsAssets: boolean,
   ): ElementType<any> {
     const resolve = this.options.resolveClientReference;
     const entries =
@@ -513,7 +535,7 @@ class PayloadStreamDecode {
       entries === undefined &&
       gate === null &&
       !isThenable(resolved) &&
-      (this.clientRowAssets === null || reference.assets === undefined)
+      !retainsAssets
     ) {
       return resolved;
     }
@@ -685,7 +707,7 @@ class PayloadStreamDecode {
     if (typeof typeModel === "string" || typeModel.$fig !== "client") return;
     const gate = this.clientRowGates.get(typeModel.id);
     if (gate !== undefined) elementGates.set(props, gate);
-    const assets = this.clientRowAssets?.get(typeModel.id);
+    const assets = this.clientRowAssets.get(typeModel.id);
     if (assets !== undefined) elementAssets.set(props, assets);
   }
 

@@ -33,7 +33,6 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 ## Asset Resources
 
 - **Streamed stylesheet precedence** — how precedence should interact with independently streamed segments when bundler-discovered stylesheets share or conflict in ordering. The current manifest integration preserves discovery order but does not define a stronger cross-segment policy. → `docs/concepts/assets.md`
-- **Late head assets are diagnosed, not delivered** — a `title`/`meta` discovered under a pending Suspense boundary after the streaming head seals only triggers `onAssetError`; React's Float runtime inserts into `<head>` client-side at any time. Sketch: a small head-update op in the existing inline runtime (e.g. `t(value)` swapping `document.title`) emitted when a head-destination asset registers after sealing. Must stay visible to the client's key-based asset dedupe (no double titles on later insertions) and have payload-wire parity. Prerender avoids the class by sealing late. → `docs/concepts/assets.md`, `docs/concepts/server-rendering.md`
 
 ## Server Rendering
 

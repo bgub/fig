@@ -2,16 +2,20 @@ import type { FigDataHydrationEntry } from "./data.ts";
 import type { Key } from "./element.ts";
 import type {
   FontResource,
+  MetaResource,
   ModulePreloadResource,
   PreconnectResource,
   PreloadResource,
   ScriptResource,
   StylesheetResource,
+  TitleResource,
 } from "./resource.ts";
 
-// Stream-safe asset resources only (no head-only title/meta). Optional fields
-// stay optional on the wire; omitted `undefined` values are part of the payload
-// contract, not a serializer implementation detail.
+// Asset resources represented as descriptor data. Optional fields stay optional
+// on the wire; omitted `undefined` values are part of the payload contract, not
+// a serializer implementation detail. Delivery assets prepare eagerly at row
+// arrival; document metadata stays attached to its owning decoded row until
+// that row commits.
 export type SerializedAssetResource =
   | {
       crossorigin?: StylesheetResource["crossorigin"];
@@ -53,6 +57,19 @@ export type SerializedAssetResource =
       crossorigin?: PreconnectResource["crossorigin"];
       href: string;
       kind: "preconnect";
+    }
+  | {
+      kind: "title";
+      value: TitleResource["value"];
+    }
+  | {
+      charset?: MetaResource["charset"];
+      content?: MetaResource["content"];
+      "http-equiv"?: MetaResource["http-equiv"];
+      key?: string;
+      kind: "meta";
+      name?: MetaResource["name"];
+      property?: MetaResource["property"];
     };
 
 /** The `error` row value under the server's `onError` contract. */

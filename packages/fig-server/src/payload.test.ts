@@ -12,6 +12,7 @@ import {
   font,
   isValidElement,
   lazy,
+  meta,
   modulepreload,
   preload,
   readContext,
@@ -312,7 +313,7 @@ describe("payload rendering", () => {
     ]);
   });
 
-  it("serializes stream-safe asset assets on rendered client rows", async () => {
+  it("serializes delivery assets and commit-owned metadata on client rows", async () => {
     const Counter = clientReference({
       id: "app/Counter.client.tsx#Counter",
       assets: [
@@ -322,7 +323,7 @@ describe("payload rendering", () => {
         }),
         modulepreload("/assets/Counter.js", { key: "counter-script" }),
         stylesheet("/assets/Counter.css"), // duplicate key, dropped
-        title("ignored"), // head-only, not stream-safe
+        title("Counter"),
       ],
     });
 
@@ -342,6 +343,7 @@ describe("payload rendering", () => {
             precedence: "app",
           },
           { href: "/assets/Counter.js", kind: "modulepreload" },
+          { kind: "title", value: "Counter" },
         ],
       },
     });
@@ -511,6 +513,8 @@ describe("payload rendering", () => {
           [
             stylesheet("/assets/ServerRoute.css"),
             preload("/mark.svg", "image"),
+            title("Server route"),
+            meta({ content: "Payload route", name: "description" }),
           ],
           createElement("article", null, "Server route"),
         ),
@@ -524,6 +528,8 @@ describe("payload rendering", () => {
     expect(assetsRow.value).toEqual([
       { href: "/assets/ServerRoute.css", kind: "stylesheet" },
       { as: "image", href: "/mark.svg", kind: "preload" },
+      { kind: "title", value: "Server route" },
+      { content: "Payload route", kind: "meta", name: "description" },
     ]);
 
     // The assets row gates the reveal of the model row it names, and it must

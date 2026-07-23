@@ -882,13 +882,15 @@ function serializeAssetResources(
 
   for (const resource of input) {
     if (!isFigAssetResource(resource)) continue;
-    // Only stream-safe assets travel on the wire; head-only title/meta are
-    // document state, not client-component assets (see the asset-resources plan).
-    if (assetResourceDestination(resource) !== "stream") continue;
-
-    const key = assetResourceKey(resource);
-    if (request.emittedAssetKeys.has(key)) continue;
-    request.emittedAssetKeys.add(key);
+    // Delivery assets are request-global and persistent, so the first
+    // definition wins. Metadata is owner-scoped and may legitimately repeat
+    // with a different value in another row; the decoder retains those
+    // declarations until their owning tree commits.
+    if (assetResourceDestination(resource) === "stream") {
+      const key = assetResourceKey(resource);
+      if (request.emittedAssetKeys.has(key)) continue;
+      request.emittedAssetKeys.add(key);
+    }
     resources.push(serializeAssetResource(resource));
   }
 
@@ -909,11 +911,10 @@ function collectClientReferenceAssets(
 function serializeAssetResource(
   resource: FigAssetResource,
 ): SerializedAssetResource {
-  // The payload asset wire format is descriptor-only and intentionally does not
-  // carry author-supplied `key`; streamed assets dedupe by their concrete URL.
+  // Delivery assets intentionally omit author-supplied `key` and dedupe by
+  // their concrete URL. Metadata keeps its owner-local identity when needed.
   // Omitted `undefined` optionals are part of the wire contract, hence the
-  // assign-if-defined shape. SSR/head resources still round-trip keys through
-  // data-fig-resource-key.
+  // assign-if-defined shape.
   switch (resource.kind) {
     case "stylesheet": {
       const model: SerializedAssetResource = {
@@ -995,10 +996,19 @@ function serializeAssetResource(
       return model;
     }
     case "title":
-    case "meta":
-      throw new Error(
-        "Head-only resources cannot be serialized into the payload.",
-      );
+      return { kind: resource.kind, value: resource.value };
+    case "meta": {
+      const model: SerializedAssetResource = { kind: resource.kind };
+      if (resource.charset !== undefined) model.charset = resource.charset;
+      if (resource.content !== undefined) model.content = resource.content;
+      if (resource["http-equiv"] !== undefined) {
+        model["http-equiv"] = resource["http-equiv"];
+      }
+      if (resource.key !== undefined) model.key = resource.key;
+      if (resource.name !== undefined) model.name = resource.name;
+      if (resource.property !== undefined) model.property = resource.property;
+      return model;
+    }
   }
 }
 

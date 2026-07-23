@@ -70,30 +70,52 @@ describe("AssetResourceRegistry", () => {
 
   it("lets later title resources replace the singleton slot", () => {
     const registry = new AssetResourceRegistry("");
+    const owner = {};
 
-    registry.register(title("Dashboard"));
-    registry.register(title("Settings"));
+    registry.activateMetadata(owner, [title("Dashboard")]);
+    registry.activateMetadata(owner, [title("Settings")]);
 
     expect(registry.headHtml()).toBe(
       "<title data-fig-hydration-skip>Settings</title>",
     );
   });
 
-  it("rejects conflicting meta resources", () => {
+  it("restores a shadowed metadata claim when the winner leaves", () => {
     const registry = new AssetResourceRegistry("");
+    const page = {};
+    const overlay = {};
 
-    registry.register(title("Dashboard"));
-    registry.register(meta({ name: "description", content: "One" }));
+    registry.activateMetadata(page, [
+      meta({ name: "description", content: "One" }),
+    ]);
+    registry.activateMetadata(overlay, [
+      meta({ name: "description", content: "Two" }),
+    ]);
 
-    expect(() =>
-      registry.register(meta({ name: "description", content: "Two" })),
-    ).toThrow('Conflicting Fig resource for key "meta:name:description".');
+    expect(registry.headHtml()).toBe(
+      '<meta name="description" content="Two" data-fig-hydration-skip>',
+    );
+
+    registry.activateMetadata(page, [
+      meta({ name: "description", content: "One updated" }),
+    ]);
+    expect(registry.headHtml()).toBe(
+      '<meta name="description" content="Two" data-fig-hydration-skip>',
+    );
+
+    registry.releaseMetadata(overlay);
+
+    expect(registry.headHtml()).toBe(
+      '<meta name="description" content="One updated" data-fig-hydration-skip>',
+    );
   });
 
   it("writes native meta descriptor attributes", () => {
     const registry = new AssetResourceRegistry("");
 
-    registry.register(meta({ "http-equiv": "refresh", content: "30" }));
+    registry.activateMetadata({}, [
+      meta({ "http-equiv": "refresh", content: "30" }),
+    ]);
 
     expect(registry.headHtml()).toBe(
       '<meta http-equiv="refresh" content="30" data-fig-hydration-skip>',
@@ -141,12 +163,19 @@ describe("AssetResourceRegistry", () => {
 
   it("keeps the title singleton by replacing it", () => {
     const registry = new AssetResourceRegistry("");
+    const base = {};
+    const overlay = {};
 
-    registry.register(title("Dashboard"));
-    registry.register(title("Settings"));
+    registry.activateMetadata(base, [title("Dashboard")]);
+    registry.activateMetadata(overlay, [title("Settings")]);
 
     expect(registry.headHtml()).toBe(
       "<title data-fig-hydration-skip>Settings</title>",
+    );
+
+    registry.releaseMetadata(overlay);
+    expect(registry.headHtml()).toBe(
+      "<title data-fig-hydration-skip>Dashboard</title>",
     );
   });
 

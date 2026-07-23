@@ -392,7 +392,7 @@ function canonicalResources(
     if (!isFigAssetResource(value)) continue;
     const resource = asInsertableResource(value);
     const key = assetResourceKey(resource);
-    if (!result.has(key) || resource.kind === "title") {
+    if (!result.has(key) || isMetadataResource(resource)) {
       result.set(key, resource);
     }
   }

@@ -452,7 +452,6 @@ describe("@bgub/fig-server", () => {
 
   it("prerender includes head assets discovered after suspension", async () => {
     const pending = deferred<string>();
-    const lateAssets: string[] = [];
 
     function Message() {
       const value = readPromise(pending.promise);
@@ -465,11 +464,6 @@ describe("@bgub/fig-server", () => {
         { fallback: createElement("em", null, "Loading") },
         createElement(Message, null),
       ),
-      {
-        onAssetError(_error, info) {
-          lateAssets.push(info.key);
-        },
-      },
     );
 
     await waitForMicrotasks();
@@ -477,7 +471,6 @@ describe("@bgub/fig-server", () => {
 
     const result = await resultPromise;
 
-    expect(lateAssets).toEqual([]);
     expect(result.head).toBe(
       "<title data-fig-hydration-skip>Late Ready</title>",
     );
@@ -1206,7 +1199,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(
-      `<!doctype html><html><head>${EARLY_EVENTS}<title data-fig-hydration-skip>Stream</title></head><body>`,
+      `<!doctype html><html><head>${EARLY_EVENTS}<title data-fig-hydration-skip data-fig-streamed-metadata="title">Stream</title></head><body>`,
     );
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain(
@@ -1228,9 +1221,8 @@ describe("@bgub/fig-server", () => {
     );
   });
 
-  it("keeps late document metadata out of an already-flushed document head", async () => {
+  it("publishes late document metadata with its boundary reveal", async () => {
     const pending = deferred<string>();
-    const diagnostics: string[] = [];
 
     function Message() {
       return assets(
@@ -1254,11 +1246,6 @@ describe("@bgub/fig-server", () => {
           ),
         ),
       ),
-      {
-        onAssetError(_error, info) {
-          diagnostics.push(info.key);
-        },
-      },
     );
 
     await result.shellReady;
@@ -1267,15 +1254,13 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).toContain(`<head>${EARLY_EVENTS}</head>`);
-    expect(html).not.toContain(
-      "<title data-fig-hydration-skip>Late Title</title>",
+    expect(html).toContain(
+      '__figSSR.c("b-0","s-0",[["title","title","Late Title"]])',
     );
-    expect(diagnostics).toEqual(["title"]);
   });
 
-  it("reports late head assets while keeping them out of the stream", async () => {
+  it("keeps streamed metadata staged until its boundary reveals", async () => {
     const pending = deferred<string>();
-    const diagnostics: Array<{ componentStack: string; key: string }> = [];
 
     function Message() {
       const value = readPromise(pending.promise);
@@ -1288,15 +1273,6 @@ describe("@bgub/fig-server", () => {
         { fallback: createElement("em", null, "Loading") },
         createElement(Message, null),
       ),
-      {
-        onAssetError(error, info) {
-          expect(error).toBeInstanceOf(Error);
-          diagnostics.push({
-            componentStack: info.componentStack,
-            key: info.key,
-          });
-        },
-      },
     );
 
     await result.headReady;
@@ -1305,16 +1281,126 @@ describe("@bgub/fig-server", () => {
     pending.resolve("Ready");
     await result.allReady;
     expect(result.getHead()).toBe("");
-    expect(diagnostics).toEqual([
-      {
-        componentStack: "\n    at Message",
-        key: "title",
-      },
-    ]);
 
     const html = await readStream(result.stream);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).not.toContain("<title");
+    expect(html).toContain(
+      '__figSSR.c("b-0","s-0",[["title","title","Late Ready"]])',
+    );
+  });
+
+  it("replaces fallback metadata when its primary boundary reveals", async () => {
+    const pending = deferred<string>();
+
+    function Primary() {
+      const value = readPromise(pending.promise);
+      return assets(
+        title(`Primary ${value}`),
+        createElement("strong", null, value),
+      );
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        {
+          fallback: assets(
+            title("Loading page"),
+            createElement("em", null, "Loading"),
+          ),
+        },
+        createElement(Primary, null),
+      ),
+    );
+
+    await result.headReady;
+    expect(result.getHead()).toBe(
+      '<title data-fig-hydration-skip data-fig-streamed-metadata="title">Loading page</title>',
+    );
+
+    pending.resolve("Ready");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toContain(
+      '__figSSR.c("b-0","s-0",[["title","title","Primary Ready"]])',
+    );
+  });
+
+  it("does not publish metadata from a failed primary branch", async () => {
+    const pending = deferred<void>();
+
+    function Broken(): FigNode {
+      readPromise(pending.promise);
+      return assets(title("Broken"), createElement(ThrowAfterMetadata, null));
+    }
+
+    function ThrowAfterMetadata(): never {
+      throw new Error("primary failed");
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        {
+          fallback: assets(
+            title("Stable fallback"),
+            createElement("em", null, "Loading"),
+          ),
+        },
+        createElement(Broken, null),
+      ),
+      { onError: () => ({ digest: "failed" }) },
+    );
+
+    await result.headReady;
+    expect(result.getHead()).toBe(
+      '<title data-fig-hydration-skip data-fig-streamed-metadata="title">Stable fallback</title>',
+    );
+
+    pending.resolve(undefined);
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).not.toContain("Broken");
+    expect(html).toContain('__figSSR.x("b-0","failed","")');
+  });
+
+  it("stages partial-segment metadata until the whole boundary reveals", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+
+    function First() {
+      const value = readPromise(first.promise);
+      return assets(
+        title(`Partial ${value}`),
+        createElement("span", null, value),
+      );
+    }
+
+    function Second() {
+      return createElement("span", null, readPromise(second.promise));
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(First, null),
+        createElement(Second, null),
+      ),
+    );
+
+    await result.headReady;
+    first.resolve("ready");
+    await waitForMicrotasks();
+    second.resolve("done");
+    await result.allReady;
+
+    const html = await readStream(result.stream);
+    expect(html).toMatch(/__figSSR\.s\("p-\d+","s-\d+"\)/);
+    expect(html).toContain('[["title","title","Partial ready"]]');
+    expect(html.match(/Partial ready/g)).toHaveLength(1);
   });
 
   it("rejects conflicting duplicate document assets", async () => {
