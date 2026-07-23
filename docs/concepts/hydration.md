@@ -10,6 +10,8 @@ Hydration is Suspense-boundary selective: server markers can stay dehydrated unt
 
 `hydrateRoot` accepts a root-neutral `dataStore` created before router hydration. It adopts that same instance and attaches its scheduler before rendering, so route-loader hydration and component `readData` share one cache without a store-to-store copy. fig-dom accepts `Document` containers for full-document framework hydration in addition to elements and document fragments. Root recovery in a `Document` preserves its doctype, which is document metadata rather than a Fig-owned host node.
 
+Dehydrated Suspense and Activity state also captures the canonical `useId` path at the moment its server marker is claimed. A later hydration attempt restores that immutable base rather than deriving ids from the boundary's possibly shifted live fiber index. Updates may therefore insert or move siblings while the boundary remains dehydrated without renumbering its server ids; components mounted by those updates receive client-only `fig-C-*` ids. The private Activity fiber that Suspense uses to retain its primary tree is transparent to the path because it has no server counterpart.
+
 Hydration adopts single-text host children as text fibers (they must match the server's text nodes), and re-renders **keep that shape** instead of collapsing to the client's textContent optimization. Collapsing would delete the adopted fiber and rewrite identical text on the first post-hydration commit — wasted DOM work whose flags read as a real content mutation (it made view transitions animate a no-op on the first navigation).
 
 ## Event Replay

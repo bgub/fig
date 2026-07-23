@@ -337,6 +337,30 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("uses the canonical tree path for ids inside hidden Activity", async () => {
+    function Field() {
+      const id = useId();
+      return createElement(
+        "label",
+        { for: id },
+        "Secret",
+        createElement("input", { id }),
+      );
+    }
+
+    function App() {
+      return createElement(
+        "main",
+        null,
+        createElement(Activity, { mode: "hidden" }, createElement(Field, null)),
+      );
+    }
+
+    await expect(renderToHtml(createElement(App, null))).resolves.toBe(
+      '<main><template data-fig-activity="" id="a-0"><label for="fig-0-0-0-0-0">Secret<input id="fig-0-0-0-0-0"></label></template></main>',
+    );
+  });
+
   it("renders current deferred values on the server", async () => {
     function App() {
       const value = useDeferredValue("Server", "Initial");

@@ -452,6 +452,181 @@ describe("@bgub/fig-dom hydration", () => {
     expect(input.attributes.id).toBe("hydr-fig-0-0");
   });
 
+  it("keeps ids stable inside selectively hydrated Suspense", async () => {
+    function Field() {
+      const id = useId();
+
+      return createElement(
+        "label",
+        { for: id },
+        "Name",
+        createElement("input", { id }),
+      );
+    }
+
+    const app = createElement(
+      Suspense,
+      { fallback: null },
+      createElement(Suspense, { fallback: null }, createElement(Field, null)),
+    );
+    const container = containerFromHtml(await renderToHtml(app));
+    const label = container.childNodes[2] as FakeElement;
+    const input = label.childNodes[1] as FakeElement;
+    const serverId = input.attributes.id;
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+    await waitForHostTurns();
+
+    expect(container.childNodes).toEqual([label]);
+    expect(label.attributes.for).toBe(serverId);
+    expect(input.attributes.id).toBe(serverId);
+    expect(recoverable.errors).toEqual([]);
+  });
+
+  it("restores a dehydrated boundary's id path after sibling insertion", async () => {
+    function Field({ label }: { label: string }) {
+      const id = useId();
+
+      return createElement(
+        "label",
+        { for: id },
+        label,
+        createElement("input", { id }),
+      );
+    }
+
+    let clientId: string | null = null;
+    function ClientOnly() {
+      clientId = useId();
+      return null;
+    }
+
+    function App({ extra = false }: { extra?: boolean }) {
+      return createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: null, key: "first" },
+          createElement(Field, { label: "First" }),
+        ),
+        extra ? createElement(ClientOnly, { key: "extra" }) : null,
+        createElement(
+          Suspense,
+          { fallback: null, key: "second" },
+          createElement(Field, { label: "Second" }),
+        ),
+      );
+    }
+
+    const container = containerFromHtml(
+      await renderToHtml(createElement(App, null)),
+    );
+    const main = container.childNodes[0] as FakeElement;
+    const firstLabel = main.childNodes[1] as FakeElement;
+    const secondLabel = main.childNodes[4] as FakeElement;
+    const secondInput = secondLabel.childNodes[1] as FakeElement;
+    const serverId = secondInput.attributes.id;
+    const recoverable = captureRecoverableErrors();
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+
+    flushSync(() => {
+      root = hydrateRoot(container as unknown as Element, createElement(App), {
+        onRecoverableError: recoverable.capture,
+      });
+    });
+    flushSync(() => root?.render(createElement(App, { extra: true })));
+    await waitForHostTurns();
+
+    expect(main.childNodes).toEqual([firstLabel, secondLabel]);
+    expect(clientId).toBe("fig-C-0");
+    expect(secondInput.attributes.id).toBe(serverId);
+    expect(recoverable.errors).toEqual([]);
+  });
+
+  it("restores a shifted boundary's id path after hydration suspends", async () => {
+    const pending = deferred<string>();
+    let clientId: string | null = null;
+    let hydratedId: string | null = null;
+
+    function ClientOnly() {
+      clientId = useId();
+      return null;
+    }
+
+    function Field({ value }: { value: string | Promise<string> }) {
+      const id = useId();
+      hydratedId = id;
+      const label = typeof value === "string" ? value : readPromise(value);
+
+      return createElement(
+        "label",
+        { for: id },
+        label,
+        createElement("input", { id }),
+      );
+    }
+
+    function App({
+      extra = false,
+      value,
+    }: {
+      extra?: boolean;
+      value: string | Promise<string>;
+    }) {
+      return createElement(
+        "main",
+        null,
+        extra ? createElement(ClientOnly, { key: "extra" }) : null,
+        createElement(
+          Suspense,
+          { fallback: null, key: "field" },
+          createElement(Field, { value }),
+        ),
+      );
+    }
+
+    const container = containerFromHtml(
+      await renderToHtml(createElement(App, { value: "Name" })),
+    );
+    const main = container.childNodes[0] as FakeElement;
+    const label = main.childNodes[1] as FakeElement;
+    const input = label.childNodes[1] as FakeElement;
+    const serverId = input.attributes.id;
+    const recoverable = captureRecoverableErrors();
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+
+    flushSync(() => {
+      root = hydrateRoot(
+        container as unknown as Element,
+        createElement(App, { value: pending.promise }),
+        { onRecoverableError: recoverable.capture },
+      );
+    });
+    await waitForHostTurns();
+
+    expect(input.attributes.id).toBe(serverId);
+    expect(hydratedId).toBe(serverId);
+
+    flushSync(() =>
+      root?.render(createElement(App, { extra: true, value: pending.promise })),
+    );
+    pending.resolve("Name");
+    await waitForHostTurns();
+
+    expect(main.childNodes).toEqual([label]);
+    expect(clientId).toBe("fig-C-0");
+    expect(hydratedId).toBe(serverId);
+    expect(label.attributes.for).toBe(serverId);
+    expect(input.attributes.id).toBe(serverId);
+    expect(recoverable.errors).toEqual([]);
+  });
+
   it("runs binds for hydrated host elements", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");

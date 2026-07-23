@@ -4,6 +4,7 @@ import {
   readPromise,
   Suspense,
   useSyncExternalStore,
+  useId,
   useReactive,
   useState,
 } from "@bgub/fig";
@@ -502,6 +503,69 @@ describe("@bgub/fig-dom activity", () => {
     expect(container.textContent).toBe("secret tab");
     expect(childRenders).toBe(2);
     expect(calls).toEqual(["run", "abort", "run"]);
+  });
+
+  it("restores server ids when a shifted Activity hydrates on reveal", async () => {
+    let clientId: string | null = null;
+    let setMode: ((mode: "visible" | "hidden") => void) | null = null;
+
+    function ClientOnly() {
+      clientId = useId();
+      return null;
+    }
+
+    function Field() {
+      const id = useId();
+      return createElement(
+        "label",
+        { for: id },
+        "Secret",
+        createElement("input", { id }),
+      );
+    }
+
+    function App({ extra = false }: { extra?: boolean }) {
+      const [mode, set] = useState<"visible" | "hidden">("hidden");
+      setMode = set;
+      return createElement(
+        "main",
+        null,
+        extra ? createElement(ClientOnly, { key: "extra" }) : null,
+        createElement(
+          Activity,
+          { key: "activity", mode },
+          createElement(Field, null),
+        ),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const main = new FakeElement("main");
+    const template = new FakeElement("template");
+    const label = new FakeElement("label");
+    const input = new FakeElement("input");
+    const serverId = "fig-0-0-0-0-0";
+    template.setAttribute("data-fig-activity", "");
+    label.setAttribute("for", serverId);
+    input.setAttribute("id", serverId);
+    label.appendChild(new FakeText("Secret"));
+    label.appendChild(input);
+    template.appendChild(label);
+    main.appendChild(template);
+    container.appendChild(main);
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+
+    flushSync(() => {
+      root = hydrateRoot(container as unknown as Element, createElement(App));
+    });
+    flushSync(() => root?.render(createElement(App, { extra: true })));
+    flushSync(() => setMode?.("visible"));
+    await waitForHostTurns();
+
+    expect(main.childNodes).toEqual([label]);
+    expect(clientId).toBe("fig-C-0");
+    expect(label.attributes.for).toBe(serverId);
+    expect(input.attributes.id).toBe(serverId);
   });
 
   it("hydrates server-hidden content through when the client mode is visible", async () => {
