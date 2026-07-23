@@ -27,13 +27,13 @@ Either design must specify batching, transitions, Activity visibility, hydration
 
 ## 3. Compiler-extracted templates
 
-**Status: parked outside `main`.** The complete opt-in experiment and its tests live on [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates). Revisit that branch rather than rebuilding the spike.
+**Status: archived experiment; not an active direction.** The implementation and its tests remain on [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates) as research evidence, not maintained or mergeable product code.
 
 The compiler splits eligible static JSX into a hoisted `<template>` and a list of dynamic slots. A template fiber mounts by cloning the template and binding the slots; updates diff only the slot values, so reconciler work no longer scales with the static portion of the subtree. Unsupported constructs fall back to ordinary fibers.
 
 At 1,000 rows in headless Chromium, the experiment was 1.43–1.47× faster on mount, 2.74–2.92× faster on same-order updates, and 1.10–1.11× faster on reverse-keyed updates. Its size-limit deltas were +109 B for `@bgub/fig`, +13 B for the core subset, +1,025 B for `fig-dom`, and +265 B for the reconciler.
 
-The remaining question is architectural rather than mechanical: whether Fig should accept a second reconciliation model and its long-term compiler, events, hydration, server-rendering, and slot-identity contracts. It composes naturally with direct host binding because templates provide the stable slots that make direct subscriptions provable.
+The best-case update result did not justify a second reconciliation model and its permanent compiler, events, hydration, server-rendering, Payload, and slot-identity contracts. Conservative eligibility also excluded many common JSX shapes, limiting how often applications would receive the benefit. Reconsider only if profiling real applications shows that large, compiler-eligible static host subtrees are a material bottleneck; use the archived branch as evidence rather than as a porting base.
 
 ## Measurement protocol
 

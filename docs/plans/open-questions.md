@@ -15,29 +15,19 @@
 - React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs
   - Shouldn't be too difficult hopefully
 
-## Hooks
+## API
 
-- Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive
-- Does Fig need a lane-aware `useOptimistic` analog for component-local optimistic overlays, or are `useActionState` plus cache-level optimism from the planned TanStack Query adapter sufficient?
-
-## Hydration
-
-- Would be cool to introduce a new primitive to fix common classes of hydration errors like local time, local, and viewport. This might remove the need for `suppressHydrationWarning` entirely. See the [hydration concept](../concepts/hydration.md) for some brainstorms
-
-## Data Resources
-
-- Adding first-class `reset` or `retry` functions to ErrorBoundary might be helpful. Currently you can run `invalidateDataError(error)` or `invalidateDataKey(key)` manually
-
-## Serialized Components
-
-- Should we add a binary payload codec?
-
-## Server Rendering
-
-- Fig inlines every Suspense boundary that has completed when its parent flushes; only genuinely pending content is outlined. Unlike Fizz's `progressiveChunkSize` heuristic, this means a large completed boundary can block later shell siblings in document order. Consider revisiting in the future.
-- **Early hints / preload headers** — no `onHeaders` equivalent: `headReady` resolves with the shell, too late for 103 Early Hints. Two real constraints shape any design: the Web `Response` API cannot express 103 at all (Node's `writeEarlyHints` is the only seam, so this is inherently a runtime-specific side channel), and a useful trigger point must fire before the shell yet after enough render progress to have discovered assets (first root suspension is the natural candidate — the shell being slow is exactly when 103s pay off). `Link`-header-on-200 preload emission from the asset registry is the milder, runtime-neutral half. → `docs/concepts/server-rendering.md`
-- **Resume / partial prerendering** — `prerender` is all-or-nothing settled and aborting yields static fallbacks; there is no postpone/resume pair, so the slot React canary's `prerender` + `resume` fills (prerender the static shell once, resume the dynamic holes per-request) is empty. The hard part is the parked-state contract: which suspension points can park, what render-scope state serializes across the boundary (id paths, provider values, asset-registry state), and whether the byte-identical-resume invariant extends across processes. A major feature, not an increment. → `docs/concepts/server-rendering.md`
+- **Hooks:** Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive
+- **Hooks:** Does Fig need a lane-aware `useOptimistic` analog for component-local optimistic overlays, or are `useActionState` plus cache-level optimism from the planned TanStack Query adapter sufficient?
+- **Error recovery:** Adding first-class `reset` or `retry` functions to ErrorBoundary might be helpful. Currently you can run `invalidateDataError(error)` or `invalidateDataKey(key)` manually
+- **Hydration:** Would be cool to introduce a new primitive to fix common classes of hydration errors like local time, local, and viewport. This might remove the need for `suppressHydrationWarning` entirely. See the [hydration concept](../concepts/hydration.md) for some brainstorms
 
 ## Performance
 
-- **Compiler-extracted templates** — a complete opt-in experiment lives on [`experimental/compile-templates`](https://github.com/bgub/fig/tree/experimental/compile-templates), including DOM/SSR/hydration/payload integration, regression coverage, and a real-browser benchmark. The direction is promising, but the compile-time optimization is deliberately outside `main` until its transformation and long-term maintenance contract feel mature enough to adopt. Revisit from the branch rather than rebuilding the spike. → Compiler-extracted templates in `docs/plans/reconciler-explorations.md`
+- **Payload:** Should we add a binary codec?
+- **SSR streaming:** Fig inlines every Suspense boundary that has completed when its parent flushes; only genuinely pending content is outlined. Unlike Fizz's `progressiveChunkSize` heuristic, this means a large completed boundary can block later shell siblings in document order. Consider revisiting in the future.
+
+## Server Rendering
+
+- **Early hints / preload headers** — no `onHeaders` equivalent: `headReady` resolves with the shell, too late for 103 Early Hints. Two real constraints shape any design: the Web `Response` API cannot express 103 at all (Node's `writeEarlyHints` is the only seam, so this is inherently a runtime-specific side channel), and a useful trigger point must fire before the shell yet after enough render progress to have discovered assets (first root suspension is the natural candidate — the shell being slow is exactly when 103s pay off). `Link`-header-on-200 preload emission from the asset registry is the milder, runtime-neutral half. → `docs/concepts/server-rendering.md`
+- **Resume / partial prerendering** — `prerender` is all-or-nothing settled and aborting yields static fallbacks; there is no postpone/resume pair, so the slot React canary's `prerender` + `resume` fills (prerender the static shell once, resume the dynamic holes per-request) is empty. The hard part is the parked-state contract: which suspension points can park, what render-scope state serializes across the boundary (id paths, provider values, asset-registry state), and whether the byte-identical-resume invariant extends across processes. A major feature, not an increment. → `docs/concepts/server-rendering.md`
