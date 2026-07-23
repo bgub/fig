@@ -24,15 +24,11 @@
 
 ## Serialized Components
 
-Payload trees are delivered as ordinary data resources, and the targeted-refresh protocol was removed after its parity gate passed. Remaining follow-ups:
-
-- **Wire shape for the resource value** — lean: core defines stream-of-rows in, value out; the framework owns HTTP and any envelope.
-- **Optimistic-state primitive** — needs lane awareness so it cannot live in a framework. Capture in its own plan.
-- **Payload codec productization** — whether framework adapters expose codec selection as a first-class option, when to ship a binary codec, and whether binary codec ids need explicit versioning beyond the opaque implementation id.
+- When we add optimistic-state primitives, they'll need lane awareness
+- Should we add a binary payload codec?
 
 ## Asset Resources
 
-- **Streamed stylesheet precedence** — how precedence should interact with independently streamed segments when bundler-discovered stylesheets share or conflict in ordering. The current manifest integration preserves discovery order but does not define a stronger cross-segment policy. → `docs/concepts/assets.md`
 - **Late head assets are diagnosed, not delivered** — a `title`/`meta` discovered under a pending Suspense boundary after the streaming head seals only triggers `onAssetError`; React's Float runtime inserts into `<head>` client-side at any time. Sketch: a small head-update op in the existing inline runtime (e.g. `t(value)` swapping `document.title`) emitted when a head-destination asset registers after sealing. Must stay visible to the client's key-based asset dedupe (no double titles on later insertions) and have payload-wire parity. Prerender avoids the class by sealing late. → `docs/concepts/assets.md`, `docs/concepts/server-rendering.md`
 
 ## Server Rendering
@@ -42,8 +38,6 @@ Payload trees are delivered as ordinary data resources, and the targeted-refresh
 - **Resume / partial prerendering** — `prerender` is all-or-nothing settled and aborting yields static fallbacks; there is no postpone/resume pair, so the slot React canary's `prerender` + `resume` fills (prerender the static shell once, resume the dynamic holes per-request) is empty. The hard part is the parked-state contract: which suspension points can park, what render-scope state serializes across the boundary (id paths, provider values, asset-registry state), and whether the byte-identical-resume invariant extends across processes. A major feature, not an increment. → `docs/concepts/server-rendering.md`
 
 ## TanStack Adapters
-
-The metaframework bet is the shipped `@bgub/fig-tanstack-router` and `@bgub/fig-tanstack-start` adapters. Data resources are the external cache for route data (`ensureRouteData` delegates to `ensureData` without creating `loaderData`, and data-backed routers default `defaultPreloadStaleTime` to `0` — see `docs/concepts/data.md` and the adapter README).
 
 - **Native TanStack Start framework target** — generated and lazy file routes are shipped, but plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Upstream needs an extensible framework descriptor (package ids, route templates, compiler imports, refresh behavior) before Fig can remove its private Solid package-id mappings. The route objects, runtime, store, and hydration contracts do not depend on that change.
 - **TanStack Query adapter** — a Query-flavored API over data resources would layer freshness policy (stale timers, refetch-on-focus) above the two core verbs. Build when demand appears.
