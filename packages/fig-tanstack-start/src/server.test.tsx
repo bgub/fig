@@ -2,8 +2,13 @@ import {
   assets,
   dataResource,
   type FigNode,
+  preconnect,
+  preload,
   readData,
+  readPromise,
+  script,
   stylesheet,
+  Suspense,
 } from "@bgub/fig";
 import {
   createMemoryHistory,
@@ -188,6 +193,119 @@ describe("@bgub/fig-tanstack-start server", () => {
       expect(loads).toBe(expectedLoads);
     },
   );
+
+  it("merges a deduplicated shell preload header when enabled", async () => {
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      component: Document,
+      head: () => ({
+        links: [{ href: "/route.css", rel: "stylesheet" }],
+      }),
+    });
+    const pageRoute = createRoute({
+      component: () =>
+        assets(
+          [
+            preconnect("https://cdn.example.com"),
+            stylesheet("/route.css"),
+            stylesheet("/component.css"),
+            preload("/hero.jpg", "image", { fetchpriority: "high" }),
+            script("/component.js"),
+          ],
+          <main>page</main>,
+        ),
+      getParentRoute: () => rootRoute,
+      path: "page",
+    });
+    const router = createRouter({
+      ...createStartDataContext(),
+      history: createMemoryHistory({ initialEntries: ["/page"] }),
+      routeTree: rootRoute.addChildren([pageRoute]),
+    });
+
+    await router.load();
+    attachRouterServerSsrUtils({
+      router,
+      manifest: {
+        routes: {
+          [rootRoute.id]: {
+            css: ["/route.css"],
+            preloads: ["/route.js"],
+          },
+        },
+      },
+    });
+    await router.serverSsr?.dehydrate();
+    const result = await renderRouterToStream({
+      preloadHeader: true,
+      request: new Request("https://example.test/page"),
+      responseHeaders: new Headers({
+        link: '</route.css>; rel=preload; as=style, </feed,a>; rel=alternate; title="a,b"',
+      }),
+      router,
+    });
+
+    const link = result.response.headers.get("link");
+    expect(link?.match(/<\/route\.css>/g)).toHaveLength(1);
+    expect(link).toContain("<https://cdn.example.com>; rel=preconnect");
+    expect(link).toContain("</hero.jpg>; rel=preload; as=image");
+    expect(link).toContain("</component.css>; rel=preload; as=style");
+    expect(link).toContain("</route.js>; rel=modulepreload; as=script");
+    expect(link).toContain('</feed,a>; rel=alternate; title="a,b"');
+    expect(link).not.toContain("/component.js");
+    await result.response.text();
+  });
+
+  it("disposes the render when preload header filtering fails", async () => {
+    const pending = new Promise<never>(() => undefined);
+    const failure = new Error("preload filter failed");
+    const probe = dataResource<[], string>({
+      key: () => ["disposed-render-probe"],
+      load: async () => "live",
+    });
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      component: Document,
+    });
+    const pageRoute = createRoute({
+      component: () =>
+        assets(
+          stylesheet("/app.css"),
+          <Suspense fallback={<main>loading</main>}>
+            <Pending />
+          </Suspense>,
+        ),
+      getParentRoute: () => rootRoute,
+      path: "page",
+    });
+    const startData = createStartDataContext();
+    const router = createRouter({
+      ...startData,
+      history: createMemoryHistory({ initialEntries: ["/page"] }),
+      routeTree: rootRoute.addChildren([pageRoute]),
+    });
+
+    await router.load();
+    attachRouterServerSsrUtils({ manifest: undefined, router });
+    await router.serverSsr?.dehydrate();
+    await expect(
+      renderRouterToStream({
+        preloadHeader: {
+          filter: () => {
+            throw failure;
+          },
+        },
+        request: new Request("https://example.test/page"),
+        responseHeaders: new Headers(),
+        router,
+      }),
+    ).rejects.toBe(failure);
+    await expect(startData.context.data.ensureData(probe)).rejects.toThrow(
+      "disposed",
+    );
+
+    function Pending(): FigNode {
+      return readPromise(pending);
+    }
+  });
 });
 
 async function renderRouterHtml(

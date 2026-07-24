@@ -1,10 +1,17 @@
 import type { FigNode } from "@bgub/fig";
-import { renderToDocumentStream } from "@bgub/fig-server";
+import {
+  renderToDocumentStream,
+  type ServerPreloadHeaderOptions,
+} from "@bgub/fig-server";
 import {
   renderToPayloadStream,
   type PayloadRenderOptions,
 } from "@bgub/fig-server/payload";
 import { RouterProvider } from "@bgub/fig-tanstack-router";
+import {
+  createStartHandler,
+  type CreateStartHandlerOptions,
+} from "@tanstack/start-server-core";
 import {
   createSsrStreamResponse,
   transformReadableStreamWithRouter,
@@ -17,12 +24,31 @@ import { requireStartDataStore } from "./store.ts";
 import { compiledIsomorphicReferenceAssets } from "virtual:fig-tanstack-start/payload-manifest";
 
 export interface RenderRouterToStreamOptions {
+  preloadHeader?: boolean | ServerPreloadHeaderOptions;
   request: Request;
   responseHeaders: Headers;
   router: AnyRouter;
 }
 
+export interface CreateFigStartHandlerOptions extends Omit<
+  CreateStartHandlerOptions,
+  "handler"
+> {
+  preloadHeader?: boolean | ServerPreloadHeaderOptions;
+}
+
+export function createFigStartHandler({
+  preloadHeader = false,
+  ...options
+}: CreateFigStartHandlerOptions = {}) {
+  return createStartHandler({
+    ...options,
+    handler: (context) => renderRouterToStream({ ...context, preloadHeader }),
+  });
+}
+
 export async function renderRouterToStream({
+  preloadHeader = false,
   request,
   responseHeaders,
   router,
@@ -34,27 +60,94 @@ export async function renderRouterToStream({
   });
   await render.shellReady;
 
-  // Router Core and the DOM library resolve this Web stream through different
-  // Node buffer generics, even though the runtime value is the same.
-  const documentStream = injectPayloadDocument(
-    render.stream,
-    router.options.ssr?.nonce,
-    render.allReady,
-  );
-  const routerStream = documentStream as unknown as Parameters<
-    typeof transformReadableStreamWithRouter
-  >[1];
-  const stream = transformReadableStreamWithRouter(router, routerStream, {
-    onAbort: (reason) => render.abort(reason),
-  });
-  responseHeaders.set("content-type", render.contentType);
-  return createSsrStreamResponse(
-    router,
-    new Response(stream as unknown as BodyInit, {
-      headers: responseHeaders,
-      status: router.stores.statusCode.get(),
-    }),
-  );
+  try {
+    if (preloadHeader !== false) {
+      const value = render.getPreloadHeader(
+        preloadHeader === true ? undefined : preloadHeader,
+      );
+      if (value !== undefined) mergeLinkHeader(responseHeaders, value);
+    }
+
+    // Router Core and the DOM library resolve this Web stream through different
+    // Node buffer generics, even though the runtime value is the same.
+    const documentStream = injectPayloadDocument(
+      render.stream,
+      router.options.ssr?.nonce,
+      render.allReady,
+    );
+    const routerStream = documentStream as unknown as Parameters<
+      typeof transformReadableStreamWithRouter
+    >[1];
+    const stream = transformReadableStreamWithRouter(router, routerStream, {
+      onAbort: (reason) => render.abort(reason),
+    });
+    responseHeaders.set("content-type", render.contentType);
+    return createSsrStreamResponse(
+      router,
+      new Response(stream as unknown as BodyInit, {
+        headers: responseHeaders,
+        status: router.stores.statusCode.get(),
+      }),
+    );
+  } catch (error) {
+    render.abort(error);
+    throw error;
+  }
+}
+
+function mergeLinkHeader(headers: Headers, incoming: string): void {
+  const current = headers.get("link");
+  if (current === null) {
+    headers.set("link", incoming);
+    return;
+  }
+
+  const values = new Set(splitLinkHeader(current));
+  for (const value of splitLinkHeader(incoming)) values.add(value);
+  headers.set("link", [...values].join(", "));
+}
+
+function splitLinkHeader(value: string): string[] {
+  const links: string[] = [];
+  let angleDepth = 0;
+  let escaped = false;
+  let quoted = false;
+  let start = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (quoted && character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted) continue;
+    if (character === "<") {
+      angleDepth += 1;
+      continue;
+    }
+    if (character === ">") {
+      angleDepth = Math.max(0, angleDepth - 1);
+      continue;
+    }
+    if (character !== "," || angleDepth !== 0) continue;
+
+    const link = value.slice(start, index).trim();
+    if (link !== "") links.push(link);
+    start = index + 1;
+  }
+
+  const link = value.slice(start).trim();
+  if (link !== "") links.push(link);
+  return links;
 }
 
 export function renderPayloadResponse(

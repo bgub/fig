@@ -42,6 +42,8 @@ export function renderToDocumentStream(
     contentType: request.contentType,
     data: request.data,
     getData: () => request.getData(),
+    getPreloadHeader: (headerOptions) =>
+      request.getPreloadHeader(headerOptions),
     shellReady: request.shellReady,
     stream: request.stream,
   };
@@ -117,6 +119,8 @@ export type {
   ServerErrorInfo,
   ServerErrorPayload,
   ServerFragmentRenderResult,
+  ServerPreloadHeaderOptions,
+  ServerPreloadHeaderResource,
   ServerPrerenderOptions,
   ServerPrerenderResult,
   ServerRenderOptions,

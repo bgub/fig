@@ -16,6 +16,8 @@ On the server:
 2. `renderRouterToStream` passes the same store to `renderToDocumentStream`.
 3. The renderer adopts it for the request and later disposes it.
 
+`createFigStartHandler` composes Start's request handler with Fig's stream renderer. It can opt into the renderer's shell preload header with `preloadHeader: true`, or receive `{ filter, maxLength }` for cache policy and budget control. The renderer merges the result with route-provided `Link` values before constructing the `Response`, preserving existing links and deduplicating exact serialized values. The default handler leaves this disabled because shared caches and CDNs may replay response links before the application authorizes a request.
+
 On the client, the adapter decodes the Fig document snapshot into a fresh store before `hydrateRoot` adopts it. TanStack never copies those values into `loaderData`.
 
 `StartScripts` appears near the end of `<body>`, after route content. It writes, in order:

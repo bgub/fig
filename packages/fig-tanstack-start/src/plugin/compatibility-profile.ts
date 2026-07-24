@@ -46,11 +46,10 @@ export function createCompilerRpcModules(
 }
 
 export function createDefaultServerEntry(): string {
-  const { figStart, startServer } = tanStackCompatibilityProfile.packages;
+  const { figStart } = tanStackCompatibilityProfile.packages;
   return [
-    `import { createStartHandler } from "${startServer}";`,
-    `import { renderRouterToStream } from ${JSON.stringify(`${figStart}/server`)};`,
-    "const fetch = createStartHandler(renderRouterToStream);",
+    `import { createFigStartHandler } from ${JSON.stringify(`${figStart}/server`)};`,
+    "const fetch = createFigStartHandler();",
     "export default { fetch };",
   ].join("\n");
 }

@@ -1,6 +1,7 @@
 import type {
   DataResourceKeyInput,
   ElementType,
+  FigAssetResource,
   FigAssetResourceList,
   FigClientReference,
   FigDataHydrationEntry,
@@ -76,9 +77,26 @@ interface ServerStreamRenderResult {
   /** The request-scoped store used by this render. */
   data: FigDataStoreHandle;
   getData(): FigDataHydrationEntry[];
+  /**
+   * Returns the shell's deduplicated HTTP `Link` value for preload-capable
+   * asset resources. Returns undefined before `shellReady`; assets discovered
+   * later remain in the HTML stream and are not added retroactively.
+   */
+  getPreloadHeader(options?: ServerPreloadHeaderOptions): string | undefined;
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;
 }
+
+export interface ServerPreloadHeaderOptions {
+  /** Include only resources that are safe for this response's cache policy. */
+  filter?: (resource: ServerPreloadHeaderResource) => boolean;
+  /** Maximum UTF-16 code units in the returned value. Defaults to 2,000. */
+  maxLength?: number;
+}
+
+export type ServerPreloadHeaderResource = Readonly<
+  Exclude<FigAssetResource, { kind: "meta" | "script" | "title" }>
+>;
 
 // Document mode is the fragment result minus the head accessors: the
 // document renderer injects the sealed head into the stream itself.

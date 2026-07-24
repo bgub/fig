@@ -37,6 +37,28 @@ compiler-only `paths` entry:
 }
 ```
 
+## Response preload headers
+
+The default server entry leaves response `Link` headers disabled because a CDN
+may cache and replay request-specific asset URLs. A custom server entry can opt
+in globally or provide a resource filter:
+
+```ts
+import { createFigStartHandler } from "@bgub/fig-tanstack-start/server";
+
+const fetch = createFigStartHandler({
+  preloadHeader: {
+    filter: (resource) => resource.href.startsWith("/assets/"),
+  },
+});
+
+export default { fetch };
+```
+
+The header contains assets discovered before Fig's document shell becomes
+ready. Assets discovered later through Suspense or Payload remain in the HTML
+stream and cannot be added after the response is created.
+
 The Start mapping lets the generated registration footer carry middleware
 context types from a conventional `src/start.ts` into `createServerFn`.
 

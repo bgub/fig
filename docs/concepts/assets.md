@@ -74,6 +74,8 @@ Streaming HTML seals an initial head snapshot with the shell. Metadata discovere
 
 Full-document shell output keeps positioned head children such as `<base>` in source order, then writes collected assets in browser-critical phases: charset and CSP metadata, viewport metadata, preconnects, font and high-priority image preloads, stylesheets, ordinary metadata, and finally remaining hints and scripts. Order within each phase remains discovery order. Assets discovered after the shell continue to stream beside the content that declared them.
 
+Server stream results expose the shell's preload-capable delivery assets as a bounded, deduplicated HTTP `Link` value. Stylesheets become `preload` hints; scripts require an explicit `preload` or `modulepreload` descriptor because a `script()` declaration alone does not opt into elevated fetch priority. Header collection does not consume the resources: their normal HTML tags still emit for document semantics and streaming fallback. Late discoveries are absent from the sealed header snapshot.
+
 The reveal swaps fallback, content, and the complete visible metadata snapshot atomically. Partial segments never publish metadata. Prerender waits for all content, so its single static head is already final.
 
 ## Loading Before Reveal

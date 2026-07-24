@@ -100,7 +100,10 @@ export function sealHead(request: Request): void {
     request.nonce,
     !request.prerender && request.pendingTasks > 0,
   );
-  request.headSnapshot = metadata;
+  request.headSnapshot = {
+    ...metadata,
+    preloadHeaderEntries: request.assetRegistry.preloadHeaderEntries(),
+  };
   request.headReady.resolve(metadata.preamble + metadata.metadata);
 }
 

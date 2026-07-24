@@ -4,12 +4,14 @@ import {
   meta,
   modulepreload,
   preload,
+  preconnect,
   script,
   stylesheet,
   title,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { AssetResourceRegistry } from "./asset-registry.ts";
+import { formatPreloadHeader } from "./preload-header.ts";
 
 function write(
   registry: AssetResourceRegistry,
@@ -246,5 +248,21 @@ describe("AssetResourceRegistry", () => {
     expect(() =>
       write(registry, preload("/asset", "image", { fetchpriority: "low" })),
     ).toThrow('Conflicting Fig resource for key "preload:image:/asset".');
+  });
+
+  it("serializes deduplicated preload headers in browser-critical order", () => {
+    const registry = new AssetResourceRegistry("");
+
+    registry.register(modulepreload("/route.js", { crossorigin: "" }));
+    registry.register(stylesheet("/app.css"));
+    registry.register(preconnect("https://cdn.example.com"));
+    registry.register(preload("/hero.jpg", "image", { fetchpriority: "high" }));
+    registry.register(font("/font.woff2", "font/woff2"));
+    registry.register(preload("/app.css", "style"));
+    registry.register(script("/app.js", { module: true }));
+
+    expect(formatPreloadHeader(registry.preloadHeaderEntries())).toBe(
+      '<https://cdn.example.com>; rel=preconnect, </hero.jpg>; rel=preload; as=image; fetchpriority=high, </font.woff2>; rel=preload; as=font; crossorigin=anonymous; type="font/woff2", </app.css>; rel=preload; as=style, </route.js>; rel=modulepreload; as=script; crossorigin',
+    );
   });
 });

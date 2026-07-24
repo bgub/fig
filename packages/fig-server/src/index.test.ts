@@ -1090,6 +1090,50 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("snapshots preload headers when the shell becomes ready", async () => {
+    const pending = deferred<string>();
+
+    function LateAssets() {
+      const value = readPromise(pending.promise);
+      return assets(
+        preload("/late.js", "script"),
+        createElement("span", null, value),
+      );
+    }
+
+    const result = renderToDocumentStream(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          assets(
+            [preconnect("https://cdn.example.com"), stylesheet("/app.css")],
+            createElement(
+              Suspense,
+              { fallback: createElement("em", null, "Loading") },
+              createElement(LateAssets, null),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.getPreloadHeader()).toBeUndefined();
+    await result.shellReady;
+    const shellHeader = result.getPreloadHeader();
+    expect(shellHeader).toBe(
+      "<https://cdn.example.com>; rel=preconnect, </app.css>; rel=preload; as=style",
+    );
+
+    pending.resolve("Ready");
+    await result.allReady;
+    expect(result.getPreloadHeader()).toBe(shellHeader);
+    expect(result.getPreloadHeader()).not.toContain("/late.js");
+  });
+
   it("does not emit head-only assets into the body stream", async () => {
     const html = await renderToHtml(
       assets(

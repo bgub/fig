@@ -5,6 +5,10 @@ import {
   HYDRATION_SKIP_ATTRIBUTE,
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
+import {
+  createPreloadHeaderEntries,
+  type PreloadHeaderEntry,
+} from "./preload-header.ts";
 import { STREAMED_METADATA_ATTRIBUTE } from "./shared.ts";
 
 export type MetadataSnapshotEntry =
@@ -113,6 +117,10 @@ export class AssetResourceRegistry {
       }
     }
     return snapshot;
+  }
+
+  preloadHeaderEntries(): PreloadHeaderEntry[] {
+    return createPreloadHeaderEntries(this.deliveryResources.values());
   }
 
   private visibleMetadata(): Map<string, MetadataResource> {

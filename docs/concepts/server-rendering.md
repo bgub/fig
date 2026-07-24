@@ -22,6 +22,7 @@ Stream calls return immediately with an object containing `stream`, readiness pr
   data,
   getHead?,
   getData,
+  getPreloadHeader,
   abort,
   contentType,
 }
@@ -37,13 +38,21 @@ export async function handleRequest(): Promise<Response> {
 
   await result.shellReady;
 
+  const headers = new Headers({ "content-type": result.contentType });
+  const preloadHeader = result.getPreloadHeader();
+  if (preloadHeader !== undefined) headers.append("link", preloadHeader);
+
   return new Response(result.stream, {
-    headers: { "content-type": result.contentType },
+    headers,
   });
 }
 ```
 
 Waiting for `shellReady` lets the handler catch a fatal shell error before committing the HTTP response. The stream object itself exists immediately.
+
+`getPreloadHeader({ filter?, maxLength? })` snapshots the shell's preconnects, fonts, explicit preloads and module preloads, and stylesheet preloads into one deduplicated HTTP `Link` value. It prioritizes connection hints, fonts and high-priority images, and stylesheets before remaining hints. The default length budget is 2,000 UTF-16 code units; entries that do not fit are omitted. The filter lets an adapter exclude private or request-specific URLs before a shared cache can replay them.
+
+The snapshot seals with `shellReady`; `getPreloadHeader()` returns `undefined` before then. Assets discovered by later Suspense or Payload work still stream beside their content, but response headers cannot be changed after the `Response` is created. This is a final-response header API, not `103 Early Hints`; interim responses remain runtime-specific.
 
 Fragment mode collects head content through `getHead()` and `headReady`. Document mode requires the root to render `<html>` and `<head>` and writes assets directly into that document. Its head begins with the early-event capture script. Positioned head children retain source order; collected shell assets then prioritize charset/CSP and viewport metadata, connection and critical preload hints, and blocking stylesheets ahead of ordinary metadata, module preloads, and scripts. Every framework-owned script carries `data-fig-hydration-skip` so full-document hydration knows it has no application fiber.
 

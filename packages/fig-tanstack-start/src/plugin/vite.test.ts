@@ -303,10 +303,10 @@ describe("tanstackStart", () => {
     });
   });
 
-  it("builds the default handler directly from the public renderer", () => {
+  it("builds the default handler through the public Fig adapter", () => {
     const code = createDefaultServerEntry();
 
-    expect(code).toContain("createStartHandler(renderRouterToStream)");
+    expect(code).toContain("createFigStartHandler()");
     expect(code).not.toContain("defaultStreamHandler");
   });
 });

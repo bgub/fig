@@ -28,4 +28,3 @@
 - **SSR streaming:** Fig inlines every Suspense boundary that has completed when its parent flushes; only genuinely pending content is outlined. Unlike Fizz's `progressiveChunkSize` heuristic, this means a large completed boundary can block later shell siblings in document order. Consider revisiting in the future.
 - Partial pre-rendering?? (we don't have to do bundler dynamic/static analysis like Next does)
 - **Early hints:** Should Fig also report preload discoveries before the shell so runtime adapters can send `103 Early Hints`? The Web `Response` API cannot represent interim responses, so emission would remain adapter-specific.
-- **Preload headers:** Let server adapters obtain a deduplicated `Link` header for render-discovered asset preloads before creating the response.

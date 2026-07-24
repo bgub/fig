@@ -58,6 +58,10 @@ import {
 } from "./html.ts";
 import { activityId, earlyEventCaptureMarkup } from "./protocol.ts";
 import {
+  formatPreloadHeader,
+  type PreloadHeaderEntry,
+} from "./preload-header.ts";
+import {
   documentHeadMarker,
   flushCompletedQueues,
   leadingNewlineEndMarker,
@@ -88,6 +92,10 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+interface HeadSnapshot extends HeadMetadataHtml {
+  readonly preloadHeaderEntries: readonly PreloadHeaderEntry[];
+}
+
 export interface Request {
   abortableTasks: Set<Task>;
   allReady: Deferred<void>;
@@ -117,7 +125,7 @@ export interface Request {
   headReady: Deferred<string>;
   // Set exactly once, when the shell completes and the head is sealed; also
   // the "head is sealed" flag.
-  headSnapshot: HeadMetadataHtml | null;
+  headSnapshot: HeadSnapshot | null;
   shellReady: Deferred<void>;
   status: "open" | "aborting" | "closed";
   clientRenderedBoundaries: Set<SuspenseBoundary>;
@@ -388,6 +396,13 @@ export function createServerRenderRequest(
     contentType: "text/html; charset=utf-8",
     data: request.dataStore,
     getData: () => request.dataStore.snapshot(),
+    getPreloadHeader: (headerOptions) =>
+      request.headSnapshot === null
+        ? undefined
+        : formatPreloadHeader(
+            request.headSnapshot.preloadHeaderEntries,
+            headerOptions,
+          ),
     getHead: () => {
       const snapshot = request.headSnapshot;
       return snapshot === null
