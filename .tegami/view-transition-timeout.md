@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig: patch
-  npm:@bgub/fig-dom: patch
-  npm:@bgub/fig-server: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Bound stalled view-transition waits

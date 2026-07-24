@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-vite: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-vite:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-vite)
 ---
 
 ## Use one data-resource API in every environment

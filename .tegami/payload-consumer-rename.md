@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-server: minor
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Rename the payload decoding API to `createPayloadConsumer`

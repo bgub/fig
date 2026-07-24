@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: patch
-  npm:@bgub/fig-dom: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Serialized components move to the data-resource model

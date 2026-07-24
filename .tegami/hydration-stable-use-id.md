@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig: patch
-  npm:@bgub/fig-dom: patch
-  npm:@bgub/fig-reconciler: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Keep `useId` stable through selective hydration

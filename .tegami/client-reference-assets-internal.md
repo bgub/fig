@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
 ---
 
 ## Drop the `clientReferenceAssets` helper from the main entry

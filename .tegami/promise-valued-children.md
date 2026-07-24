@@ -1,10 +1,20 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-dom: minor
-  npm:@bgub/fig-reconciler: minor
-  npm:@bgub/fig-server: minor
-  npm:@bgub/fig-tanstack-start: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Promise-valued children render through Suspense

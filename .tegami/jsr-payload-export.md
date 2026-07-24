@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
 ---
 
 ## Expose the payload decoder on JSR

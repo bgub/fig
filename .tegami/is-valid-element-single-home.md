@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-reconciler: patch
-  npm:@bgub/fig-server: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## `isValidElement` has a single home on the main entry

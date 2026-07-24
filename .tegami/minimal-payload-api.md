@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-dom: minor
-  npm:@bgub/fig-server: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Payload exposes rendering and decoding, not its implementation

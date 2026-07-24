@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-router: minor
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Remove `useLoaderData`; enforce void loaders for data-backed routers

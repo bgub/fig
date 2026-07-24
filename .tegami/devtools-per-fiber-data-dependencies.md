@@ -1,8 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-reconciler: minor
-  npm:@bgub/fig-devtools: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## DevTools show per-fiber data-resource dependencies

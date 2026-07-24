@@ -1,31 +1,382 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:fig:\n    type: minor\n---\n\n## Initial alpha release\n\nFirst public alpha release of Fig.\n"
-    filename: initial-alpha.md
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## Asset descriptors use native names and preserve native ordering\n\nClient-inserted and host-rendered stylesheets now form precedence buckets in\nthe order each distinct precedence value is first discovered. A stylesheet\ndiscovered later for an existing bucket is inserted before the following\nbucket, keeping lazy and payload-delivered CSS in its intended cascade order.\n\nRaw `<script>` elements now enter the asset registry only when explicitly\nmarked `async`. Non-async scripts retain their native document position and\nexecution semantics; explicit `script()` descriptors continue to support all\nasset-delivery modes.\n\nAsset descriptor options and serialized payload asset rows now use native HTML\nattribute names: `crossorigin`, `fetchpriority`, and `http-equiv`. The previous\nReact-style `crossOrigin`, `fetchPriority`, and `httpEquiv` spellings are\nremoved.\n\nHost resource resolution now receives the actual host parent and fixes\nout-of-band placement once per fiber. SVG and MathML titles consequently stay\nin their native namespace, while HTML titles carrying `itemprop` stay in-tree;\nordinary document titles continue to use the shared head registry.\n"
+    filename: asset-precedence-and-native-scripts.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n---\n\n## Drop the `clientReferenceAssets` helper from the main entry\n\nThe runtime helper `clientReferenceAssets(reference)` (read a client\nreference's declared assets, resolving thunks) had two homes; it is now\nexported only from `@bgub/fig/internal`, where its consumers — the payload\nserializer and framework manifest plumbing — already import it. Apps\ndeclare assets with `clientReference({ assets })` and never call the\nhelper. The `ClientReferenceAssets` type stays on the main entry because\nit appears in the public `ClientReferenceOptions.assets` signature.\n"
+    filename: client-reference-assets-internal.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n---\n\n## Stable client-reference identity across decodes\n\n`@bgub/fig/payload` exposes `createPayloadClientReferenceResolver(resolve)`:\na caller-owned stateful resolver passed as the `resolveClientReference`\ndecode option. With one, every resolvable client reference decodes to one\nresolver-owned wrapper per reference id across all decodes sharing the\nresolver — gated, ungated, or asynchronously resolved — so re-decoding a\npayload updates islands in place instead of remounting them. Reveal gates\nride the decoded element instances rather than the wrapper: each decode\ngates exactly its own content, so a newer decode's pending assets never\nre-suspend an island already on screen, while its new island instances\nstill wait for the stylesheets they declared. The caller owns the\nresolver's lifetime; under fast refresh no manual invalidation is needed\n(hot edits remap the latched resolution through component families, and\nunaccepted updates full-reload), while `delete`/`clear` cover manifest\nswaps without a reload. With a plain resolve function, gated and async\nreferences keep their per-decode wrapper identity, now with the same\nper-element gating.\n\n`@bgub/fig-dom`'s `payloadDataLoader` accepts the stateful resolver through\nits existing `resolveClientReference` option.\n\nFramework adapters can retain one resolver across refreshes and navigations,\npreventing asset-gated islands from remounting on every re-decode.\n"
+    filename: client-reference-cache.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-server:\n    type: major\n---\n\n## Publish metadata only with its visible owner\n\nTitle and meta resources now travel through Payload as owner-bound\ndeclarations and update the document only when their decoded tree commits.\nPending or superseded refreshes keep the previous metadata visible.\n\nStreaming HTML now treats Suspense fallbacks as metadata owners and reconciles\nthe completed visible metadata snapshot in the boundary reveal operation.\nPartial segments and failed or abandoned primary work cannot mutate the head.\n\nThe obsolete `onAssetError` option and its asset-diagnostic types are removed:\nlate metadata is delivered with its owner instead of being dropped.\n"
+    filename: commit-owned-metadata.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n---\n\n## Supersession abort waits for the successor's value\n\nRefreshing a fulfilled data-resource entry no longer aborts the previous\ngeneration's signal when the new load starts. Authority transfers when the\nsuccessor's value publishes: the visible stale value keeps streaming through\nthe refresh window (payload holes keep filling), subscribers re-render onto\nthe new tree in the same pass the old generation retires in, and a failed\nrefresh leaves the previous generation fully alive — stale value usable,\nlive holes included. Value-less pending loads still abort immediately when\nsuperseded, and hydrate-over/eviction/disposal still end every generation.\n\nThis closes the gap where refreshing a serialized-component resource while\nits holes were still streaming surfaced \"Payload decode aborted.\" through\nthe nearest ErrorBoundary — cancellation now stays retirement, never a user\nerror, for plain consumers too.\n"
+    filename: deferred-supersession-abort.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-devtools:\n    type: minor\n---\n\n## DevTools show per-fiber data-resource dependencies\n\n`@bgub/fig` data stores expose `inspectDataDependencyCanonicalKeys(owner)`,\na dev-only inspection read of the canonical keys an owner's committed\n`readData` subscriptions point at (returns an empty array in prod builds).\n\n`@bgub/fig-reconciler` devtools snapshots record those keys on every fiber\nas `FigDevtoolsFiberSnapshot.dataResourceCanonicalKeys`. The field is\nrequired, so external snapshot producers must supply it (empty array when\nunknown).\n\nThe `@bgub/fig-devtools` panel filters the Data section by the selected\nfiber's dependencies instead of always listing the entire store, and tree\nrows show a green badge with the fiber's data-resource read count next to\nthe blue hook-count badge. Selecting\nthe root still lists every entry, including those with no committed\nsubscriber (unclaimed preloads, hydrated-but-unread rows). Refreshing\nentries no longer render a redundant `Pending` row.\n"
+    filename: devtools-per-fiber-data-dependencies.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## `ensureData`: the awaitable read for code outside render\n\n`ensureData(resource, ...args)` resolves the value a key would render with:\nthe cached value when the entry has one (kicking the same background\nrevalidation a stale `readData` does), or the in-flight load's settlement on\na cache miss. It rejects with the error `readData` would throw, follows\nsuperseding loads and server hydrations to the authoritative value, and never\nsubscribes — pair it with `readData` in the component, which claims the\nsettled entry within the preload retention window. An awaiting caller retains\nthe entry, so the unclaimed-preload eviction cannot abort a load out from\nunder an ensure.\n\nAvailable as a free function (ambient store) and on the explicit handle\n(`readDataStore()`, `root.data`). This is the delegation verb for external\nrouters: a route loader awaits `ensureData`, the component reads with\n`readData`, and the data store stays the single cache.\n"
+    filename: ensure-data-verb.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-dom:\n    type: minor\n---\n\n## Serialized components move to the data-resource model\n\nSerialized trees are now ordinary data resources: servers return plain\nPayload streams, and clients consume them through keyed `dataResource`\ninstances with `payloadDataLoader`. Refresh is `refreshData`, navigation can\nselect a new key, and back/forward navigations reuse cached entries. Commits\nwait for the incoming Payload, island modules, and stylesheet gates.\n\nSupporting API additions: `payloadDataLoader` accepts a `prepareAssets`\noverride (defaults to `insertAssetResources`), and `decodePayloadStream`\naccepts an `onClientReference` observer for reference metadata.\n"
+    filename: fig-start-resource-model.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: major\n---\n\n## Compose host behavior with mixins\n\nCore now exports `createMixin()` and resolves render-time host behavior through\nthe `mix` prop. Mixins may contribute host props or nested mixins while keeping\nthe host type and subtree fixed. Explicit host props form the baseline; mixins\nrun in authoring order, and later results win.\n\nDOM event listeners now use `mix={on(type, callback)}`. Migrate\n`events={[on(type, callback)]}` to `mix={on(type, callback)}`; multiple or\nconditional descriptors move into `mix={[...]}` and preserve positional\nlistener identity.\n"
+    filename: host-mixins.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-reconciler:\n    type: patch\n---\n\n## Keep `useId` stable through selective hydration\n\n`useId` now follows one canonical server/hydration tree path through Suspense\nand Activity. Dehydrated boundaries snapshot that path when they claim their\nserver marker, then restore it when hydration resumes, so client updates that\ninsert or move surrounding siblings cannot renumber ids already present in the\nserver HTML. Suspense's private Activity wrapper is transparent to the path.\n\nComponents mounted only on the client now receive ids from a separate\n`fig-C-*` namespace. Those ids remain stable for the component lifetime and\ncannot collide with ids reserved by server-rendered content that has not\nhydrated yet.\n"
+    filename: hydration-stable-use-id.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: patch\n  npm:@bgub/fig-server:\n    type: patch\n---\n\n## `isValidElement` has a single home on the main entry\n\n`isValidElement` was the one runtime export with two homes: the app-facing\nmain entry and `@bgub/fig/internal` (grouped with the other `$$typeof`\nbrand predicates). It is now exported only from `@bgub/fig`; the renderer\nand server packages import it from there. The internal-only predicates\n(`isSuspense`, `isPortal`, ...) are unchanged.\n"
+    filename: is-valid-element-single-home.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n---\n\n## Expose the payload decoder on JSR\n\nThe JSR manifest now exports `@bgub/fig/payload`, matching the npm package\nand making the browser-safe payload decoder available from both registries.\n"
+    filename: jsr-payload-export.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## Payload exposes rendering and decoding, not its implementation\n\nThe payload packages now present two primary operations:\n`renderToPayloadStream` on the server and `decodePayloadStream` in the\nbrowser-safe core entry. Row/model types, value encoding, codec machinery,\ncontent-type negotiation helpers, and framework document transports are\ninternal implementation details.\n\nClient references use one `resolveClientReference(reference)` seam that may\nreturn a component synchronously or asynchronously. It replaces the separate\nload, resolve, and observation callbacks; reference metadata now includes its\nstream-safe assets. The unused `load` field is also removed from\n`clientReference(...)` declarations.\n\n`payloadDataLoader` keeps only `request`, `resolveClientReference`, and the\noptional `prepareAssets` override. Payload encoding is fixed internally rather\nthan exposed as a speculative custom-codec interface.\n"
+    filename: minimal-payload-api.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n---\n\n## Generation-lifetime loader signals and `payloadDataLoader`\n\nData-resource loader signals now live as long as their load's generation,\nnot just the pending promise: the `{ signal }` a loader receives stays\nunaborted after the value lands and aborts when the generation loses\nauthority — a newer load supersedes it, a server push hydrates over it, the\nentry evicts, or the store is disposed. A rejected load's own signal aborts\non settlement, and `invalidateData` never aborts (marking stale does not\nrevoke authority). Loaders that stream into their value in the background —\npayload decodes filling holes — tie that work to the signal; plain fetch\nloaders are unaffected.\n\nThe load context also carries an internal, generation-guarded hydration\ncapability (symbol-keyed; read through `@bgub/fig/internal`) that hydrates\nserver-pushed `data` rows through the calling store only while the load is\nauthoritative, skipping rows that target the loading entry's own key.\n\nNew in `@bgub/fig-dom`: `payloadDataLoader({ request,\nresolveClientReference?, prepareAssets? })` adapts a payload-stream\nendpoint into an ordinary data-resource loader. It validates the response\n(status, body, payload codec content-type; unusable bodies are cancelled),\nwires `decodePayloadStream` to the generation-lifetime signal, hydrates\n`data` rows through the store capability, inserts stream-discovered assets\nwith `insertAssetResources` (stylesheet gates delay only dependent reveal),\nand resolves with the decoded root value — so `readData(postResource, slug)`\nsuspends like any read and returns renderable elements while streamed holes\nkeep filling in the background.\n"
+    filename: payload-data-loader.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## `@bgub/fig/payload`: the browser-safe payload home and `decodePayloadStream`\n\nThe payload decoder moved from `@bgub/fig-server/payload` to a new browser-safe\n`@bgub/fig/payload` entry. Browser code no longer imports the server package to\ndecode; fig-server's serializer and the decoder share their private row/value\nformat through `@bgub/fig/internal`.\n\nNew client half: `decodePayloadStream(stream, options)` returns a live\n`PayloadDecode` — `value` resolves when the root row decodes while outlined\nholes keep streaming in, the never-rejecting `completion` reports\ncomplete/failed/aborted, and `abort()` idempotently rejects unresolved holes\nwith an internal cancellation reason. Options wire data-row hydration\n(`hydrate`), unified client-reference resolution, and asset preparation with\nreveal gating (`prepareAssets`).\n\nInternally, `assets` rows now carry an optional `for` — the row id whose\nreveal depends on those assets, decided at serialization scope exit so a\nsuspended subtree's assets gate its outlined row rather than the enclosing\ntree.\n\nDev-time enforcement: serialized components are render-only. During\n`renderToPayloadStream`, `useState`, `useActionState`, `useTransition`,\n`useStableEvent`, and the effect hooks now throw in development; the read\nverbs, `useMemo`, `useId`, and `useSyncExternalStore`'s `getServerSnapshot`\npath stay server-safe.\n"
+    filename: payload-format-home-and-decode.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n---\n\n## Deliver client-reference assets outside the resolution suspension\n\nA decoded client reference's asset declarations now attach above its\nmodule-load and reveal-gate suspension points. A server document render\nthat hits a cold reference module emits the island's stylesheet with the\nsegment containing the reference instead of with the late fill, so\nfirst-request asset ordering matches warm requests.\n"
+    filename: payload-reference-assets-escape-suspension.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Move `createPortalNode` to `@bgub/fig/internal`\n\n`createPortalNode` is the cross-package seam renderers wrap in their\ncontainer-typed `createPortal`; apps never call it directly. It now lives\non the internal entry with the other renderer protocol exports instead of\nthe app-facing main entry. Portal-creating apps keep using\n`createPortal(children, container, key?)` from `@bgub/fig-dom`; the\n`FigPortal` type stays on the main entry because it appears in public\nsignatures.\n"
+    filename: portal-node-internal.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Promise-shaped payload decoder\n\n`decodePayloadStream` now returns `Promise<FigNode>` directly — the root\nvalue promise — instead of a `PayloadDecode` handle. Cancellation is\nsignal-only (`options.signal`, unchanged); the redundant `abort()` method is\ngone. The `completion` promise is replaced by an `onStreamDone(result)`\ndecode option, called exactly once when ingestion settles as `complete`,\n`failed`, or `aborted` — post-root failures that strand no pending hole\nremain observable there. The callback is never awaited and its exceptions\nand rejections are swallowed, so an observer — sync or async — cannot break\ndecode teardown or leak an unhandled rejection. The\n`PayloadDecode` interface and its non-thenable caveat are deleted;\n`PayloadDecodeCompletion` remains as the callback's result type.\n\n`@bgub/fig-dom`'s `payloadDataLoader` migrates internally; its public API is\nunchanged.\n\nAlso considered and declined: narrowing `ResolveClientReference` to an\nopaque id. The reference's `exportName`/`ssr`/`assets` mirror the `client`\nrow's wire fields and are all load-bearing in framework document pipelines;\nthe rationale is recorded in `docs/concepts/payload.md`.\n"
+    filename: promise-shaped-decoder.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Promise-valued children render through Suspense\n\n`FigNode` now accepts promises of nodes. Promise children occupy distinct,\nhost-transparent child slots, suspend through the nearest `Suspense`, and route\nrejections or invalid resolved children through normal error handling.\n\nHTML rendering retains exact promise children as independent streaming tasks,\nwhile Payload uses node-validated promise rows that decode to the same child\nshape. Payload-rendered async components are invoked once and retain their\ncomponent-scoped assets on the outlined row.\n"
+    filename: promise-valued-children.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n---\n\n## Tighten public component, loader, asset, and bind signatures\n\n`@bgub/fig` now names the shared data loader contract as\n`DataResourceLoader`, constrains lazy loaders to components, and exposes\n`ComponentProps` so lazy wrappers preserve the loaded component's props\nwithout exposing its implementation statics. Client-reference SSR\nimplementations stay aligned with the reference's props. Stable-event typing\nnow models the trailing lifecycle signal separately from caller arguments.\n\n`meta()` descriptors now require exactly one valid metadata identity:\n`charset`, `name` plus `content`, `property` plus `content`, or `http-equiv`\nplus `content`. Raw meta elements that do not satisfy the same shape remain\nordinary host elements instead of entering the asset registry.\n\n`@bgub/fig-dom` payload requests now receive the standard\n`DataResourceLoadContext`, portals retain their DOM container type in the\nreturned `FigPortal`, and bind callbacks must return `undefined`; cleanup is\nexclusively driven by their `AbortSignal`.\n"
+    filename: public-signature-cleanup.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Attribute rejected payload holes to their data resource\n\nPayload hole errors are attributed to the authoritative owning data-resource\ngeneration. Error boundaries receive `dataResourceKeys`, and\n`invalidateDataError` retires the broken fulfilled value before retrying so a\nremounted boundary suspends on fresh content instead of immediately catching\nthe same rejected hole. `decodePayloadStream` also exposes an observational\n`onHoleError` callback.\n\nThe load context's hydration capability now shares the same authority window:\na still-visible generation's `data` rows keep hydrating through a superseding\nrefresh's window instead of being dropped the moment the refresh starts.\n"
+    filename: rejected-payload-hole-attribution.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n---\n\n## Remove the `FigText` type alias\n\n`FigText` was a two-member alias (`string | number`) whose only use was\nas a constituent of the `FigNode` union; no signature anywhere took it\nby name. The union now spells out `string | number` directly, and the\nalias is gone from both the main and internal entries. Code that\nreferenced `FigText` should use `string | number` (or `FigNode` where\nthe full children type is meant).\n"
+    filename: remove-fig-text.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n---\n\n## Remove the `h` alias for `createElement`\n\n`@bgub/fig` no longer exports `createElement` under the second name `h`.\nEvery export has one home and one name; migrate by importing\n`createElement` (or alias it locally: `const h = createElement`).\n"
+    filename: remove-h-alias.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-vite:\n    type: minor\n---\n\n## Use one data-resource API in every environment\n\n`dataResource` now covers shared, browser, and server-only loaders without a\nsecond API. Server-only loaders belong behind the framework's server module\nboundary; browser code uses an explicit key-only resource when it needs the\nsame hydrated value.\n\nThe pass-through `serverDataResource` API, `@bgub/fig/server` entry point,\n`figData` Vite transform, and generated browser resource stubs are removed.\n"
+    filename: remove-server-data-resource.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## The targeted-refresh protocol and payload consumer are gone\n\nThe serialized-components deletion gate passed across the demo e2e suites,\nso the legacy architecture is removed rather than deprecated:\n\n- `@bgub/fig-server/payload` no longer exports `createPayloadConsumer`,\n  `PayloadConsumer`, `PayloadBoundary`, `PAYLOAD_BOUNDARY_HEADER`,\n  `PayloadFetchError`, or the consumer fetch/ingestion seam, and\n  `renderToPayloadStream` drops its `refreshBoundary` option.\n- The wire format loses the `refresh`/`refresh-error` rows and the\n  `$fig:\"boundary\"` model: the refresh unit is the data-resource key that\n  delivers the payload, so refreshing is requesting the same stream again.\n\nReplacements, all already shipping: `decodePayloadStream` in\n`@bgub/fig/payload` is the client half; fig-dom's `payloadDataLoader`\ndelivers a serialized tree as an ordinary data resource; the freshness\nverbs (`refreshData`/`invalidateData`) are the refresh story; sub-tree\nrefresh granularity is finer resource keys.\n"
+    filename: remove-targeted-refresh.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-server:\n    type: major\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Move HTML escaping helpers to a focused subpath\n\n`escapeAttribute`, `escapeText`, `escapeScriptText`, and `escapeScriptJson` now export from\n`@bgub/fig-server/html` instead of the main `@bgub/fig-server` entry.\nThe dedicated subpath keeps companion-markup helpers separate from server\nrender entry points while preserving their exact escaping behavior. The\nTanStack Start adapter now consumes these helpers, Fig's internal data-store\nbrand predicate, and its own storage-context API instead of duplicating them.\n"
+    filename: server-html-helper-subpath.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n---\n\n## Server-route navigations commit content in one pass\n\nNavigating to a payload server route used to commit an empty slot for one\nretry beat (stretched to the full animation length when a view transition\nwas running) before the content revealed, because three already-settled\npromises still suspended on their first render read:\n\n- payload element gates are now tracked at creation, so a gate that settles\n  before its first read resolves synchronously;\n- client-reference module resolutions are tracked the same way;\n- pre-commit asset preparation now reveals the island hydration gate,\n  so navigations mount real islands instead of paying a placeholder →\n  reveal follow-up commit.\n\nThe route swap now lands as a single commit containing the full decoded\ncontent, so view transitions capture the destination page with its content\nalready present.\n"
+    filename: single-commit-server-route-navigation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n---\n\n## Resolved client references keep their identity across decodes\n\n`decodePayloadStream` used to wrap every client reference in a fresh\nper-decode component, so re-decoding a surrounding payload (refreshing a\nserver component that contains islands) remounted every island and dropped\nits client state.\n\nReferences that `resolveClientReference` resolves synchronously and that carry no asset\ngate now decode to the resolved component itself. The element type is\nidentity-stable across decodes, so a refresh of the surrounding payload\nupdates islands in place and their state survives. Gated or\nasynchronously resolved references still decode to per-decode wrappers.\n"
+    filename: stable-resolved-reference-identity.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-server:\n    type: patch\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Preserve framework-managed asset placement\n\nFramework adapters can now keep externally managed head and body tags in their\ndeclared positions without exposing a DOM prop. TanStack Router uses this for\nroute-managed links, styles, and scripts while continuing to map title and meta\nentries through Fig asset resources. Full-document hydration now ignores the\ndoctype and one shared marker identifies every server-owned node without a\nclient fiber. Declarative asset lists also gain a client commit lifecycle, so\nroute titles and metadata update during navigation.\n"
+    filename: tanstack-start-demo.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-server:\n    type: patch\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Add Payload routes to the TanStack Start adapter\n\n`@bgub/fig-tanstack-start/payload` now exposes `payloadResource`, which compiles\nan inline render callback into a private server function and Fig-owned route\ndata resource. Applications supply the cache key and component tree without\nauthoring transport plumbing. The shared declaration can stay in one\n`.payload.tsx` module; its render callback and render-only imports are omitted\nfrom the browser build. The initial SSR response is embedded into the document\nand adopted without refetching; client navigation and refresh use the same\nresource request path. Payload data rows\nhydrate the shared store, asset resources are retained on their owning server\nsegments or inserted through the browser registry, and client references retain\ntheir resolver-defined identity. `decodePayloadStream` and `payloadDataLoader`\nnow expose `retainAssets` for server document renderers that need this delivery\npath.\n\n`@bgub/fig-tanstack-start/server` exposes the lower-level\n`renderPayloadResponse` used by the generated TanStack server function; it\ndefaults its render abort signal to the incoming request, so a disconnected\nclient cancels the Payload render. Shell\nHTML streams while outlined Suspense holes settle, and the completed initial\nresponses are embedded before TanStack starts full-document hydration. The Vite\nadapter also publishes assets imported only by server modules into the client\nbuild output. Fig Router links also consume TanStack's `viewTransition`\nnavigation option without forwarding it as an invalid attribute to the rendered\nanchor, and derive active state from the resolved route instead of an in-flight\nlocation.\n"
+    filename: tanstack-start-payload-routes.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-server:\n    type: minor\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Add the TanStack Start runtime adapter\n\n`createDataStore` now creates a root-neutral Fig store that route loaders can\npopulate before a renderer exists. Server and client renderers adopt that exact\nstore, preserving one cache while attaching their lifecycle and scheduling.\n\nThe new TanStack Start runtime uses the store for route loading, server\nrendering, Fig-owned document serialization, client deserialization, and\nhydration. Route-managed head and script output maps through the Router adapter,\nincluding Fig asset resources. The end-to-end contract verifies no initial\nclient refetch and exactly one reload after invalidation.\n"
+    filename: tanstack-start-runtime.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-server:\n    type: patch\n---\n\n## Share the text-separator protocol constant; small DOM cleanups\n\nThe `<!--,-->` text-separator comment the server writes between adjacent text\nfibers was hardcoded independently by the server renderer and fig-dom's\nhydration cursor. The comment data now lives in `@bgub/fig/internal` as\n`TEXT_SEPARATOR_DATA`, next to the other streaming protocol constants, so the\ntwo sides cannot drift. No wire change — the emitted markup is identical.\n\nfig-dom also drops an unused internal `rootFor` helper, routes style clearing\nthrough the shared `isEmptyPropValue` predicate, and simplifies a redundant\nbranch in select-value syncing. No behavior change.\n"
+    filename: text-separator-shared-constant.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## Add typed View Transition scopes and abortable lifecycle events\n\n`transition` and the `useTransition` starter now accept explicit transition\ntypes, which Fig carries with the updates that reach each root and forwards to\nthe browser without leaking into unrelated commits.\n\n`ViewTransition` adds one `onTransition(event, signal)` lifecycle callback for\nenter, exit, share, and update phases. Events expose all participating surfaces\nand the commit's transition types. Fig DOM's optional View Transition entry can\nresolve those opaque surfaces into group, image-pair, old, and new pseudo\nhandles for animation and inspection; the signal aborts when the native\ntransition finishes.\n"
+    filename: view-transition-lifecycle.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig:\n    type: patch\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-server:\n    type: patch\n---\n\n## Bound stalled view-transition waits\n\nTransition-eligible commits and annotated streaming reveals now wait at most 60\nseconds for a previous browser View Transition. If its completion promise never\nsettles, Fig releases the document mutex and proceeds with the latest work\ninstead of parking it forever.\n"
+    filename: view-transition-timeout.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## Restore shadowed document metadata when its winner leaves\n\nClient title and meta entries now keep stable per-fiber ownership claims. The\nlatest acquired live claim controls the single canonical DOM element; updates\nto shadowed claims stay dormant, and removing the winner immediately restores\nthe latest remaining value.\n\nHoisted host and declarative asset lifecycle callbacks receive an opaque,\nstable `AssetResourceOwner`. Hoisted updates own the complete canonical host\nupdate, including text, so a shadowed fiber cannot overwrite registry state.\n"
+    filename: claim-based-metadata-registry.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-reconciler:\n    type: patch\n---\n\n## Recover full-document Suspense hydration mismatches\n\nFull-document hydration now escalates a mismatch inside the document-level\nSuspense boundary to root recovery, preserves the document doctype, and\nrebuilds the document without reusing cleared insertion anchors.\n"
+    filename: document-suspense-hydration-recovery.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: minor\n---\n\n## Make `configureDomRefreshScheduler` internal\n\nThe `@bgub/fig-dom/refresh` subpath now exports only `scheduleRefresh`\nand the `RefreshFamily`/`RefreshUpdate` types. The wiring setter was\ncalled by exactly one place — fig-dom's own renderer, as a module side\neffect — and HMR runtimes only ever needed `scheduleRefresh`. The\nbefore-main-entry update buffering is unchanged and keeps living in a\nsingle shared module, so pre-evaluation refreshes still replay once the\nrenderer configures itself.\n"
+    filename: dom-refresh-configure-internal.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Split fig-dom's oversized modules into focused ones\n\nInternal restructuring with no API or behavior change. The host config and\nrenderer wiring move out of the package entry into `renderer.ts`; form\ncontrol value/checked/select handling, style application, the `on()` event\ndescriptor, and the propagation-state patching each get their own module.\nEvent slot attachment state is now a discriminated union instead of four\nnullable fields.\n"
+    filename: fig-dom-module-split.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Diagnose hoisted resource declassification\n\nDevelopment now throws when an update would turn a permanently hoisted host\nfiber into an ordinary in-tree element, naming the affected asset and\nexplaining that changing placement requires a different Fig element key.\nProduction ignores the update instead of mutating a shared delivery asset or\noverwriting the owner's last valid title or metadata claim.\n"
+    filename: hoisted-resource-declassification.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Trim DOM renderer hot-path work\n\nThe DOM renderer now avoids transient collections while diffing host props,\nupdating event descriptors, and scanning document assets. Event routing keeps\nroot state in one container record, stores less per-listener metadata, and\nbuilds dispatch paths in place. Host configuration callbacks whose signatures\nalready match now connect directly instead of paying forwarding closures.\n\nControlled single-select elements also keep their scalar value without\nallocating a one-entry `Set`; multi-select values retain set lookup behavior.\nThese changes preserve the public API while reducing the production entry\nbundle and allocation pressure during mount, update, dispatch, and teardown.\n"
+    filename: leaner-fig-dom-hot-paths.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: minor\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## Make DOM View Transitions explicitly optional\n\n`enableViewTransitions()` from `@bgub/fig-dom/view-transitions` explicitly\nactivates native DOM View Transitions, including after roots exist. Applications\nthat omit the optional entry exclude both the reconciler planner and browser\nadapter from their bundles.\n\nRenderer authors can install the optional View Transition planner through the\nnew single-owner commit-coordinator seam. Coordinator types preserve the host's\ncontainer and instance identities, while a private type-only contract keeps the\nplanner's fiber and root views aligned with the reconciler.\n"
+    filename: optional-view-transitions.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: major\n  npm:@bgub/fig-tanstack-start:\n    type: major\n---\n\n## Make Payload trees directly renderable\n\n`createPayloadComponent` now creates a props-typed component backed by Fig's\nordinary data store. Complete props form its cache identity by default through\na canonical encoding of Payload-compatible values, and the component works\nwith route loaders and the existing data-resource freshness APIs and explicit\nstore handles.\n\nThe lower-level `payloadDataLoader` and `PayloadDataLoaderOptions` exports have\nbeen removed. Use `createPayloadComponent`, or `decodePayloadStream` when\nmanaging the transport and data integration directly.\n\nTanStack Start replaces `payloadResource({ key, render })` with\n`createPayloadComponent({ key, load: serverPayload(render) })`. Its compiler\ncan extract a component imported from `.server.tsx`, while initial companion\nstreams, client references, and compiled asset dependencies keep their existing\ntransport behavior.\n\nPayload component loaders receive the resolved resource `key` alongside\n`signal`, so framework transports can register responses under the exact cache\nentry without changing ordinary data loaders.\n\nDefault keys are canonical across plain-object property order, and Payload\ncomponents use their namespace as their DevTools label. TanStack Start renders\nthe supplied component inside the Payload renderer so root-level reads and\nsuspension work, and rejects uncompiled `serverPayload` calls before invoking\napplication code.\n\nPayload rendering also rejects nesting one Payload component inside another in\ndevelopment. Payload components are client-visible delivery boundaries;\ncompose ordinary server components inside them or mount separate Payload\ncomponents from the client tree to preserve independent refresh keys.\n"
+    filename: payload-components.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-reconciler:\n    type: minor\n  npm:@bgub/fig-dom:\n    type: patch\n---\n\n## Move `act` to `@bgub/fig-reconciler/test-utils`\n\n`act` is testing infrastructure, not renderer construction, so it moves\noff the main entry onto a `./test-utils` subpath — the same shape as\n`@bgub/fig-dom/test-utils`. DOM tests keep importing `act` from\n`@bgub/fig-dom/test-utils`; renderer tests now import it from\n`@bgub/fig-reconciler/test-utils`. Behavior is unchanged; the subpath\nshares the scheduler instance with the main entry.\n"
+    filename: reconciler-act-test-utils.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-dom:\n    type: patch\n  npm:@bgub/fig-reconciler:\n    type: patch\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Fix first-load styling and development client navigation\n\nKeep TanStack Start's compiler-sensitive client modules out of Vite dependency\nprebundling so client navigation uses the client server-function transport\ninstead of executing server-only context access in the browser. Preserve\nbrowser-extension roots appended to document singletons during hydration so a\nthird-party node cannot trigger document replacement and remove stylesheets.\n"
+    filename: tanstack-start-client-navigation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## `@bgub/fig-reconciler/devtools` is now type-only\n\n`devtoolsTypeName` and `getFigDevtoolsGlobalHook` were reconciler\nimplementation helpers, not part of the DevTools protocol; both moved\nto an internal module. The subpath now exposes exactly the protocol and\nsnapshot types (`FigDevtoolsGlobalHook`, `FigDevtools*Snapshot`, ...).\nDevTools frontends define their own hook accessor against the\n`FigDevtoolsGlobalHook` shape, which is unchanged.\n"
+    filename: devtools-helpers-internal.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-reconciler:\n    type: minor\n---\n\n## Remove `HostRenderConfig` and `HostValidationConfig`\n\nBoth were plain `Pick<HostConfig, ...>` regroupings with no consumers\nand no enforcement value. The capability types stay: those are\ncoherent host method groups for renderers that implement them. Their\n`Required<Pick<...>>` portions express complete required method sets,\nwhile intersections preserve deliberately optional notifications such\nas `commitHydratedInstance`. `HostPortalConfig` describes the optional\nportal lifecycle pair; portals themselves use the core mutation methods.\nHosts that referenced the removed aliases should use\n`Pick<HostConfig, ...>` inline or `HostConfig` itself.\n"
+    filename: remove-hostconfig-pick-aliases.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-reconciler:\n    type: patch\n---\n\n## Mark host subtrees committed when a re-placed wrapper inserts them\n\nRe-placing a reused non-host fiber (for example a component moved during the\nsame commit that reveals a captured Suspense primary) inserts its host\nsubtree in one pass. Those host fibers were never individually placed, so\nthey kept claiming they had never committed; the next re-render then\nre-assembled their live instances during the render phase, detaching\ncommitted children and crashing the commit's recorded deletions with\n`NotFoundError: removeChild`. Subtree insertion now marks never-committed\nhost fibers committed (acquiring uncommitted hoisted instances), exactly\nlike a direct host placement, and a dev-mode parity assert fails the commit\nthat inserts a placed host fiber without marking it — catching the whole\nclass at its source instead of at the next navigation's crash.\n"
+    filename: reveal-subtree-committed-marking.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## Rename the payload decoding API to `createPayloadConsumer`\n\n`createPayloadResponse` is now `createPayloadConsumer`, and the returned\nobject is a `PayloadConsumer` (options: `PayloadConsumerOptions`). The old\nname described the object as a response when it is the long-lived decoding\nend of the payload wire: it ingests many HTTP responses over its lifetime,\nholds decode caches and boundary state, and re-renders a bound root.\n\nThe standalone `fetchPayload(response, input, options?)` function is now a\nmethod: `consumer.fetch(input, options?)`. Behavior is unchanged — it sends\nthe consumer codec in `Accept`, sends `refreshBoundary` via\n`PAYLOAD_BOUNDARY_HEADER`, rejects non-2xx with `PayloadFetchError`, and\nresolves after the body is fully ingested.\n\nBoth changes are breaking renames with no compatibility aliases; migrate by\nrenaming call sites.\n"
+    filename: payload-consumer-rename.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## `renderToPayloadStream` cancels through its signal only\n\nThe payload render result no longer carries an `abort()` method; it is\n`{ stream, allReady, contentType }`. Cancellation is signal-only, matching\nthe payload decoder: pass `signal` in the render options (or cancel the\nstream) to abort a hung payload render and reject `allReady`. The HTML\nrenderer keeps its `abort()` method, whose semantics are genuinely distinct\nthere (it delivers client-render ops for pending boundaries to a live\nconsumer); on the payload side it was a third spelling of the same\ncancellation.\n"
+    filename: payload-render-signal-only.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: patch\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Prioritize render-blocking document assets\n\nFull-document rendering now emits parser- and security-sensitive metadata,\nconnection hints, critical font and image preloads, and stylesheets before\nordinary metadata and lower-priority JavaScript hints. TanStack Router matches\nalso register authored links and manifest stylesheets before their generated\nmodule preloads, so render-blocking CSS begins loading earlier without changing\nstylesheet order.\n"
+    filename: prioritize-document-preamble.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: patch\n---\n\n## Batch server-rendered opening tags\n\nServer HTML rendering now serializes each host opening tag and its attributes\ninto one segment chunk. Attribute-heavy trees avoid per-attribute segment and\nflush-buffer entries while preserving byte-identical HTML output.\n"
+    filename: server-html-serialization.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Expose render-discovered assets as response preload headers\n\nServer stream results now provide a bounded, deduplicated HTTP `Link` value for\npreconnects, fonts, stylesheets, explicit preloads, and module preloads\ndiscovered before the shell becomes ready. Filters let adapters exclude asset\nURLs that are unsafe for a shared cache.\n\nThe TanStack Start renderer can opt into merging that shell snapshot with the\nresponse's existing `Link` header before constructing the streamed response.\nAssets discovered after the shell continue to arrive through HTML streaming.\n"
+    filename: server-preload-headers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: minor\n---\n\n## Streaming HTML and payload respect consumer backpressure\n\nServer render streams — HTML and payload — now carry a byte-length queuing\nstrategy with a new `highWaterMark` option (default 65536 bytes). When the\nstream's internal queue reaches the mark, completed Suspense content waits in\nsegment form (HTML) or encoded rows wait queued (payload) and flush through\nthe stream's pull handler as the consumer reads, so a slow connection no\nlonger buffers the entire remaining document in memory.\nRendering itself never pauses, and `shellReady`/`headReady`/`allReady` still\nsettle on task completion regardless of consumer pace. Gating sits between\nboundary flushes, so every chunk still ends on complete markup. As a side\neffect, boundaries that settle while the flow is blocked coalesce into a\nsingle staged piece with one reveal op instead of partial fills.\n\nCancelling the stream mid-render (`reader.cancel()`) now aborts the render\ncleanly instead of throwing from an enqueue into the cancelled stream.\n"
+    filename: streaming-backpressure.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-server:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Compile Payload components and their assets\n\nFig TanStack Start now turns stylesheet imports in the ordinary component graph\nreached from a `payloadResource` render callback into Payload asset dependencies\nautomatically. The same declaration compiles to a private TanStack server\nfunction and Payload response, so applications no longer author\n`createServerFn`, `renderPayloadResponse`, or request plumbing for Payload\nroutes. Payload rendering is independent of filenames. Applications\nconventionally use `.payload.tsx` for the shared resource declaration, but the\nsuffix is only a human label. Components and assets referenced only by the\nrender callback are omitted from the browser bundle. Compiled styles use the\nexisting Payload row ownership, dedupe, streaming, and reveal-gating behavior\nwithout requiring an `assets(stylesheet(...))` wrapper.\n\nApplications mark the exceptional SSR-plus-hydration boundary with\n`<Isomorphic component={Counter} ... />` and an ordinary static import. The\ngenerated per-bundle manifest owns module resolution, stable component\nidentity, and client CSS metadata, so applications no longer author\n`clientReference`, `createPayloadClientReferenceResolver`, ids, or dynamic\nimports. Ordinary component uses remain Payload-rendered.\n"
+    filename: tanstack-start-compiled-payload-assets.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n---\n\n## Add the TanStack Router adapter for Fig\n\n`@bgub/fig-tanstack-router` now supplies code-route creation, a Fig router\nprovider and outlet, router hooks, native anchor links, route preloading, and a\nprivate reactive-store bridge for `@tanstack/router-core` 1.171.15.\n"
+    filename: fig-tanstack-router.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n---\n\n## Remove `useLoaderData`; enforce void loaders for data-backed routers\n\nThe adapter no longer exposes `useLoaderData` (standalone, route-bound, or via\n`getRouteApi`): the Fig data store is the single route-data cache, so loader\nvalues are read with `readData` against the same resource the loader ensured.\n`useLoaderDeps` remains — deps are loader orchestration, not a cache.\n\nIn dev builds, a match that commits with `loaderData` set while\n`router.context.data` is configured now throws a diagnostic naming the route.\nDerive navigation-scoped values from `useLoaderDeps`, search params, or\n`beforeLoad`-returned route context. Routers created without `context.data`\nkeep Router Core's native loader semantics untouched.\n"
+    filename: remove-use-loader-data.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Build generated TanStack Start file routes with Fig\n\n`@bgub/fig-tanstack-router` now implements generated file routes, lazy route\nrecords, lazy components, and lazy loader functions. TanStack Start builds and\nreloads those routes in development through its existing generator and code\nsplitter.\n\n`@bgub/fig-tanstack-start` now exposes Start configuration and middleware\nfactories. Its demo covers request-isolated middleware context, server and\nclient redirects, generated error and not-found routes, split chunks, SSR,\nhydration, and server-function mutations.\n"
+    filename: tanstack-file-routes.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n---\n\n## Add canonical bound route APIs\n\nFig routes and `getRouteApi` now provide bound match, params, search,\nloader-deps, loader-data, context, navigation, link, and not-found helpers. The\nadapter also adds active-match selection, reactive route matching,\n`MatchRoute`, and declarative `Navigate` APIs.\n"
+    filename: tanstack-route-apis.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n---\n\n## Expand TanStack Router hook and link parity\n\nRouter selectors now honor structural sharing, including the router-wide\ndefault, and support selected locations plus loose or optional match reads.\nLinks gain composable active and inactive props and render-function children\nwith active and transitioning state. `linkOptions` and `createRouteMask` add\nzero-wrapper helpers for reusable, type-checked navigation options. A\npublished compatibility matrix now distinguishes the guaranteed Start surface\nfrom compatibility, deferred, and deliberately omitted APIs.\n"
+    filename: tanstack-router-api-parity.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: minor\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Complete Fig-native data and navigation patterns\n\nTanStack Start routes can now preload Payload data and return immediately,\nletting Fig Suspense stream the result and its asset resources without copying\nvalues into Router loader data. Initial Payload responses registered after the\ndocument shell starts are embedded before hydration, preventing a duplicate\nclient request.\n\nThe Router adapter adds modern object-only `useBlocker` and reactive\n`useCanGoBack` hooks, makes the concrete Router and RouteApi constructors\ninternal, and rejects unsupported proximity preloading in `LinkProps`.\nFig's structural `ViewTransition` remains the sole document-transition owner,\neven when a TanStack navigation carries its `viewTransition` option.\n"
+    filename: tanstack-router-data-and-navigation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Make data resources the router's default external cache\n\nPut `root.data` in router context, return `ensureRouteData` from loaders, and\nread the same resource with `readData` in components. Data-backed routers now\ndefault `defaultPreloadStaleTime` to `0`, the loader helper resolves to `void`\nso the value is not duplicated in `loaderData`, and route reset invalidates\nattributed Fig data errors before re-running the router. The adapter also\nrenders Router Core's global not-found state through the root outlet.\n"
+    filename: tanstack-router-data-delegation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Complete route match rendering semantics\n\nRoute matches now honor pending delay and minimum duration, route and default\nremount dependencies, explicit Suspense wrapping, client-only and data-only SSR\npolicies, redirects, and router-level error reporting. Scroll restoration is\ninstalled idempotently and emits its Start SSR bootstrap once.\n"
+    filename: tanstack-router-match-lifecycle.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Keep outgoing route hooks valid through unmount\n\nRoute-scoped hooks now retain their mounted match while navigation replaces the\nactive match list. Outgoing routes can subscribe to router state without\nthrowing during browser back navigation and clearing the rendered page.\n"
+    filename: tanstack-router-mounted-match-hooks.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Settle Router navigation through Fig transitions\n\n`RouterProvider` now merges partial options and route context before the first\nloader runs. Browser navigation uses Fig transitions, publishes Router's load,\nmount, resolved, and rendered lifecycle events in order, ignores superseded\nnavigation completions, and keeps `isTransitioning` accurate while an\nasynchronous navigation settles.\n\nHydration skips duplicate initial loads, canonical validated locations replace\nthe browser URL, and provider unmounts release history and transition bindings.\n"
+    filename: tanstack-router-navigation-lifecycle.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Give each matched route ownership of its Fig assets\n\nRoute stylesheets, preload hints, preconnects, font preloads, and async scripts\nnow enter Fig's shared asset registry at the matched subtree. This gives Start\nstreaming, client navigation, and Payload assets one deduplicating ownership\nmodel while title, meta, inline styles, JSON-LD, and synchronous scripts retain\ntheir declared document positions.\n\nManifest `assetCrossOrigin` configuration now belongs to `createRouter`\noptions, where it is available before the root match renders.\n"
+    filename: tanstack-router-route-assets.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-router:\n    type: patch\n---\n\n## Define the Start-first Router support contract\n\nThe Router adapter now documents generated TanStack Start file routes as its\nprimary interface, distinguishes supported code-created routes from deferred\nor deliberately omitted adapter conveniences, and clarifies when route data\nbelongs in Fig data resources versus Router `loaderData`. The package also\ndeclares itself side-effect-free and guards the production Start-oriented\nsurface with a bundle-size limit.\n"
+    filename: tanstack-router-start-contract.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-vite:\n    type: patch\n  npm:@bgub/fig-tanstack-start:\n    type: patch\n---\n\n## Refresh resolves the app's renderer runtime\n\n`figRefresh` now imports `@bgub/fig-dom/refresh` through its bare specifier\nrather than a resolved `/@fs/` path, so app-level aliases, dedupe, and\nprebundling apply and the refresh scheduler cannot be instantiated twice.\n\n## TanStack Start's client graph is prebundled\n\nThe TanStack Start adapter now prebundles `@tanstack/start-client-core` in\ndevelopment while leaving its application-bound router and Start imports as\nexternal Vite modules. This reduces the module-request waterfall without\nfreezing generated app entries or the linked Fig adapter packages. Production\ncontinues to use Vite's normal application bundling.\n"
+    filename: dev-server-prebundling.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Own the TanStack Start document transport\n\n`StartScripts` now owns Fig data serialization, the initial Payload insertion\npoint, and TanStack's bootstrap scripts as one ordered document surface. The\nPayload transport targets a Fig-owned marker instead of matching TanStack's\nprivate hydration-barrier markup.\n\nThe Vite adapter records its exact Router and Start core compatibility profile\nand rejects emitted Solid Router or Start adapter modules. Server-only assets\nare still mirrored into the public client output, but a conflicting client\nasset now fails the build instead of being silently overwritten.\n"
+    filename: tanstack-start-document-transport.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n  npm:@bgub/fig-vite:\n    type: minor\n---\n\n## TanStack Start gains state-preserving Fast Refresh\n\nThe TanStack Start Vite adapter now installs Fig Fast Refresh automatically.\nComponent edits update in place and preserve hook state in accepted modules.\n\n`@bgub/fig-vite` is now a public package containing the reusable Fast Refresh\nand server data-resource transforms.\n"
+    filename: tanstack-start-fast-refresh.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@bgub/fig-tanstack-start:\n    type: minor\n---\n\n## Build Fig applications with TanStack Start and Vite\n\n`@bgub/fig-tanstack-start/plugin/vite` now delegates client and SSR builds,\ndevelopment and preview serving, manifests, and server-function compilation to\nTanStack Start's plugin core. Default entries stream and hydrate Fig documents\nwithout application-owned build or HTTP glue.\n\nThe package root now exposes `createServerFn`. Compiled mutations use TanStack's\nRPC transport and can invalidate the live Fig data store afterward; the demo\nproves the full production flow from SSR hydration through mutation and one\ndata-resource refresh.\n"
+    filename: tanstack-start-vite.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - initial-alpha.md
+      - asset-precedence-and-native-scripts.md
+      - client-reference-assets-internal.md
+      - client-reference-cache.md
+      - commit-owned-metadata.md
+      - deferred-supersession-abort.md
+      - devtools-per-fiber-data-dependencies.md
+      - ensure-data-verb.md
+      - fig-start-resource-model.md
+      - host-mixins.md
+      - hydration-stable-use-id.md
+      - is-valid-element-single-home.md
+      - jsr-payload-export.md
+      - minimal-payload-api.md
+      - payload-data-loader.md
+      - payload-format-home-and-decode.md
+      - payload-reference-assets-escape-suspension.md
+      - portal-node-internal.md
+      - promise-shaped-decoder.md
+      - promise-valued-children.md
+      - public-signature-cleanup.md
+      - rejected-payload-hole-attribution.md
+      - remove-fig-text.md
+      - remove-h-alias.md
+      - remove-server-data-resource.md
+      - remove-targeted-refresh.md
+      - server-html-helper-subpath.md
+      - single-commit-server-route-navigation.md
+      - stable-resolved-reference-identity.md
+      - tanstack-start-demo.md
+      - tanstack-start-payload-routes.md
+      - tanstack-start-runtime.md
+      - text-separator-shared-constant.md
+      - view-transition-lifecycle.md
+      - view-transition-timeout.md
     id: npm:@bgub/fig
     updated: true
   - changelogIds:
-      - initial-alpha.md
+      - asset-precedence-and-native-scripts.md
+      - claim-based-metadata-registry.md
+      - client-reference-cache.md
+      - commit-owned-metadata.md
+      - document-suspense-hydration-recovery.md
+      - dom-refresh-configure-internal.md
+      - fig-dom-module-split.md
+      - fig-start-resource-model.md
+      - hoisted-resource-declassification.md
+      - host-mixins.md
+      - hydration-stable-use-id.md
+      - leaner-fig-dom-hot-paths.md
+      - minimal-payload-api.md
+      - optional-view-transitions.md
+      - payload-components.md
+      - payload-data-loader.md
+      - portal-node-internal.md
+      - promise-shaped-decoder.md
+      - promise-valued-children.md
+      - public-signature-cleanup.md
+      - reconciler-act-test-utils.md
+      - rejected-payload-hole-attribution.md
+      - tanstack-start-client-navigation.md
+      - tanstack-start-demo.md
+      - tanstack-start-payload-routes.md
+      - tanstack-start-runtime.md
+      - text-separator-shared-constant.md
+      - view-transition-lifecycle.md
+      - view-transition-timeout.md
     id: npm:@bgub/fig-dom
     updated: true
   - changelogIds:
-      - initial-alpha.md
+      - asset-precedence-and-native-scripts.md
+      - claim-based-metadata-registry.md
+      - devtools-helpers-internal.md
+      - devtools-per-fiber-data-dependencies.md
+      - document-suspense-hydration-recovery.md
+      - ensure-data-verb.md
+      - hydration-stable-use-id.md
+      - is-valid-element-single-home.md
+      - optional-view-transitions.md
+      - promise-valued-children.md
+      - reconciler-act-test-utils.md
+      - remove-hostconfig-pick-aliases.md
+      - reveal-subtree-committed-marking.md
+      - tanstack-start-client-navigation.md
+      - tanstack-start-demo.md
+      - tanstack-start-runtime.md
+      - view-transition-lifecycle.md
     id: npm:@bgub/fig-reconciler
     updated: true
-  - changelogIds:
-      - initial-alpha.md
-    id: npm:@bgub/fig-refresh
+  - id: npm:@bgub/fig-refresh
     updated: true
   - changelogIds:
-      - initial-alpha.md
+      - asset-precedence-and-native-scripts.md
+      - commit-owned-metadata.md
+      - is-valid-element-single-home.md
+      - minimal-payload-api.md
+      - payload-consumer-rename.md
+      - payload-format-home-and-decode.md
+      - payload-render-signal-only.md
+      - prioritize-document-preamble.md
+      - promise-valued-children.md
+      - remove-targeted-refresh.md
+      - server-html-helper-subpath.md
+      - server-html-serialization.md
+      - server-preload-headers.md
+      - streaming-backpressure.md
+      - tanstack-start-compiled-payload-assets.md
+      - tanstack-start-demo.md
+      - tanstack-start-payload-routes.md
+      - tanstack-start-runtime.md
+      - text-separator-shared-constant.md
+      - view-transition-timeout.md
     id: npm:@bgub/fig-server
+    updated: true
+  - changelogIds:
+      - fig-tanstack-router.md
+      - prioritize-document-preamble.md
+      - remove-use-loader-data.md
+      - tanstack-file-routes.md
+      - tanstack-route-apis.md
+      - tanstack-router-api-parity.md
+      - tanstack-router-data-and-navigation.md
+      - tanstack-router-data-delegation.md
+      - tanstack-router-match-lifecycle.md
+      - tanstack-router-mounted-match-hooks.md
+      - tanstack-router-navigation-lifecycle.md
+      - tanstack-router-route-assets.md
+      - tanstack-router-start-contract.md
+      - tanstack-start-demo.md
+      - tanstack-start-payload-routes.md
+      - tanstack-start-runtime.md
+    id: npm:@bgub/fig-tanstack-router
+    updated: true
+  - changelogIds:
+      - dev-server-prebundling.md
+      - payload-components.md
+      - promise-valued-children.md
+      - server-html-helper-subpath.md
+      - server-preload-headers.md
+      - tanstack-file-routes.md
+      - tanstack-router-data-and-navigation.md
+      - tanstack-router-route-assets.md
+      - tanstack-start-client-navigation.md
+      - tanstack-start-compiled-payload-assets.md
+      - tanstack-start-document-transport.md
+      - tanstack-start-fast-refresh.md
+      - tanstack-start-payload-routes.md
+      - tanstack-start-runtime.md
+      - tanstack-start-vite.md
+    id: npm:@bgub/fig-tanstack-start
+    updated: true
+  - changelogIds:
+      - dev-server-prebundling.md
+      - remove-server-data-resource.md
+      - tanstack-start-fast-refresh.md
+    id: npm:@bgub/fig-vite
     updated: true
 npm:packages:
   - distTag: latest
     id: npm:@bgub/fig
+  - id: npm:@bgub/fig-demo-client
+  - id: npm:@bgub/fig-demo-hmr
+  - id: npm:@bgub/fig-demo-payload
+  - id: npm:@bgub/fig-demo-tanstack-router
+  - id: npm:@bgub/fig-demo-ssr
+  - id: npm:@bgub/fig-demo-tanstack-start
+  - id: npm:@bgub/fig-devtools
   - distTag: latest
     id: npm:@bgub/fig-dom
   - distTag: latest
@@ -34,9 +385,9 @@ npm:packages:
     id: npm:@bgub/fig-refresh
   - distTag: latest
     id: npm:@bgub/fig-server
-  - id: npm:@bgub/fig-demo-client
-  - id: npm:@bgub/fig-demo-payload
-  - id: npm:@bgub/fig-demo-ssr
-  - id: npm:@bgub/fig-devtools
-  - id: npm:@bgub/fig-demo-hmr
-  - id: npm:@bgub/fig-vite
+  - distTag: latest
+    id: npm:@bgub/fig-tanstack-router
+  - distTag: latest
+    id: npm:@bgub/fig-tanstack-start
+  - distTag: latest
+    id: npm:@bgub/fig-vite

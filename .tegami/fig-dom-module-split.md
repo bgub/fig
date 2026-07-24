@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-dom: patch
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Split fig-dom's oversized modules into focused ones

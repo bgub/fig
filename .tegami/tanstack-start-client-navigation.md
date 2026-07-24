@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig-dom: patch
-  npm:@bgub/fig-reconciler: patch
-  npm:@bgub/fig-tanstack-start: patch
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Fix first-load styling and development client navigation

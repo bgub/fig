@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-reconciler: minor
-  npm:@bgub/fig-dom: patch
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Move `act` to `@bgub/fig-reconciler/test-utils`

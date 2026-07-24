@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-vite: patch
-  npm:@bgub/fig-tanstack-start: patch
+  npm:@bgub/fig-vite:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-vite)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Refresh resolves the app's renderer runtime

@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-server: patch
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Batch server-rendered opening tags
