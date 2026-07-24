@@ -1,8 +1,14 @@
 ---
 packages:
-  "@bgub/fig-dom": minor
-  "@bgub/fig-reconciler": minor
-  "@bgub/fig-refresh": minor
+  "@bgub/fig-dom":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  "@bgub/fig-reconciler":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  "@bgub/fig-refresh":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-refresh)
 ---
 
 ## Renderers now install their reconciler implementation

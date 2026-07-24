@@ -1,12 +1,26 @@
 ---
 packages:
-  "@bgub/fig": patch
-  "@bgub/fig-dom": patch
-  "@bgub/fig-reconciler": patch
-  "@bgub/fig-server": patch
-  "@bgub/fig-tanstack-router": patch
-  "@bgub/fig-vite": minor
-  "@bgub/fig-tanstack-start": patch
+  "@bgub/fig":
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  "@bgub/fig-dom":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  "@bgub/fig-reconciler":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  "@bgub/fig-server":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  "@bgub/fig-tanstack-router":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
+  "@bgub/fig-vite":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-vite)
+  "@bgub/fig-tanstack-start":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Let Fig's Vite integration own runtime configuration
