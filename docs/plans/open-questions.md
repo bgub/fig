@@ -8,11 +8,6 @@
 - **DevTools:** Extend render-tree collection to `renderToPayloadStream` so Payload component names survive into DevTools.
 - **DevTools:** Emit dev-only Chrome Performance extensibility entries for scheduler lanes, render attempts, commits, effects, and Suspense retries.
 
-## React Parity Gaps
-
-- React Canary ViewTransition gestures
-  - Shouldn't be too difficult hopefully
-
 ## API
 
 - **Hooks:** Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive

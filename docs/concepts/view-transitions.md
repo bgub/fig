@@ -157,6 +157,5 @@ The inline Suspense operations `s`, `c`, and `ac` collect old and new annotated 
 
 ## Known Gaps
 
-- No gesture-driven transitions.
 - A boundary shifted only by an inserted sibling may not be collected unless its parent also has work.
 - Content updates always animate; Fig does not yet remove width/height animation when size is unchanged.

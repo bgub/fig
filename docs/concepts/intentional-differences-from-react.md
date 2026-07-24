@@ -41,6 +41,14 @@ Fig DOM's JSX types reject React spellings and event props at compile time. HTML
 
 See [Events](./events.md), [Host mixins](./mixins.md), and [JSX](./jsx.md).
 
+## View Transitions
+
+Fig supports structural transition boundaries, transition types, lifecycle callbacks, and pseudo-element handles, but intentionally omits React Canary's gesture-driven transition protocol.
+
+Gesture-driven transitions need a distinct interactive lifecycle for starting, tracking, finishing, and cancelling work outside Fig's commit-scoped transition model. Fig has no demonstrated application need for that extra contract today, so adopting an evolving API would add core, reconciler, and DOM complexity speculatively. Revisit this decision when a concrete application needs animation progress to follow a user gesture and cannot express it through Fig's existing transition lifecycle and pseudo-element animation handles.
+
+See [View Transitions](./view-transitions.md).
+
 ## Data And Assets
 
 - Data resources live in `@bgub/fig`. Their array keys are canonical identities shared by reads, mutations, hydration, and Payload.
