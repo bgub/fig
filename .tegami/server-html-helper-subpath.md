@@ -1,8 +1,14 @@
 ---
 packages:
-  npm:@bgub/fig: patch
-  npm:@bgub/fig-server: major
-  npm:@bgub/fig-tanstack-start: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Move HTML escaping helpers to a focused subpath

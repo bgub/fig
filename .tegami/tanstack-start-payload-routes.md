@@ -1,10 +1,20 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-dom: minor
-  npm:@bgub/fig-server: patch
-  npm:@bgub/fig-tanstack-router: patch
-  npm:@bgub/fig-tanstack-start: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Add Payload routes to the TanStack Start adapter

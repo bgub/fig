@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-dom: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Move `createPortalNode` to `@bgub/fig/internal`

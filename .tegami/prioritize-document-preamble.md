@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-server: patch
-  npm:@bgub/fig-tanstack-router: patch
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Prioritize render-blocking document assets

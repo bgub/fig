@@ -1,10 +1,20 @@
 ---
 packages:
-  npm:@bgub/fig: patch
-  npm:@bgub/fig-dom: patch
-  npm:@bgub/fig-reconciler: minor
-  npm:@bgub/fig-server: patch
-  npm:@bgub/fig-tanstack-router: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Preserve framework-managed asset placement

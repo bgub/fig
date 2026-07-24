@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-start: minor
-  npm:@bgub/fig-vite: minor
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
+  npm:@bgub/fig-vite:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-vite)
 ---
 
 ## TanStack Start gains state-preserving Fast Refresh

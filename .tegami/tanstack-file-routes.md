@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-router: minor
-  npm:@bgub/fig-tanstack-start: minor
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Build generated TanStack Start file routes with Fig

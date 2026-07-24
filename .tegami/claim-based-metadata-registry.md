@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-dom: minor
-  npm:@bgub/fig-reconciler: minor
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Restore shadowed document metadata when its winner leaves

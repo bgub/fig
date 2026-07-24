@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-reconciler: minor
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Remove `HostRenderConfig` and `HostValidationConfig`

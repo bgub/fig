@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-server: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## The targeted-refresh protocol and payload consumer are gone

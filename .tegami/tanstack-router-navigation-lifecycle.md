@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-router: patch
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Settle Router navigation through Fig transitions

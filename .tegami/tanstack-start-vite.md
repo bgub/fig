@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-start: minor
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Build Fig applications with TanStack Start and Vite

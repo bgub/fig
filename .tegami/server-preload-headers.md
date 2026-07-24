@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-server: minor
-  npm:@bgub/fig-tanstack-start: minor
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Expose render-discovered assets as response preload headers

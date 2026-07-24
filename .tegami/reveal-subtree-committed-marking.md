@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig-reconciler: patch
+  npm:@bgub/fig-reconciler:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Mark host subtrees committed when a re-placed wrapper inserts them

@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-router: patch
-  npm:@bgub/fig-tanstack-start: patch
+  npm:@bgub/fig-tanstack-router:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Give each matched route ownership of its Fig assets

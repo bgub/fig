@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig-dom: major
-  npm:@bgub/fig-tanstack-start: major
+  npm:@bgub/fig-dom:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  npm:@bgub/fig-tanstack-start:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Make Payload trees directly renderable

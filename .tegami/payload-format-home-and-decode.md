@@ -1,7 +1,11 @@
 ---
 packages:
-  npm:@bgub/fig: minor
-  npm:@bgub/fig-server: minor
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  npm:@bgub/fig-server:
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## `@bgub/fig/payload`: the browser-safe payload home and `decodePayloadStream`

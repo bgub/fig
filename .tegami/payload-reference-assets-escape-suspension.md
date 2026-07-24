@@ -1,6 +1,8 @@
 ---
 packages:
-  npm:@bgub/fig: patch
+  npm:@bgub/fig:
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
 ---
 
 ## Deliver client-reference assets outside the resolution suspension
