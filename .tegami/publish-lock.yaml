@@ -1,35 +1,44 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: minor\n  \"@bgub/fig-server\":\n    type: minor\n---\n\n## Preload eligible host images during server rendering\n\nHTML and Payload rendering now derive image preload assets from eager `<img>`\nhosts. The hints share Fig's existing asset registry, dedupe against explicit\npreloads, preserve responsive `srcset` and `sizes` selection, and arrive before\nthe content that depends on them.\n\nThe first ten distinct images receive early shell delivery without being\nforced to high browser priority. Lazy, explicitly low-priority, data-URL,\n`<picture>`, and `<noscript>` images remain untouched.\n"
-    filename: automatic-image-preloads.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-dom\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-vite\":\n    type: minor\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Let Fig's Vite integration own runtime configuration\n\nThe new `fig()` Vite integration defines Fig's development gate and installs\nFast Refresh. TanStack Start composes it automatically, so applications no\nlonger need to configure Fig's compile-time mode or SSR package bundling\nthemselves.\n\n`@bgub/fig-vite` now uses the application's Fig DOM renderer as a peer instead\nof installing a private renderer copy.\n\nThe development gate follows Vite's command rather than its mode: serving\nenables development behavior, while builds—including `--mode development`—strip\nit from production output.\n\nPublished npm packages now expose development artifacts through a Fig-owned\ncondition, allowing the Vite integration to enable diagnostics and Fast Refresh\nfor ordinary installs while explicit static overrides remain authoritative and\ndefault production imports retain their previous dead-code elimination. A\nstatic `false` override also disables Fast Refresh instrumentation.\n"
+    filename: vite-owned-fig-config.md
     v: 0.0.0
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-dom\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Keep empty children and document assets hydration-safe\n\nEmpty string children now normalize away on both the server and client, so a\nrendered empty token cannot force hydration to recover the root.\n\nWhen full-document hydration does recover, declarative stylesheets, titles,\nand metadata now acquire against the replacement head instead of disappearing\nwith the server document.\n"
-    filename: hydration-empty-text-assets.md
+  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: minor\n  \"@bgub/fig-reconciler\":\n    type: minor\n  \"@bgub/fig-refresh\":\n    type: minor\n---\n\n## Renderers now install their reconciler implementation\n\nFig DOM and Fast Refresh now depend on their exact reconciler version directly.\nApplications no longer need to install `@bgub/fig-reconciler` alongside Fig DOM;\nthe reconciler remains a direct dependency only for custom-renderer authors.\n\nFast Refresh connects to Fig DOM through a renderer-owned adapter, ensuring its\nfamily resolver and scheduled updates always reach the same reconciler instance\neven when development tooling resolves through a separate package graph.\n"
+    filename: renderer-owned-reconciler.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - automatic-image-preloads.md
-      - hydration-empty-text-assets.md
+      - vite-owned-fig-config.md
     id: npm:@bgub/fig
     updated: true
   - changelogIds:
-      - hydration-empty-text-assets.md
+      - renderer-owned-reconciler.md
+      - vite-owned-fig-config.md
     id: npm:@bgub/fig-dom
     updated: true
   - changelogIds:
-      - hydration-empty-text-assets.md
+      - renderer-owned-reconciler.md
+      - vite-owned-fig-config.md
     id: npm:@bgub/fig-reconciler
     updated: true
-  - id: npm:@bgub/fig-refresh
+  - changelogIds:
+      - renderer-owned-reconciler.md
+    id: npm:@bgub/fig-refresh
     updated: true
   - changelogIds:
-      - automatic-image-preloads.md
+      - vite-owned-fig-config.md
     id: npm:@bgub/fig-server
     updated: true
-  - id: npm:@bgub/fig-tanstack-router
+  - changelogIds:
+      - vite-owned-fig-config.md
+    id: npm:@bgub/fig-tanstack-router
     updated: true
-  - id: npm:@bgub/fig-tanstack-start
+  - changelogIds:
+      - vite-owned-fig-config.md
+    id: npm:@bgub/fig-tanstack-start
     updated: true
-  - id: npm:@bgub/fig-vite
+  - changelogIds:
+      - vite-owned-fig-config.md
+    id: npm:@bgub/fig-vite
     updated: true
 npm:packages:
   - distTag: latest
@@ -38,8 +47,8 @@ npm:packages:
   - id: npm:@bgub/fig-demo-hmr
   - id: npm:@bgub/fig-demo-payload
   - id: npm:@bgub/fig-demo-ssr
-  - id: npm:@bgub/fig-demo-tanstack-start
   - id: npm:@bgub/fig-demo-tanstack-router
+  - id: npm:@bgub/fig-demo-tanstack-start
   - id: npm:@bgub/fig-devtools
   - distTag: latest
     id: npm:@bgub/fig-dom

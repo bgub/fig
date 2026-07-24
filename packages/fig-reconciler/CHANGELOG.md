@@ -1,3 +1,35 @@
+## @bgub/fig-reconciler@0.1.0-alpha.3
+
+### Renderers now install their reconciler implementation
+
+Fig DOM and Fast Refresh now depend on their exact reconciler version directly.
+Applications no longer need to install `@bgub/fig-reconciler` alongside Fig DOM;
+the reconciler remains a direct dependency only for custom-renderer authors.
+
+Fast Refresh connects to Fig DOM through a renderer-owned adapter, ensuring its
+family resolver and scheduled updates always reach the same reconciler instance
+even when development tooling resolves through a separate package graph.
+
+### Let Fig's Vite integration own runtime configuration
+
+The new `fig()` Vite integration defines Fig's development gate and installs
+Fast Refresh. TanStack Start composes it automatically, so applications no
+longer need to configure Fig's compile-time mode or SSR package bundling
+themselves.
+
+`@bgub/fig-vite` now uses the application's Fig DOM renderer as a peer instead
+of installing a private renderer copy.
+
+The development gate follows Vite's command rather than its mode: serving
+enables development behavior, while builds—including `--mode development`—strip
+it from production output.
+
+Published npm packages now expose development artifacts through a Fig-owned
+condition, allowing the Vite integration to enable diagnostics and Fast Refresh
+for ordinary installs while explicit static overrides remain authoritative and
+default production imports retain their previous dead-code elimination. A
+static `false` override also disables Fast Refresh instrumentation.
+
 ## @bgub/fig-reconciler@0.1.0-alpha.2
 
 ### Keep empty children and document assets hydration-safe
