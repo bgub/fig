@@ -6,7 +6,11 @@ import {
   validateInstanceNesting,
   validateTextNesting,
 } from "@bgub/fig/internal";
-import { createRenderer, type HostConfig } from "@bgub/fig-reconciler";
+import {
+  createRenderer,
+  type FigRenderer,
+  type HostConfig,
+} from "@bgub/fig-reconciler";
 import {
   acquireDocumentResource,
   adoptDocumentResource,
@@ -224,7 +228,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   removePortalContainer,
 };
 
-export const domRenderer = createRenderer(hostConfig);
+export const domRenderer: FigRenderer<Container, Element> =
+  createRenderer(hostConfig);
 setEventBatching(domRenderer.batchedUpdates);
 configureDomRefreshScheduler(domRenderer.scheduleRefresh);
 
