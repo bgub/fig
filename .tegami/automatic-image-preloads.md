@@ -1,7 +1,11 @@
 ---
 packages:
-  "@bgub/fig": minor
-  "@bgub/fig-server": minor
+  "@bgub/fig":
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  "@bgub/fig-server":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Preload eligible host images during server rendering

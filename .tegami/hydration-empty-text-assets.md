@@ -1,8 +1,14 @@
 ---
 packages:
-  "@bgub/fig": patch
-  "@bgub/fig-dom": patch
-  "@bgub/fig-reconciler": patch
+  "@bgub/fig":
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
+  "@bgub/fig-dom":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
+  "@bgub/fig-reconciler":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Keep empty children and document assets hydration-safe

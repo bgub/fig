@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-vite",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Fig Vite plugin for state-preserving Fast Refresh",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
