@@ -85,13 +85,16 @@ export async function synchronizeJsrManifest(
   expectedName: string,
   version: string,
 ): Promise<boolean> {
-  const manifest = await readJsrManifest(manifestPath);
-  if (manifest === undefined) return false;
+  const file = await readJsrManifestFile(manifestPath);
+  if (file === undefined) return false;
+  const { manifest, source } = file;
   assertManifestName(manifest, expectedName, manifestPath);
   if (manifest.version === version) return false;
 
-  manifest.version = version;
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(
+    manifestPath,
+    replaceManifestVersion(source, manifest.version, version, manifestPath),
+  );
   return true;
 }
 
@@ -130,6 +133,12 @@ function orderOf(name: string | undefined, order: readonly string[]): number {
 }
 
 async function readJsrManifest(path: string): Promise<JsrManifest | undefined> {
+  return (await readJsrManifestFile(path))?.manifest;
+}
+
+async function readJsrManifestFile(
+  path: string,
+): Promise<{ manifest: JsrManifest; source: string } | undefined> {
   let source: string;
   try {
     source = await readFile(path, "utf8");
@@ -150,7 +159,27 @@ async function readJsrManifest(path: string): Promise<JsrManifest | undefined> {
     throw new Error(`Invalid JSR manifest: ${path}`);
   }
 
-  return parsed as JsrManifest;
+  return { manifest: parsed as JsrManifest, source };
+}
+
+function replaceManifestVersion(
+  source: string,
+  currentVersion: string,
+  value: string,
+  path: string,
+): string {
+  const property = /"version"\s*:\s*/g;
+  const match = property.exec(source);
+  if (match === null || property.exec(source) !== null) {
+    throw new Error(`Invalid version property in JSR manifest: ${path}`);
+  }
+
+  const valueStart = match.index + match[0].length;
+  const serializedVersion = JSON.stringify(currentVersion);
+  if (!source.startsWith(serializedVersion, valueStart)) {
+    throw new Error(`Invalid version property in JSR manifest: ${path}`);
+  }
+  return `${source.slice(0, valueStart)}${JSON.stringify(value)}${source.slice(valueStart + serializedVersion.length)}`;
 }
 
 function assertManifestIdentity(

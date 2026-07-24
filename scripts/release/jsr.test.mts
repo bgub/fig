@@ -65,20 +65,24 @@ void test("JSR manifests expose every JSR package's npm entries", async () => {
 void test("synchronizeJsrManifest updates only the version", async () => {
   const dir = await mkdtemp(join(tmpdir(), "fig-jsr-release-"));
   const path = join(dir, "jsr.json");
-  await writeFile(
-    path,
-    `${JSON.stringify({ name: "@bgub/fig", version: "0.0.1", exports: "./src/index.ts" }, null, 2)}\n`,
-  );
+  const source = `{
+  "name": "@bgub/fig",
+  "version": "0.0.1",
+  "exports": "./src/index.ts",
+  "publish": {
+    "include": ["LICENSE", "README.md", "src/**/*.ts"]
+  }
+}\n`;
+  await writeFile(path, source);
 
   assert.equal(
     await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0-alpha.0"),
     true,
   );
-  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
-    name: "@bgub/fig",
-    version: "0.1.0-alpha.0",
-    exports: "./src/index.ts",
-  });
+  assert.equal(
+    await readFile(path, "utf8"),
+    source.replace('"version": "0.0.1"', '"version": "0.1.0-alpha.0"'),
+  );
   assert.equal(
     await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0-alpha.0"),
     false,
