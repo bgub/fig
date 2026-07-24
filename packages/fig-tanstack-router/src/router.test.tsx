@@ -10,6 +10,7 @@ import {
 } from "@bgub/fig";
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
+import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   type AnyRoute,
@@ -46,6 +47,8 @@ import {
   useParams,
   useRouterState,
 } from "./router.tsx";
+
+enableViewTransitions();
 
 declare module "./router.tsx" {
   interface FileRoutesByPath {

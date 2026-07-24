@@ -34,6 +34,14 @@ Fiber flags remain the source of truth for commit work. Completion summarizes de
 
 When a boundary discards work, it rolls that index back. Development builds compare the index with the normal tree traversal.
 
+### Commit Coordination
+
+`createRenderer()` owns at most one renderer-local commit coordinator. `installCommitCoordinator()` may be called after roots exist, is idempotent for the installed coordinator object, and rejects a different coordinator because two owners cannot independently park, defer, or reorder one commit transaction. A coordinator declares the optional capabilities it owns so renderer-neutral diagnostics do not mistake unrelated coordination for feature support. Its type carries the renderer's container and instance identities, so an adapter for one host cannot be installed on another. The `@bgub/fig-reconciler/commit-coordinator` entry owns this narrow contract.
+
+A coordinator receives opaque root and finished-work identities plus a semantic work priority. Its transaction's `runMutation()` preserves the reconciler's commit and deferred-error invariants. Returning `false` promises that no mutation occurred, so the reconciler can follow its ordinary commit path.
+
+View Transition planning is the first coordinator. `@bgub/fig-reconciler/view-transitions` contains the fiber-aware planner and constructs a coordinator from a renderer host adapter. As a version-locked module in the same package, that built-in planner has a privileged private structural view of the otherwise opaque fiber and root identities. The real reconciler types extend that private view, so a field rename or incompatible repurpose fails typechecking instead of leaving an unchecked mirror. This private contract is type-only and is not a renderer-author API. The ordinary reconciler retains only boundary recognition, static subtree marking, and the commit seam. `enableViewTransitions()` from `@bgub/fig-dom/view-transitions` explicitly installs the planner and browser adapter on Fig DOM's existing renderer; applications that omit this optional entry bundle neither implementation.
+
 ## `@bgub/fig/internal`
 
 This entry is the versioned protocol shared by sibling Fig packages. Applications must not import it.
@@ -58,7 +66,7 @@ This keeps data-free bundles data-free. It also explains one edge case: exact-ke
 
 ## Boundaries That Stay Private
 
-- Fibers and lanes never cross a public API. Renderer packages receive `EventPriority` as `"default"`, `"continuous"`, or `"discrete"`.
+- Fibers and lanes are never exposed structurally. Commit coordinators receive opaque identity tokens and semantic priorities; renderer packages receive `EventPriority` as `"default"`, `"continuous"`, or `"discrete"`.
 - The scheduler is internal to the reconciler. `act` is the public testing boundary; no `unstable_` scheduler API is published.
 - The scheduler prefers `setImmediate`, creates `MessageChannel` lazily in browsers, and falls back to `setTimeout`. Importing a renderer must not keep a Node process alive.
 - Development behavior uses compile-time `__FIG_DEV__` checks. Fig does not read `process.env.NODE_ENV` at runtime and does not publish separate development builds.

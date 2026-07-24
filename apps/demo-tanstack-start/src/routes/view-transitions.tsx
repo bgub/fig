@@ -1,6 +1,9 @@
 import { type FigNode, transition, useState, ViewTransition } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
+import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
 import { createFileRoute } from "@tanstack/solid-router";
+
+enableViewTransitions();
 
 export const Route = createFileRoute("/view-transitions")({
   component: ViewTransitionLab,

@@ -62,17 +62,26 @@ The exported `HostHydrationConfig`, `HostSuspenseHydrationConfig`, and `HostActi
   hydrateTarget,
   flushSync,
   batchedUpdates,
+  installCommitCoordinator,
   scheduleRefresh,
 }
 ```
 
-A `FigRoot` exposes `{ data, render, unmount }`. Fibers and lanes never cross this boundary. Event priority uses the public string union, and `hydrateTarget` accepts one of those priorities.
+A `FigRoot` exposes `{ data, render, unmount }`. Fibers and lanes are never exposed structurally through the root API. Event priority uses the public string union, and `hydrateTarget` accepts one of those priorities.
 
 `batchedUpdates` exists for renderer event dispatch and is not an application API. Application batching is automatic.
 
 Creating two roots on one container throws. `unmount` runs synchronously so fiber cleanup completes while the data store is still alive, then releases the container for reuse.
 
 Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, and the development-only `devtools` option.
+
+## Commit Coordination
+
+`installCommitCoordinator()` permanently installs one renderer-local coordinator, including for roots that already exist. Installing the same coordinator object twice is idempotent; installing a different coordinator throws because commit ownership is exclusive. The coordinator carries the renderer's `Container` and `Instance` types, so TypeScript rejects a host adapter created for a different renderer. A coordinator's `capabilities` identify the optional renderer features it actually coordinates; the built-in View Transition coordinator declares `"view-transitions"`. `@bgub/fig-reconciler/commit-coordinator` exports the contract.
+
+Returning `false` from a commit coordinator promises it performed no mutation, so the ordinary commit path may continue. `"committed"` means the transaction completed synchronously. `"deferred"` freezes that root until the coordinator calls `captureFinished()` after running the transaction.
+
+`@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, and native-commit operations into a coordinator. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
 
 ## Scheduler
 

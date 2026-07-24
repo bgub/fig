@@ -23,9 +23,11 @@ import {
   useState,
   useStableEvent,
   useTransition,
+  ViewTransition,
 } from "@bgub/fig";
 import { Assets } from "@bgub/fig/internal";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
+import type { ReconcilerCommitCoordinator } from "@bgub/fig-reconciler/commit-coordinator";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   FigDevtoolsCommitInspection,
@@ -131,6 +133,19 @@ const host: HostConfig<TestElement, TestElement, TestText> = {
   },
 };
 
+function commitCoordinatorHostTypeChecks(): void {
+  const renderer = createRenderer(host);
+  const mismatched: ReconcilerCommitCoordinator<string, string> = {
+    name: "mismatched",
+    commit: () => false,
+  };
+
+  // @ts-expect-error coordinator host identities must match the renderer.
+  renderer.installCommitCoordinator(mismatched);
+}
+
+void commitCoordinatorHostTypeChecks;
+
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((done) => {
@@ -195,6 +210,105 @@ afterEach(() => {
 });
 
 describe("reconciler", () => {
+  it("installs one commit coordinator idempotently", () => {
+    const renderer = createRenderer(host);
+    const container = new TestElement("root");
+    const order: string[] = [];
+    const coordinator: ReconcilerCommitCoordinator<TestElement, TestElement> = {
+      name: "coordinator",
+      commit(context) {
+        order.push("coordinate");
+        context.runMutation(() => order.push("after-mutation"));
+        return "committed";
+      },
+    };
+
+    const root = renderer.createRoot(container);
+    renderer.installCommitCoordinator(coordinator);
+    renderer.installCommitCoordinator(coordinator);
+    renderer.flushSync(() =>
+      root.render(createElement("span", null, "Coordinated")),
+    );
+
+    expect(container.textContent).toBe("Coordinated");
+    expect(order).toEqual(["coordinate", "after-mutation"]);
+    expect(() =>
+      renderer.installCommitCoordinator({
+        name: "other-coordinator",
+        commit: () => false,
+      }),
+    ).toThrow(/already owned by "coordinator"/);
+  });
+
+  it("warns when an installed coordinator lacks View Transition support", () => {
+    const renderer = createRenderer(host);
+    const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderer.installCommitCoordinator({
+      name: "unrelated-coordinator",
+      commit: () => false,
+    });
+
+    const root = renderer.createRoot(new TestElement("root"));
+    renderer.flushSync(() =>
+      root.render(
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("span", null, "Unanimated"),
+        ),
+      ),
+    );
+
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining("does not provide View Transition support"),
+    );
+  });
+
+  it("lets a commit coordinator finish a deferred transaction", () => {
+    const renderer = createRenderer(host);
+    const container = new TestElement("root");
+    const deferred: { commit: (() => void) | null } = { commit: null };
+
+    renderer.installCommitCoordinator({
+      name: "deferred-coordinator",
+      commit(context) {
+        deferred.commit = () => {
+          context.runMutation(() => undefined);
+          context.captureFinished();
+        };
+        return "deferred";
+      },
+    });
+
+    const root = renderer.createRoot(container);
+    renderer.flushSync(() =>
+      root.render(createElement("span", null, "Deferred")),
+    );
+    expect(container.textContent).toBe("");
+
+    deferred.commit?.();
+    expect(container.textContent).toBe("Deferred");
+  });
+
+  it("rejects capture completion before the mutation transaction", () => {
+    const renderer = createRenderer(host);
+    const root = renderer.createRoot(new TestElement("root"));
+
+    renderer.installCommitCoordinator({
+      name: "broken-coordinator",
+      commit(context) {
+        context.captureFinished();
+        return "deferred";
+      },
+    });
+
+    expect(() =>
+      renderer.flushSync(() =>
+        root.render(createElement("span", null, "Never committed")),
+      ),
+    ).toThrow(/before running the mutation transaction/);
+  });
+
   it("returns the flushSync callback result", () => {
     const { flushSync } = createRenderer(host);
 

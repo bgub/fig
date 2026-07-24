@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./view-transitions": "./src/view-transitions.ts",
     "./refresh": "./src/refresh.ts",
     "./test-utils": "./src/act.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",

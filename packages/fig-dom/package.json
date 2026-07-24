@@ -11,6 +11,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./view-transitions": {
+      "types": "./dist/view-transitions.d.ts",
+      "import": "./dist/view-transitions.js",
+      "default": "./dist/view-transitions.js"
+    },
     "./refresh": {
       "types": "./dist/refresh.d.ts",
       "import": "./dist/refresh.js",

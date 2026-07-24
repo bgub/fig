@@ -11,6 +11,16 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./commit-coordinator": {
+      "types": "./dist/commit-coordinator.d.ts",
+      "import": "./dist/commit-coordinator.js",
+      "default": "./dist/commit-coordinator.js"
+    },
+    "./view-transitions": {
+      "types": "./dist/view-transitions.d.ts",
+      "import": "./dist/view-transitions.js",
+      "default": "./dist/view-transitions.js"
+    },
     "./devtools": {
       "types": "./dist/devtools.d.ts",
       "import": "./dist/devtools.js",

@@ -11,6 +11,7 @@ import {
   useState as useFigState,
 } from "../../packages/fig/dist/index.js";
 import { createRenderer as createFigRenderer } from "../../packages/fig-reconciler/dist/index.js";
+import { createViewTransitionCommitCoordinator as createFigViewTransitionCommitCoordinator } from "../../packages/fig-reconciler/dist/view-transitions.js";
 import { createOperationCounts } from "./timing.mjs";
 
 process.env.NODE_ENV ??= "production";
@@ -181,6 +182,9 @@ function createFigBenchRenderer() {
     },
   };
   const renderer = createFigRenderer(host);
+  renderer.installCommitCoordinator(
+    createFigViewTransitionCommitCoordinator(host.viewTransition),
+  );
 
   return {
     createRoot: (container) =>

@@ -14,6 +14,9 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
+import { enableViewTransitions } from "./view-transitions.ts";
+
+enableViewTransitions();
 
 interface MockViewTransitionDocument {
   startViewTransition?: (update: () => void) => {
@@ -89,6 +92,48 @@ describe("ViewTransition", () => {
       expect(surfaceStyle(container).viewTransitionName).toBe("");
       expect(surfaceStyle(container).viewTransitionClass).toBe("");
       expect(container.textContent).toBe("Transition");
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
+  it("falls back when the browser rejects a transition before mutation", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const errors: string[] = [];
+    let setLabel: StateSetter<string> | null = null;
+    let starts = 0;
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = () => {
+      starts += 1;
+      throw new Error("transition unavailable");
+    };
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container, {
+        onUncaughtError(error) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        },
+      });
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("Second")));
+
+      expect(starts).toBe(1);
+      expect(errors).toEqual([]);
+      expect(container.textContent).toBe("Second");
     } finally {
       ownerDocument.startViewTransition = previousStart;
       container.remove();

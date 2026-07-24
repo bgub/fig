@@ -23,6 +23,7 @@ import {
   FakeText,
   installFakeDocument,
 } from "./test-utils.ts";
+import { enableViewTransitions } from "./view-transitions.ts";
 import { requestPaint } from "../../fig-reconciler/src/scheduler.ts";
 
 installFakeDocument();
@@ -1083,6 +1084,7 @@ describe("@bgub/fig-dom hydration", () => {
   });
 
   it("does not animate ViewTransition boundaries hydrated by a retry", async () => {
+    enableViewTransitions();
     const { container, content } = suspenseDom("completed", "button", "Server");
     let resolve: (value: string) => void = () => undefined;
     const promise = new Promise<string>((done) => {

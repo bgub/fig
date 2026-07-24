@@ -45,7 +45,6 @@ import {
   mathNamespace,
   svgNamespace,
 } from "./tree.ts";
-import { viewTransitionHostConfig } from "./view-transition.ts";
 
 type TextLike = Text | Comment;
 type HydrationNode = Element | TextLike | DocumentType;
@@ -223,7 +222,6 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   preparePortalContainer: registerPortalContainer,
   removePortalContainer,
-  viewTransition: viewTransitionHostConfig,
 };
 
 export const domRenderer = createRenderer(hostConfig);

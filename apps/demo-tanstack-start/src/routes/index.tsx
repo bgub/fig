@@ -1,6 +1,9 @@
 import { type FigNode, ViewTransition } from "@bgub/fig";
+import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
 import { Link } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
+
+enableViewTransitions();
 
 export const Route = createFileRoute("/")({ component: Home });
 

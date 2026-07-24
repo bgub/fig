@@ -29,12 +29,15 @@ const libraryEntries: Record<string, string[] | Record<string, string>> = {
   ],
   "packages/fig-dom": [
     "./src/index.ts",
+    "./src/view-transitions.ts",
     "./src/refresh.ts",
     "./src/act.ts",
     "./src/jsx-runtime.ts",
   ],
   "packages/fig-reconciler": [
     "./src/index.ts",
+    "./src/commit-coordinator.ts",
+    "./src/view-transitions.ts",
     "./src/devtools.ts",
     "./src/refresh.ts",
     "./src/act.ts",

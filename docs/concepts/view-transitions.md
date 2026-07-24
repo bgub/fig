@@ -9,10 +9,21 @@ Status: exploring
 `ViewTransition` is a branded component exported by `@bgub/fig`:
 
 ```tsx
+import { ViewTransition } from "@bgub/fig";
+import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
+
+enableViewTransitions();
+
 <ViewTransition name="article" enter="slide-in" exit="slide-out">
   <Article />
-</ViewTransition>
+</ViewTransition>;
 ```
+
+`enableViewTransitions()` activates native DOM View Transitions for the current application. It is permanent and idempotent, may run after roots exist, and may live in the module that first renders a transition surface, including a lazy route. Importing the module alone does not activate the feature. The ordinary `@bgub/fig-dom` entry includes neither the View Transition planner nor the browser adapter.
+
+In development, rendering a `ViewTransition` before installing a coordinator with the `"view-transitions"` capability reports a one-time renderer-neutral diagnostic; its Fig DOM guidance points to `enableViewTransitions()`. Production continues to degrade to ordinary rendering when the optional capability is absent.
+
+`ViewTransition` itself stays in core because it is a renderer-neutral boundary. `@bgub/fig-reconciler/view-transitions` owns the optional planning and commit-coordination module; `@bgub/fig-dom/view-transitions` combines that planner with the browser host and explicitly installs the resulting coordinator on Fig DOM's existing renderer.
 
 Its props are:
 

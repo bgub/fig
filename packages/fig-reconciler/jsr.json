@@ -4,6 +4,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./commit-coordinator": "./src/commit-coordinator.ts",
+    "./view-transitions": "./src/view-transitions.ts",
     "./devtools": "./src/devtools.ts",
     "./refresh": "./src/refresh.ts",
     "./test-utils": "./src/act.ts"

@@ -21,7 +21,6 @@ import {
   type Props,
   type StartTransition,
   type StateSetter,
-  type ViewTransitionClass,
   type ViewTransitionProps,
 } from "@bgub/fig";
 import {
@@ -50,6 +49,17 @@ import {
 } from "./commit-index.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
 import { devtoolsTypeName } from "./devtools-internal.ts";
+import type {
+  ReconcilerCommitCapability,
+  ReconcilerCommitContext,
+  ReconcilerCommitCoordinator,
+  ReconcilerWorkPriority,
+} from "./commit-coordinator.ts";
+import type {
+  ViewTransitionPlannerFiber,
+  ViewTransitionPlannerRoot,
+  ViewTransitionPlannerState,
+} from "./view-transition-planner-types.ts";
 import {
   ActivityTag,
   AssetsTag,
@@ -232,53 +242,6 @@ export interface DehydratedSuspenseBoundary<
   forceClientRender: boolean;
 }
 
-export type ViewTransitionCommitResult = false | "committed" | "deferred";
-
-export interface ViewTransitionSurfaceMeasurement {
-  // Width/height changes of statically positioned surfaces relayout their
-  // parent (React's AffectedParentLayout); absolutely positioned ones don't.
-  absolutelyPositioned: boolean;
-  height: number;
-  inViewport: boolean;
-  width: number;
-  x: number;
-  y: number;
-}
-
-// Computed inside the host's update callback, after mutations and new-side
-// measurement: which already-captured groups turned out not to move (hide
-// them at ready) and whether the whole-page snapshot can be dropped.
-export interface ViewTransitionMutationResult {
-  canceledNames: string[];
-  cancelRootSnapshot: boolean;
-}
-
-export interface ViewTransitionHostConfig<Container, Instance> {
-  commit(
-    this: void,
-    container: Container,
-    prepareSnapshot: () => void,
-    mutate: () => ViewTransitionMutationResult,
-    cleanup: () => void,
-  ): ViewTransitionCommitResult;
-  apply(
-    this: void,
-    instance: Instance,
-    name: string,
-    className: string | null,
-  ): void;
-  restore(this: void, instance: Instance, props: Props): void;
-  measure?(
-    this: void,
-    instance: Instance,
-  ): ViewTransitionSurfaceMeasurement | null;
-  // True when a view transition is currently running on the container's
-  // document; `onFinished` fires once it settles (and never fires when this
-  // returns false). Lets the reconciler park eligible commits behind a
-  // running animation instead of committing under it.
-  suspend?(this: void, container: Container, onFinished: () => void): boolean;
-}
-
 declare const AssetResourceOwnerBrand: unique symbol;
 
 /** Stable opaque identity for one fiber's asset-resource ownership. */
@@ -424,7 +387,6 @@ export interface HostConfig<Container, Instance, TextInstance> {
     logicalParent: Parent<Container, Instance>,
   ): void;
   removePortalContainer?(container: Parent<Container, Instance>): void;
-  viewTransition?: ViewTransitionHostConfig<Container, Instance>;
   commitTextUpdate(text: TextInstance, value: string): void;
 }
 
@@ -516,7 +478,7 @@ export interface RecoverableErrorInfo extends ErrorInfo {
 
 export type HydrationTargetResult = "none" | "hydrated" | "blocked";
 
-export interface FigRenderer<Container> {
+export interface FigRenderer<Container, Instance = unknown> {
   batchedUpdates<T>(this: void, callback: () => T): T;
   createRoot(
     this: void,
@@ -536,18 +498,12 @@ export interface FigRenderer<Container> {
     priority?: EventPriority,
   ): HydrationTargetResult;
   flushSync<T>(this: void, callback: () => T): T;
+  installCommitCoordinator(
+    this: void,
+    coordinator: ReconcilerCommitCoordinator<Container, Instance>,
+  ): void;
   scheduleRefresh(this: void, update: RefreshUpdate): void;
 }
-
-// A commit may animate only when every rendered lane is transition-shaped:
-// transitions, retries (client Suspense reveals), deferred follow-ups, idle.
-// Hydration lanes are excluded on purpose — hydration changes no pixels, so
-// animating an "enter" for freshly hydrated boundaries is a visible glitch —
-// and only-eligible (not some-lane) semantics keep urgent updates that were
-// batched into the commit (expiration, entanglement) from being captured
-// mid-animation. Mirrors React's includesOnlyViewTransitionEligibleLanes.
-const ViewTransitionEligibleLanes =
-  AllTransitionLanes | RetryLanes | DeferredLane | IdleLane;
 
 interface Hook<S = any> {
   kind: HookKind;
@@ -705,7 +661,11 @@ interface PendingSuspenseRetry<Container, Instance, TextInstance> {
   lanes: Lanes;
 }
 
-interface Fiber<Container, Instance, TextInstance> {
+interface Fiber<
+  Container,
+  Instance,
+  TextInstance,
+> extends ViewTransitionPlannerFiber<Instance> {
   tag: Tag;
   type: FiberType;
   key: string | number | null;
@@ -746,40 +706,12 @@ interface Fiber<Container, Instance, TextInstance> {
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
 }
 
-interface ViewTransitionState {
+interface ViewTransitionState extends ViewTransitionPlannerState {
   autoName: string | null;
 }
 
-type ViewTransitionPhase = "enter" | "exit" | "share" | "update";
-
-interface ViewTransitionSurface<Instance> {
-  boundary: object;
-  className: string | null;
-  instance: Instance;
-  // Old-side geometry, captured while applying names before the old
-  // snapshot; the post-mutation pass compares against fresh measurements.
-  measurement: ViewTransitionSurfaceMeasurement | null;
-  // Content-driven updates and share pairs animate regardless of geometry;
-  // layout-driven updates and moves let measurement decide.
-  mustAnimate: boolean;
-  name: string;
-  phase: ViewTransitionPhase;
-  props: Props;
-  // Gated out (viewport, unchanged geometry): no name applied on this side.
-  skipped: boolean;
-}
-
-interface ViewTransitionPlan<Instance> {
-  newSurfaces: ViewTransitionSurface<Instance>[];
-  oldSurfaces: ViewTransitionSurface<Instance>[];
-  // True when the commit also mutates layout outside annotated boundaries
-  // (insertions, deletions, moves, or plain mutations not contained in a
-  // collected boundary). When false the host may cancel the browser's
-  // whole-page snapshot so untouched regions stay interactive.
-  rootAffected: boolean;
-}
-
-interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
+interface FiberRoot<Container, Instance, TextInstance>
+  extends LaneRoot, ViewTransitionPlannerRoot<Container, Instance> {
   container: Container;
   current: Fiber<Container, Instance, TextInstance>;
   element: FigNode;
@@ -791,13 +723,13 @@ interface FiberRoot<Container, Instance, TextInstance> extends LaneRoot {
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
-  pendingViewTransitionCommit: boolean;
-  // finishedWork is rendered but its commit waits for a running view
-  // transition to finish. Unlike pendingViewTransitionCommit (the sub-frame
-  // capture window, which freezes the root), a parked root keeps rendering:
+  pendingCoordinatedCommit: boolean;
+  // finishedWork is rendered but its commit waits for a coordinator-owned
+  // operation to finish. Unlike pendingCoordinatedCommit (the sub-frame
+  // commit window, which freezes the root), a parked root keeps rendering:
   // newer work supersedes the parked tree so the latest state commits when
   // the animation ends.
-  parkedViewTransitionCommit: boolean;
+  parkedCoordinatedCommit: boolean;
   dataStore: FigDataStore;
   contextValues: Map<FigContext<unknown>, unknown>;
   contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
@@ -879,7 +811,7 @@ class HydrationMismatchError extends Error {}
 
 export function createRenderer<Container, Instance, TextInstance>(
   host: HostConfig<Container, Instance, TextInstance>,
-): FigRenderer<Container> {
+): FigRenderer<Container, Instance> {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
   // Shared read-only stand-in for the common no-retries commit; never pushed
@@ -913,6 +845,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   const pendingRoots = new Set<R>();
   const batchedRoots = new Set<R>();
   const abandonedHydrationBoundaries = new WeakSet<object>();
+  let commitCoordinator: ReconcilerCommitCoordinator<
+    Container,
+    Instance
+  > | null = null;
+  let didWarnMissingViewTransitionCoordinator = false;
   let batchDepth = 0;
   let flushingSyncWork = false;
   let commitDepth = 0;
@@ -938,12 +875,41 @@ export function createRenderer<Container, Instance, TextInstance>(
     Instance,
     TextInstance
   > | null = null;
-  const viewTransitionHost = host.viewTransition ?? null;
   let renderingFiber: F | null = null;
   let currentHook: Hook | null = null;
   let workInProgressHook: Hook | null = null;
   let localIdCounter = 0;
-  let viewTransitionAutoNameCounter = 0;
+
+  function installCommitCoordinator(
+    coordinator: ReconcilerCommitCoordinator<Container, Instance>,
+  ): void {
+    if (commitCoordinator === coordinator) return;
+    if (commitCoordinator !== null) {
+      throw new Error(
+        `Cannot install commit coordinator "${coordinator.name}": commit ` +
+          `coordination is already owned by "${commitCoordinator.name}".`,
+      );
+    }
+    commitCoordinator = coordinator;
+  }
+
+  function commitCoordinatorProvides(
+    capability: ReconcilerCommitCapability,
+  ): boolean {
+    return commitCoordinator?.capabilities?.includes(capability) === true;
+  }
+
+  function commitPriority(lanes: Lanes): ReconcilerWorkPriority {
+    const lane = getHighestPriorityLane(lanes);
+    if (includesSomeLane(RetryLanes | SelectiveHydrationLane, lane)) {
+      return "suspense";
+    }
+    if (includesSomeLane(AllTransitionLanes | DeferredLane, lane)) {
+      return "transition";
+    }
+    if (includesSomeLane(IdleLane | OffscreenLane, lane)) return "idle";
+    return "blocking";
+  }
 
   // Argument-identical delegations are direct references (the function
   // declarations below are hoisted); only the effect hooks, which bind their
@@ -1068,8 +1034,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       wip: null,
       finishedWork: null,
       renderLanes: NoLanes,
-      pendingViewTransitionCommit: false,
-      parkedViewTransitionCommit: false,
+      pendingCoordinatedCommit: false,
+      parkedCoordinatedCommit: false,
       dataStore,
       contextValues: new Map(),
       contextStack: [],
@@ -1311,7 +1277,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
-    if (root.pendingViewTransitionCommit) return;
+    if (root.pendingCoordinatedCommit) return;
 
     markStarvedLanesAsExpired(root, now());
 
@@ -1453,7 +1419,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingViewTransitionCommit) return;
+    if (root.pendingCoordinatedCommit) return;
 
     if (root.pendingLanes === NoLanes && root.wip === null) {
       pendingRoots.delete(root);
@@ -1462,8 +1428,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     flushPendingReactiveEffects(root);
 
-    if (root.parkedViewTransitionCommit) {
-      root.parkedViewTransitionCommit = false;
+    if (root.parkedCoordinatedCommit) {
+      root.parkedCoordinatedCommit = false;
       // The parked tree's lanes were never marked finished, so they are
       // still inside pendingLanes; anything beyond them is newer work.
       const supersededByNewerWork =
@@ -1801,6 +1767,22 @@ export function createRenderer<Container, Instance, TextInstance>(
             '"none" disables the browser feature and "" is not a valid ' +
             'view-transition-name; use "auto" or omit the prop for a ' +
             "generated name.",
+        );
+      }
+      if (
+        !commitCoordinatorProvides("view-transitions") &&
+        !didWarnMissingViewTransitionCoordinator
+      ) {
+        didWarnMissingViewTransitionCoordinator = true;
+        const coordinatorDescription =
+          commitCoordinator === null
+            ? "this renderer has no commit coordinator with View Transition support"
+            : `the installed commit coordinator "${commitCoordinator.name}" does not provide View Transition support`;
+        console.error(
+          `A <ViewTransition> rendered, but ${coordinatorDescription}. ` +
+            "Install View Transition support for this renderer. Fig DOM " +
+            "applications can call enableViewTransitions() from " +
+            '"@bgub/fig-dom/view-transitions".',
         );
       }
     }
@@ -3747,775 +3729,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
-  // Shared by the commit-parking gate and the plan builder. Parking uses
-  // this WITHOUT checking for boundaries on purpose: even a commit with no
-  // annotated surfaces must not land under a running animation — mutations
-  // to captured regions stay invisible until the animation settles and then
-  // pop in. React parks all eligible commits the same way.
-  function isViewTransitionEligibleCommit(root: R): boolean {
-    return (
-      !root.clearContainerBeforeCommit &&
-      root.renderLanes !== NoLanes &&
-      (root.renderLanes & ~ViewTransitionEligibleLanes) === NoLanes &&
-      viewTransitionHost !== null
-    );
-  }
-
-  function prepareViewTransitionPlan(
-    root: R,
-    finishedWork: F,
-  ): ViewTransitionPlan<Instance> | null {
-    if (!isViewTransitionEligibleCommit(root)) return null;
-    if (
-      (finishedWork.subtreeFlags & ViewTransitionStaticFlag) === 0 &&
-      !root.needsCommitDeletions
-    ) {
-      return null;
-    }
-
-    const plan: ViewTransitionPlan<Instance> = {
-      newSurfaces: [],
-      oldSurfaces: [],
-      rootAffected: false,
-    };
-    const exitsByName = new Map<string, F>();
-
-    if (root.needsCommitDeletions) {
-      collectDeletedViewTransitions(root, finishedWork, plan, exitsByName);
-    }
-    const changedBoundaries = attributeQueuedHostUpdates(root, plan);
-    collectFinishedViewTransitions(
-      finishedWork.child,
-      false,
-      false,
-      false,
-      changedBoundaries,
-      plan,
-      exitsByName,
-    );
-
-    if (__DEV__ && !plan.rootAffected && devFlagRootAffected(finishedWork)) {
-      throw new Error(
-        "Fig internal parity error: commit-queue attribution missed a " +
-          "mutation outside view-transition boundaries (rootAffected).",
-      );
-    }
-
-    if (plan.oldSurfaces.length === 0 && plan.newSurfaces.length === 0) {
-      return null;
-    }
-
-    if (__DEV__) warnOnDuplicateViewTransitionNames(plan);
-    return plan;
-  }
-
-  // Two live boundaries sharing one view-transition-name make the browser
-  // silently skip the whole transition, which reads as "animations randomly
-  // stopped working" — surface it. Old and new sides are checked separately:
-  // the same name on both sides is exactly how pairs morph.
-  function warnOnDuplicateViewTransitionNames(
-    plan: ViewTransitionPlan<Instance>,
-  ): void {
-    for (const surfaces of [plan.oldSurfaces, plan.newSurfaces]) {
-      const owners = new Map<string, object>();
-      for (const surface of surfaces) {
-        const owner = owners.get(surface.name);
-        if (owner !== undefined && owner !== surface.boundary) {
-          console.error(
-            `Multiple <ViewTransition> boundaries resolved to the name ` +
-              `"${surface.name}" in one commit. The browser skips the ` +
-              "entire transition when a view-transition-name is duplicated; " +
-              "give each simultaneously mounted boundary a distinct name.",
-          );
-        }
-        owners.set(surface.name, surface.boundary);
-      }
-    }
-  }
-
-  function collectDeletedViewTransitions(
-    root: R,
-    node: F,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, F>,
-  ): void {
-    let collected = 0;
-    for (const cursor of root.commitIndex) {
-      if (cursor.deletions === null) continue;
-      if (__DEV__) collected += 1;
-      for (const deletion of cursor.deletions) {
-        collectDeletedViewTransitionFiber(deletion, plan, exitsByName, true);
-      }
-    }
-
-    if (__DEV__) {
-      let expected = 0;
-      walkFiberSubtree(node, (cursor) => {
-        if (cursor.deletions !== null) expected += 1;
-        return (cursor.subtreeFlags & DeletionFlag) !== 0;
-      });
-      if (collected !== expected) {
-        throw new Error(
-          "Fig internal parity error: the commit index collected deleted " +
-            `view transitions from ${collected} fiber(s) where the tree ` +
-            `walk found ${expected}.`,
-        );
-      }
-    }
-  }
-
-  // A deletions entry is a single detached subtree; its sibling pointers
-  // still reference kept fibers in the old child list, so only the entry
-  // itself is walked, never its siblings.
-  function collectDeletedViewTransitionFiber(
-    cursor: F,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, F>,
-    collectExit: boolean,
-  ): void {
-    if (cursor.tag === PortalTag || isHiddenBoundary(cursor)) return;
-
-    if (cursor.tag === ViewTransitionTag) {
-      if (explicitViewTransitionName(cursor) !== null) {
-        exitsByName.set(viewTransitionName(cursor), cursor);
-      }
-      if (collectExit) {
-        collectViewTransitionSurfaces(
-          cursor,
-          "exit",
-          plan.oldSurfaces,
-          "committed",
-        );
-      }
-      // The outermost deleted boundary owns the exit; deeper named
-      // boundaries never exit on their own but stay eligible to pair with
-      // an appearing counterpart (share).
-      for (let child = cursor.child; child !== null; child = child.sibling) {
-        collectDeletedViewTransitionFiber(child, plan, exitsByName, false);
-      }
-      return;
-    }
-
-    // Deleted fibers committed before, so their persisted static flag is
-    // authoritative: no bit means no boundary anywhere below — skip the
-    // subtree instead of walking every deleted fiber.
-    if ((cursor.subtreeFlags & ViewTransitionStaticFlag) === 0) return;
-    for (let child = cursor.child; child !== null; child = child.sibling) {
-      collectDeletedViewTransitionFiber(child, plan, exitsByName, collectExit);
-    }
-  }
-
-  // Host-update bits never reach subtreeFlags, so the collect walk cannot
-  // see updates below a fiber. This pass recovers that signal from the
-  // commit index: each pending host update is attributed to its innermost
-  // enclosing ViewTransition boundary (matching "the innermost boundary owns
-  // an update"), to nothing when a portal intervenes (the collect walks skip
-  // portal content), or to the root snapshot when no boundary encloses it.
-  function attributeQueuedHostUpdates(
-    root: R,
-    plan: ViewTransitionPlan<Instance>,
-  ): Set<F> | null {
-    let changed: Set<F> | null = null;
-
-    for (const entry of root.commitIndex) {
-      if ((entry.flags & HostUpdateMask) === 0) continue;
-      let sawPortal = false;
-      let boundary: F | null = null;
-      for (let parent = entry.return; parent !== null; parent = parent.return) {
-        if (parent.tag === ViewTransitionTag) {
-          boundary = parent;
-          break;
-        }
-        if (parent.tag === PortalTag) sawPortal = true;
-      }
-      if (boundary === null) {
-        // Portal content still repaints the page, and the pre-queue walk
-        // counted it through raw subtree bits when no boundary enclosed it.
-        plan.rootAffected = true;
-      } else if (!sawPortal) {
-        (changed ??= new Set()).add(boundary);
-      }
-    }
-
-    return changed;
-  }
-
-  // Dev-only pre-masking truth: does any own-fiber mutation/deletion flag
-  // exist outside every ViewTransition boundary? Mirrors the old
-  // subtree-bit rootAffected discovery (portal content counts only outside
-  // boundaries; stably hidden VT-containing subtrees are skipped).
-  function devFlagRootAffected(node: F): boolean {
-    let affected = false;
-    walkFiberSubtree(node, (cursor) => {
-      if (cursor === node) return true;
-      const containsViewTransition =
-        cursor.tag === ViewTransitionTag ||
-        (cursor.subtreeFlags & ViewTransitionStaticFlag) !== 0;
-      if (!containsViewTransition) {
-        if (devSubtreeHasMutations(cursor)) affected = true;
-        return false;
-      }
-      if (isStablyHiddenBoundary(cursor)) return false;
-      if (cursor.tag === ViewTransitionTag) return false;
-      if (cursor.tag === PortalTag) return false;
-      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) affected = true;
-      return true;
-    });
-    return affected;
-  }
-
-  function devSubtreeHasMutations(node: F): boolean {
-    let found = false;
-    walkFiberSubtree(node, (cursor) => {
-      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) found = true;
-      return !found;
-    });
-    return found;
-  }
-
-  function collectFinishedViewTransitions(
-    node: F | null,
-    placed: boolean,
-    insideBoundary: boolean,
-    // A fiber whose own props or child list changed re-lays-out its
-    // descendants, so boundaries below it may move without any mutation of
-    // their own (a container's gap/class change is the classic case). React
-    // measures such "nested" boundaries and cancels the still ones; without
-    // measurement Fig collects them as updates and lets identical-geometry
-    // morphs be visual no-ops. Sibling-insertion shifts are still missed:
-    // placement flags live on the inserted fiber, not its parent.
-    ancestorLayoutChanged: boolean,
-    changedBoundaries: Set<F> | null,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, F>,
-  ): void {
-    // A keyed reorder moves existing content: every sibling at the level may
-    // shift without its own flags, so treat the level as layout-changed and
-    // let measurement cancel the boundaries that did not actually move. A
-    // placed fiber that was committed before (it has an alternate, or was
-    // adopted in place by a bailout) is a move; fresh insertions keep the
-    // documented behavior of not animating the siblings they shift. The scan
-    // only runs when it can still change the answer.
-    let layoutChanged = ancestorLayoutChanged;
-    for (
-      let cursor = node;
-      !layoutChanged && cursor !== null;
-      cursor = cursor.sibling
-    ) {
-      if (
-        (cursor.flags & PlacementFlag) !== 0 &&
-        (cursor.alternate !== null || (cursor.flags & AdoptedFlag) !== 0)
-      ) {
-        layoutChanged = true;
-      }
-    }
-
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-      const cursorPlaced = placed || (cursor.flags & PlacementFlag) !== 0;
-      const containsViewTransition =
-        cursor.tag === ViewTransitionTag ||
-        (cursor.subtreeFlags & ViewTransitionStaticFlag) !== 0;
-
-      if (!containsViewTransition) {
-        // Changes out here are not contained by any boundary: the root
-        // snapshot must stay so the browser cross-fades them.
-        if (
-          !insideBoundary &&
-          ((cursor.flags | cursor.subtreeFlags) &
-            (MutationMask | DeletionFlag)) !==
-            0
-        ) {
-          plan.rootAffected = true;
-        }
-        continue;
-      }
-      // Stably hidden content is never captured by the browser, so its
-      // boundaries must not create surfaces (or a plan). A boundary hiding
-      // this commit still walks: its old side was visible and animates away.
-      if (isStablyHiddenBoundary(cursor)) continue;
-
-      if (cursor.tag === ViewTransitionTag) {
-        // Hydration mounts fresh fibers over already-visible server pixels:
-        // nothing enters or changes visually, so a hydrating boundary must
-        // not animate (retry-lane commits that finish a dehydrated Suspense
-        // boundary land here). React reaches the same outcome by keying
-        // enter off Placement flags, which hydration never sets.
-        if (
-          !cursorPlaced &&
-          ((cursor.flags | cursor.subtreeFlags) & HydrationFlag) !== 0
-        ) {
-          continue;
-        }
-        // Enter is keyed off Placement flags only (like React). A missing
-        // alternate must NOT read as "mounted this commit": in-place bailout
-        // reuse means a fiber that mounted once and always bailed out since
-        // keeps alternate === null forever, and treating it as entering
-        // replays its enter animation on every eligible commit.
-        if (cursorPlaced) {
-          const pairedExit = exitsByName.get(viewTransitionName(cursor));
-          if (pairedExit !== undefined) {
-            // A pair vacates one slot and fills another: both relayout.
-            if (!insideBoundary) plan.rootAffected = true;
-            collectViewTransitionPair(plan, pairedExit, cursor);
-            exitsByName.delete(viewTransitionName(cursor));
-          } else if (cursor.alternate !== null) {
-            // A moved boundary keeps its identity: naming both the committed
-            // and finished instances lets the browser morph position instead
-            // of treating the move as an enter-only cross-fade. Measurement
-            // decides whether it actually moved, and reorder companions are
-            // collected through the sibling-move level rule, so the root
-            // snapshot is not forced here.
-            collectViewTransitionSurfaces(
-              cursor.alternate,
-              "update",
-              plan.oldSurfaces,
-              "committed",
-              false,
-            );
-            collectViewTransitionSurfaces(
-              cursor,
-              "update",
-              plan.newSurfaces,
-              "finished",
-              false,
-            );
-          } else {
-            // An insertion changes the sibling count at its slot: the
-            // surrounding layout shifts, so the root cross-fade must stay.
-            if (!insideBoundary) plan.rootAffected = true;
-            collectViewTransitionSurfaces(
-              cursor,
-              "enter",
-              plan.newSurfaces,
-              "finished",
-            );
-          }
-          // Named boundaries deeper in a new or moved subtree never enter on
-          // their own, but they can still pair with a deleted counterpart.
-          collectAppearingPairViewTransitions(cursor.child, plan, exitsByName);
-          continue;
-        }
-
-        // The innermost boundary owns an update: this boundary only animates
-        // when something changed outside its nested boundaries (or an
-        // ancestor's layout change moved it), and the walk always descends
-        // so nested boundaries classify their own changes (an outer
-        // update="none" must not disable them). A bailed-out boundary is its
-        // own committed instance (in-place reuse never created an
-        // alternate): eligible commits cannot be first mounts, so a fiber
-        // with neither placement nor alternate was committed before.
-        const current = cursor.alternate ?? cursor;
-        const contentChanged = viewTransitionChangedOutsideNested(
-          cursor,
-          changedBoundaries,
-        );
-        if (__DEV__) {
-          const expected = devViewTransitionChangedOutsideNested(cursor);
-          if (contentChanged !== expected) {
-            throw new Error(
-              "Fig internal parity error: commit-queue attribution " +
-                `classified a view-transition boundary as ${contentChanged ? "changed" : "unchanged"} ` +
-                "where own-fiber flags disagree.",
-            );
-          }
-        }
-        if (contentChanged || layoutChanged) {
-          collectViewTransitionSurfaces(
-            current,
-            "update",
-            plan.oldSurfaces,
-            "committed",
-            contentChanged,
-          );
-          collectViewTransitionSurfaces(
-            cursor,
-            "update",
-            plan.newSurfaces,
-            "finished",
-            contentChanged,
-          );
-        }
-        collectFinishedViewTransitions(
-          cursor.child,
-          cursorPlaced,
-          true,
-          contentChanged || layoutChanged,
-          changedBoundaries,
-          plan,
-          exitsByName,
-        );
-        continue;
-      }
-
-      if (cursor.tag !== PortalTag) {
-        // The fiber's own mutations and deletions sit outside any boundary
-        // deeper in its subtree.
-        if (
-          !insideBoundary &&
-          (cursor.flags & (MutationMask | DeletionFlag)) !== 0
-        ) {
-          plan.rootAffected = true;
-        }
-        collectFinishedViewTransitions(
-          cursor.child,
-          cursorPlaced,
-          insideBoundary,
-          layoutChanged || (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
-          changedBoundaries,
-          plan,
-          exitsByName,
-        );
-      }
-    }
-  }
-
-  function collectAppearingPairViewTransitions(
-    node: F | null,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, F>,
-  ): void {
-    if (exitsByName.size === 0) return;
-
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-      if (cursor.tag === PortalTag || isStablyHiddenBoundary(cursor)) continue;
-
-      if (cursor.tag === ViewTransitionTag) {
-        const pairedExit =
-          explicitViewTransitionName(cursor) !== null
-            ? exitsByName.get(viewTransitionName(cursor))
-            : undefined;
-        if (pairedExit !== undefined) {
-          collectViewTransitionPair(plan, pairedExit, cursor);
-          exitsByName.delete(viewTransitionName(cursor));
-        }
-      }
-
-      collectAppearingPairViewTransitions(cursor.child, plan, exitsByName);
-    }
-  }
-
-  function collectViewTransitionPair(
-    plan: ViewTransitionPlan<Instance>,
-    oldBoundary: F,
-    newBoundary: F,
-  ): void {
-    removeViewTransitionSurfaces(plan.oldSurfaces, oldBoundary);
-    collectViewTransitionSurfaces(
-      oldBoundary,
-      "share",
-      plan.oldSurfaces,
-      "committed",
-    );
-    collectViewTransitionSurfaces(
-      newBoundary,
-      "share",
-      plan.newSurfaces,
-      "finished",
-    );
-  }
-
-  function isStablyHiddenBoundary(node: F): boolean {
-    if (!isHiddenBoundary(node)) return false;
-    const current = node.alternate;
-    return (
-      current === null || activityHidden(current.memoizedProps ?? current.props)
-    );
-  }
-
-  function viewTransitionChangedOutsideNested(
-    boundary: F,
-    changedBoundaries: Set<F> | null,
-  ): boolean {
-    if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
-    // Host updates below this boundary (outside nested boundaries) were
-    // attributed from the commit index; subtree bits no longer carry them.
-    if (changedBoundaries !== null && changedBoundaries.has(boundary)) {
-      return true;
-    }
-    return subtreeChangedOutsideNested(boundary.child);
-  }
-
-  // Dev-only pre-masking truth via own-fiber flags, no subtree pruning.
-  function devViewTransitionChangedOutsideNested(boundary: F): boolean {
-    if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
-    let changed = false;
-    walkFiberForest(boundary.child, (cursor) => {
-      if (changed || cursor.tag === PortalTag) return false;
-      if (cursor.tag === ViewTransitionTag) return false;
-      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) changed = true;
-      return !changed;
-    });
-    return changed;
-  }
-
-  function subtreeChangedOutsideNested(node: F | null): boolean {
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-      if (cursor.tag === PortalTag) continue;
-      // A nested boundary owns everything below it, including its own flags.
-      if (cursor.tag === ViewTransitionTag) continue;
-      if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) return true;
-      if ((cursor.subtreeFlags & (MutationMask | DeletionFlag)) === 0) continue;
-      if (subtreeChangedOutsideNested(cursor.child)) return true;
-    }
-
-    return false;
-  }
-
-  function removeViewTransitionSurfaces(
-    surfaces: ViewTransitionSurface<Instance>[],
-    boundary: F,
-  ): void {
-    for (let index = surfaces.length - 1; index >= 0; index -= 1) {
-      const surface = surfaces[index];
-      if (surface.boundary === boundary) surfaces.splice(index, 1);
-    }
-  }
-
-  function collectViewTransitionSurfaces(
-    boundary: F,
-    phase: ViewTransitionPhase,
-    surfaces: ViewTransitionSurface<Instance>[],
-    propsSource: "committed" | "finished",
-    mustAnimate = true,
-  ): void {
-    const className = viewTransitionClass(boundary.props, phase);
-    if (className === "none") return;
-
-    const name = viewTransitionName(boundary);
-    let index = 0;
-
-    const collect = (node: F | null): void => {
-      for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-        if (cursor.tag === PortalTag) continue;
-        if (cursor.tag === ViewTransitionTag) continue;
-        if (cursor.tag === HostTag) {
-          if (!isHoistedFiber(cursor)) {
-            surfaces.push({
-              boundary,
-              className,
-              instance: cursor.stateNode as Instance,
-              measurement: null,
-              mustAnimate,
-              name: index === 0 ? name : `${name}_${index}`,
-              phase,
-              props: viewTransitionSurfaceProps(cursor, propsSource),
-              skipped: false,
-            });
-            index += 1;
-          }
-          continue;
-        }
-        collect(cursor.child);
-      }
-    };
-
-    collect(boundary.child);
-  }
-
-  function viewTransitionSurfaceProps(
-    node: F,
-    source: "committed" | "finished",
-  ): Props {
-    if (source === "committed") {
-      return node.committedProps ?? node.memoizedProps ?? node.props;
-    }
-    return node.memoizedProps ?? node.props;
-  }
-
-  function viewTransitionName(node: F): string {
-    const props = node.props as ViewTransitionProps;
-    if (props.name !== undefined && props.name !== "auto") return props.name;
-
-    const state = node.stateNode as ViewTransitionState;
-    state.autoName ??= `fig-vt-${viewTransitionAutoNameCounter++}`;
-    return state.autoName;
-  }
-
-  function explicitViewTransitionName(node: F): string | null {
-    const name = (node.props as ViewTransitionProps).name;
-    return name === undefined || name === "auto" ? null : name;
-  }
-
-  function viewTransitionClass(
-    props: Props,
-    phase: "enter" | "exit" | "share" | "update",
-  ): ViewTransitionClass | null {
-    const viewTransitionProps = props as ViewTransitionProps;
-    const phaseClass = viewTransitionProps[phase];
-    const className =
-      phaseClass === undefined ? viewTransitionProps.default : phaseClass;
-
-    if (className === undefined || className === "auto") return null;
-    if (className === "none") return "none";
-    return className;
-  }
-
-  // The prepare pass, before the browser captures the old state: measure and
-  // name the old-side surfaces. Exits gate on the old viewport alone — the
-  // element is leaving, so offscreen exits never participate (React reverts
-  // these the same way before its old capture).
-  function applyOldViewTransitionSurfaces(
-    plan: ViewTransitionPlan<Instance>,
-  ): void {
-    if (viewTransitionHost === null) return;
-    const measure = viewTransitionHost.measure;
-
-    for (const surface of plan.oldSurfaces) {
-      surface.measurement = measure?.(surface.instance) ?? null;
-      if (
-        surface.phase === "exit" &&
-        surface.measurement !== null &&
-        !surface.measurement.inViewport
-      ) {
-        surface.skipped = true;
-        continue;
-      }
-      viewTransitionHost.apply(
-        surface.instance,
-        surface.name,
-        surface.className,
-      );
-    }
-  }
-
-  // The resolve pass, inside the update callback after mutations landed and
-  // before the browser captures the new state. Fresh measurements decide who
-  // really animates, mirroring React's after-mutation pass:
-  // - enters gate on the new viewport;
-  // - layout-driven updates whose geometry did not change are canceled (the
-  //   new name is withheld and the already-captured old group is hidden at
-  //   ready), while content-driven updates and share pairs always animate;
-  // - a resize of a statically positioned surface relayouts its parent, and
-  //   a shrunken surface list relayouts its slot, so either keeps the root
-  //   snapshot alive.
-  function resolveViewTransitionPlan(
-    plan: ViewTransitionPlan<Instance> | null,
-  ): ViewTransitionMutationResult {
-    const result: ViewTransitionMutationResult = {
-      canceledNames: [],
-      cancelRootSnapshot: false,
-    };
-    if (viewTransitionHost === null || plan === null) return result;
-    const measure = viewTransitionHost.measure;
-
-    const oldByName = new Map<string, ViewTransitionSurface<Instance>>();
-    for (const surface of plan.oldSurfaces) {
-      if (!surface.skipped) oldByName.set(surface.name, surface);
-    }
-
-    let rootAffected = plan.rootAffected;
-    const newNames = new Set<string>();
-
-    for (const surface of plan.newSurfaces) {
-      newNames.add(surface.name);
-      const measurement = measure?.(surface.instance) ?? null;
-
-      if (surface.phase === "enter") {
-        if (measurement !== null && !measurement.inViewport) {
-          surface.skipped = true;
-          continue;
-        }
-        applyViewTransitionSurface(viewTransitionHost, surface);
-        continue;
-      }
-
-      if (surface.phase === "update") {
-        const before = oldByName.get(surface.name)?.measurement ?? null;
-        if (before !== null && measurement !== null) {
-          const moved =
-            before.x !== measurement.x ||
-            before.y !== measurement.y ||
-            before.width !== measurement.width ||
-            before.height !== measurement.height;
-          const offscreen = !before.inViewport && !measurement.inViewport;
-
-          if (offscreen || (!surface.mustAnimate && !moved)) {
-            // The prepare pass already named this instance (update surfaces
-            // share it between sides); take the name back off so the new
-            // capture skips it, and hide the old capture at ready.
-            surface.skipped = true;
-            viewTransitionHost.restore(surface.instance, surface.props);
-            if (oldByName.has(surface.name)) {
-              result.canceledNames.push(surface.name);
-            }
-            continue;
-          }
-          if (
-            (before.width !== measurement.width ||
-              before.height !== measurement.height) &&
-            !measurement.absolutelyPositioned
-          ) {
-            rootAffected = true;
-          }
-        }
-      }
-
-      applyViewTransitionSurface(viewTransitionHost, surface);
-    }
-
-    // Update names with no new counterpart mean the surface list shrank:
-    // that slot relayouts, and the dangling old capture exits.
-    for (const [name, surface] of oldByName) {
-      if (surface.phase === "update" && !newNames.has(name)) {
-        rootAffected = true;
-      }
-    }
-
-    result.cancelRootSnapshot = !rootAffected;
-    return result;
-  }
-
-  function applyViewTransitionSurface(
-    viewTransitionHost: ViewTransitionHostConfig<Container, Instance>,
-    surface: ViewTransitionSurface<Instance>,
-  ): void {
-    viewTransitionHost.apply(surface.instance, surface.name, surface.className);
-  }
-
-  function restoreViewTransitionSurfaces(
-    plan: ViewTransitionPlan<Instance>,
-  ): void {
-    if (viewTransitionHost === null) return;
-
-    const propsByInstance = new Map<Instance, Props>();
-    for (const surface of plan.oldSurfaces) {
-      propsByInstance.set(surface.instance, surface.props);
-    }
-    for (const surface of plan.newSurfaces) {
-      propsByInstance.set(surface.instance, surface.props);
-    }
-
-    for (const [instance, props] of propsByInstance) {
-      viewTransitionHost.restore(instance, props);
-    }
-  }
-
   function commitRoot(root: R, finishedWork: F): boolean {
-    // While a previous view transition is animating, park eligible commits
-    // instead of committing under it: mutations to captured surfaces would
-    // stay invisible until the animation ends (a visual pop at settle), and
-    // the browser cannot hand an interrupted transition off to a new one —
-    // skipTransition() hard-stops and restarts, which is the jank this
-    // avoids. Rendering stays live while parked, and any newer render
-    // supersedes the parked tree (its lanes are still pending, so the fresh
-    // render absorbs them): the LATEST state commits the moment the
-    // animation finishes. This is React's suspend-commits model
-    // (facebook/react#32002) — waiting is cheap because only the commit
-    // waits, never the rendering. The park sits before every commit phase
-    // so a superseded parked commit never runs its effects.
     if (
-      !root.pendingViewTransitionCommit &&
-      isViewTransitionEligibleCommit(root) &&
-      viewTransitionHost?.suspend?.(root.container, () =>
-        scheduleRoot(root),
-      ) === true
+      !root.pendingCoordinatedCommit &&
+      commitCoordinator?.suspend?.(root, () => scheduleRoot(root)) === true
     ) {
-      root.parkedViewTransitionCommit = true;
-      // The scheduler callback that carried this attempt is spent; clear it
-      // so the finished-callback's (or a newer update's) scheduleRoot isn't
-      // deduped against it.
-      root.callback = null;
-      root.callbackPriority = NoLane;
+      parkCoordinatedCommit(root);
       return true;
     }
 
@@ -4536,7 +3755,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
-      const viewTransitionPlan = prepareViewTransitionPlan(root, finishedWork);
       const commitHostChanges = () => {
         if (root.clearContainerBeforeCommit) {
           requireHydrationHostConfig().clearContainer(root.container);
@@ -4613,68 +3831,97 @@ export function createRenderer<Container, Instance, TextInstance>(
         // from commitRoot).
         requestPaint();
       };
-      const commitWithoutViewTransition = () => {
-        commitHostChanges();
-        completeCommit();
+      const finishDeferredCommit = () => {
+        if (!root.pendingCoordinatedCommit) return;
+        root.pendingCoordinatedCommit = false;
+        finishRootWork(root);
+        flushPostCommitSyncWork();
       };
-      const commitWithViewTransition = (): ViewTransitionMutationResult => {
-        const isDeferredCommit = root.pendingViewTransitionCommit;
-        if (isDeferredCommit) commitDepth += 1;
-        try {
-          commitHostChanges();
-          const resolution = resolveViewTransitionPlan(viewTransitionPlan);
-          completeCommit();
-          return resolution;
-        } catch (error) {
-          // A deferred commit runs inside the browser's startViewTransition
-          // update callback, outside any performRoot frame. Rethrowing there
-          // would strand the error in the transition's promise and leave the
-          // root half-committed, so route it through the same uncaught-error
-          // path performRoot uses.
-          if (!isDeferredCommit) throw error;
-          const info =
-            root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
-          restartRootWork(root);
-          clearRootAfterUncaughtError(root);
-          reportUncaughtError(root, error, info);
-          if (root.onUncaughtError === null) {
-            setTimeout(() => {
-              throw error;
-            });
-          }
-          return { canceledNames: [], cancelRootSnapshot: false };
-        } finally {
-          if (isDeferredCommit) {
-            root.pendingViewTransitionCommit = false;
-            commitDepth -= 1;
-            finishRootWork(root);
-            flushPostCommitSyncWork();
-          }
+      if (commitCoordinator !== null) {
+        let didRunMutation = false;
+        let didFinishCapture = false;
+        const context: ReconcilerCommitContext<Container> = {
+          container: root.container,
+          finishedWork,
+          priority: commitPriority(root.renderLanes),
+          root,
+          captureFinished() {
+            if (!didRunMutation) {
+              throw new Error(
+                "A commit coordinator cannot finish capture before running the mutation transaction.",
+              );
+            }
+            didFinishCapture = true;
+            finishDeferredCommit();
+          },
+          runMutation(afterMutation) {
+            if (didRunMutation) {
+              throw new Error(
+                "A commit coordinator may run its mutation transaction only once.",
+              );
+            }
+            didRunMutation = true;
+            const isDeferredCommit = root.pendingCoordinatedCommit;
+            if (isDeferredCommit) commitDepth += 1;
+            try {
+              commitHostChanges();
+              completeCommit();
+              return afterMutation();
+            } catch (error) {
+              if (!isDeferredCommit) throw error;
+              const info =
+                root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
+              restartRootWork(root);
+              clearRootAfterUncaughtError(root);
+              reportUncaughtError(root, error, info);
+              if (root.onUncaughtError === null) {
+                setTimeout(() => {
+                  throw error;
+                });
+              }
+              return undefined;
+            } finally {
+              if (isDeferredCommit) commitDepth -= 1;
+            }
+          },
+        };
+        switch (commitCoordinator.commit(context)) {
+          case false:
+            if (didRunMutation) {
+              throw new Error(
+                "A commit coordinator returned false after running the mutation transaction.",
+              );
+            }
+            break;
+          case "committed":
+            if (!didRunMutation) {
+              throw new Error(
+                'A commit coordinator returned "committed" without running the mutation transaction.',
+              );
+            }
+            return false;
+          case "deferred":
+            root.pendingCoordinatedCommit = true;
+            root.callback = null;
+            root.callbackPriority = NoLane;
+            if (didFinishCapture) finishDeferredCommit();
+            return true;
         }
-      };
-      if (viewTransitionPlan !== null && viewTransitionHost !== null) {
-        const viewTransitionResult = viewTransitionHost.commit(
-          root.container,
-          () => applyOldViewTransitionSurfaces(viewTransitionPlan),
-          commitWithViewTransition,
-          () => restoreViewTransitionSurfaces(viewTransitionPlan),
-        );
-
-        if (viewTransitionResult === "deferred") {
-          root.pendingViewTransitionCommit = true;
-          root.callback = null;
-          root.callbackPriority = NoLane;
-          return true;
-        }
-
-        if (viewTransitionResult === "committed") return false;
       }
-
-      commitWithoutViewTransition();
+      commitHostChanges();
+      completeCommit();
       return false;
     } finally {
       commitDepth -= 1;
     }
+  }
+
+  function parkCoordinatedCommit(root: R): void {
+    root.parkedCoordinatedCommit = true;
+    // The scheduler callback that carried this attempt is spent; clear it so
+    // the coordinator's resume callback (or a newer update) is not deduped.
+    root.callback = null;
+    root.callbackPriority = NoLane;
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
@@ -6247,6 +5494,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     hydrateRoot,
     hydrateTarget,
     flushSync,
+    installCommitCoordinator,
     scheduleRefresh,
   };
 

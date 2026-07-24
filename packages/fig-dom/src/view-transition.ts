@@ -8,7 +8,7 @@ import type {
   ViewTransitionHostConfig,
   ViewTransitionMutationResult,
   ViewTransitionSurfaceMeasurement,
-} from "@bgub/fig-reconciler";
+} from "@bgub/fig-reconciler/view-transitions";
 import type { Container } from "./events.ts";
 
 interface RunningViewTransition {
