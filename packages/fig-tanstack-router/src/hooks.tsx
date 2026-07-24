@@ -35,6 +35,7 @@ import {
   type ResolveUseParams,
   type ResolveUseSearch,
   type RouteIds,
+  type RouterReadableStore,
   type RouterState,
   type StrictOrFrom,
   type ThrowConstraint,
@@ -68,7 +69,8 @@ export type RouteMatchResult<
   : TSelected;
 
 export const RouterContext = createContext<AnyRouter | null>(null);
-export const MatchContext = createContext<string | null>(null);
+export const MatchContext =
+  createContext<RouterReadableStore<AnyRouteMatch> | null>(null);
 const missingMatch = Symbol("missing route match");
 const missingMatchStore = {
   get: () => undefined,
@@ -347,12 +349,11 @@ function useMatchSelection(
   structuralSharing?: boolean,
 ): unknown {
   const router = useRouter<AnyRouter>();
-  const nearestMatchId = readContext(MatchContext);
-  const store = from
-    ? router.stores.getRouteMatchStore(from)
-    : nearestMatchId === null
-      ? undefined
-      : router.stores.matchStores.get(nearestMatchId);
+  const nearestMatchStore = readContext(MatchContext);
+  const store =
+    from === undefined || nearestMatchStore?.get().routeId === from
+      ? nearestMatchStore
+      : router.stores.getRouteMatchStore(from);
   const selectMatch = useStoreSelector(router, { select, structuralSharing });
 
   const selectPresentMatch = useCallback(

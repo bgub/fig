@@ -40,8 +40,8 @@ The Fig adapter subscribes each feature to the smallest store available:
 - `useLocation` and `Link` read the location atom.
 - `Matches` reads the first-match id.
 - `useMatches` reads the match list.
-- Each rendered match reads its own store.
-- Targeted hooks use Router Core's cached per-route store.
+- Each rendered match provides its exact store to route hooks, keeping those reads valid for the full mounted lifetime while navigation replaces the active match list.
+- Hooks targeting another route use Router Core's cached per-route store.
 - Only `useRouterState` subscribes to the aggregate snapshot.
 
 Browser routers use reactive TanStack Store atoms. Server routers use non-reactive stores because the server reads each value once.

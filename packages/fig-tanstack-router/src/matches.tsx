@@ -384,7 +384,7 @@ function Match({ matchId }: { matchId: string }): FigNode {
 
   const matchContent = createElement(
     MatchContext,
-    { value: match.id },
+    { value: store },
     ErrorComponent || NotFoundComponent
       ? createElement(
           ErrorBoundary,
@@ -572,13 +572,10 @@ function renderScrollRestorationScript(router: AnyRouter): FigNode {
 
 export function Outlet(): FigNode {
   const router = useRouter<AnyRouter>();
-  const parentMatchId = readContext(MatchContext);
+  const parentMatchStore = readContext(MatchContext);
+  const parentMatch = parentMatchStore?.get();
   const matchIds = useReadableStore(router.stores.matchesId);
-  const parentIndex = matchIds.findIndex((id) => id === parentMatchId);
-  const parentMatch =
-    parentMatchId === null
-      ? undefined
-      : router.stores.matchStores.get(parentMatchId)?.get();
+  const parentIndex = matchIds.findIndex((id) => id === parentMatch?.id);
   if (parentMatch?.globalNotFound === true) {
     const route = router.routesById[parentMatch.routeId];
     if (route === undefined) {
@@ -588,6 +585,7 @@ export function Outlet(): FigNode {
     }
     return renderNotFound(router, route, parentMatch);
   }
+  if (parentMatch !== undefined && parentIndex === -1) return null;
   const childMatchId = matchIds[parentIndex + 1];
   return childMatchId === undefined
     ? null

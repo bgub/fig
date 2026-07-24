@@ -789,6 +789,62 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.querySelector("#can-go-back")?.textContent).toBe("false");
   });
 
+  it("keeps route hooks valid while an outgoing match unmounts", async () => {
+    const rootRoute = createRootRoute({ component: Outlet });
+    const homeRoute = createRoute({
+      component: () => createElement("h1", null, "home"),
+      getParentRoute: () => rootRoute,
+      path: "/",
+    });
+    const postRoute = createRoute({
+      component: Post,
+      getParentRoute: () => rootRoute,
+      path: "posts/$slug",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([homeRoute, postRoute]),
+    });
+    const container = document.createElement("div");
+    const errors: unknown[] = [];
+    const root = createRoot(container, {
+      onUncaughtError: (error) => errors.push(error),
+    });
+    mountedRoots.push(root);
+
+    function Post(): FigNode {
+      const { slug } = postRoute.useParams();
+      const pathname = useRouterState({
+        select: (state) => state.location.pathname,
+      });
+      return createElement(
+        "article",
+        null,
+        createElement("h1", null, `${String(slug)} at ${pathname}`),
+        createElement(Outlet),
+      );
+    }
+
+    await act(() => root.render(createElement(RouterProvider, { router })));
+    await act(() => waitForRouterIdle(router));
+    await act(() =>
+      router.navigate({
+        params: { slug: "hello" },
+        to: "/posts/$slug",
+      } as never),
+    );
+    expect(container.querySelector("h1")?.textContent).toBe(
+      "hello at /posts/hello",
+    );
+
+    router.history.back();
+    await act(() => waitForPath(router, "/"));
+    await act(() => waitForRouterIdle(router));
+
+    expect(errors).toEqual([]);
+    expect(container.querySelector("h1")?.textContent).toBe("home");
+  });
+
   it("leaves document view transitions to Fig structural boundaries", async () => {
     const rootRoute = createRootRoute({ component: Outlet });
     const homeRoute = createRoute({
@@ -1097,10 +1153,13 @@ describe("@bgub/fig-tanstack-router", () => {
     const broadSubscribe = vi.spyOn(router.stores.__store, "subscribe");
     const firstMatchSubscribe = vi.spyOn(router.stores.firstId, "subscribe");
     const locationSubscribe = vi.spyOn(router.stores.location, "subscribe");
-    const matchSubscribe = vi.spyOn(
-      router.stores.getRouteMatchStore("/users/$id"),
-      "subscribe",
-    );
+    const match = router.stores.matches
+      .get()
+      .find((candidate) => candidate.routeId === "/users/$id");
+    const matchStore =
+      match === undefined ? undefined : router.stores.matchStores.get(match.id);
+    if (matchStore === undefined) throw new Error("Missing user match store.");
+    const matchSubscribe = vi.spyOn(matchStore, "subscribe");
     const container = document.createElement("div");
     const root = createRoot(container);
     mountedRoots.push(root);
@@ -1111,7 +1170,7 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(broadSubscribe).not.toHaveBeenCalled();
     expect(firstMatchSubscribe).toHaveBeenCalledOnce();
     expect(locationSubscribe).toHaveBeenCalledOnce();
-    expect(matchSubscribe).toHaveBeenCalledOnce();
+    expect(matchSubscribe).toHaveBeenCalledTimes(2);
   });
 
   it("can subscribe to an explicit router outside a provider", async () => {
