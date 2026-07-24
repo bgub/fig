@@ -3,6 +3,15 @@ import { collectChildren } from "./children.ts";
 import { describe, expect, it } from "vitest";
 
 describe("child normalization", () => {
+  it("drops empty strings without creating child slots", () => {
+    const child = createElement("span", null, "child");
+
+    expect(collectChildren(["", "before", "", 0, "", child, ""])).toEqual([
+      "before0",
+      child,
+    ]);
+  });
+
   it("preserves promise children as slots between text children", () => {
     const promise = Promise.resolve("middle");
 

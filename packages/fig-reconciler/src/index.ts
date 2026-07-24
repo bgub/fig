@@ -3762,7 +3762,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
       const commitHostChanges = () => {
-        if (root.clearContainerBeforeCommit) {
+        const recoveringHydration = root.clearContainerBeforeCommit;
+        if (recoveringHydration) {
           requireHydrationHostConfig().clearContainer(root.container);
         }
         if (root.needsCommitDeletions) {
@@ -3770,8 +3771,10 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.needsCommitDeletions = false;
         }
         if (__DEV__) assertDeletionCommitParity(finishedWork);
-        commitAssetResourceUpdates(root);
-        if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
+        if (!recoveringHydration) {
+          commitAssetResourceUpdates(root);
+          if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
+        }
         commitDataDependencies(root);
         if (__DEV__) assertDataDependencyCommitParity(finishedWork.child);
         commitHostUpdates(root);
@@ -3780,6 +3783,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (hasHiddenBoundaries)
           commitHiddenBoundaryVisibility(finishedWork.child);
         if (__DEV__) assertPlacedHostCommitParity(finishedWork.child, false);
+        // Root hydration recovery clears the old document before placement.
+        // Wait until the replacement <head> exists before acquiring assets.
+        if (recoveringHydration) {
+          commitAssetResourceUpdates(root);
+          if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
+        }
         root.clearContainerBeforeCommit = false;
       };
       const completeCommit = () => {

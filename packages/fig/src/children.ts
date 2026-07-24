@@ -53,6 +53,8 @@ function collectChild(node: FigNode, children: NormalizedChild[]): void {
 }
 
 function appendTextChild(children: NormalizedChild[], text: string): void {
+  if (text === "") return;
+
   const previous = children.at(-1);
 
   if (typeof previous === "string") {

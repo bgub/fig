@@ -759,6 +759,33 @@ describe("@bgub/fig-dom hydration", () => {
     expect(container.textContent).toBe("only");
   });
 
+  it("hydrates nested empty text children without recovering the root", async () => {
+    const app = createElement(
+      "pre",
+      null,
+      createElement(
+        "code",
+        null,
+        createElement("span", { class: "token" }, ""),
+      ),
+    );
+    const html = await renderToHtml(app);
+    expect(html).toBe('<pre><code><span class="token"></span></code></pre>');
+
+    const container = containerFromHtml(html);
+    const server = container.childNodes[0];
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(container as unknown as Element, app, {
+        onRecoverableError: recoverable.capture,
+      }),
+    );
+
+    expect(recoverable.errors).toEqual([]);
+    expect(container.childNodes[0]).toBe(server);
+  });
+
   it("hydrates text seams around a fulfilled promise child", async () => {
     const child = Promise.resolve("middle");
     const app = createElement(

@@ -21,7 +21,7 @@ Portals render into another host container but remain children in the logical Fi
 Client and server rendering share the same normalization code. It:
 
 - flattens arrays;
-- removes booleans, `null`, and `undefined`;
+- removes booleans, `null`, `undefined`, and empty strings;
 - converts numbers to text;
 - merges adjacent text from one children array; and
 - keeps each promise as its own child slot.

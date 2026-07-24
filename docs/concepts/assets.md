@@ -46,6 +46,8 @@ On the client, every `Assets` fiber owns its descriptor list. Commit calls the r
 
 Raw hoisted tags use the same ownership model through acquire, update, and release callbacks. Work from a suspended, failed, or abandoned render never reaches commit and therefore never changes the live registry.
 
+If full-document hydration recovers at the root, the old document is cleared before the client tree is placed. Declarative assets commit after that placement so they acquire against the replacement `<head>`; a recoverable mismatch cannot leave the replacement document without its owned styles or metadata.
+
 Delivery assets and metadata have different lifetimes:
 
 - **Delivery assets**—stylesheets, scripts, hints, and fonts—are reference-counted, but remain after their last owner leaves. Removing the element cannot undo a fetch or script execution.

@@ -1,5 +1,12 @@
 // @vitest-environment happy-dom
-import { assets, createElement, stylesheet, Suspense } from "@bgub/fig";
+import {
+  assets,
+  createElement,
+  meta,
+  stylesheet,
+  Suspense,
+  title,
+} from "@bgub/fig";
 import {
   HYDRATION_SKIP_ATTRIBUTE,
   preventAssetResourceHoist,
@@ -200,5 +207,63 @@ describe("document hydration", () => {
     expect(serverDocument.doctype).toBe(doctype);
     expect(serverDocument.querySelectorAll("html")).toHaveLength(1);
     expect(serverDocument.querySelector("main")?.textContent).toBe("Client");
+  });
+
+  it("retains document assets through root hydration recovery and updates", () => {
+    const previousDocument = globalThis.document;
+    const serverDocument = document.implementation.createHTMLDocument("");
+    const stylesheetHref = "data:text/css,/*recovery*/";
+    serverDocument.head.innerHTML = `<title ${HYDRATION_SKIP_ATTRIBUTE}="">Page</title><meta ${HYDRATION_SKIP_ATTRIBUTE}="" name="description" content="Description"><link ${HYDRATION_SKIP_ATTRIBUTE}="" rel="stylesheet" href="${stylesheetHref}">`;
+    serverDocument.body.innerHTML = "<main>Server</main>";
+    const recoverableErrors: unknown[] = [];
+    const renderDocument = (label: string) =>
+      createElement(
+        "html",
+        null,
+        createElement("head"),
+        createElement(
+          "body",
+          null,
+          assets(
+            [
+              title("Page"),
+              meta({ content: "Description", name: "description" }),
+              stylesheet(stylesheetHref),
+            ],
+            createElement("main", null, label),
+          ),
+        ),
+      );
+
+    globalThis.document = serverDocument;
+    try {
+      const root = flushSync(() =>
+        hydrateRoot(serverDocument, renderDocument("Client"), {
+          onRecoverableError: (error) => recoverableErrors.push(error),
+        }),
+      );
+
+      expect(recoverableErrors).toHaveLength(1);
+      expect(serverDocument.querySelector("main")?.textContent).toBe("Client");
+      expect(serverDocument.title).toBe("Page");
+      expect(
+        serverDocument
+          .querySelector('meta[name="description"]')
+          ?.getAttribute("content"),
+      ).toBe("Description");
+      expect(
+        serverDocument.querySelectorAll(`link[href="${stylesheetHref}"]`),
+      ).toHaveLength(1);
+
+      flushSync(() => root.render(renderDocument("Updated")));
+
+      expect(serverDocument.querySelector("main")?.textContent).toBe("Updated");
+      expect(serverDocument.title).toBe("Page");
+      expect(
+        serverDocument.querySelectorAll(`link[href="${stylesheetHref}"]`),
+      ).toHaveLength(1);
+    } finally {
+      globalThis.document = previousDocument;
+    }
   });
 });
