@@ -1,4 +1,5 @@
 import { hydrateRoot } from "@bgub/fig-dom";
+import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook } from "@bgub/fig-devtools";
 import { hydrateDevtoolsPanel } from "@bgub/fig-devtools/client";
@@ -15,6 +16,8 @@ import {
   demoDevtoolsPaneId,
   demoRootId,
 } from "./app.tsx";
+
+enableViewTransitions();
 
 const data = readClientData();
 const initialData = readInitialData();
