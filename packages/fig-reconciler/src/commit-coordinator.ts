@@ -1,5 +1,4 @@
 export type ReconcilerCommitResult = false | "committed" | "deferred";
-export type ReconcilerCommitCapability = "view-transitions";
 export type ReconcilerWorkPriority =
   | "blocking"
   | "transition"
@@ -28,7 +27,7 @@ export interface ReconcilerCommitCoordinator<Container, Instance> {
     instance: Instance,
   ) => readonly [Container, Instance];
   readonly name: string;
-  readonly capabilities?: readonly ReconcilerCommitCapability[];
+  readonly viewTransitions?: true;
   // Returning false promises that no mutation was performed; the reconciler
   // then follows its ordinary commit path.
   commit(

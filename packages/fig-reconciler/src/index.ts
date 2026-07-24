@@ -50,7 +50,6 @@ import {
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
 import { devtoolsTypeName } from "./devtools-internal.ts";
 import type {
-  ReconcilerCommitCapability,
   ReconcilerCommitContext,
   ReconcilerCommitCoordinator,
   ReconcilerWorkPriority,
@@ -665,7 +664,7 @@ interface Fiber<
   Container,
   Instance,
   TextInstance,
-> extends ViewTransitionPlannerFiber<Instance> {
+> extends ViewTransitionPlannerFiber {
   tag: Tag;
   type: FiberType;
   key: string | number | null;
@@ -711,7 +710,7 @@ interface ViewTransitionState extends ViewTransitionPlannerState {
 }
 
 interface FiberRoot<Container, Instance, TextInstance>
-  extends LaneRoot, ViewTransitionPlannerRoot<Container, Instance> {
+  extends LaneRoot, ViewTransitionPlannerRoot<Container> {
   container: Container;
   current: Fiber<Container, Instance, TextInstance>;
   element: FigNode;
@@ -891,12 +890,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       );
     }
     commitCoordinator = coordinator;
-  }
-
-  function commitCoordinatorProvides(
-    capability: ReconcilerCommitCapability,
-  ): boolean {
-    return commitCoordinator?.capabilities?.includes(capability) === true;
   }
 
   function commitPriority(lanes: Lanes): ReconcilerWorkPriority {
@@ -1770,7 +1763,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         );
       }
       if (
-        !commitCoordinatorProvides("view-transitions") &&
+        commitCoordinator?.viewTransitions !== true &&
         !didWarnMissingViewTransitionCoordinator
       ) {
         didWarnMissingViewTransitionCoordinator = true;

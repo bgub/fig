@@ -5,7 +5,7 @@ import { act } from "./act.ts";
 import { createRoot } from "./index.ts";
 
 describe("View Transition activation", () => {
-  it("is inert on import and can activate after root creation", async () => {
+  it("is inert on import, idempotent, and can activate after root creation", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const { enableViewTransitions } = await import("./view-transitions.ts");
@@ -51,6 +51,7 @@ describe("View Transition activation", () => {
         ),
       ).toHaveLength(1);
 
+      enableViewTransitions();
       enableViewTransitions();
       await act(() => transition(() => render("after activation")));
 

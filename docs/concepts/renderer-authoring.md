@@ -77,7 +77,7 @@ Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`
 
 ## Commit Coordination
 
-`installCommitCoordinator()` permanently installs one renderer-local coordinator, including for roots that already exist. Installing the same coordinator object twice is idempotent; installing a different coordinator throws because commit ownership is exclusive. The coordinator carries the renderer's `Container` and `Instance` types, so TypeScript rejects a host adapter created for a different renderer. A coordinator's `capabilities` identify the optional renderer features it actually coordinates; the built-in View Transition coordinator declares `"view-transitions"`. `@bgub/fig-reconciler/commit-coordinator` exports the contract.
+`installCommitCoordinator()` permanently installs one renderer-local coordinator, including for roots that already exist. Installing the same coordinator object twice is idempotent; installing a different coordinator throws because commit ownership is exclusive. The coordinator carries the renderer's `Container` and `Instance` types, so TypeScript rejects a host adapter created for a different renderer. A coordinator that owns View Transition commits declares `viewTransitions: true`, allowing renderer-neutral diagnostics to distinguish it from unrelated coordinators. `@bgub/fig-reconciler/commit-coordinator` exports the contract.
 
 Returning `false` from a commit coordinator promises it performed no mutation, so the ordinary commit path may continue. `"committed"` means the transaction completed synchronously. `"deferred"` freezes that root until the coordinator calls `captureFinished()` after running the transaction.
 

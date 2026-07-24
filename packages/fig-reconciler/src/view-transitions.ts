@@ -83,7 +83,7 @@ export interface ViewTransitionHostConfig<Container, Instance> {
 type ViewTransitionPhase = "enter" | "exit" | "share" | "update";
 
 interface ViewTransitionSurface<Instance> {
-  boundary: PlannerFiber<Instance>;
+  boundary: PlannerFiber;
   className: string | null;
   instance: Instance;
   measurement: ViewTransitionSurfaceMeasurement | null;
@@ -100,6 +100,12 @@ interface ViewTransitionPlan<Instance> {
   rootAffected: boolean;
 }
 
+interface ViewTransitionCollection<Instance> {
+  changedBoundaries: Set<PlannerFiber> | null;
+  exitsByName: Map<string, PlannerFiber>;
+  plan: ViewTransitionPlan<Instance>;
+}
+
 const ViewTransitionEligibleLanes =
   AllTransitionLanes | RetryLanes | DeferredLane | IdleLane;
 
@@ -108,7 +114,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 ): ReconcilerCommitCoordinator<Container, Instance> {
   let autoNameCounter = 0;
 
-  function isEligible(root: PlannerRoot<Container, Instance>): boolean {
+  function isEligible(root: PlannerRoot<Container>): boolean {
     return (
       !root.clearContainerBeforeCommit &&
       root.renderLanes !== NoLanes &&
@@ -117,8 +123,8 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function preparePlan(
-    root: PlannerRoot<Container, Instance>,
-    finishedWork: PlannerFiber<Instance>,
+    root: PlannerRoot<Container>,
+    finishedWork: PlannerFiber,
   ): ViewTransitionPlan<Instance> | null {
     if (!isEligible(root)) return null;
     if (
@@ -132,20 +138,22 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       oldSurfaces: [],
       rootAffected: false,
     };
-    const exitsByName = new Map<string, PlannerFiber<Instance>>();
+    const collection: ViewTransitionCollection<Instance> = {
+      changedBoundaries: null,
+      exitsByName: new Map(),
+      plan,
+    };
 
     if (root.needsCommitDeletions) {
-      collectDeletedViewTransitions(root, finishedWork, plan, exitsByName);
+      collectDeletedViewTransitions(root, finishedWork, collection);
     }
-    const changedBoundaries = attributeQueuedHostUpdates(root, plan);
+    collection.changedBoundaries = attributeQueuedHostUpdates(root, plan);
     collectFinishedViewTransitions(
       finishedWork.child,
       false,
       false,
       false,
-      changedBoundaries,
-      plan,
-      exitsByName,
+      collection,
     );
     if (__DEV__ && !plan.rootAffected && devFlagRootAffected(finishedWork)) {
       throw new Error(
@@ -166,7 +174,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     plan: ViewTransitionPlan<Instance>,
   ): void {
     for (const surfaces of [plan.oldSurfaces, plan.newSurfaces]) {
-      const owners = new Map<string, PlannerFiber<Instance>>();
+      const owners = new Map<string, PlannerFiber>();
       for (const surface of surfaces) {
         const owner = owners.get(surface.name);
         if (owner !== undefined && owner !== surface.boundary) {
@@ -183,17 +191,16 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function collectDeletedViewTransitions(
-    root: PlannerRoot<Container, Instance>,
-    node: PlannerFiber<Instance>,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, PlannerFiber<Instance>>,
+    root: PlannerRoot<Container>,
+    node: PlannerFiber,
+    collection: ViewTransitionCollection<Instance>,
   ): void {
     let collected = 0;
     for (const cursor of root.commitIndex) {
       if (cursor.deletions === null) continue;
       if (__DEV__) collected += 1;
       for (const deletion of cursor.deletions) {
-        collectDeletedViewTransitionFiber(deletion, plan, exitsByName, true);
+        collectDeletedViewTransitionFiber(deletion, collection, true);
       }
     }
 
@@ -214,47 +221,45 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function collectDeletedViewTransitionFiber(
-    cursor: PlannerFiber<Instance>,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, PlannerFiber<Instance>>,
+    cursor: PlannerFiber,
+    collection: ViewTransitionCollection<Instance>,
     collectExit: boolean,
   ): void {
     if (cursor.tag === PortalTag || isHiddenBoundary(cursor)) return;
 
     if (cursor.tag === ViewTransitionTag) {
-      if (explicitViewTransitionName(cursor) !== null) {
-        exitsByName.set(viewTransitionName(cursor), cursor);
-      }
+      const name = explicitViewTransitionName(cursor);
+      if (name !== null) collection.exitsByName.set(name, cursor);
       if (collectExit) {
         collectViewTransitionSurfaces(
           cursor,
           "exit",
-          plan.oldSurfaces,
+          collection.plan.oldSurfaces,
           "committed",
         );
       }
       for (let child = cursor.child; child !== null; child = child.sibling) {
-        collectDeletedViewTransitionFiber(child, plan, exitsByName, false);
+        collectDeletedViewTransitionFiber(child, collection, false);
       }
       return;
     }
 
     if ((cursor.subtreeFlags & ViewTransitionStaticFlag) === 0) return;
     for (let child = cursor.child; child !== null; child = child.sibling) {
-      collectDeletedViewTransitionFiber(child, plan, exitsByName, collectExit);
+      collectDeletedViewTransitionFiber(child, collection, collectExit);
     }
   }
 
   function attributeQueuedHostUpdates(
-    root: PlannerRoot<Container, Instance>,
+    root: PlannerRoot<Container>,
     plan: ViewTransitionPlan<Instance>,
-  ): Set<PlannerFiber<Instance>> | null {
-    let changed: Set<PlannerFiber<Instance>> | null = null;
+  ): Set<PlannerFiber> | null {
+    let changed: Set<PlannerFiber> | null = null;
 
     for (const entry of root.commitIndex) {
       if ((entry.flags & HostUpdateMask) === 0) continue;
       let sawPortal = false;
-      let boundary: PlannerFiber<Instance> | null = null;
+      let boundary: PlannerFiber | null = null;
       for (let parent = entry.return; parent !== null; parent = parent.return) {
         if (parent.tag === ViewTransitionTag) {
           boundary = parent;
@@ -272,7 +277,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     return changed;
   }
 
-  function devFlagRootAffected(node: PlannerFiber<Instance>): boolean {
+  function devFlagRootAffected(node: PlannerFiber): boolean {
     let affected = false;
     walkFiberSubtree(node, (cursor) => {
       if (cursor === node) return true;
@@ -292,7 +297,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     return affected;
   }
 
-  function devSubtreeHasMutations(node: PlannerFiber<Instance>): boolean {
+  function devSubtreeHasMutations(node: PlannerFiber): boolean {
     let found = false;
     walkFiberSubtree(node, (cursor) => {
       if ((cursor.flags & (MutationMask | DeletionFlag)) !== 0) found = true;
@@ -302,14 +307,13 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function collectFinishedViewTransitions(
-    node: PlannerFiber<Instance> | null,
+    node: PlannerFiber | null,
     placed: boolean,
     insideBoundary: boolean,
     ancestorLayoutChanged: boolean,
-    changedBoundaries: Set<PlannerFiber<Instance>> | null,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, PlannerFiber<Instance>>,
+    collection: ViewTransitionCollection<Instance>,
   ): void {
+    const { changedBoundaries, exitsByName, plan } = collection;
     let layoutChanged = ancestorLayoutChanged;
     for (
       let cursor = node;
@@ -351,11 +355,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           continue;
         }
         if (cursorPlaced) {
-          const pairedExit = exitsByName.get(viewTransitionName(cursor));
+          const name = viewTransitionName(cursor);
+          const pairedExit = exitsByName.get(name);
           if (pairedExit !== undefined) {
             if (!insideBoundary) plan.rootAffected = true;
             collectViewTransitionPair(plan, pairedExit, cursor);
-            exitsByName.delete(viewTransitionName(cursor));
+            exitsByName.delete(name);
           } else if (cursor.alternate !== null) {
             collectViewTransitionSurfaces(
               cursor.alternate,
@@ -380,7 +385,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
               "finished",
             );
           }
-          collectAppearingPairViewTransitions(cursor.child, plan, exitsByName);
+          collectAppearingPairViewTransitions(cursor.child, collection);
           continue;
         }
 
@@ -420,9 +425,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           cursorPlaced,
           true,
           contentChanged || layoutChanged,
-          changedBoundaries,
-          plan,
-          exitsByName,
+          collection,
         );
         continue;
       }
@@ -439,43 +442,43 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           cursorPlaced,
           insideBoundary,
           layoutChanged || (cursor.flags & (MutationMask | DeletionFlag)) !== 0,
-          changedBoundaries,
-          plan,
-          exitsByName,
+          collection,
         );
       }
     }
   }
 
   function collectAppearingPairViewTransitions(
-    node: PlannerFiber<Instance> | null,
-    plan: ViewTransitionPlan<Instance>,
-    exitsByName: Map<string, PlannerFiber<Instance>>,
+    node: PlannerFiber | null,
+    collection: ViewTransitionCollection<Instance>,
   ): void {
+    const { exitsByName, plan } = collection;
     if (exitsByName.size === 0) return;
 
-    for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-      if (cursor.tag === PortalTag || isStablyHiddenBoundary(cursor)) continue;
-
-      if (cursor.tag === ViewTransitionTag) {
-        const pairedExit =
-          explicitViewTransitionName(cursor) !== null
-            ? exitsByName.get(viewTransitionName(cursor))
-            : undefined;
-        if (pairedExit !== undefined) {
-          collectViewTransitionPair(plan, pairedExit, cursor);
-          exitsByName.delete(viewTransitionName(cursor));
-        }
+    walkFiberForest(node, (cursor) => {
+      if (exitsByName.size === 0) return false;
+      if (cursor.tag === PortalTag || isStablyHiddenBoundary(cursor)) {
+        return false;
       }
 
-      collectAppearingPairViewTransitions(cursor.child, plan, exitsByName);
-    }
+      if (cursor.tag === ViewTransitionTag) {
+        const name = explicitViewTransitionName(cursor);
+        if (name !== null) {
+          const pairedExit = exitsByName.get(name);
+          if (pairedExit !== undefined) {
+            collectViewTransitionPair(plan, pairedExit, cursor);
+            exitsByName.delete(name);
+          }
+        }
+      }
+      return true;
+    });
   }
 
   function collectViewTransitionPair(
     plan: ViewTransitionPlan<Instance>,
-    oldBoundary: PlannerFiber<Instance>,
-    newBoundary: PlannerFiber<Instance>,
+    oldBoundary: PlannerFiber,
+    newBoundary: PlannerFiber,
   ): void {
     removeViewTransitionSurfaces(plan.oldSurfaces, oldBoundary);
     collectViewTransitionSurfaces(
@@ -492,11 +495,11 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     );
   }
 
-  function isHiddenBoundary(node: PlannerFiber<Instance>): boolean {
+  function isHiddenBoundary(node: PlannerFiber): boolean {
     return node.tag === ActivityTag && node.props.mode === "hidden";
   }
 
-  function isStablyHiddenBoundary(node: PlannerFiber<Instance>): boolean {
+  function isStablyHiddenBoundary(node: PlannerFiber): boolean {
     if (!isHiddenBoundary(node)) return false;
     const current = node.alternate;
     return (
@@ -506,8 +509,8 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function viewTransitionChangedOutsideNested(
-    boundary: PlannerFiber<Instance>,
-    changedBoundaries: Set<PlannerFiber<Instance>> | null,
+    boundary: PlannerFiber,
+    changedBoundaries: Set<PlannerFiber> | null,
   ): boolean {
     if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
     if (changedBoundaries?.has(boundary) === true) return true;
@@ -515,7 +518,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function devViewTransitionChangedOutsideNested(
-    boundary: PlannerFiber<Instance>,
+    boundary: PlannerFiber,
   ): boolean {
     if ((boundary.flags & (MutationMask | DeletionFlag)) !== 0) return true;
     let changed = false;
@@ -528,9 +531,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     return changed;
   }
 
-  function subtreeChangedOutsideNested(
-    node: PlannerFiber<Instance> | null,
-  ): boolean {
+  function subtreeChangedOutsideNested(node: PlannerFiber | null): boolean {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if (cursor.tag === PortalTag || cursor.tag === ViewTransitionTag)
         continue;
@@ -543,7 +544,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
   function removeViewTransitionSurfaces(
     surfaces: ViewTransitionSurface<Instance>[],
-    boundary: PlannerFiber<Instance>,
+    boundary: PlannerFiber,
   ): void {
     for (let index = surfaces.length - 1; index >= 0; index -= 1) {
       if (surfaces[index].boundary === boundary) surfaces.splice(index, 1);
@@ -551,7 +552,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   }
 
   function collectViewTransitionSurfaces(
-    boundary: PlannerFiber<Instance>,
+    boundary: PlannerFiber,
     phase: ViewTransitionPhase,
     surfaces: ViewTransitionSurface<Instance>[],
     propsSource: "committed" | "finished",
@@ -563,36 +564,31 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     const name = viewTransitionName(boundary);
     let index = 0;
 
-    const collect = (node: PlannerFiber<Instance> | null): void => {
-      for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
-        if (cursor.tag === PortalTag) continue;
-        if (cursor.tag === ViewTransitionTag) continue;
-        if (cursor.tag === HostTag) {
-          if ((cursor.flags & HoistedStaticFlag) === 0) {
-            surfaces.push({
-              boundary,
-              className,
-              instance: cursor.stateNode as Instance,
-              measurement: null,
-              mustAnimate,
-              name: index === 0 ? name : `${name}_${index}`,
-              phase,
-              props: viewTransitionSurfaceProps(cursor, propsSource),
-              skipped: false,
-            });
-            index += 1;
-          }
-          continue;
-        }
-        collect(cursor.child);
+    walkFiberForest(boundary.child, (cursor) => {
+      if (cursor.tag === PortalTag || cursor.tag === ViewTransitionTag) {
+        return false;
       }
-    };
-
-    collect(boundary.child);
+      if (cursor.tag !== HostTag) return true;
+      if ((cursor.flags & HoistedStaticFlag) === 0) {
+        surfaces.push({
+          boundary,
+          className,
+          instance: cursor.stateNode as Instance,
+          measurement: null,
+          mustAnimate,
+          name: index === 0 ? name : `${name}_${index}`,
+          phase,
+          props: viewTransitionSurfaceProps(cursor, propsSource),
+          skipped: false,
+        });
+        index += 1;
+      }
+      return false;
+    });
   }
 
   function viewTransitionSurfaceProps(
-    node: PlannerFiber<Instance>,
+    node: PlannerFiber,
     source: "committed" | "finished",
   ): Props {
     if (source === "committed") {
@@ -601,7 +597,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     return node.memoizedProps ?? node.props;
   }
 
-  function viewTransitionName(node: PlannerFiber<Instance>): string {
+  function viewTransitionName(node: PlannerFiber): string {
     const props = node.props as ViewTransitionProps;
     if (props.name !== undefined && props.name !== "auto") return props.name;
 
@@ -610,9 +606,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     return state.autoName;
   }
 
-  function explicitViewTransitionName(
-    node: PlannerFiber<Instance>,
-  ): string | null {
+  function explicitViewTransitionName(node: PlannerFiber): string | null {
     const name = (node.props as ViewTransitionProps).name;
     return name === undefined || name === "auto" ? null : name;
   }
@@ -671,7 +665,6 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
       if (surface.phase === "enter") {
         if (measurement !== null && !measurement.inViewport) {
-          surface.skipped = true;
           continue;
         }
         host.apply(surface.instance, surface.name, surface.className);
@@ -690,10 +683,8 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           const offscreen = !before.inViewport && !measurement.inViewport;
 
           if (offscreen || (!surface.mustAnimate && !moved)) {
-            surface.skipped = true;
             host.restore(surface.instance, surface.props);
             if (oldSurface !== undefined) {
-              oldSurface.skipped = true;
               result.canceledNames.push(surface.name);
             }
             continue;
@@ -737,22 +728,18 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     }
   }
 
-  function emptyMutationResult(): ViewTransitionMutationResult {
-    return { canceledNames: [], cancelRootSnapshot: false };
-  }
-
   return {
     name: "view-transitions",
-    capabilities: ["view-transitions"],
+    viewTransitions: true,
     suspend(rootIdentity, onReady) {
-      const root = rootIdentity as PlannerRoot<Container, Instance>;
+      const root = rootIdentity as PlannerRoot<Container>;
       return (
         isEligible(root) && host.suspend?.(root.container, onReady) === true
       );
     },
     commit(context) {
-      const root = context.root as PlannerRoot<Container, Instance>;
-      const finishedWork = context.finishedWork as PlannerFiber<Instance>;
+      const root = context.root as PlannerRoot<Container>;
+      const finishedWork = context.finishedWork as PlannerFiber;
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
       let didRunMutation = false;
@@ -763,8 +750,10 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
         () => {
           didRunMutation = true;
           return (
-            context.runMutation(() => resolveViewTransitionPlan(plan)) ??
-            emptyMutationResult()
+            context.runMutation(() => resolveViewTransitionPlan(plan)) ?? {
+              canceledNames: [],
+              cancelRootSnapshot: false,
+            }
           );
         },
         () => {

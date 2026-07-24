@@ -207,6 +207,7 @@ function hasInspectDataEntries(handle: object): handle is {
 
 afterEach(() => {
   delete globalWithDevtoolsHook.__FIG_DEVTOOLS_GLOBAL_HOOK__;
+  vi.restoreAllMocks();
 });
 
 describe("reconciler", () => {
@@ -262,6 +263,29 @@ describe("reconciler", () => {
     expect(warning).toHaveBeenCalledWith(
       expect.stringContaining("does not provide View Transition support"),
     );
+  });
+
+  it("recognizes View Transition support declared by a coordinator", () => {
+    const renderer = createRenderer(host);
+    const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderer.installCommitCoordinator({
+      name: "view-transition-coordinator",
+      viewTransitions: true,
+      commit: () => false,
+    });
+
+    const root = renderer.createRoot(new TestElement("root"));
+    renderer.flushSync(() =>
+      root.render(
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("span", null, "Unanimated"),
+        ),
+      ),
+    );
+
+    expect(warning).not.toHaveBeenCalled();
   });
 
   it("lets a commit coordinator finish a deferred transaction", () => {

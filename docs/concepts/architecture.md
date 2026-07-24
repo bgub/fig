@@ -36,7 +36,7 @@ When a boundary discards work, it rolls that index back. Development builds comp
 
 ### Commit Coordination
 
-`createRenderer()` owns at most one renderer-local commit coordinator. `installCommitCoordinator()` may be called after roots exist, is idempotent for the installed coordinator object, and rejects a different coordinator because two owners cannot independently park, defer, or reorder one commit transaction. A coordinator declares the optional capabilities it owns so renderer-neutral diagnostics do not mistake unrelated coordination for feature support. Its type carries the renderer's container and instance identities, so an adapter for one host cannot be installed on another. The `@bgub/fig-reconciler/commit-coordinator` entry owns this narrow contract.
+`createRenderer()` owns at most one renderer-local commit coordinator. `installCommitCoordinator()` may be called after roots exist, is idempotent for the installed coordinator object, and rejects a different coordinator because two owners cannot independently park, defer, or reorder one commit transaction. A coordinator that owns View Transition commits declares that fact directly, so renderer-neutral diagnostics do not mistake unrelated coordination for feature support. Its type carries the renderer's container and instance identities, so an adapter for one host cannot be installed on another. The `@bgub/fig-reconciler/commit-coordinator` entry owns this narrow contract.
 
 A coordinator receives opaque root and finished-work identities plus a semantic work priority. Its transaction's `runMutation()` preserves the reconciler's commit and deferred-error invariants. Returning `false` promises that no mutation occurred, so the reconciler can follow its ordinary commit path.
 

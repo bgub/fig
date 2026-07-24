@@ -66,7 +66,7 @@ function commitViewTransition(
       // transition still runs can re-associate the live root with its
       // (force-hidden) captured group, which paints the page blank for the
       // rest of the animation.
-      const settleAfterTransition = transition?.finished ?? transition?.ready;
+      const settleAfterTransition = transitionSettled(transition);
       const restore = (): void => restoreRootName?.();
       if (settleAfterTransition === undefined) {
         restore();
@@ -227,7 +227,7 @@ function hideCanceledSnapshots(
   if (ready === undefined) hide();
   else ready.then(hide, () => undefined);
 
-  const settled = transition.finished ?? transition.ready;
+  const settled = transitionSettled(transition);
   if (settled === undefined) cancelHideAnimations();
   else settled.then(cancelHideAnimations, cancelHideAnimations);
 }
@@ -242,21 +242,9 @@ function registerPendingTransition(
       owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
     }
   };
-  const settled = transition.finished ?? transition.ready;
+  const settled = transitionSettled(transition);
   if (settled === undefined) release();
   else settled.then(release, release);
-}
-
-// The reconciler parks eligible commits behind a running transition (the
-// shared per-document mutex — client commits and streaming reveals alike)
-// and re-schedules once it settles. Rendering continues during the park;
-// only the commit waits.
-function suspendOnActiveViewTransition(
-  container: Container,
-  onFinished: () => void,
-): boolean {
-  const owner = ownerDocument(container);
-  return waitForActiveViewTransition(owner, onFinished);
 }
 
 // React caps suspended commits at 60 seconds. Besides preventing a broken or
@@ -267,8 +255,9 @@ function waitForActiveViewTransition(
   onFinished: () => void,
 ): boolean {
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
-  const settled = pending?.finished ?? pending?.ready;
-  if (pending == null || settled === undefined) return false;
+  if (pending == null) return false;
+  const settled = transitionSettled(pending);
+  if (settled === undefined) return false;
 
   let waiting = true;
   function finish(): void {
@@ -284,6 +273,12 @@ function waitForActiveViewTransition(
   const timeout = setTimeout(finish, VIEW_TRANSITION_TIMEOUT_MS);
   settled.then(finish, finish);
   return true;
+}
+
+function transitionSettled(
+  transition: RunningViewTransition | undefined,
+): Promise<unknown> | undefined {
+  return transition?.finished ?? transition?.ready;
 }
 
 function measureViewTransitionSurface(
@@ -367,5 +362,9 @@ export const viewTransitionHostConfig: ViewTransitionHostConfig<
   apply: applyViewTransitionName,
   restore: restoreViewTransitionName,
   measure: measureViewTransitionSurface,
-  suspend: suspendOnActiveViewTransition,
+  // Park eligible commits behind the shared per-document mutex while
+  // rendering continues, then re-schedule once the transition settles.
+  suspend(container, onFinished) {
+    return waitForActiveViewTransition(ownerDocument(container), onFinished);
+  },
 };

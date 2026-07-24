@@ -2,10 +2,10 @@ import { createViewTransitionCommitCoordinator } from "@bgub/fig-reconciler/view
 import { domRenderer } from "./renderer.ts";
 import { viewTransitionHostConfig } from "./view-transition.ts";
 
-const viewTransitionCommitCoordinator = createViewTransitionCommitCoordinator(
+const coordinator = createViewTransitionCommitCoordinator(
   viewTransitionHostConfig,
 );
 
 export function enableViewTransitions(): void {
-  domRenderer.installCommitCoordinator(viewTransitionCommitCoordinator);
+  domRenderer.installCommitCoordinator(coordinator);
 }
