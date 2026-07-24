@@ -1,3 +1,14 @@
+## @bgub/fig-reconciler@0.1.0-alpha.2
+
+### Keep empty children and document assets hydration-safe
+
+Empty string children now normalize away on both the server and client, so a
+rendered empty token cannot force hydration to recover the root.
+
+When full-document hydration does recover, declarative stylesheets, titles,
+and metadata now acquire against the replacement head instead of disappearing
+with the server document.
+
 ## @bgub/fig-reconciler@0.1.0-alpha.1
 
 ### Asset descriptors use native names and preserve native ordering
