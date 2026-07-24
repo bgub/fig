@@ -89,7 +89,7 @@ See [Payload](./payload.md).
 - Every public export has one package home. Renderer packages do not mirror core APIs.
 - Fibers and lanes stay private. Event priority crosses renderer boundaries as `"default"`, `"continuous"`, or `"discrete"`.
 - The scheduler is internal and publishes no `unstable_` surface.
-- Development behavior is removed through compile-time `__FIG_DEV__` gates rather than runtime environment checks or separate builds.
+- Development behavior is removed through compile-time `__FIG_DEV__` gates rather than runtime environment checks. `fig()` selects precompiled development and production npm artifacts through a Fig-owned export condition; source distributions use the same resolved gate through their bundler integration.
 - Invalid render input throws before commit instead of warning afterward.
 
 See [Architecture](./architecture.md) and [Renderer authoring](./renderer-authoring.md).

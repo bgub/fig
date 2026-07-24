@@ -12,7 +12,11 @@ import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { setRefreshHandler } from "@bgub/fig-reconciler/refresh";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
-import { type RefreshFamily, scheduleRefresh } from "./refresh.ts";
+import {
+  domRefreshAdapter,
+  type RefreshFamily,
+  scheduleRefresh,
+} from "./refresh.ts";
 import { FakeElement, installFakeDocument } from "./test-utils.ts";
 
 installFakeDocument();
@@ -25,7 +29,7 @@ afterEach(() => {
 // Build a handler that maps a fixed set of component versions to one family.
 function familyOf(...types: unknown[]): RefreshFamily {
   const family: RefreshFamily = { current: types[0] };
-  setRefreshHandler((type: unknown) =>
+  domRefreshAdapter.setRefreshHandler((type: unknown) =>
     types.includes(type) ? family : undefined,
   );
   return family;
@@ -62,7 +66,7 @@ describe("@bgub/fig-dom fast refresh", () => {
 
     // Simulate a hot edit: same hooks, new body.
     family.current = CounterV2;
-    scheduleRefresh({
+    domRefreshAdapter.scheduleRefresh({
       staleFamilies: new Set(),
       updatedFamilies: new Set([family]),
     });

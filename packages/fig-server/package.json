@@ -8,16 +8,19 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "fig-development": "./dist-development/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./payload": {
       "types": "./dist/payload.d.ts",
+      "fig-development": "./dist-development/payload.js",
       "import": "./dist/payload.js",
       "default": "./dist/payload.js"
     },
     "./html": {
       "types": "./dist/html-entry.d.ts",
+      "fig-development": "./dist-development/html-entry.js",
       "import": "./dist/html-entry.js",
       "default": "./dist/html-entry.js"
     },
@@ -26,7 +29,8 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "dist-development"
   ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",

@@ -2,9 +2,10 @@
 // preserves both page state and a marker that only survives an in-place HMR
 // update. The source file is restored even if the probe fails.
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+import { createServer } from "vite";
 
-const base = process.argv[2] ?? "http://127.0.0.1:4185";
 const file = new URL("../src/components/AssetLabIsland.tsx", import.meta.url);
 const before = "Client asset island";
 const after = "Client asset island · refreshed";
@@ -14,15 +15,30 @@ if (!original.includes(before)) {
   throw new Error(`Could not find the HMR probe label in ${file.pathname}.`);
 }
 
-const browser = await chromium.launch();
-const page = await browser.newPage();
-const errors = [];
-page.on("console", (message) => {
-  if (message.type() === "error") errors.push(message.text());
-});
-page.on("pageerror", (error) => errors.push(String(error)));
+let server;
+let browser;
 
 try {
+  let base = process.argv[2];
+  if (base === undefined) {
+    server = await createServer({
+      configFile: fileURLToPath(new URL("../vite.config.cjs", import.meta.url)),
+      optimizeDeps: { force: true },
+      server: { host: "127.0.0.1", port: 0 },
+    });
+    await server.listen();
+    base = server.resolvedUrls?.local[0];
+    if (base === undefined) throw new Error("Vite did not expose a local URL.");
+  }
+
+  browser = await chromium.launch();
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(String(error)));
+
   await page.goto(`${base}/asset-lab`, { waitUntil: "networkidle" });
   const island = page.getByRole("button", { name: /Client asset island/ });
   await island.click();
@@ -53,5 +69,6 @@ try {
   if (!inPlace || errors.length > 0) process.exitCode = 1;
 } finally {
   await writeFile(file, original);
-  await browser.close();
+  await browser?.close();
+  await server?.close();
 }

@@ -75,7 +75,10 @@ interface OptimizerPlugin {
 }
 
 describe("tanstackStart", () => {
-  it("installs Fig Fast Refresh after the route compiler", () => {
+  it("installs Fig configuration and Fast Refresh after the route compiler", () => {
+    expect(tanstackStart().at(-2)).toEqual(
+      expect.objectContaining({ name: "fig:config" }),
+    );
     expect(tanstackStart().at(-1)).toEqual(
       expect.objectContaining({ name: "fig:refresh" }),
     );

@@ -8,26 +8,31 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "fig-development": "./dist-development/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./internal": {
       "types": "./dist/internal.d.ts",
+      "fig-development": "./dist-development/internal.js",
       "import": "./dist/internal.js",
       "default": "./dist/internal.js"
     },
     "./payload": {
       "types": "./dist/payload.d.ts",
+      "fig-development": "./dist-development/payload.js",
       "import": "./dist/payload.js",
       "default": "./dist/payload.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
+      "fig-development": "./dist-development/jsx-runtime.js",
       "import": "./dist/jsx-runtime.js",
       "default": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
+      "fig-development": "./dist-development/jsx-runtime.js",
       "import": "./dist/jsx-runtime.js",
       "default": "./dist/jsx-runtime.js"
     },
@@ -37,6 +42,7 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "dist-development",
     "CHANGELOG.md"
   ],
   "scripts": {

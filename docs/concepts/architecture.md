@@ -24,6 +24,10 @@ The one mechanical exception is JSX. `@bgub/fig-dom/jsx-runtime` re-exports the 
 
 The HTML server renderer is a separate implementation that depends on `@bgub/fig`, not on the reconciler. This is why `HostConfig` has no server-rendering mode.
 
+Published renderer integrations own their exact reconciler version as an implementation dependency. Applications install `@bgub/fig` and their renderer; only custom-renderer packages install `@bgub/fig-reconciler` directly. Core remains a peer of both because application code and the renderer must share the same element, hook, and internal-protocol identities.
+
+Fast Refresh crosses that package boundary through `RefreshAdapter`: the runtime supplies its family resolver to a renderer and sends updates back through the same adapter. Fig DOM's adapter installs both operations into its renderer-owned reconciler. `@bgub/fig-refresh` therefore never evaluates a reconciler implementation, so refresh correctness does not depend on the runtime and renderer resolving the same physical package copy.
+
 ## Reconciler Shape
 
 `createRenderer` is the reconciler's main stateful module. Rendering, hydration, Suspense, commit, and effects stay together because they share one host configuration and the same fiber rules.
@@ -69,7 +73,9 @@ This keeps data-free bundles data-free. It also explains one edge case: exact-ke
 - Fibers and lanes are never exposed structurally. Commit coordinators receive opaque identity tokens and semantic priorities; renderer packages receive `EventPriority` as `"default"`, `"continuous"`, or `"discrete"`.
 - The scheduler is internal to the reconciler. `act` is the public testing boundary; no `unstable_` scheduler API is published.
 - The scheduler prefers `setImmediate`, creates `MessageChannel` lazily in browsers, and falls back to `setTimeout`. Importing a renderer must not keep a Node process alive.
-- Development behavior uses compile-time `__FIG_DEV__` checks. Fig does not read `process.env.NODE_ENV` at runtime and does not publish separate development builds.
+- Development behavior uses compile-time `__FIG_DEV__` checks. Fig does not read `process.env.NODE_ENV` at runtime. npm exports a Fig-owned development-condition artifact alongside the default production artifact so both remove the unused branch before Fig's nested renderer factories are bundled.
+- `fig()` from `@bgub/fig-vite` defines the gate from Vite's command and selects the matching npm artifact: development serving enables it and production builds remove it. A host integration may override the gate with the static value `true` or `false`; disabling the gate also disables Fast Refresh instrumentation so Vite can fall back to ordinary invalidation. Dynamic expressions are rejected because they cannot select a precompiled artifact. Source distributions such as JSR use the same resolved gate.
+- The same integration keeps `@bgub/fig*` packages inside one Vite SSR module graph. Renderer, server, and adapter packages share ambient root and request state; evaluating sibling packages through independently externalized graphs would split that state during one render.
 
 Each gated module declares `__FIG_DEV__` and defines its own local `__DEV__`. JSR publishes source, so those declarations cannot rely on ambient files. Bundlers also remove a gate more reliably when its constant is local.
 

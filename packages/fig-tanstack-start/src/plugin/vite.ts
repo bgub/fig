@@ -3,7 +3,7 @@ import {
   tanStackStartVite,
   type TanStackStartViteInputConfig,
 } from "@tanstack/start-plugin-core/vite";
-import { figRefresh } from "@bgub/fig-vite";
+import { fig } from "@bgub/fig-vite";
 import type { PluginOption } from "vite";
 import {
   defaultEntryPaths,
@@ -32,6 +32,6 @@ export function tanstackStart(
     // Route splitting must run first: it moves component declarations into
     // virtual modules. Refresh then registers the declarations where they
     // actually remain instead of leaving references in the route shell.
-    figRefresh(),
+    ...fig(),
   ];
 }

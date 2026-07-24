@@ -1,11 +1,6 @@
 import * as babel from "@babel/core";
-import type { NodePath, PluginObject } from "@babel/core";
+import type { InputOptions, NodePath, PluginObject } from "@babel/core";
 import presetTypescript from "@babel/preset-typescript";
-
-interface TransformResult {
-  code: string;
-  map: unknown;
-}
 
 interface FunctionRecord {
   fnPath: NodePath;
@@ -17,6 +12,23 @@ interface FunctionRecord {
 interface SignatureResult {
   forceReset: boolean;
   signature: string;
+}
+
+function figDevGateBabelPlugin(api: typeof babel): PluginObject {
+  const t = api.types;
+
+  return {
+    name: "fig-dev-gate",
+    visitor: {
+      ReferencedIdentifier(path) {
+        if (path.node.name !== "__FIG_DEV__") return;
+        if (path.scope.hasBinding("__FIG_DEV__")) return;
+        const development = (this as { opts?: { development?: boolean } }).opts
+          ?.development;
+        path.replaceWith(t.booleanLiteral(development === true));
+      },
+    },
+  };
 }
 
 // Babel visitor: find top-level component declarations (PascalCase functions),
@@ -346,11 +358,46 @@ function isBuiltinFigHookName(name: string): boolean {
 
 // Transform a single module. Returns null when it has no components (so the
 // caller leaves it for the regular pipeline).
-export async function transformModule(
+export async function transformModule(code: string, id: string) {
+  const result = await babel.transformAsync(code, {
+    ...transformOptions(id),
+    plugins: [[figRefreshBabelPlugin, { moduleId: id }]],
+  });
+
+  if (result?.code == null || !result.code.includes("virtual:fig-refresh")) {
+    return null;
+  }
+  return { code: result.code, map: mutableSourceMap(result.map) };
+}
+
+export async function transformDevGate(
   code: string,
   id: string,
-): Promise<TransformResult | null> {
+  development: boolean,
+) {
   const result = await babel.transformAsync(code, {
+    ...transformOptions(id),
+    plugins: [[figDevGateBabelPlugin, { development }]],
+  });
+  if (result?.code == null) {
+    throw new Error(`Could not transform the Fig development gate in ${id}.`);
+  }
+  return { code: result.code, map: mutableSourceMap(result.map) };
+}
+
+function mutableSourceMap(map: babel.FileResult["map"]) {
+  if (map === null) return undefined;
+  return {
+    ...map,
+    names: [...map.names],
+    sources: [...map.sources],
+    sourcesContent:
+      map.sourcesContent === undefined ? undefined : [...map.sourcesContent],
+  };
+}
+
+function transformOptions(id: string): InputOptions {
+  return {
     babelrc: false,
     configFile: false,
     filename: id,
@@ -365,11 +412,5 @@ export async function transformModule(
       ],
     ],
     parserOpts: { plugins: id.endsWith("x") ? ["jsx"] : [] },
-    plugins: [[figRefreshBabelPlugin, { moduleId: id }]],
-  });
-
-  if (result?.code == null || !result.code.includes("virtual:fig-refresh")) {
-    return null;
-  }
-  return { code: result.code, map: result.map };
+  };
 }

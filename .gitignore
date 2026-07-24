@@ -11,6 +11,7 @@ compiled
 .rpt2_cache
 
 dist
+dist-development
 
 package-lock.json
 yarn.lock

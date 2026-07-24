@@ -1,7 +1,11 @@
-import type { RefreshUpdate } from "@bgub/fig-reconciler/refresh";
+import type {
+  RefreshAdapter,
+  RefreshFamily,
+  RefreshUpdate,
+} from "@bgub/fig-reconciler/refresh";
 import { describe, expect, it, vi } from "vitest";
 import {
-  injectScheduleRefresh,
+  injectRenderer,
   performRefresh,
   register,
   setSignature,
@@ -9,8 +13,14 @@ import {
 
 // Families are module-global, so each test uses unique ids and fresh functions.
 let lastUpdate: RefreshUpdate | null = null;
-injectScheduleRefresh((update) => {
-  lastUpdate = update;
+let resolveFamily = (_type: unknown): RefreshFamily | undefined => undefined;
+injectRenderer({
+  setRefreshHandler(handler) {
+    resolveFamily = handler;
+  },
+  scheduleRefresh(update) {
+    lastUpdate = update;
+  },
 });
 
 function component(label: string): () => string {
@@ -28,6 +38,7 @@ describe("@bgub/fig-refresh runtime", () => {
     const update = performRefresh();
     expect(update?.updatedFamilies.size).toBe(1);
     expect([...update!.updatedFamilies][0]?.current).toBe(v2);
+    expect(resolveFamily(v1)?.current).toBe(v2);
   });
 
   it("returns null and calls no renderer when nothing is pending", () => {
@@ -81,10 +92,11 @@ describe("@bgub/fig-refresh runtime", () => {
     expect(update?.staleFamilies.has(family!)).toBe(true);
   });
 
-  it("replays refreshes performed before a scheduler is injected", async () => {
+  it("replays refreshes performed before a renderer is injected", async () => {
     vi.resetModules();
     const runtime = await import("./index.ts");
     let delivered: RefreshUpdate | null = null;
+    const setRefreshHandler = vi.fn();
     const v1 = component("e1");
     const v2 = component("e2");
 
@@ -97,10 +109,16 @@ describe("@bgub/fig-refresh runtime", () => {
     expect(update?.updatedFamilies.size).toBe(1);
     expect(delivered).toBeNull();
 
-    runtime.injectScheduleRefresh((nextUpdate) => {
-      delivered = nextUpdate;
-    });
+    const renderer: RefreshAdapter = {
+      setRefreshHandler,
+      scheduleRefresh(nextUpdate) {
+        delivered = nextUpdate;
+      },
+    };
+    runtime.injectRenderer(renderer);
+    runtime.injectRenderer(renderer);
 
     expect(delivered).toBe(update);
+    expect(setRefreshHandler).toHaveBeenCalledOnce();
   });
 });

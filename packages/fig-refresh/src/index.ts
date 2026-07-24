@@ -1,7 +1,7 @@
-import {
-  type RefreshFamily,
-  type RefreshUpdate,
-  setRefreshHandler,
+import type {
+  RefreshAdapter,
+  RefreshFamily,
+  RefreshUpdate,
 } from "@bgub/fig-reconciler/refresh";
 
 // The Fig Fast Refresh runtime. A bundler transform (dev only) registers each
@@ -18,24 +18,13 @@ interface Signature {
 const familiesByType = new WeakMap<object, RefreshFamily>();
 const familiesById = new Map<string, RefreshFamily>();
 const signatures = new WeakMap<object, Signature>();
-const scheduleRefreshFns = new Set<(update: RefreshUpdate) => void>();
+const renderers = new Set<RefreshAdapter>();
 const unscheduledRefreshes: RefreshUpdate[] = [];
 let pendingUpdates: Array<[RefreshFamily, object]> = [];
-let installed = false;
 
 function asKey(type: unknown): object | null {
-  return typeof type === "function" ||
-    (typeof type === "object" && type !== null)
-    ? (type as object)
-    : null;
-}
-
-// Install the reconciler handler lazily so importing the runtime has no effect
-// until something actually registers (keeps it tree-shakeable / prod-safe).
-function ensureInstalled(): void {
-  if (installed) return;
-  installed = true;
-  setRefreshHandler(resolveFamilyByType);
+  if (typeof type === "function") return type;
+  return typeof type === "object" && type !== null ? type : null;
 }
 
 function resolveFamilyByType(type: unknown): RefreshFamily | undefined {
@@ -46,7 +35,6 @@ function resolveFamilyByType(type: unknown): RefreshFamily | undefined {
 // Register a component version under a stable id (e.g. "src/App.tsx#App"). The
 // first version creates a family; later versions of the same id queue an update.
 export function register(type: unknown, id: string): void {
-  ensureInstalled();
   const key = asKey(type);
   if (key === null || familiesByType.has(key)) return;
 
@@ -71,14 +59,16 @@ export function setSignature(
   if (target !== null) signatures.set(target, { forceReset, key });
 }
 
-// Connect a renderer's scheduleRefresh (e.g. from @bgub/fig-dom). The app's dev
-// bootstrap calls this once.
-export function injectScheduleRefresh(
-  scheduleRefresh: (update: RefreshUpdate) => void,
-): void {
-  ensureInstalled();
-  scheduleRefreshFns.add(scheduleRefresh);
-  for (const update of unscheduledRefreshes) scheduleRefresh(update);
+// Connect the runtime to a renderer-owned reconciler. The adapter installs the
+// family resolver and schedules updates through the same reconciler instance.
+export function injectRenderer(renderer: RefreshAdapter): void {
+  if (renderers.has(renderer)) return;
+
+  renderer.setRefreshHandler(resolveFamilyByType);
+  renderers.add(renderer);
+  for (const update of unscheduledRefreshes) {
+    renderer.scheduleRefresh(update);
+  }
   unscheduledRefreshes.length = 0;
 }
 
@@ -104,11 +94,11 @@ export function performRefresh(): RefreshUpdate | null {
   for (const family of staleFamilies) updatedFamilies.delete(family);
 
   const update: RefreshUpdate = { staleFamilies, updatedFamilies };
-  if (scheduleRefreshFns.size === 0) {
+  if (renderers.size === 0) {
     unscheduledRefreshes.push(update);
     return update;
   }
-  for (const scheduleRefresh of scheduleRefreshFns) scheduleRefresh(update);
+  for (const renderer of renderers) renderer.scheduleRefresh(update);
   return update;
 }
 

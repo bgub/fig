@@ -63,7 +63,7 @@ Payload data rows hydrate the same generation-guarded store. Browser delivery as
 
 ## Compiler And Vite Integration
 
-The Vite plugin delegates environment planning, routes, server-function extraction, development serving, production builds, and preview to TanStack's plugin core. It supplies Fig's client and server entries and installs `figRefresh()`.
+The Vite plugin delegates environment planning, routes, server-function extraction, development serving, production builds, and preview to TanStack's plugin core. It supplies Fig's client and server entries and installs the generic `fig()` Vite integration, which owns Fig's compile-time development gate and Fast Refresh.
 
 TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's versioned compatibility profile privately uses Solid identifiers, pins the participating TanStack versions, and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph.
 

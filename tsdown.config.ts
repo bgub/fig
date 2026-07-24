@@ -14,55 +14,67 @@ const sourceAliases = figSourceAliases();
 const figPackages = /^@bgub\/fig/;
 const reactPackages = /^react/;
 const tanstackPackages = /^@tanstack\//;
-const libraryEntries: Record<string, string[] | Record<string, string>> = {
-  "packages/fig": [
-    "./src/index.ts",
-    "./src/internal.ts",
-    "./src/jsx-runtime.ts",
-    "./src/payload.ts",
-  ],
-  "packages/fig-devtools": [
-    "./src/index.ts",
-    "./src/server.ts",
-    "./src/client.ts",
-    "./src/tanstack.ts",
-  ],
-  "packages/fig-dom": [
-    "./src/index.ts",
-    "./src/view-transitions.ts",
-    "./src/refresh.ts",
-    "./src/act.ts",
-    "./src/jsx-runtime.ts",
-  ],
-  "packages/fig-reconciler": [
-    "./src/index.ts",
-    "./src/commit-coordinator.ts",
-    "./src/view-transitions.ts",
-    "./src/devtools.ts",
-    "./src/refresh.ts",
-    "./src/act.ts",
-  ],
-  "packages/fig-refresh": ["./src/index.ts"],
-  "packages/fig-vite": ["./src/index.ts"],
-  "packages/fig-server": [
-    "./src/index.ts",
-    "./src/html-entry.ts",
-    "./src/payload.ts",
-  ],
-  "packages/fig-tanstack-router": ["./src/router.tsx"],
-  "packages/fig-tanstack-start": {
-    data: "./src/data.ts",
-    client: "./src/client.tsx",
-    "default-entry/client": "./src/default-entry/client.ts",
-    "default-entry/server": "./src/default-entry/server.ts",
-    "default-entry/start": "./src/default-entry/start.ts",
-    payload: "./src/payload.ts",
-    server: "./src/server.tsx",
-    "storage-context": "./src/storage-context.ts",
-    "plugin/vite": "./src/plugin/vite.ts",
-  },
-};
+export const libraryEntries: Record<string, string[] | Record<string, string>> =
+  {
+    "packages/fig": [
+      "./src/index.ts",
+      "./src/internal.ts",
+      "./src/jsx-runtime.ts",
+      "./src/payload.ts",
+    ],
+    "packages/fig-devtools": [
+      "./src/index.ts",
+      "./src/server.ts",
+      "./src/client.ts",
+      "./src/tanstack.ts",
+    ],
+    "packages/fig-dom": [
+      "./src/index.ts",
+      "./src/view-transitions.ts",
+      "./src/refresh.ts",
+      "./src/act.ts",
+      "./src/jsx-runtime.ts",
+    ],
+    "packages/fig-reconciler": [
+      "./src/index.ts",
+      "./src/commit-coordinator.ts",
+      "./src/view-transitions.ts",
+      "./src/devtools.ts",
+      "./src/refresh.ts",
+      "./src/act.ts",
+    ],
+    "packages/fig-refresh": ["./src/index.ts"],
+    "packages/fig-vite": ["./src/index.ts"],
+    "packages/fig-server": [
+      "./src/index.ts",
+      "./src/html-entry.ts",
+      "./src/payload.ts",
+    ],
+    "packages/fig-tanstack-router": ["./src/router.tsx"],
+    "packages/fig-tanstack-start": {
+      data: "./src/data.ts",
+      client: "./src/client.tsx",
+      "default-entry/client": "./src/default-entry/client.ts",
+      "default-entry/server": "./src/default-entry/server.ts",
+      "default-entry/start": "./src/default-entry/start.ts",
+      payload: "./src/payload.ts",
+      server: "./src/server.tsx",
+      "storage-context": "./src/storage-context.ts",
+      "plugin/vite": "./src/plugin/vite.ts",
+    },
+  };
 const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
+// These packages contain development gates. They always emit the artifact that
+// Vite selects while serving; FIG_DEV_SOURCE additionally keeps the primary
+// output development-enabled for non-Vite workspace demos.
+export const developmentLibraryPaths = [
+  "packages/fig",
+  "packages/fig-dom",
+  "packages/fig-reconciler",
+  "packages/fig-server",
+  "packages/fig-tanstack-router",
+] as const;
+const developmentLibraries = new Set<string>(developmentLibraryPaths);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };
 const figProductionDefine = { __FIG_DEV__: JSON.stringify(false) };
 // Demos are dev-mode showcases: Fig dev diagnostics and DevTools emission stay
@@ -79,6 +91,7 @@ const demoBrowserDefine = {
 function assertDevBundle(target: string): string {
   return `node ${workspacePath("scripts/assert-dev-bundle.mjs")} ${target}`;
 }
+
 const packageConfig = packConfigFor(packagePath);
 export default defineConfig(
   packageConfig === undefined ? {} : withPackageCwd(packageConfig),
@@ -90,22 +103,32 @@ function packConfigFor(path: string): PackConfig | undefined {
   const libraryEntry = libraryEntries[path];
   if (libraryEntry !== undefined) {
     const browser = browserLibraries.has(path);
-    return {
+    const config: UserConfig = {
       entry: libraryEntry,
       dts: true,
       deps:
         path === "packages/fig-tanstack-start"
           ? { neverBundle: [/^virtual:fig-tanstack-start\//] }
           : undefined,
-      // Monorepo dev (FIG_DEV_SOURCE=1) builds the libraries with __DEV__ on so
-      // workspace demos that consume these built packages get strict
-      // diagnostics and DevTools commit emission. Publishing builds (flag
-      // unset) stay production, preserving dead-code elimination.
-      define: isDevSourcePack ? figDevDefine : figProductionDefine,
       minify: browser ? true : undefined,
       platform: browser ? "browser" : undefined,
       sourcemap: true,
     };
+    const primary = {
+      ...config,
+      define: isDevSourcePack ? figDevDefine : figProductionDefine,
+    };
+    return developmentLibraries.has(path)
+      ? [
+          primary,
+          {
+            ...config,
+            define: figDevDefine,
+            dts: false,
+            outDir: "dist-development",
+          },
+        ]
+      : primary;
   }
 
   switch (path) {

@@ -36,10 +36,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "peerDependencies": {
-    "@bgub/fig-reconciler": "workspace:*"
-  },
-  "devDependencies": {
+  "dependencies": {
     "@bgub/fig-reconciler": "workspace:*"
   },
   "engines": {

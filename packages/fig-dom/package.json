@@ -8,31 +8,37 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "fig-development": "./dist-development/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./view-transitions": {
       "types": "./dist/view-transitions.d.ts",
+      "fig-development": "./dist-development/view-transitions.js",
       "import": "./dist/view-transitions.js",
       "default": "./dist/view-transitions.js"
     },
     "./refresh": {
       "types": "./dist/refresh.d.ts",
+      "fig-development": "./dist-development/refresh.js",
       "import": "./dist/refresh.js",
       "default": "./dist/refresh.js"
     },
     "./test-utils": {
       "types": "./dist/act.d.ts",
+      "fig-development": "./dist-development/act.js",
       "import": "./dist/act.js",
       "default": "./dist/act.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
+      "fig-development": "./dist-development/jsx-runtime.js",
       "import": "./dist/jsx-runtime.js",
       "default": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
+      "fig-development": "./dist-development/jsx-runtime.js",
       "import": "./dist/jsx-runtime.js",
       "default": "./dist/jsx-runtime.js"
     },
@@ -41,6 +47,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "dist-development",
     "CHANGELOG.md"
   ],
   "scripts": {
@@ -61,13 +68,14 @@
   "publishConfig": {
     "access": "public"
   },
-  "peerDependencies": {
-    "@bgub/fig": "workspace:*",
+  "dependencies": {
     "@bgub/fig-reconciler": "workspace:*"
+  },
+  "peerDependencies": {
+    "@bgub/fig": "workspace:*"
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*",
-    "@bgub/fig-reconciler": "workspace:*",
     "@bgub/fig-server": "workspace:*"
   },
   "engines": {

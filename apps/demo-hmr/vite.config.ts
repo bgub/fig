@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { figRefresh } from "@bgub/fig-vite";
+import { fig } from "@bgub/fig-vite";
 import { defineConfig } from "vite";
 
 const pkg = (relative: string): string =>
@@ -51,12 +51,6 @@ export default defineConfig({
     ],
   },
   // Only transform this app's own components for Fast Refresh (not Fig source).
-  plugins: [figRefresh({ include: /\/apps\/demo-hmr\/src\/.*\.[jt]sx?$/ })],
-  // Fig dev-only paths (diagnostics, DevTools emission, refresh matching)
-  // compile in through the __FIG_DEV__ gate; NODE_ENV covers bundled deps.
-  define: {
-    __FIG_DEV__: JSON.stringify(true),
-    "process.env.NODE_ENV": JSON.stringify("development"),
-  },
+  plugins: [fig({ include: /\/apps\/demo-hmr\/src\/.*\.[jt]sx?$/ })],
   esbuild: { jsx: "automatic", jsxImportSource: "@bgub/fig-dom" },
 });

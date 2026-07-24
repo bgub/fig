@@ -12,6 +12,7 @@
   "exports": {
     ".": {
       "types": "./dist/router.d.ts",
+      "fig-development": "./dist-development/router.js",
       "import": "./dist/router.js",
       "default": "./dist/router.js"
     },
@@ -20,6 +21,7 @@
   "types": "./dist/router.d.ts",
   "files": [
     "dist",
+    "dist-development",
     "CHANGELOG.md",
     "COMPATIBILITY.md"
   ],

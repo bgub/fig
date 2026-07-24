@@ -8,31 +8,37 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "fig-development": "./dist-development/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./commit-coordinator": {
       "types": "./dist/commit-coordinator.d.ts",
+      "fig-development": "./dist-development/commit-coordinator.js",
       "import": "./dist/commit-coordinator.js",
       "default": "./dist/commit-coordinator.js"
     },
     "./view-transitions": {
       "types": "./dist/view-transitions.d.ts",
+      "fig-development": "./dist-development/view-transitions.js",
       "import": "./dist/view-transitions.js",
       "default": "./dist/view-transitions.js"
     },
     "./devtools": {
       "types": "./dist/devtools.d.ts",
+      "fig-development": "./dist-development/devtools.js",
       "import": "./dist/devtools.js",
       "default": "./dist/devtools.js"
     },
     "./refresh": {
       "types": "./dist/refresh.d.ts",
+      "fig-development": "./dist-development/refresh.js",
       "import": "./dist/refresh.js",
       "default": "./dist/refresh.js"
     },
     "./test-utils": {
       "types": "./dist/act.d.ts",
+      "fig-development": "./dist-development/act.js",
       "import": "./dist/act.js",
       "default": "./dist/act.js"
     },
@@ -41,7 +47,8 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "dist-development"
   ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
