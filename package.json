@@ -37,7 +37,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "33.7 kB"
+      "limit": "33.8 kB"
     },
     {
       "name": "Fig DOM createRoot without View Transitions",
@@ -47,12 +47,12 @@
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "29.1 kB"
+      "limit": "29.2 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "36.7 kB"
+      "limit": "36.9 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",

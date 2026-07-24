@@ -68,6 +68,10 @@ import {
   streamHighWaterMark,
   withContextValue,
 } from "./shared.ts";
+import {
+  imagePreloadFromHostProps,
+  suppressesImagePreloads,
+} from "./image-preloads.ts";
 import type { ServerErrorInfo, ServerErrorPayload } from "./types.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
@@ -146,6 +150,7 @@ type PayloadRequest = {
 type Task = {
   contextValues: ContextValues;
   id: number;
+  imagePreloadsSuppressed: boolean;
   stack: StackFrame | null;
 } & TaskValue;
 
@@ -169,6 +174,7 @@ type RenderFrame = {
   // within the same synchronous attempt, so buffering costs no wire latency.
   pendingAssets: SerializedAssetResource[];
   request: PayloadRequest;
+  imagePreloadsSuppressed: boolean;
   stack: StackFrame | null;
 };
 
@@ -232,7 +238,14 @@ function createPayloadRequest(
   void request.allReady.promise.catch(() => undefined);
 
   request.pingedTasks.push(
-    createTask(request, 0, { kind: "node", value: node }, new Map(), null),
+    createTask(
+      request,
+      0,
+      { kind: "node", value: node },
+      new Map(),
+      false,
+      null,
+    ),
   );
 
   const stream = new ReadableStream<Uint8Array>(
@@ -275,10 +288,11 @@ function createTask(
   id: number,
   value: TaskValue,
   contextValues: ContextValues,
+  imagePreloadsSuppressed: boolean,
   stack: StackFrame | null,
 ): Task {
   request.pendingTasks += 1;
-  return { contextValues, id, stack, ...value };
+  return { contextValues, id, imagePreloadsSuppressed, stack, ...value };
 }
 
 function performWork(request: PayloadRequest): void {
@@ -298,6 +312,7 @@ function retryTask(request: PayloadRequest, task: Task): void {
     dispatcher: null,
     pendingAssets: [],
     request,
+    imagePreloadsSuppressed: task.imagePreloadsSuppressed,
     stack: task.stack,
   };
 
@@ -487,13 +502,7 @@ function serializeElement(
   const type = element.type;
 
   if (typeof type === "string") {
-    return serializeElementModel(
-      element,
-      type,
-      frame,
-      preserveIdentity,
-      childrenTreeProps,
-    );
+    return serializeHostElement(element, type, frame, preserveIdentity);
   }
 
   if (type === Fragment) {
@@ -557,6 +566,39 @@ function serializeElement(
   }
 
   throw new Error("Unsupported Fig element type during payload render.");
+}
+
+function serializeHostElement(
+  element: FigElement,
+  type: string,
+  frame: RenderFrame,
+  preserveIdentity: boolean,
+): PayloadModel {
+  const preload = imagePreloadFromHostProps(
+    type,
+    element.props,
+    frame.imagePreloadsSuppressed,
+  );
+  if (preload !== null) {
+    frame.pendingAssets.push(
+      ...serializeAssetResources(frame.request, preload),
+    );
+  }
+
+  const previousImagePreloadsSuppressed = frame.imagePreloadsSuppressed;
+  frame.imagePreloadsSuppressed =
+    previousImagePreloadsSuppressed || suppressesImagePreloads(type);
+  try {
+    return serializeElementModel(
+      element,
+      type,
+      frame,
+      preserveIdentity,
+      childrenTreeProps,
+    );
+  } finally {
+    frame.imagePreloadsSuppressed = previousImagePreloadsSuppressed;
+  }
 }
 
 function serializeElementModel(
@@ -766,6 +808,7 @@ function outlineTask(
     id,
     value,
     cloneContextValues(frame.contextValues),
+    frame.imagePreloadsSuppressed,
     stackForError(wakeable, frame.stack),
   );
 
@@ -942,7 +985,6 @@ function serializeAssetResource(
     case "preload": {
       const model: SerializedAssetResource = {
         as: resource.as,
-        href: resource.href,
         kind: resource.kind,
       };
       if (resource.crossorigin !== undefined) {
@@ -950,6 +992,16 @@ function serializeAssetResource(
       }
       if (resource.fetchpriority !== undefined) {
         model.fetchpriority = resource.fetchpriority;
+      }
+      if (resource.href !== undefined) model.href = resource.href;
+      if (resource.imagesizes !== undefined) {
+        model.imagesizes = resource.imagesizes;
+      }
+      if (resource.imagesrcset !== undefined) {
+        model.imagesrcset = resource.imagesrcset;
+      }
+      if (resource.referrerpolicy !== undefined) {
+        model.referrerpolicy = resource.referrerpolicy;
       }
       if (resource.type !== undefined) model.type = resource.type;
       return model;

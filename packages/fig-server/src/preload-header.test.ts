@@ -91,6 +91,17 @@ describe("preload headers", () => {
     expect(format(stylesheet(href))).toBeUndefined();
   });
 
+  it("omits responsive image preloads from HTTP Link headers", () => {
+    expect(
+      format(
+        preload("/fallback.jpg", "image", {
+          imagesizes: "100vw",
+          imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   it.each(["/bad\ntarget", "/bad\ud800target"])(
     "omits unsafe target %j",
     (href) => {

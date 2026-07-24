@@ -8,6 +8,7 @@ import type {
   FigDataStoreController,
   FigDataStoreHandle,
   FigNode,
+  PreloadResource,
   Props,
 } from "@bgub/fig";
 import type { RenderTreeCollector } from "./render-tree.ts";
@@ -94,8 +95,13 @@ export interface ServerPreloadHeaderOptions {
   maxLength?: number;
 }
 
+type HeaderPreloadResource = PreloadResource & {
+  href: string;
+};
+
 export type ServerPreloadHeaderResource = Readonly<
-  Exclude<FigAssetResource, { kind: "meta" | "script" | "title" }>
+  | Exclude<FigAssetResource, { kind: "meta" | "preload" | "script" | "title" }>
+  | HeaderPreloadResource
 >;
 
 // Document mode is the fragment result minus the head accessors: the

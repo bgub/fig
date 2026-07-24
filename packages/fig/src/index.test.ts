@@ -34,6 +34,7 @@ import {
   assetResourceDestination,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
+  assetResourceHostAttributes,
   assetResourceKey,
   clientReferenceAssets,
   createPortalNode,
@@ -359,6 +360,44 @@ describe("@bgub/fig", () => {
     );
   });
 
+  it("keys responsive image preloads by srcset and sizes", () => {
+    expect(
+      assetResourceKey(
+        preload("/fallback.jpg", "image", {
+          imagesizes: "100vw",
+          imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+        }),
+      ),
+    ).toBe("preload:image:/small.jpg 400w, /large.jpg 800w\n100vw");
+  });
+
+  it("applies responsive selection only to non-empty image source sets", () => {
+    const resource = preload("/app.js", "script", {
+      imagesizes: "100vw",
+      imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+    });
+
+    expect(assetResourceKey(resource)).toBe("preload:script:/app.js");
+    expect(Object.fromEntries(assetResourceHostAttributes(resource))).toEqual({
+      as: "script",
+      href: "/app.js",
+      imagesizes: "100vw",
+      rel: "preload",
+    });
+
+    const empty = preload("/fallback.jpg", "image", {
+      imagesizes: "100vw",
+      imagesrcset: "",
+    });
+    expect(assetResourceKey(empty)).toBe("preload:image:/fallback.jpg");
+    expect(Object.fromEntries(assetResourceHostAttributes(empty))).toEqual({
+      as: "image",
+      href: "/fallback.jpg",
+      imagesizes: "100vw",
+      rel: "preload",
+    });
+  });
+
   it("collapses every title to the singleton key", () => {
     expect(assetResourceKey(title("A"))).toBe("title");
     // Other kinds still honor an explicit key.
@@ -433,6 +472,24 @@ describe("@bgub/fig", () => {
       fetchpriority: "high",
       href: "/chunk.js",
       kind: "modulepreload",
+    });
+    expect(
+      assetResourceFromHostProps("link", {
+        as: "image",
+        imagesizes: "100vw",
+        imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+        rel: "preload",
+      }),
+    ).toEqual({
+      as: "image",
+      crossorigin: undefined,
+      fetchpriority: undefined,
+      href: undefined,
+      imagesizes: "100vw",
+      imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+      kind: "preload",
+      referrerpolicy: undefined,
+      type: undefined,
     });
     expect(
       assetResourceFromHostProps(

@@ -542,6 +542,92 @@ describe("payload rendering", () => {
     expect(rows.indexOf(assetsRow)).toBeLessThan(gatedIndex);
   });
 
+  it("sends deduplicated host image preloads before their model", async () => {
+    const rows = parseTestPayloadRows(
+      await renderToPayloadText(
+        createElement(
+          Fragment,
+          null,
+          createElement("img", { alt: "", src: "/avatar.jpg" }),
+          createElement("img", { alt: "", src: "/avatar.jpg" }),
+          createElement("img", {
+            alt: "",
+            crossorigin: "anonymous",
+            sizes: "100vw",
+            src: "/fallback.jpg",
+            srcset: "/small.jpg 400w, /large.jpg 800w",
+          }),
+        ),
+      ),
+    );
+
+    const assetsRow = rows.find((row) => row.tag === "assets");
+    if (assetsRow === undefined) throw new Error("Expected an assets row.");
+    expect(assetsRow).toEqual({
+      for: 0,
+      tag: "assets",
+      value: [
+        { as: "image", href: "/avatar.jpg", kind: "preload" },
+        {
+          as: "image",
+          crossorigin: "anonymous",
+          href: "/fallback.jpg",
+          imagesizes: "100vw",
+          imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+          kind: "preload",
+        },
+      ],
+    });
+    const modelIndex = rows.findIndex(
+      (row) => row.tag === "model" && row.id === 0,
+    );
+    expect(rows.indexOf(assetsRow)).toBeLessThan(modelIndex);
+  });
+
+  it("does not preload host images in picture or noscript", async () => {
+    const rows = parseTestPayloadRows(
+      await renderToPayloadText(
+        createElement(
+          Fragment,
+          null,
+          createElement(
+            "picture",
+            null,
+            createElement("img", { alt: "", src: "/picture.jpg" }),
+          ),
+          createElement(
+            "noscript",
+            null,
+            createElement("img", { alt: "", src: "/noscript.jpg" }),
+          ),
+        ),
+      ),
+    );
+
+    expect(rows.some((row) => row.tag === "assets")).toBe(false);
+  });
+
+  it("keeps picture suppression across outlined payload work", async () => {
+    const pending = deferred<void>();
+
+    function DelayedImage() {
+      readPromise(pending.promise);
+      return createElement("img", { alt: "", src: "/picture.jpg" });
+    }
+
+    const result = renderToPayloadStream(
+      createElement("picture", null, createElement(DelayedImage, null)),
+    );
+    const text = readStream(result.stream);
+    await Promise.resolve();
+    pending.resolve(undefined);
+    await result.allReady;
+
+    expect(
+      parseTestPayloadRows(await text).some((row) => row.tag === "assets"),
+    ).toBe(false);
+  });
+
   it("discovers assets attached to server component types", async () => {
     function Card() {
       return createElement("section", null, "Card");

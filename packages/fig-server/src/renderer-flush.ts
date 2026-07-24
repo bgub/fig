@@ -480,6 +480,7 @@ function writeChunk(
     request.headSnapshot ??
     request.assetRegistry.headMetadataHtml(request.nonce);
   const [beforeMetadata, afterMetadata] = partitionHeadAssets(
+    request,
     segment.assetResources,
   );
   const blockingIds = new Set<string>();
@@ -490,6 +491,7 @@ function writeChunk(
 }
 
 function partitionHeadAssets(
+  request: Request,
   resources: Segment["assetResources"],
 ): [
   beforeMetadata: Segment["assetResources"],
@@ -507,7 +509,9 @@ function partitionHeadAssets(
       resource.kind === "font" ||
       (resource.kind === "preload" &&
         (resource.as === "font" ||
-          (resource.as === "image" && resource.fetchpriority === "high")))
+          (resource.as === "image" &&
+            (resource.fetchpriority === "high" ||
+              request.assetRegistry.isEarlyImage(resource)))))
     ) {
       criticalPreloads.push(resource);
     } else if (resource.kind === "stylesheet") {

@@ -179,6 +179,24 @@ describe("@bgub/fig-dom asset resources", () => {
     expect(links()).toHaveLength(1);
   });
 
+  it("dedupes responsive images against server-rendered preloads", () => {
+    const ssr = new FakeElement("link");
+    ssr.setAttribute("rel", "preload");
+    ssr.setAttribute("as", "image");
+    ssr.setAttribute("imagesrcset", "/small.jpg 400w, /large.jpg 800w");
+    ssr.setAttribute("imagesizes", "100vw");
+    head.appendChild(ssr);
+
+    void insertAssetResources([
+      preload("/fallback.jpg", "image", {
+        imagesizes: "100vw",
+        imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+      }),
+    ]);
+
+    expect(links()).toHaveLength(1);
+  });
+
   it("gates later dependents on a pending inserted stylesheet", async () => {
     let firstSettled = false;
     let secondSettled = false;

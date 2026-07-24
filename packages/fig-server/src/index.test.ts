@@ -1090,6 +1090,121 @@ describe("@bgub/fig-server", () => {
     );
   });
 
+  it("discovers, dedupes, and prioritizes eager host images", async () => {
+    const images = Array.from({ length: 11 }, (_, index) =>
+      createElement("img", { alt: "", src: `/image-${index}.jpg` }),
+    );
+    const html = await renderToDocumentHtml(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          assets(
+            stylesheet("/app.css"),
+            createElement(Fragment, null, ...images),
+          ),
+        ),
+      ),
+    );
+
+    const stylesheetIndex = html.indexOf('href="/app.css"');
+    for (let index = 0; index < 10; index += 1) {
+      expect(html.indexOf(`href="/image-${index}.jpg"`)).toBeLessThan(
+        stylesheetIndex,
+      );
+    }
+    expect(html.indexOf('href="/image-10.jpg"')).toBeGreaterThan(
+      stylesheetIndex,
+    );
+    expect(html.match(/rel="preload"[^>]+as="image"/g)).toHaveLength(11);
+    expect(html.match(/<img /g)).toHaveLength(11);
+  });
+
+  it("promotes and dedupes an explicit image preload", async () => {
+    const html = await renderToDocumentHtml(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          assets(
+            preload("/hero.jpg", "image"),
+            createElement(
+              Fragment,
+              null,
+              createElement("img", { alt: "", src: "/hero.jpg" }),
+              createElement("img", {
+                alt: "",
+                fetchpriority: "high",
+                src: "/hero.jpg",
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      html.match(/rel="preload" href="\/hero\.jpg" as="image"/g),
+    ).toHaveLength(1);
+    expect(html).toContain(
+      'rel="preload" href="/hero.jpg" as="image" fetchpriority="high"',
+    );
+  });
+
+  it("preserves responsive image selection and skip semantics", async () => {
+    const html = await renderToDocumentHtml(
+      createElement(
+        "html",
+        null,
+        createElement("head", null),
+        createElement(
+          "body",
+          null,
+          createElement("img", {
+            alt: "",
+            sizes: "100vw",
+            src: "/fallback.jpg",
+            srcset: "/small.jpg 400w, /large.jpg 800w",
+          }),
+          createElement("img", {
+            alt: "",
+            loading: "lazy",
+            src: "/lazy.jpg",
+          }),
+          createElement("img", {
+            alt: "",
+            fetchpriority: "low",
+            src: "/low.jpg",
+          }),
+          createElement(
+            "picture",
+            null,
+            createElement("img", { alt: "", src: "/picture.jpg" }),
+          ),
+          createElement(
+            "noscript",
+            null,
+            createElement("img", { alt: "", src: "/noscript.jpg" }),
+          ),
+        ),
+      ),
+    );
+
+    expect(html).toContain(
+      'rel="preload" as="image" imagesrcset="/small.jpg 400w, /large.jpg 800w" imagesizes="100vw"',
+    );
+    expect(html).not.toContain('rel="preload" href="/fallback.jpg"');
+    for (const skipped of ["lazy", "low", "picture", "noscript"]) {
+      expect(html).not.toContain(`rel="preload" href="/${skipped}.jpg"`);
+    }
+  });
+
   it("snapshots preload headers when the shell becomes ready", async () => {
     const pending = deferred<string>();
 
@@ -1112,9 +1227,14 @@ describe("@bgub/fig-server", () => {
           assets(
             [preconnect("https://cdn.example.com"), stylesheet("/app.css")],
             createElement(
-              Suspense,
-              { fallback: createElement("em", null, "Loading") },
-              createElement(LateAssets, null),
+              Fragment,
+              null,
+              createElement("img", { alt: "", src: "/hero.jpg" }),
+              createElement(
+                Suspense,
+                { fallback: createElement("em", null, "Loading") },
+                createElement(LateAssets, null),
+              ),
             ),
           ),
         ),
@@ -1125,7 +1245,7 @@ describe("@bgub/fig-server", () => {
     await result.shellReady;
     const shellHeader = result.getPreloadHeader();
     expect(shellHeader).toBe(
-      "<https://cdn.example.com>; rel=preconnect, </app.css>; rel=preload; as=style",
+      "<https://cdn.example.com>; rel=preconnect, </hero.jpg>; rel=preload; as=image, </app.css>; rel=preload; as=style",
     );
 
     pending.resolve("Ready");

@@ -47,8 +47,11 @@ export interface PreloadResource extends ResourceBase {
   as: string;
   crossorigin?: CrossOrigin;
   fetchpriority?: FetchPriority;
-  href: string;
+  href?: string;
+  imagesizes?: string;
+  imagesrcset?: string;
   kind: "preload";
+  referrerpolicy?: string;
   type?: string;
 }
 
@@ -162,7 +165,13 @@ export function preload(
   as: string,
   options: Omit<PreloadResource, "as" | "href" | "kind"> = {},
 ): PreloadResource {
-  return { ...options, as, href, kind: "preload" };
+  return {
+    ...options,
+    as,
+    href,
+    imagesrcset: as === "image" ? options.imagesrcset || undefined : undefined,
+    kind: "preload",
+  };
 }
 
 export function modulepreload(
@@ -254,8 +263,14 @@ export function assetResourceKey(resource: FigAssetResource): string {
   switch (resource.kind) {
     case "stylesheet":
       return `stylesheet:${resource.href}`;
-    case "preload":
-      return `preload:${resource.as}:${resource.href}`;
+    case "preload": {
+      const imagesrcset = resource.imagesrcset || undefined;
+      return `preload:${resource.as}:${
+        imagesrcset === undefined
+          ? (resource.href ?? "")
+          : `${imagesrcset}\n${resource.imagesizes ?? ""}`
+      }`;
+    }
     case "modulepreload":
       return `modulepreload:${resource.href}`;
     case "script":
@@ -334,17 +349,22 @@ export function assetResourceHostAttributes(
         ["crossorigin", resource.crossorigin],
       );
       break;
-    case "preload":
+    case "preload": {
+      const imagesrcset = resource.imagesrcset || undefined;
       pairs.push(
         ["rel", "preload"],
-        ["href", resource.href],
+        ["href", imagesrcset === undefined ? resource.href : undefined],
         ["as", resource.as],
         ["data-fig-resource-key", resource.key],
         ["type", resource.type],
         ["crossorigin", resource.crossorigin],
         ["fetchpriority", resource.fetchpriority],
+        ["imagesrcset", imagesrcset],
+        ["imagesizes", resource.imagesizes],
+        ["referrerpolicy", resource.referrerpolicy],
       );
       break;
+    }
     case "modulepreload":
       pairs.push(
         ["rel", "modulepreload"],
@@ -476,13 +496,32 @@ function linkResourceFromHost(
 ): FigAssetResource | null {
   const rel = readProp(prop, "rel")?.toLowerCase();
   const href = readProp(prop, "href");
-  if (
-    rel === undefined ||
-    href === undefined ||
-    readProp(prop, "itemprop") !== undefined
-  ) {
+  if (rel === undefined || readProp(prop, "itemprop") !== undefined) {
     return null;
   }
+
+  if (rel === "preload") {
+    const as = readProp(prop, "as");
+    const imagesrcset =
+      as === "image" ? readProp(prop, "imagesrcset") || undefined : undefined;
+    if (as === undefined || (href === undefined && imagesrcset === undefined)) {
+      return null;
+    }
+    return {
+      as,
+      crossorigin: readCrossorigin(prop),
+      fetchpriority: fetchpriorityProp(readProp(prop, "fetchpriority")),
+      href,
+      imagesizes:
+        imagesrcset === undefined ? undefined : readProp(prop, "imagesizes"),
+      imagesrcset,
+      kind: "preload",
+      referrerpolicy: readProp(prop, "referrerpolicy"),
+      type: readProp(prop, "type"),
+    };
+  }
+
+  if (href === undefined) return null;
 
   if (rel === "stylesheet") {
     return {
@@ -503,19 +542,6 @@ function linkResourceFromHost(
       fetchpriority: fetchpriorityProp(readProp(prop, "fetchpriority")),
       href,
       kind: "modulepreload",
-    };
-  }
-
-  if (rel === "preload") {
-    const as = readProp(prop, "as");
-    if (as === undefined) return null;
-    return {
-      as,
-      crossorigin: readCrossorigin(prop),
-      fetchpriority: fetchpriorityProp(readProp(prop, "fetchpriority")),
-      href,
-      kind: "preload",
-      type: readProp(prop, "type"),
     };
   }
 

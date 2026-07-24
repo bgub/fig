@@ -28,8 +28,11 @@ export type SerializedAssetResource =
       as: string;
       crossorigin?: PreloadResource["crossorigin"];
       fetchpriority?: PreloadResource["fetchpriority"];
-      href: string;
+      href?: string;
+      imagesizes?: PreloadResource["imagesizes"];
+      imagesrcset?: PreloadResource["imagesrcset"];
       kind: "preload";
+      referrerpolicy?: PreloadResource["referrerpolicy"];
       type?: string;
     }
   | {

@@ -9,6 +9,7 @@ import {
   type FigNode,
   Fragment,
   isValidElement,
+  type PreloadResource,
   type Props,
   type ViewTransitionProps,
 } from "@bgub/fig";
@@ -56,6 +57,10 @@ import {
   writeElementStart,
   writeText,
 } from "./html.ts";
+import {
+  imagePreloadFromHostProps,
+  suppressesImagePreloads,
+} from "./image-preloads.ts";
 import { activityId, earlyEventCaptureMarkup } from "./protocol.ts";
 import {
   formatPreloadHeader,
@@ -165,6 +170,9 @@ interface RenderScope {
   // Namespace inherited by the next host element. Unlike dev-only nesting
   // ancestry this is runtime semantics: asset lowering applies only to HTML.
   hostNamespace: HostNamespace;
+  // True inside HTML <picture> and <noscript>, where an <img> does not name a
+  // standalone preload candidate.
+  imagePreloadsSuppressed: boolean;
   idPath: string;
   pendingLeadingNewline: boolean;
   selectProps: Props | null;
@@ -340,6 +348,7 @@ export function createServerRenderRequest(
     hiddenActivityId: null,
     hostAncestors: [],
     hostNamespace: "html",
+    imagePreloadsSuppressed: false,
     idPath: "",
     pendingLeadingNewline: false,
     selectProps: null,
@@ -445,6 +454,7 @@ function forkScope(scope: RenderScope): RenderScope {
     hiddenActivityId: scope.hiddenActivityId,
     hostAncestors: scope.hostAncestors,
     hostNamespace: scope.hostNamespace,
+    imagePreloadsSuppressed: scope.imagePreloadsSuppressed,
     idPath: scope.idPath,
     pendingLeadingNewline: scope.pendingLeadingNewline,
     selectProps: scope.selectProps,
@@ -883,6 +893,19 @@ function renderAssetValue(value: unknown, frame: RenderFrame): void {
   }
 }
 
+function renderAutomaticImagePreload(
+  resource: PreloadResource,
+  frame: RenderFrame,
+): void {
+  try {
+    frame.request.assetRegistry.registerAutomaticImage(resource);
+  } catch (error) {
+    recordErrorStack(error, frame.stack);
+    throw error;
+  }
+  frame.segment.assetResources.push(resource);
+}
+
 function renderSuspense(props: Props, frame: RenderFrame): void {
   consumePendingLeadingNewline(frame);
   const fallbackAbortableTasks = new Set<Task>();
@@ -1050,6 +1073,17 @@ function renderHostElement(
     throw new Error("Host elements cannot have both unsafeHTML and children.");
   }
 
+  if (namespace === "html") {
+    const imagePreload = imagePreloadFromHostProps(
+      type,
+      props,
+      frame.imagePreloadsSuppressed,
+    );
+    if (imagePreload !== null) {
+      renderAutomaticImagePreload(imagePreload, frame);
+    }
+  }
+
   consumePendingLeadingNewline(frame);
   const viewTransition = frame.viewTransition;
   const hostProps =
@@ -1096,12 +1130,16 @@ function renderHostElement(
   if (namespace === "html" && type === "select") frame.selectProps = props;
   const previousHostAncestors = frame.hostAncestors;
   const previousHostNamespace = frame.hostNamespace;
+  const previousImagePreloadsSuppressed = frame.imagePreloadsSuppressed;
   const previousViewTransition = frame.viewTransition;
   if (viewTransition !== null) frame.viewTransition = null;
   if (__DEV__) {
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
   frame.hostNamespace = childHostNamespace(type, namespace);
+  frame.imagePreloadsSuppressed =
+    previousImagePreloadsSuppressed ||
+    (namespace === "html" && suppressesImagePreloads(type));
   if (tracksLeadingNewline) {
     frame.segment.chunks.push(leadingNewlineStartMarker);
   }
@@ -1114,6 +1152,7 @@ function renderHostElement(
     frame.selectProps = previousSelectProps;
     frame.hostAncestors = previousHostAncestors;
     frame.hostNamespace = previousHostNamespace;
+    frame.imagePreloadsSuppressed = previousImagePreloadsSuppressed;
     frame.viewTransition = previousViewTransition;
     frame.pendingLeadingNewline = previousPendingLeadingNewline;
   }

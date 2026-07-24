@@ -1,4 +1,8 @@
-import { type FigAssetResource, type Props } from "@bgub/fig";
+import {
+  type FigAssetResource,
+  type PreloadResource,
+  type Props,
+} from "@bgub/fig";
 import {
   assetResourceHostAttributes,
   assetResourceKey,
@@ -28,6 +32,7 @@ export interface HeadMetadataHtml {
 }
 
 export class AssetResourceRegistry {
+  private readonly earlyImageKeys = new Set<string>();
   private readonly emittedResources = new Set<string>();
   private readonly deliveryResources = new Map<string, DeliveryResource>();
   private readonly metadataByOwner = new Map<
@@ -42,6 +47,22 @@ export class AssetResourceRegistry {
   register(resource: FigAssetResource): void {
     if (isMetadataResource(resource)) return;
     this.canonical(resource);
+  }
+
+  registerAutomaticImage(resource: PreloadResource): void {
+    const { key, resource: current } = this.canonical(resource);
+    if (
+      this.earlyImageKeys.size < 10 ||
+      (current.kind === "preload" &&
+        current.as === "image" &&
+        current.fetchpriority === "high")
+    ) {
+      this.earlyImageKeys.add(key);
+    }
+  }
+
+  isEarlyImage(resource: PreloadResource): boolean {
+    return this.earlyImageKeys.has(assetResourceKey(resource));
   }
 
   activateMetadata(
@@ -120,7 +141,10 @@ export class AssetResourceRegistry {
   }
 
   preloadHeaderEntries(): PreloadHeaderEntry[] {
-    return createPreloadHeaderEntries(this.deliveryResources.values());
+    return createPreloadHeaderEntries(
+      this.deliveryResources.values(),
+      (resource) => this.isEarlyImage(resource),
+    );
   }
 
   private visibleMetadata(): Map<string, MetadataResource> {
@@ -142,7 +166,12 @@ export class AssetResourceRegistry {
 
     if (current !== undefined) {
       if (assetSignature(current) !== assetSignature(resource)) {
-        throw new AssetResourceConflictError(key, current, resource);
+        const promoted = promoteCompatibleImagePreload(current, resource);
+        if (promoted === null) {
+          throw new AssetResourceConflictError(key, current, resource);
+        }
+        this.deliveryResources.set(key, promoted);
+        return { key, resource: promoted };
       }
 
       return { key, resource: current };
@@ -305,15 +334,21 @@ function assetSignature(resource: FigAssetResource): string {
         resource.crossorigin ?? "",
         resource.blocking ?? "reveal",
       );
-    case "preload":
+    case "preload": {
+      const imagesrcset =
+        resource.as === "image" ? resource.imagesrcset || undefined : undefined;
       return signature(
         resource.kind,
-        resource.href,
+        imagesrcset === undefined ? (resource.href ?? "") : "",
         resource.as,
         resource.type ?? "",
         resource.crossorigin ?? "",
         resource.fetchpriority ?? "",
+        imagesrcset ?? "",
+        imagesrcset === undefined ? "" : (resource.imagesizes ?? ""),
+        resource.referrerpolicy ?? "",
       );
+    }
     case "modulepreload":
       return signature(
         resource.kind,
@@ -332,6 +367,9 @@ function assetSignature(resource: FigAssetResource): string {
         resource.type,
         resource.crossorigin ?? "anonymous",
         resource.fetchpriority ?? "",
+        "",
+        "",
+        "",
       );
     case "preconnect":
       return signature(
@@ -362,6 +400,34 @@ function assetSignature(resource: FigAssetResource): string {
   }
 
   return unsupportedAssetResource(resource);
+}
+
+function promoteCompatibleImagePreload(
+  current: DeliveryResource,
+  incoming: DeliveryResource,
+): DeliveryResource | null {
+  if (
+    current.kind !== "preload" ||
+    incoming.kind !== "preload" ||
+    current.as !== "image" ||
+    incoming.as !== "image" ||
+    assetSignature({
+      ...current,
+      fetchpriority: incoming.fetchpriority,
+    }) !== assetSignature(incoming)
+  ) {
+    return null;
+  }
+
+  const currentPriority =
+    current.fetchpriority === "auto" ? undefined : current.fetchpriority;
+  const incomingPriority =
+    incoming.fetchpriority === "auto" ? undefined : incoming.fetchpriority;
+  if (currentPriority === incomingPriority) return current;
+  if (currentPriority === "low" || incomingPriority === "low") return null;
+  return currentPriority === "high"
+    ? current
+    : { ...current, fetchpriority: "high" };
 }
 
 function unsupportedAssetResource(resource: FigAssetResource): never {

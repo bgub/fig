@@ -212,6 +212,23 @@ describe("AssetResourceRegistry", () => {
     );
   });
 
+  it("writes responsive image preload attributes without a fallback href", () => {
+    const registry = new AssetResourceRegistry("");
+
+    expect(
+      write(
+        registry,
+        preload("/fallback.jpg", "image", {
+          imagesizes: "100vw",
+          imagesrcset: "/small.jpg 400w, /large.jpg 800w",
+          referrerpolicy: "no-referrer",
+        }),
+      ),
+    ).toBe(
+      '<link data-fig-hydration-skip rel="preload" as="image" imagesrcset="/small.jpg 400w, /large.jpg 800w" imagesizes="100vw" referrerpolicy="no-referrer">',
+    );
+  });
+
   it("writes and dedupes modulepreloads", () => {
     const registry = new AssetResourceRegistry("");
 

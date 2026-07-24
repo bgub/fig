@@ -1,4 +1,4 @@
-import type { FigAssetResource } from "@bgub/fig";
+import type { FigAssetResource, PreloadResource } from "@bgub/fig";
 import type {
   ServerPreloadHeaderOptions,
   ServerPreloadHeaderResource,
@@ -18,6 +18,7 @@ const URI_REFERENCE_PUNCTUATION = "-._~:/?#[]@!$&'()*+,;=";
 
 export function createPreloadHeaderEntries(
   resources: Iterable<DeliveryResource>,
+  isEarlyImage?: (resource: PreloadResource) => boolean,
 ): PreloadHeaderEntry[] {
   const preconnects: PreloadHeaderEntry[] = [];
   const criticalPreloads: PreloadHeaderEntry[] = [];
@@ -25,7 +26,7 @@ export function createPreloadHeaderEntries(
   const remaining: PreloadHeaderEntry[] = [];
 
   for (const resource of resources) {
-    if (resource.kind === "script") continue;
+    if (!isServerPreloadHeaderResource(resource)) continue;
     const value = preloadHeaderValue(resource);
     if (value === null) continue;
     const entry = { resource, value };
@@ -36,7 +37,9 @@ export function createPreloadHeaderEntries(
       resource.kind === "font" ||
       (resource.kind === "preload" &&
         (resource.as === "font" ||
-          (resource.as === "image" && resource.fetchpriority === "high")))
+          (resource.as === "image" &&
+            (resource.fetchpriority === "high" ||
+              isEarlyImage?.(resource) === true))))
     ) {
       criticalPreloads.push(entry);
     } else if (resource.kind === "stylesheet") {
@@ -95,6 +98,7 @@ function preloadHeaderValue(
         ["crossorigin", resource.crossorigin],
         ["type", resource.type],
         ["fetchpriority", resource.fetchpriority],
+        ["referrerpolicy", resource.referrerpolicy],
       ]);
     case "modulepreload":
       return serializeLink(resource.href, [
@@ -117,6 +121,17 @@ function preloadHeaderValue(
         ["crossorigin", resource.crossorigin],
       ]);
   }
+}
+
+function isServerPreloadHeaderResource(
+  resource: DeliveryResource,
+): resource is ServerPreloadHeaderResource {
+  if (resource.kind === "script") return false;
+  return (
+    resource.kind !== "preload" ||
+    (resource.href !== undefined &&
+      (resource.as !== "image" || !resource.imagesrcset))
+  );
 }
 
 function serializeLink(

@@ -24,7 +24,7 @@ return assets(
 
 There is still only one runtime mechanism: every source becomes the same descriptor and enters the same registry.
 
-Descriptor options use native HTML names such as `crossorigin`, `fetchpriority`, and `http-equiv`.
+Descriptor options use native HTML names such as `crossorigin`, `fetchpriority`, `imagesrcset`, `imagesizes`, `referrerpolicy`, and `http-equiv`.
 
 ## Raw Host Tags
 
@@ -39,6 +39,16 @@ There are deliberate exceptions:
 Frameworks that already positioned a tag may apply the private `preventAssetResourceHoist` marker. The symbol-backed marker never reaches the DOM; it only tells Fig not to reinterpret or move that element.
 
 Registry-owned server elements carry `data-fig-hydration-skip` because they have no client fiber. Explicitly positioned elements hydrate normally and do not receive the marker.
+
+## Automatic Image Preloads
+
+Server rendering derives a standard `preload(..., "image")` asset from each eligible HTML `<img>`. The derived descriptor enters the same registry as explicit assets, so repeated images and an equivalent explicit preload produce one `<link>`.
+
+An image is eligible when it has a string `src` or `srcset`, is not `loading="lazy"` or `fetchpriority="low"`, does not use a data URL, and is not inside `<picture>` or `<noscript>`. Derived descriptors carry the image's native `crossorigin`, `fetchpriority`, `referrerpolicy`, and type options. Responsive images map `srcset` and `sizes` to `imagesrcset` and `imagesizes`; their identity is the selection pair rather than the fallback `src`.
+
+The first ten distinct automatic image preloads enter the shell's early-image tier. An explicitly high-priority image always enters that tier, even when discovered later. The tier controls delivery order only: Fig does not add `fetchpriority="high"` to an ordinary image. Further eligible images still preload in ordinary stream order.
+
+Payload rendering performs the same discovery. Its asset row precedes the dependent model row, so navigation can prepare the image before committing its host node. Images discovered in suspended work stay with that work's streamed segment or Payload row.
 
 ## Ownership
 
@@ -74,9 +84,9 @@ Payload carries both groups as descriptors. Browser decoding prepares stream ass
 
 Streaming HTML seals an initial head snapshot with the shell. Metadata discovered in late primary content travels with that Suspense boundary's completion operation.
 
-Full-document shell output keeps positioned head children such as `<base>` in source order, then writes collected assets in browser-critical phases: charset and CSP metadata, viewport metadata, preconnects, font and high-priority image preloads, stylesheets, ordinary metadata, and finally remaining hints and scripts. Order within each phase remains discovery order. Assets discovered after the shell continue to stream beside the content that declared them.
+Full-document shell output keeps positioned head children such as `<base>` in source order, then writes collected assets in browser-critical phases: charset and CSP metadata, viewport metadata, preconnects, font preloads and early image preloads, stylesheets, ordinary metadata, and finally remaining hints and scripts. Order within each phase remains discovery order. Assets discovered after the shell continue to stream beside the content that declared them.
 
-Server stream results expose the shell's preload-capable delivery assets as a bounded, deduplicated HTTP `Link` value. Stylesheets become `preload` hints; scripts require an explicit `preload` or `modulepreload` descriptor because a `script()` declaration alone does not opt into elevated fetch priority. Header collection does not consume the resources: their normal HTML tags still emit for document semantics and streaming fallback. Late discoveries are absent from the sealed header snapshot.
+Server stream results expose the shell's preload-capable delivery assets as a bounded, deduplicated HTTP `Link` value. Stylesheets become `preload` hints; scripts require an explicit `preload` or `modulepreload` descriptor because a `script()` declaration alone does not opt into elevated fetch priority. Responsive image preloads remain in HTML because HTTP `Link` does not reliably carry their selection inputs. Header collection does not consume the resources: their normal HTML tags still emit for document semantics and streaming fallback. Late discoveries are absent from the sealed header snapshot.
 
 The reveal swaps fallback, content, and the complete visible metadata snapshot atomically. Partial segments never publish metadata. Prerender waits for all content, so its single static head is already final.
 
