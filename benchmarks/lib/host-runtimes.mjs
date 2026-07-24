@@ -142,14 +142,15 @@ function createFigBenchRenderer() {
       text.nodeValue = value;
     },
     viewTransition: {
-      commit: (_container, prepare, mutate, cleanup) => {
+      commit: (_container, _types, prepare, mutate, ready, finished) => {
         operations.commitViewTransition += 1;
         prepare();
         try {
           mutate();
           return "committed";
         } finally {
-          cleanup();
+          ready(true);
+          finished();
         }
       },
       apply: (instance, name, className) => {

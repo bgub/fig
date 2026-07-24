@@ -10,7 +10,10 @@ Status: exploring
 
 ```tsx
 import { ViewTransition } from "@bgub/fig";
-import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
+import {
+  enableViewTransitions,
+  getViewTransitionPseudoElements,
+} from "@bgub/fig-dom/view-transitions";
 
 enableViewTransitions();
 
@@ -29,9 +32,57 @@ Its props are:
 
 - `name?: string` — an explicit `view-transition-name`; missing or `"auto"` uses a generated name.
 - `default`, `enter`, `exit`, `share`, and `update` — each accepts `"auto"`, `"none"`, or a class string.
+- `onTransition?: (event, signal) => undefined` — runs when the native pseudo tree is ready and remains live until `signal` aborts.
 - `children?: FigNode`.
 
 `"auto"` keeps browser/default styling. `"none"` disables that phase. Empty names and `name="none"` are reserved and throw in development.
+
+## Transition Types
+
+Both transition entry points accept explicit types as trailing options:
+
+```ts
+transition(() => navigate("/inbox"), {
+  types: ["navigation", "forward"],
+});
+
+const [isPending, start] = useTransition();
+start((signal) => refresh(signal), { types: ["refresh"] });
+```
+
+Fig records types when an update reaches a root, rather than reading mutable global state at commit time. Nested scopes on the same lane union their types in insertion order, duplicate values collapse, and a commit unions the types of all rendered lanes. Types therefore follow the updates they label across async callbacks and concurrent roots without leaking into unrelated retries, deferred reveals, or later commits.
+
+When the resulting list is non-empty, Fig DOM calls `document.startViewTransition({ update, types })`. It keeps the callback-only browser form for an untyped transition.
+
+## Lifecycle And Pseudo Elements
+
+`onTransition` receives one renderer-neutral event for a participating boundary:
+
+```tsx
+<ViewTransition
+  name="article"
+  onTransition={(event, signal) => {
+    for (const surface of event.surfaces) {
+      const pseudos = getViewTransitionPseudoElements(surface);
+      pseudos.new?.animate({ opacity: [0, 1] }, { duration: 180 });
+    }
+
+    signal.addEventListener("abort", () => stopExternalWork());
+  }}
+>
+  <Article />
+</ViewTransition>
+```
+
+The event has:
+
+- `phase: "enter" | "exit" | "share" | "update"`;
+- `types`, the deduplicated types attached to this commit; and
+- `surfaces`, one opaque `{ name }` handle for each top-level host surface owned by the boundary.
+
+The callback runs after native `ready`, once the pseudo tree exists. It does not run if the browser rejects or skips readiness, or if measurement removes every surface for that boundary. The incoming boundary owns a shared pair's callback; the committed outgoing boundary owns an exit. The signal aborts at native `finished`. Callbacks return nothing, and surfaces are event-scoped handles rather than persistent refs.
+
+For Fig DOM surfaces, `getViewTransitionPseudoElements(surface)` returns `group`, `imagePair`, and nullable `old` and `new` handles. Each handle exposes its selector plus `animate`, `getAnimations`, and `getComputedStyle`. The resolver rejects fabricated surfaces and keeps DOM types out of `@bgub/fig`.
 
 ## Which Commits May Animate
 
@@ -106,6 +157,6 @@ The inline Suspense operations `s`, `c`, and `ac` collect old and new annotated 
 
 ## Known Gaps
 
-- No transition types, lifecycle callbacks, gestures, or pseudo-element refs.
+- No gesture-driven transitions.
 - A boundary shifted only by an inserted sibling may not be collected unless its parent also has work.
 - Content updates always animate; Fig does not yet remove width/height animation when size is unchanged.

@@ -15,6 +15,7 @@ A callback that outlives its call site receives a signal and returns nothing. Th
 | `on()` handlers | re-entry, listener removal |
 | `useStableEvent` handlers | re-entry, unmount, Activity hide |
 | `useTransition` callbacks | superseding run, unmount, Activity hide |
+| `ViewTransition.onTransition` | native view transition finishes |
 | `useActionState` actions | superseding run, unmount, Activity hide |
 | data-resource loaders | a newer value publishes, rejection, store disposal, entry eviction |
 
@@ -69,7 +70,7 @@ Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effec
 
 ## Transitions
 
-`transition(callback)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` remain inside the same transition.
+`transition(callback, options?)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` remain inside the same transition. Both the top-level function and the hook's `start` function accept `{ types?: readonly string[] }`; view-transition types are described in the [View Transitions concept](./view-transitions.md#transition-types).
 
 Each `useTransition` hook is one cancellation domain. Starting another run aborts and retires the previous one:
 

@@ -1,4 +1,4 @@
-import { isThenable } from "@bgub/fig/internal";
+import { isThenable, type TransitionOptions } from "@bgub/fig/internal";
 import {
   IdlePriority,
   ImmediatePriority,
@@ -108,6 +108,16 @@ let nextRetryLane: Lane = RetryLane1;
 // pending. Explicit event/sync priorities still override this fallback.
 let asyncTransitionLanes: Lanes = NoLanes;
 const asyncTransitionLaneCounts = createLaneMap<number>(0);
+
+interface TransitionTypeHooks {
+  retain?(lane: Lane, types: readonly string[] | undefined): () => void;
+  record?(root: object, lane: Lane): void;
+  complete?(root: object, remainingLanes: Lanes): void;
+}
+
+// The optional View Transition entry installs these hooks. Keeping the state
+// behind that entry leaves ordinary renderer bundles with only the hook calls.
+export const transitionTypeHooks: TransitionTypeHooks = {};
 
 export function createLaneMap<T extends number>(initial: T): LaneMap<T> {
   return Array.from({ length: TotalLanes }, () => initial);
@@ -381,19 +391,43 @@ export function runWithPriority<T>(lane: Lane, callback: () => T): T {
   }
 }
 
-export function runWithTransition<T>(callback: () => T): T {
+export function runWithTransition<T>(
+  callback: () => T,
+  options?: TransitionOptions,
+): T {
   const lane = includesSomeLane(AllTransitionLanes, currentUpdateLane)
     ? currentUpdateLane
     : claimNextTransitionLane();
 
-  return runWithTransitionLane(lane, callback);
+  return runWithTransitionLane(lane, callback, options);
 }
 
-export function runWithTransitionLane<T>(lane: Lane, callback: () => T): T {
-  const result = runWithPriority(lane, callback);
+export function runWithTransitionLane<T>(
+  lane: Lane,
+  callback: () => T,
+  options?: TransitionOptions,
+): T {
+  const releaseTransition = transitionTypeHooks.retain?.(lane, options?.types);
+  let result: T;
+  try {
+    result = runWithPriority(lane, callback);
+  } catch (error) {
+    releaseTransition?.();
+    throw error;
+  }
+
   if (isThenable(result)) {
-    const release = trackAsyncTransitionLane(lane);
+    const releaseAsyncLane = trackAsyncTransitionLane(lane);
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      releaseAsyncLane();
+      releaseTransition?.();
+    };
     result.then(release, release);
+  } else {
+    releaseTransition?.();
   }
 
   return result;
@@ -447,6 +481,6 @@ function computeExpirationTime(lane: Lane, currentTime: number): number {
   return NoTimestamp;
 }
 
-function laneToIndex(lanes: Lanes): number {
+export function laneToIndex(lanes: Lanes): number {
   return 31 - Math.clz32(lanes);
 }

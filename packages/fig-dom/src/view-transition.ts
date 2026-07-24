@@ -10,6 +10,10 @@ import type {
   ViewTransitionSurfaceMeasurement,
 } from "@bgub/fig-reconciler/view-transitions";
 import type { Container } from "./events.ts";
+import {
+  createDOMViewTransitionSurface,
+  escapeViewTransitionName,
+} from "./view-transition-pseudos.ts";
 
 interface RunningViewTransition {
   finished?: Promise<unknown>;
@@ -21,32 +25,38 @@ interface CancellableAnimation {
 }
 
 type ViewTransitionDocument = Document & {
-  startViewTransition?: (
-    update: () => void,
-  ) => RunningViewTransition | undefined;
   [VIEW_TRANSITION_PENDING_PROPERTY]?: RunningViewTransition | null;
 };
 
 function commitViewTransition(
   container: Container,
+  types: readonly string[],
   prepareSnapshot: () => void,
   mutate: () => ViewTransitionMutationResult,
-  cleanup: () => void,
+  onReady: (active: boolean) => void,
+  onFinished: () => void,
 ): ViewTransitionCommitResult {
   const owner = ownerDocument(container);
-  const start = owner.startViewTransition;
-  if (typeof start !== "function") return false;
+  const start = owner.startViewTransition?.bind(owner);
+  if (start === undefined) return false;
 
   let didMutate = false;
   let chained = false;
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
   let mutationResult: ViewTransitionMutationResult | null = null;
+  const notifyReady = once(onReady);
+  const notifyFinished = once(onFinished);
+  const finishUnanimated = (): void => {
+    restoreRootName?.();
+    notifyReady(false);
+    notifyFinished();
+  };
 
   const run = (): void => {
     prepareSnapshot();
     try {
-      const transition = start.call(owner, () => {
+      const update = () => {
         didMutate = true;
         mutationResult = mutate();
         // Before the new capture: when measurement shows every change is
@@ -56,7 +66,10 @@ function commitViewTransition(
         if (mutationResult.cancelRootSnapshot) {
           restoreRootName = cancelRootViewTransitionName(owner);
         }
-      });
+      };
+      const transition = start(
+        types.length === 0 ? update : { types: [...types], update },
+      );
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
         hideCanceledSnapshots(owner, transition, () => mutationResult);
@@ -67,30 +80,42 @@ function commitViewTransition(
       // (force-hidden) captured group, which paints the page blank for the
       // rest of the animation.
       const settleAfterTransition = transitionSettled(transition);
-      const restore = (): void => restoreRootName?.();
       if (settleAfterTransition === undefined) {
-        restore();
-        cleanup();
+        finishUnanimated();
       } else {
-        (transition?.ready ?? settleAfterTransition).then(cleanup, cleanup);
-        settleAfterTransition.then(restore, restore);
+        if (transition?.ready === undefined) {
+          onSettled(settleAfterTransition, () => notifyReady(false));
+        } else {
+          transition.ready.then(
+            () => notifyReady(true),
+            () => notifyReady(false),
+          );
+        }
+        const finish = (): void => {
+          restoreRootName?.();
+          notifyFinished();
+        };
+        onSettled(settleAfterTransition, finish);
       }
     } catch (error) {
-      restoreRootName?.();
       if (!didMutate) {
         // A chained run has no caller to report a fallback to and the
         // reconciler stays frozen until mutate runs: commit unanimated.
         // A synchronous run reports `false` so the caller falls back.
         if (chained) {
           didMutate = true;
-          mutate();
+          try {
+            mutate();
+          } finally {
+            finishUnanimated();
+          }
         } else {
           failedBeforeMutate = true;
+          finishUnanimated();
         }
-        cleanup();
         return;
       }
-      cleanup();
+      finishUnanimated();
       if (!chained) throw error;
       // Chained commit errors were already routed by the reconciler's
       // deferred-commit handling; a residual throw here is a transition
@@ -169,15 +194,8 @@ function hideCanceledSnapshots(
       return;
     }
 
-    const element = owner.documentElement as
-      | (HTMLElement & {
-          animate?: (
-            keyframes: Record<string, unknown>,
-            options: Record<string, unknown>,
-          ) => unknown;
-        })
-      | null;
-    if (element === null || typeof element.animate !== "function") return;
+    const element = owner.documentElement;
+    if (typeof element.animate !== "function") return;
 
     const track = (animation: unknown): void => {
       if (
@@ -189,7 +207,7 @@ function hideCanceledSnapshots(
 
     const hideGroup = (name: string): void => {
       track(
-        element.animate?.(
+        element.animate(
           { opacity: [0, 0], pointerEvents: ["none", "none"] },
           {
             duration: 0,
@@ -228,8 +246,7 @@ function hideCanceledSnapshots(
   else ready.then(hide, () => undefined);
 
   const settled = transitionSettled(transition);
-  if (settled === undefined) cancelHideAnimations();
-  else settled.then(cancelHideAnimations, cancelHideAnimations);
+  onSettled(settled, cancelHideAnimations);
 }
 
 function registerPendingTransition(
@@ -242,9 +259,7 @@ function registerPendingTransition(
       owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
     }
   };
-  const settled = transitionSettled(transition);
-  if (settled === undefined) release();
-  else settled.then(release, release);
+  onSettled(transitionSettled(transition), release);
 }
 
 // React caps suspended commits at 60 seconds. Besides preventing a broken or
@@ -271,8 +286,27 @@ function waitForActiveViewTransition(
   }
 
   const timeout = setTimeout(finish, VIEW_TRANSITION_TIMEOUT_MS);
-  settled.then(finish, finish);
+  onSettled(settled, finish);
   return true;
+}
+
+function onSettled(
+  promise: Promise<unknown> | undefined,
+  callback: () => void,
+): void {
+  if (promise === undefined) callback();
+  else promise.then(callback, callback);
+}
+
+function once<Args extends unknown[]>(
+  callback: (...args: Args) => void,
+): (...args: Args) => void {
+  let called = false;
+  return (...args) => {
+    if (called) return;
+    called = true;
+    callback(...args);
+  };
 }
 
 function transitionSettled(
@@ -341,11 +375,6 @@ function ownerDocument(container: Container): ViewTransitionDocument {
   return (container.ownerDocument ?? document) as ViewTransitionDocument;
 }
 
-function escapeViewTransitionName(name: string): string {
-  const escape = globalThis.CSS?.escape;
-  return escape === undefined ? name : escape(name);
-}
-
 function styleValue(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") {
     return String(value).trim();
@@ -362,6 +391,7 @@ export const viewTransitionHostConfig: ViewTransitionHostConfig<
   apply: applyViewTransitionName,
   restore: restoreViewTransitionName,
   measure: measureViewTransitionSurface,
+  createSurface: createDOMViewTransitionSurface,
   // Park eligible commits behind the shared per-document mutex while
   // rendering continues, then re-schedule once the transition settles.
   suspend(container, onFinished) {

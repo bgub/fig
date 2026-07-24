@@ -5,16 +5,22 @@ import {
   readPromise,
   Suspense,
   transition,
+  useTransition,
   useBeforePaint,
   useSyncExternalStore,
   useState,
   ViewTransition,
   type StateSetter,
+  type StartTransition,
+  type ViewTransitionEvent,
 } from "@bgub/fig";
 import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
-import { enableViewTransitions } from "./view-transitions.ts";
+import {
+  enableViewTransitions,
+  getViewTransitionPseudoElements,
+} from "./view-transitions.ts";
 
 enableViewTransitions();
 
@@ -24,6 +30,10 @@ interface MockViewTransitionDocument {
     ready: Promise<unknown>;
   };
 }
+
+type MockViewTransitionInput =
+  | (() => void)
+  | { update: () => void; types: string[] };
 
 // happy-dom has no layout: getBoundingClientRect returns zeros, so the
 // measurement pass would cancel every move. Give elements document-order
@@ -51,6 +61,202 @@ function stubDomOrderRects(container: HTMLElement, selector: string): void {
 }
 
 describe("ViewTransition", () => {
+  it("passes unioned types to the browser and scopes lifecycle surfaces to the animation", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    let startTransition: StartTransition | null = null;
+    let resolveReady = (): void => undefined;
+    let resolveFinished = (): void => undefined;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const finished = new Promise<void>((resolve) => {
+      resolveFinished = resolve;
+    });
+    const events: ViewTransitionEvent[] = [];
+    const signals: AbortSignal[] = [];
+    const nativeInputs: MockViewTransitionInput[] = [];
+    const animations: KeyframeAnimationOptions[] = [];
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+    const rootElement = document.documentElement;
+    const previousAnimate = Object.getOwnPropertyDescriptor(
+      rootElement,
+      "animate",
+    );
+
+    rootElement.animate = ((_keyframes, options) => {
+      animations.push(options as KeyframeAnimationOptions);
+      return {} as Animation;
+    }) as typeof rootElement.animate;
+    ownerDocument.startViewTransition = ((input: MockViewTransitionInput) => {
+      nativeInputs.push(input);
+      const update = typeof input === "function" ? input : input.update;
+      update();
+      return { finished, ready };
+    }) as MockViewTransitionDocument["startViewTransition"];
+
+    function App() {
+      const [label, set] = useState("First");
+      const [, start] = useTransition();
+      setLabel = set;
+      startTransition = start;
+      return createElement(
+        ViewTransition,
+        {
+          name: "card",
+          onTransition(event: ViewTransitionEvent, signal: AbortSignal) {
+            events.push(event);
+            signals.push(signal);
+            getViewTransitionPseudoElements(event.surfaces[0]).new?.animate(
+              { opacity: [0, 1] },
+              120,
+            );
+          },
+        },
+        createElement("section", null, label),
+        createElement("aside", null, "Metadata"),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() =>
+        transition(
+          () =>
+            transition(() => setLabel?.("Second"), {
+              types: ["forward", "navigation"],
+            }),
+          { types: ["navigation"] },
+        ),
+      );
+
+      expect(nativeInputs).toHaveLength(1);
+      expect(nativeInputs[0]).toMatchObject({
+        types: ["navigation", "forward"],
+      });
+      expect(events).toEqual([]);
+
+      resolveReady();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        phase: "update",
+        types: ["navigation", "forward"],
+      });
+      expect(events[0].surfaces.map((surface) => surface.name)).toEqual([
+        "card",
+        "card_1",
+      ]);
+      expect(signals[0].aborted).toBe(false);
+      expect(animations).toContainEqual({
+        duration: 120,
+        pseudoElement: "::view-transition-new(card)",
+      });
+
+      const pseudos = getViewTransitionPseudoElements(events[0].surfaces[0]);
+      expect(pseudos.group.selector).toBe("::view-transition-group(card)");
+      expect(pseudos.imagePair.selector).toBe(
+        "::view-transition-image-pair(card)",
+      );
+      expect(pseudos.old?.selector).toBe("::view-transition-old(card)");
+      expect(pseudos.new?.selector).toBe("::view-transition-new(card)");
+
+      resolveFinished();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(signals[0].aborted).toBe(true);
+
+      await act(() =>
+        startTransition?.(() => setLabel?.("Third"), { types: ["refresh"] }),
+      );
+      expect(nativeInputs[1]).toMatchObject({ types: ["refresh"] });
+    } finally {
+      resolveReady();
+      resolveFinished();
+      await Promise.resolve();
+      await Promise.resolve();
+      ownerDocument.startViewTransition = previousStart;
+      if (previousAnimate === undefined) {
+        Reflect.deleteProperty(rootElement, "animate");
+      } else {
+        Object.defineProperty(rootElement, "animate", previousAnimate);
+      }
+      container.remove();
+    }
+  });
+
+  it("reports enter, share, and exit from the boundary that owns each phase", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setStep: StateSetter<number> | null = null;
+    const phases: Array<{
+      label: string;
+      new: boolean;
+      old: boolean;
+      phase: ViewTransitionEvent["phase"];
+    }> = [];
+    const signals: AbortSignal[] = [];
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [step, set] = useState(0);
+      setStep = set;
+      if (step === 0 || step === 3) return null;
+
+      const label = step === 1 ? "old" : "new";
+      return createElement(
+        ViewTransition,
+        {
+          key: label,
+          name: "hero",
+          onTransition(event: ViewTransitionEvent, signal: AbortSignal) {
+            const pseudos = getViewTransitionPseudoElements(event.surfaces[0]);
+            phases.push({
+              label,
+              new: pseudos.new !== null,
+              old: pseudos.old !== null,
+              phase: event.phase,
+            });
+            signals.push(signal);
+          },
+        },
+        createElement("article", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setStep?.(1)));
+      await Promise.resolve();
+      await act(() => transition(() => setStep?.(2)));
+      await Promise.resolve();
+      await act(() => transition(() => setStep?.(3)));
+      await Promise.resolve();
+
+      expect(phases).toEqual([
+        { label: "old", new: true, old: false, phase: "enter" },
+        { label: "new", new: true, old: true, phase: "share" },
+        { label: "new", new: false, old: true, phase: "exit" },
+      ]);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
   it("wraps transition commits and restores temporary names", async () => {
     const container = document.createElement("div");
     document.body.append(container);

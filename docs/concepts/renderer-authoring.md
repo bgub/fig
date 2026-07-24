@@ -81,7 +81,7 @@ Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`
 
 Returning `false` from a commit coordinator promises it performed no mutation, so the ordinary commit path may continue. `"committed"` means the transaction completed synchronously. `"deferred"` freezes that root until the coordinator calls `captureFinished()` after running the transaction.
 
-`@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, and native-commit operations into a coordinator. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
+`@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, surface-resolution, and native-commit operations into a coordinator. The commit adapter receives the commit's transition types and separate readiness and finished callbacks: readiness restores temporary host state and publishes lifecycle events, while finished aborts their signals. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
 
 ## Scheduler
 

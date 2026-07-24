@@ -79,8 +79,12 @@ export {
   type LazyLoader,
   type Props,
   type SuspenseProps,
+  type ViewTransitionCallback,
   type ViewTransitionClass,
+  type ViewTransitionEvent,
+  type ViewTransitionPhase,
   type ViewTransitionProps,
+  type ViewTransitionSurface,
 } from "./element.ts";
 export {
   clientOnlyHostBehavior,
@@ -157,4 +161,8 @@ export {
   type Thenable,
   trackThenable,
 } from "./thenables.ts";
-export { setTransitionHandler, type TransitionHandler } from "./transition.ts";
+export {
+  setTransitionHandler,
+  type TransitionHandler,
+  type TransitionOptions,
+} from "./transition.ts";

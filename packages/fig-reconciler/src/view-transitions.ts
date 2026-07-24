@@ -1,7 +1,11 @@
 import type {
   Props,
+  ViewTransitionCallback,
   ViewTransitionClass,
+  ViewTransitionEvent,
+  ViewTransitionPhase,
   ViewTransitionProps,
+  ViewTransitionSurface as PublicViewTransitionSurface,
 } from "@bgub/fig";
 import type {
   ReconcilerCommitResult,
@@ -36,6 +40,7 @@ import type {
   ViewTransitionPlannerRoot as PlannerRoot,
   ViewTransitionPlannerState as ViewTransitionState,
 } from "./view-transition-planner-types.ts";
+import { getRootTransitionTypes } from "./transition-types.ts";
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
@@ -58,13 +63,20 @@ export interface ViewTransitionMutationResult {
   cancelRootSnapshot: boolean;
 }
 
+export interface ViewTransitionSurfaceSnapshots {
+  readonly old: boolean;
+  readonly new: boolean;
+}
+
 export interface ViewTransitionHostConfig<Container, Instance> {
   commit(
     this: void,
     container: Container,
+    types: readonly string[],
     prepareSnapshot: () => void,
     mutate: () => ViewTransitionMutationResult,
-    cleanup: () => void,
+    ready: (active: boolean) => void,
+    finished: () => void,
   ): ViewTransitionCommitResult;
   apply(
     this: void,
@@ -77,10 +89,14 @@ export interface ViewTransitionHostConfig<Container, Instance> {
     this: void,
     instance: Instance,
   ): ViewTransitionSurfaceMeasurement | null;
+  createSurface?(
+    this: void,
+    instance: Instance,
+    name: string,
+    snapshots: ViewTransitionSurfaceSnapshots,
+  ): PublicViewTransitionSurface;
   suspend?(this: void, container: Container, onFinished: () => void): boolean;
 }
-
-type ViewTransitionPhase = "enter" | "exit" | "share" | "update";
 
 interface ViewTransitionSurface<Instance> {
   boundary: PlannerFiber;
@@ -98,6 +114,7 @@ interface ViewTransitionPlan<Instance> {
   newSurfaces: ViewTransitionSurface<Instance>[];
   oldSurfaces: ViewTransitionSurface<Instance>[];
   rootAffected: boolean;
+  types: string[];
 }
 
 interface ViewTransitionCollection<Instance> {
@@ -137,6 +154,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       newSurfaces: [],
       oldSurfaces: [],
       rootAffected: false,
+      types: getRootTransitionTypes(root, root.renderLanes),
     };
     const collection: ViewTransitionCollection<Instance> = {
       changedBoundaries: null,
@@ -665,6 +683,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
       if (surface.phase === "enter") {
         if (measurement !== null && !measurement.inViewport) {
+          surface.skipped = true;
           continue;
         }
         host.apply(surface.instance, surface.name, surface.className);
@@ -683,8 +702,10 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           const offscreen = !before.inViewport && !measurement.inViewport;
 
           if (offscreen || (!surface.mustAnimate && !moved)) {
+            surface.skipped = true;
             host.restore(surface.instance, surface.props);
             if (oldSurface !== undefined) {
+              oldSurface.skipped = true;
               result.canceledNames.push(surface.name);
             }
             continue;
@@ -728,6 +749,71 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     }
   }
 
+  function participatingSurfaceNames(
+    surfaces: ViewTransitionSurface<Instance>[],
+  ): Set<string> {
+    const names = new Set<string>();
+    for (const surface of surfaces) {
+      if (!surface.skipped) names.add(surface.name);
+    }
+    return names;
+  }
+
+  function dispatchViewTransitionCallbacks(
+    plan: ViewTransitionPlan<Instance>,
+    signal: AbortSignal,
+  ): void {
+    const groups = new Map<
+      PlannerFiber,
+      {
+        callback: ViewTransitionCallback;
+        surfaces: ViewTransitionSurface<Instance>[];
+      }
+    >();
+    const collect = (surface: ViewTransitionSurface<Instance>): void => {
+      if (surface.skipped) return;
+      const callback = (surface.boundary.props as ViewTransitionProps)
+        .onTransition;
+      if (callback === undefined) return;
+      const group = groups.get(surface.boundary);
+      if (group === undefined) {
+        groups.set(surface.boundary, { callback, surfaces: [surface] });
+      } else {
+        group.surfaces.push(surface);
+      }
+    };
+
+    // New surfaces own enter, update, and share callbacks. Exit has no new
+    // side, so its committed boundary owns the callback instead.
+    for (const surface of plan.newSurfaces) collect(surface);
+    for (const surface of plan.oldSurfaces) {
+      if (surface.phase === "exit") collect(surface);
+    }
+    if (groups.size === 0) return;
+
+    const oldNames = participatingSurfaceNames(plan.oldSurfaces);
+    const newNames = participatingSurfaceNames(plan.newSurfaces);
+    for (const { callback, surfaces: group } of groups.values()) {
+      const surfaces = group.map((surface) => {
+        const snapshots: ViewTransitionSurfaceSnapshots = {
+          old: oldNames.has(surface.name),
+          new: newNames.has(surface.name),
+        };
+        return (
+          host.createSurface?.(surface.instance, surface.name, snapshots) ?? {
+            name: surface.name,
+          }
+        );
+      });
+      const event: ViewTransitionEvent = {
+        phase: group[0].phase,
+        surfaces,
+        types: plan.types,
+      };
+      callback(event, signal);
+    }
+  }
+
   return {
     name: "view-transitions",
     viewTransitions: true,
@@ -743,9 +829,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
       let didRunMutation = false;
+      let didFinish = false;
+      let controller: AbortController | null = null;
 
       return host.commit(
         context.container,
+        plan.types,
         () => applyOldViewTransitionSurfaces(plan),
         () => {
           didRunMutation = true;
@@ -756,7 +845,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
             }
           );
         },
-        () => {
+        (active) => {
           try {
             restoreViewTransitionSurfaces(plan);
           } finally {
@@ -764,6 +853,14 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
             // fails before mutation so the reconciler can fall back normally.
             if (didRunMutation) context.captureFinished();
           }
+          if (active && !didFinish && controller === null) {
+            controller = new AbortController();
+            dispatchViewTransitionCallbacks(plan, controller.signal);
+          }
+        },
+        () => {
+          didFinish = true;
+          controller?.abort();
         },
       );
     },

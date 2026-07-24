@@ -90,6 +90,26 @@ export interface FigActivity {
 
 export type ViewTransitionClass = "auto" | "none" | (string & {});
 
+export type ViewTransitionPhase = "enter" | "exit" | "share" | "update";
+
+// Renderer-neutral identity for one named host surface in the native
+// transition. Renderer packages can resolve it into their own imperative
+// handles without putting host types in core.
+export interface ViewTransitionSurface {
+  readonly name: string;
+}
+
+export interface ViewTransitionEvent {
+  readonly phase: ViewTransitionPhase;
+  readonly surfaces: readonly ViewTransitionSurface[];
+  readonly types: readonly string[];
+}
+
+export type ViewTransitionCallback = (
+  event: ViewTransitionEvent,
+  signal: AbortSignal,
+) => undefined;
+
 export interface ViewTransitionProps {
   name?: string;
   children?: FigNode;
@@ -98,6 +118,7 @@ export interface ViewTransitionProps {
   exit?: ViewTransitionClass;
   share?: ViewTransitionClass;
   update?: ViewTransitionClass;
+  onTransition?: ViewTransitionCallback;
 }
 
 export interface FigViewTransition {

@@ -10,7 +10,7 @@
 
 ## React Parity Gaps
 
-- React Canary ViewTransition transition types, lifecycle callbacks, gestures, and pseudo-element refs
+- React Canary ViewTransition gestures
   - Shouldn't be too difficult hopefully
 
 ## API

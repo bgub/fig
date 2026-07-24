@@ -21,6 +21,7 @@ import {
   type Props,
   type StartTransition,
   type StateSetter,
+  type TransitionOptions,
   type ViewTransitionProps,
 } from "@bgub/fig";
 import {
@@ -167,6 +168,7 @@ import {
   runWithPriority,
   runWithTransition,
   runWithTransitionLane,
+  transitionTypeHooks,
   SelectiveHydrationLane,
   SyncLane,
 } from "./lanes.ts";
@@ -1254,10 +1256,16 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function markRootPending(root: R, lane: Lane): void {
     markRootUpdated(root, lane);
+    transitionTypeHooks.record?.(root, lane);
     pendingRoots.add(root);
     if (currentCommitEffectPhase === BeforePaintEffect && isSyncLane(lane)) {
       needsPostCommitSyncFlush = true;
     }
+  }
+
+  function markRootCompleted(root: R, remainingLanes: Lanes): void {
+    markRootFinished(root, remainingLanes);
+    transitionTypeHooks.complete?.(root, remainingLanes);
   }
 
   function markCommitEffectPhase(root: R, phase: EffectPhase): void {
@@ -2823,7 +2831,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
 
       const instance = hook.memoizedState.instance;
-      start = (callback: (signal: AbortSignal) => void | PromiseLike<void>) => {
+      start = (
+        callback: (signal: AbortSignal) => void | PromiseLike<void>,
+        options?: TransitionOptions,
+      ) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Transitions cannot be started while rendering a component.",
@@ -2850,6 +2861,7 @@ export function createRenderer<Container, Instance, TextInstance>(
               });
             }
           },
+          options,
         );
       };
       hook.memoizedState.start = start;
@@ -2872,6 +2884,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       failed: boolean,
       asynchronous: boolean,
     ) => void,
+    options?: TransitionOptions,
   ): void {
     if (retireRun(instance)) updatePending(-1, DefaultLane);
     const lane = claimNextTransitionLane();
@@ -2897,7 +2910,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let result: T | PromiseLike<T>;
     try {
       const invoke = () =>
-        runWithTransitionLane(lane, () => run(controller.signal));
+        runWithTransitionLane(lane, () => run(controller.signal), options);
       result = store === undefined ? invoke() : store.run(invoke);
     } catch (error) {
       settle(error, true, false);
@@ -3787,7 +3800,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // updates on the finishedWork fibers (begin cleared the lanes that
         // actually rendered), so merging finishedWork.lanes | childLanes revives
         // exactly the work still owed without resurrecting completed lanes.
-        markRootFinished(
+        markRootCompleted(
           root,
           (root.pendingLanes & ~root.renderLanes) |
             finishedWork.lanes |
@@ -4097,7 +4110,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.commitEffectPhases = 0;
     root.needsCommitDeletions = false;
     root.committedCaughtErrors.length = 0;
-    markRootFinished(root, NoLanes);
+    markRootCompleted(root, NoLanes);
     pendingRoots.delete(root);
   }
 

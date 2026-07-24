@@ -2,6 +2,12 @@ import { createViewTransitionCommitCoordinator } from "@bgub/fig-reconciler/view
 import { domRenderer } from "./renderer.ts";
 import { viewTransitionHostConfig } from "./view-transition.ts";
 
+export {
+  getViewTransitionPseudoElements,
+  type ViewTransitionPseudoElement,
+  type ViewTransitionPseudoElements,
+} from "./view-transition-pseudos.ts";
+
 const coordinator = createViewTransitionCommitCoordinator(
   viewTransitionHostConfig,
 );

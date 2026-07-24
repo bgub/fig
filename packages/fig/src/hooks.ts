@@ -1,6 +1,7 @@
 import type { FigContext } from "./context.ts";
 import type { DataResource, FigDataStore } from "./data.ts";
 import { resolveCurrentDataStore } from "./data.ts";
+import type { TransitionOptions } from "./transition.ts";
 
 // The useState updater: accepts the next state, or an updater function of
 // the previous state for stale-closure safety.
@@ -30,6 +31,7 @@ export type ActionStateRunner<Args extends unknown[]> = (...args: Args) => void;
  */
 export type StartTransition = (
   callback: (signal: AbortSignal) => void | PromiseLike<void>,
+  options?: TransitionOptions,
 ) => void;
 type Callback = (...args: never[]) => unknown;
 

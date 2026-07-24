@@ -1,4 +1,11 @@
-export type TransitionHandler = <T>(callback: () => T) => T;
+export interface TransitionOptions {
+  types?: readonly string[];
+}
+
+export type TransitionHandler = <T>(
+  callback: () => T,
+  options?: TransitionOptions,
+) => T;
 
 let transitionHandler: TransitionHandler = (callback) => callback();
 
@@ -7,8 +14,11 @@ let transitionHandler: TransitionHandler = (callback) => callback();
  * `callback` returns a thenable, updates after an `await` remain in the
  * transition priority scope until it settles.
  */
-export function transition<T>(callback: () => T): T {
-  return transitionHandler(callback);
+export function transition<T>(
+  callback: () => T,
+  options?: TransitionOptions,
+): T {
+  return transitionHandler(callback, options);
 }
 
 export function setTransitionHandler(

@@ -56,8 +56,12 @@ export {
   Suspense,
   type SuspenseProps,
   ViewTransition,
+  type ViewTransitionCallback,
   type ViewTransitionClass,
+  type ViewTransitionEvent,
+  type ViewTransitionPhase,
   type ViewTransitionProps,
+  type ViewTransitionSurface,
 } from "./element.ts";
 export {
   createMixin,
@@ -124,4 +128,4 @@ export {
   type TitleResource,
   title,
 } from "./resource.ts";
-export { transition } from "./transition.ts";
+export { transition, type TransitionOptions } from "./transition.ts";

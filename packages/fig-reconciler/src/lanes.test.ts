@@ -32,6 +32,7 @@ import {
   TransitionLane2,
   TransitionLane3,
 } from "./lanes.ts";
+import { getCurrentTransitionTypes } from "./transition-types.ts";
 import { NormalPriority } from "./scheduler.ts";
 
 function root(): LaneRoot {
@@ -106,6 +107,59 @@ describe("lanes", () => {
     });
 
     expect(requestUpdateLane()).toBe(DefaultLane);
+  });
+
+  it("unions transition types within a lane and releases them with the scope", () => {
+    let transitionLane = NoLanes;
+    runWithTransition(
+      () => {
+        const lane = requestUpdateLane();
+        transitionLane = lane;
+        expect(getCurrentTransitionTypes(lane)).toEqual(
+          new Set(["navigation"]),
+        );
+
+        runWithTransition(
+          () => {
+            expect(getCurrentTransitionTypes(lane)).toEqual(
+              new Set(["navigation", "forward"]),
+            );
+          },
+          { types: ["forward", "navigation"] },
+        );
+
+        expect(getCurrentTransitionTypes(lane)).toEqual(
+          new Set(["navigation", "forward"]),
+        );
+      },
+      { types: ["navigation"] },
+    );
+
+    expect(getCurrentTransitionTypes(transitionLane)).toBe(null);
+  });
+
+  it("keeps transition types active across an async scope", async () => {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let transitionLane = NoLanes;
+
+    const pending = runWithTransition(
+      async () => {
+        transitionLane = requestUpdateLane();
+        await gate;
+        expect(requestUpdateLane()).toBe(transitionLane);
+        expect(getCurrentTransitionTypes(transitionLane)).toEqual(
+          new Set(["navigation"]),
+        );
+      },
+      { types: ["navigation"] },
+    );
+
+    release();
+    await pending;
+    expect(getCurrentTransitionTypes(transitionLane)).toBe(null);
   });
 
   it("selects pending non-suspended lanes and includes entanglements", () => {
