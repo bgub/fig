@@ -150,11 +150,11 @@ describe("tanstackStart", () => {
 
     expect(config?.optimizeDeps?.include).toEqual([
       "existing-include",
-      "@tanstack/history",
+      "@bgub/fig-tanstack-router > @tanstack/history",
       "@tanstack/router-core",
       "@tanstack/router-core/scroll-restoration-script",
       "@tanstack/router-core/ssr/client",
-      "@tanstack/store",
+      "@bgub/fig-tanstack-router > @tanstack/store",
     ]);
     expect(config?.optimizeDeps?.exclude).toEqual([
       "existing-exclude",
