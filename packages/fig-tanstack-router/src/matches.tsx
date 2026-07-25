@@ -34,7 +34,12 @@ import {
 import { getScrollRestorationScriptForRouter } from "@tanstack/router-core/scroll-restoration-script";
 import { batch } from "@tanstack/store";
 import { dataStoreFromContext } from "./data-context.ts";
-import { MatchContext, RouterContext, useRouter } from "./hooks.tsx";
+import {
+  MatchContext,
+  readRouterContext,
+  RouterContext,
+  useRouter,
+} from "./hooks.tsx";
 import {
   collectRouteAssets,
   renderPositionedRouterTag,
@@ -62,13 +67,20 @@ type HistoryUpdate = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
 export type RouterProviderProps<TRouter extends AnyRouter = RegisteredRouter> =
   Partial<Omit<TRouter["options"], "context">> & {
     context?: Partial<TRouter["options"]["context"]>;
+    ownerDocument?: Document;
     router: TRouter;
   };
 
 export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
+  ownerDocument,
   router,
   ...options
 }: RouterProviderProps<TRouter>): FigNode {
+  const contextValue = useMemo(
+    () => ({ ownerDocument, router }),
+    [ownerDocument, router],
+  );
+
   if (Object.keys(options).length > 0) {
     if ("context" in options) {
       options.context = {
@@ -81,7 +93,7 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
 
   return createElement(
     RouterContext,
-    { value: router },
+    { value: contextValue },
     createElement(Transitioner),
     createElement(Matches),
   );
@@ -593,13 +605,13 @@ export function Outlet(): FigNode {
 }
 
 export function HeadContent(): FigNode {
-  const router = useRouter<AnyRouter>();
+  const { ownerDocument, router } = readRouterContext();
   const selectTags = useCallback(
     (matches: AnyRouteMatch[]) => buildHeadTags(router, matches),
     [router],
   );
   const tags = useReadableStore(router.stores.matches, selectTags, deepEqual);
-  return renderRouterHeadTags(tags);
+  return renderRouterHeadTags(tags, ownerDocument);
 }
 
 export function Scripts(): FigNode {

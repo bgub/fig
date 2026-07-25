@@ -68,7 +68,12 @@ export type RouteMatchResult<
     : MakeRouteMatchUnion<TRouter>
   : TSelected;
 
-export const RouterContext = createContext<AnyRouter | null>(null);
+interface RouterContextValue {
+  ownerDocument: Document | undefined;
+  router: AnyRouter;
+}
+
+export const RouterContext = createContext<RouterContextValue | null>(null);
 export const MatchContext =
   createContext<RouterReadableStore<AnyRouteMatch> | null>(null);
 const missingMatch = Symbol("missing route match");
@@ -78,14 +83,15 @@ const missingMatchStore = {
 export function useRouter<
   TRouter extends AnyRouter = RegisteredRouter,
 >(): TRouter {
-  return requireRouter(readContext(RouterContext)) as TRouter;
+  return readRouterContext().router as TRouter;
 }
 
-function requireRouter(router: AnyRouter | null): AnyRouter {
-  if (router === null) {
+export function readRouterContext(): RouterContextValue {
+  const value = readContext(RouterContext);
+  if (value === null) {
     throw new Error("Router hooks must be used inside <RouterProvider>.");
   }
-  return router;
+  return value;
 }
 
 function useStoreSelector<TValue, TSelected = TValue>(
@@ -125,7 +131,7 @@ export function useRouterState<
     router?: TRouter;
   },
 ): TSelected {
-  const router = requireRouter(options?.router ?? readContext(RouterContext));
+  const router = options?.router ?? readRouterContext().router;
   const select = useStoreSelector(router, options);
   return useReadableStore(router.stores.__store, select) as TSelected;
 }

@@ -27,12 +27,23 @@ export async function hydrateStart(
   const { container = document, ...rootOptions } = options;
   await waitForRouterBootstrap();
   const router = await hydrateTanStackStart();
-  const dataStore = hydrateStartDataStore(router.options.context, document);
+  const ownerDocument =
+    container.nodeType === 9
+      ? (container as Document)
+      : (container.ownerDocument ?? document);
+  const dataStore = hydrateStartDataStore(
+    router.options.context,
+    ownerDocument,
+  );
 
-  const root = hydrateRoot(container, <RouterProvider router={router} />, {
-    ...rootOptions,
-    dataStore,
-  });
+  const root = hydrateRoot(
+    container,
+    <RouterProvider ownerDocument={ownerDocument} router={router} />,
+    {
+      ...rootOptions,
+      dataStore,
+    },
+  );
   window.$_TSR?.h();
   return { root, router };
 }

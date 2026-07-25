@@ -90,7 +90,7 @@ Each active match owns descriptors derived from route metadata and the Start man
 
 Within each match, authored links and manifest stylesheets are discovered before generated module preloads. Render-blocking CSS therefore begins loading before the route's JavaScript dependency hints without changing authored stylesheet order.
 
-`HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker.
+`HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker. When Start builds side-effect CSS imports with `server.build.inlineCss`, the server style carries TanStack's hydration marker and the client's empty manifest placeholder adopts its text. Hydration therefore retains the inlined CSS instead of replacing it with an empty style. `hydrateStart` scopes that adoption to the container's document; standalone roots targeting a non-global document pass it to `RouterProvider` as `ownerDocument`.
 
 `assetCrossOrigin` is a router option because route assets are translated before the document renders. The server nonce applies to both registry assets and positioned tags.
 

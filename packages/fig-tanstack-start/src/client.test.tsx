@@ -20,10 +20,36 @@ import { hydrateStart } from "./client.tsx";
 
 afterEach(() => {
   delete window.$_TSR;
+  vi.clearAllMocks();
   vi.restoreAllMocks();
 });
 
 describe("TanStack Start client hydration", () => {
+  it("uses the container document for data and inline CSS hydration", async () => {
+    const router = {
+      options: { context: createStartDataContext().context },
+    };
+    const root = { unmount: vi.fn() };
+    const serverDocument = document.implementation.createHTMLDocument("");
+    const querySelector = vi.spyOn(serverDocument, "querySelector");
+    const hydrated = vi.fn();
+    window.$_TSR = { h: hydrated } as never;
+    mocks.hydrateTanStackStart.mockResolvedValue(router);
+    mocks.hydrateRoot.mockReturnValue(root);
+
+    await expect(hydrateStart({ container: serverDocument })).resolves.toEqual({
+      root,
+      router,
+    });
+
+    const [, node] = mocks.hydrateRoot.mock.calls[0] ?? [];
+    expect(node).toMatchObject({
+      props: { ownerDocument: serverDocument, router },
+    });
+    expect(querySelector).toHaveBeenCalledWith("#__fig_tanstack_start_data__");
+    expect(hydrated).toHaveBeenCalledOnce();
+  });
+
   it("waits for the positioned router bootstrap while parsing", async () => {
     const router = {
       options: { context: createStartDataContext().context },

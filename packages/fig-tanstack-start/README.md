@@ -105,6 +105,25 @@ function Document() {
 
 `StartScripts` serializes the Fig store into the server document with Fig's value codec, establishes the adapter's Payload insertion point, and then renders TanStack's bootstrap scripts. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
+## CSS
+
+Use TanStack Start's standard side-effect CSS imports and enable build-time
+inlining when desired:
+
+```ts
+import "./styles.css";
+```
+
+```ts
+tanstackStart({
+  server: { build: { inlineCss: true } },
+});
+```
+
+`HeadContent` emits the server's inline style and adopts its contents when
+TanStack dehydrates an empty client placeholder, so full-document hydration
+keeps the page styled.
+
 ## Request and function middleware
 
 The package root also exports TanStack's `createStart`, `createMiddleware`, and

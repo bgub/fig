@@ -1,8 +1,81 @@
+// @vitest-environment happy-dom
+import { createElement } from "@bgub/fig";
+import { flushSync, hydrateRoot } from "@bgub/fig-dom";
 import type { AnyRouteMatch, AnyRouter, Manifest } from "@tanstack/router-core";
 import { describe, expect, it } from "vitest";
-import { collectRouteAssets } from "./route-assets.ts";
+import { collectRouteAssets, renderRouterHeadTags } from "./route-assets.ts";
 
 describe("TanStack route asset translation", () => {
+  it("adopts server-rendered inline CSS into the hydration placeholder", () => {
+    const css = ".app { color: rebeccapurple; }";
+    document.head.innerHTML = `<style data-tsr-inline-css>${css}</style>`;
+    const recoverableErrors: unknown[] = [];
+
+    const root = flushSync(() =>
+      hydrateRoot(
+        document.head,
+        renderRouterHeadTags([
+          {
+            tag: "style",
+            attrs: { suppressHydrationWarning: true },
+            inlineCss: true,
+          },
+        ]),
+        { onRecoverableError: (error) => recoverableErrors.push(error) },
+      ),
+    );
+
+    try {
+      expect(recoverableErrors).toEqual([]);
+      expect(document.head.querySelector("style")?.textContent).toBe(css);
+    } finally {
+      root.unmount();
+      document.head.replaceChildren();
+    }
+  });
+
+  it("retains inline CSS when a non-global document recovers hydration", () => {
+    const css = ".app { color: rebeccapurple; }";
+    const serverDocument = document.implementation.createHTMLDocument("");
+    serverDocument.head.innerHTML = `<style data-tsr-inline-css>${css}</style>`;
+    serverDocument.body.innerHTML = "<main>Server</main>";
+    const recoverableErrors: unknown[] = [];
+
+    const root = flushSync(() =>
+      hydrateRoot(
+        serverDocument,
+        createElement(
+          "html",
+          null,
+          createElement(
+            "head",
+            null,
+            renderRouterHeadTags(
+              [
+                {
+                  tag: "style",
+                  attrs: { suppressHydrationWarning: true },
+                  inlineCss: true,
+                },
+              ],
+              serverDocument,
+            ),
+          ),
+          createElement("body", null, createElement("main", null, "Client")),
+        ),
+        { onRecoverableError: (error) => recoverableErrors.push(error) },
+      ),
+    );
+
+    try {
+      expect(recoverableErrors).toHaveLength(1);
+      expect(serverDocument.head.querySelector("style")?.textContent).toBe(css);
+      expect(serverDocument.body.textContent).toBe("Client");
+    } finally {
+      root.unmount();
+    }
+  });
+
   it("collects blocking styles before generated module preloads", () => {
     const router = { options: {} } as unknown as AnyRouter;
     const match = {

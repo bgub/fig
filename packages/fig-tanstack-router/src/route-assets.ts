@@ -26,6 +26,8 @@ interface RouteAssets {
   scripts: RouterManagedTag[];
 }
 
+const inlineCssHydrationAttribute = "data-tsr-inline-css";
+
 export function collectRouteAssets(
   router: AnyRouter,
   match: AnyRouteMatch,
@@ -101,13 +103,24 @@ export function collectRouteAssets(
   return { resources, links, headScripts, scripts };
 }
 
-export function renderRouterHeadTags(tags: RouterManagedTag[]): FigNode {
+export function renderRouterHeadTags(
+  tags: RouterManagedTag[],
+  ownerDocument?: Document,
+): FigNode {
   const resources: FigAssetResource[] = [];
   const nodes: FigNode[] = [];
   for (const tag of tags) {
     const resource = resourceFromTag(tag);
     if (resource === null || assetResourceDestination(resource) !== "head") {
-      nodes.push(renderPositionedRouterTag(tag));
+      nodes.push(
+        renderPositionedRouterTag(
+          tag.tag === "style" &&
+            tag.inlineCss === true &&
+            tag.children === undefined
+            ? { ...tag, children: hydratedInlineCss(ownerDocument) }
+            : tag,
+        ),
+      );
     } else {
       resources.push(resource);
     }
@@ -116,12 +129,22 @@ export function renderRouterHeadTags(tags: RouterManagedTag[]): FigNode {
 }
 
 export function renderPositionedRouterTag(tag: RouterManagedTag): FigNode {
+  const inlineCss = tag.tag === "style" && tag.inlineCss === true;
   return createElement(
     tag.tag,
     preventAssetResourceHoist({
       ...nativeAttributes(tag.attrs),
+      ...(inlineCss ? { [inlineCssHydrationAttribute]: "" } : {}),
       ...(tag.children === undefined ? {} : { unsafeHTML: tag.children }),
     }),
+  );
+}
+
+function hydratedInlineCss(ownerDocument: Document | undefined): string {
+  return (
+    (ownerDocument ?? globalThis.document)?.querySelector<HTMLStyleElement>(
+      `style[${inlineCssHydrationAttribute}]`,
+    )?.textContent ?? ""
   );
 }
 
