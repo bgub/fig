@@ -1,3 +1,12 @@
+## @bgub/fig-dom@0.1.0-alpha.5
+
+### Avoid false selected-option hydration warnings
+
+Hydrating a select now recognizes the `selected` attributes synthesized by
+server rendering from the select's value. Genuine mismatched selected options
+still produce a development warning, and uncontrolled selects continue to
+preserve user changes made before hydration.
+
 ## @bgub/fig-dom@0.1.0-alpha.3
 
 ### Renderers now install their reconciler implementation

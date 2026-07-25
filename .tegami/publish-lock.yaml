@@ -1,11 +1,13 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Preserve TanStack Start inline CSS during hydration\n\nAdopt the server-rendered contents of TanStack Start's inline CSS placeholder\nso full-document hydration no longer replaces the application styles with an\nempty style element.\n"
-    filename: tanstack-inline-css-hydration.md
+  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Avoid false selected-option hydration warnings\n\nHydrating a select now recognizes the `selected` attributes synthesized by\nserver rendering from the select's value. Genuine mismatched selected options\nstill produce a development warning, and uncontrolled selects continue to\npreserve user changes made before hydration.\n"
+    filename: select-hydration-selected.md
     v: 0.0.0
 core:packages:
   - id: npm:@bgub/fig
     updated: true
-  - id: npm:@bgub/fig-dom
+  - changelogIds:
+      - select-hydration-selected.md
+    id: npm:@bgub/fig-dom
     updated: true
   - id: npm:@bgub/fig-reconciler
     updated: true
@@ -13,13 +15,9 @@ core:packages:
     updated: true
   - id: npm:@bgub/fig-server
     updated: true
-  - changelogIds:
-      - tanstack-inline-css-hydration.md
-    id: npm:@bgub/fig-tanstack-router
+  - id: npm:@bgub/fig-tanstack-router
     updated: true
-  - changelogIds:
-      - tanstack-inline-css-hydration.md
-    id: npm:@bgub/fig-tanstack-start
+  - id: npm:@bgub/fig-tanstack-start
     updated: true
   - id: npm:@bgub/fig-vite
     updated: true
