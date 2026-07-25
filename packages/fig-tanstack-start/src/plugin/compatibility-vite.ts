@@ -97,8 +97,13 @@ export function startCompatibilityPlugin(): PluginOption {
             // environment; prebundling these first freezes server code into
             // the client graph and makes client-side server functions crash.
             ...tanstackStartClientModules,
+            // The compiler-facing aliases resolve to these Fig packages. Keep
+            // both spellings external so Vite cannot evaluate one through a
+            // dependency prebundle and the other as an application module.
             figTanStackStartPackage,
             figRouterPackage,
+            tanstackStartPackage,
+            tanstackRouterPackage,
           ],
           rolldownOptions: {
             ...environment.optimizeDeps?.rolldownOptions,

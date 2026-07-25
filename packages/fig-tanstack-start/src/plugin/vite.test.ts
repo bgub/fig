@@ -139,7 +139,7 @@ describe("tanstackStart", () => {
     expect(incompatibleRuntimeModules([solidModule])).toEqual([solidModule]);
   });
 
-  it("keeps compiler-sensitive Start modules out of dependency prebundling", () => {
+  it("keeps application-bound compatibility modules out of dependency prebundling", () => {
     const plugin = compatibilityPlugin();
     const config = plugin.configEnvironment("client", {
       optimizeDeps: {
@@ -159,6 +159,8 @@ describe("tanstackStart", () => {
       "@tanstack/start-client-core/client-rpc",
       "@bgub/fig-tanstack-start",
       "@bgub/fig-tanstack-router",
+      "@tanstack/solid-start",
+      "@tanstack/solid-router",
     ]);
 
     plugin.configResolved({
