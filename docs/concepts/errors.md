@@ -33,7 +33,7 @@ Invalidation resets a cached rejection to pending. Remounting resets the boundar
 
 An uncaught render error is rethrown to a `flushSync` caller. Outside `flushSync`, it goes to the root's `onUncaughtError`. If the root has no handler, Fig rethrows it from a detached task so a scheduler tick never swallows the failure.
 
-Hydration recovery reports through `onRecoverableError`. Fig DOM does not provide React's root-level `onCaughtError`; a boundary's `onError` prop owns caught-error reporting.
+Hydration recovery reports through `onRecoverableError`. If the root does not provide a handler, Fig reports the recoverable error to the console. Fig DOM does not provide React's root-level `onCaughtError`; a boundary's `onError` prop owns caught-error reporting.
 
 ## Server Errors And Digests
 

@@ -112,6 +112,15 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     const name = elementName(instance);
     return name === "html" || name === "head" || name === "body";
   },
+  resolveSingletonInstance: documentSingleton,
+  acquireSingletonInstance: (instance, props) => {
+    removeAttributes(instance);
+    updateElement(instance, {}, props, { initial: true });
+  },
+  releaseSingletonInstance: (instance, props) => {
+    updateElement(instance, props, {});
+    removeAttributes(instance);
+  },
   // Hoisted asset resources never appear at their fiber's server position
   // (the server registers them and emits nothing inline): hydration must not
   // match them against the DOM cursor, and commit acquires/releases them in
@@ -127,19 +136,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
-    let child = container.firstChild as HydrationNode | null;
-
-    while (child !== null) {
-      const next = child.nextSibling as HydrationNode | null;
-      if (child.nodeType !== 10) {
-        detachSubtree(child);
-        container.removeChild(child);
-      }
-      child = next;
-    }
-
-    // A cleared container (hydration-mismatch recovery) detaches every
-    // queued replayable event's target; drain them.
+    clearDomChildren(container, isDocumentContainer(container));
+    // Hydration-mismatch recovery may detach queued event targets; drain them.
     queueMicrotask(replayQueuedEvents);
   },
   insertBefore: (parent, child, before) => {
@@ -266,6 +264,71 @@ function createDomElement(
   return namespace === htmlNamespace
     ? document.createElement(type)
     : document.createElementNS(namespace, type);
+}
+
+function documentSingleton(
+  type: string,
+  parent: Container | Element,
+): Element | null {
+  if (isDocumentContainer(parent)) {
+    return type.toLowerCase() === "html" ? parent.documentElement : null;
+  }
+
+  const owner = parent.ownerDocument;
+  if (owner == null) return null;
+  if (parent !== owner.documentElement) return null;
+
+  switch (type.toLowerCase()) {
+    case "head":
+      return owner.head;
+    case "body":
+      return owner.body;
+    default:
+      return null;
+  }
+}
+
+function removeAttributes(element: Element): void {
+  while (element.attributes.length > 0) {
+    element.removeAttributeNode(element.attributes[0] as Attr);
+  }
+}
+
+function clearDomChildren(
+  parent: Container | Element,
+  preserveShell: boolean,
+): void {
+  let child = parent.firstChild as HydrationNode | null;
+
+  while (child !== null) {
+    const next = child.nextSibling as HydrationNode | null;
+    if (child.nodeType === 10) {
+      child = next;
+      continue;
+    }
+
+    if (preserveShell && isElementNode(child)) {
+      const name = elementName(child);
+      if (name === "html" || name === "head" || name === "body") {
+        clearDomChildren(child, true);
+        child = next;
+        continue;
+      }
+      if (
+        name === "script" ||
+        name === "style" ||
+        (name === "link" &&
+          child.getAttribute("rel")?.toLowerCase() === "stylesheet")
+      ) {
+        child = next;
+        continue;
+      }
+    }
+
+    detachSubtree(child);
+    parent.removeChild(child);
+    child = next;
+  }
 }
 
 function namespaceFor(type: string, parent: Container | Element): string {

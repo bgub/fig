@@ -213,8 +213,23 @@ describe("document hydration", () => {
     const previousDocument = globalThis.document;
     const serverDocument = document.implementation.createHTMLDocument("");
     const stylesheetHref = "data:text/css,/*recovery*/";
-    serverDocument.head.innerHTML = `<title ${HYDRATION_SKIP_ATTRIBUTE}="">Page</title><meta ${HYDRATION_SKIP_ATTRIBUTE}="" name="description" content="Description"><link ${HYDRATION_SKIP_ATTRIBUTE}="" rel="stylesheet" href="${stylesheetHref}">`;
+    serverDocument.head.innerHTML = `<title ${HYDRATION_SKIP_ATTRIBUTE}="">Page</title><meta ${HYDRATION_SKIP_ATTRIBUTE}="" name="description" content="Description"><style ${HYDRATION_SKIP_ATTRIBUTE}="">/* critical */</style><script ${HYDRATION_SKIP_ATTRIBUTE}="">/* bootstrap */</script><link ${HYDRATION_SKIP_ATTRIBUTE}="" rel="stylesheet" href="${stylesheetHref}">`;
     serverDocument.body.innerHTML = "<main>Server</main>";
+    const serverHtml = serverDocument.documentElement;
+    const serverHead = serverDocument.head;
+    const serverBody = serverDocument.body;
+    const serverStylesheet = serverDocument.querySelector(
+      `link[href="${stylesheetHref}"]`,
+    );
+    const serverStyle = serverDocument.querySelector("style");
+    const serverScript = serverDocument.querySelector("head script");
+    const removedDuringRecovery: Node[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        removedDuringRecovery.push(...record.removedNodes);
+      }
+    });
+    observer.observe(serverDocument, { childList: true, subtree: true });
     const recoverableErrors: unknown[] = [];
     const renderDocument = (label: string) =>
       createElement(
@@ -242,8 +257,26 @@ describe("document hydration", () => {
           onRecoverableError: (error) => recoverableErrors.push(error),
         }),
       );
+      for (const record of observer.takeRecords()) {
+        removedDuringRecovery.push(...record.removedNodes);
+      }
 
       expect(recoverableErrors).toHaveLength(1);
+      expect(removedDuringRecovery).not.toContain(serverHtml);
+      expect(removedDuringRecovery).not.toContain(serverHead);
+      expect(removedDuringRecovery).not.toContain(serverBody);
+      expect(removedDuringRecovery).not.toContain(serverStylesheet);
+      expect(removedDuringRecovery).not.toContain(serverStyle);
+      expect(removedDuringRecovery).not.toContain(serverScript);
+      expect(serverDocument.documentElement).toBe(serverHtml);
+      expect(serverDocument.head).toBe(serverHead);
+      expect(serverDocument.body).toBe(serverBody);
+      expect(
+        serverDocument.querySelector(`link[href="${stylesheetHref}"]`),
+      ).toBe(serverStylesheet);
+      expect(serverDocument.querySelector("style")).toBe(serverStyle);
+      expect(serverDocument.querySelector("head script")).toBe(serverScript);
+      expect(serverStylesheet?.isConnected).toBe(true);
       expect(serverDocument.querySelector("main")?.textContent).toBe("Client");
       expect(serverDocument.title).toBe("Page");
       expect(
@@ -262,7 +295,51 @@ describe("document hydration", () => {
       expect(
         serverDocument.querySelectorAll(`link[href="${stylesheetHref}"]`),
       ).toHaveLength(1);
+
+      root.unmount();
+
+      expect(serverDocument.documentElement).toBe(serverHtml);
+      expect(serverDocument.head).toBe(serverHead);
+      expect(serverDocument.body).toBe(serverBody);
+      expect(
+        serverDocument.querySelector(`link[href="${stylesheetHref}"]`),
+      ).toBe(serverStylesheet);
+      expect(serverDocument.querySelector("style")).toBe(serverStyle);
+      expect(serverDocument.querySelector("head script")).toBe(serverScript);
+      expect(serverDocument.querySelector("main")).toBeNull();
     } finally {
+      observer.disconnect();
+      globalThis.document = previousDocument;
+    }
+  });
+
+  it("reports a hydration mismatch when no recoverable error handler is provided", () => {
+    const previousDocument = globalThis.document;
+    const serverDocument = document.implementation.createHTMLDocument("");
+    serverDocument.body.innerHTML = "<main>Server</main>";
+    const reported: unknown[][] = [];
+    const previousError = console.error;
+
+    globalThis.document = serverDocument;
+    console.error = (...args: unknown[]) => reported.push(args);
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          serverDocument,
+          createElement(
+            "html",
+            null,
+            createElement("head"),
+            createElement("body", null, createElement("main", null, "Client")),
+          ),
+        ),
+      );
+
+      expect(reported).toHaveLength(1);
+      expect(reported[0]?.[0]).toBeInstanceOf(Error);
+      expect(serverDocument.querySelector("main")?.textContent).toBe("Client");
+    } finally {
+      console.error = previousError;
       globalThis.document = previousDocument;
     }
   });

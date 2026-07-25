@@ -94,6 +94,7 @@ import {
   MutationMask,
   NoFlags,
   PlacementFlag,
+  SingletonStaticFlag,
   StaticFlagsMask,
   StoreConsistencyFlag,
   TextContentFlag,
@@ -319,6 +320,15 @@ export interface HostConfig<Container, Instance, TextInstance> {
     nextProps: Props,
     owner: AssetResourceOwner,
   ): Instance;
+  // Resolve a persistent host singleton such as a Document's html, head, or
+  // body. The three singleton hooks form one capability and must be supplied
+  // together.
+  resolveSingletonInstance?(
+    type: string,
+    parent: Parent<Container, Instance>,
+  ): Instance | null;
+  acquireSingletonInstance?(instance: Instance, props: Props): void;
+  releaseSingletonInstance?(instance: Instance, props: Props): void;
   // Assets fibers are transparent to host placement. This commit-time diff is
   // their complete lifecycle: null means the owner did not exist on that side
   // of the commit. The host owns normalization, dedupe, and reference counts.
@@ -449,6 +459,15 @@ export type HostHoistedAssetConfig<Container, Instance, TextInstance> =
       | "updateHoistedInstance"
     >
   >;
+
+export type HostSingletonConfig<Container, Instance, TextInstance> = Required<
+  Pick<
+    HostConfig<Container, Instance, TextInstance>,
+    | "resolveSingletonInstance"
+    | "acquireSingletonInstance"
+    | "releaseSingletonInstance"
+  >
+>;
 
 export interface FigRoot {
   data: FigDataStoreHandle;
@@ -1041,7 +1060,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingSuspenseRetries: [],
       attachedSuspenseRetries: new WeakMap(),
       consumedPendingQueues: [],
-      onRecoverableError: options.onRecoverableError ?? noop,
+      onRecoverableError:
+        options.onRecoverableError ?? defaultOnRecoverableError,
       onUncaughtError: options.onUncaughtError ?? null,
       recoverableErrors: [],
       uncaughtErrorInfo: null,
@@ -1074,7 +1094,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function noop(): void {}
+  function defaultOnRecoverableError(error: unknown): void {
+    console.error(error);
+  }
 
   function rootHandle(root: R): FigRoot {
     let unmounted = false;
@@ -1679,6 +1701,15 @@ export function createRenderer<Container, Instance, TextInstance>(
       const type = String(node.type);
       const children = hostChildren(node.props);
       const hoisted = resolveHoistedFiber(node, root);
+      let singleton: Instance | null = null;
+      if (!hoisted) {
+        if (isSingletonFiber(node)) {
+          singleton = node.stateNode as Instance;
+        } else if (node.stateNode === null) {
+          singleton =
+            host.resolveSingletonInstance?.(type, hostParent(node)) ?? null;
+        }
+      }
 
       if (__DEV__) {
         let ancestors: string[] | null = null;
@@ -1704,16 +1735,22 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
 
       if (!hoisted && tryHydrateInstance(node, root)) {
+        if (singleton === node.stateNode) node.flags |= SingletonStaticFlag;
         reconcileCurrentChildren(node, children, root);
         return;
       }
 
       if (!hoisted) {
-        node.stateNode ??= host.createInstance(
-          type,
-          node.props,
-          hostParent(node),
-        );
+        if (singleton === null) {
+          node.stateNode ??= host.createInstance(
+            type,
+            node.props,
+            hostParent(node),
+          );
+        } else {
+          node.stateNode = singleton;
+          node.flags |= SingletonStaticFlag;
+        }
       }
 
       reconcileCurrentChildren(
@@ -2067,6 +2104,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     return host as HostHydrationConfig<Container, Instance, TextInstance>;
+  }
+
+  function requireSingletonHostConfig(): HostSingletonConfig<
+    Container,
+    Instance,
+    TextInstance
+  > {
+    if (
+      host.resolveSingletonInstance === undefined ||
+      host.acquireSingletonInstance === undefined ||
+      host.releaseSingletonInstance === undefined
+    ) {
+      throw new Error(
+        "Host singleton support requires resolve, acquire, and release hooks.",
+      );
+    }
+
+    return host as HostSingletonConfig<Container, Instance, TextInstance>;
   }
 
   // The message and the recoverable-error fields derive from two facts: what
@@ -3490,7 +3545,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     return (
       node.tag === HostTag &&
       node.committedProps === null &&
-      (node.flags & HydrationFlag) === 0
+      (node.flags & (HydrationFlag | SingletonStaticFlag)) === 0
     );
   }
 
@@ -4250,6 +4305,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     return (node.flags & AssembledFlag) !== 0;
   }
 
+  function isSingletonFiber(node: F): boolean {
+    return (
+      node.tag === HostTag && (node.flags & SingletonStaticFlag) !== NoFlags
+    );
+  }
+
   function placementRunTail(node: F): F {
     let tail = node;
     while (
@@ -4266,6 +4327,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     before: HostNode<Instance, TextInstance> | null = hostSibling(node),
   ): void {
     if (isHost(node)) {
+      if (isSingletonFiber(node)) {
+        if (node.committedProps === null) {
+          requireSingletonHostConfig().acquireSingletonInstance(
+            node.stateNode as Instance,
+            node.props,
+          );
+        }
+        markHostCommitted(node);
+        return;
+      }
       if (node.tag === HostTag && isHoistedFiber(node)) {
         // First commit only: a move keeps the out-of-band instance in place.
         if (node.committedProps === null) acquireHoistedInstance(node);
@@ -4701,6 +4772,18 @@ export function createRenderer<Container, Instance, TextInstance>(
           assetResourceOwner(node),
         );
       }
+      return;
+    }
+
+    if (isSingletonFiber(node)) {
+      const instance = node.stateNode as Instance;
+      for (let child = node.child; child !== null; child = child.sibling) {
+        remove(child, instance);
+      }
+      requireSingletonHostConfig().releaseSingletonInstance(
+        instance,
+        node.committedProps ?? node.props,
+      );
       return;
     }
 
@@ -5310,19 +5393,22 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.child = null;
     next.sibling = null;
     next.index = current.index;
-    // Exactly the hoisted bit survives the clone, in both directions:
+    // Exactly the host identity bits survive the clone, in both directions:
     // - HoistedStaticFlag MUST carry. It is set once, when the instance is
     //   resolved, and never re-derived; a clone without it would misroute
     //   commit work — most dangerously deletion, where host.removeChild at
     //   the fiber position targets an instance that lives in <head>
     //   (NotFoundError in a real DOM).
+    // - SingletonStaticFlag MUST carry so placement and deletion continue to
+    //   acquire/release the persistent host instance instead of inserting or
+    //   removing it.
     // - ViewTransitionStaticFlag MUST NOT carry. complete() re-derives it
     //   for every fiber a render visits, so carrying it only matters for
     //   clones that never complete (cloneSuspendedPrimary's captured hidden
     //   trees): their stale bit would survive into the hidden Activity's
     //   subtree summary and advertise view-transition boundaries in commits
     //   that have no live view-transition work.
-    next.flags = current.flags & HoistedStaticFlag;
+    next.flags = current.flags & (HoistedStaticFlag | SingletonStaticFlag);
     next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;

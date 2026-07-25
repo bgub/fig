@@ -14,7 +14,7 @@ After a fallback has committed on the client, later Suspense retries use low-pri
 
 The hydration cursor skips only Fig's `<!--,-->` adjacent-text separators. It never skips Suspense markers.
 
-`hydrateRoot` may adopt a data store prepared before rendering by a router. The renderer attaches scheduling to that same store, so route loaders and component `readData` calls share one cache. Fig DOM also accepts a `Document` container for full-document hydration and preserves its doctype during recovery.
+`hydrateRoot` may adopt a data store prepared before rendering by a router. The renderer attaches scheduling to that same store, so route loaders and component `readData` calls share one cache. Fig DOM also accepts a `Document` container for full-document hydration. Recovery preserves its doctype and reuses the existing `html`, `head`, and `body` singletons; loaded stylesheets, style elements, and scripts remain connected while mismatched content is rebuilt.
 
 Dehydrated Suspense and Activity boundaries capture their canonical `useId` path when they claim a server marker. Later hydration restores that path instead of using a live fiber index that intervening updates may have shifted. Suspense's private Activity fiber is transparent because it has no server counterpart, and purely client-mounted components use the separate `fig-C-*` namespace.
 
@@ -38,7 +38,7 @@ Fig handles mismatch types differently:
 
 - Extra server attributes and styles remain in place, with a development warning. Browser extensions and edge middleware may have added them.
 - Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; uncontrolled hydration still preserves a live selection changed by the user before hydration.
-- Text mismatches recover by client-rendering the root and report through `onRecoverableError`.
+- Text mismatches recover by client-rendering the root and report through `onRecoverableError`. Without a root handler, Fig reports the error to the console.
 - Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary.
 - If that boundary contains a `Document`'s `<html>` element, recovery escalates to the root because a document cannot temporarily contain two document elements.
 

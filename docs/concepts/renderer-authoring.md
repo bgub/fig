@@ -75,6 +75,8 @@ Creating two roots on one container throws. `unmount` runs synchronously so fibe
 
 Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, and the development-only `devtools` option.
 
+A renderer with persistent host singletons supplies the complete `HostSingletonConfig` capability: resolve returns the existing instance, acquire initializes it without insertion, and release clears managed state without removing the instance. Fig DOM uses this for a `Document`'s `html`, `head`, and `body`, which lets hydration recovery clear their contents sparingly while stylesheets remain connected.
+
 ## Commit Coordination
 
 `installCommitCoordinator()` permanently installs one renderer-local coordinator, including for roots that already exist. Installing the same coordinator object twice is idempotent; installing a different coordinator throws because commit ownership is exclusive. The coordinator carries the renderer's `Container` and `Instance` types, so TypeScript rejects a host adapter created for a different renderer. A coordinator that owns View Transition commits declares `viewTransitions: true`, allowing renderer-neutral diagnostics to distinguish it from unrelated coordinators. `@bgub/fig-reconciler/commit-coordinator` exports the contract.
