@@ -1,44 +1,27 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-dom\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-vite\":\n    type: minor\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Let Fig's Vite integration own runtime configuration\n\nThe new `fig()` Vite integration defines Fig's development gate and installs\nFast Refresh. TanStack Start composes it automatically, so applications no\nlonger need to configure Fig's compile-time mode or SSR package bundling\nthemselves.\n\n`@bgub/fig-vite` now uses the application's Fig DOM renderer as a peer instead\nof installing a private renderer copy.\n\nThe development gate follows Vite's command rather than its mode: serving\nenables development behavior, while builds—including `--mode development`—strip\nit from production output.\n\nPublished npm packages now expose development artifacts through a Fig-owned\ncondition, allowing the Vite integration to enable diagnostics and Fast Refresh\nfor ordinary installs while explicit static overrides remain authoritative and\ndefault production imports retain their previous dead-code elimination. A\nstatic `false` override also disables Fast Refresh instrumentation.\n"
-    filename: vite-owned-fig-config.md
-    v: 0.0.0
-  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: minor\n  \"@bgub/fig-reconciler\":\n    type: minor\n  \"@bgub/fig-refresh\":\n    type: minor\n---\n\n## Renderers now install their reconciler implementation\n\nFig DOM and Fast Refresh now depend on their exact reconciler version directly.\nApplications no longer need to install `@bgub/fig-reconciler` alongside Fig DOM;\nthe reconciler remains a direct dependency only for custom-renderer authors.\n\nFast Refresh connects to Fig DOM through a renderer-owned adapter, ensuring its\nfamily resolver and scheduled updates always reach the same reconciler instance\neven when development tooling resolves through a separate package graph.\n"
-    filename: renderer-owned-reconciler.md
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Preserve TanStack Start inline CSS during hydration\n\nAdopt the server-rendered contents of TanStack Start's inline CSS placeholder\nso full-document hydration no longer replaces the application styles with an\nempty style element.\n"
+    filename: tanstack-inline-css-hydration.md
     v: 0.0.0
 core:packages:
-  - changelogIds:
-      - vite-owned-fig-config.md
-    id: npm:@bgub/fig
+  - id: npm:@bgub/fig
+    updated: true
+  - id: npm:@bgub/fig-dom
+    updated: true
+  - id: npm:@bgub/fig-reconciler
+    updated: true
+  - id: npm:@bgub/fig-refresh
+    updated: true
+  - id: npm:@bgub/fig-server
     updated: true
   - changelogIds:
-      - renderer-owned-reconciler.md
-      - vite-owned-fig-config.md
-    id: npm:@bgub/fig-dom
-    updated: true
-  - changelogIds:
-      - renderer-owned-reconciler.md
-      - vite-owned-fig-config.md
-    id: npm:@bgub/fig-reconciler
-    updated: true
-  - changelogIds:
-      - renderer-owned-reconciler.md
-    id: npm:@bgub/fig-refresh
-    updated: true
-  - changelogIds:
-      - vite-owned-fig-config.md
-    id: npm:@bgub/fig-server
-    updated: true
-  - changelogIds:
-      - vite-owned-fig-config.md
+      - tanstack-inline-css-hydration.md
     id: npm:@bgub/fig-tanstack-router
     updated: true
   - changelogIds:
-      - vite-owned-fig-config.md
+      - tanstack-inline-css-hydration.md
     id: npm:@bgub/fig-tanstack-start
     updated: true
-  - changelogIds:
-      - vite-owned-fig-config.md
-    id: npm:@bgub/fig-vite
+  - id: npm:@bgub/fig-vite
     updated: true
 npm:packages:
   - distTag: latest

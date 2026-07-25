@@ -1,3 +1,11 @@
+## @bgub/fig-tanstack-router@0.1.0-alpha.4
+
+### Preserve TanStack Start inline CSS during hydration
+
+Adopt the server-rendered contents of TanStack Start's inline CSS placeholder
+so full-document hydration no longer replaces the application styles with an
+empty style element.
+
 ## @bgub/fig-tanstack-router@0.1.0-alpha.3
 
 ### Let Fig's Vite integration own runtime configuration

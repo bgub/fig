@@ -1,9 +1,11 @@
 ---
 packages:
   "@bgub/fig-tanstack-router":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
   "@bgub/fig-tanstack-start":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Preserve TanStack Start inline CSS during hydration
