@@ -29,7 +29,13 @@ const tanstackStartClientAliases = tanstackStartClientModules.map((id) => ({
   find: new RegExp(`^${id}$`),
   replacement: resolveDependency(id),
 }));
-const optimizedClientModules = ["@tanstack/router-core/ssr/client"] as const;
+const optimizedClientModules = [
+  "@tanstack/history",
+  "@tanstack/router-core",
+  "@tanstack/router-core/scroll-restoration-script",
+  "@tanstack/router-core/ssr/client",
+  "@tanstack/store",
+] as const;
 const applicationEntryIds = new Set([
   "#tanstack-router-entry",
   "#tanstack-start-entry",
