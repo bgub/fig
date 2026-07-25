@@ -1,6 +1,8 @@
 ---
 packages:
-  "@bgub/fig-dom": patch
+  "@bgub/fig-dom":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Avoid false selected-option hydration warnings
