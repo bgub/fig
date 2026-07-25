@@ -167,11 +167,113 @@ describe("@bgub/fig-dom hydration", () => {
     expect(div.textContent).toBe("Hello");
   });
 
+  it("accepts a controlled select's server-selected option", () => {
+    const container = new FakeElement("root");
+    const select = new FakeElement("select");
+    const optionA = new FakeElement("option");
+    optionA.setAttribute("value", "a");
+    const optionB = new FakeElement("option");
+    optionB.setAttribute("value", "b");
+    optionB.setAttribute("selected", "");
+    optionB.selected = true;
+    select.appendChild(optionA);
+    select.appendChild(optionB);
+    container.appendChild(select);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+
+    try {
+      flushSync(() => {
+        root = hydrateRoot(
+          container as unknown as Element,
+          createElement(
+            "select",
+            { value: "b" },
+            createElement("option", { value: "a" }),
+            createElement("option", { value: "b" }),
+          ),
+        );
+      });
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([]);
+    expect(optionA.selected).toBe(false);
+    expect(optionB.selected).toBe(true);
+
+    flushSync(() =>
+      root?.render(
+        createElement(
+          "select",
+          { value: "a" },
+          createElement("option", { value: "a" }),
+          createElement("option", { value: "b" }),
+        ),
+      ),
+    );
+
+    expect(optionA.selected).toBe(true);
+    expect(optionB.selected).toBe(false);
+  });
+
+  it("accepts server-selected options in a controlled multiple select", () => {
+    const container = new FakeElement("root");
+    const select = new FakeElement("select");
+    select.setAttribute("multiple", "");
+    select.multiple = true;
+    const options = ["a", "b", "c"].map((value) => {
+      const option = new FakeElement("option");
+      option.setAttribute("value", value);
+      if (value !== "b") {
+        option.setAttribute("selected", "");
+        option.selected = true;
+      }
+      select.appendChild(option);
+      return option;
+    });
+    container.appendChild(select);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement(
+            "select",
+            { multiple: true, value: ["a", "c"] },
+            createElement("option", { value: "a" }),
+            createElement("option", { value: "b" }),
+            createElement("option", { value: "c" }),
+          ),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([]);
+    expect(options.map((option) => option.selected)).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
   it("preserves pre-hydration select changes for uncontrolled selects", () => {
     const container = new FakeElement("root");
     const select = new FakeElement("select");
     const optionA = new FakeElement("option");
     optionA.setAttribute("value", "a");
+    optionA.setAttribute("selected", "");
     const optionB = new FakeElement("option");
     optionB.setAttribute("value", "b");
     select.appendChild(optionA);
@@ -180,22 +282,76 @@ describe("@bgub/fig-dom hydration", () => {
 
     // The server rendered defaultValue "a", but the user changed the
     // selection to "b" before hydration (selects work without JS).
+    optionA.selected = false;
     optionB.selected = true;
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
 
-    flushSync(() =>
-      hydrateRoot(
-        container as unknown as Element,
-        createElement(
-          "select",
-          { defaultValue: "a" },
-          createElement("option", { value: "a" }),
-          createElement("option", { value: "b" }),
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement(
+            "select",
+            { defaultValue: "a" },
+            createElement("option", { value: "a" }),
+            createElement("option", { value: "b" }),
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([]);
+    expect(optionA.selected).toBe(false);
+    expect(optionB.selected).toBe(true);
+  });
+
+  it("warns about a selected option that does not match the client select", () => {
+    const container = new FakeElement("root");
+    const select = new FakeElement("select");
+    const optionA = new FakeElement("option");
+    optionA.setAttribute("value", "a");
+    optionA.setAttribute("selected", "");
+    optionA.selected = true;
+    const optionB = new FakeElement("option");
+    optionB.setAttribute("value", "b");
+    select.appendChild(optionA);
+    select.appendChild(optionB);
+    container.appendChild(select);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      flushSync(() =>
+        hydrateRoot(
+          container as unknown as Element,
+          createElement(
+            "select",
+            { value: "b" },
+            createElement("option", { value: "a" }),
+            createElement("option", { value: "b" }),
+          ),
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
 
     expect(optionA.selected).toBe(false);
     expect(optionB.selected).toBe(true);
+    expect(errors).toEqual([
+      "Hydration preserved extra server attributes or styles on <option>: " +
+        "selected. They were preserved, so this element now differs from " +
+        "a pure client render.",
+    ]);
   });
 
   it("warns about server-only attributes preserved during hydration", () => {

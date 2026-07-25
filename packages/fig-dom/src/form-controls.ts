@@ -130,6 +130,16 @@ export function hydratedFormAttributeName(
   return name;
 }
 
+export function optionMatchesInheritedSelectValue(option: Element): boolean {
+  if (elementName(option) !== "option") return false;
+
+  const select = closestParentSelect(option);
+  const state = select === null ? undefined : selectStates.get(select);
+  return (
+    state !== undefined && optionMatchesValue(option, state.selectedValues)
+  );
+}
+
 function setDefaultValue(
   element: Element,
   value: unknown,
@@ -203,11 +213,20 @@ function setOptionSelected(
   option: Element,
   values: string | ReadonlySet<string>,
 ): void {
+  (option as Element & { selected: boolean }).selected = optionMatchesValue(
+    option,
+    values,
+  );
+}
+
+function optionMatchesValue(
+  option: Element,
+  values: string | ReadonlySet<string>,
+): boolean {
   const explicitValue = option.getAttribute("value");
   const value =
     explicitValue ?? (option.textContent ?? "").replace(/\s+/g, " ").trim();
-  (option as Element & { selected: boolean }).selected =
-    typeof values === "string" ? value === values : values.has(value);
+  return typeof values === "string" ? value === values : values.has(value);
 }
 
 function closestParentSelect(element: Element): Element | null {

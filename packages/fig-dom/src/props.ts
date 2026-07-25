@@ -6,6 +6,7 @@ import {
   type HostUpdateOptions,
   hydratedFormAttributeName,
   isFormProp,
+  optionMatchesInheritedSelectValue,
   updateFormControl,
   updateParentSelect,
   updateSelect,
@@ -192,6 +193,13 @@ function warnExtraHydratedAttributes(
 
     const attribute = hydratedAttributeName(type, name, html);
     if (attribute !== null) expectedAttributes.add(attribute);
+  }
+
+  // The server represents a parent select's value on its matching options.
+  // That selected attribute has no option prop, but it is still part of the
+  // client tree's expected server encoding.
+  if (type === "option" && optionMatchesInheritedSelectValue(element)) {
+    expectedAttributes.add("selected");
   }
 
   const extra: string[] = [];

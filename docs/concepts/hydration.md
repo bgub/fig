@@ -37,6 +37,7 @@ Renderers without this host lookup can fall back to searching the fiber tree.
 Fig handles mismatch types differently:
 
 - Extra server attributes and styles remain in place, with a development warning. Browser extensions and edge middleware may have added them.
+- Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; uncontrolled hydration still preserves a live selection changed by the user before hydration.
 - Text mismatches recover by client-rendering the root and report through `onRecoverableError`.
 - Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary.
 - If that boundary contains a `Document`'s `<html>` element, recovery escalates to the root because a document cannot temporarily contain two document elements.
