@@ -1,8 +1,6 @@
 ---
 packages:
-  npm:@bgub/fig:
-    replay:
-      - exit-prerelease(npm:@bgub/fig)
+  "@bgub/fig": patch
 ---
 
 ## Identify why data-loader signals abort

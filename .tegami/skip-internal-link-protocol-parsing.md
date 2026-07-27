@@ -1,8 +1,6 @@
 ---
 packages:
-  npm:@bgub/fig-tanstack-router:
-    replay:
-      - exit-prerelease(npm:@bgub/fig-tanstack-router)
+  "@bgub/fig-tanstack-router": patch
 ---
 
 ## Skip protocol parsing for generated internal links
