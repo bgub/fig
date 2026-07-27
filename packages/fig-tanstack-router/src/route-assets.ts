@@ -6,7 +6,7 @@ import {
 } from "@bgub/fig";
 import {
   assetResourceDestination,
-  assetResourceFromHostProps,
+  assetResourceFromHostValues,
   preventAssetResourceHoist,
 } from "@bgub/fig/internal";
 import {
@@ -194,10 +194,34 @@ function collectTag(
 }
 
 function resourceFromTag(tag: RouterManagedTag): FigAssetResource | null {
-  return assetResourceFromHostProps(tag.tag, {
-    ...nativeAttributes(tag.attrs),
-    children: tag.children,
-  });
+  return assetResourceFromHostValues(
+    tag.tag,
+    (name) => routerTagAttribute(tag.attrs, name),
+    tag.children,
+    true,
+  );
+}
+
+function routerTagAttribute(
+  attrs: Record<string, unknown> | undefined,
+  name: string,
+): unknown {
+  const value = attrs?.[name];
+  if (value !== undefined) return value;
+  switch (name) {
+    case "charset":
+      return attrs?.charSet;
+    case "crossorigin":
+      return attrs?.crossOrigin;
+    case "fetchpriority":
+      return attrs?.fetchPriority;
+    case "http-equiv":
+      return attrs?.httpEquiv;
+    case "referrerpolicy":
+      return attrs?.referrerPolicy;
+    default:
+      return undefined;
+  }
 }
 
 function renameAttribute(

@@ -9,6 +9,9 @@ import { payloadTransportMarker } from "./document-markers.ts";
 import { getStartContext } from "./start-context.ts";
 
 const payloadKeyAttribute = "data-fig-tanstack-payload-key";
+const textEncoder = new TextEncoder();
+const emptyBytes = new Uint8Array();
+const payloadTransportMarkerBytes = textEncoder.encode(payloadTransportMarker);
 
 interface PayloadDocumentEntry {
   contentType: string;
@@ -22,7 +25,7 @@ interface RegisteredPayloadStream {
 }
 
 interface PayloadCollector {
-  cancel(reason: unknown): void;
+  cancel(reason: unknown): Promise<void>;
   result: Promise<PayloadDocumentEntry>;
 }
 
@@ -97,11 +100,9 @@ export function injectPayloadDocument(
   if (requestPayloads === undefined) return html;
   const registeredPayloads = requestPayloads;
   const collectors = new Map<string, PayloadCollector>();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
+  const htmlReader = html.getReader();
+  let buffer: Uint8Array = emptyBytes;
   let injected = false;
-  let htmlReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   function collectRegisteredPayloads(): void {
     for (const [key, entry] of registeredPayloads) {
@@ -124,10 +125,10 @@ export function injectPayloadDocument(
 
   function enqueue(
     controller: ReadableStreamDefaultController<Uint8Array>,
-    value: string,
+    value: Uint8Array,
   ): boolean {
-    if (value.length === 0) return false;
-    controller.enqueue(encoder.encode(value));
+    if (value.byteLength === 0) return false;
+    controller.enqueue(value);
     return true;
   }
 
@@ -137,20 +138,22 @@ export function injectPayloadDocument(
   ): Promise<boolean> {
     if (injected) {
       const emitted = enqueue(controller, buffer);
-      buffer = "";
+      buffer = emptyBytes;
       return emitted;
     }
 
-    const marker = buffer.indexOf(payloadTransportMarker);
+    const marker = indexOfPayloadTransportMarker(buffer);
     if (marker !== -1) {
-      let emitted = enqueue(controller, buffer.slice(0, marker));
-      buffer = buffer.slice(marker);
+      let emitted = enqueue(controller, buffer.subarray(0, marker));
+      buffer = buffer.subarray(marker);
       emitted =
-        enqueue(controller, payloadDocumentScripts(await payloads(), nonce)) ||
-        emitted;
+        enqueue(
+          controller,
+          textEncoder.encode(payloadDocumentScripts(await payloads(), nonce)),
+        ) || emitted;
       injected = true;
       emitted = enqueue(controller, buffer) || emitted;
-      buffer = "";
+      buffer = emptyBytes;
       return emitted;
     }
 
@@ -162,50 +165,74 @@ export function injectPayloadDocument(
         );
       }
       const emitted = enqueue(controller, buffer);
-      buffer = "";
+      buffer = emptyBytes;
       injected = true;
       return emitted;
     }
 
-    const length = Math.max(0, buffer.length - payloadTransportMarker.length);
-    const emitted = enqueue(controller, buffer.slice(0, length));
-    buffer = buffer.slice(length);
+    const length = Math.max(
+      0,
+      buffer.byteLength - payloadTransportMarkerBytes.byteLength,
+    );
+    const emitted = enqueue(controller, buffer.subarray(0, length));
+    buffer = buffer.subarray(length);
     return emitted;
   }
 
   return new ReadableStream<Uint8Array>({
-    start() {
-      htmlReader = html.getReader();
-    },
     async pull(controller) {
-      if (htmlReader === null) return;
       for (;;) {
         const result = await htmlReader.read();
         if (result.done) {
-          buffer += decoder.decode();
           await flush(controller, true);
           controller.close();
           return;
         }
-        buffer += decoder.decode(result.value, { stream: true });
+        buffer = concatenateBytes(buffer, result.value);
         if (await flush(controller, false)) return;
       }
     },
-    cancel(reason) {
-      void htmlReader?.cancel(reason).catch(() => undefined);
+    async cancel(reason) {
       collectRegisteredPayloads();
-      for (const collector of collectors.values()) collector.cancel(reason);
+      await Promise.allSettled([
+        htmlReader.cancel(reason),
+        ...[...collectors.values()].map((collector) =>
+          collector.cancel(reason),
+        ),
+      ]);
     },
   });
+}
+
+function concatenateBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  if (left.byteLength === 0) return right;
+  const result = new Uint8Array(left.byteLength + right.byteLength);
+  result.set(left);
+  result.set(right, left.byteLength);
+  return result;
+}
+
+function indexOfPayloadTransportMarker(value: Uint8Array): number {
+  const lastStart = value.byteLength - payloadTransportMarkerBytes.byteLength;
+  for (let start = 0; start <= lastStart; start += 1) {
+    let index = 0;
+    while (
+      index < payloadTransportMarkerBytes.byteLength &&
+      value[start + index] === payloadTransportMarkerBytes[index]
+    ) {
+      index += 1;
+    }
+    if (index === payloadTransportMarkerBytes.byteLength) return start;
+  }
+  return -1;
 }
 
 function collectPayload(
   key: string,
   entry: RegisteredPayloadStream,
 ): PayloadCollector {
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const reader = entry.stream.getReader();
   const result = (async (): Promise<PayloadDocumentEntry> => {
-    reader = entry.stream.getReader();
     const decoder = new TextDecoder();
     const chunks: string[] = [];
     for (;;) {
@@ -222,9 +249,7 @@ function collectPayload(
   })();
 
   return {
-    cancel(reason) {
-      void reader?.cancel(reason).catch(() => undefined);
-    },
+    cancel: (reason) => reader.cancel(reason),
     result,
   };
 }

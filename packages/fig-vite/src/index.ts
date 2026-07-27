@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defaultClientConditions, defaultServerConditions } from "vite";
 import type { Plugin } from "vite";
-import { transformDevGate, transformModule } from "./transform.ts";
 
 const VIRTUAL_ID = "virtual:fig-refresh";
 const RESOLVED_VIRTUAL_ID = "\0virtual:fig-refresh";
@@ -67,12 +66,6 @@ function figConfig(): Plugin {
         },
       };
     },
-    async transform(code, id) {
-      const gate = this.environment.config.define?.__FIG_DEV__;
-      if (gate === undefined || !code.includes("__FIG_DEV__")) return null;
-
-      return transformDevGate(code, id, developmentGate(gate));
-    },
   };
 }
 
@@ -104,6 +97,7 @@ export function figRefresh(options: FigRefreshOptions = {}): FigRefreshPlugin {
 
       const clean = id.split("?")[0] ?? id;
       if (clean.includes("/node_modules/") || !include.test(clean)) return null;
+      const { transformModule } = await import("./transform.ts");
       return transformModule(code, clean);
     },
   };

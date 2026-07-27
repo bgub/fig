@@ -14,23 +14,6 @@ interface SignatureResult {
   signature: string;
 }
 
-function figDevGateBabelPlugin(api: typeof babel): PluginObject {
-  const t = api.types;
-
-  return {
-    name: "fig-dev-gate",
-    visitor: {
-      ReferencedIdentifier(path) {
-        if (path.node.name !== "__FIG_DEV__") return;
-        if (path.scope.hasBinding("__FIG_DEV__")) return;
-        const development = (this as { opts?: { development?: boolean } }).opts
-          ?.development;
-        path.replaceWith(t.booleanLiteral(development === true));
-      },
-    },
-  };
-}
-
 // Babel visitor: find top-level component declarations (PascalCase functions),
 // then inject calls to the Fig refresh runtime + a self-accepting HMR boundary.
 // Emits register/setSignature directly (no react-refresh global protocol).
@@ -366,21 +349,6 @@ export async function transformModule(code: string, id: string) {
 
   if (result?.code == null || !result.code.includes("virtual:fig-refresh")) {
     return null;
-  }
-  return { code: result.code, map: mutableSourceMap(result.map) };
-}
-
-export async function transformDevGate(
-  code: string,
-  id: string,
-  development: boolean,
-) {
-  const result = await babel.transformAsync(code, {
-    ...transformOptions(id),
-    plugins: [[figDevGateBabelPlugin, { development }]],
-  });
-  if (result?.code == null) {
-    throw new Error(`Could not transform the Fig development gate in ${id}.`);
   }
   return { code: result.code, map: mutableSourceMap(result.map) };
 }

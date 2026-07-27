@@ -22,18 +22,6 @@ function configHooks(plugin: Plugin) {
   };
 }
 
-function transformedCode(result: unknown): string {
-  if (
-    typeof result !== "object" ||
-    result === null ||
-    !("code" in result) ||
-    typeof result.code !== "string"
-  ) {
-    throw new Error("Expected transformed JavaScript code.");
-  }
-  return result.code;
-}
-
 describe("@bgub/fig-vite plugin", () => {
   it("exposes the complete integration and the focused refresh plugin", () => {
     expect(Object.keys(figVite)).toEqual(["fig", "figRefresh"]);
@@ -176,32 +164,6 @@ describe("@bgub/fig-vite plugin", () => {
         serveEnvironment,
       ),
     ).toThrow("must be the static value true or false");
-  });
-
-  it("resolves source gates without rewriting strings or properties", async () => {
-    const [plugin] = fig();
-    const transform = requireFunction(plugin.transform).bind({
-      environment: { config: { define: { __FIG_DEV__: "true" } } },
-    } as never);
-
-    const result = await transform(
-      'if (__FIG_DEV__) enableDiagnostics(); const label = "__FIG_DEV__"; const value = settings.__FIG_DEV__; function local(__FIG_DEV__) { return __FIG_DEV__; }',
-      "/app/gate.js",
-    );
-
-    const code = transformedCode(result);
-    expect(code).toContain("if (true) enableDiagnostics();");
-    expect(code).toContain('const label = "__FIG_DEV__";');
-    expect(code).toContain("const value = settings.__FIG_DEV__;");
-    expect(code).toContain("return __FIG_DEV__;");
-
-    const sourceResult = await transform(
-      "declare const __FIG_DEV__: boolean | undefined; const enabled = __FIG_DEV__;",
-      "/app/gate.ts",
-    );
-    const sourceCode = transformedCode(sourceResult);
-    expect(sourceCode).toContain("const enabled = true;");
-    expect(sourceCode).not.toContain("declare const");
   });
 
   it("connects the file-loaded runtime to the app's DOM adapter", () => {

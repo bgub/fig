@@ -1363,14 +1363,14 @@ describe("@bgub/fig-server", () => {
         createElement(
           "body",
           null,
-          createElement("title", null, "Host Tags"),
-          createElement("meta", { name: "description", content: "Host" }),
-          createElement("link", {
+          createElement("TITLE", null, "Host Tags"),
+          createElement("META", { name: "description", content: "Host" }),
+          createElement("LINK", {
             href: "/host.css",
             precedence: "app",
             rel: "stylesheet",
           }),
-          createElement("script", {
+          createElement("SCRIPT", {
             async: true,
             src: "/host.js",
             type: "module",

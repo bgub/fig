@@ -131,6 +131,7 @@ export {
   assetResourceDestination,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
+  assetResourceFromHostValues,
   assetResourceHostAttributes,
   assetResourceKey,
   type ClientReferenceAssets,

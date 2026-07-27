@@ -73,6 +73,7 @@ declare module "@tanstack/router-core" {
 const userRouteApi = getRouteApi("/users/$id");
 
 const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
+const dangerousUrl: string = "javascript:alert(1)";
 const externalUrl: string = "https://example.com/";
 
 afterEach(() => {
@@ -966,6 +967,44 @@ describe("@bgub/fig-tanstack-router", () => {
       .querySelector<HTMLAnchorElement>("#preload-link")
       ?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     expect(preload).toHaveBeenCalledOnce();
+  });
+
+  it("blocks dangerous explicit and external link protocols", async () => {
+    const rootRoute = createRootRoute({
+      component: () => (
+        <main>
+          <Link href={dangerousUrl} id="explicit-dangerous" to="/">
+            Explicit
+          </Link>
+          <Link id="safe-external" to={externalUrl}>
+            Safe external
+          </Link>
+          <Link id="dangerous-external" to={dangerousUrl}>
+            Dangerous external
+          </Link>
+        </main>
+      ),
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute,
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+
+    expect(
+      container.querySelector("#explicit-dangerous")?.hasAttribute("href"),
+    ).toBe(false);
+    expect(
+      container.querySelector("#safe-external")?.getAttribute("href"),
+    ).toBe(externalUrl);
+    expect(
+      container.querySelector("#dangerous-external")?.hasAttribute("href"),
+    ).toBe(false);
   });
 
   it("keeps link activity on the resolved route while navigation is pending", async () => {

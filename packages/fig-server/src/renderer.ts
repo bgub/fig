@@ -535,7 +535,7 @@ function retryTask(request: Request, task: Task): void {
   const frame = createRenderFrame(request, task.segment, forkScope(task));
 
   try {
-    renderChildSequence(collectChildren(task.node), frame, task.childIndexBase);
+    renderChildren(task.node, frame, task.childIndexBase);
     completeSegmentText(task.segment);
     task.segment.status = "completed";
     detachTask(request, task);
@@ -643,8 +643,24 @@ function renderNode(node: FigNode, frame: RenderFrame): void {
   throw invalidChildError(node);
 }
 
-function renderChildren(node: FigNode, frame: RenderFrame): void {
-  renderChildSequence(collectChildren(node), frame);
+function renderChildren(
+  node: FigNode,
+  frame: RenderFrame,
+  indexBase = 0,
+): void {
+  if (Array.isArray(node)) {
+    renderChildSequence(collectChildren(node), frame, indexBase);
+    return;
+  }
+  if (
+    node === null ||
+    node === undefined ||
+    typeof node === "boolean" ||
+    node === ""
+  ) {
+    return;
+  }
+  renderChildAtIndex(node, frame, indexBase);
 }
 
 function renderChildSequence(
@@ -655,17 +671,33 @@ function renderChildSequence(
   indexBase = 0,
 ): void {
   for (let index = 0; index < children.length; index += 1) {
-    const child = children[index];
-    try {
-      withIdSegment(frame, indexBase + index, () => renderNode(child, frame));
-    } catch (error) {
-      if (isThenable(error)) {
-        spawnSuspendedTask(frame, child, error, indexBase + index);
-        continue;
-      }
+    renderChildAtIndex(children[index], frame, indexBase + index);
+  }
+}
 
-      throw error;
+function renderChildAtIndex(
+  child: FigNode,
+  frame: RenderFrame,
+  index: number,
+): void {
+  const previousIdPath = frame.idPath;
+  const segment = index.toString(32);
+  frame.idPath =
+    previousIdPath === "" ? segment : `${previousIdPath}-${segment}`;
+
+  try {
+    renderNode(child, frame);
+  } catch (error) {
+    // A retry task stores the parent path plus this child index, so fork its
+    // scope only after restoring the parent path. `finally` covers every exit.
+    frame.idPath = previousIdPath;
+    if (isThenable(error)) {
+      spawnSuspendedTask(frame, child, error, index);
+      return;
     }
+    throw error;
+  } finally {
+    frame.idPath = previousIdPath;
   }
 }
 
@@ -676,23 +708,6 @@ function renderChildSequence(
 function completeSegmentText(segment: Segment): void {
   if (segment.textEmbedded && segment.lastPushedText) {
     segment.write(TEXT_SEPARATOR);
-  }
-}
-
-function withIdSegment<T>(
-  frame: RenderFrame,
-  index: number,
-  callback: () => T,
-): T {
-  const previousIdPath = frame.idPath;
-  const segment = index.toString(32);
-  frame.idPath =
-    previousIdPath === "" ? segment : `${previousIdPath}-${segment}`;
-
-  try {
-    return callback();
-  } finally {
-    frame.idPath = previousIdPath;
   }
 }
 
@@ -812,7 +827,9 @@ function renderFunctionComponent(
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
   const previousStack = frame.stack;
   const previousLocalIdCounter = frame.localIdCounter;
-  frame.stack = { name: type.name || "Anonymous", parent: previousStack };
+  if (__DEV__ || frame.request.onError !== undefined) {
+    frame.stack = { name: type.name || "Anonymous", parent: previousStack };
+  }
   frame.localIdCounter = 0;
 
   try {
@@ -1189,7 +1206,21 @@ function renderHostAsset(
   props: Props,
   frame: RenderFrame,
 ): boolean {
-  const resource = assetResourceFromHostProps(type, props);
+  // Deliberately gate before assetResourceFromHostProps, which allocates a
+  // prop accessor. These names mirror the core classifier; other tags dominate.
+  if (type.length < 4 || type.length > 6) return false;
+  const normalizedType = type.toLowerCase();
+  switch (normalizedType) {
+    case "link":
+    case "meta":
+    case "script":
+    case "title":
+      break;
+    default:
+      return false;
+  }
+
+  const resource = assetResourceFromHostProps(normalizedType, props);
   if (resource === null) return false;
 
   renderAssetValue(resource, frame);

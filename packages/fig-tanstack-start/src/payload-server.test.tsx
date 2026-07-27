@@ -206,6 +206,40 @@ describe("TanStack Start server payload resources", () => {
     });
   });
 
+  it("injects across a split marker without rewriting document bytes", async () => {
+    await runWithStartContext({}, async () => {
+      registerPayloadResponse(
+        ["split-marker"],
+        new Response(streamFromString("payload"), {
+          headers: { "content-type": "text/plain" },
+        }),
+      );
+      const source = payloadDocument("<main>café 🙂</main>");
+      const markerStart = source.indexOf(
+        `<template id="${payloadTransportMarkerId}`,
+      );
+      const split = new TextEncoder().encode(
+        source.slice(0, markerStart + 7),
+      ).byteLength;
+      const bytes = new TextEncoder().encode(source);
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, split));
+          controller.enqueue(bytes.subarray(split));
+          controller.close();
+        },
+      });
+
+      const html = await readStream(injectPayloadDocument(stream, undefined));
+
+      expect(html).toContain("<main>café 🙂</main>");
+      expect(html).toContain(">payload</script>");
+      expect(html.indexOf("payload</script>")).toBeLessThan(
+        html.indexOf(payloadTransportMarkerId),
+      );
+    });
+  });
+
   it("embeds a payload registered after the document shell starts", async () => {
     await runWithStartContext({}, async () => {
       let markReady = (): void => undefined;
@@ -281,6 +315,10 @@ describe("TanStack Start server payload resources", () => {
   it("cancels registered payload collection with the document", async () => {
     let htmlCancelled = false;
     let payloadCancelled = false;
+    let finishHtmlCancellation = (): void => undefined;
+    const htmlCancellation = new Promise<void>((resolve) => {
+      finishHtmlCancellation = resolve;
+    });
 
     await runWithStartContext({}, async () => {
       const decodeResponse = registerPayloadResponse(
@@ -296,21 +334,32 @@ describe("TanStack Start server payload resources", () => {
       );
       const document = injectPayloadDocument(
         new ReadableStream<Uint8Array>({
-          cancel() {
+          async cancel() {
             htmlCancelled = true;
+            await htmlCancellation;
           },
         }),
         undefined,
       );
 
-      await Promise.all([
+      let cancellationSettled = false;
+      const cancellation = Promise.all([
         document.cancel("document cancelled"),
         decodeResponse.body?.cancel("decode cancelled"),
       ]);
-    });
+      void cancellation.then(() => {
+        cancellationSettled = true;
+      });
+      await Promise.resolve();
 
-    expect(htmlCancelled).toBe(true);
-    expect(payloadCancelled).toBe(true);
+      expect(htmlCancelled).toBe(true);
+      expect(payloadCancelled).toBe(true);
+      expect(cancellationSettled).toBe(false);
+
+      finishHtmlCancellation();
+      await cancellation;
+      expect(cancellationSettled).toBe(true);
+    });
   });
 });
 

@@ -914,6 +914,7 @@ describe("generation-lifetime loader signals", () => {
     gate.resolve("refreshed");
     await refresh;
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe("superseded");
     expect(signals[1]?.aborted).toBe(false);
   });
 
@@ -932,6 +933,7 @@ describe("generation-lifetime loader signals", () => {
     store.hydrate([{ key: ["gen-hydrate", "one"], value: "pushed" }]);
 
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe("superseded");
   });
 
   it("aborts the fulfilled generation's signal on store disposal", async () => {
@@ -949,6 +951,7 @@ describe("generation-lifetime loader signals", () => {
     store.dispose();
 
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe("store-disposed");
   });
 
   it("aborts the fulfilled generation's signal when the entry evicts", async () => {
@@ -973,6 +976,7 @@ describe("generation-lifetime loader signals", () => {
     await waitForNextMacrotask();
 
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe("evicted");
   });
 
   it("keeps the signal live across invalidateData", async () => {
@@ -995,13 +999,12 @@ describe("generation-lifetime loader signals", () => {
 
   it("aborts a rejected load's own signal", async () => {
     const signals: AbortSignal[] = [];
+    const loadError = new Error("load failed");
     const resource = dataResource<[string], string>({
       key: (id: string) => ["gen-reject", id],
       load: (_id: string, { signal }) => {
         signals.push(signal);
-        return signals.length === 1
-          ? Promise.reject(new Error("load failed"))
-          : "recovered";
+        return signals.length === 1 ? Promise.reject(loadError) : "recovered";
       },
     });
     const store = signalStore();
@@ -1009,10 +1012,30 @@ describe("generation-lifetime loader signals", () => {
     const first = await store.refreshData(resource, "one");
     expect(first.status).toBe("rejected");
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe(loadError);
 
     const second = await store.refreshData(resource, "one");
     expect(second.status).toBe("fulfilled");
     expect(signals[1]?.aborted).toBe(false);
+  });
+
+  it("uses the platform AbortError for a reasonless rejection", async () => {
+    let signal: AbortSignal | undefined;
+    const resource = dataResource<[], string>({
+      key: () => ["gen-reject-without-reason"],
+      load: (context) => {
+        signal = context.signal;
+        return Promise.reject();
+      },
+    });
+    const store = signalStore();
+
+    const result = await store.refreshData(resource);
+
+    expect(result).toEqual({ error: undefined, status: "rejected" });
+    expect(signal?.aborted).toBe(true);
+    expect(signal?.reason).toBeInstanceOf(DOMException);
+    expect(signal?.reason).toMatchObject({ name: "AbortError" });
   });
 
   it("keeps the stale generation alive when a refresh fails", async () => {
@@ -1063,6 +1086,7 @@ describe("generation-lifetime loader signals", () => {
 
     // A value-less pending load has no authority to defer: it dies at once.
     expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe("superseded");
   });
 });
 
@@ -1104,12 +1128,14 @@ describe("load-context error attribution capability", () => {
     // before the loader's returned promise settles. It must survive publish.
     const holeError = new Error("sync hole");
     const gate = deferred<string>();
+    let firstSignal: AbortSignal | undefined;
     let loads = 0;
     const resource = dataResource<[], string>({
       key: () => ["pre-publish-hole"],
       load: (context) => {
         loads += 1;
         if (loads === 1) {
+          firstSignal = context.signal;
           loadContextCapabilities(context)?.attributeError(holeError);
           return "broken";
         }
@@ -1124,6 +1150,7 @@ describe("load-context error attribution capability", () => {
     await store.refreshData(resource);
     expect(dataResourceKeysForError(holeError)).toEqual([["pre-publish-hole"]]);
     expect(store.invalidateDataError(holeError)).toBe(true);
+    expect(firstSignal?.reason).toBe(holeError);
 
     // Retired, not served stale: the next read suspends on a fresh load
     // instead of returning the broken value.

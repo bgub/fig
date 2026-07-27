@@ -306,6 +306,62 @@ describe("@bgub/fig-tanstack-start server", () => {
       return readPromise(pending);
     }
   });
+
+  it("cancels the document render when the response consumer disconnects", async () => {
+    const pending = new Promise<never>(() => undefined);
+    const disconnect = new Error("client disconnected");
+    let loadSignal: AbortSignal | undefined;
+    const probe = dataResource<[], string>({
+      key: () => ["cancelled-render-probe"],
+      load: ({ signal }) => {
+        loadSignal = signal;
+        return "live";
+      },
+    });
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      component: Document,
+    });
+    const pageRoute = createRoute({
+      component: () => (
+        <main>
+          {readData(probe)}
+          <Suspense fallback="loading">
+            <Pending />
+          </Suspense>
+        </main>
+      ),
+      getParentRoute: () => rootRoute,
+      path: "page",
+    });
+    const startData = createStartDataContext();
+    const router = createRouter({
+      ...startData,
+      history: createMemoryHistory({ initialEntries: ["/page"] }),
+      routeTree: rootRoute.addChildren([pageRoute]),
+    });
+
+    await router.load();
+    attachRouterServerSsrUtils({ manifest: undefined, router });
+    await router.serverSsr?.dehydrate();
+    const result = await renderRouterToStream({
+      request: new Request("https://example.test/page"),
+      responseHeaders: new Headers(),
+      router,
+    });
+    const reader = result.response.body?.getReader();
+    expect(reader).toBeDefined();
+    await reader?.cancel(disconnect);
+
+    expect(loadSignal?.aborted).toBe(true);
+    expect(loadSignal?.reason).toBe("store-disposed");
+    await expect(startData.context.data.ensureData(probe)).rejects.toThrow(
+      "disposed",
+    );
+
+    function Pending(): FigNode {
+      return readPromise(pending);
+    }
+  });
 });
 
 async function renderRouterHtml(

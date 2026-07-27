@@ -305,7 +305,12 @@ export function assetResourceFromHostProps(
   ) {
     return null;
   }
-  return resourceFromHost(type, (name) => props[name], props.children, true);
+  return assetResourceFromHostValues(
+    type,
+    (name) => props[name],
+    props.children,
+    true,
+  );
 }
 
 export function preventAssetResourceHoist<P extends Props>(props: P): P {
@@ -320,7 +325,7 @@ export function assetResourceFromHostAttributes(
   type: string,
   getAttribute: (name: string) => unknown,
 ): FigAssetResource | null {
-  return resourceFromHost(type, getAttribute, undefined, false);
+  return assetResourceFromHostValues(type, getAttribute, undefined, false);
 }
 
 export type AssetResourceHostAttribute = readonly [
@@ -419,7 +424,7 @@ export function assetResourceHostAttributes(
   );
 }
 
-function resourceFromHost(
+export function assetResourceFromHostValues(
   type: string,
   prop: (name: string) => unknown,
   children?: FigNode,

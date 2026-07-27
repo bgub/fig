@@ -43,6 +43,8 @@ After a load fulfills, its generation stays authoritative while that value is vi
 
 Starting a refresh does not immediately revoke a visible stale value. If the refresh fails, the previous generation remains authoritative. A pending load with no visible value aborts as soon as another load supersedes it. `invalidateData` only marks an entry stale and does not abort it.
 
+The signal reason identifies that retirement: `"superseded"`, `"evicted"`, or `"store-disposed"`. A generation that rejects aborts with its rejection reason; a reasonless rejection receives the platform's default `AbortError`. Invalidating a generation through an attributed error aborts with that error.
+
 Internal adapters receive two additional generation-guarded capabilities. `hydrate` applies Payload data rows through the current store. `attributeError` associates a streamed hole failure with the owning value.
 
 Both stop working once their generation loses authority. A loader cannot replace its own entry using a data row from its own Payload response.

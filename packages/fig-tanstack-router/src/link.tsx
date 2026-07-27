@@ -122,7 +122,7 @@ export function Link<
     (explicitHref !== undefined &&
       isAbsoluteLinkTarget(explicitHref, router.origin));
   const dangerous =
-    href !== undefined
+    href !== undefined && (external || explicitHref !== undefined)
       ? isDangerousProtocol(href, router.protocolAllowlist)
       : false;
   const preload =

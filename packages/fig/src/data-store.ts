@@ -896,7 +896,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // has published: subscribers re-render top-down onto the new tree in
       // the same pass, so the old generation's retired holes unmount before
       // their abort rejections could reach a mounted reader.
-      superseded?.abort();
+      superseded?.abort("superseded");
       const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
       pending.resolve(result);
       return result;
@@ -911,7 +911,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // generation's valueController is deliberately untouched: a failed
       // refresh keeps the stale value fully alive, live holes included.
       entry.controller = null;
-      controller.abort();
+      controller.abort(error);
       entry.pending = null;
 
       if (hadValue && entryHasValue(entry)) {
@@ -1013,7 +1013,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry: Entry<Owner, Lane>,
     reason: AbortReason,
   ): void {
-    entry.controller?.abort();
+    entry.controller?.abort(reason);
     entry.controller = null;
 
     const pending = entry.pending;
@@ -1030,7 +1030,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     reason: AbortReason,
   ): void {
     this.abortPendingLoad(entry, reason);
-    entry.valueController?.abort();
+    entry.valueController?.abort(reason);
     entry.valueController = null;
   }
 
@@ -1160,7 +1160,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       isAttributableError(attributedError) &&
       entry.valueErrors.has(attributedError)
     ) {
-      entry.valueController?.abort();
+      entry.valueController?.abort(attributedError);
       entry.valueController = null;
       entry.valueErrors = new WeakSet();
       entry.value = undefined;

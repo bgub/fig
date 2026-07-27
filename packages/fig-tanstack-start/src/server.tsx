@@ -78,9 +78,10 @@ export async function renderRouterToStream({
     const routerStream = documentStream as unknown as Parameters<
       typeof transformReadableStreamWithRouter
     >[1];
-    const stream = transformReadableStreamWithRouter(router, routerStream, {
-      onAbort: (reason) => render.abort(reason),
-    });
+    // This is a direct Web-stream chain, so cancelling the response reaches
+    // the Fig render through each upstream reader. TanStack's onAbort hook is
+    // only needed for producers hidden behind an adapter such as PassThrough.
+    const stream = transformReadableStreamWithRouter(router, routerStream);
     responseHeaders.set("content-type", render.contentType);
     return createSsrStreamResponse(
       router,
