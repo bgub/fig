@@ -1,3 +1,13 @@
+## @bgub/fig-tanstack-start@0.1.0-alpha.6
+
+### Reduce server-render and TanStack Start overhead
+
+Server rendering now avoids redundant child normalization, component-stack,
+and asset-classification work. Route assets are normalized lazily, payload
+markers are injected without decoding and re-encoding HTML bytes, and
+successful stream cancellation propagates directly through the existing Web
+stream chain.
+
 ## @bgub/fig-tanstack-start@0.1.0-alpha.4
 
 ### Preserve TanStack Start inline CSS during hydration
