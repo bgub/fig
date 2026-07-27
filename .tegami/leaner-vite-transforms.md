@@ -1,6 +1,8 @@
 ---
 packages:
-  "@bgub/fig-vite": patch
+  "@bgub/fig-vite":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-vite)
 ---
 
 ## Avoid redundant Vite transforms

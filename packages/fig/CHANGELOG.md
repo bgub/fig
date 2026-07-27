@@ -1,3 +1,20 @@
+## @bgub/fig@0.1.0-alpha.6
+
+### Identify why data-loader signals abort
+
+Data-resource loader signals now expose whether their generation was
+superseded, evicted, or disposed. Rejected generations and values invalidated
+through an attributed error receive the originating error as their abort
+reason; reasonless rejections receive the platform's default `AbortError`.
+
+### Reduce server-render and TanStack Start overhead
+
+Server rendering now avoids redundant child normalization, component-stack,
+and asset-classification work. Route assets are normalized lazily, payload
+markers are injected without decoding and re-encoding HTML bytes, and
+successful stream cancellation propagates directly through the existing Web
+stream chain.
+
 ## @bgub/fig@0.1.0-alpha.3
 
 ### Let Fig's Vite integration own runtime configuration

@@ -1,3 +1,13 @@
+## @bgub/fig-server@0.1.0-alpha.6
+
+### Reduce server-render and TanStack Start overhead
+
+Server rendering now avoids redundant child normalization, component-stack,
+and asset-classification work. Route assets are normalized lazily, payload
+markers are injected without decoding and re-encoding HTML bytes, and
+successful stream cancellation propagates directly through the existing Web
+stream chain.
+
 ## @bgub/fig-server@0.1.0-alpha.3
 
 ### Let Fig's Vite integration own runtime configuration

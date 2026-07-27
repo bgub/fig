@@ -1,3 +1,23 @@
+## @bgub/fig-tanstack-router@0.1.0-alpha.6
+
+### Reduce server-render and TanStack Start overhead
+
+Server rendering now avoids redundant child normalization, component-stack,
+and asset-classification work. Route assets are normalized lazily, payload
+markers are injected without decoding and re-encoding HTML bytes, and
+successful stream cancellation propagates directly through the existing Web
+stream chain.
+
+### Skip protocol parsing for generated internal links
+
+Router-generated internal links are safe by construction and no longer pass
+through WHATWG `URL` parsing during render. Absolute targets, explicit `href`
+values, and locations marked external still receive the same dangerous-protocol
+validation.
+
+This removes repeated URL construction from link-heavy SSR pages while
+preserving link output and navigation behavior.
+
 ## @bgub/fig-tanstack-router@0.1.0-alpha.4
 
 ### Preserve TanStack Start inline CSS during hydration

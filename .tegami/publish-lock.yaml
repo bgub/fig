@@ -1,25 +1,44 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Avoid false selected-option hydration warnings\n\nHydrating a select now recognizes the `selected` attributes synthesized by\nserver rendering from the select's value. Genuine mismatched selected options\nstill produce a development warning, and uncontrolled selects continue to\npreserve user changes made before hydration.\n"
-    filename: select-hydration-selected.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n---\n\n## Identify why data-loader signals abort\n\nData-resource loader signals now expose whether their generation was\nsuperseded, evicted, or disposed. Rejected generations and values invalidated\nthrough an attributed error receive the originating error as their abort\nreason; reasonless rejections receive the platform's default `AbortError`.\n"
+    filename: data-loader-abort-reasons.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Reduce server-render and TanStack Start overhead\n\nServer rendering now avoids redundant child normalization, component-stack,\nand asset-classification work. Route assets are normalized lazily, payload\nmarkers are injected without decoding and re-encoding HTML bytes, and\nsuccessful stream cancellation propagates directly through the existing Web\nstream chain.\n"
+    filename: leaner-server-rendering.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Skip protocol parsing for generated internal links\n\nRouter-generated internal links are safe by construction and no longer pass\nthrough WHATWG `URL` parsing during render. Absolute targets, explicit `href`\nvalues, and locations marked external still receive the same dangerous-protocol\nvalidation.\n\nThis removes repeated URL construction from link-heavy SSR pages while\npreserving link output and navigation behavior.\n"
+    filename: skip-internal-link-protocol-parsing.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-vite\":\n    type: patch\n---\n\n## Avoid redundant Vite transforms\n\nProduction builds now rely on Vite's scope-aware `__FIG_DEV__` replacement\ninstead of running an additional Babel pass. Development loads the refresh\ntransformer only when a matching application module needs it.\n"
+    filename: leaner-vite-transforms.md
     v: 0.0.0
 core:packages:
-  - id: npm:@bgub/fig
-    updated: true
   - changelogIds:
-      - select-hydration-selected.md
-    id: npm:@bgub/fig-dom
+      - data-loader-abort-reasons.md
+      - leaner-server-rendering.md
+    id: npm:@bgub/fig
+    updated: true
+  - id: npm:@bgub/fig-dom
     updated: true
   - id: npm:@bgub/fig-reconciler
     updated: true
   - id: npm:@bgub/fig-refresh
     updated: true
-  - id: npm:@bgub/fig-server
+  - changelogIds:
+      - leaner-server-rendering.md
+    id: npm:@bgub/fig-server
     updated: true
-  - id: npm:@bgub/fig-tanstack-router
+  - changelogIds:
+      - leaner-server-rendering.md
+      - skip-internal-link-protocol-parsing.md
+    id: npm:@bgub/fig-tanstack-router
     updated: true
-  - id: npm:@bgub/fig-tanstack-start
+  - changelogIds:
+      - leaner-server-rendering.md
+    id: npm:@bgub/fig-tanstack-start
     updated: true
-  - id: npm:@bgub/fig-vite
+  - changelogIds:
+      - leaner-vite-transforms.md
+    id: npm:@bgub/fig-vite
     updated: true
 npm:packages:
   - distTag: latest
