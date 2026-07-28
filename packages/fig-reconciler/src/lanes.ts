@@ -109,15 +109,15 @@ let nextRetryLane: Lane = RetryLane1;
 let asyncTransitionLanes: Lanes = NoLanes;
 const asyncTransitionLaneCounts = createLaneMap<number>(0);
 
-interface TransitionTypeHooks {
-  retain?(lane: Lane, types: readonly string[] | undefined): () => void;
+interface TransitionOptionsHooks {
+  retain?(lane: Lane, options: TransitionOptions | undefined): () => void;
   record?(root: object, lane: Lane): void;
   complete?(root: object, remainingLanes: Lanes): void;
 }
 
 // The optional View Transition entry installs these hooks. Keeping the state
 // behind that entry leaves ordinary renderer bundles with only the hook calls.
-export const transitionTypeHooks: TransitionTypeHooks = {};
+export const transitionOptionsHooks: TransitionOptionsHooks = {};
 
 export function createLaneMap<T extends number>(initial: T): LaneMap<T> {
   return Array.from({ length: TotalLanes }, () => initial);
@@ -407,7 +407,7 @@ export function runWithTransitionLane<T>(
   callback: () => T,
   options?: TransitionOptions,
 ): T {
-  const releaseTransition = transitionTypeHooks.retain?.(lane, options?.types);
+  const releaseTransition = transitionOptionsHooks.retain?.(lane, options);
   let result: T;
   try {
     result = runWithPriority(lane, callback);

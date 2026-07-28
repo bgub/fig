@@ -17,6 +17,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
+import { viewTransitionHostConfig } from "./view-transition.ts";
 import {
   enableViewTransitions,
   getViewTransitionPseudoElements,
@@ -28,6 +29,7 @@ interface MockViewTransitionDocument {
   startViewTransition?: (update: () => void) => {
     finished: Promise<unknown>;
     ready: Promise<unknown>;
+    skipTransition?(): void;
   };
 }
 
@@ -1667,6 +1669,238 @@ describe("ViewTransition", () => {
       expect(container.textContent).toBe("Third");
     } finally {
       ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("interrupts the active animation when the next transition requests it", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    const updates: string[] = [];
+    let skipped = 0;
+    let finishFirst: () => void = () => undefined;
+    const firstFinished = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      const first = updates.length === 0;
+      update();
+      updates.push(container.textContent ?? "");
+      return first
+        ? {
+            finished: firstFinished,
+            ready: Promise.resolve(),
+            skipTransition() {
+              skipped += 1;
+              finishFirst();
+            },
+          }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement(
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("Second")));
+
+      expect(updates).toEqual(["Second"]);
+
+      await act(() =>
+        transition(() => setLabel?.("Third"), {
+          viewTransition: "interrupt",
+        }),
+      );
+
+      expect(skipped).toBe(1);
+      expect(updates).toEqual(["Second", "Third"]);
+      expect(container.textContent).toBe("Third");
+    } finally {
+      finishFirst();
+      await Promise.resolve();
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("interrupts before a transition commit with no changed boundary", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    let setCount: StateSetter<number> | null = null;
+    let skipped = 0;
+    let started = 0;
+    let finishFirst: () => void = () => undefined;
+    const firstFinished = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+
+    ownerDocument.startViewTransition = (update) => {
+      started += 1;
+      update();
+      return started === 1
+        ? {
+            finished: firstFinished,
+            ready: Promise.resolve(),
+            skipTransition() {
+              skipped += 1;
+              finishFirst();
+            },
+          }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, setL] = useState("A");
+      const [count, setC] = useState(0);
+      setLabel = setL;
+      setCount = setC;
+      return createElement(
+        "main",
+        null,
+        createElement("p", null, String(count)),
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("section", null, label),
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("B")));
+
+      await act(() =>
+        transition(() => setCount?.(1), {
+          viewTransition: "interrupt",
+        }),
+      );
+
+      expect(skipped).toBe(1);
+      expect(started).toBe(1);
+      expect(container.textContent).toBe("1B");
+    } finally {
+      finishFirst();
+      await Promise.resolve();
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("skips one active transition only once across multiple waiters", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let skipped = 0;
+    let finish: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const pending = {
+      finished,
+      ready: Promise.resolve(),
+      skipTransition() {
+        skipped += 1;
+        finish();
+      },
+    };
+    const ownerDocument = document as unknown as {
+      __figViewTransition?: unknown;
+    };
+    const firstReady = vi.fn();
+    const secondReady = vi.fn();
+    ownerDocument.__figViewTransition = pending;
+
+    try {
+      expect(
+        viewTransitionHostConfig.suspend?.(
+          container,
+          { interrupt: true, types: [] },
+          firstReady,
+        ),
+      ).toBe(true);
+      expect(
+        viewTransitionHostConfig.suspend?.(
+          container,
+          { interrupt: true, types: [] },
+          secondReady,
+        ),
+      ).toBe(true);
+
+      expect(skipped).toBe(1);
+      await finished;
+      await Promise.resolve();
+      expect(firstReady).toHaveBeenCalledOnce();
+      expect(secondReady).toHaveBeenCalledOnce();
+    } finally {
+      finish();
+      await Promise.resolve();
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
+  it("falls back to settlement when skipTransition throws", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let finish: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const ownerDocument = document as unknown as {
+      __figViewTransition?: unknown;
+    };
+    const ready = vi.fn();
+    const skipTransition = vi.fn(() => {
+      throw new Error("cannot skip");
+    });
+    ownerDocument.__figViewTransition = {
+      finished,
+      ready: Promise.resolve(),
+      skipTransition,
+    };
+
+    try {
+      expect(
+        viewTransitionHostConfig.suspend?.(
+          container,
+          { interrupt: true, types: [] },
+          ready,
+        ),
+      ).toBe(true);
+      expect(skipTransition).toHaveBeenCalledOnce();
+      expect(ready).not.toHaveBeenCalled();
+
+      finish();
+      await finished;
+      await Promise.resolve();
+      expect(ready).toHaveBeenCalledOnce();
+    } finally {
+      finish();
+      await Promise.resolve();
       ownerDocument.__figViewTransition = null;
       container.remove();
     }

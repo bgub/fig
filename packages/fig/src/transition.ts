@@ -1,5 +1,11 @@
 export interface TransitionOptions {
   types?: readonly string[];
+  /**
+   * Interrupts an active native View Transition before committing this
+   * transition. The new commit still waits for the interrupted transition to
+   * settle so host restoration cannot race its old-state snapshot.
+   */
+  viewTransition?: "interrupt";
 }
 
 export type TransitionHandler = <T>(

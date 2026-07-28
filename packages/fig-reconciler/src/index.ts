@@ -169,7 +169,7 @@ import {
   runWithPriority,
   runWithTransition,
   runWithTransitionLane,
-  transitionTypeHooks,
+  transitionOptionsHooks,
   SelectiveHydrationLane,
   SyncLane,
 } from "./lanes.ts";
@@ -1278,7 +1278,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function markRootPending(root: R, lane: Lane): void {
     markRootUpdated(root, lane);
-    transitionTypeHooks.record?.(root, lane);
+    transitionOptionsHooks.record?.(root, lane);
     pendingRoots.add(root);
     if (currentCommitEffectPhase === BeforePaintEffect && isSyncLane(lane)) {
       needsPostCommitSyncFlush = true;
@@ -1287,7 +1287,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function markRootCompleted(root: R, remainingLanes: Lanes): void {
     markRootFinished(root, remainingLanes);
-    transitionTypeHooks.complete?.(root, remainingLanes);
+    transitionOptionsHooks.complete?.(root, remainingLanes);
   }
 
   function markCommitEffectPhase(root: R, phase: EffectPhase): void {

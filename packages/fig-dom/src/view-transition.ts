@@ -4,6 +4,7 @@ import {
   VIEW_TRANSITION_TIMEOUT_MS,
 } from "@bgub/fig/internal";
 import type {
+  ViewTransitionCommitOptions,
   ViewTransitionCommitResult,
   ViewTransitionHostConfig,
   ViewTransitionMutationResult,
@@ -18,6 +19,7 @@ import {
 interface RunningViewTransition {
   finished?: Promise<unknown>;
   ready?: Promise<unknown>;
+  skipTransition?(): void;
 }
 
 interface CancellableAnimation {
@@ -28,9 +30,11 @@ type ViewTransitionDocument = Document & {
   [VIEW_TRANSITION_PENDING_PROPERTY]?: RunningViewTransition | null;
 };
 
+const interruptedTransitions = new WeakSet<object>();
+
 function commitViewTransition(
   container: Container,
-  types: readonly string[],
+  options: ViewTransitionCommitOptions,
   prepareSnapshot: () => void,
   mutate: () => ViewTransitionMutationResult,
   onReady: (active: boolean) => void,
@@ -68,7 +72,9 @@ function commitViewTransition(
         }
       };
       const transition = start(
-        types.length === 0 ? update : { types: [...types], update },
+        options.types.length === 0
+          ? update
+          : { types: [...options.types], update },
       );
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
@@ -126,15 +132,14 @@ function commitViewTransition(
     }
   };
 
-  // Serialize per document: starting a transition while one is running makes
-  // the browser abruptly skip the running animation, and the skipped
-  // transition's restore could race this one's old-state capture. The
-  // reconciler normally parks eligible commits upstream (render-during-wait
-  // via the adapter's suspend hook), so for fig-dom this chain is a fallback
-  // for renderers that wire commit without suspend — chaining freezes the root
-  // until the previous animation settles or times out; parking keeps
-  // rendering live.
-  if (waitForActiveViewTransition(owner, run)) {
+  // Coordinate per document: the default serializes animations, while an
+  // explicit interruption skips the active one but still waits for its
+  // restoration before capturing the next old state. The reconciler normally
+  // parks eligible commits upstream (render-during-wait via the adapter's
+  // suspend hook), so for fig-dom this chain is a fallback for renderers that
+  // wire commit without suspend — chaining freezes the root until the previous
+  // animation settles or times out; parking keeps rendering live.
+  if (coordinateActiveViewTransition(owner, options.interrupt, run)) {
     chained = true;
     return "deferred";
   }
@@ -265,8 +270,9 @@ function registerPendingTransition(
 // React caps suspended commits at 60 seconds. Besides preventing a broken or
 // infinite animation from parking work forever, releasing the document mutex
 // lets the resumed commit start a new transition, which ends the stale one.
-function waitForActiveViewTransition(
+function coordinateActiveViewTransition(
   owner: ViewTransitionDocument,
+  interrupt: boolean,
   onFinished: () => void,
 ): boolean {
   const pending = owner[VIEW_TRANSITION_PENDING_PROPERTY];
@@ -287,6 +293,19 @@ function waitForActiveViewTransition(
 
   const timeout = setTimeout(finish, VIEW_TRANSITION_TIMEOUT_MS);
   onSettled(settled, finish);
+  if (
+    interrupt &&
+    pending.skipTransition !== undefined &&
+    !interruptedTransitions.has(pending)
+  ) {
+    interruptedTransitions.add(pending);
+    try {
+      pending.skipTransition();
+    } catch {
+      interruptedTransitions.delete(pending);
+      // A failed interruption falls back to waiting for normal settlement.
+    }
+  }
   return true;
 }
 
@@ -394,7 +413,11 @@ export const viewTransitionHostConfig: ViewTransitionHostConfig<
   createSurface: createDOMViewTransitionSurface,
   // Park eligible commits behind the shared per-document mutex while
   // rendering continues, then re-schedule once the transition settles.
-  suspend(container, onFinished) {
-    return waitForActiveViewTransition(ownerDocument(container), onFinished);
+  suspend(container, options, onFinished) {
+    return coordinateActiveViewTransition(
+      ownerDocument(container),
+      options.interrupt,
+      onFinished,
+    );
   },
 };

@@ -28,11 +28,16 @@ import {
   SelectiveHydrationLane,
   SyncLane,
   TotalLanes,
+  transitionOptionsHooks,
   TransitionLane1,
   TransitionLane2,
   TransitionLane3,
 } from "./lanes.ts";
-import { getCurrentTransitionTypes } from "./transition-types.ts";
+import {
+  getCurrentTransitionTypes,
+  getRootTransitionOptions,
+  interruptsCurrentViewTransition,
+} from "./transition-options.ts";
 import { NormalPriority } from "./scheduler.ts";
 
 function root(): LaneRoot {
@@ -160,6 +165,57 @@ describe("lanes", () => {
     release();
     await pending;
     expect(getCurrentTransitionTypes(transitionLane)).toBe(null);
+  });
+
+  it("retains an interrupting view-transition policy for the lane scope", () => {
+    let transitionLane = NoLanes;
+    runWithTransition(
+      () => {
+        transitionLane = requestUpdateLane();
+        expect(interruptsCurrentViewTransition(transitionLane)).toBe(true);
+
+        runWithTransition(() => {
+          expect(interruptsCurrentViewTransition(transitionLane)).toBe(true);
+        });
+      },
+      { viewTransition: "interrupt" },
+    );
+
+    expect(interruptsCurrentViewTransition(transitionLane)).toBe(false);
+  });
+
+  it("lets interruption win when rendered lanes merge transition options", () => {
+    const laneRoot = {};
+    let typedLane = NoLanes;
+    let interruptingLane = NoLanes;
+
+    runWithTransition(
+      () => {
+        typedLane = requestUpdateLane();
+        transitionOptionsHooks.record?.(laneRoot, typedLane);
+      },
+      { types: ["navigation"] },
+    );
+    runWithTransition(
+      () => {
+        interruptingLane = requestUpdateLane();
+        transitionOptionsHooks.record?.(laneRoot, interruptingLane);
+      },
+      { types: ["forward"], viewTransition: "interrupt" },
+    );
+
+    expect(interruptingLane).not.toBe(typedLane);
+    expect(
+      getRootTransitionOptions(
+        laneRoot,
+        mergeLanes(typedLane, interruptingLane),
+      ),
+    ).toEqual({
+      interrupt: true,
+      types: ["navigation", "forward"],
+    });
+
+    transitionOptionsHooks.complete?.(laneRoot, NoLanes);
   });
 
   it("selects pending non-suspended lanes and includes entanglements", () => {

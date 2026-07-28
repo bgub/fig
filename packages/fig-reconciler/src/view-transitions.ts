@@ -40,7 +40,7 @@ import type {
   ViewTransitionPlannerRoot as PlannerRoot,
   ViewTransitionPlannerState as ViewTransitionState,
 } from "./view-transition-planner-types.ts";
-import { getRootTransitionTypes } from "./transition-types.ts";
+import { getRootTransitionOptions } from "./transition-options.ts";
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
@@ -63,6 +63,11 @@ export interface ViewTransitionMutationResult {
   cancelRootSnapshot: boolean;
 }
 
+export interface ViewTransitionCommitOptions {
+  readonly interrupt: boolean;
+  readonly types: readonly string[];
+}
+
 export interface ViewTransitionSurfaceSnapshots {
   readonly old: boolean;
   readonly new: boolean;
@@ -72,7 +77,7 @@ export interface ViewTransitionHostConfig<Container, Instance> {
   commit(
     this: void,
     container: Container,
-    types: readonly string[],
+    options: ViewTransitionCommitOptions,
     prepareSnapshot: () => void,
     mutate: () => ViewTransitionMutationResult,
     ready: (active: boolean) => void,
@@ -95,7 +100,12 @@ export interface ViewTransitionHostConfig<Container, Instance> {
     name: string,
     snapshots: ViewTransitionSurfaceSnapshots,
   ): PublicViewTransitionSurface;
-  suspend?(this: void, container: Container, onFinished: () => void): boolean;
+  suspend?(
+    this: void,
+    container: Container,
+    options: ViewTransitionCommitOptions,
+    onFinished: () => void,
+  ): boolean;
 }
 
 interface ViewTransitionSurface<Instance> {
@@ -113,8 +123,8 @@ interface ViewTransitionSurface<Instance> {
 interface ViewTransitionPlan<Instance> {
   newSurfaces: ViewTransitionSurface<Instance>[];
   oldSurfaces: ViewTransitionSurface<Instance>[];
+  options: ViewTransitionCommitOptions;
   rootAffected: boolean;
-  types: string[];
 }
 
 interface ViewTransitionCollection<Instance> {
@@ -150,11 +160,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     ) {
       return null;
     }
+    const options = getRootTransitionOptions(root, root.renderLanes);
     const plan: ViewTransitionPlan<Instance> = {
       newSurfaces: [],
       oldSurfaces: [],
+      options,
       rootAffected: false,
-      types: getRootTransitionTypes(root, root.renderLanes),
     };
     const collection: ViewTransitionCollection<Instance> = {
       changedBoundaries: null,
@@ -808,7 +819,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const event: ViewTransitionEvent = {
         phase: group[0].phase,
         surfaces,
-        types: plan.types,
+        types: plan.options.types,
       };
       callback(event, signal);
     }
@@ -819,8 +830,10 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     viewTransitions: true,
     suspend(rootIdentity, onReady) {
       const root = rootIdentity as PlannerRoot<Container>;
+      const options = getRootTransitionOptions(root, root.renderLanes);
       return (
-        isEligible(root) && host.suspend?.(root.container, onReady) === true
+        isEligible(root) &&
+        host.suspend?.(root.container, options, onReady) === true
       );
     },
     commit(context) {
@@ -834,7 +847,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
       return host.commit(
         context.container,
-        plan.types,
+        plan.options,
         () => applyOldViewTransitionSurfaces(plan),
         () => {
           didRunMutation = true;

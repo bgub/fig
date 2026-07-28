@@ -22,7 +22,7 @@ enableViewTransitions();
 </ViewTransition>;
 ```
 
-`enableViewTransitions()` activates native DOM View Transitions for the current application. It is permanent and idempotent, may run after roots exist, and may live in the module that first renders a transition surface, including a lazy route. Importing the module alone does not activate the feature. The ordinary `@bgub/fig-dom` entry includes neither the View Transition planner nor the browser adapter.
+`enableViewTransitions()` activates native DOM View Transitions for the current application. It is permanent and idempotent, may run after roots exist, and may live in the module that first renders a transition surface, including a lazy route. Importing the module alone does not activate the feature. The ordinary `@bgub/fig-dom` entry includes neither the document View Transition planner nor its commit coordinator.
 
 In development, rendering a `ViewTransition` before installing a coordinator that declares `viewTransitions: true` reports a one-time renderer-neutral diagnostic; its Fig DOM guidance points to `enableViewTransitions()`. Production continues to degrade to ordinary rendering when that support is absent.
 
@@ -37,13 +37,14 @@ Its props are:
 
 `"auto"` keeps browser/default styling. `"none"` disables that phase. Empty names and `name="none"` are reserved and throw in development.
 
-## Transition Types
+## Transition Options
 
-Both transition entry points accept explicit types as trailing options:
+Both transition entry points accept native animation types and an optional interruption policy as trailing options:
 
 ```ts
 transition(() => navigate("/inbox"), {
   types: ["navigation", "forward"],
+  viewTransition: "interrupt",
 });
 
 const [isPending, start] = useTransition();
@@ -53,6 +54,8 @@ start((signal) => refresh(signal), { types: ["refresh"] });
 Fig records types when an update reaches a root, rather than reading mutable global state at commit time. Nested scopes on the same lane union their types in insertion order, duplicate values collapse, and a commit unions the types of all rendered lanes. Types therefore follow the updates they label across async callbacks and concurrent roots without leaking into unrelated retries, deferred reveals, or later commits.
 
 When the resulting list is non-empty, Fig DOM calls `document.startViewTransition({ update, types })`. It keeps the callback-only browser form for an untyped transition.
+
+`viewTransition: "interrupt"` makes newest user intent replace an active native animation. Interruption is sticky within a transition lane and wins when a commit includes multiple rendered lanes. Fig calls `skipTransition()` on the active browser transition, waits for its `finished` promise so restoration completes, then commits the latest rendered state and starts a new transition when the commit has participating boundaries. Without this option, eligible commits retain the default serialized behavior.
 
 ## Lifecycle And Pseudo Elements
 
@@ -132,7 +135,7 @@ Root-name restoration and temporary hide animations remain in place until `finis
 
 ## One Transition At A Time
 
-Client commits and annotated server reveals share a per-document `__figViewTransition` mutex. A new eligible commit waits for the current animation to finish instead of calling `skipTransition()` and producing a stutter.
+Client commits and annotated server reveals share a per-document `__figViewTransition` mutex. By default, a new eligible commit waits for the current animation to finish instead of calling `skipTransition()` and producing a stutter. A client transition carrying `viewTransition: "interrupt"` explicitly chooses responsiveness over completing the active animation: Fig skips it, waits only for settlement cleanup, and then resumes the latest commit.
 
 Only commit waits. Rendering continues normally:
 
