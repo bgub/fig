@@ -10,6 +10,10 @@ import {
   rewriteFrameworkImports,
   tanStackCompatibilityProfile,
 } from "./compatibility-profile.ts";
+import {
+  compilerSourceIdFilter,
+  isCompilerSourceModule,
+} from "./compiler-options.ts";
 import { writePublicAsset } from "./public-assets.ts";
 import { tanstackStart } from "./vite.ts";
 
@@ -36,6 +40,8 @@ interface CompatibilityPlugin {
     resolve: { alias: Alias[] };
     root: string;
   }): void;
+  load: FilteredHook<(id: string) => string | undefined>;
+  resolveId: FilteredHook<(source: string) => string | undefined>;
 }
 
 interface PayloadPlugin {
@@ -43,12 +49,16 @@ interface PayloadPlugin {
     environmentName: string,
     environment: EnvironmentOptions,
   ): { build?: EnvironmentOptions["build"] } | undefined;
-  resolveId(
-    this: PayloadPluginContext,
-    source: string,
-    importer?: string,
-  ): Promise<string | null | undefined>;
-  load(this: PayloadPluginContext, id: string): Promise<string | undefined>;
+  resolveId: FilteredHook<
+    (
+      this: PayloadPluginContext,
+      source: string,
+      importer?: string,
+    ) => Promise<string | null | undefined>
+  >;
+  load: FilteredHook<
+    (this: PayloadPluginContext, id: string) => Promise<string | undefined>
+  >;
   hotUpdate(
     this: {
       environment: {
@@ -71,7 +81,14 @@ interface PayloadPluginContext {
 }
 
 interface OptimizerPlugin {
-  resolveId(source: string): { external: true; id: string } | null;
+  resolveId: FilteredHook<
+    (source: string) => { external: true; id: string } | null
+  >;
+}
+
+interface FilteredHook<Handler> {
+  filter: { id: RegExp };
+  handler: Handler;
 }
 
 describe("tanstackStart", () => {
@@ -139,6 +156,11 @@ describe("tanstackStart", () => {
     expect(incompatibleRuntimeModules([solidModule])).toEqual([solidModule]);
   });
 
+  it("returns unrelated modules unchanged", () => {
+    const code = 'import { Link } from "@bgub/fig-tanstack-router";';
+    expect(rewriteFrameworkImports(code)).toBe(code);
+  });
+
   it("keeps application-bound compatibility modules out of dependency prebundling", () => {
     const plugin = compatibilityPlugin();
     const config = plugin.configEnvironment("client", {
@@ -178,14 +200,17 @@ describe("tanstackStart", () => {
       root: "/app",
     });
     const [optimizer] = config?.optimizeDeps?.rolldownOptions?.plugins ?? [];
-    expect(optimizer?.resolveId("#tanstack-router-entry")).toEqual({
+    expect(optimizer?.resolveId.handler("#tanstack-router-entry")).toEqual({
       external: true,
       id: "/@fs/app/router.ts",
     });
-    expect(optimizer?.resolveId("#tanstack-start-entry")).toEqual({
+    expect(optimizer?.resolveId.handler("#tanstack-start-entry")).toEqual({
       external: true,
       id: "/@fs/app/start.ts",
     });
+    expect(optimizer?.resolveId.filter.id.test("unrelated-package")).toBe(
+      false,
+    );
   });
 
   it("emits server-only assets for public delivery", () => {
@@ -193,6 +218,54 @@ describe("tanstackStart", () => {
 
     expect(config?.build?.emitAssets).toBe(true);
   });
+
+  it("filters private compiler hooks before they cross into JavaScript", () => {
+    const compatibility = compatibilityPlugin();
+    const payload = payloadPlugin();
+
+    expect(
+      compatibility.resolveId.filter.id.test(
+        "@tanstack/solid-start/client-rpc",
+      ),
+    ).toBe(true);
+    expect(
+      compatibility.resolveId.filter.id.test("@tanstack/router-core"),
+    ).toBe(false);
+    expect(
+      payload.resolveId.filter.id.test("/app/page.tsx?fig-payload-manifest=1"),
+    ).toBe(true);
+    expect(payload.resolveId.filter.id.test("@tanstack/router-core")).toBe(
+      false,
+    );
+    expect(
+      payload.load.filter.id.test(
+        "\0virtual:fig-tanstack-start/payload-runtime",
+      ),
+    ).toBe(true);
+    expect(payload.load.filter.id.test("/app/page.tsx")).toBe(false);
+  });
+
+  it.each([
+    ["/app/page.tsx", true],
+    ["/app/page.tsx?raw", true],
+    ["/app/page.tsx?raw#fragment", true],
+    ["/app/page.tsx#fragment", false],
+    ["node_modules/library/index.js", false],
+    ["/app/node_modules/library/index.js", false],
+    [String.raw`C:\app\page.tsx`, true],
+    [String.raw`C:\app\node_modules\library\index.js`, false],
+    ["/app/page.css", false],
+  ])(
+    "keeps native and fallback source filters aligned for %s",
+    (id, expected) => {
+      const native =
+        compilerSourceIdFilter.include.test(id) &&
+        !compilerSourceIdFilter.exclude.test(id);
+
+      expect(native).toBe(expected);
+      expect(isCompilerSourceModule(id)).toBe(expected);
+    },
+  );
 
   it("rejects conflicting server and client assets at one public path", async () => {
     const root = await mkdtemp(join(tmpdir(), "fig-start-assets-"));
@@ -241,7 +314,7 @@ describe("tanstackStart", () => {
       };
       const definitions = new Map<string, { id: string }>();
       for (const file of [labPath, plainPath]) {
-        const definitionId = await plugin.resolveId.call(
+        const definitionId = await plugin.resolveId.handler.call(
           context,
           `${file}?fig-payload-manifest`,
           file,
@@ -249,7 +322,7 @@ describe("tanstackStart", () => {
         if (typeof definitionId !== "string") {
           throw new Error("Expected a manifest definition id.");
         }
-        await plugin.load.call(context, definitionId);
+        await plugin.load.handler.call(context, definitionId);
         definitions.set(file, { id: definitionId });
       }
 
@@ -317,6 +390,22 @@ describe("tanstackStart", () => {
 
     expect(code).toContain("createFigStartHandler()");
     expect(code).not.toContain("defaultStreamHandler");
+  });
+
+  it("keeps Babel behind the Payload compiler gate", async () => {
+    const sources = await Promise.all(
+      [
+        "./compiler-options.ts",
+        "./payload-compiler.ts",
+        "./server-payload-compiler.ts",
+      ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+    );
+    const code = sources.join("\n");
+
+    expect(code).toContain('import("@babel/core")');
+    expect(code).not.toMatch(
+      /^import\s+(?!type\s)[^;]+\sfrom\s+["']@babel\//mu,
+    );
   });
 });
 

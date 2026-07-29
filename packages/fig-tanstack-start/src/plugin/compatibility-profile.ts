@@ -17,6 +17,14 @@ export const tanStackCompatibilityProfile = {
   },
 } as const;
 
+const figStartPackage = tanStackCompatibilityProfile.packages.figStart;
+const frameworkStartPackage =
+  tanStackCompatibilityProfile.packages.frameworkStart;
+const figStartImportPattern = new RegExp(
+  `\\b(from|import)\\s*(\\(\\s*)?(["'])${escapeRegExp(figStartPackage)}\\3`,
+  "g",
+);
+
 export function createCompilerRpcModules(
   resolveDependency: (id: string) => string,
 ) {
@@ -55,14 +63,11 @@ export function createDefaultServerEntry(): string {
 }
 
 export function rewriteFrameworkImports(code: string): string {
-  const { figStart, frameworkStart } = tanStackCompatibilityProfile.packages;
+  if (!code.includes(figStartPackage)) return code;
   return code.replace(
-    new RegExp(
-      `\\b(from|import)\\s*(\\(\\s*)?(["'])${escapeRegExp(figStart)}\\3`,
-      "g",
-    ),
+    figStartImportPattern,
     (_match, keyword: string, parenthesis: string | undefined, quote: string) =>
-      `${keyword}${parenthesis === undefined ? " " : parenthesis}${quote}${frameworkStart}${quote}`,
+      `${keyword}${parenthesis === undefined ? " " : parenthesis}${quote}${frameworkStartPackage}${quote}`,
   );
 }
 

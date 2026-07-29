@@ -1,7 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { START_ENVIRONMENT_NAMES } from "@tanstack/start-plugin-core/vite";
 import type { PluginOption } from "vite";
-import { toViteFsPath } from "./module-ids.ts";
+import {
+  compilerSourceIdFilter,
+  isCompilerSourceModule,
+} from "./compiler-options.ts";
+import { cleanModuleId, toViteFsPath } from "./module-ids.ts";
 import {
   createCompilerRpcModules,
   createDefaultServerEntry,
@@ -40,6 +44,7 @@ const applicationEntryIds = new Set([
   "#tanstack-router-entry",
   "#tanstack-start-entry",
 ]);
+const applicationEntryPattern = /^#tanstack-(?:router|start)-entry$/;
 const storageContextPath = fileURLToPath(
   new URL("../storage-context.js", import.meta.url),
 );
@@ -51,14 +56,24 @@ export const defaultEntryPaths = {
 } as const;
 
 const compilerRpcModules = createCompilerRpcModules(resolveDependency);
+const compilerRpcSourcePattern = exactPattern(
+  compilerRpcModules.map((module) => module.source),
+);
+const compatibilityLoadPattern = exactPattern([
+  ...compilerRpcModules.map((module) => module.id),
+  defaultEntryPaths.server,
+]);
 
 export function startCompatibilityPlugin(): PluginOption {
   const applicationEntryUrls = new Map<string, string>();
   const optimizerApplicationEntries = {
     name: "fig-tanstack-start:optimizer-application-entries",
-    resolveId(source: string) {
-      const id = applicationEntryUrls.get(source);
-      return id === undefined ? null : { external: true, id };
+    resolveId: {
+      filter: { id: applicationEntryPattern },
+      handler(source: string) {
+        const id = applicationEntryUrls.get(source);
+        return id === undefined ? null : { external: true, id };
+      },
     },
   };
 
@@ -146,18 +161,44 @@ export function startCompatibilityPlugin(): PluginOption {
         `${tanStackCompatibilityProfile.id} resolved compatibility-only Solid modules into the client runtime:\n${incompatible.join("\n")}`,
       );
     },
-    resolveId(source) {
-      return compilerRpcModules.find((module) => module.source === source)?.id;
+    resolveId: {
+      filter: { id: compilerRpcSourcePattern },
+      handler(source) {
+        return compilerRpcModules.find((module) => module.source === source)
+          ?.id;
+      },
     },
-    load(id) {
-      const rpcModule = compilerRpcModules.find((module) => module.id === id);
-      if (rpcModule !== undefined) return rpcModule.code;
-      if (id === defaultEntryPaths.server) return createDefaultServerEntry();
-      return undefined;
+    load: {
+      filter: { id: compatibilityLoadPattern },
+      handler(id) {
+        const rpcModule = compilerRpcModules.find((module) => module.id === id);
+        if (rpcModule !== undefined) return rpcModule.code;
+        if (id === defaultEntryPaths.server) return createDefaultServerEntry();
+        return undefined;
+      },
     },
-    transform(code) {
-      const rewritten = rewriteFrameworkImports(code);
-      return rewritten === code ? null : { code: rewritten, map: null };
+    transform: {
+      filter: {
+        code: figTanStackStartPackage,
+        id: compilerSourceIdFilter,
+      },
+      handler(code, id) {
+        if (
+          (this.environment.name !== START_ENVIRONMENT_NAMES.client &&
+            this.environment.name !== START_ENVIRONMENT_NAMES.server) ||
+          !isCompilerSourceModule(cleanModuleId(id))
+        ) {
+          return null;
+        }
+        const rewritten = rewriteFrameworkImports(code);
+        return rewritten === code ? null : { code: rewritten, map: null };
+      },
     },
   };
+}
+
+function exactPattern(values: readonly string[]): RegExp {
+  return new RegExp(
+    `^(?:${values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`,
+  );
 }

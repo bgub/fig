@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { START_ENVIRONMENT_NAMES } from "@tanstack/start-plugin-core/vite";
 import type { EnvironmentModuleNode, PluginOption } from "vite";
 import { rewriteFrameworkImports } from "./compatibility-profile.ts";
+import { compilerSourceIdFilter } from "./compiler-options.ts";
 import {
   isomorphicReferenceId,
   type ManifestReference,
@@ -37,12 +38,26 @@ import { writePublicAsset } from "./public-assets.ts";
 
 const payloadManifestDefinitionPrefix =
   "\0fig-tanstack-start:payload-manifest-definition:";
+const payloadResolveIdPattern =
+  /(?:^virtual:fig-tanstack-start\/payload-(?:runtime|manifest)$|[?&]fig-payload-(?:module|manifest)(?:=|&|$))/;
+const payloadLoadIdPattern = new RegExp(
+  `^(?:${resolvedPayloadRuntimeId}|${resolvedPayloadManifestId}|${payloadManifestDefinitionPrefix})`,
+);
 
 export function serverPayloadPlugin(): PluginOption {
   return {
     name: "fig-tanstack-start:server-payload",
     enforce: "pre",
-    transform: transformServerPayloadDefinitions,
+    applyToEnvironment(environment) {
+      return (
+        environment.name === START_ENVIRONMENT_NAMES.client ||
+        environment.name === START_ENVIRONMENT_NAMES.server
+      );
+    },
+    transform: {
+      filter: { code: "serverPayload", id: compilerSourceIdFilter },
+      handler: transformServerPayloadDefinitions,
+    },
   };
 }
 
@@ -63,6 +78,12 @@ export function payloadPlugin(): PluginOption {
   return {
     name: "fig-tanstack-start:payload",
     enforce: "pre",
+    applyToEnvironment(environment) {
+      return (
+        environment.name === START_ENVIRONMENT_NAMES.client ||
+        environment.name === START_ENVIRONMENT_NAMES.server
+      );
+    },
     configEnvironment(environmentName) {
       if (environmentName === START_ENVIRONMENT_NAMES.server) {
         return { build: { emitAssets: true } };
@@ -109,66 +130,72 @@ export function payloadPlugin(): PluginOption {
       if (this.environment.name !== START_ENVIRONMENT_NAMES.client) return;
       collectClientStylesheets(bundle, clientStylesheets, base);
     },
-    async resolveId(source, importer) {
-      if (source === payloadRuntimeId) return resolvedPayloadRuntimeId;
-      if (source === payloadManifestId) return resolvedPayloadManifestId;
-      if (hasModuleQuery(source, payloadModuleQuery)) {
+    resolveId: {
+      filter: { id: payloadResolveIdPattern },
+      async handler(source, importer) {
+        if (source === payloadRuntimeId) return resolvedPayloadRuntimeId;
+        if (source === payloadManifestId) return resolvedPayloadManifestId;
+        if (hasModuleQuery(source, payloadModuleQuery)) {
+          const resolved = await this.resolve(cleanModuleId(source), importer, {
+            skipSelf: true,
+          });
+          return resolved === null
+            ? null
+            : withModuleQuery(
+                cleanModuleId(resolved.id),
+                payloadModuleQuery,
+                "1",
+              );
+        }
+        if (!hasModuleQuery(source, payloadManifestDefinitionQuery)) {
+          return undefined;
+        }
+
         const resolved = await this.resolve(cleanModuleId(source), importer, {
           skipSelf: true,
         });
-        return resolved === null
-          ? null
-          : withModuleQuery(
-              cleanModuleId(resolved.id),
-              payloadModuleQuery,
-              "1",
-            );
-      }
-      if (!hasModuleQuery(source, payloadManifestDefinitionQuery)) {
-        return undefined;
-      }
-
-      const resolved = await this.resolve(cleanModuleId(source), importer, {
-        skipSelf: true,
-      });
-      if (resolved === null) return null;
-      // Start protects .server modules from the client graph. The manifest
-      // needs only their compiled definitions, so expose those definitions
-      // through a private virtual id before import protection runs.
-      return definitionModuleId(cleanModuleId(resolved.id));
+        if (resolved === null) return null;
+        // Start protects .server modules from the client graph. The manifest
+        // needs only their compiled definitions, so expose those definitions
+        // through a private virtual id before import protection runs.
+        return definitionModuleId(cleanModuleId(resolved.id));
+      },
     },
-    async load(id) {
-      if (id === resolvedPayloadRuntimeId) return payloadRuntimeCode();
-      if (id === resolvedPayloadManifestId) {
-        return payloadManifestRuntimeCode(clientStylesheets);
-      }
-      if (!id.startsWith(payloadManifestDefinitionPrefix)) return undefined;
+    load: {
+      filter: { id: payloadLoadIdPattern },
+      async handler(id) {
+        if (id === resolvedPayloadRuntimeId) return payloadRuntimeCode();
+        if (id === resolvedPayloadManifestId) {
+          return payloadManifestRuntimeCode(clientStylesheets);
+        }
+        if (!id.startsWith(payloadManifestDefinitionPrefix)) return undefined;
 
-      const sourceId = decodeOpaqueId(
-        id.slice(payloadManifestDefinitionPrefix.length),
-      );
-      const code = rewriteFrameworkImports(await readFile(sourceId, "utf8"));
-      const stylesheetSources = new Map<string, string>();
-      const references = await collectPayloadReferences(
-        sourceId,
-        code,
-        (source, importer) =>
-          this.resolve(source, importer, { skipSelf: true }),
-        root,
-        stylesheetSources,
-      );
-      if (references.length > 0) {
-        this.addWatchFile(sourceId);
-        definitionInputs.set(sourceId, {
-          boundaries: boundaryFingerprint(references),
+        const sourceId = decodeOpaqueId(
+          id.slice(payloadManifestDefinitionPrefix.length),
+        );
+        const code = rewriteFrameworkImports(await readFile(sourceId, "utf8"));
+        const stylesheetSources = new Map<string, string>();
+        const references = await collectPayloadReferences(
+          sourceId,
+          code,
+          (source, importer) =>
+            this.resolve(source, importer, { skipSelf: true }),
+          root,
           stylesheetSources,
-        });
-      } else {
-        // A missing entry means the empty fingerprint, so the map only holds
-        // the few definitions that actually have boundaries.
-        definitionInputs.delete(sourceId);
-      }
-      return payloadManifestDefinitionCode(references);
+        );
+        if (references.length > 0) {
+          this.addWatchFile(sourceId);
+          definitionInputs.set(sourceId, {
+            boundaries: boundaryFingerprint(references),
+            stylesheetSources,
+          });
+        } else {
+          // A missing entry means the empty fingerprint, so the map only holds
+          // the few definitions that actually have boundaries.
+          definitionInputs.delete(sourceId);
+        }
+        return payloadManifestDefinitionCode(references);
+      },
     },
     async hotUpdate({ file, modules, read }) {
       const { moduleGraph } = this.environment;
@@ -223,21 +250,24 @@ export function payloadPlugin(): PluginOption {
       if (invalidated.size === 0) return undefined;
       return [...modules, ...invalidated];
     },
-    async transform(code, id) {
-      if (
-        this.environment.name !== START_ENVIRONMENT_NAMES.server ||
-        !mayBePayloadModule(code, id)
-      ) {
-        return null;
-      }
-      const references = await collectPayloadReferences(
-        id,
-        code,
-        (source, importer) =>
-          this.resolve(source, importer, { skipSelf: true }),
-        root,
-      );
-      return transformPayloadModule(code, id, references);
+    transform: {
+      filter: { id: compilerSourceIdFilter },
+      async handler(code, id) {
+        if (
+          this.environment.name !== START_ENVIRONMENT_NAMES.server ||
+          !mayBePayloadModule(code, id)
+        ) {
+          return null;
+        }
+        const references = await collectPayloadReferences(
+          id,
+          code,
+          (source, importer) =>
+            this.resolve(source, importer, { skipSelf: true }),
+          root,
+        );
+        return transformPayloadModule(code, id, references);
+      },
     },
   };
 }

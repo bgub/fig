@@ -1,6 +1,9 @@
-import * as babel from "@babel/core";
-import type { NodePath } from "@babel/core";
-import presetTypescript from "@babel/preset-typescript";
+import type { NodePath, PluginItem } from "@babel/core";
+
+interface CompilerTransformOptions {
+  plugins: PluginItem[];
+  sourceMaps?: true;
+}
 
 export const payloadPackageId = "@bgub/fig-tanstack-start/payload";
 export const serverPackageId = "@bgub/fig-tanstack-start/server";
@@ -18,14 +21,35 @@ export const sourceModuleExtensions = [
   "mts",
 ] as const;
 
-const sourceModulePattern = new RegExp(
-  `\\.(?:${sourceModuleExtensions.join("|")})$`,
-);
+const sourceModuleSuffix = `\\.(?:${sourceModuleExtensions.join("|")})`;
+const sourceModulePattern = new RegExp(`${sourceModuleSuffix}$`);
+const compilerSourceIdPattern = new RegExp(`${sourceModuleSuffix}(?:\\?.*)?$`);
+const dependencyModuleIdPattern = /(?:^|[\\/])node_modules[\\/]/;
+export const compilerSourceIdFilter = {
+  include: compilerSourceIdPattern,
+  exclude: dependencyModuleIdPattern,
+} as const;
 
-export function babelOptions(
+let babelCompiler:
+  | Promise<
+      readonly [
+        typeof import("@babel/core"),
+        (typeof import("@babel/preset-typescript"))["default"],
+      ]
+    >
+  | undefined;
+
+export async function transformWithBabel(
+  code: string,
   filename: string,
-): NonNullable<Parameters<typeof babel.transformAsync>[1]> {
-  return {
+  { plugins, sourceMaps }: CompilerTransformOptions,
+) {
+  babelCompiler ??= Promise.all([
+    import("@babel/core"),
+    import("@babel/preset-typescript").then((module) => module.default),
+  ]);
+  const [babel, presetTypescript] = await babelCompiler;
+  return babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
     filename,
@@ -36,11 +60,19 @@ export function babelOptions(
       ],
     ],
     parserOpts: { plugins: filename.endsWith("x") ? ["jsx"] : [] },
-  };
+    plugins,
+    sourceMaps,
+  });
 }
 
 export function isSourceModule(id: string): boolean {
   return sourceModulePattern.test(id);
+}
+
+export function isCompilerSourceModule(id: string): boolean {
+  return (
+    compilerSourceIdPattern.test(id) && !dependencyModuleIdPattern.test(id)
+  );
 }
 
 export function isComponentName(name: string): boolean {

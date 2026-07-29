@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeIsomorphicBoundaries,
+  mayBePayloadModule,
   payloadRuntimeCode,
   payloadRuntimeId,
   transformPayloadModule,
@@ -57,6 +58,27 @@ describe("TanStack Start Payload compiler", () => {
       /Symbol\.for\("fig\.tanstack-start\.payload-stylesheets"\)/,
     );
     expect(payloadRuntimeCode()).toContain("Object.defineProperty(component");
+  });
+
+  it("rejects unrelated modules before parsing", () => {
+    const code = 'export const message = "plain";';
+
+    expect(mayBePayloadModule(code, "/app/plain.tsx")).toBe(false);
+  });
+
+  it("does not recompile dependency output", async () => {
+    expect(
+      mayBePayloadModule(
+        "renderPayloadResponse(Component);",
+        "/app/node_modules/library/dist/server.js",
+      ),
+    ).toBe(false);
+    await expect(
+      analyzeIsomorphicBoundaries(
+        "const boundary = Isomorphic;",
+        "/app/node_modules/library/index.js",
+      ),
+    ).resolves.toEqual([]);
   });
 
   it("compiles only explicit Isomorphic component props into references", async () => {

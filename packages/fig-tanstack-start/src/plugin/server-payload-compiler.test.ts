@@ -48,6 +48,15 @@ describe("TanStack Start serverPayload compiler", () => {
     expect(result?.code).not.toContain("serverPayload((props");
   });
 
+  it("does not recompile generated dependency output", async () => {
+    await expect(
+      transformServerPayloadDefinitions(
+        "const payload = serverPayload(Component);",
+        "/app/node_modules/.nitro/services/ssr/index.js",
+      ),
+    ).resolves.toBeNull();
+  });
+
   it.each([
     {
       code: "export const value = serverPayload();",

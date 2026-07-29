@@ -1,12 +1,12 @@
-import * as babel from "@babel/core";
+import type * as babel from "@babel/core";
 import type { NodePath, PluginObject } from "@babel/core";
 import { tanStackCompatibilityProfile } from "./compatibility-profile.ts";
 import {
-  babelOptions,
+  isCompilerSourceModule,
   isImportedBinding,
-  isSourceModule,
   payloadPackageId,
   serverPackageId,
+  transformWithBabel,
 } from "./compiler-options.ts";
 import { cleanModuleId } from "./module-ids.ts";
 
@@ -18,11 +18,12 @@ export async function transformServerPayloadDefinitions(
   id: string,
 ) {
   const clean = cleanModuleId(id);
-  if (!isSourceModule(clean) || !code.includes("serverPayload")) return null;
+  if (!isCompilerSourceModule(clean) || !code.includes("serverPayload")) {
+    return null;
+  }
 
   const state = { transformed: false };
-  const result = await babel.transformAsync(code, {
-    ...babelOptions(clean),
+  const result = await transformWithBabel(code, clean, {
     sourceMaps: true,
     plugins: [serverPayloadBabelPlugin(state)],
   });

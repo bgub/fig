@@ -47,7 +47,7 @@ export const PostPage = createPayloadComponent<{ id: string }>({
 
 A route loader calls `ensureRouteData(context, PostPage, { id })`, and the route renders `<PostPage id={id} />`. TanStack orchestrates the route; Fig owns the cache entry, streamed tree, data rows, and assets. The same component works with the ordinary data-resource freshness APIs and explicit store methods.
 
-The compiler turns the component or callback passed to `serverPayload` into a private TanStack server function. It renders that function as the Payload root rather than calling it before rendering, so root-level data reads, hooks, and suspension use normal server-renderer semantics. Browser output keeps a compiler-marked RPC loader but removes server-only JSX and imports; without that marker, `serverPayload` throws before invoking application code. The declaration therefore stays in a client-importable module, conventionally `.payload.tsx`; the filename itself has no runtime meaning. The extracted component may come from a TanStack-protected `.server.tsx` module.
+The compiler turns the component or callback passed to `serverPayload` into a private TanStack server function. It renders that function as the Payload root rather than calling it before rendering, so root-level data reads, hooks, and suspension use normal server-renderer semantics. Browser output keeps a compiler-marked RPC loader but removes server-only JSX and imports; without that marker, `serverPayload` throws before invoking application code. The declaration therefore stays in a client-importable module, conventionally `.payload.tsx`; the filename itself has no runtime meaning. The extracted component may come from a TanStack-protected `.server.tsx` module. Compiler hooks accept application and workspace source, but skip installed dependency output so deployment bundlers cannot recursively compile an already-emitted SSR service.
 
 Start server functions do not expose an abort signal, so `renderPayloadResponse` uses the current request signal unless explicitly overridden. A disconnected client stops the Payload render.
 
@@ -64,6 +64,8 @@ Payload data rows hydrate the same generation-guarded store. Browser delivery as
 ## Compiler And Vite Integration
 
 The Vite plugin delegates environment planning, routes, server-function extraction, development serving, production builds, and preview to TanStack's plugin core. It supplies Fig's client and server entries and installs the generic `fig()` Vite integration, which owns Fig's compile-time development gate and Fast Refresh.
+
+The Payload compiler's Babel implementation loads only after a gated application module requires compilation. Applications that do not use `serverPayload`, `renderPayloadResponse`, or `Isomorphic` do not retain the compiler during ordinary Vite builds. Resolver, loader, and transform hooks publish native Vite/Rolldown filters so unrelated module traffic does not cross into their JavaScript handlers.
 
 TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's versioned compatibility profile privately uses Solid identifiers, pins the participating TanStack versions, and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph.
 

@@ -1,12 +1,13 @@
-import * as babel from "@babel/core";
+import type * as babel from "@babel/core";
 import type { NodePath, PluginObject } from "@babel/core";
 import { payloadStylesheetsSymbolKey } from "../payload-assets.ts";
 import {
-  babelOptions,
   isComponentName,
+  isCompilerSourceModule,
   isImportedBinding,
   isSourceModule,
   serverPackageId,
+  transformWithBabel,
 } from "./compiler-options.ts";
 import {
   type CompiledIsomorphicImport,
@@ -49,8 +50,7 @@ export async function analyzeStylesheetImports(
   const clean = cleanModuleId(id);
   if (!isSourceModule(clean)) return [];
   const stylesheets: string[] = [];
-  await babel.transformAsync(code, {
-    ...babelOptions(clean),
+  await transformWithBabel(code, clean, {
     plugins: [stylesheetImportAnalysisPlugin(stylesheets)],
   });
   return stylesheets;
@@ -61,11 +61,10 @@ export async function analyzeIsomorphicBoundaries(
   id: string,
 ): Promise<IsomorphicImport[]> {
   const clean = cleanModuleId(id);
-  if (!isSourceModule(clean) || !code.includes("Isomorphic")) return [];
+  if (!isCompilerSourceModule(clean) || !code.includes("Isomorphic")) return [];
 
   const imports: IsomorphicImport[] = [];
-  await babel.transformAsync(code, {
-    ...babelOptions(clean),
+  await transformWithBabel(code, clean, {
     plugins: [isomorphicBoundaryAnalysisPlugin(imports)],
   });
   return imports;
@@ -75,7 +74,7 @@ export async function analyzeIsomorphicBoundaries(
 // skip boundary analysis for modules this transform cannot apply to.
 export function mayBePayloadModule(code: string, id: string): boolean {
   return (
-    isSourceModule(cleanModuleId(id)) &&
+    isCompilerSourceModule(cleanModuleId(id)) &&
     (hasModuleQuery(id, payloadModuleQuery) ||
       code.includes("renderPayloadResponse"))
   );
@@ -89,8 +88,7 @@ export async function transformPayloadModule(
   if (!mayBePayloadModule(code, id)) return null;
 
   const state = { changed: false };
-  const result = await babel.transformAsync(code, {
-    ...babelOptions(cleanModuleId(id)),
+  const result = await transformWithBabel(code, cleanModuleId(id), {
     sourceMaps: true,
     plugins: [
       payloadBabelPlugin(
