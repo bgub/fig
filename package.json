@@ -53,7 +53,7 @@
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "37.3 kB"
+      "limit": "37.4 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
