@@ -94,7 +94,7 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
   return createElement(
     RouterContext,
     { value: contextValue },
-    createElement(Transitioner),
+    router.isServer ? null : createElement(Transitioner),
     createElement(Matches),
   );
 }
@@ -462,7 +462,7 @@ function Match({ matchId }: { matchId: string }): FigNode {
   if (route.parentRoute?.id !== rootRouteId) return ownedMatchContent;
   return [
     ownedMatchContent,
-    createElement(OnRendered),
+    router.isServer ? null : createElement(OnRendered),
     router.options.scrollRestoration && router.isServer
       ? renderScrollRestorationScript(router)
       : null,
