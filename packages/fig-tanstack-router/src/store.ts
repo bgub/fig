@@ -44,6 +44,11 @@ export function useReadableStore<TValue, TSelected = TValue>(
   ) => TSelected,
   equal: (previous: TSelected, next: TSelected) => boolean = Object.is,
 ): TSelected {
+  // Server routers deliberately use TanStack's non-reactive stores. Reading
+  // them directly avoids allocating subscription and memoized snapshot
+  // closures that can never observe an update during an SSR render.
+  if (store.subscribe === undefined) return select(store.get());
+
   const subscribe = useCallback(
     (onChange: () => void) =>
       store.subscribe?.(onChange).unsubscribe ?? doNothing,
