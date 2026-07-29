@@ -7,6 +7,9 @@
   }
 
   html {
+    /* Reserve the scrollbar's gutter permanently, so locking the scroll for a
+       dialog cannot reflow the page behind it. */
+    scrollbar-gutter: stable;
     --fig-tanstack-bg: #f5f7f8;
     --fig-tanstack-card: #ffffff;
     --fig-tanstack-fg: #182025;
@@ -162,5 +165,227 @@
   [data-theme-selected]:hover {
     background: var(--fig-tanstack-selected-bg);
     color: var(--fig-tanstack-selected-fg);
+  }
+
+  [data-tabs-demo-tab] {
+    color: var(--fig-tanstack-muted);
+  }
+
+  [data-tabs-demo-tab]:hover {
+    background: var(--fig-tanstack-hover);
+  }
+
+  [data-tabs-demo-tab][data-active],
+  [data-tabs-demo-tab][data-active]:hover {
+    background: var(--fig-tanstack-selected-bg);
+    color: var(--fig-tanstack-selected-fg);
+  }
+
+  [data-tabs-demo-panel="keyboard"] {
+    min-height: 12rem;
+  }
+
+  /* The frame group interpolates the panel height; its old and new images
+     carry the outgoing and incoming panel. */
+  ::view-transition-group(tabs-demo-panel),
+  ::view-transition-old(tabs-demo-panel),
+  ::view-transition-new(tabs-demo-panel) {
+    animation-duration: 320ms;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    mix-blend-mode: normal;
+  }
+
+  /* Frame chrome belongs to the group, which morphs, and never to the images,
+     which slide. The live frame drops its own chrome for the transition. */
+  ::view-transition-group(tabs-demo-panel) {
+    background: var(--fig-tanstack-card);
+    border: 1px solid var(--fig-tanstack-border);
+    border-radius: 0 0 0.5rem 0.5rem;
+    border-top-width: 0;
+    box-sizing: border-box;
+    overflow: clip;
+  }
+
+  :root:active-view-transition-type(fig-tabs-left) [data-tabs-demo-frame],
+  :root:active-view-transition-type(fig-tabs-right) [data-tabs-demo-frame] {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  :root:active-view-transition-type(
+    fig-tabs-right
+  )::view-transition-old(tabs-demo-panel) {
+    animation-name: tabs-demo-slide-out-left;
+  }
+
+  :root:active-view-transition-type(
+    fig-tabs-right
+  )::view-transition-new(tabs-demo-panel) {
+    animation-name: tabs-demo-slide-in-right;
+  }
+
+  :root:active-view-transition-type(
+    fig-tabs-left
+  )::view-transition-old(tabs-demo-panel) {
+    animation-name: tabs-demo-slide-out-right;
+  }
+
+  :root:active-view-transition-type(
+    fig-tabs-left
+  )::view-transition-new(tabs-demo-panel) {
+    animation-name: tabs-demo-slide-in-left;
+  }
+
+  @keyframes tabs-demo-slide-out-left {
+    to {
+      opacity: 0;
+      transform: translateX(-2.5rem);
+    }
+  }
+
+  @keyframes tabs-demo-slide-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(2.5rem);
+    }
+  }
+
+  @keyframes tabs-demo-slide-out-right {
+    to {
+      opacity: 0;
+      transform: translateX(2.5rem);
+    }
+  }
+
+  @keyframes tabs-demo-slide-in-left {
+    from {
+      opacity: 0;
+      transform: translateX(-2.5rem);
+    }
+  }
+
+  /* Each accordion item is its own boundary, so the item that expands morphs
+     its height while the items below it slide to their new positions. */
+  ::view-transition-group(accordion-demo-shipping),
+  ::view-transition-group(accordion-demo-returns) {
+    animation-duration: 260ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    overflow: clip;
+  }
+
+  ::view-transition-old(accordion-demo-shipping),
+  ::view-transition-old(accordion-demo-returns),
+  ::view-transition-new(accordion-demo-shipping),
+  ::view-transition-new(accordion-demo-returns) {
+    animation-duration: 260ms;
+    height: 100%;
+    object-fit: none;
+    object-position: top left;
+  }
+
+  /* A dialog enters and leaves the top layer, so it animates with
+     @starting-style and allow-discrete rather than a view transition. */
+  html:has(dialog[open]) {
+    overflow: clip;
+  }
+
+  [data-dialog-demo] {
+    /* A modal dialog is centred by the user agent's `margin: auto`, which a
+       CSS reset removes along with every other margin. */
+    margin: auto;
+    opacity: 0;
+    transition:
+      display 200ms allow-discrete,
+      opacity 200ms,
+      overlay 200ms allow-discrete,
+      translate 200ms;
+    translate: 0 -0.5rem;
+  }
+
+  [data-dialog-demo][open] {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  @starting-style {
+    [data-dialog-demo][open] {
+      opacity: 0;
+      translate: 0 -0.5rem;
+    }
+  }
+
+  [data-dialog-demo]::backdrop {
+    background: rgb(15 23 42 / 40%);
+    opacity: 0;
+    transition:
+      display 200ms allow-discrete,
+      opacity 200ms,
+      overlay 200ms allow-discrete;
+  }
+
+  [data-dialog-demo][open]::backdrop {
+    opacity: 1;
+  }
+
+  @starting-style {
+    [data-dialog-demo][open]::backdrop {
+      opacity: 0;
+    }
+  }
+
+  /* The widget publishes the anchor name; placement is ordinary CSS. */
+  [data-popover-demo] {
+    margin: 0;
+    margin-block-start: 0.5rem;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: block-start span-inline-end;
+  }
+
+  [data-tooltip-demo],
+  [data-select-demo],
+  [data-combobox-demo] {
+    margin: 0;
+    margin-block-start: 0.25rem;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: block-start span-inline-end;
+  }
+
+  [data-tooltip-demo] {
+    pointer-events: none;
+  }
+
+  /* Without anchor positioning the popover still opens in the top layer, so
+     give it a placement that does not depend on the trigger's box. */
+  @supports not (anchor-name: --fallback) {
+    [data-popover-demo],
+    [data-tooltip-demo],
+    [data-select-demo],
+    [data-combobox-demo] {
+      inset: auto auto 1rem 1rem;
+      margin: 0;
+      position: fixed;
+    }
+  }
+
+  [data-menu-demo] {
+    margin: 0;
+    margin-block-start: 0.25rem;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: block-start span-inline-end;
+  }
+
+  [data-menu-demo] [data-menu-demo-item][data-disabled] {
+    color: var(--fig-tanstack-muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(tabs-demo-panel),
+    ::view-transition-old(tabs-demo-panel),
+    ::view-transition-new(tabs-demo-panel),
+    ::view-transition-group(accordion-demo-shipping),
+    ::view-transition-group(accordion-demo-returns) {
+      animation-duration: 0s;
+    }
   }
 }

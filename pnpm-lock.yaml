@@ -229,6 +229,9 @@ importers:
       '@bgub/fig-tanstack-start':
         specifier: workspace:*
         version: link:../../packages/fig-tanstack-start
+      '@bgub/fig-ui':
+        specifier: workspace:*
+        version: link:../../packages/fig-ui
       '@tanstack/devtools':
         specifier: 0.12.5
         version: 0.12.5(csstype@3.2.3)
