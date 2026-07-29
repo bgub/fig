@@ -28,6 +28,7 @@ Open work that spans several subsystems lives in [open-questions.md](../plans/op
 - [Rendering](./rendering.md) — elements, fibers, bailouts, strict development rendering, diagnostics, and commit.
 - [Hooks](./hooks.md) — state, effects, stable events, transitions, actions, read verbs, and the shared `AbortSignal` contract.
 - [Host mixins](./mixins.md) — render-time host behavior composition.
+- [Headless widgets](./widgets.md) — stateful roots with application-owned host parts.
 - [Events](./events.md) — `on()`, native propagation, logical-tree delegation, replay, and `bind`.
 - [JSX](./jsx.md) — renderer-owned JSX types and native host props.
 - [Data resources](./data.md) — keys, stores, reads, freshness, and SSR handoff.

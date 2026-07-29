@@ -369,6 +369,18 @@ importers:
         specifier: 8.1.4
         version: 8.1.4(@types/node@20.19.43)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
 
+  packages/fig-ui:
+    devDependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../fig-server
+
   packages/fig-vite:
     dependencies:
       '@babel/core':

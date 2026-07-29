@@ -51,6 +51,25 @@ export const libraryEntries: Record<string, string[] | Record<string, string>> =
       "./src/payload.ts",
     ],
     "packages/fig-tanstack-router": ["./src/router.tsx"],
+    "packages/fig-ui": {
+      accordion: "./src/accordion/accordion.tsx",
+      checkbox: "./src/checkbox/checkbox.tsx",
+      combobox: "./src/combobox/combobox.tsx",
+      dialog: "./src/dialog/dialog.tsx",
+      field: "./src/field/field.tsx",
+      listbox: "./src/listbox/listbox.tsx",
+      menu: "./src/menu/menu.tsx",
+      "menu/submenu": "./src/menu/submenu.ts",
+      popover: "./src/popover/popover.tsx",
+      "radio-group": "./src/radio-group/radio-group.tsx",
+      select: "./src/select/select.tsx",
+      switch: "./src/switch/switch.tsx",
+      tabs: "./src/tabs/tabs.tsx",
+      "tabs/indicator": "./src/tabs/indicator.ts",
+      toast: "./src/toast/toast.tsx",
+      toolbar: "./src/toolbar/toolbar.tsx",
+      tooltip: "./src/tooltip/tooltip.tsx",
+    },
     "packages/fig-tanstack-start": {
       data: "./src/data.ts",
       client: "./src/client.tsx",
@@ -63,7 +82,11 @@ export const libraryEntries: Record<string, string[] | Record<string, string>> =
       "plugin/vite": "./src/plugin/vite.ts",
     },
   };
-const browserLibraries = new Set(["packages/fig-devtools", "packages/fig-dom"]);
+const browserLibraries = new Set([
+  "packages/fig-devtools",
+  "packages/fig-dom",
+  "packages/fig-ui",
+]);
 // These packages contain development gates. They always emit the artifact that
 // Vite selects while serving; FIG_DEV_SOURCE additionally keeps the primary
 // output development-enabled for non-Vite workspace demos.
@@ -73,6 +96,7 @@ export const developmentLibraryPaths = [
   "packages/fig-reconciler",
   "packages/fig-server",
   "packages/fig-tanstack-router",
+  "packages/fig-ui",
 ] as const;
 const developmentLibraries = new Set<string>(developmentLibraryPaths);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };

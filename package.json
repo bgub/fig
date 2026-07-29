@@ -41,6 +41,142 @@
       "limit": "34.2 kB"
     },
     {
+      "path": "packages/fig-ui/dist/accordion.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "2.6 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/checkbox.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.6 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/combobox.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "4.4 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/field.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.2 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/listbox.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "3.3 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/switch.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.6 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/dialog.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "2.2 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/menu.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "3.5 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/menu/submenu.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "4 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/popover.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.8 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/radio-group.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "2.5 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/select.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "4.5 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/tabs.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "3.3 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/tabs/indicator.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.2 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/toast.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.8 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/toolbar.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "2.1 kB"
+    },
+    {
+      "path": "packages/fig-ui/dist/tooltip.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "1.8 kB"
+    },
+    {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
       "limit": "26.5 kB"

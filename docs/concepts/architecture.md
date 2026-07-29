@@ -18,6 +18,7 @@ The one mechanical exception is JSX. `@bgub/fig-dom/jsx-runtime` re-exports the 
 - `@bgub/fig-server` owns HTML server rendering and the server half of Payload. Its `./html` subpath exports the escaping helpers frameworks need when writing companion markup.
 - `@bgub/fig/payload` owns browser-safe Payload decoding. Browser code never imports `@bgub/fig-server` to decode.
 - `@bgub/fig-refresh` and `@bgub/fig-vite` own the published Fast Refresh runtime and Vite integration.
+- `@bgub/fig-ui` owns the private reference implementation of accessible, unstyled DOM widgets whose stateful roots expose host behavior through Fig mixins. Applications copy its source rather than depending on a published package.
 - `@bgub/fig-tanstack-router` owns Fig's Router Core adapter. TanStack still owns matching, history, loading, and navigation.
 - `@bgub/fig-tanstack-start` owns the Start integration: one Fig data store per request/root, document-data transport, Payload routes, and Fig rendering around Start's request and hydration cores.
 - `@bgub/fig-devtools` is the private DevTools preview. Its TanStack plugin mounts an isolated Fig root, while snapshots continue to flow through Fig's global DevTools hook.
