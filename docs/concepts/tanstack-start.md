@@ -67,6 +67,8 @@ The Vite plugin delegates environment planning, routes, server-function extracti
 
 The Payload compiler's Babel implementation loads only after a gated application module requires compilation. Applications that do not use `serverPayload`, `renderPayloadResponse`, or `Isomorphic` do not retain the compiler during ordinary Vite builds. Resolver, loader, and transform hooks publish native Vite/Rolldown filters so unrelated module traffic does not cross into their JavaScript handlers.
 
+The private default server entry composes TanStack's `createStartHandler` with Fig's narrow renderer module. The public `renderRouterToStream` and `createFigStartHandler` APIs delegate to the same renderer, but their combined server module is not the default entry's dependency: it also owns Payload response rendering and its compiled application-reference manifest. The package build shares the renderer implementation without exposing another package entrypoint.
+
 TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's versioned compatibility profile privately uses Solid identifiers, pins the participating TanStack versions, and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph.
 
 Applications mirror the generated compatibility ids with TypeScript paths. A future native Fig target can replace this aliasing without changing runtime ownership.

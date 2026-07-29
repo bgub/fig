@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { Alias, EnvironmentOptions, UserConfig } from "vite";
 import {
   createCompilerRpcModules,
-  createDefaultServerEntry,
   incompatibleRuntimeModules,
   rewriteFrameworkImports,
   tanStackCompatibilityProfile,
@@ -385,11 +384,28 @@ describe("tanstackStart", () => {
     });
   });
 
-  it("builds the default handler through the public Fig adapter", () => {
-    const code = createDefaultServerEntry();
+  it("builds the default handler at the Start Core manifest boundary", async () => {
+    const code = await readFile(
+      new URL("../default-entry/server.ts", import.meta.url),
+      "utf8",
+    );
 
-    expect(code).toContain("createFigStartHandler()");
+    expect(code).toContain("createStartHandler");
+    expect(code).toContain('from "../server-renderer.tsx"');
+    expect(code).toContain("renderRouterDocument");
+    expect(code).not.toContain("createFigStartHandler");
+    expect(code).not.toContain('from "@bgub/fig-tanstack-start/server"');
     expect(code).not.toContain("defaultStreamHandler");
+  });
+
+  it("keeps the default renderer seam out of the handler-factory graph", async () => {
+    const code = await readFile(
+      new URL("../server-renderer.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(code).not.toContain("@tanstack/start-server-core");
+    expect(code).not.toContain('from "./server.tsx"');
   });
 
   it("keeps Babel behind the Payload compiler gate", async () => {

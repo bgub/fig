@@ -8,7 +8,6 @@ import {
 import { cleanModuleId, toViteFsPath } from "./module-ids.ts";
 import {
   createCompilerRpcModules,
-  createDefaultServerEntry,
   incompatibleRuntimeModules,
   rewriteFrameworkImports,
   tanStackCompatibilityProfile,
@@ -59,10 +58,9 @@ const compilerRpcModules = createCompilerRpcModules(resolveDependency);
 const compilerRpcSourcePattern = exactPattern(
   compilerRpcModules.map((module) => module.source),
 );
-const compatibilityLoadPattern = exactPattern([
-  ...compilerRpcModules.map((module) => module.id),
-  defaultEntryPaths.server,
-]);
+const compatibilityLoadPattern = exactPattern(
+  compilerRpcModules.map((module) => module.id),
+);
 
 export function startCompatibilityPlugin(): PluginOption {
   const applicationEntryUrls = new Map<string, string>();
@@ -173,7 +171,6 @@ export function startCompatibilityPlugin(): PluginOption {
       handler(id) {
         const rpcModule = compilerRpcModules.find((module) => module.id === id);
         if (rpcModule !== undefined) return rpcModule.code;
-        if (id === defaultEntryPaths.server) return createDefaultServerEntry();
         return undefined;
       },
     },
