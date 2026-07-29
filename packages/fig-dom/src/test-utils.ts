@@ -64,6 +64,7 @@ type FakeStyle = Record<string, string> & {
 // browsers, not the implementation, so fidelity gaps surface in tests.
 const nonBubblingEvents = new Set([
   "abort",
+  "beforetoggle",
   "blur",
   "cancel",
   "canplay",

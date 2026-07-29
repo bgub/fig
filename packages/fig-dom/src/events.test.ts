@@ -574,6 +574,10 @@ describe("@bgub/fig-dom events", () => {
       "mouseleave",
       "focus",
       "blur",
+      // A popover reports through toggle and beforetoggle, neither of which
+      // bubbles, so a delegated root listener would never see them.
+      "toggle",
+      "beforetoggle",
     ]) {
       const calls: string[] = [];
       const container = new FakeElement("root");

@@ -161,6 +161,7 @@ const hydrationEvents = new Set([
 // Fig does not emulate bubbling focus the way React does.
 const nonDelegatedEvents = new Set([
   "abort",
+  "beforetoggle",
   "blur",
   "cancel",
   "canplay",
