@@ -57,8 +57,9 @@ export function withPropagationState<T>(
     restoreCancelBubble();
     restoreImmediate();
     restoreStop();
-    // Reflect a logical stop onto the native event after removing the patches.
-    if (state.stopped) event.cancelBubble = true;
+    // Reflect the logical stop through the restored native method. Some DOM
+    // implementations expose cancelBubble as read-only.
+    if (state.stopped) event.stopPropagation();
   }
 }
 
