@@ -1740,6 +1740,55 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("keeps pointer input live during an interruptible transition", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setLabel: StateSetter<string> | null = null;
+    const rootNames: string[] = [];
+    const ownerDocument = document as unknown as MockViewTransitionDocument;
+    const previousStart = ownerDocument.startViewTransition;
+    const rootElement = document.documentElement as HTMLElement;
+
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      rootNames.push(rootElement.style.viewTransitionName || "");
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    };
+
+    function App() {
+      const [label, set] = useState("First");
+      setLabel = set;
+      return createElement(
+        "main",
+        null,
+        createElement("p", null, `Outside ${label}`),
+        createElement(
+          ViewTransition,
+          { name: "card" },
+          createElement("section", null, label),
+        ),
+      );
+    }
+
+    try {
+      const root = createRoot(container);
+      await act(() => root.render(createElement(App, null)));
+      await act(() =>
+        transition(() => setLabel?.("Second"), {
+          viewTransition: "interrupt",
+        }),
+      );
+
+      // Even the paragraph changed outside the explicit boundary. Responsive
+      // transitions still drop the implicit full-page snapshot so controls
+      // outside named surfaces remain live pointer targets.
+      expect(rootNames).toEqual(["none"]);
+    } finally {
+      ownerDocument.startViewTransition = previousStart;
+      container.remove();
+    }
+  });
+
   it("interrupts before a transition commit with no changed boundary", async () => {
     const container = document.createElement("div");
     document.body.append(container);

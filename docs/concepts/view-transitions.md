@@ -57,6 +57,8 @@ When the resulting list is non-empty, Fig DOM calls `document.startViewTransitio
 
 `viewTransition: "interrupt"` makes newest user intent replace an active native animation. Interruption is sticky within a transition lane and wins when a commit includes multiple rendered lanes. Fig calls `skipTransition()` on the active browser transition, waits for its `finished` promise so restoration completes, then commits the latest rendered state and starts a new transition when the commit has participating boundaries. Without this option, eligible commits retain the default serialized behavior.
 
+Fig DOM drops the implicit full-page `root` snapshot for interruptible commits, even when changed layout outside an explicit boundary would normally retain it. Controls outside explicit transition surfaces therefore remain live pointer targets that can express the next intent. Browsers deliberately remove captured elements and their descendants from hit testing, so an interactive control that must interrupt an animation cannot sit inside an authored `ViewTransition` or `view-transition-name` surface.
+
 ## Lifecycle And Pseudo Elements
 
 `onTransition` receives one renderer-neutral event for a participating boundary:
@@ -129,7 +131,7 @@ If a layout candidate did not move, Fig removes its live name and hides the alre
 
 The browser captures the whole page by default. Fig cancels that root snapshot when all layout changes are already covered by named surfaces. Untouched regions then remain live and interactive while those groups animate.
 
-Changes outside a transition boundary, parent-affecting size changes, or shortened surface lists keep the root snapshot. Pure keyed moves may still cancel it because the moved surfaces animate on their own.
+Changes outside a transition boundary, parent-affecting size changes, or shortened surface lists keep the root snapshot for ordinary transitions. Pure keyed moves may still cancel it because the moved surfaces animate on their own. Interruptible commits always cancel the root snapshot so live controls outside explicit surfaces remain pointer-interactive; uncovered layout changes update immediately instead of animating as part of the root.
 
 Root-name restoration and temporary hide animations remain in place until `finished`, not merely `ready`. Restoring the root name during an active animation can reconnect the live page to a hidden captured group and briefly paint the page blank.
 
@@ -161,4 +163,5 @@ The inline Suspense operations `s`, `c`, and `ac` collect old and new annotated 
 ## Known Gaps
 
 - A boundary shifted only by an inserted sibling may not be collected unless its parent also has work.
+- A boundary whose every change belongs to a nested boundary has no change of its own, so it is not collected and its own box does not interpolate. Wrapping a resizing frame around individually named children therefore animates the children while the frame snaps; name the frame instead and let its old and new images carry the children.
 - Content updates always animate; Fig does not yet remove width/height animation when size is unchanged.

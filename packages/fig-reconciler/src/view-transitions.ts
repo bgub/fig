@@ -740,7 +740,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       }
     }
 
-    result.cancelRootSnapshot = !rootAffected;
+    result.cancelRootSnapshot = plan.options.interrupt || !rootAffected;
     return result;
   }
 
