@@ -1,5 +1,6 @@
 import {
   assets,
+  createMixin,
   dataResource,
   type FigNode,
   preconnect,
@@ -17,6 +18,7 @@ import {
   createRouter,
   ensureRouteData,
   HeadContent,
+  Link,
   Outlet,
   type AnyRouter,
   type RouteDataContext,
@@ -24,10 +26,99 @@ import {
 import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import type { ServerManifest } from "@tanstack/router-core";
 import { describe, expect, it } from "vitest";
+import { RouterContext } from "../../fig-tanstack-router/src/hooks.tsx";
 import { createStartDataContext, StartScripts } from "./data.ts";
-import { renderRouterToStream } from "./server.tsx";
+import { renderPayloadResponse, renderRouterToStream } from "./server.tsx";
 
 describe("@bgub/fig-tanstack-start server", () => {
+  it("renders links from static server state without client lifecycle setup", async () => {
+    const dangerousUrl: string = "javascript:alert(1)";
+    const externalUrl: string = "https://example.com/";
+    const observesBind = createMixin((context) => ({
+      "data-bind-type": typeof context.props.bind,
+    }));
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      component: Document,
+    });
+    const pageRoute = createRoute({
+      component: () => (
+        <main>
+          <Link
+            activeProps={{
+              bind: () => undefined,
+              class: "active",
+              "data-selected": "yes",
+            }}
+            class="base"
+            id="active-link"
+            mix={observesBind()}
+            preload="viewport"
+            to="/page"
+          >
+            {({ isActive, isTransitioning }) =>
+              `${isActive ? "active" : "inactive"}:${isTransitioning ? "transitioning" : "idle"}`
+            }
+          </Link>
+          <Link disabled id="disabled-link" to="/page">
+            Disabled
+          </Link>
+          <Link id="external-link" to={externalUrl}>
+            External
+          </Link>
+          <Link href={dangerousUrl} id="dangerous-link" to="/page">
+            Dangerous
+          </Link>
+        </main>
+      ),
+      getParentRoute: () => rootRoute,
+      path: "page",
+    });
+    const router = createRouter({
+      ...createStartDataContext(),
+      history: createMemoryHistory({ initialEntries: ["/page"] }),
+      routeTree: rootRoute.addChildren([pageRoute]),
+    });
+
+    const html = await renderRouterHtml(router, "/page");
+
+    expect(html).toContain('href="/page"');
+    expect(html).toContain('class="base active"');
+    expect(html).toContain('data-selected="yes"');
+    expect(html).toContain('data-bind-type="function"');
+    expect(html).toContain(">active:idle</a>");
+    const anchor = (id: string) => {
+      const tag = html.match(new RegExp(`<a(?=[^>]*id="${id}")[^>]*>`))?.[0];
+      if (tag === undefined) throw new Error(`Missing anchor ${id}.`);
+      return tag;
+    };
+    expect(anchor("disabled-link")).not.toContain("href=");
+    expect(anchor("external-link")).toContain(`href="${externalUrl}"`);
+    expect(anchor("dangerous-link")).not.toContain("href=");
+  });
+
+  it("rejects links that would lose navigation behavior in Payload", async () => {
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({});
+    const pageRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "page",
+    });
+    const router = createRouter({
+      ...createStartDataContext(),
+      history: createMemoryHistory({ initialEntries: ["/page"] }),
+      routeTree: rootRoute.addChildren([pageRoute]),
+    });
+
+    const payload = await renderPayloadResponse(
+      <RouterContext value={{ ownerDocument: undefined, router }}>
+        <Link to="/page">Page</Link>
+      </RouterContext>,
+    ).text();
+
+    expect(payload).toContain(
+      "Client-only host behavior from on() cannot be serialized in a payload",
+    );
+  });
+
   it("hands route data and asset resources into the document render", async () => {
     let loads = 0;
     const userResource = dataResource<[string], string>({

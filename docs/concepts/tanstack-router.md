@@ -110,7 +110,7 @@ For non-blocking work, loaders call `context.data.preloadData` and return. Navig
 
 ## Links
 
-`Link` always renders a native `<a href>`. Fig's `on()` mixin adds client navigation while preserving normal browser behavior for external URLs, reloads, downloads, modified clicks, non-primary buttons, and non-`_self` targets.
+`Link` always renders a native `<a href>`. On the server it resolves href, active state, authored props, and render-function children from the router's static stores, without allocating client state, subscriptions, timers, preload observers, or navigation callbacks. The server anchor retains one shared client-only marker so Payload rendering rejects a `Link` that would otherwise lose its browser navigation behavior. In the browser, Fig's `on()` mixin adds client navigation while preserving normal browser behavior for external URLs, reloads, downloads, modified clicks, non-primary buttons, and non-`_self` targets.
 
 Disabled links omit `href` and set `aria-disabled`. Active and inactive props merge with the base anchor; `class`, `style`, `mix`, and `bind` compose rather than replace. Render-function children receive `isActive` and per-navigation `isTransitioning`.
 

@@ -1,18 +1,21 @@
 // @vitest-environment happy-dom
-import { dataResource, readData } from "@bgub/fig";
+import { dataResource, readData, useId } from "@bgub/fig";
 import { hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
+import { renderToHtml } from "@bgub/fig-server";
 import {
   createMemoryHistory,
   createRootRouteWithContext,
   createRoute,
   createRouter,
   ensureRouteData,
+  Link,
   Outlet,
   type RouteDataContext,
 } from "@bgub/fig-tanstack-router";
 import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import { afterEach, describe, expect, it } from "vitest";
+import { RouterContext } from "../../fig-tanstack-router/src/hooks.tsx";
 import { createStartDataContext, StartScripts } from "./data.ts";
 import { renderRouterToStream } from "./server.tsx";
 
@@ -25,6 +28,61 @@ afterEach(() => {
 });
 
 describe("TanStack Start data round trip", () => {
+  it("keeps nested Link useId paths stable during hydration", async () => {
+    function LinkContent() {
+      const id = useId();
+      return <span id={id}>{id}</span>;
+    }
+
+    function LinkApp() {
+      return (
+        <Link to="/">
+          <LinkContent />
+        </Link>
+      );
+    }
+
+    const createTestRouter = (isServer: boolean) =>
+      createRouter({
+        ...createStartDataContext(),
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer,
+        routeTree: createRootRouteWithContext<RouteDataContext>()({}),
+      });
+    const serverRouter = createTestRouter(true);
+    const html = await renderToHtml(
+      <RouterContext value={{ ownerDocument: undefined, router: serverRouter }}>
+        <LinkApp />
+      </RouterContext>,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    document.body.append(container);
+    const serverId = container.querySelector("span")?.id;
+    if (serverId === undefined) throw new Error("Missing server link content.");
+    const recoverableErrors: unknown[] = [];
+    const clientRouter = createTestRouter(false);
+
+    const root = await act(() =>
+      hydrateRoot(
+        container,
+        <RouterContext
+          value={{ ownerDocument: undefined, router: clientRouter }}
+        >
+          <LinkApp />
+        </RouterContext>,
+        { onRecoverableError: (error) => recoverableErrors.push(error) },
+      ),
+    );
+    roots.push(root);
+
+    expect(recoverableErrors).toEqual([]);
+    const hydratedId = container.querySelector("span")?.id;
+    if (hydratedId === undefined)
+      throw new Error("Missing hydrated link content.");
+    expect(hydratedId).toBe(serverId);
+  });
+
   it("hydrates route-loader data without refetching, then reloads once on invalidation", async () => {
     let loads = 0;
     const userResource = dataResource<[string], string>({

@@ -969,6 +969,49 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(preload).toHaveBeenCalledOnce();
   });
 
+  it("remounts client link behavior when the router mode changes", async () => {
+    const router = makeRouter();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await router.load();
+    await act(() =>
+      root.render(createElement(RouterProvider, { isServer: false, router })),
+    );
+    await act(() =>
+      root.render(createElement(RouterProvider, { isServer: true, router })),
+    );
+
+    const serverClick = new MouseEvent("click", {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+    });
+    container
+      .querySelector<HTMLAnchorElement>("#user-link")
+      ?.dispatchEvent(serverClick);
+    expect(serverClick.defaultPrevented).toBe(false);
+    expect(router.stores.location.get().pathname).toBe("/");
+
+    await act(() =>
+      root.render(createElement(RouterProvider, { isServer: false, router })),
+    );
+    const clientClick = new MouseEvent("click", {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLAnchorElement>("#user-link")
+        ?.dispatchEvent(clientClick);
+      await waitForPath(router, "/users/42");
+    });
+
+    expect(clientClick.defaultPrevented).toBe(true);
+  });
+
   it("blocks dangerous explicit and external link protocols", async () => {
     const rootRoute = createRootRoute({
       component: () => (
