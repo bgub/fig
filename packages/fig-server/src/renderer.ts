@@ -126,7 +126,6 @@ export interface Request {
   nonce?: string;
   onError?: ServerRenderOptions["onError"];
   pendingRootTasks: number;
-  pendingTasks: number;
   pingedTasks: Task[];
   rootSegment: Segment;
   runtimeName: string;
@@ -147,7 +146,6 @@ export interface Request {
   documentHasHead: boolean | null;
   assetRegistry: AssetResourceRegistry;
   resolveAssetKey?: ServerRenderOptions["resolveAssetKey"];
-  workScheduled: boolean;
   // Reentrancy guard: enqueueing inside a flush pass can synchronously invoke
   // the stream's pull handler, which must not restart the pass — a boundary
   // stays in its queue while it flushes, so a reentrant drain would emit it
@@ -159,9 +157,10 @@ export interface Request {
   write(chunk: string): void;
 }
 
-// Render-scope state shared by queued tasks and live frames; forked (with
-// context values cloned) whenever work is spawned or resumed.
-interface RenderScope {
+// Mutable state for one synchronous render branch. A suspended branch keeps
+// this frame on its Task and resumes it directly; forks clone only the state
+// that must be isolated from the parent branch.
+interface RenderFrame {
   // Only fallback work needs a second owner; every task already belongs to
   // request.abortableTasks.
   fallbackTasks: Set<Task> | null;
@@ -190,15 +189,20 @@ interface RenderScope {
   // boundary's node.
   treeParent: RenderTreeNode | null;
   viewTransition: ServerViewTransitionContext | null;
+  dispatcher: RenderDispatcher | null;
+  idPathString: string | null;
+  localIdCounter: number;
+  request: Request;
+  segment: Segment;
 }
 
-interface Task extends RenderScope {
+interface Task {
   // Index of the suspended child within its original normalized children
   // sequence. Resuming id-path numbering here keeps useId paths identical to
   // the never-suspending render (and to client fiber indices).
   childIndexBase: number;
+  frame: RenderFrame;
   node: FigNode;
-  segment: Segment;
 }
 
 export interface Segment {
@@ -242,14 +246,6 @@ export interface SuspenseBoundary {
 type BoundaryStatus = "pending" | "completed" | "client-rendered";
 type SegmentStatus = "pending" | "rendering" | "completed" | "flushed";
 type HostNamespace = "html" | "mathml" | "svg";
-
-interface RenderFrame extends RenderScope {
-  dispatcher: RenderDispatcher | null;
-  idPathString: string | null;
-  localIdCounter: number;
-  request: Request;
-  segment: Segment;
-}
 
 interface ServerViewTransitionContext {
   className: string | null;
@@ -313,7 +309,6 @@ export function createServerRenderRequest(
     nonce: options.nonce,
     onError: options.onError,
     pendingRootTasks: 0,
-    pendingTasks: 0,
     pingedTasks: [],
     rootSegment,
     runtimeName: createRuntimeName(options.identifierPrefix),
@@ -330,7 +325,6 @@ export function createServerRenderRequest(
     documentHasHead: mode.document === true ? false : null,
     assetRegistry: new AssetResourceRegistry(options.identifierPrefix ?? ""),
     resolveAssetKey: options.resolveAssetKey,
-    workScheduled: false,
     flushing: false,
     writeBuffer: "",
     write: writeRequestChunk,
@@ -340,22 +334,27 @@ export function createServerRenderRequest(
   }
 
   rootSegment.parentFlushed = true;
-  const rootTask = createTask(request, node, rootSegment, {
+  const rootTask = createTask(node, {
     boundary: null,
     contextValues: new Map(),
+    dispatcher: null,
     fallbackTasks: null,
     hiddenActivityId: null,
     hostAncestors: [],
     hostNamespace: "html",
     imagePreloadsSuppressed: false,
     idPath: [],
+    idPathString: null,
+    localIdCounter: 0,
     pendingLeadingNewline: false,
+    request,
     selectProps: null,
+    segment: rootSegment,
     stack: null,
     treeParent: options.renderTree?.tree ?? null,
     viewTransition: null,
   });
-  request.pingedTasks.push(rootTask);
+  pingTask(rootTask);
 
   const stream = new ReadableStream<Uint8Array>(
     {
@@ -392,12 +391,6 @@ export function createServerRenderRequest(
     };
   }
 
-  request.workScheduled = true;
-  queueMicrotask(() => {
-    request.workScheduled = false;
-    performWork(request);
-  });
-
   return {
     abort: (reason?: unknown) => abort(request, reason),
     allReady: allReady.promise,
@@ -433,52 +426,57 @@ export function createServerRenderRequest(
 }
 
 function createTask(
-  request: Request,
   node: FigNode,
-  segment: Segment,
-  scope: RenderScope,
+  frame: RenderFrame,
   childIndexBase = 0,
 ): Task {
-  request.pendingTasks += 1;
-  if (scope.boundary === null) {
+  const { request } = frame;
+  if (frame.boundary === null) {
     request.pendingRootTasks += 1;
   } else {
-    scope.boundary.pendingTasks += 1;
+    frame.boundary.pendingTasks += 1;
   }
 
-  const task: Task = { ...scope, childIndexBase, node, segment };
+  const task: Task = { childIndexBase, frame, node };
   request.abortableTasks.add(task);
-  scope.fallbackTasks?.add(task);
+  frame.fallbackTasks?.add(task);
   return task;
 }
 
-// Captures a scope for work that can outlive the current stack. Context values
-// are cloned so the fork observes the provider stack at this exact point.
-function forkScope(
-  scope: RenderScope,
-  boundary = scope.boundary,
-  fallbackTasks = scope.fallbackTasks,
-): RenderScope {
+// Forks a branch that can outlive the current stack. Context values, the id
+// path, and the view-transition cursor are snapshots; the remaining fields
+// are immutable or restored by balanced push/pop pairs.
+function forkFrame(
+  frame: RenderFrame,
+  segment: Segment,
+  boundary = frame.boundary,
+  fallbackTasks = frame.fallbackTasks,
+): RenderFrame {
   return {
     boundary,
-    contextValues: cloneContextValues(scope.contextValues),
+    contextValues: cloneContextValues(frame.contextValues),
+    dispatcher: null,
     fallbackTasks,
-    hiddenActivityId: scope.hiddenActivityId,
-    hostAncestors: scope.hostAncestors,
-    hostNamespace: scope.hostNamespace,
-    imagePreloadsSuppressed: scope.imagePreloadsSuppressed,
-    idPath: [...scope.idPath],
-    pendingLeadingNewline: scope.pendingLeadingNewline,
-    selectProps: scope.selectProps,
-    stack: scope.stack,
-    treeParent: scope.treeParent,
+    hiddenActivityId: frame.hiddenActivityId,
+    hostAncestors: frame.hostAncestors,
+    hostNamespace: frame.hostNamespace,
+    imagePreloadsSuppressed: frame.imagePreloadsSuppressed,
+    idPath: [...frame.idPath],
+    idPathString: null,
+    localIdCounter: 0,
+    pendingLeadingNewline: frame.pendingLeadingNewline,
+    request: frame.request,
+    selectProps: frame.selectProps,
+    segment,
+    stack: frame.stack,
+    treeParent: frame.treeParent,
     // Forked branches get their own surface-index cursor from the same
     // snapshot. A Suspense fallback and its streamed content then produce
     // the SAME name sequence, so the reveal pairs (morphs) them instead of
     // cross-fading two differently suffixed names — and names stay
     // deterministic under parallel task completion.
     viewTransition:
-      scope.viewTransition === null ? null : { ...scope.viewTransition },
+      frame.viewTransition === null ? null : { ...frame.viewTransition },
   };
 }
 
@@ -537,46 +535,28 @@ function performWork(request: Request): void {
   const tasks = request.pingedTasks;
   request.pingedTasks = [];
 
-  for (const task of tasks) retryTask(request, task);
+  for (const task of tasks) retryTask(task);
 
   flushCompletedQueues(request);
 }
 
-function retryTask(request: Request, task: Task): void {
-  if (task.segment.status !== "pending") return;
+function retryTask(task: Task): void {
+  const { frame } = task;
+  if (frame.segment.status !== "pending") return;
 
-  task.segment.status = "rendering";
-  // A task already owns a forked render scope. Rendering mutates every scoped
-  // field in balanced push/pop pairs, so resuming it does not need to clone
-  // its context, id path, and view-transition cursor a second time.
-  const frame = createRenderFrame(request, task.segment, task);
+  frame.segment.status = "rendering";
 
   try {
     renderChildren(task.node, frame, task.childIndexBase);
-    completeSegmentText(task.segment);
-    task.segment.status = "completed";
-    detachTask(request, task);
-    finishedTask(request, task);
+    completeSegmentText(frame.segment);
+    frame.segment.status = "completed";
+    detachTask(task);
+    settleTask(task, "completed");
   } catch (error) {
-    detachTask(request, task);
-    task.segment.status = "completed";
-    erroredTask(request, task, error);
+    detachTask(task);
+    frame.segment.status = "completed";
+    settleTask(task, "errored", error);
   }
-}
-
-function createRenderFrame(
-  request: Request,
-  segment: Segment,
-  scope: RenderScope,
-): RenderFrame {
-  return {
-    ...scope,
-    dispatcher: null,
-    idPathString: null,
-    localIdCounter: 0,
-    request,
-    segment,
-  };
 }
 
 function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
@@ -963,11 +943,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   parentSegment.lastPushedText = false;
 
   contentSegment.parentFlushed = true;
-  const contentFrame = createRenderFrame(
-    frame.request,
-    contentSegment,
-    forkScope(frame, boundary),
-  );
+  const contentFrame = forkFrame(frame, contentSegment, boundary);
 
   try {
     renderChildren(props.children, contentFrame);
@@ -990,10 +966,11 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
 
   if (boundary.status === "completed") return;
 
-  const fallbackFrame = createRenderFrame(
-    frame.request,
+  const fallbackFrame = forkFrame(
+    frame,
     boundarySegment,
-    forkScope(frame, frame.boundary, boundary.fallbackTasks),
+    frame.boundary,
+    boundary.fallbackTasks,
   );
 
   try {
@@ -1002,7 +979,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
   } catch (error) {
     if (boundary.pendingTasks > 0) {
       for (const task of boundary.fallbackTasks) {
-        abortTask(frame.request, task);
+        abortTask(task);
       }
     }
     throw error;
@@ -1206,7 +1183,7 @@ function renderHostElement(
     frame.segment.chunks.push(leadingNewlineEndMarker);
   }
   if (frame.request.documentHasHead !== null && type === "head") {
-    writeDocumentHeadMarker(frame.segment);
+    frame.segment.write(documentHeadMarker);
   }
   writeElementEnd(type, frame.segment);
 }
@@ -1281,7 +1258,6 @@ function spawnSuspendedTask(
   thenable: Thenable,
   childIndexBase: number,
 ): void {
-  const request = frame.request;
   // The spawned segment splices between the parent's text chunks: it adopts
   // the parent's trailing-text state (so its own leading text writes a
   // separator against the text before the splice point) and marks itself
@@ -1294,92 +1270,71 @@ function spawnSuspendedTask(
   frame.segment.lastPushedText = false;
   frame.segment.children.push(segment);
 
-  const task = createTask(
-    request,
-    node,
-    segment,
-    forkScope(frame),
-    childIndexBase,
-  );
+  const task = createTask(node, forkFrame(frame, segment), childIndexBase);
   thenable.then(
-    () => pingTask(request, task),
-    () => pingTask(request, task),
+    () => pingTask(task),
+    () => pingTask(task),
   );
 }
 
-function pingTask(request: Request, task: Task): void {
+function pingTask(task: Task): void {
+  const { request } = task.frame;
   if (request.status === "closed" || request.status === "aborting") return;
+  const shouldSchedule = request.pingedTasks.length === 0;
   request.pingedTasks.push(task);
-  // Many thenables settling in one tick ping many tasks; one performWork
-  // pass drains them all, so schedule at most one.
-  if (request.workScheduled) return;
-  request.workScheduled = true;
-  queueMicrotask(() => {
-    request.workScheduled = false;
-    performWork(request);
-  });
+  // An empty queue has no scheduled drain. Many thenables settling in one
+  // tick append behind the first and share its microtask.
+  if (shouldSchedule) queueMicrotask(() => performWork(request));
 }
 
-function finishedTask(request: Request, task: Task): void {
-  request.pendingTasks -= 1;
-
-  const boundary = task.boundary;
+function settleTask(
+  task: Task,
+  outcome: "aborted" | "completed" | "errored",
+  error?: unknown,
+): void {
+  const { boundary, request, segment, stack } = task.frame;
   if (boundary === null) {
     request.pendingRootTasks -= 1;
+    if (outcome === "errored") {
+      fatalError(request, error);
+      return;
+    }
     if (request.pendingRootTasks === 0) finishRootShell(request);
   } else {
     boundary.pendingTasks -= 1;
 
-    if (task.segment.parentFlushed) {
-      boundary.completedSegments.push(task.segment);
+    if (outcome === "errored") {
+      markBoundaryClientRendered(request, boundary, error, stack);
+    } else if (outcome === "completed" && segment.parentFlushed) {
+      boundary.completedSegments.push(segment);
     }
 
-    if (!completeBoundaryIfReady(request, boundary) && boundary.parentFlushed) {
-      request.partialBoundaries.add(boundary);
+    if (outcome !== "errored") {
+      const boundaryCompleted = completeBoundaryIfReady(request, boundary);
+      if (
+        outcome === "completed" &&
+        !boundaryCompleted &&
+        boundary.parentFlushed
+      ) {
+        request.partialBoundaries.add(boundary);
+      }
     }
   }
 
-  if (request.pendingTasks === 0) request.allReady.resolve(undefined);
+  if (request.abortableTasks.size === 0) request.allReady.resolve(undefined);
 }
 
-function erroredTask(request: Request, task: Task, error: unknown): void {
-  request.pendingTasks -= 1;
-
-  const boundary = task.boundary;
-  if (boundary === null) {
-    request.pendingRootTasks -= 1;
-    fatalError(request, error);
-    return;
-  }
-
-  boundary.pendingTasks -= 1;
-  markBoundaryClientRendered(request, boundary, error, task.stack);
-
-  if (request.pendingTasks === 0) request.allReady.resolve(undefined);
+function detachTask(task: Task): boolean {
+  task.frame.fallbackTasks?.delete(task);
+  return task.frame.request.abortableTasks.delete(task);
 }
 
-function detachTask(request: Request, task: Task): void {
-  task.fallbackTasks?.delete(task);
-  request.abortableTasks.delete(task);
-}
+function abortTask(task: Task): void {
+  if (!detachTask(task)) return;
 
-function abortTask(request: Request, task: Task): void {
-  if (!request.abortableTasks.delete(task)) return;
-
-  task.segment.status = "completed";
-  task.fallbackTasks?.delete(task);
-  request.pendingTasks -= 1;
-
-  const boundary = task.boundary;
-  if (boundary === null) {
-    request.pendingRootTasks -= 1;
-    if (request.pendingRootTasks === 0) finishRootShell(request);
-  } else {
-    boundary.pendingTasks -= 1;
-    completeBoundaryIfReady(request, boundary);
-  }
-
-  if (request.pendingTasks === 0) request.allReady.resolve(undefined);
+  const { frame } = task;
+  frame.segment.status = "completed";
+  settleTask(task, "aborted");
 }
 
 function completeBoundaryIfReady(
@@ -1391,18 +1346,11 @@ function completeBoundaryIfReady(
   }
 
   boundary.status = "completed";
-  abortFallbackTasks(request, boundary);
+  for (const fallbackTask of boundary.fallbackTasks) {
+    abortTask(fallbackTask);
+  }
   if (boundary.parentFlushed) request.completedBoundaries.add(boundary);
   return true;
-}
-
-function abortFallbackTasks(
-  request: Request,
-  boundary: SuspenseBoundary,
-): void {
-  for (const fallbackTask of boundary.fallbackTasks) {
-    abortTask(request, fallbackTask);
-  }
 }
 
 function markBoundaryClientRendered(
@@ -1422,11 +1370,11 @@ function markBoundaryClientRendered(
   request.partialBoundaries.delete(boundary);
 
   for (const task of request.abortableTasks) {
-    if (task.boundary === boundary) abortTask(request, task);
+    if (task.frame.boundary === boundary) abortTask(task);
   }
 
   for (const task of boundary.fallbackTasks) {
-    abortTask(request, task);
+    abortTask(task);
   }
 
   if (boundary.parentFlushed) {
@@ -1448,14 +1396,13 @@ function abort(request: Request, reason?: unknown): void {
   }
 
   for (const task of request.abortableTasks) {
-    const boundary = task.boundary;
+    const { boundary, stack } = task.frame;
     if (boundary !== null) {
-      markBoundaryClientRendered(request, boundary, error, task.stack, {});
+      markBoundaryClientRendered(request, boundary, error, stack, {});
     }
   }
 
   request.abortableTasks.clear();
-  request.pendingTasks = 0;
   request.allReady.resolve(undefined);
   flushCompletedQueues(request);
 }
@@ -1526,11 +1473,6 @@ function createRuntimeName(identifierPrefix: string | undefined): string {
   nextRuntimeId += 1;
   const prefix = identifierPrefix?.replace(/[^A-Za-z0-9_$]/g, "_") ?? "";
   return prefix === "" ? `__figSSR_${id}` : `__figSSR_${prefix}_${id}`;
-}
-
-function writeDocumentHeadMarker(segment: Segment): void {
-  segment.lastPushedText = false;
-  segment.chunks.push(documentHeadMarker);
 }
 
 function consumePendingLeadingNewline(frame: RenderFrame): boolean {

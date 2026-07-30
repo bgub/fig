@@ -36,7 +36,7 @@ const textEncoder = new TextEncoder();
 export function flushCompletedQueues(request: Request): void {
   if (request.controller === null || request.status === "closed") return;
   if (request.pendingRootTasks > 0) return;
-  if (request.prerender && request.pendingTasks > 0) return;
+  if (request.prerender && request.abortableTasks.size > 0) return;
   if (request.flushing) return;
 
   request.flushing = true;
@@ -79,7 +79,7 @@ export function flushCompletedQueues(request: Request): void {
   // Deliberately not conditioned on flow: close() only marks the end of the
   // queue, so a full queue with nothing left to write still closes here.
   if (
-    request.pendingTasks === 0 &&
+    request.abortableTasks.size === 0 &&
     request.completedBoundaries.size === 0 &&
     request.clientRenderedBoundaries.size === 0 &&
     request.partialBoundaries.size === 0
@@ -97,7 +97,7 @@ export function sealHead(request: Request): void {
   activateVisibleMetadata(request, request.rootSegment);
   const metadata = request.assetRegistry.headMetadataHtml(
     request.nonce,
-    !request.prerender && request.pendingTasks > 0,
+    !request.prerender && request.abortableTasks.size > 0,
   );
   request.headSnapshot = {
     ...metadata,
@@ -261,7 +261,7 @@ function writeSegmentRevealScript(
   blockingIds: string,
 ): void {
   const id = ensureSegmentId(request, segment);
-  writeRuntime(request);
+  writeProtocolRuntime(request);
   // Partial segments — including those of a hidden-Activity boundary — stage and
   // fill in light-DOM hidden divs; only the boundary's final reveal (`ac`) moves
   // the assembled content into the inert activity template.
@@ -283,7 +283,7 @@ function writeBoundaryRevealScript(
   const blockingIds = flushSegmentAssets(request, boundary.contentSegment);
   const metadata = switchBoundaryMetadata(request, boundary);
   const metadataArgument = metadata === null ? "" : `,${metadata}`;
-  writeRuntime(request);
+  writeProtocolRuntime(request);
   const boundaryRef = jsString(
     boundaryId(request, ensureBoundaryId(request, boundary)),
   );
@@ -407,7 +407,7 @@ function flushClientRenderedBoundary(
   boundary: SuspenseBoundary,
 ): void {
   if (boundary.id === null) return;
-  writeRuntime(request);
+  writeProtocolRuntime(request);
   const boundaryRef = jsString(boundaryId(request, boundary.id));
   const digest = jsString(boundary.error?.digest ?? "");
   const message = jsString(boundary.error?.message ?? "");
@@ -440,10 +440,6 @@ function drainBoundaryQueue(
     // chunk) while still coalescing the per-attribute writes within.
     flushWriteBuffer(request);
   }
-}
-
-function writeRuntime(request: Request): void {
-  writeProtocolRuntime(request);
 }
 
 // Classic <script> elements share the page's global lexical environment, so a
