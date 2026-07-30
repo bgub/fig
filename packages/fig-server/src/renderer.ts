@@ -63,8 +63,10 @@ import {
 } from "./image-preloads.ts";
 import { activityId, earlyEventCaptureMarkup } from "./protocol.ts";
 import {
+  createPreloadHeaderEntries,
   formatPreloadHeader,
   type PreloadHeaderEntry,
+  type PreloadHeaderResourceSnapshot,
 } from "./preload-header.ts";
 import {
   documentHeadMarker,
@@ -98,7 +100,8 @@ declare const __FIG_DEV__: boolean | undefined;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 interface HeadSnapshot extends HeadMetadataHtml {
-  readonly preloadHeaderEntries: readonly PreloadHeaderEntry[];
+  preloadHeaderEntries: readonly PreloadHeaderEntry[] | null;
+  preloadHeaderResources: PreloadHeaderResourceSnapshot | null;
 }
 
 export interface Request {
@@ -406,13 +409,22 @@ export function createServerRenderRequest(
     contentType: "text/html; charset=utf-8",
     data: request.dataStore,
     getData: () => request.dataStore.snapshot(),
-    getPreloadHeader: (headerOptions) =>
-      request.headSnapshot === null
-        ? undefined
-        : formatPreloadHeader(
-            request.headSnapshot.preloadHeaderEntries,
-            headerOptions,
-          ),
+    getPreloadHeader: (headerOptions) => {
+      const snapshot = request.headSnapshot;
+      if (snapshot === null) return undefined;
+
+      let entries = snapshot.preloadHeaderEntries;
+      if (entries === null) {
+        const resources = snapshot.preloadHeaderResources;
+        if (resources === null) {
+          throw new Error("Missing preload-header resource snapshot.");
+        }
+        entries = createPreloadHeaderEntries(resources);
+        snapshot.preloadHeaderEntries = entries;
+        snapshot.preloadHeaderResources = null;
+      }
+      return formatPreloadHeader(entries, headerOptions);
+    },
     getHead: () => {
       const snapshot = request.headSnapshot;
       return snapshot === null

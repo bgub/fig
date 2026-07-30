@@ -395,6 +395,51 @@ The change therefore reduces collection frequency and request allocation. Its
 GC-time improvement is small because the remaining minor collections were
 slightly longer in these runs.
 
+## Lazy preload-header serialization result
+
+The renderer previously serialized every shell asset into an HTTP `Link`
+header entry when the shell sealed. TanStack Start disables this header by
+default, so bengubler.com discarded those strings and entry objects on every
+request without ever reading them.
+
+The replacement freezes shallow value copies of the ordered shell resources at
+`shellReady`. The first `getPreloadHeader()` call serializes and caches the
+entries, then releases the raw snapshot. Copying the primitive resource fields
+ensures later user mutation cannot change the sealed header. Assets discovered
+by later Suspense work also cannot enter the response header.
+
+Allocation sampling over 10,000 requests measured:
+
+| Metric                   |  Baseline | Lazy serialization | Change |
+| ------------------------ | --------: | -----------------: | -----: |
+| Total sampled allocation | 10.434 GB |          10.208 GB |  -2.2% |
+| Allocation per request   |  1,043 KB |           1,021 KB | -23 KB |
+
+The baseline attributed 193.5 MB of self allocation to `serializeLink`; that
+frame disappeared from the candidate profile. Inclusive allocation under the
+eager `createPreloadHeaderEntries` path was 282.6 MB, while the corrected lazy
+snapshot path allocated 17.8 MB. Copying resource values for snapshot integrity
+added only 4.2 MB over 10,000 requests, approximately 0.42 KB per request.
+
+Two alternating fixed-work runs of 40,000 requests each, before adding the
+resource-value copies, measured:
+
+| Metric            | Baseline mean | Lazy mean | Change |
+| ----------------- | ------------: | --------: | -----: |
+| Minor collections |         693.5 |     680.0 |  -1.9% |
+| Minor GC time     |     500.61 ms | 504.68 ms |  +0.8% |
+| Total GC time     |     604.43 ms | 605.98 ms |  +0.3% |
+| Average latency   |      24.91 ms |  24.68 ms |  -0.9% |
+
+GC duration was flat within run-to-run pause noise, but the lower collection
+frequency agrees with the allocation profile. Two 10-second throughput runs
+also averaged 2,032 versus 2,020 requests per second (+0.6%) and 24.12 versus
+24.26 ms latency (-0.6%). The response remained 20,871 bytes and was identical
+after normalizing request timestamps. A post-integrity-fix run recorded 672
+minor collections and 611.83 ms total GC; the added copies therefore did not
+reverse the collection-frequency improvement, while GC duration remained
+inside the same pause-time noise.
+
 ## Recommended optimization order
 
 ### 1. Server HTML and output pipeline
@@ -422,10 +467,10 @@ riskier gain.
 
 Canonical asset host props now fill the server writer's owned object directly,
 removing the attribute-pair array, `Object.fromEntries`, and nonce clone. The
-remaining work is:
+HTTP preload-header values are also serialized lazily, eliminating roughly 23
+KB of sampled allocation per request when the default Start handler leaves the
+header disabled. The remaining work is:
 
-- Avoid building both HTML props and preload-header parameter arrays when the
-  same normalized values can be visited directly.
 - Reassess which production module preloads are necessary.
 
 ### 4. Payload insertion

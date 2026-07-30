@@ -6,8 +6,8 @@ import {
 } from "@bgub/fig/internal";
 import { writeElementEnd, writeElementStart, writeText } from "./html.ts";
 import {
-  createPreloadHeaderEntries,
-  type PreloadHeaderEntry,
+  type PreloadHeaderResourceSnapshot,
+  snapshotPreloadHeaderResources,
 } from "./preload-header.ts";
 import { STREAMED_METADATA_ATTRIBUTE } from "./shared.ts";
 
@@ -136,8 +136,8 @@ export class AssetResourceRegistry {
     return snapshot;
   }
 
-  preloadHeaderEntries(): PreloadHeaderEntry[] {
-    return createPreloadHeaderEntries(
+  preloadHeaderResources(): PreloadHeaderResourceSnapshot {
+    return snapshotPreloadHeaderResources(
       this.deliveryResources.values(),
       (resource) => this.isEarlyImage(resource),
     );

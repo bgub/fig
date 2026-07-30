@@ -1207,6 +1207,7 @@ describe("@bgub/fig-server", () => {
 
   it("snapshots preload headers when the shell becomes ready", async () => {
     const pending = deferred<string>();
+    const shellStylesheet = stylesheet("/app.css");
 
     function LateAssets() {
       const value = readPromise(pending.promise);
@@ -1225,7 +1226,7 @@ describe("@bgub/fig-server", () => {
           "body",
           null,
           assets(
-            [preconnect("https://cdn.example.com"), stylesheet("/app.css")],
+            [preconnect("https://cdn.example.com"), shellStylesheet],
             createElement(
               Fragment,
               null,
@@ -1243,13 +1244,14 @@ describe("@bgub/fig-server", () => {
 
     expect(result.getPreloadHeader()).toBeUndefined();
     await result.shellReady;
+    shellStylesheet.href = "/mutated.css";
+    pending.resolve("Ready");
+    await result.allReady;
+
     const shellHeader = result.getPreloadHeader();
     expect(shellHeader).toBe(
       "<https://cdn.example.com>; rel=preconnect, </hero.jpg>; rel=preload; as=image, </app.css>; rel=preload; as=style",
     );
-
-    pending.resolve("Ready");
-    await result.allReady;
     expect(result.getPreloadHeader()).toBe(shellHeader);
     expect(result.getPreloadHeader()).not.toContain("/late.js");
   });

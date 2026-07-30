@@ -102,7 +102,8 @@ export function sealHead(request: Request): void {
   );
   request.headSnapshot = {
     ...metadata,
-    preloadHeaderEntries: request.assetRegistry.preloadHeaderEntries(),
+    preloadHeaderEntries: null,
+    preloadHeaderResources: request.assetRegistry.preloadHeaderResources(),
   };
   request.headReady.resolve(metadata.preamble + metadata.metadata);
 }

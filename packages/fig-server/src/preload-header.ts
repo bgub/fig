@@ -6,6 +6,9 @@ import type {
 
 type DeliveryResource = Exclude<FigAssetResource, { kind: "meta" | "title" }>;
 
+export type PreloadHeaderResourceSnapshot =
+  readonly ServerPreloadHeaderResource[];
+
 export interface PreloadHeaderEntry {
   readonly resource: ServerPreloadHeaderResource;
   readonly value: string;
@@ -18,21 +21,33 @@ const URI_REFERENCE_PUNCTUATION = "-._~:/?#[]@!$&'()*+,;=";
 
 export function createPreloadHeaderEntries(
   resources: Iterable<DeliveryResource>,
-  isEarlyImage?: (resource: PreloadResource) => boolean,
 ): PreloadHeaderEntry[] {
-  const preconnects: PreloadHeaderEntry[] = [];
-  const criticalPreloads: PreloadHeaderEntry[] = [];
-  const stylesheets: PreloadHeaderEntry[] = [];
-  const remaining: PreloadHeaderEntry[] = [];
+  const entries: PreloadHeaderEntry[] = [];
 
   for (const resource of resources) {
     if (!isServerPreloadHeaderResource(resource)) continue;
     const value = preloadHeaderValue(resource);
-    if (value === null) continue;
-    const entry = { resource, value };
+    if (value !== null) entries.push({ resource, value });
+  }
+
+  return entries;
+}
+
+export function snapshotPreloadHeaderResources(
+  resources: Iterable<DeliveryResource>,
+  isEarlyImage?: (resource: PreloadResource) => boolean,
+): PreloadHeaderResourceSnapshot {
+  const preconnects: ServerPreloadHeaderResource[] = [];
+  const criticalPreloads: ServerPreloadHeaderResource[] = [];
+  const stylesheets: ServerPreloadHeaderResource[] = [];
+  const remaining: ServerPreloadHeaderResource[] = [];
+
+  for (const resource of resources) {
+    if (!isServerPreloadHeaderResource(resource)) continue;
+    const snapshot: ServerPreloadHeaderResource = { ...resource };
 
     if (resource.kind === "preconnect") {
-      preconnects.push(entry);
+      preconnects.push(snapshot);
     } else if (
       resource.kind === "font" ||
       (resource.kind === "preload" &&
@@ -41,11 +56,11 @@ export function createPreloadHeaderEntries(
             (resource.fetchpriority === "high" ||
               isEarlyImage?.(resource) === true))))
     ) {
-      criticalPreloads.push(entry);
+      criticalPreloads.push(snapshot);
     } else if (resource.kind === "stylesheet") {
-      stylesheets.push(entry);
+      stylesheets.push(snapshot);
     } else {
-      remaining.push(entry);
+      remaining.push(snapshot);
     }
   }
 

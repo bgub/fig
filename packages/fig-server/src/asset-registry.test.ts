@@ -11,7 +11,10 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { AssetResourceRegistry } from "./asset-registry.ts";
-import { formatPreloadHeader } from "./preload-header.ts";
+import {
+  createPreloadHeaderEntries,
+  formatPreloadHeader,
+} from "./preload-header.ts";
 
 function write(
   registry: AssetResourceRegistry,
@@ -278,7 +281,11 @@ describe("AssetResourceRegistry", () => {
     registry.register(preload("/app.css", "style"));
     registry.register(script("/app.js", { module: true }));
 
-    expect(formatPreloadHeader(registry.preloadHeaderEntries())).toBe(
+    expect(
+      formatPreloadHeader(
+        createPreloadHeaderEntries(registry.preloadHeaderResources()),
+      ),
+    ).toBe(
       '<https://cdn.example.com>; rel=preconnect, </hero.jpg>; rel=preload; as=image; fetchpriority=high, </font.woff2>; rel=preload; as=font; crossorigin=anonymous; type="font/woff2", </app.css>; rel=preload; as=style, </route.js>; rel=modulepreload; as=script; crossorigin',
     );
   });
