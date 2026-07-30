@@ -117,6 +117,10 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
+  "files": [
+    "dist",
+    "dist-development"
+  ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
     "test": "vitest run --config ../../vite.config.ts src"

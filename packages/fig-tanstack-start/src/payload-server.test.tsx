@@ -9,6 +9,10 @@ import {
   Suspense,
 } from "@bgub/fig";
 import {
+  decodePayloadDataEntries,
+  type PayloadDataHydrationEntry,
+} from "@bgub/fig/internal";
+import {
   createPayloadComponent,
   type PayloadComponentLoader,
 } from "@bgub/fig-dom";
@@ -23,6 +27,7 @@ import {
 import { serverPayload } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
+import { startDataDocumentScript, startDataScriptId } from "./transport.ts";
 
 describe("TanStack Start server payload resources", () => {
   it("registers initial payloads instead of serializing element values", async () => {
@@ -203,6 +208,46 @@ describe("TanStack Start server payload resources", () => {
       expect(html.match(/nonce="nonce-1"/g)).toHaveLength(2);
       expect(html).toContain("first-payload");
       expect(html).toContain("second-payload");
+    });
+  });
+
+  it("filters payload-backed values from the late Fig data snapshot", async () => {
+    await runWithStartContext({}, async () => {
+      const store = createDataStore();
+      store.hydrate([
+        { key: ["document-data"], value: "document-value" },
+        { key: ["payload-data"], value: "duplicated-value" },
+      ]);
+      const decoded = registerPayloadResponse(
+        ["payload-data"],
+        new Response("payload-value", {
+          headers: { "content-type": "text/plain" },
+        }),
+      ).text();
+
+      const html = await readStream(
+        injectPayloadDocument(
+          streamFromString(payloadDocument()),
+          undefined,
+          Promise.resolve(),
+          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+        ),
+      );
+      const script = html.match(
+        new RegExp(
+          `<script[^>]*id="${startDataScriptId}"[^>]*>([\\s\\S]*?)<\\/script>`,
+        ),
+      )?.[1];
+      if (script === undefined) throw new Error("Missing Fig data script.");
+      const entries = decodePayloadDataEntries(
+        JSON.parse(script) as PayloadDataHydrationEntry[],
+      );
+
+      expect(entries).toEqual([
+        { key: ["document-data"], value: "document-value" },
+      ]);
+      expect(html).toContain("payload-value</script>");
+      await decoded;
     });
   });
 

@@ -2,10 +2,14 @@ import { createDataStore, type FigDataStoreController } from "@bgub/fig";
 import {
   decodePayloadDataEntries,
   encodePayloadDataEntries,
+  HYDRATION_SKIP_ATTRIBUTE,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
 import { escapeScriptJson } from "@bgub/fig-server/html";
-import { serializableStartData } from "./payload-internal.ts";
+import {
+  type PayloadKeyLookup,
+  serializableStartData,
+} from "./payload-internal.ts";
 import { requireStartDataStore } from "./store.ts";
 
 export const startDataScriptId = "__fig_tanstack_start_data__";
@@ -29,12 +33,16 @@ export function hydrateStartDataStore(
   return dataStore;
 }
 
-export function serializeStartDataStore(
+export function startDataDocumentScript(
   dataStore: FigDataStoreController,
+  payloadKeys: PayloadKeyLookup,
 ): string {
-  return escapeScriptJson(
-    encodePayloadDataEntries(serializableStartData(dataStore.snapshot())),
+  const data = escapeScriptJson(
+    encodePayloadDataEntries(
+      serializableStartData(dataStore.snapshot(), payloadKeys),
+    ),
   );
+  return `<script ${HYDRATION_SKIP_ATTRIBUTE} id="${startDataScriptId}" type="application/json">${data}</script>`;
 }
 
 function hydrateDataStore(

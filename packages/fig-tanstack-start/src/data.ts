@@ -11,12 +11,7 @@ import {
   useRouter,
 } from "@bgub/fig-tanstack-router";
 import { payloadTransportMarkerId } from "./document-markers.ts";
-import { requireStartDataStore } from "./store.ts";
-import {
-  createStartDataStore,
-  serializeStartDataStore,
-  startDataScriptId,
-} from "./transport.ts";
+import { createStartDataStore } from "./transport.ts";
 
 export {
   createCsrfMiddleware,
@@ -43,14 +38,7 @@ export function StartScripts(): FigNode {
   const routerScripts = createElement(RouterScripts);
   if (!router.isServer) return routerScripts;
 
-  const dataStore = requireStartDataStore(router.options.context);
   return [
-    createElement("script", {
-      [HYDRATION_SKIP_ATTRIBUTE]: true,
-      id: startDataScriptId,
-      type: "application/json",
-      unsafeHTML: serializeStartDataStore(dataStore),
-    }),
     createElement("template", {
       id: payloadTransportMarkerId,
       [HYDRATION_SKIP_ATTRIBUTE]: true,

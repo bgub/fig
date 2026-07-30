@@ -88,6 +88,8 @@ Scroll restoration installs once and runs after `onRendered`. Start SSR emits on
 
 During SSR, each active match owns one cached asset plan derived from route metadata and the Start manifest. Every match render, head pass, and script pass reuses that plan. An `assets()` boundary around the match delivers stylesheets, preloads, preconnects, fonts, and async scripts before dependent content. Fig's registry deduplicates them against assets from ordinary components and Payload.
 
+TanStack's server router stores are non-reactive. Adapter reads therefore use their snapshots directly during SSR instead of constructing client subscription and memoized-selector state that cannot observe a server update.
+
 Within each match, authored links and manifest stylesheets are discovered before generated module preloads. Render-blocking CSS therefore begins loading before the route's JavaScript dependency hints without changing authored stylesheet order.
 
 `HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker. When Start builds side-effect CSS imports with `server.build.inlineCss`, the server style carries TanStack's hydration marker and the client's empty manifest placeholder adopts its text. Hydration therefore retains the inlined CSS instead of replacing it with an empty style. `hydrateStart` scopes that adoption to the container's document; standalone roots targeting a non-global document pass it to `RouterProvider` as `ownerDocument`.

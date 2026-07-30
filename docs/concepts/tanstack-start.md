@@ -26,7 +26,9 @@ On the client, the adapter decodes the Fig document snapshot into a fresh store 
 2. a marker where initial Payload carriers belong; and
 3. Router's normal `Scripts` output.
 
-The data script is hydration state, not UI. It is decoded while constructing the client router, before client-only loaders can start. The client entry repeats the decode idempotently as a fallback. If the parser has not reached `StartScripts` yet, hydration waits for `DOMContentLoaded`.
+The separate Fig script is a lifecycle boundary, not a duplicate router transport. TanStack freezes its hydration graph before Fig renders the document; the adapter holds the `StartScripts` insertion point until the render is ready, then snapshots settled data first discovered while rendering route content.
+
+The data script is hydration state, not UI. It is decoded while constructing the client router, before client-only loaders can start. The client entry repeats the decode idempotently as a fallback before `hydrateRoot`. If the parser has not reached `StartScripts` yet, hydration waits for `DOMContentLoaded`.
 
 The transport uses Fig's Payload value codec, including supported non-JSON values and graph identity. Inline-dangerous characters are escaped.
 

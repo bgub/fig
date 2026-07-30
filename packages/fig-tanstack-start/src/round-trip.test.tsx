@@ -83,7 +83,13 @@ describe("TanStack Start data round trip", () => {
     expect(hydratedId).toBe(serverId);
   });
 
-  it("hydrates route-loader data without refetching, then reloads once on invalidation", async () => {
+  it("hydrates route-loader data without refetching", () =>
+    runDataRoundTrip(true));
+
+  it("hydrates render-discovered data without refetching", () =>
+    runDataRoundTrip(false));
+
+  async function runDataRoundTrip(preloadFromRoute: boolean) {
     let loads = 0;
     const userResource = dataResource<[string], string>({
       key: (id: string) => ["round-trip-user", id],
@@ -117,19 +123,21 @@ describe("TanStack Start data round trip", () => {
     const serverUserRoute = createRoute({
       component: User,
       getParentRoute: () => serverRootRoute,
-      loader: ({ context }) => ensureRouteData(context, userResource, "42"),
+      loader: preloadFromRoute
+        ? ({ context }) => ensureRouteData(context, userResource, "42")
+        : undefined,
       path: "users/$id",
     });
     const serverData = createStartDataContext();
     const serverRouter = createRouter({
-      ...serverData,
+      context: serverData.context,
       history: createMemoryHistory({ initialEntries: ["/users/42"] }),
       isServer: true,
       routeTree: serverRootRoute.addChildren([serverUserRoute]),
     });
 
     await serverRouter.load();
-    expect(loads).toBe(1);
+    expect(loads).toBe(preloadFromRoute ? 1 : 0);
     attachRouterServerSsrUtils({ router: serverRouter, manifest: undefined });
     await serverRouter.serverSsr?.dehydrate();
     const result = await renderRouterToStream({
@@ -140,6 +148,7 @@ describe("TanStack Start data round trip", () => {
     const html = await result.response.text();
 
     expect(html).toContain("user-42-v1");
+    expect(loads).toBe(1);
 
     const parsed = new DOMParser().parseFromString(html, "text/html");
     document.head.innerHTML = parsed.head.innerHTML;
@@ -168,5 +177,5 @@ describe("TanStack Start data round trip", () => {
 
     expect(container.textContent).toBe("user-42-v2");
     expect(loads).toBe(2);
-  });
+  }
 });

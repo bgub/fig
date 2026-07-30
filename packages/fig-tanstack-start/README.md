@@ -103,7 +103,7 @@ function Document() {
 }
 ```
 
-`StartScripts` serializes the Fig store into the server document with Fig's value codec, establishes the adapter's Payload insertion point, and then renders TanStack's bootstrap scripts. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
+`StartScripts` establishes where the adapter writes the Fig store with Fig's value codec, inserts initial Payload responses, and renders TanStack's bootstrap scripts. The separate data block is intentional: TanStack freezes its hydration graph before Fig renders, while the adapter waits for the document render before snapshotting settled data first discovered in route components. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
 
 ## CSS
 

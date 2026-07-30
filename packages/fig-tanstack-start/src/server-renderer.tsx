@@ -10,6 +10,7 @@ import {
 } from "@tanstack/router-core/ssr/server";
 import { injectPayloadDocument } from "./payload-internal.ts";
 import { requireStartDataStore } from "./store.ts";
+import { startDataDocumentScript } from "./transport.ts";
 
 interface RenderRouterDocumentOptions {
   preloadHeader?: boolean | ServerPreloadHeaderOptions;
@@ -27,8 +28,9 @@ export async function renderRouterDocument({
   responseHeaders,
   router,
 }: RenderRouterDocumentOptions) {
+  const dataStore = requireStartDataStore(router.options.context);
   const render = renderToDocumentStream(<RouterProvider router={router} />, {
-    dataStore: requireStartDataStore(router.options.context),
+    dataStore,
     nonce: router.options.ssr?.nonce,
     signal: request.signal,
   });
@@ -48,6 +50,7 @@ export async function renderRouterDocument({
       render.stream,
       router.options.ssr?.nonce,
       render.allReady,
+      (payloadKeys) => startDataDocumentScript(dataStore, payloadKeys),
     );
     const routerStream = documentStream as unknown as Parameters<
       typeof transformReadableStreamWithRouter

@@ -29,6 +29,8 @@ interface PayloadCollector {
   result: Promise<PayloadDocumentEntry>;
 }
 
+export type PayloadKeyLookup = Pick<ReadonlySet<string>, "has" | "size">;
+
 const requestPayloads = new WeakMap<
   object,
   Map<string, RegisteredPayloadStream>
@@ -83,11 +85,11 @@ export function registerPayloadResponse(
 
 export function serializableStartData(
   entries: readonly FigDataHydrationEntry[],
+  payloadKeys: PayloadKeyLookup | undefined = currentRequestPayloads(false),
 ): readonly FigDataHydrationEntry[] {
-  const payloads = currentRequestPayloads(false);
-  if (payloads === undefined || payloads.size === 0) return entries;
+  if (payloadKeys === undefined || payloadKeys.size === 0) return entries;
   return entries.filter(
-    (entry) => !payloads.has(normalizeDataResourceKey(entry.key)),
+    (entry) => !payloadKeys.has(normalizeDataResourceKey(entry.key)),
   );
 }
 
@@ -95,10 +97,13 @@ export function injectPayloadDocument(
   html: ReadableStream<Uint8Array>,
   nonce: string | undefined,
   ready: PromiseLike<void> = Promise.resolve(),
+  beforePayloads?: (payloadKeys: PayloadKeyLookup) => string,
 ): ReadableStream<Uint8Array> {
   const requestPayloads = currentRequestPayloads(true);
-  if (requestPayloads === undefined) return html;
-  const registeredPayloads = requestPayloads;
+  if (requestPayloads === undefined && beforePayloads === undefined)
+    return html;
+  const registeredPayloads =
+    requestPayloads ?? new Map<string, RegisteredPayloadStream>();
   const collectors = new Map<string, PayloadCollector>();
   const htmlReader = html.getReader();
   let buffer: Uint8Array = emptyBytes;
@@ -146,10 +151,16 @@ export function injectPayloadDocument(
     if (marker !== -1) {
       let emitted = enqueue(controller, buffer.subarray(0, marker));
       buffer = buffer.subarray(marker);
+      // `payloads()` waits for `ready`, so the document prefix observes the
+      // final store and the complete set of Payload-backed keys.
+      const entries = await payloads();
       emitted =
         enqueue(
           controller,
-          textEncoder.encode(payloadDocumentScripts(await payloads(), nonce)),
+          textEncoder.encode(
+            (beforePayloads?.(registeredPayloads) ?? "") +
+              payloadDocumentScripts(entries, nonce),
+          ),
         ) || emitted;
       injected = true;
       emitted = enqueue(controller, buffer) || emitted;
