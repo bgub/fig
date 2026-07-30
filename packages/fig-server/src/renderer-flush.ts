@@ -145,6 +145,11 @@ function flushSubtree(request: Request, segment: Segment): void {
   for (; chunkIndex < segment.chunks.length; chunkIndex += 1) {
     writeChunk(request, segment.chunks[chunkIndex], segment);
   }
+
+  // A flushed segment never needs its serialized fragments again. Releasing
+  // them here keeps a completed render from retaining a second copy of the
+  // response while the encoded stream chunk is consumed.
+  segment.chunks.length = 0;
 }
 
 function flushSuspenseBoundary(
@@ -159,6 +164,7 @@ function flushSuspenseBoundary(
     flushBoundaryContent(request, boundary);
     request.write(`<!--${SUSPENSE_END_MARKER}-->`);
     segment.status = "flushed";
+    segment.chunks.length = 0;
     return;
   }
 
