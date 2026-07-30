@@ -390,11 +390,8 @@ export function encodePayloadValueWithGraph(
   }
 
   if (Array.isArray(value)) {
-    return serializePayloadArray(
-      value,
-      graph,
-      () => value,
-      (item) => encodePayloadValueWithGraph(item, graph),
+    return serializePayloadArray(value, graph, (item) =>
+      encodePayloadValueWithGraph(item, graph),
     );
   }
   if (value instanceof Date) {
@@ -494,15 +491,14 @@ export function definePayloadGraphElement(
 }
 
 export function serializePayloadArray<T>(
-  value: object,
+  value: readonly T[],
   graph: PayloadGraphEncodeContext,
-  entries: () => readonly T[],
   encodeChild: (value: T) => PayloadModel,
 ): PayloadModel {
   const existing = payloadGraphReference(graph, value);
   if (existing !== null) return existing;
   const id = definePayloadGraphObject(graph, value);
-  return { $fig: "array", id, value: entries().map(encodeChild) };
+  return { $fig: "array", id, value: value.map(encodeChild) };
 }
 
 export function serializePayloadPlainObject(

@@ -13,6 +13,13 @@ import {
 } from "./element.ts";
 import { readPromise } from "./hooks.ts";
 import {
+  createPayloadClientReferenceResolver,
+  type PayloadClientReference,
+  type PayloadClientReferenceResolver,
+  PayloadClientReferences,
+  type ResolveClientReference,
+} from "./payload-client-reference.ts";
+import {
   decodePayloadDataEntries,
   decodePayloadRecord,
   decodePayloadValueTag,
@@ -35,63 +42,12 @@ import {
 } from "./resource.ts";
 import { isThenable, trackThenable } from "./thenables.ts";
 
-export interface PayloadClientReference {
-  assets?: readonly FigAssetResource[];
-  exportName?: string;
-  id: string;
-  ssr?: boolean;
-}
-
-export type ResolveClientReference = (
-  reference: PayloadClientReference,
-) => ElementType<any> | PromiseLike<ElementType<any>> | undefined;
-
-/**
- * A caller-owned stateful resolver: a `ResolveClientReference` that also
- * owns component identity. Decodes given one (as `resolveClientReference`)
- * resolve every client reference to a single resolver-owned wrapper per
- * reference id, so re-decoding a payload updates islands in place instead
- * of remounting them. The caller owns the lifetime: drop entries when their
- * modules change (HMR) or the manifest swaps.
- */
-export interface PayloadClientReferenceResolver {
-  (
-    reference: PayloadClientReference,
-  ): ElementType<any> | PromiseLike<ElementType<any>> | undefined;
-  clear(): void;
-  delete(id: string): boolean;
-}
-
-const resolverEntries = new WeakMap<
-  ResolveClientReference,
-  Map<string, ElementType<any>>
->();
-
-export function createPayloadClientReferenceResolver(
-  resolve: ResolveClientReference,
-): PayloadClientReferenceResolver {
-  const entries = new Map<string, ElementType<any>>();
-  const resolver = Object.assign(
-    (reference: PayloadClientReference) => resolve(reference),
-    {
-      clear: (): void => entries.clear(),
-      delete: (id: string): boolean => entries.delete(id),
-    },
-  );
-  resolverEntries.set(resolver, entries);
-  return resolver;
-}
-
-// Reveal gates ride the decoded element instances, not the reference
-// wrapper: each decode attaches its own gate to the elements it
-// materializes. Identity lives on the component type; the asset dependency
-// lives on the element — so a mounted island (a previous decode's elements)
-// can never be re-suspended by a newer decode's pending assets, while the
-// newer decode's elements gate on exactly the assets they declared.
-// Elements minted outside a decode from a cached component carry no gate
-// and render ungated: they declared no dependency.
-const elementGates = new WeakMap<Props, Promise<void>>();
-const elementAssets = new WeakMap<Props, readonly FigAssetResource[]>();
+export {
+  createPayloadClientReferenceResolver,
+  type PayloadClientReference,
+  type PayloadClientReferenceResolver,
+  type ResolveClientReference,
+};
 
 export type PayloadDecodeCompletion =
   | { status: "aborted" }
@@ -173,7 +129,7 @@ export function decodePayloadStream(
   stream: ReadableStream<Uint8Array>,
   options: PayloadDecodeOptions = {},
 ): Promise<AwaitedFigNode> {
-  return new PayloadStreamDecode(stream, options).value;
+  return new PayloadDecoder(stream, options).value;
 }
 
 type DecodeChunk = {
@@ -184,9 +140,9 @@ type DecodeChunk = {
   // Materialized lazily: most rows settle synchronously at arrival and are
   // only ever read through result, so eagerly allocating a promise and
   // its controls per row would be waste.
-  deferred: Deferred<unknown> | null;
-  id: number;
   promise: Promise<unknown> | null;
+  reject: ((reason: unknown) => void) | null;
+  resolve: ((value: unknown) => void) | null;
   result:
     | { status: "pending" }
     | { status: "fulfilled"; value: unknown }
@@ -201,6 +157,18 @@ type DecodingElement = {
 };
 
 const noop = (): void => undefined;
+
+function notifyObserver<T>(
+  observer: ((value: T) => unknown) | undefined,
+  value: T,
+): void {
+  try {
+    const result = observer?.(value);
+    if (isThenable(result)) void Promise.resolve(result).then(noop, noop);
+  } catch {
+    // Observers cannot break decode teardown or create unhandled rejections.
+  }
+}
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -226,7 +194,7 @@ function decodeAssetResources(
   return assets.length === 0 ? null : assets;
 }
 
-class PayloadStreamDecode {
+class PayloadDecoder {
   readonly value: Promise<AwaitedFigNode>;
 
   private readonly chunks = new Map<number, DecodeChunk>();
@@ -234,15 +202,8 @@ class PayloadStreamDecode {
   // Asset gates registered for a row id (assets rows carry `for`); consumed
   // when that row arrives.
   private readonly rowGates = new Map<number, Array<PromiseLike<void>>>();
-  private readonly rowAssets = new Map<number, readonly FigAssetResource[]>();
-  // Unsettled reveal gates for arrived client rows, attached per element as
-  // models referencing the row materialize (see elementGates).
-  private readonly clientRowGates = new Map<number, Promise<void>>();
-  private readonly clientRowAssets = new Map<
-    number,
-    readonly FigAssetResource[]
-  >();
-  private readonly rowDecoder: PayloadRowDecoder;
+  private readonly rowAssets = new Map<number, FigAssetResource[]>();
+  private readonly clientReferences: PayloadClientReferences;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private done = false;
   // Resolved on abort so arrived-but-gated chunks reveal instead of waiting
@@ -267,12 +228,15 @@ class PayloadStreamDecode {
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
-    this.rowDecoder = jsonPayloadCodec.createDecoder((row) =>
+    this.clientReferences = new PayloadClientReferences(
+      options.resolveClientReference,
+    );
+    const rowDecoder = jsonPayloadCodec.createDecoder((row) =>
       this.handleRow(row),
     );
     this.value = this.chunkPromise(this.getChunk(0)) as Promise<AwaitedFigNode>;
 
-    void this.ingest(stream);
+    void this.ingest(stream, rowDecoder);
 
     const signal = options.signal;
     if (signal !== undefined) {
@@ -296,7 +260,10 @@ class PayloadStreamDecode {
     this.settle({ status: "aborted" });
   }
 
-  private async ingest(stream: ReadableStream<Uint8Array>): Promise<void> {
+  private async ingest(
+    stream: ReadableStream<Uint8Array>,
+    rowDecoder: PayloadRowDecoder,
+  ): Promise<void> {
     const reader = stream.getReader();
     this.reader = reader;
 
@@ -305,9 +272,9 @@ class PayloadStreamDecode {
         const { done, value } = await reader.read();
         if (this.done) return;
         if (done) break;
-        this.rowDecoder.decode(value);
+        rowDecoder.decode(value);
       }
-      this.rowDecoder.flush();
+      rowDecoder.flush();
       this.finishIngestion();
     } catch (error) {
       if (this.done) return;
@@ -317,20 +284,15 @@ class PayloadStreamDecode {
   }
 
   private finishIngestion(): void {
-    let truncated = false;
     for (const chunk of this.chunks.values()) {
       if (!chunk.arrived) {
-        truncated = true;
-        break;
+        // The server closes the stream only after every outlined row has
+        // been written, so any unresolved reference is truncation.
+        this.failIngestion(
+          new Error("Payload stream ended before all referenced rows arrived."),
+        );
+        return;
       }
-    }
-    if (truncated) {
-      // The server closes the stream only after every outlined row has been
-      // written, so an unresolved reference at end-of-stream is truncation.
-      this.failIngestion(
-        new Error("Payload stream ended before all referenced rows arrived."),
-      );
-      return;
     }
     this.settle({ status: "complete" });
   }
@@ -342,10 +304,10 @@ class PayloadStreamDecode {
   }
 
   private rejectUnresolved(error: unknown): void {
-    for (const chunk of this.chunks.values()) {
+    for (const [id, chunk] of this.chunks) {
       if (chunk.arrived) continue;
       chunk.arrived = true;
-      this.rejectChunk(chunk, error);
+      this.rejectChunk(id, chunk, error);
     }
   }
 
@@ -353,14 +315,7 @@ class PayloadStreamDecode {
     if (this.done) return;
     this.done = true;
     this.removeAbortListener();
-    try {
-      const observed = this.options.onStreamDone?.(result);
-      // An async observer's rejection must not surface as an unhandled
-      // rejection any more than a sync throw may break teardown.
-      if (isThenable(observed)) void Promise.resolve(observed).then(noop, noop);
-    } catch {
-      // An observer must not be able to break ingestion teardown.
-    }
+    notifyObserver(this.options.onStreamDone, result);
   }
 
   private handleRow(row: PayloadRow): void {
@@ -399,26 +354,12 @@ class PayloadStreamDecode {
           reference.assets = assets;
         }
         const retainedAssets = this.retainedAssets(assets);
-        if (retainedAssets !== null) {
-          this.clientRowAssets.set(row.id, retainedAssets);
-        }
         const gate = this.prepareAssets(assets);
-        if (gate !== null) {
-          // Elements referencing this row inherit the gate as they
-          // materialize; once it settles there is nothing left to gate.
-          // Track it now so a gate that settles before its first render
-          // read (e.g. awaited by a router's pre-commit prepare) resolves
-          // synchronously instead of suspending for a retry beat.
-          trackThenable(gate);
-          this.clientRowGates.set(row.id, gate);
-          void gate.then(() => {
-            this.clientRowGates.delete(row.id);
-          });
-        }
-        const component = this.clientReferenceComponent(
+        const component = this.clientReferences.register(
+          row.id,
           reference,
           gate,
-          retainedAssets !== null,
+          retainedAssets,
         );
         chunk.arrived = true;
         this.fulfillChunk(chunk, component);
@@ -430,7 +371,7 @@ class PayloadStreamDecode {
         // Reveal-gating a failure is pointless; drop any gates aimed here.
         this.rowGates.delete(row.id);
         this.rowAssets.delete(row.id);
-        this.rejectChunk(chunk, errorFromPayloadValue(row.value));
+        this.rejectChunk(row.id, chunk, errorFromPayloadValue(row.value));
         return;
       }
       case "data": {
@@ -444,12 +385,9 @@ class PayloadStreamDecode {
         const retainedAssets = this.retainedAssets(decodedAssets);
         if (retainedAssets !== null && row.for !== undefined) {
           const retained = this.rowAssets.get(row.for);
-          this.rowAssets.set(
-            row.for,
-            retained === undefined
-              ? retainedAssets
-              : [...retained, ...retainedAssets],
-          );
+          if (retained === undefined)
+            this.rowAssets.set(row.for, retainedAssets);
+          else retained.push(...retainedAssets);
         }
         const gate = this.prepareAssets(decodedAssets);
         if (gate === null || row.for === undefined) return;
@@ -486,8 +424,8 @@ class PayloadStreamDecode {
   }
 
   private retainedAssets(
-    assets: readonly FigAssetResource[] | null,
-  ): readonly FigAssetResource[] | null {
+    assets: FigAssetResource[] | null,
+  ): FigAssetResource[] | null {
     if (assets === null) return null;
     const retained =
       this.options.retainAssets === true
@@ -498,62 +436,15 @@ class PayloadStreamDecode {
     return retained.length === 0 ? null : retained;
   }
 
-  private clientReferenceComponent(
-    reference: PayloadClientReference,
-    gate: Promise<void> | null,
-    retainsAssets: boolean,
-  ): ElementType<any> {
-    const resolve = this.options.resolveClientReference;
-    const entries =
-      resolve === undefined ? undefined : resolverEntries.get(resolve);
-    const existing = entries?.get(reference.id);
-    if (existing !== undefined) return existing;
-
-    let resolved: ReturnType<ResolveClientReference>;
-    try {
-      resolved = resolve?.(reference);
-    } catch (error) {
-      resolved = Promise.reject(error);
-    }
-
-    if (resolved === undefined) {
-      // Never cached: a stateful resolver that cannot resolve this
-      // reference must not latch the error component for later decodes
-      // that can.
-      return function PayloadUnresolvedClientComponent(): never {
-        throw new Error(
-          `Cannot render client reference "${reference.id}" because decodePayloadStream was not configured with a matching resolveClientReference.`,
-        );
-      };
-    }
-
-    // Without a stateful resolver, an ungated synchronously resolved
-    // reference decodes to the component itself, so its element type is
-    // stable across decodes whenever the resolver's answer is — re-decoding
-    // updates the client component in place and its state survives.
-    if (
-      entries === undefined &&
-      gate === null &&
-      !isThenable(resolved) &&
-      !retainsAssets
-    ) {
-      return resolved;
-    }
-
-    const component = clientReferenceWrapper(resolved, reference.id);
-    entries?.set(reference.id, component);
-    return component;
-  }
-
   private getChunk(id: number): DecodeChunk {
     const existing = this.chunks.get(id);
     if (existing !== undefined) return existing;
 
     const chunk: DecodeChunk = {
       arrived: false,
-      deferred: null,
-      id,
       promise: null,
+      reject: null,
+      resolve: null,
       result: { status: "pending" },
     };
     this.chunks.set(id, chunk);
@@ -574,8 +465,10 @@ class PayloadStreamDecode {
       // still observe the stored error.
       void chunk.promise.catch(noop);
     } else {
-      chunk.deferred = deferred<unknown>();
-      chunk.promise = chunk.deferred.promise;
+      chunk.promise = new Promise((resolve, reject) => {
+        chunk.resolve = resolve;
+        chunk.reject = reject;
+      });
     }
     trackThenable(chunk.promise);
     return chunk.promise;
@@ -584,27 +477,22 @@ class PayloadStreamDecode {
   private fulfillChunk(chunk: DecodeChunk, value: unknown): void {
     if (chunk.result.status !== "pending") return;
     chunk.result = { status: "fulfilled", value };
-    chunk.deferred?.resolve(value);
+    chunk.resolve?.(value);
+    chunk.resolve = null;
+    chunk.reject = null;
   }
 
-  private rejectChunk(chunk: DecodeChunk, error: unknown): void {
+  private rejectChunk(id: number, chunk: DecodeChunk, error: unknown): void {
     if (chunk.result.status !== "pending") return;
     chunk.result = { error, status: "rejected" };
-    if (chunk.deferred !== null) {
-      chunk.deferred.reject(error);
+    if (chunk.reject !== null) {
+      chunk.reject(error);
       void chunk.promise?.catch(noop);
     }
-    if (chunk.id !== 0 && !(error instanceof PayloadDecodeAbortedError)) {
-      this.observeHoleError(error);
-    }
-  }
-
-  private observeHoleError(error: unknown): void {
-    try {
-      const observed = this.options.onHoleError?.(error);
-      if (isThenable(observed)) void Promise.resolve(observed).then(noop, noop);
-    } catch {
-      // Error attribution/reporting is observational and cannot break decode.
+    chunk.resolve = null;
+    chunk.reject = null;
+    if (id !== 0 && !(error instanceof PayloadDecodeAbortedError)) {
+      notifyObserver(this.options.onHoleError, error);
     }
   }
 
@@ -675,7 +563,7 @@ class PayloadStreamDecode {
         // every unresolved chunk, which must include holes that decoded but
         // were never read.
         this.getChunk(model.id);
-        return createElement(PayloadStreamHole, { decode: this, id: model.id });
+        return createElement(PayloadHole, { decode: this, id: model.id });
       case "promise":
         // Promise props are handed straight to consumers, so the promise
         // (and its thenable-registry tracking) materializes here.
@@ -705,10 +593,7 @@ class PayloadStreamDecode {
     props: Props,
   ): void {
     if (typeof typeModel === "string" || typeModel.$fig !== "client") return;
-    const gate = this.clientRowGates.get(typeModel.id);
-    if (gate !== undefined) elementGates.set(props, gate);
-    const assets = this.clientRowAssets.get(typeModel.id);
-    if (assets !== undefined) elementAssets.set(props, assets);
+    this.clientReferences.attach(typeModel.id, props);
   }
 
   private defineObjectRef<T>(
@@ -730,75 +615,6 @@ class PayloadStreamDecode {
   }
 }
 
-function PayloadStreamHole(props: {
-  decode: PayloadStreamDecode;
-  id: number;
-}): FigNode {
+function PayloadHole(props: { decode: PayloadDecoder; id: number }): FigNode {
   return props.decode.readChunkForRender(props.id) as FigNode;
-}
-
-// The one client-reference wrapper: attaches the per-element asset
-// declarations, reads the per-element reveal gate (elementGates), resolves
-// the component, renders it. Owned by a stateful resolver it is reused
-// across decodes, so island identity survives re-decodes whether a given
-// decode arrives gated or not; otherwise it lives for a single decode.
-// Asynchronous resolution starts at row arrival — overlapping the rest of
-// the stream instead of serializing behind it — and latches its type;
-// thenable tracking lets a resolution settled before its first render read
-// synchronously instead of suspending for a retry beat.
-//
-// Assets attach above the suspension points: the outer component always
-// completes, so a renderer delivers the declarations with the segment that
-// contains the reference even while the module load or reveal gate still
-// suspends the content below. The reveal gate and the reference's own
-// props ride explicit content props — createElement clones props objects,
-// so the per-element WeakMaps cannot be read through the inner element.
-function clientReferenceWrapper(
-  resolved: ElementType<any> | PromiseLike<ElementType<any>>,
-  referenceId: string,
-): ElementType<any> {
-  let render: (props: Props) => FigNode;
-  if (!isThenable(resolved)) {
-    render = (props) => createElement(resolved, props);
-  } else {
-    const pending = Promise.resolve(resolved);
-    trackThenable(pending);
-    let type: ElementType<any> | null = null;
-    render = (props) => {
-      if (type === null) {
-        type = clientReferenceType(readPromise(pending), referenceId);
-      }
-      return createElement(type, props);
-    };
-  }
-
-  function PayloadClientContent(content: {
-    gate?: Promise<void>;
-    props: Props;
-  }): FigNode {
-    // Suspends while pending; gates never reject (prepareAssets results
-    // settle through noop handlers).
-    if (content.gate !== undefined) readPromise(content.gate);
-    return render(content.props);
-  }
-
-  return function PayloadClientComponent(props: Props): FigNode {
-    return attachElementAssets(
-      props,
-      createElement(PayloadClientContent, {
-        gate: elementGates.get(props),
-        props,
-      }),
-    );
-  };
-}
-
-function attachElementAssets(props: Props, node: FigNode): FigNode {
-  const resources = elementAssets.get(props);
-  return resources === undefined ? node : attachAssets(resources, node);
-}
-
-function clientReferenceType(value: unknown, id: string): ElementType<any> {
-  if (typeof value === "function") return value as ElementType<any>;
-  throw new Error(`Client reference "${id}" did not resolve to a component.`);
 }

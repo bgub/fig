@@ -1,7 +1,6 @@
 import type { DataResourceKeyInput } from "@bgub/fig";
 import {
   type AwaitedFigNode,
-  type FigAssetResource,
   type FigAssetResourceList,
   type FigClientReference,
   type FigContext,
@@ -13,11 +12,8 @@ import {
   type Props,
 } from "@bgub/fig";
 import {
-  assetResourceDestination,
-  assetResourceKey,
   checkpointPayloadGraph,
   clientOnlyHostBehavior,
-  clientReferenceAssets,
   createRendererDataStore,
   createPayloadGraphEncodeContext,
   type DataStore,
@@ -31,7 +27,6 @@ import {
   isClientReference,
   isContext,
   isErrorBoundary,
-  isFigAssetResource,
   isPlainPayloadValue,
   isPortal,
   isSuspense,
@@ -55,6 +50,7 @@ import {
   setCurrentDispatcher,
   type Thenable,
 } from "@bgub/fig/internal";
+import { PayloadAssets } from "./payload-assets.ts";
 import {
   type ContextValues,
   type StackFrame,
@@ -124,13 +120,12 @@ class PayloadRequestCancelledError extends Error {
 
 type PayloadRequest = {
   allReady: Deferred<void>;
+  assets: PayloadAssets;
   cleanupAbortListener: (() => void) | null;
   clientReferenceRows: Map<string, number>;
-  clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   componentAssets: PayloadRenderOptions["componentAssets"];
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
-  emittedAssetKeys: Set<string>;
   emittedDataKeys: Set<string>;
   graph: PayloadGraphEncodeContext;
   nextRowId: number;
@@ -145,7 +140,7 @@ type PayloadRequest = {
   // is spliced only after the loop, so a reentrant pass would re-enqueue the
   // same rows.
   flushingRows: boolean;
-  status: "open" | "closed";
+  closed: boolean;
   workScheduled: boolean;
 };
 
@@ -181,34 +176,22 @@ type RenderFrame = {
 };
 
 const errorStacks = new WeakMap<object, StackFrame>();
-const childrenTreeProps = new Set(["children"]);
-const emptyTreeProps = new Set<string>();
-const suspenseTreeProps = new Set(["children", "fallback"]);
+type TreePropMode = "children" | "suspense" | null;
+type OutlineKind = "lazy" | "promise";
+type PayloadOutline = Extract<PayloadSpecialModel, { $fig: OutlineKind }>;
 
 export function renderToPayloadStream(
   node: FigNode,
   options: PayloadRenderOptions = {},
 ): PayloadRenderResult {
-  const { request, stream } = createPayloadRequest(node, options);
-  return {
-    allReady: request.allReady.promise,
-    contentType: jsonPayloadCodec.contentType,
-    stream,
-  };
-}
-
-function createPayloadRequest(
-  node: FigNode,
-  options: PayloadRenderOptions,
-): { request: PayloadRequest; stream: ReadableStream<Uint8Array> } {
   throwIfAborted(options.signal);
 
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
     allReady: deferred<void>(),
+    assets: new PayloadAssets(options.clientReferenceAssets),
     cleanupAbortListener: null,
     clientReferenceRows: new Map(),
-    clientReferenceAssets: options.clientReferenceAssets,
     componentAssets: options.componentAssets,
     controller: null,
     dataStore: createRendererDataStore<object, null>({
@@ -219,7 +202,6 @@ function createPayloadRequest(
       partition: options.dataPartition,
       schedule: noop,
     }),
-    emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
     graph: createPayloadGraphEncodeContext(),
     nextRowId: 1,
@@ -230,7 +212,7 @@ function createPayloadRequest(
     pingedTasks: [],
     queuedRows: [],
     flushingRows: false,
-    status: "open",
+    closed: false,
     workScheduled: false,
   };
   // allReady also rejects through the stream when a consumer cancels (the
@@ -282,7 +264,11 @@ function createPayloadRequest(
 
   scheduleWork(request);
 
-  return { request, stream };
+  return {
+    allReady: request.allReady.promise,
+    contentType: jsonPayloadCodec.contentType,
+    stream,
+  };
 }
 
 function createTask(
@@ -298,7 +284,7 @@ function createTask(
 }
 
 function performWork(request: PayloadRequest): void {
-  if (request.status === "closed") return;
+  if (request.closed) return;
 
   const tasks = request.pingedTasks;
   request.pingedTasks = [];
@@ -310,7 +296,9 @@ function performWork(request: PayloadRequest): void {
 
 function retryTask(request: PayloadRequest, task: Task): void {
   const frame: RenderFrame = {
-    contextValues: cloneContextValues(task.contextValues),
+    // Tasks already capture a context snapshot when outlined. Provider
+    // mutation is balanced, so retries can use that snapshot directly.
+    contextValues: task.contextValues,
     dispatcher: null,
     pendingAssets: [],
     request,
@@ -337,8 +325,8 @@ function retryTask(request: PayloadRequest, task: Task): void {
     finishTask(request);
   } catch (error) {
     if (isThenable(error)) {
-      // The retry re-discovers nothing already in emittedAssetKeys, so this
-      // attempt's assets must ship now; the task still settles into task.id.
+      // The retry re-discovers nothing already deduped by request.assets, so
+      // this attempt's assets must ship now; the task still settles into id.
       flushFrameAssets(frame, task.id);
       error.then(
         () => pingTask(request, task),
@@ -390,7 +378,8 @@ function emitDataRows(request: PayloadRequest): void {
 
 function flushFrameAssets(frame: RenderFrame, rowId: number): void {
   if (frame.pendingAssets.length === 0) return;
-  const value = frame.pendingAssets.splice(0);
+  const value = frame.pendingAssets;
+  frame.pendingAssets = [];
   emitRow(frame.request, { for: rowId, tag: "assets", value });
 }
 
@@ -440,9 +429,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
 
 function serializeNode(node: FigNode, frame: RenderFrame): PayloadModel {
   if (Array.isArray(node)) {
-    return flattenChildArrays(node).map((child) =>
-      serializeNodeOrLazy(child, frame),
-    );
+    return serializeTreeArray(node, frame);
   }
 
   if (node === null || node === undefined || typeof node === "boolean") {
@@ -513,7 +500,7 @@ function serializeElement(
       { $fig: "fragment" },
       frame,
       preserveIdentity,
-      childrenTreeProps,
+      "children",
     );
   }
 
@@ -541,7 +528,7 @@ function serializeElement(
       { $fig: "suspense" },
       frame,
       preserveIdentity,
-      suspenseTreeProps,
+      "suspense",
     );
   }
 
@@ -559,7 +546,7 @@ function serializeElement(
       { $fig: "view-transition" },
       frame,
       preserveIdentity,
-      childrenTreeProps,
+      "children",
     );
   }
 
@@ -582,9 +569,7 @@ function serializeHostElement(
     frame.imagePreloadsSuppressed,
   );
   if (preload !== null) {
-    frame.pendingAssets.push(
-      ...serializeAssetResources(frame.request, preload),
-    );
+    frame.pendingAssets.push(...frame.request.assets.serialize(preload));
   }
 
   const previousImagePreloadsSuppressed = frame.imagePreloadsSuppressed;
@@ -596,7 +581,7 @@ function serializeHostElement(
       type,
       frame,
       preserveIdentity,
-      childrenTreeProps,
+      "children",
     );
   } finally {
     frame.imagePreloadsSuppressed = previousImagePreloadsSuppressed;
@@ -608,7 +593,7 @@ function serializeElementModel(
   type: PayloadElementModel["type"],
   frame: RenderFrame,
   preserveIdentity: boolean,
-  treeProps: ReadonlySet<string> = emptyTreeProps,
+  treeProps: TreePropMode = null,
 ): PayloadModel {
   const id = preserveIdentity
     ? definePayloadGraphElement(frame.request.graph, element)
@@ -636,10 +621,7 @@ function serializeFunctionComponent(
 ): PayloadModel {
   const assetCheckpoint = frame.pendingAssets.length;
   frame.pendingAssets.push(
-    ...serializeAssetResources(
-      frame.request,
-      frame.request.componentAssets?.(type),
-    ),
+    ...frame.request.assets.serialize(frame.request.componentAssets?.(type)),
   );
   frame.dispatcher ??= createPayloadDispatcher(frame);
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
@@ -693,16 +675,14 @@ function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   // Buffered, not emitted: the owning row id is decided at scope exit (see
   // RenderFrame.pendingAssets). Dedupe happens here, so a retried subtree
   // does not re-buffer assets an earlier attempt already shipped.
-  frame.pendingAssets.push(
-    ...serializeAssetResources(frame.request, props.assets),
-  );
+  frame.pendingAssets.push(...frame.request.assets.serialize(props.assets));
   return serializeNode(props.children, frame);
 }
 
 function serializeProps(
   props: Props,
   frame: RenderFrame,
-  treeProps: ReadonlySet<string>,
+  treeProps: TreePropMode,
   hostElement = false,
 ): PayloadModel {
   const clientOnlyBehavior = hostElement
@@ -722,7 +702,11 @@ function serializeProps(
     // Component `mix` props still serialize (and fail loudly on functions).
     if (hostElement && name === "mix") continue;
     const child = props[name];
-    value[name] = treeProps.has(name)
+    const isTreeProp =
+      treeProps !== null &&
+      (name === "children" ||
+        (treeProps === "suspense" && name === "fallback"));
+    value[name] = isTreeProp
       ? serializeTreeProp(child, frame)
       : serializeValue(child, frame);
   }
@@ -733,12 +717,17 @@ function serializeProps(
 }
 
 function serializeTreeProp(value: FigNode, frame: RenderFrame): PayloadModel {
-  if (Array.isArray(value)) {
-    return flattenChildArrays(value).map((child) =>
-      serializeNodeOrLazy(child, frame),
-    );
-  }
+  if (Array.isArray(value)) return serializeTreeArray(value, frame);
   return serializeNodeOrLazy(value, frame);
+}
+
+function serializeTreeArray(
+  value: FigNode[],
+  frame: RenderFrame,
+): PayloadModel[] {
+  return flattenChildArrays(value).map((child) =>
+    serializeNodeOrLazy(child, frame),
+  );
 }
 
 function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
@@ -778,11 +767,8 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
     }
 
     if (Array.isArray(value)) {
-      return serializePayloadArray(
-        value,
-        frame.request.graph,
-        () => value,
-        (item) => serializeValue(item, frame),
+      return serializePayloadArray(value, frame.request.graph, (item) =>
+        serializeValue(item, frame),
       );
     }
 
@@ -796,18 +782,15 @@ function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
 function outlineTask(
   frame: RenderFrame,
   value: TaskValue,
-  referenceKind: "lazy" | "promise",
+  referenceKind: OutlineKind,
   wakeable: Thenable,
   scopedAssets: SerializedAssetResource[] = [],
 ): PayloadSpecialModel {
   const request = frame.request;
-  const id = request.nextRowId++;
-  if (scopedAssets.length > 0) {
-    emitRow(request, { for: id, tag: "assets", value: scopedAssets });
-  }
+  const outline = createOutline(request, referenceKind, scopedAssets);
   const task = createTask(
     request,
-    id,
+    outline.id,
     value,
     cloneContextValues(frame.contextValues),
     frame.imagePreloadsSuppressed,
@@ -819,28 +802,40 @@ function outlineTask(
     () => pingTask(request, task),
   );
 
-  return { $fig: referenceKind, id };
+  return outline;
 }
 
 function outlineError(
   frame: RenderFrame,
   error: unknown,
-  referenceKind: "lazy" | "promise",
+  referenceKind: OutlineKind,
   scopedAssets: SerializedAssetResource[],
 ): PayloadSpecialModel {
   const request = frame.request;
-  const id = request.nextRowId++;
+  const outline = createOutline(request, referenceKind, scopedAssets);
   // Assets first so a decoder that drops gates on error rows sees the row
   // order it expects; the assets still preload even though the row failed.
-  if (scopedAssets.length > 0) {
-    emitRow(request, { for: id, tag: "assets", value: scopedAssets });
-  }
   emitRow(request, {
-    id,
+    id: outline.id,
     tag: "error",
     value: errorRowPayload(request, error, frame.stack),
   });
-  return { $fig: referenceKind, id };
+  return outline;
+}
+
+function createOutline(
+  request: PayloadRequest,
+  kind: OutlineKind,
+  assets: SerializedAssetResource[],
+): PayloadOutline {
+  const outline: PayloadOutline = {
+    $fig: kind,
+    id: request.nextRowId++,
+  };
+  if (assets.length > 0) {
+    emitRow(request, { for: outline.id, tag: "assets", value: assets });
+  }
+  return outline;
 }
 
 // The onError return value is authoritative, like the HTML renderer's
@@ -900,10 +895,7 @@ function emitClientReference(
   // id and the client suspends on a chunk that never arrives. Resolving first
   // lets the throw propagate as an ordinary serialization error with no poisoned
   // mapping, so the reference can be retried cleanly.
-  const assets = serializeAssetResources(
-    request,
-    collectClientReferenceAssets(request, reference),
-  );
+  const assets = request.assets.serializeClientReference(reference);
   const value: Extract<PayloadRow, { tag: "client" }>["value"] = {
     id: reference.id,
   };
@@ -923,165 +915,13 @@ function emitClientReference(
   return id;
 }
 
-function serializeAssetResources(
-  request: PayloadRequest,
-  value: unknown,
-): SerializedAssetResource[] {
-  const input = isFigAssetResource(value)
-    ? [value]
-    : Array.isArray(value)
-      ? value
-      : [];
-  const resources: SerializedAssetResource[] = [];
-
-  for (const resource of input) {
-    if (!isFigAssetResource(resource)) continue;
-    // Delivery assets are request-global and persistent, so the first
-    // definition wins. Metadata is owner-scoped and may legitimately repeat
-    // with a different value in another row; the decoder retains those
-    // declarations until their owning tree commits.
-    if (assetResourceDestination(resource) === "stream") {
-      const key = assetResourceKey(resource);
-      if (request.emittedAssetKeys.has(key)) continue;
-      request.emittedAssetKeys.add(key);
-    }
-    resources.push(serializeAssetResource(resource));
-  }
-
-  return resources;
-}
-
-function collectClientReferenceAssets(
-  request: PayloadRequest,
-  reference: FigClientReference,
-): readonly FigAssetResource[] {
-  const resources = [...clientReferenceAssets(reference)];
-  const resolved = request.clientReferenceAssets?.({ id: reference.id });
-  if (resolved === undefined) return resources;
-  if (isFigAssetResource(resolved)) return [...resources, resolved];
-  return Array.isArray(resolved) ? [...resources, ...resolved] : resources;
-}
-
-function serializeAssetResource(
-  resource: FigAssetResource,
-): SerializedAssetResource {
-  // Delivery assets intentionally omit author-supplied `key` and dedupe by
-  // their concrete URL. Metadata keeps its owner-local identity when needed.
-  // Omitted `undefined` optionals are part of the wire contract, hence the
-  // assign-if-defined shape.
-  switch (resource.kind) {
-    case "stylesheet": {
-      const model: SerializedAssetResource = {
-        href: resource.href,
-        kind: resource.kind,
-      };
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      if (resource.media !== undefined) model.media = resource.media;
-      if (resource.precedence !== undefined) {
-        model.precedence = resource.precedence;
-      }
-      return model;
-    }
-    case "preload": {
-      const model: SerializedAssetResource = {
-        as: resource.as,
-        kind: resource.kind,
-      };
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      if (resource.fetchpriority !== undefined) {
-        model.fetchpriority = resource.fetchpriority;
-      }
-      if (resource.href !== undefined) model.href = resource.href;
-      if (resource.imagesizes !== undefined) {
-        model.imagesizes = resource.imagesizes;
-      }
-      if (resource.imagesrcset !== undefined) {
-        model.imagesrcset = resource.imagesrcset;
-      }
-      if (resource.referrerpolicy !== undefined) {
-        model.referrerpolicy = resource.referrerpolicy;
-      }
-      if (resource.type !== undefined) model.type = resource.type;
-      return model;
-    }
-    case "modulepreload": {
-      const model: SerializedAssetResource = {
-        href: resource.href,
-        kind: resource.kind,
-      };
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      if (resource.fetchpriority !== undefined) {
-        model.fetchpriority = resource.fetchpriority;
-      }
-      return model;
-    }
-    case "script": {
-      const model: SerializedAssetResource = {
-        kind: resource.kind,
-        src: resource.src,
-      };
-      if (resource.async !== undefined) model.async = resource.async;
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      if (resource.defer !== undefined) model.defer = resource.defer;
-      if (resource.module !== undefined) model.module = resource.module;
-      return model;
-    }
-    case "font": {
-      const model: SerializedAssetResource = {
-        href: resource.href,
-        kind: resource.kind,
-        type: resource.type,
-      };
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      if (resource.fetchpriority !== undefined) {
-        model.fetchpriority = resource.fetchpriority;
-      }
-      return model;
-    }
-    case "preconnect": {
-      const model: SerializedAssetResource = {
-        href: resource.href,
-        kind: resource.kind,
-      };
-      if (resource.crossorigin !== undefined) {
-        model.crossorigin = resource.crossorigin;
-      }
-      return model;
-    }
-    case "title":
-      return { kind: resource.kind, value: resource.value };
-    case "meta": {
-      const model: SerializedAssetResource = { kind: resource.kind };
-      if (resource.charset !== undefined) model.charset = resource.charset;
-      if (resource.content !== undefined) model.content = resource.content;
-      if (resource["http-equiv"] !== undefined) {
-        model["http-equiv"] = resource["http-equiv"];
-      }
-      if (resource.key !== undefined) model.key = resource.key;
-      if (resource.name !== undefined) model.name = resource.name;
-      if (resource.property !== undefined) model.property = resource.property;
-      return model;
-    }
-  }
-}
-
 function emitRow(request: PayloadRequest, row: PayloadRow): void {
   request.queuedRows.push(jsonPayloadCodec.encodeRow(row));
   flushRows(request);
 }
 
 function pingTask(request: PayloadRequest, task: Task): void {
-  if (request.status === "closed") return;
+  if (request.closed) return;
   request.pingedTasks.push(task);
   scheduleWork(request);
 }
@@ -1098,7 +938,7 @@ function scheduleWork(request: PayloadRequest): void {
 }
 
 function flushRows(request: PayloadRequest): void {
-  if (request.controller === null || request.status === "closed") return;
+  if (request.controller === null || request.closed) return;
   if (request.flushingRows) return;
 
   request.flushingRows = true;
@@ -1125,7 +965,7 @@ function flushRows(request: PayloadRequest): void {
   // Deliberately not conditioned on flow: close() only marks the end of the
   // queue, so a full queue with no rows left to write still closes here.
   if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
-    request.status = "closed";
+    request.closed = true;
     request.cleanupAbortListener?.();
     request.dataStore.dispose();
     request.controller.close();
@@ -1133,9 +973,9 @@ function flushRows(request: PayloadRequest): void {
 }
 
 function closeWithError(request: PayloadRequest, error: unknown): void {
-  if (request.status === "closed") return;
+  if (request.closed) return;
   request.cleanupAbortListener?.();
-  request.status = "closed";
+  request.closed = true;
   request.dataStore.dispose();
   request.allReady.reject(error);
   request.controller?.error(error);
