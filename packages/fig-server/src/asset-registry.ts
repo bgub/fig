@@ -42,11 +42,12 @@ export class AssetResourceRegistry {
 
   register(resource: FigAssetResource): void {
     if (isMetadataResource(resource)) return;
-    this.canonical(resource);
+    this.canonical(assetResourceKey(resource), resource);
   }
 
   registerAutomaticImage(resource: PreloadResource): void {
-    const { key, resource: current } = this.canonical(resource);
+    const key = assetResourceKey(resource);
+    const current = this.canonical(key, resource);
     if (
       this.earlyImageKeys.size < 10 ||
       (current.kind === "preload" &&
@@ -82,7 +83,8 @@ export class AssetResourceRegistry {
   write(resource: FigAssetResource, sink: AssetSink): string | null {
     if (isMetadataResource(resource)) return null;
 
-    const { key, resource: current } = this.canonical(resource);
+    const key = assetResourceKey(resource);
+    const current = this.canonical(key, resource);
     const id = this.revealBlockerId(key, current);
 
     if (this.emittedResources.has(key)) return id;
@@ -153,11 +155,7 @@ export class AssetResourceRegistry {
     return visible;
   }
 
-  private canonical(resource: DeliveryResource): {
-    key: string;
-    resource: DeliveryResource;
-  } {
-    const key = assetResourceKey(resource);
+  private canonical(key: string, resource: DeliveryResource): DeliveryResource {
     const current = this.deliveryResources.get(key);
 
     if (current !== undefined) {
@@ -167,14 +165,14 @@ export class AssetResourceRegistry {
           throw new AssetResourceConflictError(key, current, resource);
         }
         this.deliveryResources.set(key, promoted);
-        return { key, resource: promoted };
+        return promoted;
       }
 
-      return { key, resource: current };
+      return current;
     }
 
     this.deliveryResources.set(key, resource);
-    return { key, resource };
+    return resource;
   }
 
   private revealBlockerId(

@@ -64,6 +64,8 @@ import {
   type Deferred,
   deferred,
   errorMessage,
+  noLane,
+  noop,
   streamFlowBlocked,
   streamHighWaterMark,
   withContextValue,
@@ -122,7 +124,7 @@ class PayloadRequestCancelledError extends Error {
 
 type PayloadRequest = {
   allReady: Deferred<void>;
-  cleanupAbortListener(): void;
+  cleanupAbortListener: (() => void) | null;
   clientReferenceRows: Map<string, number>;
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   componentAssets: PayloadRenderOptions["componentAssets"];
@@ -204,18 +206,18 @@ function createPayloadRequest(
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
     allReady: deferred<void>(),
-    cleanupAbortListener: () => undefined,
+    cleanupAbortListener: null,
     clientReferenceRows: new Map(),
     clientReferenceAssets: options.clientReferenceAssets,
     componentAssets: options.componentAssets,
     controller: null,
     dataStore: createRendererDataStore<object, null>({
-      getLane: () => null,
+      getLane: noLane,
       onEntryChange: (entry: DataStoreEntrySnapshot) => {
         pendingDataSnapshots.set(entry.canonicalKey, entry);
       },
       partition: options.dataPartition,
-      schedule: () => undefined,
+      schedule: noop,
     }),
     emittedAssetKeys: new Set(),
     emittedDataKeys: new Set(),
@@ -235,7 +237,7 @@ function createPayloadRequest(
   // normal client-disconnect path); the pre-attached no-op handler keeps it
   // from becoming an unhandled rejection for callers that do not await it
   // (await-ers still observe the rejection).
-  void request.allReady.promise.catch(() => undefined);
+  void request.allReady.promise.catch(noop);
 
   request.pingedTasks.push(
     createTask(
@@ -274,7 +276,7 @@ function createPayloadRequest(
     signal.addEventListener("abort", abortListener, { once: true });
     request.cleanupAbortListener = () => {
       signal.removeEventListener("abort", abortListener);
-      request.cleanupAbortListener = () => undefined;
+      request.cleanupAbortListener = null;
     };
   }
 
@@ -1124,7 +1126,7 @@ function flushRows(request: PayloadRequest): void {
   // queue, so a full queue with no rows left to write still closes here.
   if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
     request.status = "closed";
-    request.cleanupAbortListener();
+    request.cleanupAbortListener?.();
     request.dataStore.dispose();
     request.controller.close();
   }
@@ -1132,7 +1134,7 @@ function flushRows(request: PayloadRequest): void {
 
 function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.status === "closed") return;
-  request.cleanupAbortListener();
+  request.cleanupAbortListener?.();
   request.status = "closed";
   request.dataStore.dispose();
   request.allReady.reject(error);

@@ -109,17 +109,15 @@ describe("server streaming protocol", () => {
   it("marks the server-only streaming runtime for hydration", () => {
     let html = "";
 
-    writeRuntime(
-      {
-        identifierPrefix: "",
-        nonce: "nonce-1",
-        runtimeName: "__figSSR",
-        runtimeWritten: false,
-      },
-      (chunk) => {
+    writeRuntime({
+      identifierPrefix: "",
+      nonce: "nonce-1",
+      runtimeName: "__figSSR",
+      runtimeWritten: false,
+      write(chunk) {
         html += chunk;
       },
-    );
+    });
 
     expect(html).toMatch(
       /^<script data-fig-hydration-skip="" nonce="nonce-1">/,

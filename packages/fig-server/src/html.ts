@@ -30,6 +30,15 @@ const voidElements = new Set([
   "wbr",
 ]);
 
+const attributeNamePattern = /[\s"'<>/=]/;
+const eventPropPattern = /^on[A-Z]/;
+const styleNamePattern = /[A-Z]/g;
+const tagNamePattern = /^[A-Za-z][A-Za-z0-9:._-]*$/;
+
+function hyphenateStyleLetter(letter: string): string {
+  return `-${letter.toLowerCase()}`;
+}
+
 export function writeText(value: string, sink: HtmlSink): void {
   sink.write(escapeText(value));
 }
@@ -38,10 +47,10 @@ export function writeElementStart(
   type: string,
   props: Props,
   sink: HtmlSink,
-  inheritedProps: Props = {},
+  selectProps: Props | null = null,
 ): void {
   validateTagName(type);
-  sink.write(`<${type}${serializeAttributes(type, props, inheritedProps)}>`);
+  sink.write(`<${type}${serializeAttributes(type, props, selectProps)}>`);
 }
 
 export function writeElementEnd(type: string, sink: HtmlSink): void {
@@ -55,7 +64,7 @@ export function isVoidElement(type: string): boolean {
 export function hasRenderableChild(node: unknown): boolean {
   if (Array.isArray(node)) return node.some(hasRenderableChild);
   if (isPortal(node)) return false;
-  return !emptyChild(node);
+  return node !== null && node !== undefined && typeof node !== "boolean";
 }
 
 export function formTextContent(type: string, props: Props): string | null {
@@ -75,7 +84,7 @@ export function unsafeHTMLContent(props: Props): string | null {
 function serializeAttributes(
   type: string,
   props: Props,
-  inheritedProps: Props,
+  selectProps: Props | null,
 ): string {
   let attributes = "";
 
@@ -97,7 +106,7 @@ function serializeAttributes(
   if (
     type === "option" &&
     props.selected === undefined &&
-    optionSelected(optionValue(props), inheritedProps)
+    optionSelected(optionValue(props), selectProps)
   ) {
     attributes += " selected";
   }
@@ -106,14 +115,15 @@ function serializeAttributes(
 }
 
 function serializeProp(type: string, name: string, value: unknown): string {
-  if ((type === "textarea" || type === "select") && valueProp(name)) {
+  const isValueProp = name === "value" || name === "defaultValue";
+  if ((type === "textarea" || type === "select") && isValueProp) {
     return "";
   }
 
   let attributeName = name;
   let attributeValue = value;
 
-  if (valueProp(name)) {
+  if (isValueProp) {
     attributeName = "value";
     if (serializableAttributeValue(value)) attributeValue = String(value);
   } else if (name === "defaultChecked") {
@@ -134,7 +144,9 @@ function serializeProp(type: string, name: string, value: unknown): string {
   throw new Error(`Cannot serialize prop "${name}" to HTML.`);
 }
 
-function optionSelected(value: unknown, selectProps: Props): boolean {
+function optionSelected(value: unknown, selectProps: Props | null): boolean {
+  if (selectProps === null) return false;
+
   const selectValue =
     selectProps.value !== undefined
       ? selectProps.value
@@ -144,7 +156,11 @@ function optionSelected(value: unknown, selectProps: Props): boolean {
   const optionValue = formString(value);
   if (optionValue === null) return false;
 
-  return selectedValueSet(selectValue).has(optionValue);
+  if (!Array.isArray(selectValue)) return String(selectValue) === optionValue;
+  for (const selectedValue of selectValue) {
+    if (String(selectedValue) === optionValue) return true;
+  }
+  return false;
 }
 
 function optionValue(props: Props): string | null {
@@ -175,10 +191,6 @@ function formString(value: unknown): string | null {
   return null;
 }
 
-function selectedValueSet(value: unknown): Set<string> {
-  return new Set(Array.isArray(value) ? value.map(String) : [String(value)]);
-}
-
 function serializableAttributeValue(value: unknown): boolean {
   return (
     value === true ||
@@ -192,10 +204,6 @@ function emptyValue(value: unknown): boolean {
   return value === null || value === undefined || value === false;
 }
 
-function emptyChild(value: unknown): boolean {
-  return value === null || value === undefined || typeof value === "boolean";
-}
-
 function serializeAttribute(name: string, value: string): string {
   return ` ${name}="${escapeAttribute(value)}"`;
 }
@@ -207,7 +215,8 @@ function serializeStyle(value: unknown): string {
   }
 
   let serialized = "";
-  for (const [name, item] of Object.entries(value)) {
+  for (const name of Object.keys(value)) {
+    const item = (value as Record<string, unknown>)[name];
     if (emptyValue(item)) continue;
     if (
       typeof item !== "string" &&
@@ -232,27 +241,23 @@ function reservedProp(name: string): boolean {
     name === "bind" ||
     name === "suppressHydrationWarning" ||
     name === "unsafeHTML" ||
-    /^on[A-Z]/.test(name)
+    eventPropPattern.test(name)
   );
-}
-
-function valueProp(name: string): boolean {
-  return name === "value" || name === "defaultValue";
 }
 
 function styleName(name: string): string {
   if (name.startsWith("--")) return name;
-  return name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+  return name.replace(styleNamePattern, hyphenateStyleLetter);
 }
 
 function validateTagName(name: string): void {
-  if (!/^[A-Za-z][A-Za-z0-9:._-]*$/.test(name)) {
+  if (!tagNamePattern.test(name)) {
     throw new Error(`Invalid HTML tag name "${name}".`);
   }
 }
 
 function validateAttributeName(name: string): void {
-  if (/[\s"'<>/=]/.test(name)) {
+  if (attributeNamePattern.test(name)) {
     throw new Error(`Invalid HTML attribute name "${name}".`);
   }
 }

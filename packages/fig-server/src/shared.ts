@@ -2,7 +2,6 @@ import type {
   ActionStateAction,
   ActionStateRunner,
   DependencyList,
-  EffectCallback,
   ExternalStoreSubscribe,
   FigContext,
   StateSetter,
@@ -18,6 +17,12 @@ import { escapeAttribute } from "./escaping.ts";
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
 export const STREAMED_METADATA_ATTRIBUTE = "data-fig-streamed-metadata";
+
+export function noLane(): null {
+  return null;
+}
+
+export function noop(): void {}
 
 export interface StackFrame {
   name: string;
@@ -86,12 +91,15 @@ export interface Deferred<T> {
 }
 
 export function deferred<T>(): Deferred<T> {
-  let resolve: Deferred<T>["resolve"] = () => undefined;
-  let reject: Deferred<T>["reject"] = () => undefined;
+  let resolve: Deferred<T>["resolve"] | null = null;
+  let reject: Deferred<T>["reject"] | null = null;
   const promise = new Promise<T>((innerResolve, innerReject) => {
     resolve = innerResolve;
     reject = innerReject;
   });
+  if (resolve === null || reject === null) {
+    throw new Error("Promise executor did not initialize its deferred.");
+  }
   return { promise, reject, resolve };
 }
 
@@ -134,22 +142,20 @@ function resolveInitialState<S>(initialState: S | (() => S)): S {
 export function createStaticDispatcher(
   options: StaticDispatcherOptions,
 ): RenderDispatcher {
+  const rejectUpdate = (..._args: unknown[]): never => {
+    throw new Error(options.updateError);
+  };
+
   return {
     useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
       const value = resolveInitialState(initialState);
-      const setState: StateSetter<typeof value> = () => {
-        throw new Error(options.updateError);
-      };
-      return [value, setState];
+      return [value, rejectUpdate];
     },
     useActionState<S, Args extends unknown[]>(
       _action: ActionStateAction<S, Args>,
       initialState: S,
     ): [S, ActionStateRunner<Args>, boolean] {
-      const runner: ActionStateRunner<Args> = () => {
-        throw new Error(options.updateError);
-      };
-      return [initialState, runner, false];
+      return [initialState, rejectUpdate, false];
     },
     useId(): string {
       return options.useId();
@@ -165,16 +171,11 @@ export function createStaticDispatcher(
       return calculate();
     },
     useTransition(): [boolean, StartTransition] {
-      // Server transitions run synchronously to completion; the signal never
-      // aborts (there is no supersede/unmount lifecycle during a request).
-      const startTransition: StartTransition = (
-        callback: (signal: AbortSignal) => void | PromiseLike<void>,
-      ) => void callback(new AbortController().signal);
-      return [false, startTransition];
+      return [false, startServerTransition];
     },
-    useReactive(_effect: EffectCallback, _deps?: DependencyList): void {},
-    useBeforePaint(_effect: EffectCallback, _deps?: DependencyList): void {},
-    useBeforeLayout(_effect: EffectCallback, _deps?: DependencyList): void {},
+    useReactive: noop,
+    useBeforePaint: noop,
+    useBeforeLayout: noop,
     useSyncExternalStore<T>(
       _subscribe: ExternalStoreSubscribe,
       _getSnapshot: () => T,
@@ -189,9 +190,7 @@ export function createStaticDispatcher(
     useStableEvent<Args extends unknown[], Result>(
       _handler: (...args: Args) => Result,
     ): (...args: StableEventCallerArgs<Args>) => Result {
-      return (..._args: StableEventCallerArgs<Args>): Result => {
-        throw new Error("Stable events cannot be called during server render.");
-      };
+      return rejectStableEventCall;
     },
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
@@ -212,6 +211,20 @@ export function createStaticDispatcher(
       return options.readPromise(promise);
     },
   };
+}
+
+// Server transitions run synchronously to completion; the signal never
+// aborts because there is no supersede/unmount lifecycle during a request.
+function startServerTransition(
+  callback: (signal: AbortSignal) => void | PromiseLike<void>,
+): void {
+  void callback(new AbortController().signal);
+}
+
+function rejectStableEventCall<Args extends unknown[], Result>(
+  ..._args: StableEventCallerArgs<Args>
+): Result {
+  throw new Error("Stable events cannot be called during server render.");
 }
 
 export function errorMessage(error: unknown): string {

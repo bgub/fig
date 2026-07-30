@@ -45,9 +45,8 @@ export function flushCompletedQueues(request: Request): void {
 
     // The shell flushes ungated: the queue is empty before the first enqueue,
     // and shell latency outranks flow control.
-    if (request.completedRootSegment !== null) {
-      flushSegment(request, request.completedRootSegment);
-      request.completedRootSegment = null;
+    if (request.rootSegment.status !== "flushed") {
+      flushSegment(request, request.rootSegment);
       flushWriteBuffer(request);
     }
 
@@ -85,7 +84,7 @@ export function flushCompletedQueues(request: Request): void {
     request.clientRenderedBoundaries.size === 0 &&
     request.partialBoundaries.size === 0
   ) {
-    request.cleanupAbortListener();
+    request.cleanupAbortListener?.();
     request.status = "closed";
     request.dataStore.dispose();
     request.controller.close();
@@ -131,8 +130,8 @@ function flushSubtree(request: Request, segment: Segment): void {
   if (segment.status === "flushed") return;
 
   segment.status = "flushed";
-  if (request.document === null || segment !== request.rootSegment) {
-    flushSegmentAssets(request, segment);
+  if (request.documentHasHead === null || segment !== request.rootSegment) {
+    collectSegmentAssets(request, segment, null);
   }
   let chunkIndex = 0;
 
@@ -181,7 +180,7 @@ function flushSuspenseBoundary(
   }
 
   const boundaryIdValue = ensureBoundaryId(request, boundary);
-  flushSegmentAssets(request, boundary.contentSegment);
+  collectSegmentAssets(request, boundary.contentSegment, null);
   request.write(`<!--${SUSPENSE_PENDING_PREFIX}${boundaryIdValue}-->`);
   request.write(boundaryPlaceholderMarkup(request, boundaryIdValue));
   flushSubtree(request, segment);
@@ -201,7 +200,7 @@ function flushBoundaryContent(
   for (const segment of boundary.completedSegments) {
     flushSegment(request, segment);
   }
-  boundary.completedSegments = [];
+  boundary.completedSegments.length = 0;
 }
 
 function clientRenderedBoundaryPlaceholderMarkup(
@@ -240,7 +239,7 @@ function flushPartialBoundary(
   for (const segment of boundary.completedSegments) {
     flushBoundarySegment(request, boundary, segment);
   }
-  boundary.completedSegments = [];
+  boundary.completedSegments.length = 0;
 }
 
 function flushBoundarySegment(
@@ -259,7 +258,7 @@ function flushBoundarySegment(
 function writeSegmentRevealScript(
   request: Request,
   segment: Segment,
-  blockingIds: string[],
+  blockingIds: string,
 ): void {
   const id = ensureSegmentId(request, segment);
   writeRuntime(request);
@@ -350,8 +349,8 @@ function deactivateMetadataTree(request: Request, segment: Segment): void {
   deactivateMetadataTree(request, boundary.contentSegment);
 }
 
-function flushSegmentContainer(request: Request, segment: Segment): string[] {
-  if (segment.status === "flushed") return [];
+function flushSegmentContainer(request: Request, segment: Segment): string {
+  if (segment.status === "flushed") return "";
   const blockingIds = flushSegmentAssets(request, segment);
 
   request.write(
@@ -362,16 +361,21 @@ function flushSegmentContainer(request: Request, segment: Segment): string[] {
   return blockingIds;
 }
 
-function flushSegmentAssets(request: Request, segment: Segment): string[] {
+function flushSegmentAssets(request: Request, segment: Segment): string {
   const blockingIds = new Set<string>();
   collectSegmentAssets(request, segment, blockingIds);
-  return [...blockingIds];
+  let serialized = "";
+  for (const id of blockingIds) {
+    if (serialized !== "") serialized += ",";
+    serialized += jsString(id);
+  }
+  return serialized;
 }
 
 function collectSegmentAssets(
   request: Request,
   segment: Segment,
-  blockingIds: Set<string>,
+  blockingIds: Set<string> | null,
 ): void {
   if (segment.status !== "pending" && segment.status !== "rendering") {
     flushAssetList(request, segment.assetResources, blockingIds);
@@ -385,17 +389,17 @@ function collectSegmentAssets(
 function flushAssetList(
   request: Request,
   resources: Segment["assetResources"],
-  blockingIds: Set<string>,
+  blockingIds: Set<string> | null,
 ): void {
   for (const resource of resources) {
     const id = request.assetRegistry.write(resource, request);
-    if (id !== null) blockingIds.add(id);
+    if (id !== null) blockingIds?.add(id);
   }
 }
 
-function withAssetGate(blockingIds: string[], call: string): string {
-  if (blockingIds.length === 0) return call;
-  return `${RUNTIME_REF}.r([${blockingIds.map(jsString).join(",")}],()=>{${call}})`;
+function withAssetGate(blockingIds: string, call: string): string {
+  if (blockingIds === "") return call;
+  return `${RUNTIME_REF}.r([${blockingIds}],()=>{${call}})`;
 }
 
 function flushClientRenderedBoundary(
@@ -439,7 +443,7 @@ function drainBoundaryQueue(
 }
 
 function writeRuntime(request: Request): void {
-  writeProtocolRuntime(request, (chunk) => request.write(chunk));
+  writeProtocolRuntime(request);
 }
 
 // Classic <script> elements share the page's global lexical environment, so a
@@ -450,7 +454,6 @@ function writeScript(request: Request, code: string): void {
   writeProtocolScript(
     request,
     `(__figSSR=>{${code}})(globalThis[${jsString(request.runtimeName)}])`,
-    (chunk) => request.write(chunk),
   );
 }
 
@@ -481,7 +484,7 @@ function writeChunk(
     return;
   }
 
-  if (request.document === null) return;
+  if (request.documentHasHead === null) return;
 
   const metadata =
     request.headSnapshot ??
@@ -490,11 +493,10 @@ function writeChunk(
     request,
     segment.assetResources,
   );
-  const blockingIds = new Set<string>();
   request.write(metadata.preamble);
-  flushAssetList(request, beforeMetadata, blockingIds);
+  flushAssetList(request, beforeMetadata, null);
   request.write(metadata.metadata);
-  flushAssetList(request, afterMetadata, blockingIds);
+  flushAssetList(request, afterMetadata, null);
 }
 
 function partitionHeadAssets(
