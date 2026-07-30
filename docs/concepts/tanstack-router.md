@@ -86,7 +86,7 @@ Scroll restoration installs once and runs after `onRendered`. Start SSR emits on
 
 ## Route Assets
 
-Each active match owns descriptors derived from route metadata and the Start manifest. An `assets()` boundary around the match delivers stylesheets, preloads, preconnects, fonts, and async scripts before dependent content. Fig's registry deduplicates them against assets from ordinary components and Payload.
+During SSR, each active match owns one cached asset plan derived from route metadata and the Start manifest. Every match render, head pass, and script pass reuses that plan. An `assets()` boundary around the match delivers stylesheets, preloads, preconnects, fonts, and async scripts before dependent content. Fig's registry deduplicates them against assets from ordinary components and Payload.
 
 Within each match, authored links and manifest stylesheets are discovered before generated module preloads. Render-blocking CSS therefore begins loading before the route's JavaScript dependency hints without changing authored stylesheet order.
 

@@ -201,4 +201,24 @@ describe("TanStack route asset translation", () => {
       "/manifest-ordered.js",
     ]);
   });
+
+  it("caches each immutable match asset plan", () => {
+    const router = { isServer: true, options: {} } as unknown as AnyRouter;
+    const match = { routeId: "/route" } as unknown as AnyRouteMatch;
+    const manifest: Manifest = { routes: {} };
+
+    expect(collectRouteAssets(router, match, manifest)).toBe(
+      collectRouteAssets(router, match, manifest),
+    );
+  });
+
+  it("does not cache route asset plans in the browser", () => {
+    const router = { isServer: false, options: {} } as unknown as AnyRouter;
+    const match = { routeId: "/route" } as unknown as AnyRouteMatch;
+    const manifest: Manifest = { routes: {} };
+
+    expect(collectRouteAssets(router, match, manifest)).not.toBe(
+      collectRouteAssets(router, match, manifest),
+    );
+  });
 });

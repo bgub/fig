@@ -11,6 +11,7 @@ import {
 import { createRoot, hydrateRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
+import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   type AnyRoute,
@@ -1575,6 +1576,45 @@ describe("@bgub/fig-tanstack-router", () => {
     )) {
       asset.remove();
     }
+  });
+
+  it("snapshots an inline CSS manifest once per server render", async () => {
+    const rootRoute = createRootRoute({ component: AssetDocument });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      isServer: true,
+      routeTree: rootRoute,
+    });
+    await router.load();
+    attachRouterServerSsrUtils({
+      router,
+      manifest: {
+        inlineCss: { styles: { "/root.css": "body{}" } },
+        routes: {
+          [rootRoute.id]: {
+            css: ["/root.css"],
+            preloads: ["/root.js"],
+          },
+        },
+      },
+    });
+    const serverSsr = router.ssr;
+    if (serverSsr === undefined) throw new Error("Missing server SSR state.");
+    const readManifest = vi.spyOn(serverSsr, "manifest", "get");
+    let providerRenders = 0;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    function App() {
+      providerRenders += 1;
+      return createElement(RouterProvider, { router });
+    }
+
+    await act(() => root.render(createElement(App)));
+
+    expect(readManifest).toHaveBeenCalledTimes(providerRenders);
+    router.serverSsr?.cleanup();
   });
 });
 

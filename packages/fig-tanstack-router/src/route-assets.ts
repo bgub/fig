@@ -26,6 +26,14 @@ interface RouteAssets {
   scripts: RouterManagedTag[];
 }
 
+interface CachedRouteAssets {
+  manifest: Manifest | undefined;
+  router: AnyRouter;
+  value: RouteAssets;
+}
+
+const routeAssetsCache = new WeakMap<AnyRouteMatch, CachedRouteAssets>();
+
 const inlineCssHydrationAttribute = "data-tsr-inline-css";
 
 export function collectRouteAssets(
@@ -33,6 +41,13 @@ export function collectRouteAssets(
   match: AnyRouteMatch,
   manifest: Manifest | undefined,
 ): RouteAssets {
+  if (router.isServer) {
+    const cached = routeAssetsCache.get(match);
+    if (cached?.router === router && cached.manifest === manifest) {
+      return cached.value;
+    }
+  }
+
   const nonce = router.options.ssr?.nonce;
   const resources: FigAssetResource[] = [];
   const links: RouterManagedTag[] = [];
@@ -100,7 +115,11 @@ export function collectRouteAssets(
     );
   }
 
-  return { resources, links, headScripts, scripts };
+  const value = { resources, links, headScripts, scripts };
+  if (router.isServer) {
+    routeAssetsCache.set(match, { manifest, router, value });
+  }
+  return value;
 }
 
 export function renderRouterHeadTags(

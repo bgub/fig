@@ -25,6 +25,7 @@ import {
   type MakeRouteMatch,
   type MakeRouteMatchUnion,
   type MaskOptions,
+  type Manifest,
   type MatchRouteOptions,
   type NavigateOptions,
   type ParseRoute,
@@ -69,6 +70,7 @@ export type RouteMatchResult<
   : TSelected;
 
 interface RouterContextValue {
+  manifest?: Manifest;
   ownerDocument: Document | undefined;
   router: AnyRouter;
 }

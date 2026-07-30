@@ -25,6 +25,7 @@ import {
   escapeHtml,
   getLocationChangeInfo,
   isNotFound,
+  type Manifest,
   type MetaDescriptor,
   type RegisteredRouter,
   type RouterManagedTag,
@@ -76,11 +77,6 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
   router,
   ...options
 }: RouterProviderProps<TRouter>): FigNode {
-  const contextValue = useMemo(
-    () => ({ ownerDocument, router }),
-    [ownerDocument, router],
-  );
-
   if (Object.keys(options).length > 0) {
     if ("context" in options) {
       options.context = {
@@ -90,6 +86,12 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     }
     router.update(options as never);
   }
+
+  const manifest = router.ssr?.manifest;
+  const contextValue = useMemo(
+    () => ({ manifest, ownerDocument, router }),
+    [manifest, ownerDocument, router],
+  );
 
   return createElement(
     RouterContext,
@@ -344,7 +346,7 @@ export function Matches(): FigNode {
 }
 
 function Match({ matchId }: { matchId: string }): FigNode {
-  const router = useRouter<AnyRouter>();
+  const { manifest, router } = readRouterContext();
   const [manualResetKey, setManualResetKey] = useState(0);
   const store = router.stores.matchStores.get(matchId);
   if (store === undefined) {
@@ -451,11 +453,7 @@ function Match({ matchId }: { matchId: string }): FigNode {
         )
       : content,
   );
-  const matchAssets = collectRouteAssets(
-    router,
-    match,
-    router.ssr?.manifest,
-  ).resources;
+  const matchAssets = collectRouteAssets(router, match, manifest).resources;
   const ownedMatchContent =
     matchAssets.length === 0 ? matchContent : assets(matchAssets, matchContent);
 
@@ -605,24 +603,23 @@ export function Outlet(): FigNode {
 }
 
 export function HeadContent(): FigNode {
-  const { ownerDocument, router } = readRouterContext();
+  const { manifest, ownerDocument, router } = readRouterContext();
   const selectTags = useCallback(
-    (matches: AnyRouteMatch[]) => buildHeadTags(router, matches),
-    [router],
+    (matches: AnyRouteMatch[]) => buildHeadTags(router, matches, manifest),
+    [manifest, router],
   );
   const tags = useReadableStore(router.stores.matches, selectTags, deepEqual);
   return renderRouterHeadTags(tags, ownerDocument);
 }
 
 export function Scripts(): FigNode {
-  const router = useRouter<AnyRouter>();
+  const { manifest, router } = readRouterContext();
   const selectTags = useCallback(
     (matches: AnyRouteMatch[]) =>
       matches.flatMap(
-        (match) =>
-          collectRouteAssets(router, match, router.ssr?.manifest).scripts,
+        (match) => collectRouteAssets(router, match, manifest).scripts,
       ),
-    [router],
+    [manifest, router],
   );
   const selectedTags = useReadableStore(
     router.stores.matches,
@@ -639,9 +636,9 @@ export function Scripts(): FigNode {
 function buildHeadTags(
   router: AnyRouter,
   matches: AnyRouteMatch[],
+  manifest: Manifest | undefined,
 ): RouterManagedTag[] {
   const nonce = router.options.ssr?.nonce;
-  const manifest = router.ssr?.manifest;
   const metaTags: RouterManagedTag[] = [];
   const seenMeta = new Set<string>();
   let selectedTitle: RouterManagedTag | undefined;
