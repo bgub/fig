@@ -109,7 +109,7 @@ export type ServerPreloadHeaderResource = Readonly<
 export type ServerDocumentRenderResult = ServerStreamRenderResult;
 
 export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
-  getHead(): string;
+  getHead(this: void): string;
   headReady: Promise<string>;
 }
 

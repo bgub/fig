@@ -58,10 +58,6 @@ export class AssetResourceRegistry {
     }
   }
 
-  isEarlyImage(resource: PreloadResource): boolean {
-    return this.earlyImageKeys.has(assetResourceKey(resource));
-  }
-
   activateMetadata(
     owner: object,
     resources: readonly FigAssetResource[],
@@ -92,6 +88,43 @@ export class AssetResourceRegistry {
     this.emittedResources.add(key);
     writeAssetTag(sink, current, id);
     return id;
+  }
+
+  writeDocumentHead(
+    resources: readonly FigAssetResource[],
+    metadata: HeadMetadataHtml,
+    sink: AssetSink,
+  ): void {
+    const preconnects: FigAssetResource[] = [];
+    const criticalPreloads: FigAssetResource[] = [];
+    const stylesheets: FigAssetResource[] = [];
+    const afterMetadata: FigAssetResource[] = [];
+
+    for (const resource of resources) {
+      if (resource.kind === "preconnect") {
+        preconnects.push(resource);
+      } else if (
+        resource.kind === "font" ||
+        (resource.kind === "preload" &&
+          (resource.as === "font" ||
+            (resource.as === "image" &&
+              (resource.fetchpriority === "high" ||
+                this.isEarlyImage(resource)))))
+      ) {
+        criticalPreloads.push(resource);
+      } else if (resource.kind === "stylesheet") {
+        stylesheets.push(resource);
+      } else {
+        afterMetadata.push(resource);
+      }
+    }
+
+    sink.write(metadata.preamble);
+    for (const resource of preconnects) this.write(resource, sink);
+    for (const resource of criticalPreloads) this.write(resource, sink);
+    for (const resource of stylesheets) this.write(resource, sink);
+    sink.write(metadata.metadata);
+    for (const resource of afterMetadata) this.write(resource, sink);
   }
 
   headHtml(nonce?: string, streamMetadata = false): string {
@@ -143,6 +176,10 @@ export class AssetResourceRegistry {
       this.deliveryResources.values(),
       (resource) => this.isEarlyImage(resource),
     );
+  }
+
+  private isEarlyImage(resource: PreloadResource): boolean {
+    return this.earlyImageKeys.has(assetResourceKey(resource));
   }
 
   private visibleMetadata(): Map<string, MetadataResource> {

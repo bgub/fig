@@ -31,6 +31,7 @@ import {
   isSuspense,
   isThenable,
   isViewTransition,
+  type NormalizedChild,
   type RenderDispatcher,
   readThenable,
   setCurrentDataStore,
@@ -113,7 +114,8 @@ export interface Request {
   completedBoundaries: Set<SuspenseBoundary>;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: FigDataStore;
-  fatalError: unknown;
+  dispose(): void;
+  abortReason: unknown;
   identifierPrefix: string;
   // Flush-time parser state for nested <pre>/<textarea> hosts. Rendering may
   // complete child segments out of order; only logical flush order can decide
@@ -267,11 +269,12 @@ let nextRuntimeId = 0;
 
 export function createServerRenderRequest(
   node: FigNode,
-  options: ServerRenderOptions = {},
-  mode: { document?: boolean; prerender?: boolean } = {},
+  options: ServerRenderOptions,
+  mode?: { document?: boolean; prerender?: boolean },
 ): ServerFragmentRenderResult {
   throwIfAborted(options.signal);
 
+  const identifierPrefix = options.identifierPrefix ?? "";
   const shellReady = deferred<void>();
   const headReady = deferred<string>();
   const allReady = deferred<void>();
@@ -299,8 +302,9 @@ export function createServerRenderRequest(
     completedBoundaries: new Set(),
     controller: null,
     dataStore,
-    fatalError: null,
-    identifierPrefix: options.identifierPrefix ?? "",
+    dispose: disposeRequest,
+    abortReason: null,
+    identifierPrefix,
     leadingNewlineStack: [],
     nextBoundaryId: 0,
     nextSegmentId: 0,
@@ -311,7 +315,7 @@ export function createServerRenderRequest(
     pendingRootTasks: 0,
     pingedTasks: [],
     rootSegment,
-    runtimeName: createRuntimeName(options.identifierPrefix),
+    runtimeName: createRuntimeName(identifierPrefix),
     runtimeWritten: false,
     headReady,
     headSnapshot: null,
@@ -320,10 +324,10 @@ export function createServerRenderRequest(
     clientRenderedBoundaries: new Set(),
     clientReferenceFallback: options.clientReferenceFallback,
     partialBoundaries: new Set(),
-    prerender: mode.prerender === true,
+    prerender: mode?.prerender === true,
     componentAssets: options.assets,
-    documentHasHead: mode.document === true ? false : null,
-    assetRegistry: new AssetResourceRegistry(options.identifierPrefix ?? ""),
+    documentHasHead: mode?.document === true ? false : null,
+    assetRegistry: new AssetResourceRegistry(identifierPrefix),
     resolveAssetKey: options.resolveAssetKey,
     flushing: false,
     writeBuffer: "",
@@ -506,27 +510,16 @@ function writeRequestChunk(this: Request, chunk: string): void {
   this.writeBuffer += chunk;
 }
 
+function disposeRequest(this: Request): void {
+  this.cleanupAbortListener?.();
+  this.dataStore.dispose();
+}
+
 function writeSegmentChunk(this: Segment, chunk: SegmentChunk): void {
   // Every non-text write (tags, comments, scripts) breaks text adjacency;
   // renderNode's text path re-marks the flag after writing text.
   this.lastPushedText = false;
   this.chunks.push(chunk);
-}
-
-function createBoundary(contentSegment: Segment): SuspenseBoundary {
-  return {
-    activityId: null,
-    completedSegments: [],
-    contentSegment,
-    error: null,
-    fallbackSegment: null,
-    fallbackTasks: new Set(),
-    id: null,
-    parentFlushed: false,
-    pendingTasks: 0,
-    status: "pending",
-    metadataVisible: false,
-  };
 }
 
 function performWork(request: Request): void {
@@ -586,16 +579,7 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
   });
 }
 
-function renderNode(node: FigNode, frame: RenderFrame): void {
-  if (Array.isArray(node)) {
-    renderChildren(node, frame);
-    return;
-  }
-
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return;
-  }
-
+function renderNode(node: NormalizedChild | number, frame: RenderFrame): void {
   if (typeof node === "string" || typeof node === "number") {
     const text = String(node);
     if (frame.request.documentHasHead === false) {
@@ -666,7 +650,7 @@ function renderChildren(
 }
 
 function renderChildAtIndex(
-  child: FigNode,
+  child: NormalizedChild | number,
   frame: RenderFrame,
   index: number,
 ): void {
@@ -932,8 +916,19 @@ function renderAutomaticImagePreload(
 function renderSuspense(props: Props, frame: RenderFrame): void {
   consumePendingLeadingNewline(frame);
   const contentSegment = createSegment(0);
-  const boundary = createBoundary(contentSegment);
-  boundary.activityId = frame.hiddenActivityId;
+  const boundary: SuspenseBoundary = {
+    activityId: frame.hiddenActivityId,
+    completedSegments: [],
+    contentSegment,
+    error: null,
+    fallbackSegment: null,
+    fallbackTasks: new Set(),
+    id: null,
+    metadataVisible: false,
+    parentFlushed: false,
+    pendingTasks: 0,
+    status: "pending",
+  };
   const parentSegment = frame.segment;
   const boundarySegment = createSegment(parentSegment.chunks.length, boundary);
   boundary.fallbackSegment = boundarySegment;
@@ -1000,38 +995,29 @@ function advanceViewTransitionWatermark(
   }
 }
 
-function renderViewTransition(props: Props, frame: RenderFrame): void {
+function renderViewTransition(
+  props: ViewTransitionProps,
+  frame: RenderFrame,
+): void {
   const previousViewTransition = frame.viewTransition;
-  frame.viewTransition = createServerViewTransition(props, frame.request);
+  const className = props.default;
+  frame.viewTransition = {
+    className:
+      className === undefined || className === "auto" || className === "none"
+        ? null
+        : className,
+    index: 0,
+    name:
+      props.name === undefined || props.name === "auto"
+        ? `fig-vt-${frame.request.nextViewTransitionId++}`
+        : props.name,
+  };
 
   try {
     renderChildren(props.children, frame);
   } finally {
     frame.viewTransition = previousViewTransition;
   }
-}
-
-function createServerViewTransition(
-  props: ViewTransitionProps,
-  request: Request,
-): ServerViewTransitionContext {
-  return {
-    className: serverViewTransitionClass(props),
-    index: 0,
-    name:
-      props.name === undefined || props.name === "auto"
-        ? `fig-vt-${request.nextViewTransitionId++}`
-        : props.name,
-  };
-}
-
-function serverViewTransitionClass(props: ViewTransitionProps): string | null {
-  const className = props.default;
-  if (className === undefined || className === "auto" || className === "none") {
-    return null;
-  }
-
-  return className;
 }
 
 function renderActivity(props: Props, frame: RenderFrame): void {
@@ -1064,23 +1050,31 @@ function renderHostElement(
   props: Props,
   frame: RenderFrame,
 ): void {
-  const namespace = hostElementNamespace(type, frame.hostNamespace);
-  if (namespace === "html" && renderHostAsset(type, props, frame)) return;
+  const normalizedType = type.toLowerCase();
+  const namespace =
+    normalizedType === "svg"
+      ? "svg"
+      : normalizedType === "math"
+        ? "mathml"
+        : frame.hostNamespace;
+  if (namespace === "html" && renderHostAsset(normalizedType, props, frame)) {
+    return;
+  }
 
   if (__DEV__ && namespace === "html") {
     validateInstanceNesting(type, frame.hostAncestors);
   }
 
+  const isDocument = frame.request.documentHasHead !== null;
+  const isDocumentHead = isDocument && type === "head";
   if (frame.request.documentHasHead === false) {
     if (type !== "html" && type !== "head") throw invalidDocumentShellError();
   }
 
-  if (frame.request.documentHasHead !== null && type === "html") {
+  if (isDocument && type === "html") {
     frame.segment.write("<!doctype html>");
   }
-  if (frame.request.documentHasHead !== null && type === "head") {
-    frame.request.documentHasHead = true;
-  }
+  if (isDocumentHead) frame.request.documentHasHead = true;
 
   const isVoid = namespace === "html" && isVoidElement(type);
   const unsafeHTML = unsafeHTMLContent(props);
@@ -1114,7 +1108,7 @@ function renderHostElement(
       ? props
       : viewTransitionHostProps(props, viewTransition);
   writeElementStart(type, hostProps, frame.segment, frame.selectProps);
-  if (frame.request.documentHasHead !== null && type === "head") {
+  if (isDocumentHead) {
     // First thing in <head>: events must be capturable before any content
     // can paint, or a user's first interaction races bundle execution.
     frame.segment.write(earlyEventCaptureMarkup(frame.request));
@@ -1122,28 +1116,18 @@ function renderHostElement(
   if (isVoid) return;
 
   const previousPendingLeadingNewline = frame.pendingLeadingNewline;
-  const tracksLeadingNewline = leadingNewlineStrippedHost(type);
+  const tracksLeadingNewline = type === "pre" || type === "textarea";
   frame.pendingLeadingNewline = tracksLeadingNewline;
 
-  if (unsafeHTML !== null) {
-    frame.segment.write(
-      consumePendingLeadingNewline(frame)
-        ? preserveParserStrippedLeadingNewline(unsafeHTML)
-        : unsafeHTML,
-    );
-    frame.pendingLeadingNewline = previousPendingLeadingNewline;
-    writeElementEnd(type, frame.segment);
-    return;
-  }
-
   const formText = namespace === "html" ? formTextContent(type, props) : null;
-  if (formText !== null) {
-    writeText(
-      consumePendingLeadingNewline(frame)
-        ? preserveParserStrippedLeadingNewline(formText)
-        : formText,
-      frame.segment,
-    );
+  const staticContent = unsafeHTML ?? formText;
+  if (staticContent !== null) {
+    const content =
+      consumePendingLeadingNewline(frame) && staticContent.startsWith("\n")
+        ? `\n${staticContent}`
+        : staticContent;
+    if (unsafeHTML === null) writeText(content, frame.segment);
+    else frame.segment.write(content);
     frame.pendingLeadingNewline = previousPendingLeadingNewline;
     writeElementEnd(type, frame.segment);
     return;
@@ -1159,7 +1143,10 @@ function renderHostElement(
   if (__DEV__) {
     frame.hostAncestors = [type, ...previousHostAncestors];
   }
-  frame.hostNamespace = childHostNamespace(type, namespace);
+  frame.hostNamespace =
+    namespace === "svg" && normalizedType === "foreignobject"
+      ? "html"
+      : namespace;
   frame.imagePreloadsSuppressed =
     previousImagePreloadsSuppressed ||
     (namespace === "html" && suppressesImagePreloads(type));
@@ -1182,40 +1169,18 @@ function renderHostElement(
   if (tracksLeadingNewline) {
     frame.segment.chunks.push(leadingNewlineEndMarker);
   }
-  if (frame.request.documentHasHead !== null && type === "head") {
-    frame.segment.write(documentHeadMarker);
-  }
+  if (isDocumentHead) frame.segment.write(documentHeadMarker);
   writeElementEnd(type, frame.segment);
 }
 
-function hostElementNamespace(
-  type: string,
-  parent: HostNamespace,
-): HostNamespace {
-  const normalizedType = type.toLowerCase();
-  if (normalizedType === "svg") return "svg";
-  if (normalizedType === "math") return "mathml";
-  return parent;
-}
-
-function childHostNamespace(
-  type: string,
-  namespace: HostNamespace,
-): HostNamespace {
-  return namespace === "svg" && type.toLowerCase() === "foreignobject"
-    ? "html"
-    : namespace;
-}
-
 function renderHostAsset(
-  type: string,
+  normalizedType: string,
   props: Props,
   frame: RenderFrame,
 ): boolean {
   // Deliberately gate before assetResourceFromHostProps, which allocates a
   // prop accessor. These names mirror the core classifier; other tags dominate.
-  if (type.length < 4 || type.length > 6) return false;
-  const normalizedType = type.toLowerCase();
+  if (normalizedType.length < 4 || normalizedType.length > 6) return false;
   switch (normalizedType) {
     case "link":
     case "meta":
@@ -1271,10 +1236,8 @@ function spawnSuspendedTask(
   frame.segment.children.push(segment);
 
   const task = createTask(node, forkFrame(frame, segment), childIndexBase);
-  thenable.then(
-    () => pingTask(task),
-    () => pingTask(task),
-  );
+  const ping = () => pingTask(task);
+  thenable.then(ping, ping);
 }
 
 function pingTask(task: Task): void {
@@ -1384,17 +1347,16 @@ function markBoundaryClientRendered(
 
 function abort(request: Request, reason?: unknown): void {
   if (request.status === "closed") return;
-  request.cleanupAbortListener?.();
   request.status = "aborting";
-  request.dataStore.dispose();
   const error = abortError(reason);
-  request.fatalError = error;
+  request.abortReason = error;
 
   if (request.pendingRootTasks > 0) {
     fatalError(request, error);
     return;
   }
 
+  request.dispose();
   for (const task of request.abortableTasks) {
     const { boundary, stack } = task.frame;
     if (boundary !== null) {
@@ -1410,10 +1372,8 @@ function abort(request: Request, reason?: unknown): void {
 function fatalError(request: Request, error: unknown): void {
   if (request.status === "closed") return;
 
-  request.cleanupAbortListener?.();
   request.status = "closed";
-  request.dataStore.dispose();
-  request.fatalError = error;
+  request.dispose();
   request.headReady.reject(error);
   request.shellReady.reject(error);
   request.allReady.reject(error);
@@ -1468,10 +1428,10 @@ function stackForError(
   return errorStacks.get(error) ?? fallback;
 }
 
-function createRuntimeName(identifierPrefix: string | undefined): string {
+function createRuntimeName(identifierPrefix: string): string {
   const id = nextRuntimeId.toString(36);
   nextRuntimeId += 1;
-  const prefix = identifierPrefix?.replace(/[^A-Za-z0-9_$]/g, "_") ?? "";
+  const prefix = identifierPrefix.replace(/[^A-Za-z0-9_$]/g, "_");
   return prefix === "" ? `__figSSR_${id}` : `__figSSR_${prefix}_${id}`;
 }
 
@@ -1479,14 +1439,6 @@ function consumePendingLeadingNewline(frame: RenderFrame): boolean {
   const pending = frame.pendingLeadingNewline;
   frame.pendingLeadingNewline = false;
   return pending;
-}
-
-function leadingNewlineStrippedHost(type: string): boolean {
-  return type === "pre" || type === "textarea";
-}
-
-function preserveParserStrippedLeadingNewline(text: string): string {
-  return text.startsWith("\n") ? `\n${text}` : text;
 }
 
 function invalidDocumentShellError(): Error {
@@ -1500,7 +1452,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 function throwIfAborting(request: Request): void {
-  if (request.status === "aborting") throw abortReason(request.fatalError);
+  if (request.status === "aborting") throw abortReason(request.abortReason);
 }
 
 function abortError(reason: unknown): Error {

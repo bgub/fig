@@ -84,9 +84,8 @@ export function flushCompletedQueues(request: Request): void {
     request.clientRenderedBoundaries.size === 0 &&
     request.partialBoundaries.size === 0
   ) {
-    request.cleanupAbortListener?.();
     request.status = "closed";
-    request.dataStore.dispose();
+    request.dispose();
     request.controller.close();
   }
 }
@@ -161,7 +160,10 @@ function flushSuspenseBoundary(
 
   if (boundary.status === "completed") {
     request.write(`<!--${SUSPENSE_COMPLETED_MARKER}-->`);
-    flushBoundaryContent(request, boundary);
+    for (const completedSegment of boundary.completedSegments) {
+      flushSegment(request, completedSegment);
+    }
+    boundary.completedSegments.length = 0;
     request.write(`<!--${SUSPENSE_END_MARKER}-->`);
     segment.status = "flushed";
     segment.chunks.length = 0;
@@ -191,16 +193,6 @@ function flushSuspenseBoundary(
   } else if (boundary.completedSegments.length > 0) {
     request.partialBoundaries.add(boundary);
   }
-}
-
-function flushBoundaryContent(
-  request: Request,
-  boundary: SuspenseBoundary,
-): void {
-  for (const segment of boundary.completedSegments) {
-    flushSegment(request, segment);
-  }
-  boundary.completedSegments.length = 0;
 }
 
 function clientRenderedBoundaryPlaceholderMarkup(
@@ -248,7 +240,15 @@ function flushBoundarySegment(
   segment: Segment,
 ): void {
   ensureBoundaryId(request, boundary);
-  const blockingIds = flushSegmentContainer(request, segment);
+  let blockingIds = "";
+  if (segment.status !== "flushed") {
+    blockingIds = flushSegmentAssets(request, segment);
+    request.write(
+      segmentContainerStartMarkup(request, ensureSegmentId(request, segment)),
+    );
+    flushSegment(request, segment);
+    request.write("</div>");
+  }
 
   if (segment !== boundary.contentSegment) {
     writeSegmentRevealScript(request, segment, blockingIds);
@@ -349,18 +349,6 @@ function deactivateMetadataTree(request: Request, segment: Segment): void {
   deactivateMetadataTree(request, boundary.contentSegment);
 }
 
-function flushSegmentContainer(request: Request, segment: Segment): string {
-  if (segment.status === "flushed") return "";
-  const blockingIds = flushSegmentAssets(request, segment);
-
-  request.write(
-    segmentContainerStartMarkup(request, ensureSegmentId(request, segment)),
-  );
-  flushSegment(request, segment);
-  request.write("</div>");
-  return blockingIds;
-}
-
 function flushSegmentAssets(request: Request, segment: Segment): string {
   const blockingIds = new Set<string>();
   collectSegmentAssets(request, segment, blockingIds);
@@ -378,22 +366,14 @@ function collectSegmentAssets(
   blockingIds: Set<string> | null,
 ): void {
   if (segment.status !== "pending" && segment.status !== "rendering") {
-    flushAssetList(request, segment.assetResources, blockingIds);
+    for (const resource of segment.assetResources) {
+      const id = request.assetRegistry.write(resource, request);
+      if (id !== null) blockingIds?.add(id);
+    }
   }
 
   for (const child of segment.children) {
     collectSegmentAssets(request, child, blockingIds);
-  }
-}
-
-function flushAssetList(
-  request: Request,
-  resources: Segment["assetResources"],
-  blockingIds: Set<string> | null,
-): void {
-  for (const resource of resources) {
-    const id = request.assetRegistry.write(resource, request);
-    if (id !== null) blockingIds?.add(id);
   }
 }
 
@@ -485,48 +465,11 @@ function writeChunk(
   const metadata =
     request.headSnapshot ??
     request.assetRegistry.headMetadataHtml(request.nonce);
-  const [beforeMetadata, afterMetadata] = partitionHeadAssets(
-    request,
+  request.assetRegistry.writeDocumentHead(
     segment.assetResources,
+    metadata,
+    request,
   );
-  request.write(metadata.preamble);
-  flushAssetList(request, beforeMetadata, null);
-  request.write(metadata.metadata);
-  flushAssetList(request, afterMetadata, null);
-}
-
-function partitionHeadAssets(
-  request: Request,
-  resources: Segment["assetResources"],
-): [
-  beforeMetadata: Segment["assetResources"],
-  afterMetadata: Segment["assetResources"],
-] {
-  const preconnects: Segment["assetResources"] = [];
-  const criticalPreloads: Segment["assetResources"] = [];
-  const stylesheets: Segment["assetResources"] = [];
-  const afterMetadata: Segment["assetResources"] = [];
-
-  for (const resource of resources) {
-    if (resource.kind === "preconnect") {
-      preconnects.push(resource);
-    } else if (
-      resource.kind === "font" ||
-      (resource.kind === "preload" &&
-        (resource.as === "font" ||
-          (resource.as === "image" &&
-            (resource.fetchpriority === "high" ||
-              request.assetRegistry.isEarlyImage(resource)))))
-    ) {
-      criticalPreloads.push(resource);
-    } else if (resource.kind === "stylesheet") {
-      stylesheets.push(resource);
-    } else {
-      afterMetadata.push(resource);
-    }
-  }
-
-  return [[...preconnects, ...criticalPreloads, ...stylesheets], afterMetadata];
 }
 
 function flushWriteBuffer(request: Request): void {

@@ -30,23 +30,14 @@ export function renderToDocumentStream(
   node: FigNode,
   options: ServerRenderOptions = {},
 ): ServerDocumentRenderResult {
-  const request = createServerRenderRequest(node, options, {
+  const {
+    getHead: _getHead,
+    headReady: _headReady,
+    ...result
+  } = createServerRenderRequest(node, options, {
     document: true,
   });
-
-  // Document mode owns the head: expose the stream result without the
-  // fragment-only head accessors.
-  return {
-    abort: (reason) => request.abort(reason),
-    allReady: request.allReady,
-    contentType: request.contentType,
-    data: request.data,
-    getData: () => request.getData(),
-    getPreloadHeader: (headerOptions) =>
-      request.getPreloadHeader(headerOptions),
-    shellReady: request.shellReady,
-    stream: request.stream,
-  };
+  return result;
 }
 
 /**
@@ -84,8 +75,8 @@ export async function prerender(
   node: FigNode,
   options: ServerPrerenderOptions = {},
 ): Promise<ServerPrerenderResult> {
-  const { document = false, ...renderOptions } = options;
-  const result = createServerRenderRequest(node, renderOptions, {
+  const document = options.document === true;
+  const result = createServerRenderRequest(node, options, {
     document,
     prerender: true,
   });
