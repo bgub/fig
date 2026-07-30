@@ -1,18 +1,29 @@
+const attributeEscapePattern = /[&"<>]/;
+const attributeEscapePatternGlobal = /[&"<>]/g;
+const textEscapePattern = /[&<>]/;
+const textEscapePatternGlobal = /[&<>]/g;
+
 export function escapeText(value: string): string {
-  return value.replace(/[&<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
+  if (!textEscapePattern.test(value)) return value;
+  return value.replace(textEscapePatternGlobal, escapeTextCharacter);
 }
 
 export function escapeAttribute(value: string): string {
-  return value.replace(/[&"<>]/g, (character) => {
-    if (character === "&") return "&amp;";
-    if (character === '"') return "&quot;";
-    if (character === "<") return "&lt;";
-    return "&gt;";
-  });
+  if (!attributeEscapePattern.test(value)) return value;
+  return value.replace(attributeEscapePatternGlobal, escapeAttributeCharacter);
+}
+
+function escapeAttributeCharacter(character: string): string {
+  if (character === "&") return "&amp;";
+  if (character === '"') return "&quot;";
+  if (character === "<") return "&lt;";
+  return "&gt;";
+}
+
+function escapeTextCharacter(character: string): string {
+  if (character === "&") return "&amp;";
+  if (character === "<") return "&lt;";
+  return "&gt;";
 }
 
 // Script elements are raw-text elements: HTML entities are not decoded in

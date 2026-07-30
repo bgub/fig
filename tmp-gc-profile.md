@@ -1,6 +1,6 @@
 # Fig vs React SSR GC Profile
 
-Date: 2026-07-29
+Date: 2026-07-29–30
 
 This investigation compares production SSR for identical versions of
 `bengubler.com`: Fig from the website's `main` branch and React from
@@ -11,25 +11,109 @@ This file is temporary investigation material, not product documentation.
 
 ## Executive summary
 
-Fig's GC disadvantage is caused by framework and adapter work, not by the
-application, Nitro, or Fig's isolated core renderer.
+The implemented output-buffer, server-Link, asset, and preload-header changes
+have removed approximately 40% of Fig's original excess allocation. A fresh
+current-build profile measured 10.100 GB for Fig and 9.035 GB for React over
+10,000 requests: 1.065 GB more, or approximately 106.5 KB per request (+11.8%).
 
-Over 10,000 requests, Fig allocated approximately 10.834 GB versus React's
-9.068 GB: 1.766 GB more, or approximately 176.6 KB more per request (+19.5%).
-The GC cost grows disproportionately because almost twice as much young data
-survives each minor collection. Fig therefore copies and promotes more live
-objects, has longer minor pauses, and reaches major collections more often.
+The GC problem has changed character. Fig's average minor collection is now
+5.7% cheaper than React's, but Fig performs 13.4% more minor collections. Mean
+total GC time over two alternating 40,000-request runs is therefore 8.3%
+higher. The earlier high young-generation survival and long-pause problem is
+largely fixed; the remaining gap is allocation frequency.
 
-The principal sources are:
+The strongest current framework target is HTML attribute serialization. Fig's
+`serializeAttributes` accounted for 935.9 MB of self-attributed sampled
+allocation, or approximately 93.6 KB per request. React's corresponding
+`pushAttribute` accounted for 478.0 MB, or 47.8 KB per request. The paths are
+not perfectly equivalent, but the 45.8 KB-per-request self-allocation
+difference is large enough to explain a substantial share of Fig's remaining
+106.5 KB-per-request disadvantage.
 
-1. Server HTML serialization and output buffering.
-2. The server `Link` and generic mixin-resolution path.
-3. Asset-resource and preload-header conversion.
+Payload-marker scanning remains a meaningful CPU-only target. It accounted for
+248.2 ms over 20,000 profiled requests and essentially no sampled allocation.
 
-Payload-marker scanning is a meaningful CPU hotspot, but it produces almost
-no sampled allocation and is not a cause of the GC gap.
+## Current post-optimization benchmark
 
-## Baseline application benchmark
+Both production builds used the same non-prerendered 404 route at 50
+concurrent connections. Each fixed-work result below is the mean of two
+alternating 40,000-request runs after 5,000-request warmup.
+
+| Metric              |            Fig |          React | Difference |
+| ------------------- | -------------: | -------------: | ---------: |
+| Total GC time       |      556.00 ms |      513.29 ms |  Fig +8.3% |
+| Total GC events     |            645 |            578 | Fig +11.6% |
+| Minor GC time       |      502.97 ms |      470.25 ms |  Fig +7.0% |
+| Minor collections   |            627 |            553 | Fig +13.4% |
+| Average minor pause |       0.802 ms |       0.850 ms |  Fig -5.7% |
+| Major GC time       |       51.23 ms |       40.73 ms | Fig +25.8% |
+| Major collections   |            9.0 |           12.5 | Fig -28.0% |
+| Average throughput  | 2,000.28 req/s | 2,105.69 req/s |  Fig -5.0% |
+| Average latency     |       23.53 ms |       22.55 ms |  Fig +4.3% |
+| Median p50 latency  |          23 ms |          22 ms |  Fig +4.5% |
+| Mean p99 latency    |        36.5 ms |          33 ms | Fig +10.6% |
+
+The major-GC duration is particularly noisy at only 9–12.5 events per run.
+Minor collection frequency and allocation per request are the more stable
+signals.
+
+Current response output remains slightly larger:
+
+| Metric          |          Fig |        React |       Difference |
+| --------------- | -----------: | -----------: | ---------------: |
+| Raw response    | 20,871 bytes | 19,668 bytes | Fig +1,203 bytes |
+| Gzip response   |  3,919 bytes |  3,649 bytes |   Fig +270 bytes |
+| Module preloads |           12 |           11 |           Fig +1 |
+
+### Current allocation profile
+
+V8 allocation sampling included objects collected by both minor and major GC.
+Each build handled exactly 10,000 requests after warmup.
+
+| Metric                     |              Fig |    React |    Difference |
+| -------------------------- | ---------------: | -------: | ------------: |
+| Sampled allocation         |        10.100 GB | 9.035 GB |    Fig +11.8% |
+| Allocation per request     |       1,010.0 KB | 903.5 KB | Fig +106.5 KB |
+| Original excess allocation | 176.6 KB/request |        — |             — |
+| Excess removed so far      |            39.7% |        — |             — |
+
+Selected current allocation paths:
+
+| Fig path                      |     Self |  Inclusive |
+| ----------------------------- | -------: | ---------: |
+| `serializeAttributes`         | 935.9 MB | 1,090.6 MB |
+| `writeElementStart`           | 416.3 MB |   469.8 MB |
+| `renderHostElement`           | 465.1 MB | 7,019.7 MB |
+| `resolveLinkState`            | 146.8 MB |   669.1 MB |
+| `ServerLink`                  |        — |   919.8 MB |
+| `collectRouteAssets`          | 105.4 MB |   146.3 MB |
+| `assetResourceFromHostValues` | 103.3 MB |   120.6 MB |
+
+Comparable React paths included 478.0 MB self/500.6 MB inclusive in
+`pushAttribute`, 253.3 MB self/785.0 MB inclusive in `useLinkProps`, and
+64.0 MB self/150.0 MB inclusive in `buildTagsFromMatches`. Inclusive totals
+overlap and must not be added together.
+
+### Current CPU profile
+
+The CPU profile handled exactly 20,000 requests after warmup. Selected Fig
+self times were 280.1 ms in `escapeAttribute`, 248.2 ms in
+`indexOfPayloadTransportMarker`, 204.4 ms in `ServerLink`, 178.2 ms in
+`writeElementStart`, 144.8 ms in `serializeAttributes`, and 92.9 ms in
+`resolveLinkState`. React spent 98.5 ms in `pushAttribute`, 77.9 ms in
+`pushStartInstance`, and 221.9 ms in `useLinkProps`; React's renderer instead
+attributes 669.4 ms directly to `writeChunk`, so renderer CPU frames are not a
+one-to-one partition.
+
+The non-profiled fixed-work runs remain authoritative for production GC,
+throughput, and latency. Profiles identify candidate work but impose enough
+overhead that their absolute timings should not be compared with benchmark
+timings.
+
+The sections below preserve the initial baseline and the evidence used to
+select and validate the completed optimization sequence.
+
+## Initial baseline application benchmark
 
 Before profiling, three alternating 10-second production samples gave:
 
@@ -440,14 +524,64 @@ minor collections and 611.83 ms total GC; the added copies therefore did not
 reverse the collection-frequency improvement, while GC duration remained
 inside the same pause-time noise.
 
+## Safe HTML-escaping optimization result
+
+The original text and attribute escapers called `String.replace` with newly
+created callbacks for every serialized value, even though 314 of 316 valued
+attributes in the production response contained no escapable characters. A
+manual JavaScript attribute scanner removed allocation but slowed the
+safe-value-heavy production path. The retained implementation uses hoisted
+non-global regexes as native safe-value gates and reuses callbacks only when
+replacement is required.
+
+The original attribute accumulator was retained. Two alternatives that changed
+its string construction reduced sampled allocation but increased start-tag CPU
+time by 13–19%; a local fragment array was also 5.8% slower in the focused
+attribute benchmark.
+
+Production allocation sampling over 10,000 requests measured:
+
+| Metric                           |   Baseline | Safe gate |   Change |
+| -------------------------------- | ---------: | --------: | -------: |
+| Total sampled allocation         |  10.231 GB |  9.577 GB |    -6.4% |
+| Allocation per request           | 1,023.1 KB |  957.7 KB | -65.4 KB |
+| Minor collections under profiler |        157 |       149 |    -5.1% |
+
+The fresh React control allocated 9.131 GB, leaving Fig 446 MB, or
+approximately 44.6 KB per request (+4.9%), above React. This single change
+therefore removed approximately 59% of the allocation gap measured in the same
+build-and-profile set.
+
+The CPU profile measured the complete start-tag path at 608.9 ms versus
+767.9 ms over 20,000 requests (-20.7%). `escapeAttribute` self time fell from
+266.0 ms to 98.6 ms, while `escapeText` fell from 36.8 ms to 13.0 ms. Two
+fixed-duration samples measured 2,188.19 versus 2,119.87 requests per second
+(+3.2%) and 22.34 versus 23.07 ms average latency (-3.2%).
+
+Across fixed-work runs, the attribute gate consistently reduced minor
+collection count from 628 to approximately 583–587. The final combined text
+and attribute gate recorded 580 collections (-7.6%) in its one fixed-work run.
+Aggregate GC duration varied with pause noise: the final run measured 486.56 ms
+and the three-run attribute-gate mean was 502.61 ms, versus 501.92 ms for the
+three-run baseline. The stable evidence is lower allocation and collection
+frequency, not a precise aggregate-pause percentage.
+
+Three attribute-gate Fig runs averaged 502.61 ms total GC versus 513.98 ms for
+two fresh React controls (-2.2%). More alternating samples are required before
+treating this small aggregate advantage as conclusive; Fig still performs 5.8%
+more minor collections, but each collection is approximately 9.6% cheaper.
+
 ## Recommended optimization order
 
 ### 1. Server HTML and output pipeline
 
 Implemented with a rope-style request buffer. Segment coalescing and fragmented
 start-tag writes were rejected by benchmarks. `TextEncoder.encodeInto` remains
-a possible later experiment, but only if profiles continue to identify output
-encoding after the higher-allocation Link/mixin and asset paths are fixed.
+a possible later experiment. The fresh post-optimization profile makes
+attribute serialization the next target: preserve one consolidated start-tag
+write, but investigate eliminating intermediate attribute strings or adding a
+measured fast path for common already-safe string attributes. The earlier
+fragmented-write and `for...in` experiments remain rejected.
 
 Success criteria must include allocation per request, young-generation
 survival, minor-GC pause time, throughput, and output equivalence. A
@@ -511,3 +645,10 @@ Important files include:
 
 The temporary website worktrees used to generate them were removed. The Fig
 and `bengubler.com` primary worktrees were left unchanged.
+
+Fresh post-optimization artifacts from 2026-07-30 are under:
+
+`/private/tmp/fig-react-current.lwQjNy/`
+
+They include the current Fig and React allocation profiles, CPU profiles,
+fixed-work GC logs, autocannon JSON, response bodies, and response headers.
