@@ -147,9 +147,9 @@ export interface Request {
   // stays in its queue while it flushes, so a reentrant drain would emit it
   // twice.
   flushing: boolean;
-  // Chunks accumulate here per flush pass and leave as one encoded enqueue,
+  // Markup accumulates here per flush pass and leaves as one encoded enqueue,
   // instead of one tiny Uint8Array per attribute/text write.
-  writeBuffer: string[];
+  writeBuffer: string;
   write(chunk: string): void;
 }
 
@@ -329,12 +329,12 @@ export function createServerRenderRequest(
     resolveAssetKey: options.resolveAssetKey,
     workScheduled: false,
     flushing: false,
-    writeBuffer: [],
+    writeBuffer: "",
     write(chunk) {
       if (chunk !== "" && this.leadingNewlineStack.length > 0) {
         this.leadingNewlineStack[this.leadingNewlineStack.length - 1] = true;
       }
-      this.writeBuffer.push(chunk);
+      this.writeBuffer += chunk;
     },
   };
   if (options.dataStore === undefined && options.initialData !== undefined) {
@@ -374,7 +374,7 @@ export function createServerRenderRequest(
         // The consumer is gone: drop the sink before aborting so the abort
         // pass does not enqueue into (or close) a cancelled stream.
         request.controller = null;
-        request.writeBuffer = [];
+        request.writeBuffer = "";
         abort(request, reason);
         request.status = "closed";
       },

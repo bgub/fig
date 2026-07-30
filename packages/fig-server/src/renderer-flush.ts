@@ -531,9 +531,9 @@ function partitionHeadAssets(
 }
 
 function flushWriteBuffer(request: Request): void {
-  if (request.writeBuffer.length === 0 || request.controller === null) return;
-  request.controller.enqueue(textEncoder.encode(request.writeBuffer.join("")));
-  request.writeBuffer = [];
+  if (request.writeBuffer === "" || request.controller === null) return;
+  request.controller.enqueue(textEncoder.encode(request.writeBuffer));
+  request.writeBuffer = "";
 }
 
 function ensureSegmentId(request: Request, segment: Segment): number {
