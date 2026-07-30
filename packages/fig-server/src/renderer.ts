@@ -173,7 +173,7 @@ interface RenderScope {
   // True inside HTML <picture> and <noscript>, where an <img> does not name a
   // standalone preload candidate.
   imagePreloadsSuppressed: boolean;
-  idPath: string;
+  idPath: number[];
   pendingLeadingNewline: boolean;
   selectProps: Props | null;
   stack: StackFrame | null;
@@ -237,6 +237,7 @@ type HostNamespace = "html" | "mathml" | "svg";
 
 interface RenderFrame extends RenderScope {
   dispatcher: RenderDispatcher | null;
+  idPathString: string | null;
   localIdCounter: number;
   request: Request;
   segment: Segment;
@@ -349,7 +350,7 @@ export function createServerRenderRequest(
     hostAncestors: [],
     hostNamespace: "html",
     imagePreloadsSuppressed: false,
-    idPath: "",
+    idPath: [],
     pendingLeadingNewline: false,
     selectProps: null,
     stack: null,
@@ -455,7 +456,7 @@ function forkScope(scope: RenderScope): RenderScope {
     hostAncestors: scope.hostAncestors,
     hostNamespace: scope.hostNamespace,
     imagePreloadsSuppressed: scope.imagePreloadsSuppressed,
-    idPath: scope.idPath,
+    idPath: [...scope.idPath],
     pendingLeadingNewline: scope.pendingLeadingNewline,
     selectProps: scope.selectProps,
     stack: scope.stack,
@@ -555,6 +556,7 @@ function createRenderFrame(
   return {
     ...scope,
     dispatcher: null,
+    idPathString: null,
     localIdCounter: 0,
     request,
     segment,
@@ -579,7 +581,8 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
       frame.request.dataStore.preloadData(resource, ...args);
     },
     useId() {
-      const id = `${frame.request.identifierPrefix}fig-${frame.idPath}-${frame.localIdCounter.toString(32)}`;
+      frame.idPathString ??= formatIdPath(frame.idPath);
+      const id = `${frame.request.identifierPrefix}fig-${frame.idPathString}-${frame.localIdCounter.toString(32)}`;
       frame.localIdCounter += 1;
       return id;
     },
@@ -680,25 +683,35 @@ function renderChildAtIndex(
   frame: RenderFrame,
   index: number,
 ): void {
-  const previousIdPath = frame.idPath;
-  const segment = index.toString(32);
-  frame.idPath =
-    previousIdPath === "" ? segment : `${previousIdPath}-${segment}`;
+  const previousIdPathString = frame.idPathString;
+  frame.idPath.push(index);
+  frame.idPathString = null;
 
   try {
     renderNode(child, frame);
   } catch (error) {
     // A retry task stores the parent path plus this child index, so fork its
-    // scope only after restoring the parent path. `finally` covers every exit.
-    frame.idPath = previousIdPath;
+    // scope only after restoring the parent path.
+    frame.idPath.pop();
+    frame.idPathString = previousIdPathString;
     if (isThenable(error)) {
       spawnSuspendedTask(frame, child, error, index);
       return;
     }
     throw error;
-  } finally {
-    frame.idPath = previousIdPath;
   }
+
+  frame.idPath.pop();
+  frame.idPathString = previousIdPathString;
+}
+
+function formatIdPath(path: readonly number[]): string {
+  let value = "";
+  for (let index = 0; index < path.length; index += 1) {
+    if (index > 0) value += "-";
+    value += path[index].toString(32);
+  }
+  return value;
 }
 
 // A spawned segment cannot know what follows its splice point once its

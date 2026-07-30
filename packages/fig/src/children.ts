@@ -21,9 +21,45 @@ export type NormalizedChild =
 // merged text nodes into HTML, and hydration matches them against the
 // client's fiber children — divergence is a hydration mismatch.
 export function collectChildren(node: FigNode): NormalizedChild[] {
+  if (Array.isArray(node)) return collectArrayChildren(node);
+
   const children: NormalizedChild[] = [];
   collectChild(node, children);
   return children;
+}
+
+function collectArrayChildren(children: FigNode[]): NormalizedChild[] {
+  let previousWasText = false;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (typeof child === "string") {
+      if (child !== "" && !previousWasText) {
+        previousWasText = true;
+        continue;
+      }
+    } else {
+      previousWasText = false;
+      if (
+        !Array.isArray(child) &&
+        child !== null &&
+        child !== undefined &&
+        typeof child !== "boolean" &&
+        typeof child !== "number"
+      ) {
+        if (isValidElement(child) || isPortal(child) || isThenable(child)) {
+          continue;
+        }
+        throw invalidChildError(child);
+      }
+    }
+
+    const normalized = children.slice(0, index) as NormalizedChild[];
+    for (; index < children.length; index += 1) {
+      collectChild(children[index], normalized);
+    }
+    return normalized;
+  }
+  return children as NormalizedChild[];
 }
 
 function collectChild(node: FigNode, children: NormalizedChild[]): void {

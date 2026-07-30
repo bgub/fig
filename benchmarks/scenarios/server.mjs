@@ -4,6 +4,7 @@ import {
   readFigPromise,
   figOnlyRuntime,
 } from "../lib/host-runtimes.mjs";
+import { useId as useFigId } from "../../packages/fig/dist/index.js";
 import { renderToHtml as renderFigToHtml } from "../../packages/fig-server/dist/index.js";
 import {
   createOperationCounts,
@@ -46,6 +47,26 @@ async function measureServerAttributes(_runtime, rows, iterations) {
       const html = await renderFigToHtml(node);
       if (html !== expected) {
         throw new Error("Attribute-heavy server output changed.");
+      }
+    }
+  });
+
+  return {
+    elapsed,
+    metrics,
+    operations: createOperationCounts(),
+  };
+}
+
+async function measureServerIdPaths(_runtime, rows, iterations, idInterval) {
+  const metrics = createScenarioMetrics();
+  const node = createIdPathFixture(rows, idInterval);
+  const expected = await renderFigToHtml(node);
+  const elapsed = await measureAsync(async () => {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      const html = await renderFigToHtml(node);
+      if (html !== expected) {
+        throw new Error("Server ID-path benchmark output changed.");
       }
     }
   });
@@ -108,6 +129,38 @@ function attributeFixtureMarkup(rows) {
   );
 }
 
+function createIdPathFixture(rows, idInterval) {
+  return createFigElement(
+    "main",
+    null,
+    Array.from({ length: rows }, (_, index) =>
+      createFigElement(
+        index % idInterval === 0 ? ServerIdLeaf : ServerPlainLeaf,
+        { index },
+      ),
+    ),
+  );
+}
+
+function ServerIdLeaf({ index }) {
+  const id = useFigId();
+  return createFigElement(
+    "label",
+    { for: id },
+    `Item ${index}`,
+    createFigElement("input", { id }),
+  );
+}
+
+function ServerPlainLeaf({ index }) {
+  return createFigElement(
+    "label",
+    null,
+    `Item ${index}`,
+    createFigElement("input"),
+  );
+}
+
 function createServerSuspenseFixture(rows, gates, metrics) {
   return createFigElement(
     "section",
@@ -164,6 +217,22 @@ export function serverScenariosForRows(rows) {
       rows,
       measure: (runtime, iterations) =>
         measureServerSuspenseSiblings(runtime, rows, iterations),
+      runtimes: [figOnlyRuntime],
+    },
+    {
+      group: "server",
+      name: "server.id-path-sparse",
+      rows,
+      measure: (runtime, iterations) =>
+        measureServerIdPaths(runtime, rows, iterations, 10),
+      runtimes: [figOnlyRuntime],
+    },
+    {
+      group: "server",
+      name: "server.id-path-dense",
+      rows,
+      measure: (runtime, iterations) =>
+        measureServerIdPaths(runtime, rows, iterations, 1),
       runtimes: [figOnlyRuntime],
     },
   ];
