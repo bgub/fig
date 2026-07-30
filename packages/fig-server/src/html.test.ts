@@ -48,6 +48,39 @@ describe("HTML serialization", () => {
     ]);
   });
 
+  it("does not serialize enumerable Object.prototype properties", () => {
+    const chunks: string[] = [];
+    Object.defineProperties(Object.prototype, {
+      "data-polluted": {
+        configurable: true,
+        enumerable: true,
+        value: "leaked",
+      },
+      onclick: {
+        configurable: true,
+        enumerable: true,
+        value: "alert(1)",
+      },
+    });
+
+    try {
+      writeElementStart(
+        "div",
+        { title: "safe", style: { color: "red" } },
+        {
+          write(chunk) {
+            chunks.push(chunk);
+          },
+        },
+      );
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "data-polluted");
+      Reflect.deleteProperty(Object.prototype, "onclick");
+    }
+
+    expect(chunks).toEqual(['<div title="safe" style="color:red">']);
+  });
+
   it("escapes special attribute characters after the safe-value fast path", () => {
     expect(escapeAttribute("plain attribute value")).toBe(
       "plain attribute value",
