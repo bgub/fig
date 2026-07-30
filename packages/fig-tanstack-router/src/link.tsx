@@ -7,6 +7,7 @@ import {
   useReactive,
   useState,
 } from "@bgub/fig";
+import { markClientOnlyHostProps } from "@bgub/fig/internal";
 import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   deepEqual,
@@ -23,7 +24,6 @@ type AnchorProps = HostIntrinsicElements["a"];
 type LinkStateProps = Partial<
   Omit<AnchorProps, "children" | "href" | "target">
 >;
-const serverLinkClientOnlyMarker = on("click", () => undefined);
 
 export type LinkRenderState = {
   isActive: boolean;
@@ -121,7 +121,7 @@ function ClientLink<
       : (props.preload ?? router.options.defaultPreload);
   const preloadDelay =
     props.preloadDelay ?? router.options.defaultPreloadDelay ?? 0;
-  const linkBind = composeBind(anchorProps.bind, stateBind);
+  const linkBind = combineLinkBinds(anchorProps.bind, stateBind);
   const renderedChildren =
     typeof children === "function"
       ? children({ isActive, isTransitioning })
@@ -241,7 +241,7 @@ function ClientLink<
             if (!disabled) preloadRoute();
           }),
       ],
-      role: disabled ? "link" : (stateAnchorProps.role ?? anchorProps.role),
+      role: disabled ? "link" : (stateAnchorProps?.role ?? anchorProps.role),
       style: linkStyle,
       target,
     },
@@ -275,30 +275,31 @@ function ServerLink<
     stateMix,
     target,
   } = resolveLinkState(router, currentLocation, props);
-  const linkBind = composeBind(anchorProps.bind, stateBind);
+  const linkBind = combineLinkBinds(anchorProps.bind, stateBind);
   const renderedChildren =
     typeof children === "function"
       ? children({ isActive, isTransitioning: false })
       : children;
 
-  return (
-    <a
-      {...anchorProps}
-      {...stateAnchorProps}
-      aria-current={isActive ? "page" : undefined}
-      aria-disabled={disabled ? true : undefined}
-      data-status={isActive ? "active" : undefined}
-      bind={linkBind}
-      class={linkClass}
-      href={dangerous ? undefined : href}
-      mix={combineServerLinkMixins(mix, stateMix)}
-      role={disabled ? "link" : (stateAnchorProps.role ?? anchorProps.role)}
-      style={linkStyle}
-      target={target}
-    >
-      {renderedChildren}
-    </a>
-  );
+  const serverMix = combineServerLinkMixins(mix, stateMix);
+  const serverAnchorProps: AnchorProps = {
+    ...anchorProps,
+    ...stateAnchorProps,
+    "aria-current": isActive ? "page" : undefined,
+    "aria-disabled": disabled ? true : undefined,
+    "data-status": isActive ? "active" : undefined,
+    bind: linkBind,
+    class: linkClass,
+    href: dangerous ? undefined : href,
+    role: disabled ? "link" : (stateAnchorProps?.role ?? anchorProps.role),
+    style: linkStyle,
+    target,
+  };
+  if (serverMix !== undefined) serverAnchorProps.mix = serverMix;
+
+  const element = createElement("a", serverAnchorProps, renderedChildren);
+  markClientOnlyHostProps(element.props, "on()");
+  return element;
 }
 
 function resolveLinkState<
@@ -381,16 +382,28 @@ function resolveLinkState<
     (!activeOptions?.includeHash || currentLocation.hash === next.hash);
   const selectedStateProps = isActive ? activeProps : inactiveProps;
   const stateProps =
-    (typeof selectedStateProps === "function"
+    typeof selectedStateProps === "function"
       ? selectedStateProps()
-      : selectedStateProps) ?? {};
-  const {
-    bind,
-    class: stateClass,
-    mix: stateMix,
-    style: stateStyle,
-    ...stateAnchorProps
-  } = stateProps;
+      : selectedStateProps;
+  let bind: LinkStateProps["bind"];
+  let stateAnchorProps: LinkStateProps | undefined;
+  let stateClass: LinkStateProps["class"];
+  let stateMix: LinkStateProps["mix"];
+  let stateStyle: LinkStateProps["style"];
+  if (stateProps !== undefined) {
+    const {
+      bind: nextBind,
+      class: nextClass,
+      mix: nextMix,
+      style: nextStyle,
+      ...nextAnchorProps
+    } = stateProps;
+    bind = nextBind;
+    stateAnchorProps = nextAnchorProps;
+    stateClass = nextClass;
+    stateMix = nextMix;
+    stateStyle = nextStyle;
+  }
   const linkClass =
     typeof anchorProps.class === "string" && typeof stateClass === "string"
       ? `${anchorProps.class} ${stateClass}`
@@ -425,14 +438,19 @@ function combineServerLinkMixins(
   first: LinkStateProps["mix"],
   second: LinkStateProps["mix"],
 ): LinkStateProps["mix"] {
-  if (!first) {
-    return second
-      ? [second, serverLinkClientOnlyMarker]
-      : serverLinkClientOnlyMarker;
-  }
-  return second
-    ? [first, second, serverLinkClientOnlyMarker]
-    : [first, serverLinkClientOnlyMarker];
+  if (first) return second ? [first, second] : first;
+  return second;
+}
+
+function combineLinkBinds(
+  first: LinkStateProps["bind"],
+  second: LinkStateProps["bind"],
+): LinkStateProps["bind"] {
+  const firstBind = typeof first === "function" ? first : undefined;
+  const secondBind = typeof second === "function" ? second : undefined;
+  return firstBind && secondBind
+    ? composeBind(firstBind, secondBind)
+    : (firstBind ?? secondBind);
 }
 
 function linkPathIsActive(

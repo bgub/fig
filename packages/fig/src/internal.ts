@@ -90,6 +90,7 @@ export {
   clientOnlyHostBehavior,
   FigMixinSymbol,
   markClientOnlyHostBehavior,
+  markClientOnlyHostProps,
   mixinSlot,
   resolveHostMix,
 } from "./mixin.ts";

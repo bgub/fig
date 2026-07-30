@@ -49,6 +49,7 @@ describe("@bgub/fig-tanstack-start server", () => {
               class: "active",
               "data-selected": "yes",
             }}
+            bind={false}
             class="base"
             id="active-link"
             mix={observesBind()}

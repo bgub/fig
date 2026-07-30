@@ -146,9 +146,13 @@ export function markClientOnlyHostBehavior(
   context: MixinContext,
   behavior: string,
 ): void {
-  const props = context.props as ClientOnlyHostProps;
+  markClientOnlyHostProps(context.props, behavior);
+}
+
+export function markClientOnlyHostProps(value: object, behavior: string): void {
+  const props = value as ClientOnlyHostProps;
   if (props[FigClientOnlyHostBehaviorSymbol] !== undefined) return;
-  Object.defineProperty(context.props, FigClientOnlyHostBehaviorSymbol, {
+  Object.defineProperty(props, FigClientOnlyHostBehaviorSymbol, {
     configurable: true,
     value: behavior,
   });
