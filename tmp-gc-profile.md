@@ -361,6 +361,40 @@ collects about one-third more often. The output-retention problem is therefore
 largely fixed; the remaining GC gap is now allocation frequency from the
 later Link/mixin and asset-resource targets.
 
+## Asset host-prop optimization result
+
+The server asset writer previously built an attribute-pair array, filtered it,
+converted it with `Object.fromEntries`, then sometimes cloned the resulting
+props again to append a nonce. The client independently consumed the pair
+array.
+
+The replacement uses one canonical function that fills an owned props object
+directly. The server seeds that object with its hydration marker and appends
+the reveal-blocker id and nonce in place. Client insertion iterates the same
+canonical props.
+
+Production allocation sampling over 10,000 requests measured:
+
+| Metric                    |    Baseline | Direct props | Change |
+| ------------------------- | ----------: | -----------: | -----: |
+| Total sampled allocation  | 10,446.6 MB |  10,396.2 MB |  -0.5% |
+| `writeAssetTag` inclusive |    101.7 MB |      62.9 MB | -38.2% |
+| Minor collections         |         228 |          210 |  -7.9% |
+
+Two alternating fixed-work runs of 40,000 requests each measured:
+
+| Metric              | Baseline mean | Direct-props mean | Change |
+| ------------------- | ------------: | ----------------: | -----: |
+| Minor collections   |           703 |               678 |  -3.6% |
+| Minor GC time       |     435.29 ms |         433.62 ms |  -0.4% |
+| Total GC time       |     524.02 ms |         520.45 ms |  -0.7% |
+| Median request rate |   2,062 req/s |       2,090 req/s |  +1.4% |
+| Average latency     |      23.87 ms |          23.71 ms |  -0.7% |
+
+The change therefore reduces collection frequency and request allocation. Its
+GC-time improvement is small because the remaining minor collections were
+slightly longer in these runs.
+
 ## Recommended optimization order
 
 ### 1. Server HTML and output pipeline
@@ -376,20 +410,20 @@ microbenchmark of attribute serialization alone is insufficient.
 
 ### 2. Server Link hydration marker and state resolution
 
-- Install the stable client-behavior marker directly on the SSR anchor props
-  when there is no user or state mixin.
-- Invoke generic mixin resolution only for real user/state mixins.
-- Consider a server-specific state resolver that returns or fills only fields
-  consumed by `ServerLink`, avoiding general-purpose rest/spread/result
-  objects.
-- Preserve the symmetric `ServerLink`/`ClientLink` component depth required by
-  hydration and `useId`.
+The server now installs the stable client-behavior marker directly, invokes
+generic mixin resolution only for real mixins, and avoids empty state objects
+and bind wrappers. Production allocation fell by approximately 13 KB per
+request, with a small reduction in collection frequency and neutral throughput
+and latency. A separate server-only state resolver remains deferred because it
+would duplicate complex TanStack location and active-state logic for a smaller,
+riskier gain.
 
 ### 3. Asset/preload SSR serialization
 
-- Serialize canonical Fig asset resources directly to the server sink.
-- Avoid `assetResourceHostAttributes` array allocation and
-  `Object.fromEntries` during SSR.
+Canonical asset host props now fill the server writer's owned object directly,
+removing the attribute-pair array, `Object.fromEntries`, and nonce clone. The
+remaining work is:
+
 - Avoid building both HTML props and preload-header parameter arrays when the
   same normalized values can be visited directly.
 - Reassess which production module preloads are necessary.

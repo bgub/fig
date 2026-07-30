@@ -11,7 +11,7 @@ import { isThenable, readThenable } from "./thenables.ts";
 const PreventAssetResourceHoistSymbol = Symbol.for(
   "fig.prevent-asset-resource-hoist",
 );
-type AssetResourceHostProps = Props & {
+type PreventAssetResourceHostProps = Props & {
   [PreventAssetResourceHoistSymbol]?: true;
 };
 
@@ -301,7 +301,9 @@ export function assetResourceFromHostProps(
   props: Props,
 ): FigAssetResource | null {
   if (
-    (props as AssetResourceHostProps)[PreventAssetResourceHoistSymbol] === true
+    (props as PreventAssetResourceHostProps)[
+      PreventAssetResourceHoistSymbol
+    ] === true
   ) {
     return null;
   }
@@ -328,100 +330,113 @@ export function assetResourceFromHostAttributes(
   return assetResourceFromHostValues(type, getAttribute, undefined, false);
 }
 
-export type AssetResourceHostAttribute = readonly [
-  name: string,
-  value: string | true,
-];
+export type AssetResourceHostProps = Record<string, string | true>;
 
-// Canonical attribute serialization for hoisted asset-resource elements,
-// shared by the server's registry writer and the client's head insertion so
-// the two renders cannot drift. `true` marks a boolean attribute (bare on
-// the server, empty-string in the DOM). Server-only attributes (id, nonce)
-// stay with the server writer; title/meta are written by their own paths.
-export function assetResourceHostAttributes(
+// Canonical host props for hoisted asset-resource elements, shared by the
+// server's registry writer and the client's head insertion so the two renders
+// cannot drift. `true` marks a boolean attribute (bare on the server,
+// empty-string in the DOM). Server-only attributes (id, nonce) stay with the
+// server writer; title/meta are written by their own paths.
+export function assetResourceHostProps(
   resource: FigAssetResource,
-): AssetResourceHostAttribute[] {
-  const pairs: Array<readonly [string, string | true | undefined]> = [];
+  props: AssetResourceHostProps = {},
+): AssetResourceHostProps {
+  if (resource.kind === "title" || resource.kind === "meta") return props;
 
   switch (resource.kind) {
     case "stylesheet":
-      pairs.push(
-        ["rel", "stylesheet"],
-        ["href", resource.href],
-        ["data-fig-resource-key", resource.key],
-        ["data-precedence", resource.precedence],
-        ["media", resource.media],
-        ["crossorigin", resource.crossorigin],
-      );
+      props.rel = "stylesheet";
+      props.href = resource.href;
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      if (resource.precedence !== undefined) {
+        props["data-precedence"] = resource.precedence;
+      }
+      if (resource.media !== undefined) props.media = resource.media;
+      if (resource.crossorigin !== undefined) {
+        props.crossorigin = resource.crossorigin;
+      }
       break;
     case "preload": {
       const imagesrcset = resource.imagesrcset || undefined;
-      pairs.push(
-        ["rel", "preload"],
-        ["href", imagesrcset === undefined ? resource.href : undefined],
-        ["as", resource.as],
-        ["data-fig-resource-key", resource.key],
-        ["type", resource.type],
-        ["crossorigin", resource.crossorigin],
-        ["fetchpriority", resource.fetchpriority],
-        ["imagesrcset", imagesrcset],
-        ["imagesizes", resource.imagesizes],
-        ["referrerpolicy", resource.referrerpolicy],
-      );
+      props.rel = "preload";
+      if (imagesrcset === undefined && resource.href !== undefined) {
+        props.href = resource.href;
+      }
+      props.as = resource.as;
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      if (resource.type !== undefined) props.type = resource.type;
+      if (resource.crossorigin !== undefined) {
+        props.crossorigin = resource.crossorigin;
+      }
+      if (resource.fetchpriority !== undefined) {
+        props.fetchpriority = resource.fetchpriority;
+      }
+      if (imagesrcset !== undefined) props.imagesrcset = imagesrcset;
+      if (resource.imagesizes !== undefined) {
+        props.imagesizes = resource.imagesizes;
+      }
+      if (resource.referrerpolicy !== undefined) {
+        props.referrerpolicy = resource.referrerpolicy;
+      }
       break;
     }
     case "modulepreload":
-      pairs.push(
-        ["rel", "modulepreload"],
-        ["href", resource.href],
-        ["data-fig-resource-key", resource.key],
-        ["crossorigin", resource.crossorigin],
-        ["fetchpriority", resource.fetchpriority],
-      );
+      props.rel = "modulepreload";
+      props.href = resource.href;
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      if (resource.crossorigin !== undefined) {
+        props.crossorigin = resource.crossorigin;
+      }
+      if (resource.fetchpriority !== undefined) {
+        props.fetchpriority = resource.fetchpriority;
+      }
       break;
     case "font":
-      pairs.push(
-        ["rel", "preload"],
-        ["href", resource.href],
-        ["as", "font"],
-        ["data-fig-resource-key", resource.key],
-        ["type", resource.type],
-        ["crossorigin", resource.crossorigin ?? "anonymous"],
-        ["fetchpriority", resource.fetchpriority],
-      );
+      props.rel = "preload";
+      props.href = resource.href;
+      props.as = "font";
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      props.type = resource.type;
+      props.crossorigin = resource.crossorigin ?? "anonymous";
+      if (resource.fetchpriority !== undefined) {
+        props.fetchpriority = resource.fetchpriority;
+      }
       break;
     case "preconnect":
-      pairs.push(
-        ["rel", "preconnect"],
-        ["href", resource.href],
-        ["data-fig-resource-key", resource.key],
-        ["crossorigin", resource.crossorigin],
-      );
+      props.rel = "preconnect";
+      props.href = resource.href;
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      if (resource.crossorigin !== undefined) {
+        props.crossorigin = resource.crossorigin;
+      }
       break;
     case "script":
-      pairs.push(
-        ["src", resource.src],
-        ["type", resource.module === true ? "module" : undefined],
-        ["data-fig-resource-key", resource.key],
-        // Hoisted scripts default to async, but an explicit defer opts into
-        // ordered execution and must not be overridden (async wins over
-        // defer in browsers).
-        [
-          "async",
-          (resource.async ?? resource.defer !== true) ? true : undefined,
-        ],
-        ["defer", resource.defer === true ? true : undefined],
-        ["crossorigin", resource.crossorigin],
-      );
-      break;
-    case "title":
-    case "meta":
+      props.src = resource.src;
+      if (resource.module === true) props.type = "module";
+      if (resource.key !== undefined) {
+        props["data-fig-resource-key"] = resource.key;
+      }
+      // Hoisted scripts default to async, but an explicit defer opts into
+      // ordered execution and must not be overridden (async wins over defer in
+      // browsers).
+      if (resource.async ?? resource.defer !== true) props.async = true;
+      if (resource.defer === true) props.defer = true;
+      if (resource.crossorigin !== undefined) {
+        props.crossorigin = resource.crossorigin;
+      }
       break;
   }
-
-  return pairs.filter(
-    (pair): pair is readonly [string, string | true] => pair[1] !== undefined,
-  );
+  return props;
 }
 
 export function assetResourceFromHostValues(

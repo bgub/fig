@@ -11,11 +11,11 @@ import {
   ensureRouteData,
   Link,
   Outlet,
+  RouterProvider,
   type RouteDataContext,
 } from "@bgub/fig-tanstack-router";
 import { attachRouterServerSsrUtils } from "@tanstack/router-core/ssr/server";
 import { afterEach, describe, expect, it } from "vitest";
-import { RouterContext } from "../../fig-tanstack-router/src/hooks.tsx";
 import { createStartDataContext, StartScripts } from "./data.ts";
 import { renderRouterToStream } from "./server.tsx";
 
@@ -42,19 +42,22 @@ describe("TanStack Start data round trip", () => {
       );
     }
 
-    const createTestRouter = (isServer: boolean) =>
-      createRouter({
+    const createTestRouter = (isServer: boolean) => {
+      const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+        component: LinkApp,
+      });
+      return createRouter({
         ...createStartDataContext(),
         history: createMemoryHistory({ initialEntries: ["/"] }),
         isServer,
-        routeTree: createRootRouteWithContext<RouteDataContext>()({}),
+        routeTree: rootRoute,
       });
+    };
     const serverRouter = createTestRouter(true);
-    const html = await renderToHtml(
-      <RouterContext value={{ ownerDocument: undefined, router: serverRouter }}>
-        <LinkApp />
-      </RouterContext>,
-    );
+    await serverRouter.load();
+    attachRouterServerSsrUtils({ manifest: undefined, router: serverRouter });
+    await serverRouter.serverSsr?.dehydrate();
+    const html = await renderToHtml(<RouterProvider router={serverRouter} />);
     const container = document.createElement("div");
     container.innerHTML = html;
     document.body.append(container);
@@ -62,17 +65,13 @@ describe("TanStack Start data round trip", () => {
     if (serverId === undefined) throw new Error("Missing server link content.");
     const recoverableErrors: unknown[] = [];
     const clientRouter = createTestRouter(false);
+    clientRouter.ssr = { manifest: undefined };
+    await clientRouter.load();
 
     const root = await act(() =>
-      hydrateRoot(
-        container,
-        <RouterContext
-          value={{ ownerDocument: undefined, router: clientRouter }}
-        >
-          <LinkApp />
-        </RouterContext>,
-        { onRecoverableError: (error) => recoverableErrors.push(error) },
-      ),
+      hydrateRoot(container, <RouterProvider router={clientRouter} />, {
+        onRecoverableError: (error) => recoverableErrors.push(error),
+      }),
     );
     roots.push(root);
 

@@ -96,9 +96,13 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
   return createElement(
     RouterContext,
     { value: contextValue },
-    router.isServer ? null : createElement(Transitioner),
+    createElement(router.isServer ? ServerTransitioner : Transitioner),
     createElement(Matches),
   );
+}
+
+function ServerTransitioner(): null {
+  return null;
 }
 
 type RouterTransitionState = {

@@ -34,7 +34,7 @@ import {
   assetResourceDestination,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
-  assetResourceHostAttributes,
+  assetResourceHostProps,
   assetResourceKey,
   clientReferenceAssets,
   createPortalNode,
@@ -378,7 +378,7 @@ describe("@bgub/fig", () => {
     });
 
     expect(assetResourceKey(resource)).toBe("preload:script:/app.js");
-    expect(Object.fromEntries(assetResourceHostAttributes(resource))).toEqual({
+    expect(assetResourceHostProps(resource)).toEqual({
       as: "script",
       href: "/app.js",
       imagesizes: "100vw",
@@ -390,11 +390,31 @@ describe("@bgub/fig", () => {
       imagesrcset: "",
     });
     expect(assetResourceKey(empty)).toBe("preload:image:/fallback.jpg");
-    expect(Object.fromEntries(assetResourceHostAttributes(empty))).toEqual({
+    expect(assetResourceHostProps(empty)).toEqual({
       as: "image",
       href: "/fallback.jpg",
       imagesizes: "100vw",
       rel: "preload",
+    });
+  });
+
+  it("fills owned asset host props in place", () => {
+    const props: Record<string, string | true> = {
+      "data-fig-hydration-skip": true,
+    };
+
+    expect(
+      assetResourceHostProps(
+        stylesheet("/app.css", { media: "screen", precedence: "app" }),
+        props,
+      ),
+    ).toBe(props);
+    expect(props).toEqual({
+      "data-fig-hydration-skip": true,
+      "data-precedence": "app",
+      href: "/app.css",
+      media: "screen",
+      rel: "stylesheet",
     });
   });
 

@@ -1,10 +1,6 @@
+import { type FigAssetResource, type PreloadResource } from "@bgub/fig";
 import {
-  type FigAssetResource,
-  type PreloadResource,
-  type Props,
-} from "@bgub/fig";
-import {
-  assetResourceHostAttributes,
+  assetResourceHostProps,
   assetResourceKey,
   HYDRATION_SKIP_ATTRIBUTE,
 } from "@bgub/fig/internal";
@@ -266,14 +262,14 @@ function writeAssetTag(
     default: {
       // The attribute set is shared with the client's head insertion; only
       // the server-side reveal-blocker id and nonce are appended here.
-      const props: Props = {
+      const props = assetResourceHostProps(resource, {
         [HYDRATION_SKIP_ATTRIBUTE]: true,
-        ...Object.fromEntries(assetResourceHostAttributes(resource)),
-      };
+      });
       if (resource.kind === "stylesheet" && id !== null) props.id = id;
+      if (sink.nonce !== undefined) props.nonce = sink.nonce;
 
       const tag = resource.kind === "script" ? "script" : "link";
-      writeElementStart(tag, withNonce(sink, props), sink);
+      writeElementStart(tag, props, sink);
       if (tag === "script") writeElementEnd("script", sink);
     }
   }
@@ -317,10 +313,6 @@ function metadataAttributes(
   return attributes.filter(
     (entry): entry is readonly [string, string] => entry[1] !== undefined,
   );
-}
-
-function withNonce(sink: AssetSink, props: Props): Props {
-  return sink.nonce === undefined ? props : { ...props, nonce: sink.nonce };
 }
 
 function assetSignature(resource: FigAssetResource): string {

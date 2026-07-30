@@ -128,12 +128,12 @@ export {
 } from "./payload-format.ts";
 export {
   type AssetResourceDestination,
-  type AssetResourceHostAttribute,
+  type AssetResourceHostProps,
   assetResourceDestination,
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
   assetResourceFromHostValues,
-  assetResourceHostAttributes,
+  assetResourceHostProps,
   assetResourceKey,
   type ClientReferenceAssets,
   clientReferenceAssets,

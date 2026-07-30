@@ -6,7 +6,7 @@ import {
 import {
   assetResourceFromHostAttributes,
   assetResourceFromHostProps,
-  assetResourceHostAttributes,
+  assetResourceHostProps,
   assetResourceKey,
   isFigAssetResource,
 } from "@bgub/fig/internal";
@@ -693,7 +693,9 @@ function createDeliveryResourceElement(resource: FigAssetResource): Element {
   const element = document.createElement(
     resource.kind === "script" ? "script" : "link",
   );
-  for (const [name, value] of assetResourceHostAttributes(resource)) {
+  const props = assetResourceHostProps(resource);
+  for (const name of Object.keys(props)) {
+    const value = props[name];
     element.setAttribute(name, value === true ? "" : value);
   }
   return element;
