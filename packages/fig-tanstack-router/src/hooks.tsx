@@ -79,6 +79,7 @@ export const RouterContext = createContext<RouterContextValue | null>(null);
 export const MatchContext =
   createContext<RouterReadableStore<AnyRouteMatch> | null>(null);
 const missingMatch = Symbol("missing route match");
+const noSelection = Symbol("no selection");
 const missingMatchStore = {
   get: () => undefined,
 };
@@ -100,10 +101,9 @@ function useStoreSelector<TValue, TSelected = TValue>(
   router: AnyRouter,
   options?: SelectRouteValue<TValue, TSelected>,
 ): (value: TValue) => TSelected {
-  const previous = useMemo<{ initialized: boolean; value: TSelected }>(
-    () => ({ initialized: false, value: undefined as TSelected }),
-    [],
-  );
+  const previous = useMemo<{
+    value: TSelected | typeof noSelection;
+  }>(() => ({ value: noSelection }), []);
   const select = options?.select;
   const structuralSharing =
     options?.structuralSharing ??
@@ -114,10 +114,9 @@ function useStoreSelector<TValue, TSelected = TValue>(
       let selected = (
         select === undefined ? value : select(value)
       ) as TSelected;
-      if (structuralSharing && previous.initialized) {
+      if (structuralSharing && previous.value !== noSelection) {
         selected = replaceEqualDeep(previous.value, selected);
       }
-      previous.initialized = true;
       previous.value = selected;
       return selected;
     },
@@ -342,7 +341,7 @@ export function useMatch<
   return useMatchValue(
     options?.from,
     options,
-    (match) => match as MakeRouteMatch<TRouter["routeTree"], TFrom, TStrict>,
+    null,
     options?.shouldThrow,
   ) as ThrowOrOptional<
     RouteMatchResult<TRouter, TFrom, TStrict, TSelected>,
@@ -350,11 +349,13 @@ export function useMatch<
   >;
 }
 
-function useMatchSelection(
+type MatchValueKey = "context" | "loaderDeps" | "params" | "search" | null;
+
+export function useMatchValue<TValue>(
   from: string | undefined,
-  select: ((match: AnyRouteMatch) => unknown) | undefined,
+  options: SelectRouteValue<TValue, unknown> | undefined,
+  key: MatchValueKey,
   shouldThrow = true,
-  structuralSharing?: boolean,
 ): unknown {
   const router = useRouter<AnyRouter>();
   const nearestMatchStore = readContext(MatchContext);
@@ -362,7 +363,18 @@ function useMatchSelection(
     from === undefined || nearestMatchStore?.get().routeId === from
       ? nearestMatchStore
       : router.stores.getRouteMatchStore(from);
-  const selectMatch = useStoreSelector(router, { select, structuralSharing });
+  const select = options?.select;
+  const selectValue = useCallback(
+    (match: AnyRouteMatch) => {
+      const value = (key === null ? match : match[key]) as TValue;
+      return select === undefined ? value : select(value);
+    },
+    [key, select],
+  );
+  const selectMatch = useStoreSelector(router, {
+    select: selectValue,
+    structuralSharing: options?.structuralSharing,
+  });
 
   const selectPresentMatch = useCallback(
     (match: AnyRouteMatch | undefined) =>
@@ -383,23 +395,6 @@ function useMatchSelection(
     return undefined;
   }
   return selected;
-}
-
-export function useMatchValue<TValue>(
-  from: string | undefined,
-  options: SelectRouteValue<TValue, unknown> | undefined,
-  getValue: (match: AnyRouteMatch) => TValue,
-  shouldThrow = true,
-): unknown {
-  return useMatchSelection(
-    from,
-    (match) => {
-      const value = getValue(match);
-      return options?.select === undefined ? value : options.select(value);
-    },
-    shouldThrow,
-    options?.structuralSharing,
-  );
 }
 
 type TypedRouteValueOptions<
@@ -431,7 +426,7 @@ export function useParams<
   return useMatchValue(
     options?.from,
     options,
-    (match) => match.params as ResolveUseParams<TRouter, TFrom, TStrict>,
+    "params",
     options?.shouldThrow,
   ) as ThrowOrOptional<
     UseParamsResult<TRouter, TFrom, TStrict, TSelected>,
@@ -460,7 +455,7 @@ export function useSearch<
   return useMatchValue(
     options?.from,
     options,
-    (match) => match.search as ResolveUseSearch<TRouter, TFrom, TStrict>,
+    "search",
     options?.shouldThrow,
   ) as ThrowOrOptional<
     UseSearchResult<TRouter, TFrom, TStrict, TSelected>,
@@ -483,7 +478,7 @@ export function useLoaderDeps<
   return useMatchValue(
     options?.from,
     options,
-    (match) => match.loaderDeps as ResolveUseLoaderDeps<TRouter, TFrom>,
+    "loaderDeps",
   ) as UseLoaderDepsResult<TRouter, TFrom, TSelected>;
 }
 
@@ -504,8 +499,7 @@ export function useRouteContext<
   return useMatchValue(
     options?.from,
     options,
-    (match) =>
-      match.context as UseRouteContextResult<TRouter, TFrom, TStrict, unknown>,
+    "context",
   ) as UseRouteContextResult<TRouter, TFrom, TStrict, TSelected>;
 }
 

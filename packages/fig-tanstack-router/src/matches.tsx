@@ -6,34 +6,24 @@ import {
   readContext,
   readPromise,
   Suspense,
-  transition,
   useBeforePaint,
   useCallback,
   useMemo,
   useState,
   useSyncExternalStore,
 } from "@bgub/fig";
-import type { HostIntrinsicElements } from "@bgub/fig-dom";
-import type { RouterHistory } from "@tanstack/history";
 import {
   type AnyRoute,
   type AnyRouteMatch,
   type AnyRouter,
-  appendUniqueUserTags,
   createControlledPromise,
   deepEqual,
-  escapeHtml,
   getLocationChangeInfo,
   isNotFound,
-  type Manifest,
-  type MetaDescriptor,
   type RegisteredRouter,
-  type RouterManagedTag,
   rootRouteId,
-  setupScrollRestoration,
 } from "@tanstack/router-core";
 import { getScrollRestorationScriptForRouter } from "@tanstack/router-core/scroll-restoration-script";
-import { batch } from "@tanstack/store";
 import { dataStoreFromContext } from "./data-context.ts";
 import {
   MatchContext,
@@ -43,27 +33,17 @@ import {
 } from "./hooks.tsx";
 import {
   collectRouteAssets,
+  collectRouterHeadTags,
   renderPositionedRouterTag,
   renderRouterHeadTags,
 } from "./route-assets.ts";
 import type { AsyncRouteComponent } from "./route.tsx";
 import { useReadableStore } from "./store.ts";
+import { Transitioner } from "./transitioner.tsx";
 
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
-
-declare module "@tanstack/router-core" {
-  interface RouteMatchExtensions {
-    headScripts?: Array<HostIntrinsicElements["script"] | undefined>;
-    links?: Array<HostIntrinsicElements["link"] | undefined>;
-    meta?: Array<HostIntrinsicElements["meta"] | MetaDescriptor | undefined>;
-    scripts?: Array<HostIntrinsicElements["script"] | undefined>;
-    styles?: Array<HostIntrinsicElements["style"] | undefined>;
-  }
-}
-
-type HistoryUpdate = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
 
 export type RouterProviderProps<TRouter extends AnyRouter = RegisteredRouter> =
   Partial<Omit<TRouter["options"], "context">> & {
@@ -105,192 +85,6 @@ function ServerTransitioner(): null {
   return null;
 }
 
-type RouterTransitionState = {
-  active: boolean;
-  generation: number;
-  initialLoadStarted: boolean;
-  phase: "idle" | "loading" | "loaded" | "mounting";
-};
-
-function Transitioner(): FigNode {
-  const router = useRouter<AnyRouter>();
-  const state = useMemo<RouterTransitionState>(
-    () => ({
-      active: false,
-      generation: 0,
-      initialLoadStarted: false,
-      phase: "idle",
-    }),
-    [router],
-  );
-  const settleLifecycle = useCallback(() => {
-    if (state.phase === "idle") return;
-    const isLoading = router.stores.isLoading.get();
-    const hasPending = router.stores.hasPending.get();
-    const isTransitioning = router.stores.isTransitioning.get();
-    const changeInfo = getLocationChangeInfo(
-      router.stores.location.get(),
-      router.stores.resolvedLocation.get(),
-    );
-    if (!isLoading && state.phase === "loading") {
-      state.phase = "loaded";
-      router.emit({ type: "onLoad", ...changeInfo });
-    }
-    if (!isLoading && !hasPending && state.phase === "loaded") {
-      state.phase = "mounting";
-      router.emit({ type: "onBeforeRouteMount", ...changeInfo });
-    }
-    if (!isLoading && !hasPending && !isTransitioning) {
-      state.phase = "idle";
-      router.emit({ type: "onResolved", ...changeInfo });
-      batch(() => {
-        router.stores.status.set("idle");
-        router.stores.resolvedLocation.set(router.stores.location.get());
-      });
-    }
-  }, [router, state]);
-  const runRouterTransition = useCallback(
-    (callback: () => void) => {
-      const startsPending = !router.stores.isTransitioning.get();
-      if (startsPending) router.stores.isTransitioning.set(true);
-
-      let result: unknown;
-      try {
-        const publishesPending = router.stores.pendingMatches
-          .get()
-          .some((match) => match.status === "pending");
-        if (startsPending || !publishesPending) {
-          transition(() => {
-            result = callback();
-          });
-        } else {
-          result = callback();
-        }
-      } catch (error) {
-        if (startsPending) {
-          router.stores.isTransitioning.set(false);
-        }
-        throw error;
-      }
-
-      const promise = result as PromiseLike<unknown>;
-      if (typeof promise?.then !== "function") {
-        if (startsPending) {
-          router.stores.isTransitioning.set(false);
-        }
-        return;
-      }
-
-      const generation = (state.generation += 1);
-      state.phase = "loading";
-      const finish = () => {
-        if (state.active && state.generation === generation) {
-          router.stores.isTransitioning.set(false);
-        }
-      };
-      void promise.then(finish, (error: unknown) => {
-        finish();
-        queueMicrotask(() => {
-          throw error;
-        });
-      });
-    },
-    [router, state],
-  );
-  const commitWithoutRouterViewTransition = useCallback(
-    (commit: () => Promise<void>) => {
-      router.shouldViewTransition = undefined;
-      void commit();
-    },
-    [router],
-  );
-
-  useBeforePaint(
-    (signal) => {
-      const previousStartTransition = router.startTransition;
-      const previousStartViewTransition = router.startViewTransition;
-      const subscriptions = [
-        router.stores.isLoading.subscribe(settleLifecycle),
-        router.stores.hasPending.subscribe(settleLifecycle),
-        router.stores.isTransitioning.subscribe(settleLifecycle),
-      ];
-      state.active = true;
-      router.startTransition = runRouterTransition;
-      router.startViewTransition = commitWithoutRouterViewTransition;
-      signal.addEventListener(
-        "abort",
-        () => {
-          for (const subscription of subscriptions) {
-            subscription.unsubscribe();
-          }
-          state.active = false;
-          state.generation += 1;
-          if (router.startTransition === runRouterTransition) {
-            router.startTransition = previousStartTransition;
-          }
-          if (
-            router.startViewTransition === commitWithoutRouterViewTransition
-          ) {
-            router.startViewTransition = previousStartViewTransition;
-          }
-          if (router.stores.isTransitioning.get()) {
-            router.stores.isTransitioning.set(false);
-          }
-        },
-        { once: true },
-      );
-      return undefined;
-    },
-    [
-      commitWithoutRouterViewTransition,
-      router,
-      runRouterTransition,
-      settleLifecycle,
-      state,
-    ],
-  );
-
-  useBeforePaint(
-    (signal) => {
-      setupScrollRestoration(router);
-      const unsubscribe = router.history.subscribe((update: HistoryUpdate) => {
-        void router.load(update).catch(logRouterLoadError);
-      });
-      signal.addEventListener("abort", unsubscribe, { once: true });
-
-      if (state.initialLoadStarted) return undefined;
-      state.initialLoadStarted = true;
-      const nextLocation = router.buildLocation({
-        _includeValidateSearch: true,
-        hash: true,
-        params: true,
-        search: true,
-        state: true,
-        to: router.latestLocation.pathname,
-      });
-      if (router.latestLocation.publicHref !== nextLocation.publicHref) {
-        void router
-          .commitLocation({ ...nextLocation, replace: true })
-          .catch(logRouterLoadError);
-      } else if (
-        !router.isServer &&
-        router.ssr === undefined &&
-        router.stores.matchesId.get().length === 0
-      ) {
-        void router.load().catch(logRouterLoadError);
-      }
-      return undefined;
-    },
-    [router, router.history, router.options.scrollRestoration, state],
-  );
-
-  return null;
-}
-
-function logRouterLoadError(error: unknown): void {
-  console.error("Error loading route", error);
-}
-
 function OnRendered(): FigNode {
   const router = useRouter<AnyRouter>();
   type ResolvedLocation = ReturnType<typeof router.stores.resolvedLocation.get>;
@@ -304,7 +98,6 @@ function OnRendered(): FigNode {
   );
 
   useBeforePaint(() => {
-    if (router.isServer) return undefined;
     const current = router.stores.resolvedLocation.get();
     const previous = state.previous;
     if (
@@ -385,11 +178,12 @@ function Match({ matchId }: { matchId: string }): FigNode {
     (route.isRoot ? router.options.defaultNotFoundComponent : undefined);
   const noSsr = match.ssr === false || match.ssr === "data-only";
   const shouldWrapInSuspense =
-    (!route.isRoot || route.options.wrapInSuspense || noSsr) &&
-    (route.options.wrapInSuspense ??
-      (PendingComponent !== undefined ||
-        (ErrorComponent as AsyncRouteComponent | undefined)?.preload ||
-        noSsr));
+    route.options.wrapInSuspense ??
+    (noSsr ||
+      (!route.isRoot &&
+        (PendingComponent !== undefined ||
+          (ErrorComponent as AsyncRouteComponent | undefined)?.preload !==
+            undefined)));
 
   const pending = PendingComponent ? createElement(PendingComponent) : null;
   let content: FigNode = createElement(MatchContent, { match, route });
@@ -512,7 +306,7 @@ function MatchContent({
     if (router.isServer && ErrorComponent) {
       return createElement(ErrorComponent, {
         error: match.error,
-        reset: () => undefined,
+        reset: doNothing,
       });
     }
     throw match.error;
@@ -563,15 +357,25 @@ function ClientOnly({
 }): FigNode {
   const hydrated = useSyncExternalStore(
     subscribeHydration,
-    () => true,
-    () => false,
+    hydratedSnapshot,
+    serverHydrationSnapshot,
   );
   return hydrated ? children : fallback;
 }
 
 function subscribeHydration(): () => void {
-  return () => undefined;
+  return doNothing;
 }
+
+function hydratedSnapshot(): boolean {
+  return true;
+}
+
+function serverHydrationSnapshot(): boolean {
+  return false;
+}
+
+function doNothing(): void {}
 
 function renderScrollRestorationScript(router: AnyRouter): FigNode {
   const script = getScrollRestorationScriptForRouter(router);
@@ -609,7 +413,8 @@ export function Outlet(): FigNode {
 export function HeadContent(): FigNode {
   const { manifest, ownerDocument, router } = readRouterContext();
   const selectTags = useCallback(
-    (matches: AnyRouteMatch[]) => buildHeadTags(router, matches, manifest),
+    (matches: AnyRouteMatch[]) =>
+      collectRouterHeadTags(router, matches, manifest),
     [manifest, router],
   );
   const tags = useReadableStore(router.stores.matches, selectTags, deepEqual);
@@ -630,106 +435,10 @@ export function Scripts(): FigNode {
     selectTags,
     deepEqual,
   );
-  const tags = [...selectedTags];
-
   const buffered = router.serverSsr?.takeBufferedScripts();
-  if (buffered !== undefined) tags.unshift(buffered);
-  return tags.map(renderPositionedRouterTag);
-}
-
-function buildHeadTags(
-  router: AnyRouter,
-  matches: AnyRouteMatch[],
-  manifest: Manifest | undefined,
-): RouterManagedTag[] {
-  const nonce = router.options.ssr?.nonce;
-  const metaTags: RouterManagedTag[] = [];
-  const seenMeta = new Set<string>();
-  let selectedTitle: RouterManagedTag | undefined;
-
-  for (let matchIndex = matches.length - 1; matchIndex >= 0; matchIndex -= 1) {
-    const routeMeta = matches[matchIndex]?.meta ?? [];
-    for (let metaIndex = routeMeta.length - 1; metaIndex >= 0; metaIndex -= 1) {
-      const value = routeMeta[metaIndex];
-      if (value === undefined) continue;
-      const title =
-        "title" in value && typeof value.title === "string"
-          ? value.title
-          : undefined;
-      if (title !== undefined) {
-        selectedTitle ??= { tag: "title", children: title };
-        continue;
-      }
-      if ("script:ld+json" in value) {
-        try {
-          metaTags.push({
-            tag: "script",
-            attrs: { type: "application/ld+json" },
-            children: escapeHtml(JSON.stringify(value["script:ld+json"])),
-          });
-        } catch {
-          // Invalid JSON-LD is omitted, matching TanStack Router's adapters.
-        }
-        continue;
-      }
-      const identity =
-        ("name" in value && typeof value.name === "string"
-          ? value.name
-          : undefined) ??
-        ("property" in value && typeof value.property === "string"
-          ? value.property
-          : undefined);
-      if (identity !== undefined) {
-        if (seenMeta.has(identity)) continue;
-        seenMeta.add(identity);
-      }
-      metaTags.push({ tag: "meta", attrs: { ...value, nonce } });
-    }
-  }
-  if (selectedTitle !== undefined) metaTags.push(selectedTitle);
-  if (nonce !== undefined) {
-    metaTags.push({
-      tag: "meta",
-      attrs: { content: nonce, property: "csp-nonce" },
-    });
-  }
-  metaTags.reverse();
-
-  const tags: RouterManagedTag[] = [];
-  appendUniqueUserTags(tags, metaTags);
-  appendUniqueUserTags(
-    tags,
-    matches.flatMap(
-      (match) => collectRouteAssets(router, match, manifest).links,
-    ),
-  );
-  if (manifest?.inlineStyle !== undefined) {
-    tags.push({
-      tag: "style",
-      attrs: { ...manifest.inlineStyle.attrs, nonce },
-      children: manifest.inlineStyle.children,
-      inlineCss: true,
-    });
-  }
-  appendUniqueUserTags(
-    tags,
-    matches.flatMap((match) =>
-      (match.styles ?? [])
-        .filter((style) => style !== undefined)
-        .map(({ children, ...attrs }) => ({
-          tag: "style" as const,
-          attrs: { ...attrs, nonce },
-          children: children as string | undefined,
-        })),
-    ),
-  );
-  appendUniqueUserTags(
-    tags,
-    matches.flatMap(
-      (match) => collectRouteAssets(router, match, manifest).headScripts,
-    ),
-  );
-  return tags;
+  const tags =
+    buffered === undefined ? selectedTags : [buffered, ...selectedTags];
+  return tags.map((tag) => renderPositionedRouterTag(tag));
 }
 
 function renderNotFound(

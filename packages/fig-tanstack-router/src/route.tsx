@@ -191,16 +191,13 @@ function bindRouteApi<TId extends string, TFullPath extends string>(
     notFound: (options) =>
       createNotFound({ routeId: getId(), ...options } as never),
     useLoaderDeps: (options) =>
-      useMatchValue(getId(), options, (match) => match.loaderDeps) as never,
-    useMatch: (options) =>
-      useMatchValue(getId(), options, (match) => match) as never,
+      useMatchValue(getId(), options, "loaderDeps") as never,
+    useMatch: (options) => useMatchValue(getId(), options, null) as never,
     useNavigate: () => useNavigateFrom(useFullPath()) as never,
-    useParams: (options) =>
-      useMatchValue(getId(), options, (match) => match.params) as never,
+    useParams: (options) => useMatchValue(getId(), options, "params") as never,
     useRouteContext: (options) =>
-      useMatchValue(getId(), options, (match) => match.context) as never,
-    useSearch: (options) =>
-      useMatchValue(getId(), options, (match) => match.search) as never,
+      useMatchValue(getId(), options, "context") as never,
+    useSearch: (options) => useMatchValue(getId(), options, "search") as never,
   };
 }
 
@@ -298,36 +295,17 @@ export function getRouteApi<
   const TId extends string,
   TRouter extends AnyRouter = RegisteredRouter,
 >(id: ConstrainLiteral<TId, RouteIds<TRouter["routeTree"]>>) {
-  return new RouteApi<TId, TRouter>({ id });
-}
-
-class RouteApi<
-  TId extends string,
-  TRouter extends AnyRouter = RegisteredRouter,
-> extends BaseRouteApi<TId, TRouter> {
-  declare Link: LinkComponentRoute<RouteTypesById<TRouter, TId>["fullPath"]>;
-  declare useLoaderDeps: UseLoaderDepsRoute<TId>;
-  declare useMatch: UseMatchRoute<TId>;
-  declare useNavigate: () => UseNavigateResult<
-    RouteTypesById<TRouter, TId>["fullPath"]
-  >;
-  declare useParams: UseParamsRoute<TId>;
-  declare useRouteContext: UseRouteContextRoute<TId>;
-  declare useSearch: UseSearchRoute<TId>;
-
-  constructor({ id }: { id: TId }) {
-    super({ id });
-    Object.assign(
-      this,
-      bindRouteApi(
-        () => String(this.id),
-        () => {
-          const router = useRouter<TRouter>();
-          return router.routesById[String(this.id)].fullPath;
-        },
-      ),
-    );
-  }
+  const api = new BaseRouteApi<TId, TRouter>({ id });
+  return Object.assign(
+    api,
+    bindRouteApi<TId, RouteTypesById<TRouter, TId>["fullPath"]>(
+      () => api.id,
+      () => {
+        const router = useRouter<TRouter>();
+        return router.routesById[api.id].fullPath;
+      },
+    ),
+  );
 }
 
 export function createRoute<

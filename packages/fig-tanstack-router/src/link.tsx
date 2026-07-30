@@ -107,13 +107,8 @@ function ClientLink<
     external,
     href,
     isActive,
-    linkClass,
-    linkStyle,
     mix,
-    stateAnchorProps,
-    bind: stateBind,
     stateMix,
-    target,
   } = resolveLinkState(router, currentLocation, props);
   const preload =
     props.reloadDocument || external || dangerous || props.href !== undefined
@@ -121,7 +116,6 @@ function ClientLink<
       : (props.preload ?? router.options.defaultPreload);
   const preloadDelay =
     props.preloadDelay ?? router.options.defaultPreloadDelay ?? 0;
-  const linkBind = combineLinkBinds(anchorProps.bind, stateBind);
   const renderedChildren =
     typeof children === "function"
       ? children({ isActive, isTransitioning })
@@ -179,15 +173,11 @@ function ClientLink<
     "a",
     {
       ...anchorProps,
-      ...stateAnchorProps,
-      "aria-current": isActive ? "page" : undefined,
-      "aria-disabled": disabled ? true : undefined,
-      "data-status": isActive ? "active" : undefined,
       "data-transitioning": isTransitioning ? "transitioning" : undefined,
       bind:
-        preload === "viewport" ? composeBind(linkBind, viewportBind) : linkBind,
-      class: linkClass,
-      href: dangerous ? undefined : href,
+        preload === "viewport"
+          ? composeBind(anchorProps.bind, viewportBind)
+          : anchorProps.bind,
       mix: [
         mix,
         stateMix,
@@ -196,7 +186,7 @@ function ClientLink<
             event.currentTarget instanceof Element
               ? event.currentTarget.getAttribute("target")
               : null;
-          const effectiveTarget = target ?? elementTarget;
+          const effectiveTarget = anchorProps.target ?? elementTarget;
           if (
             disabled ||
             dangerous ||
@@ -241,9 +231,6 @@ function ClientLink<
             if (!disabled) preloadRoute();
           }),
       ],
-      role: disabled ? "link" : (stateAnchorProps?.role ?? anchorProps.role),
-      style: linkStyle,
-      target,
     },
     renderedChildren,
   );
@@ -260,44 +247,20 @@ function ServerLink<
 }: LinkImplementationProps<TFrom, TTo, TMaskFrom, TMaskTo>): FigNode {
   const currentLocation =
     router.stores.resolvedLocation.get() ?? router.stores.location.get();
-  const {
-    anchorProps,
-    children,
-    dangerous,
-    disabled,
-    href,
-    isActive,
-    linkClass,
-    linkStyle,
-    mix,
-    stateAnchorProps,
-    bind: stateBind,
-    stateMix,
-    target,
-  } = resolveLinkState(router, currentLocation, props);
-  const linkBind = combineLinkBinds(anchorProps.bind, stateBind);
+  const { anchorProps, children, isActive, mix, stateMix } = resolveLinkState(
+    router,
+    currentLocation,
+    props,
+  );
   const renderedChildren =
     typeof children === "function"
       ? children({ isActive, isTransitioning: false })
       : children;
 
   const serverMix = combineServerLinkMixins(mix, stateMix);
-  const serverAnchorProps: AnchorProps = {
-    ...anchorProps,
-    ...stateAnchorProps,
-    "aria-current": isActive ? "page" : undefined,
-    "aria-disabled": disabled ? true : undefined,
-    "data-status": isActive ? "active" : undefined,
-    bind: linkBind,
-    class: linkClass,
-    href: dangerous ? undefined : href,
-    role: disabled ? "link" : (stateAnchorProps?.role ?? anchorProps.role),
-    style: linkStyle,
-    target,
-  };
-  if (serverMix !== undefined) serverAnchorProps.mix = serverMix;
+  if (serverMix !== undefined) anchorProps.mix = serverMix;
 
-  const element = createElement("a", serverAnchorProps, renderedChildren);
+  const element = createElement("a", anchorProps, renderedChildren);
   markClientOnlyHostProps(element.props, "on()");
   return element;
 }
@@ -415,22 +378,30 @@ function resolveLinkState<
     stateStyle !== null
       ? { ...anchorProps.style, ...stateStyle }
       : (stateStyle ?? anchorProps.style);
+  const resolvedAnchorProps: AnchorProps = anchorProps;
+  if (stateAnchorProps !== undefined) {
+    Object.assign(resolvedAnchorProps, stateAnchorProps);
+  }
+  resolvedAnchorProps["aria-current"] = isActive ? "page" : undefined;
+  resolvedAnchorProps["aria-disabled"] = disabled ? true : undefined;
+  resolvedAnchorProps["data-status"] = isActive ? "active" : undefined;
+  resolvedAnchorProps.bind = combineLinkBinds(anchorProps.bind, bind);
+  resolvedAnchorProps.class = linkClass;
+  resolvedAnchorProps.href = dangerous ? undefined : href;
+  resolvedAnchorProps.role = disabled ? "link" : resolvedAnchorProps.role;
+  resolvedAnchorProps.style = linkStyle;
+  resolvedAnchorProps.target = target;
 
   return {
-    anchorProps,
-    bind,
+    anchorProps: resolvedAnchorProps,
     children,
     dangerous,
     disabled,
     external,
     href,
     isActive,
-    linkClass,
-    linkStyle,
     mix,
-    stateAnchorProps,
     stateMix,
-    target,
   };
 }
 

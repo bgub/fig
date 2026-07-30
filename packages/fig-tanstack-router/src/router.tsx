@@ -1,3 +1,16 @@
+import type { HostIntrinsicElements } from "@bgub/fig-dom";
+import type { MetaDescriptor } from "@tanstack/router-core";
+
+declare module "@tanstack/router-core" {
+  interface RouteMatchExtensions {
+    headScripts?: Array<HostIntrinsicElements["script"] | undefined>;
+    links?: Array<HostIntrinsicElements["link"] | undefined>;
+    meta?: Array<HostIntrinsicElements["meta"] | MetaDescriptor | undefined>;
+    scripts?: Array<HostIntrinsicElements["script"] | undefined>;
+    styles?: Array<HostIntrinsicElements["style"] | undefined>;
+  }
+}
+
 export {
   createBrowserHistory,
   createHashHistory,
