@@ -24,6 +24,7 @@ import {
 import {
   collectComponentNames,
   isStylesheetSpecifier,
+  mayContainStylesheetSpecifier,
   rewriteStylesheetImports,
   stylesheetImportAnalysisPlugin,
 } from "./payload-stylesheet-compiler.ts";
@@ -48,7 +49,7 @@ export async function analyzeStylesheetImports(
   id: string,
 ): Promise<string[]> {
   const clean = cleanModuleId(id);
-  if (!isSourceModule(clean)) return [];
+  if (!isSourceModule(clean) || !mayContainStylesheetSpecifier(code)) return [];
   const stylesheets: string[] = [];
   await transformWithBabel(code, clean, {
     plugins: [stylesheetImportAnalysisPlugin(stylesheets)],
@@ -126,7 +127,7 @@ function payloadBabelPlugin(
   compiledPayloadModule: boolean,
   state: { changed: boolean },
 ): (api: typeof babel) => PluginObject {
-  return (api: typeof babel) => {
+  return (api) => {
     const t = api.types;
 
     return {

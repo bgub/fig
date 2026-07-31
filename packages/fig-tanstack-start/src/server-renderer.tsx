@@ -9,10 +9,9 @@ import {
   transformReadableStreamWithRouter,
 } from "@tanstack/router-core/ssr/server";
 import { injectPayloadDocument } from "./payload-internal.ts";
-import { requireStartDataStore } from "./store.ts";
-import { startDataDocumentScript } from "./transport.ts";
+import { requireStartDataStore, startDataDocumentScript } from "./transport.ts";
 
-interface RenderRouterDocumentOptions {
+export interface RenderRouterToStreamOptions {
   preloadHeader?: boolean | ServerPreloadHeaderOptions;
   request: Request;
   responseHeaders: Headers;
@@ -22,12 +21,12 @@ interface RenderRouterDocumentOptions {
 // This private module is shared by the default entry and public server API.
 // Keeping Payload response rendering out of the default entry prevents its
 // compiled application-reference manifest from entering the SSR service.
-export async function renderRouterDocument({
+export async function renderRouterToStream({
   preloadHeader = false,
   request,
   responseHeaders,
   router,
-}: RenderRouterDocumentOptions) {
+}: RenderRouterToStreamOptions) {
   const dataStore = requireStartDataStore(router.options.context);
   const render = renderToDocumentStream(<RouterProvider router={router} />, {
     dataStore,

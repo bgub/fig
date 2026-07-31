@@ -38,7 +38,7 @@ export async function transformServerPayloadDefinitions(
 function serverPayloadBabelPlugin(state: {
   transformed: boolean;
 }): (api: typeof babel) => PluginObject {
-  return (api: typeof babel) => {
+  return (api) => {
     const t = api.types;
     let createElement: babel.types.Identifier;
     let createServerFn: babel.types.Identifier;
@@ -58,39 +58,19 @@ function serverPayloadBabelPlugin(state: {
           exit(path: NodePath<babel.types.Program>) {
             if (!state.transformed) return;
             path.node.body.unshift(
-              t.importDeclaration(
-                [
-                  t.importSpecifier(
-                    createElement,
-                    t.identifier("createElement"),
-                  ),
-                ],
-                t.stringLiteral("@bgub/fig"),
+              namedImport(
+                t,
+                createServerFn,
+                "createServerFn",
+                tanStackCompatibilityProfile.packages.frameworkStart,
               ),
-            );
-            path.node.body.unshift(
-              t.importDeclaration(
-                [
-                  t.importSpecifier(
-                    renderPayloadResponse,
-                    t.identifier("renderPayloadResponse"),
-                  ),
-                ],
-                t.stringLiteral(serverPackageId),
+              namedImport(
+                t,
+                renderPayloadResponse,
+                "renderPayloadResponse",
+                serverPackageId,
               ),
-            );
-            path.node.body.unshift(
-              t.importDeclaration(
-                [
-                  t.importSpecifier(
-                    createServerFn,
-                    t.identifier("createServerFn"),
-                  ),
-                ],
-                t.stringLiteral(
-                  tanStackCompatibilityProfile.packages.frameworkStart,
-                ),
-              ),
+              namedImport(t, createElement, "createElement", "@bgub/fig"),
             );
           },
         },
@@ -236,5 +216,17 @@ function isRenderExpression(
     (value.type === "FunctionExpression" && !value.generator) ||
     value.type === "Identifier" ||
     value.type === "MemberExpression"
+  );
+}
+
+function namedImport(
+  t: typeof babel.types,
+  local: babel.types.Identifier,
+  imported: string,
+  source: string,
+): babel.types.ImportDeclaration {
+  return t.importDeclaration(
+    [t.importSpecifier(local, t.identifier(imported))],
+    t.stringLiteral(source),
   );
 }

@@ -8,18 +8,16 @@ import {
   createStartHandler,
   type CreateStartHandlerOptions,
 } from "@tanstack/start-server-core";
-import type { AnyRouter } from "@tanstack/router-core";
 import { compiledPayloadAssets } from "./payload-assets.ts";
-import { renderRouterDocument } from "./server-renderer.tsx";
+import {
+  renderRouterToStream,
+  type RenderRouterToStreamOptions,
+} from "./server-renderer.tsx";
 import { getStartContext } from "./start-context.ts";
 import { compiledIsomorphicReferenceAssets } from "virtual:fig-tanstack-start/payload-manifest";
 
-export interface RenderRouterToStreamOptions {
-  preloadHeader?: boolean | ServerPreloadHeaderOptions;
-  request: Request;
-  responseHeaders: Headers;
-  router: AnyRouter;
-}
+export { renderRouterToStream };
+export type { RenderRouterToStreamOptions };
 
 export interface CreateFigStartHandlerOptions extends Omit<
   CreateStartHandlerOptions,
@@ -34,21 +32,10 @@ export function createFigStartHandler({
 }: CreateFigStartHandlerOptions = {}) {
   return createStartHandler({
     ...options,
-    handler: (context) => renderRouterToStream({ ...context, preloadHeader }),
-  });
-}
-
-export async function renderRouterToStream({
-  preloadHeader = false,
-  request,
-  responseHeaders,
-  router,
-}: RenderRouterToStreamOptions) {
-  return renderRouterDocument({
-    preloadHeader,
-    request,
-    responseHeaders,
-    router,
+    handler:
+      preloadHeader === false
+        ? renderRouterToStream
+        : (context) => renderRouterToStream({ ...context, preloadHeader }),
   });
 }
 
@@ -76,8 +63,9 @@ export function renderPayloadResponse(
 function requestAbortSignal(): AbortSignal | undefined {
   const context = getStartContext({ throwIfNotFound: false });
   const request =
-    typeof context === "object" && context !== null
-      ? (context as { request?: unknown }).request
+    (typeof context === "object" || typeof context === "function") &&
+    context !== null
+      ? Reflect.get(context, "request")
       : undefined;
   return request instanceof Request ? request.signal : undefined;
 }

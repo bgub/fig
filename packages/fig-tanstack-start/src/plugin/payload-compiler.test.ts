@@ -206,6 +206,27 @@ describe("TanStack Start Payload compiler", () => {
     ).rejects.toThrow(/statically imported component identifier/);
   });
 
+  it("rejects a shadowed Isomorphic component after the imported component", async () => {
+    await expect(
+      analyzeIsomorphicBoundaries(
+        `
+          import { Isomorphic } from "@bgub/fig-tanstack-start/payload";
+          import { Island } from "./Island.tsx";
+
+          export function Imported() {
+            return <Isomorphic component={Island} />;
+          }
+
+          export function Shadowed() {
+            function Island() { return null; }
+            return <Isomorphic component={Island} />;
+          }
+        `,
+        "/app/card.tsx",
+      ),
+    ).rejects.toThrow(/statically imported component identifier/);
+  });
+
   it("supports a statically imported default Isomorphic component", async () => {
     await expect(
       analyzeIsomorphicBoundaries(

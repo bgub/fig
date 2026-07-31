@@ -392,7 +392,7 @@ describe("tanstackStart", () => {
 
     expect(code).toContain("createStartHandler");
     expect(code).toContain('from "../server-renderer.tsx"');
-    expect(code).toContain("renderRouterDocument");
+    expect(code).toContain("renderRouterToStream");
     expect(code).not.toContain("createFigStartHandler");
     expect(code).not.toContain('from "@bgub/fig-tanstack-start/server"');
     expect(code).not.toContain("defaultStreamHandler");

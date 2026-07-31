@@ -29,14 +29,11 @@ export function isomorphicBoundaryAnalysisPlugin(
               return;
             }
             const component = isomorphicComponentAttribute(elementPath);
-            const imported = importedComponent(
-              elementPath,
-              component.node.name,
-            );
-            const key = `${imported.source}\0${imported.importedName}\0${component.node.name}`;
-            if (seen.has(key)) return;
-            seen.add(key);
-            imports.push({ ...imported, localName: component.node.name });
+            const localName = component.node.name;
+            const imported = importedComponent(elementPath, localName);
+            if (seen.has(localName)) return;
+            seen.add(localName);
+            imports.push({ ...imported, localName });
           },
         });
       },
@@ -58,7 +55,7 @@ export function rewriteIsomorphicBoundaries(
   const createReference = path.scope.generateUidIdentifier(
     "createIsomorphicReference",
   );
-  let count = 0;
+  let changed = false;
 
   path.traverse({
     JSXOpeningElement(elementPath) {
@@ -76,10 +73,10 @@ export function rewriteIsomorphicBoundaries(
           t.stringLiteral(reference.referenceId),
         ]),
       );
-      count += 1;
+      changed = true;
     },
   });
-  if (count === 0) return undefined;
+  if (!changed) return undefined;
 
   path.scope.crawl();
   for (const localName of byLocalName.keys()) {

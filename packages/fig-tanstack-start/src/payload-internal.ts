@@ -25,7 +25,7 @@ interface RegisteredPayloadStream {
 }
 
 interface PayloadCollector {
-  cancel(reason: unknown): Promise<void>;
+  reader: ReadableStreamDefaultReader<Uint8Array>;
   result: Promise<PayloadDocumentEntry>;
 }
 
@@ -42,18 +42,22 @@ export function initialPayloadResponse(
 ): Response | undefined {
   if (typeof document === "undefined") return undefined;
   const canonicalKey = normalizeDataResourceKey(key);
-  const script = Array.from(
-    document.querySelectorAll(`script[${payloadKeyAttribute}]`),
-  ).find(
-    (candidate) => candidate.getAttribute(payloadKeyAttribute) === canonicalKey,
-  );
-  if (script === undefined || consumedPayloads.has(script)) return undefined;
-  consumedPayloads.add(script);
+  let payload: Element | undefined;
+  for (const candidate of document.querySelectorAll(
+    `script[${payloadKeyAttribute}]`,
+  )) {
+    if (candidate.getAttribute(payloadKeyAttribute) === canonicalKey) {
+      payload = candidate;
+      break;
+    }
+  }
+  if (payload === undefined || consumedPayloads.has(payload)) return undefined;
+  consumedPayloads.add(payload);
 
-  return new Response(script.textContent ?? "", {
+  return new Response(payload.textContent ?? "", {
     headers: {
       "content-type":
-        script.getAttribute("type") ?? jsonPayloadCodec.contentType,
+        payload.getAttribute("type") ?? jsonPayloadCodec.contentType,
     },
   });
 }
@@ -122,7 +126,7 @@ export function injectPayloadDocument(
     await ready;
     collectRegisteredPayloads();
     return Promise.all(
-      [...collectors.values()].map((collector) => collector.result),
+      Array.from(collectors.values(), (collector) => collector.result),
     );
   }
 
@@ -137,16 +141,9 @@ export function injectPayloadDocument(
     return true;
   }
 
-  async function flush(
+  async function flushBuffer(
     controller: ReadableStreamDefaultController<Uint8Array>,
-    final: boolean,
   ): Promise<boolean> {
-    if (injected) {
-      const emitted = enqueue(controller, buffer);
-      buffer = emptyBytes;
-      return emitted;
-    }
-
     const marker = indexOfPayloadTransportMarker(buffer);
     if (marker !== -1) {
       let emitted = enqueue(controller, buffer.subarray(0, marker));
@@ -168,22 +165,9 @@ export function injectPayloadDocument(
       return emitted;
     }
 
-    if (final) {
-      const entries = await payloads();
-      if (entries.length > 0) {
-        throw new Error(
-          "Initial TanStack Start Payload responses require <StartScripts /> in the root document.",
-        );
-      }
-      const emitted = enqueue(controller, buffer);
-      buffer = emptyBytes;
-      injected = true;
-      return emitted;
-    }
-
     const length = Math.max(
       0,
-      buffer.byteLength - payloadTransportMarkerBytes.byteLength,
+      buffer.byteLength - payloadTransportMarkerBytes.byteLength + 1,
     );
     const emitted = enqueue(controller, buffer.subarray(0, length));
     buffer = buffer.subarray(length);
@@ -195,20 +179,32 @@ export function injectPayloadDocument(
       for (;;) {
         const result = await htmlReader.read();
         if (result.done) {
-          await flush(controller, true);
+          if (!injected) {
+            const entries = await payloads();
+            if (entries.length > 0) {
+              throw new Error(
+                "Initial TanStack Start Payload responses require <StartScripts /> in the root document.",
+              );
+            }
+            enqueue(controller, buffer);
+          }
           controller.close();
           return;
         }
+        if (injected) {
+          if (enqueue(controller, result.value)) return;
+          continue;
+        }
         buffer = concatenateBytes(buffer, result.value);
-        if (await flush(controller, false)) return;
+        if (await flushBuffer(controller)) return;
       }
     },
     async cancel(reason) {
       collectRegisteredPayloads();
       await Promise.allSettled([
         htmlReader.cancel(reason),
-        ...[...collectors.values()].map((collector) =>
-          collector.cancel(reason),
+        ...Array.from(collectors.values(), (collector) =>
+          collector.reader.cancel(reason),
         ),
       ]);
     },
@@ -260,7 +256,7 @@ function collectPayload(
   })();
 
   return {
-    cancel: (reason) => reader.cancel(reason),
+    reader,
     result,
   };
 }
@@ -288,16 +284,11 @@ function payloadDocumentScripts(
   entries: readonly PayloadDocumentEntry[],
   nonce: string | undefined,
 ): string {
-  const nonceAttribute = scriptNonceAttribute(nonce);
-  return entries
-    .map(
-      (entry) =>
-        `<script type="${escapeAttribute(entry.contentType)}" ${payloadKeyAttribute}="${escapeAttribute(entry.key)}" ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute}>${escapeScriptText(entry.payload)}</script>`,
-    )
-    .join("");
-}
-
-function scriptNonceAttribute(nonce: string | undefined): string {
-  if (nonce === undefined) return "";
-  return ` nonce="${escapeAttribute(nonce)}"`;
+  const nonceAttribute =
+    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
+  let scripts = "";
+  for (const entry of entries) {
+    scripts += `<script type="${escapeAttribute(entry.contentType)}" ${payloadKeyAttribute}="${escapeAttribute(entry.key)}" ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute}>${escapeScriptText(entry.payload)}</script>`;
+  }
+  return scripts;
 }

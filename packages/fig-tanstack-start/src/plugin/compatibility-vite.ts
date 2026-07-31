@@ -8,6 +8,7 @@ import {
 import { cleanModuleId, toViteFsPath } from "./module-ids.ts";
 import {
   createCompilerRpcModules,
+  exactPattern,
   incompatibleRuntimeModules,
   rewriteFrameworkImports,
   tanStackCompatibilityProfile,
@@ -146,13 +147,13 @@ export function startCompatibilityPlugin(): PluginOption {
     },
     generateBundle(_options, bundle) {
       if (this.environment.name !== START_ENVIRONMENT_NAMES.client) return;
-      const emittedModuleIds = Object.values(bundle).flatMap((output) =>
-        output.type === "chunk"
-          ? Object.entries(output.modules).flatMap(([id, module]) =>
-              module.renderedLength === 0 ? [] : [id],
-            )
-          : [],
-      );
+      const emittedModuleIds: string[] = [];
+      for (const output of Object.values(bundle)) {
+        if (output.type !== "chunk") continue;
+        for (const [id, module] of Object.entries(output.modules)) {
+          if (module.renderedLength > 0) emittedModuleIds.push(id);
+        }
+      }
       const incompatible = incompatibleRuntimeModules(emittedModuleIds);
       if (incompatible.length === 0) return;
       throw new Error(
@@ -192,10 +193,4 @@ export function startCompatibilityPlugin(): PluginOption {
       },
     },
   };
-}
-
-function exactPattern(values: readonly string[]): RegExp {
-  return new RegExp(
-    `^(?:${values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`,
-  );
 }

@@ -33,8 +33,8 @@ import {
   resolvedPayloadRuntimeId,
   transformPayloadModule,
 } from "./payload-compiler.ts";
-import { transformServerPayloadDefinitions } from "./server-payload-compiler.ts";
 import { writePublicAsset } from "./public-assets.ts";
+import { transformServerPayloadDefinitions } from "./server-payload-compiler.ts";
 
 const payloadManifestDefinitionPrefix =
   "\0fig-tanstack-start:payload-manifest-definition:";
@@ -48,12 +48,7 @@ export function serverPayloadPlugin(): PluginOption {
   return {
     name: "fig-tanstack-start:server-payload",
     enforce: "pre",
-    applyToEnvironment(environment) {
-      return (
-        environment.name === START_ENVIRONMENT_NAMES.client ||
-        environment.name === START_ENVIRONMENT_NAMES.server
-      );
-    },
+    applyToEnvironment: isStartEnvironment,
     transform: {
       filter: { code: "serverPayload", id: compilerSourceIdFilter },
       handler: transformServerPayloadDefinitions,
@@ -78,12 +73,7 @@ export function payloadPlugin(): PluginOption {
   return {
     name: "fig-tanstack-start:payload",
     enforce: "pre",
-    applyToEnvironment(environment) {
-      return (
-        environment.name === START_ENVIRONMENT_NAMES.client ||
-        environment.name === START_ENVIRONMENT_NAMES.server
-      );
-    },
+    applyToEnvironment: isStartEnvironment,
     configEnvironment(environmentName) {
       if (environmentName === START_ENVIRONMENT_NAMES.server) {
         return { build: { emitAssets: true } };
@@ -112,19 +102,23 @@ export function payloadPlugin(): PluginOption {
       }
 
       const publicOutDir = clientOutDir;
-      await Promise.all(
-        Object.values(bundle).map(async (output) => {
-          if (
-            output.type !== "asset" ||
-            !output.fileName.startsWith(serverAssetsPrefix) ||
-            output.fileName.endsWith(".map")
-          ) {
-            return;
-          }
-          const path = resolve(publicOutDir, output.fileName);
-          await writePublicAsset(path, output.source);
-        }),
-      );
+      const writes: Promise<void>[] = [];
+      for (const output of Object.values(bundle)) {
+        if (
+          output.type !== "asset" ||
+          !output.fileName.startsWith(serverAssetsPrefix) ||
+          output.fileName.endsWith(".map")
+        ) {
+          continue;
+        }
+        writes.push(
+          writePublicAsset(
+            resolve(publicOutDir, output.fileName),
+            output.source,
+          ),
+        );
+      }
+      await Promise.all(writes);
     },
     generateBundle(_options, bundle) {
       if (this.environment.name !== START_ENVIRONMENT_NAMES.client) return;
@@ -135,19 +129,11 @@ export function payloadPlugin(): PluginOption {
       async handler(source, importer) {
         if (source === payloadRuntimeId) return resolvedPayloadRuntimeId;
         if (source === payloadManifestId) return resolvedPayloadManifestId;
-        if (hasModuleQuery(source, payloadModuleQuery)) {
-          const resolved = await this.resolve(cleanModuleId(source), importer, {
-            skipSelf: true,
-          });
-          return resolved === null
-            ? null
-            : withModuleQuery(
-                cleanModuleId(resolved.id),
-                payloadModuleQuery,
-                "1",
-              );
-        }
-        if (!hasModuleQuery(source, payloadManifestDefinitionQuery)) {
+        const payloadModule = hasModuleQuery(source, payloadModuleQuery);
+        if (
+          !payloadModule &&
+          !hasModuleQuery(source, payloadManifestDefinitionQuery)
+        ) {
           return undefined;
         }
 
@@ -155,10 +141,14 @@ export function payloadPlugin(): PluginOption {
           skipSelf: true,
         });
         if (resolved === null) return null;
+        const resolvedId = cleanModuleId(resolved.id);
+        if (payloadModule) {
+          return withModuleQuery(resolvedId, payloadModuleQuery, "1");
+        }
         // Start protects .server modules from the client graph. The manifest
         // needs only their compiled definitions, so expose those definitions
         // through a private virtual id before import protection runs.
-        return definitionModuleId(cleanModuleId(resolved.id));
+        return definitionModuleId(resolvedId);
       },
     },
     load: {
@@ -174,15 +164,15 @@ export function payloadPlugin(): PluginOption {
           id.slice(payloadManifestDefinitionPrefix.length),
         );
         const code = rewriteFrameworkImports(await readFile(sourceId, "utf8"));
-        const stylesheetSources = new Map<string, string>();
-        const references = await collectPayloadReferences(
-          sourceId,
-          code,
-          (source, importer) =>
-            this.resolve(source, importer, { skipSelf: true }),
-          root,
-          stylesheetSources,
-        );
+        const { references, stylesheetSources } =
+          await collectPayloadReferences(
+            sourceId,
+            code,
+            (source, importer) =>
+              this.resolve(source, importer, { skipSelf: true }),
+            root,
+            true,
+          );
         if (references.length > 0) {
           this.addWatchFile(sourceId);
           definitionInputs.set(sourceId, {
@@ -259,7 +249,7 @@ export function payloadPlugin(): PluginOption {
         ) {
           return null;
         }
-        const references = await collectPayloadReferences(
+        const { references } = await collectPayloadReferences(
           id,
           code,
           (source, importer) =>
@@ -310,11 +300,12 @@ async function collectPayloadReferences(
   code: string,
   resolveModule: ResolveModule,
   root: string,
-  stylesheetSources?: Map<string, string>,
-): Promise<ManifestReference[]> {
+  includeStylesheets = false,
+) {
   const importerId = cleanModuleId(id);
   const imports = await analyzeIsomorphicBoundaries(code, id);
-  return Promise.all(
+  const stylesheetSources = new Map<string, string>();
+  const references = await Promise.all(
     imports.map(async (imported): Promise<ManifestReference> => {
       const resolved = await resolveModule(imported.source, importerId);
       if (resolved === null) {
@@ -329,7 +320,7 @@ async function collectPayloadReferences(
         imported.importedName,
       );
       let hrefs: string[] = [];
-      if (stylesheetSources !== undefined) {
+      if (includeStylesheets) {
         const stylesheets = await moduleStylesheets(
           moduleId,
           root,
@@ -349,6 +340,7 @@ async function collectPayloadReferences(
       };
     }),
   );
+  return { references, stylesheetSources };
 }
 
 async function moduleStylesheets(
@@ -383,13 +375,14 @@ function collectClientStylesheets(
   base: string,
 ): void {
   clientStylesheets.clear();
+  const assetBase = base.replace(/\/$/, "");
   for (const output of Object.values(bundle)) {
     if (output.type !== "chunk") continue;
     const referenceIds = payloadReferenceIds(Object.keys(output.modules));
     for (const referenceId of referenceIds) {
       const stylesheets = new Set(clientStylesheets.get(referenceId));
       for (const file of output.viteMetadata?.importedCss ?? []) {
-        stylesheets.add(`${base.replace(/\/$/, "")}/${file}`);
+        stylesheets.add(`${assetBase}/${file}`);
       }
       clientStylesheets.set(referenceId, [...stylesheets]);
     }
@@ -406,4 +399,11 @@ interface OutputChunk {
   modules: Record<string, unknown>;
   type: "chunk";
   viteMetadata?: { importedCss?: Set<string> };
+}
+
+function isStartEnvironment(environment: { name: string }): boolean {
+  return (
+    environment.name === START_ENVIRONMENT_NAMES.client ||
+    environment.name === START_ENVIRONMENT_NAMES.server
+  );
 }

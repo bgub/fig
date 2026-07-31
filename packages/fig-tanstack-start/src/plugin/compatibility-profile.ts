@@ -63,17 +63,21 @@ export function rewriteFrameworkImports(code: string): string {
 }
 
 export function incompatibleRuntimeModules(
-  moduleIds: Iterable<string>,
+  moduleIds: readonly string[],
 ): string[] {
   const { frameworkRouter, frameworkStart } =
     tanStackCompatibilityProfile.packages;
-  const forbiddenPackages = [frameworkRouter, frameworkStart];
-  return [...moduleIds].filter((id) => {
+  return moduleIds.filter((id) => {
     const normalized = id.replaceAll("\\", "/");
-    return forbiddenPackages.some((packageName) =>
-      normalized.includes(`/node_modules/${packageName}/`),
+    return (
+      normalized.includes(`/node_modules/${frameworkRouter}/`) ||
+      normalized.includes(`/node_modules/${frameworkStart}/`)
     );
   });
+}
+
+export function exactPattern(values: readonly string[]): RegExp {
+  return new RegExp(`^(?:${values.map(escapeRegExp).join("|")})$`);
 }
 
 function escapeRegExp(value: string): string {

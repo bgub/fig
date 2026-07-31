@@ -1,6 +1,6 @@
 import { createStartHandler } from "@tanstack/start-server-core";
-import { renderRouterDocument } from "../server-renderer.tsx";
+import { renderRouterToStream } from "../server-renderer.tsx";
 
-const fetch = createStartHandler({ handler: renderRouterDocument });
+const fetch = createStartHandler({ handler: renderRouterToStream });
 
 export default { fetch };

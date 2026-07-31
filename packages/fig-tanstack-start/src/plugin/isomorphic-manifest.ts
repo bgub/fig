@@ -63,7 +63,10 @@ const definitions = import.meta.glob([
   import: "references",
   query: "?${payloadManifestDefinitionQuery}",
 });
-const references = Object.assign({}, ...Object.values(definitions));
+const references = {};
+for (const definition of Object.values(definitions)) {
+  Object.assign(references, definition);
+}
 const clientStylesheets = ${assets};
 
 export const resolveIsomorphicReference = createPayloadClientReferenceResolver(

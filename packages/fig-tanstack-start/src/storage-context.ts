@@ -16,7 +16,7 @@ export async function runWithStartContext<T>(
   context: unknown,
   callback: () => T | Promise<T>,
 ): Promise<T> {
-  return await storage.run(context, callback);
+  return storage.run(context, callback);
 }
 
 async function createStorage(): Promise<StartStorage> {

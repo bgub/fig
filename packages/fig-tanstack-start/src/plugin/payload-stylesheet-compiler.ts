@@ -3,6 +3,9 @@ import type * as babel from "@babel/core";
 import { isComponentName } from "./compiler-options.ts";
 import { cleanModuleId, hasModuleQuery } from "./module-ids.ts";
 
+const stylesheetSpecifierPattern =
+  /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss)(?:$|[?&#"'`])/;
+
 export function stylesheetImportAnalysisPlugin(
   stylesheets: string[],
 ): () => PluginObject {
@@ -89,8 +92,11 @@ export function collectComponentNames(
 }
 
 export function isStylesheetSpecifier(source: string): boolean {
-  const path = cleanModuleId(source);
-  return /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss)$/.test(path);
+  return stylesheetSpecifierPattern.test(cleanModuleId(source));
+}
+
+export function mayContainStylesheetSpecifier(code: string): boolean {
+  return stylesheetSpecifierPattern.test(code);
 }
 
 function hasUrlQuery(source: string): boolean {

@@ -3,6 +3,7 @@ import {
   decodePayloadDataEntries,
   encodePayloadDataEntries,
   HYDRATION_SKIP_ATTRIBUTE,
+  isDataStoreController,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
 import { escapeScriptJson } from "@bgub/fig-server/html";
@@ -10,7 +11,6 @@ import {
   type PayloadKeyLookup,
   serializableStartData,
 } from "./payload-internal.ts";
-import { requireStartDataStore } from "./store.ts";
 
 export const startDataScriptId = "__fig_tanstack_start_data__";
 
@@ -22,6 +22,21 @@ export function createStartDataStore(): FigDataStoreController {
     hydrateDataStore(dataStore, document);
   }
   return dataStore;
+}
+
+export function requireStartDataStore(
+  context: unknown,
+): FigDataStoreController {
+  if (
+    (typeof context === "object" || typeof context === "function") &&
+    context !== null
+  ) {
+    const data = Reflect.get(context, "data");
+    if (isDataStoreController(data)) return data;
+  }
+  throw new Error(
+    "TanStack Start routers must spread createStartDataContext() into createRouter().",
+  );
 }
 
 export function hydrateStartDataStore(

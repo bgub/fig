@@ -1,12 +1,15 @@
 import type { NodePath, PluginItem } from "@babel/core";
+import { tanStackCompatibilityProfile } from "./compatibility-profile.ts";
 
 interface CompilerTransformOptions {
   plugins: PluginItem[];
   sourceMaps?: true;
 }
 
-export const payloadPackageId = "@bgub/fig-tanstack-start/payload";
-export const serverPackageId = "@bgub/fig-tanstack-start/server";
+const figStartPackage = tanStackCompatibilityProfile.packages.figStart;
+
+export const payloadPackageId = `${figStartPackage}/payload`;
+export const serverPackageId = `${figStartPackage}/server`;
 
 // One home for what counts as a source module: the manifest glob and the
 // compiler analysis gates must accept the same files.
@@ -30,25 +33,15 @@ export const compilerSourceIdFilter = {
   exclude: dependencyModuleIdPattern,
 } as const;
 
-let babelCompiler:
-  | Promise<
-      readonly [
-        typeof import("@babel/core"),
-        (typeof import("@babel/preset-typescript"))["default"],
-      ]
-    >
-  | undefined;
+let babelCompiler: ReturnType<typeof loadBabelCompiler> | undefined;
 
 export async function transformWithBabel(
   code: string,
   filename: string,
   { plugins, sourceMaps }: CompilerTransformOptions,
 ) {
-  babelCompiler ??= Promise.all([
-    import("@babel/core"),
-    import("@babel/preset-typescript").then((module) => module.default),
-  ]);
-  const [babel, presetTypescript] = await babelCompiler;
+  const { babel, presetTypescript } = await (babelCompiler ??=
+    loadBabelCompiler());
   return babel.transformAsync(code, {
     babelrc: false,
     configFile: false,
@@ -63,6 +56,14 @@ export async function transformWithBabel(
     plugins,
     sourceMaps,
   });
+}
+
+async function loadBabelCompiler() {
+  const [babel, { default: presetTypescript }] = await Promise.all([
+    import("@babel/core"),
+    import("@babel/preset-typescript"),
+  ]);
+  return { babel, presetTypescript };
 }
 
 export function isSourceModule(id: string): boolean {
