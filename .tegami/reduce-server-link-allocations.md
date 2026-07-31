@@ -1,9 +1,11 @@
 ---
 packages:
   "@bgub/fig":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
   "@bgub/fig-tanstack-router":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Reduce server link allocations

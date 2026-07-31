@@ -1,3 +1,80 @@
+## @bgub/fig-server@0.1.0-alpha.7
+
+### Further simplify HTML server rendering
+
+HTML server rendering now removes unreachable child cases, normalizes host
+names once, centralizes request cleanup and document-head asset ordering, and
+avoids document-result forwarding closures. Rendered output and streaming,
+Suspense, abort, backpressure, asset, and hydration behavior are unchanged.
+
+### Serialize preload headers on demand
+
+Server rendering now retains a lightweight value snapshot of shell preload
+resources and serializes their HTTP `Link` values only when
+`getPreloadHeader()` is used.
+
+### Reduce asset serialization allocations
+
+Asset resources now build their canonical host props directly. Server rendering
+fills its owned props object in place instead of creating attribute tuples,
+filtering them, converting them with `Object.fromEntries`, and cloning again to
+append a nonce. Client insertion uses the same canonical props without changing
+the generated elements or server HTML.
+
+### Reduce render-path allocations
+
+Child reconciliation now reuses arrays that are already normalized. Server
+rendering defers `useId` path formatting on branches that do not request an
+ID. This avoids unnecessary allocations in common client-update and sparse-ID
+server trees without changing rendered output.
+
+### Reduce server flush garbage collection
+
+Server streaming now accumulates each flush pass in one string instead of an
+array that must be flattened before encoding. This shortens the lifetime of
+serialized response data and substantially reduces garbage-collection pauses
+without changing stream chunk boundaries or rendered HTML.
+
+### Reduce server HTML escaping work
+
+Server rendering now skips replacement work for text and attribute values that
+do not contain HTML-special characters and reuses replacement callbacks for
+values that require escaping. Rendered markup and escaping behavior are
+unchanged.
+
+### Release server-rendered chunks after flushing
+
+Server rendering now releases a segment's serialized fragments as soon as
+they are flushed, reducing retained memory for large responses.
+
+### Simplify server rendering internals
+
+Payload rendering now serializes child arrays and asset resources directly
+into their destination buffers, while shared server paths avoid transient
+metadata, callback, and dispatcher allocations. Public rendering behavior and
+wire formats are unchanged.
+
+### Simplify Payload rendering and decoding
+
+Payload now keeps client-reference identity and delivery state together,
+encapsulates server asset deduplication and wire lowering, and removes
+redundant request, graph, and chunk bookkeeping. The public API, wire values,
+streaming, asset gating, cancellation, and error behavior are unchanged.
+
+### Simplify server rendering state
+
+Server rendering now avoids duplicate completion and task-ownership state,
+reuses static callbacks and protocol source, and emits assets without several
+temporary arrays and wrapper objects. Rendered HTML, payload rows, streaming,
+Suspense, abort, and backpressure behavior are unchanged.
+
+### Simplify HTML server-rendering state
+
+HTML server rendering now resumes suspended tasks from their existing render
+frames and derives pending work and scheduling from its task collections. This
+removes duplicated state and allocation while preserving streamed HTML,
+Suspense, abort, backpressure, asset, and hydration behavior.
+
 ## @bgub/fig-server@0.1.0-alpha.6
 
 ### Reduce server-render and TanStack Start overhead

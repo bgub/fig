@@ -1,9 +1,11 @@
 ---
 packages:
   "@bgub/fig":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
   "@bgub/fig-server":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Reduce render-path allocations

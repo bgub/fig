@@ -1,44 +1,121 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n---\n\n## Identify why data-loader signals abort\n\nData-resource loader signals now expose whether their generation was\nsuperseded, evicted, or disposed. Rejected generations and values invalidated\nthrough an attributed error receive the originating error as their abort\nreason; reasonless rejections receive the platform's default `AbortError`.\n"
-    filename: data-loader-abort-reasons.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: minor\n  \"@bgub/fig-dom\":\n    type: minor\n  \"@bgub/fig-reconciler\":\n    type: minor\n---\n\n## Allow interactive transitions to interrupt native animations\n\n`transition()` and the function returned by `useTransition()` now accept\n`viewTransition: \"interrupt\"`. When another native View Transition is already\nanimating, Fig skips it, waits for its cleanup to settle, and immediately\ncommits the latest rendered state, starting a new transition when that commit\nhas participating boundaries. The default remains serialized so navigations\nand streamed reveals retain uninterrupted motion. Interruptible DOM\ntransitions also drop the implicit full-page snapshot so controls outside\nexplicit transition surfaces stay live and can express the next intent by\npointer before the current animation finishes.\n"
+    filename: interrupt-view-transitions.md
     v: 0.0.0
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Reduce server-render and TanStack Start overhead\n\nServer rendering now avoids redundant child normalization, component-stack,\nand asset-classification work. Route assets are normalized lazily, payload\nmarkers are injected without decoding and re-encoding HTML bytes, and\nsuccessful stream cancellation propagates directly through the existing Web\nstream chain.\n"
-    filename: leaner-server-rendering.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-dom\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Reduce asset serialization allocations\n\nAsset resources now build their canonical host props directly. Server rendering\nfills its owned props object in place instead of creating attribute tuples,\nfiltering them, converting them with `Object.fromEntries`, and cloning again to\nappend a nonce. Client insertion uses the same canonical props without changing\nthe generated elements or server HTML.\n"
+    filename: reduce-asset-serialization-allocations.md
     v: 0.0.0
-  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Skip protocol parsing for generated internal links\n\nRouter-generated internal links are safe by construction and no longer pass\nthrough WHATWG `URL` parsing during render. Absolute targets, explicit `href`\nvalues, and locations marked external still receive the same dangerous-protocol\nvalidation.\n\nThis removes repeated URL construction from link-heavy SSR pages while\npreserving link output and navigation behavior.\n"
-    filename: skip-internal-link-protocol-parsing.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Reduce render-path allocations\n\nChild reconciliation now reuses arrays that are already normalized. Server\nrendering defers `useId` path formatting on branches that do not request an\nID. This avoids unnecessary allocations in common client-update and sparse-ID\nserver trees without changing rendered output.\n"
+    filename: reduce-render-path-allocations.md
     v: 0.0.0
-  - content: "---\npackages:\n  \"@bgub/fig-vite\":\n    type: patch\n---\n\n## Avoid redundant Vite transforms\n\nProduction builds now rely on Vite's scope-aware `__FIG_DEV__` replacement\ninstead of running an additional Babel pass. Development loads the refresh\ntransformer only when a matching application module needs it.\n"
-    filename: leaner-vite-transforms.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Reduce server link allocations\n\nServer-rendered router links now mark their client navigation behavior directly\ninstead of resolving a synthetic click mixin. Links without state props, binds,\nor mixins also avoid creating empty state objects and composition wrappers.\nPayload rendering continues to reject links whose client navigation behavior\nwould otherwise be lost.\n"
+    filename: reduce-server-link-allocations.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Simplify Payload rendering and decoding\n\nPayload now keeps client-reference identity and delivery state together,\nencapsulates server asset deduplication and wire lowering, and removes\nredundant request, graph, and chunk bookkeeping. The public API, wire values,\nstreaming, asset gating, cancellation, and error behavior are unchanged.\n"
+    filename: simplify-payload-internals.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Attach beforetoggle listeners directly\n\n`beforetoggle` does not bubble, so `on(\"beforetoggle\", ...)` was attached as a\ndelegated root listener and never fired for a popover or a dialog. It now\nattaches to its element like the other non-bubbling events, `toggle` included.\n"
+    filename: fig-dom-beforetoggle.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Preserve stopped propagation on read-only DOM events\n\nLogical propagation stops now call the restored native `stopPropagation()`\nmethod instead of assigning `cancelBubble`, which can be read-only in DOM\nimplementations.\n"
+    filename: fig-dom-event-propagation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Further simplify HTML server rendering\n\nHTML server rendering now removes unreachable child cases, normalizes host\nnames once, centralizes request cleanup and document-head asset ordering, and\navoids document-result forwarding closures. Rendered output and streaming,\nSuspense, abort, backpressure, asset, and hydration behavior are unchanged.\n"
+    filename: further-simplify-ssr.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Serialize preload headers on demand\n\nServer rendering now retains a lightweight value snapshot of shell preload\nresources and serializes their HTTP `Link` values only when\n`getPreloadHeader()` is used.\n"
+    filename: lazy-preload-header-serialization.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Reduce server flush garbage collection\n\nServer streaming now accumulates each flush pass in one string instead of an\narray that must be flattened before encoding. This shortens the lifetime of\nserialized response data and substantially reduces garbage-collection pauses\nwithout changing stream chunk boundaries or rendered HTML.\n"
+    filename: reduce-server-flush-gc.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Reduce server HTML escaping work\n\nServer rendering now skips replacement work for text and attribute values that\ndo not contain HTML-special characters and reuses replacement callbacks for\nvalues that require escaping. Rendered markup and escaping behavior are\nunchanged.\n"
+    filename: reduce-server-html-escaping.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Release server-rendered chunks after flushing\n\nServer rendering now releases a segment's serialized fragments as soon as\nthey are flushed, reducing retained memory for large responses.\n"
+    filename: release-flushed-segment-chunks.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Simplify server rendering internals\n\nPayload rendering now serializes child arrays and asset resources directly\ninto their destination buffers, while shared server paths avoid transient\nmetadata, callback, and dispatcher allocations. Public rendering behavior and\nwire formats are unchanged.\n"
+    filename: simplify-fig-server.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Simplify server rendering state\n\nServer rendering now avoids duplicate completion and task-ownership state,\nreuses static callbacks and protocol source, and emits assets without several\ntemporary arrays and wrapper objects. Rendered HTML, payload rows, streaming,\nSuspense, abort, and backpressure behavior are unchanged.\n"
+    filename: simplify-server-renderer.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Simplify HTML server-rendering state\n\nHTML server rendering now resumes suspended tasks from their existing render\nframes and derives pending work and scheduling from its task collections. This\nremoves duplicated state and allocation while preserving streamed HTML,\nSuspense, abort, backpressure, asset, and hydration behavior.\n"
+    filename: simplify-ssr-task-state.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Simplify the TanStack Start adapter\n\nThe adapter now uses its renderer directly in the default request path,\ncentralizes data-store transport validation, simplifies Payload document\ninjection, and avoids parsing asset-free modules during stylesheet analysis.\nPublic request, hydration, Payload, and compiler behavior is unchanged.\n"
+    filename: simplify-tanstack-start.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Reduce the TanStack Start production SSR graph\n\nThe private default server entry now composes TanStack's handler with a shared\nFig renderer module. This keeps Payload response rendering and its compiled\napplication-reference manifest out of the production SSR service without\nadding another public package entrypoint.\n"
+    filename: tanstack-start-private-ssr-entry.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Hydrate render-discovered Fig data\n\nTanStack Start now snapshots Fig data after the document render is ready, so\nvalues first loaded by route components hydrate without duplicate client loads.\n"
+    filename: tanstack-start-render-data-hydration.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Preserve router provider hydration paths\n\nServer rendering now preserves the provider child slot occupied by the client\ntransition lifecycle. Route descendants therefore derive the same `useId`\npaths on the server and during hydration.\n"
+    filename: preserve-router-provider-hydration-paths.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Reduce server link rendering overhead\n\nLinks rendered on the server now skip browser-only lifecycle, subscription,\npreload, and event setup. Server and client links retain matching component\ntrees for stable hydration, while Payload rendering continues to reject links\nwhose navigation behavior cannot be serialized.\n"
+    filename: server-link-rendering.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Reuse server route asset plans\n\nServer rendering now builds each route match's asset plan once and reuses it\nfor match content, head tags, and body scripts. TanStack's inline-CSS manifest\nis snapshotted once per render so its generated wrappers do not defeat the\ncache.\n"
+    filename: server-route-asset-cache.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Simplify the TanStack Router adapter\n\nThe adapter now centralizes route-head translation, constructs shared link\nprops once, stabilizes match-value selectors, and isolates client navigation\nlifecycle handling behind one internal module. Public routing, SSR, hydration,\nasset, and navigation behavior are unchanged.\n"
+    filename: simplify-tanstack-router.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - data-loader-abort-reasons.md
-      - leaner-server-rendering.md
+      - interrupt-view-transitions.md
+      - reduce-asset-serialization-allocations.md
+      - reduce-render-path-allocations.md
+      - reduce-server-link-allocations.md
+      - simplify-payload-internals.md
     id: npm:@bgub/fig
     updated: true
-  - id: npm:@bgub/fig-dom
+  - changelogIds:
+      - fig-dom-beforetoggle.md
+      - fig-dom-event-propagation.md
+      - interrupt-view-transitions.md
+      - reduce-asset-serialization-allocations.md
+    id: npm:@bgub/fig-dom
     updated: true
-  - id: npm:@bgub/fig-reconciler
+  - changelogIds:
+      - interrupt-view-transitions.md
+    id: npm:@bgub/fig-reconciler
     updated: true
   - id: npm:@bgub/fig-refresh
     updated: true
   - changelogIds:
-      - leaner-server-rendering.md
+      - further-simplify-ssr.md
+      - lazy-preload-header-serialization.md
+      - reduce-asset-serialization-allocations.md
+      - reduce-render-path-allocations.md
+      - reduce-server-flush-gc.md
+      - reduce-server-html-escaping.md
+      - release-flushed-segment-chunks.md
+      - simplify-fig-server.md
+      - simplify-payload-internals.md
+      - simplify-server-renderer.md
+      - simplify-ssr-task-state.md
     id: npm:@bgub/fig-server
     updated: true
   - changelogIds:
-      - leaner-server-rendering.md
-      - skip-internal-link-protocol-parsing.md
-    id: npm:@bgub/fig-tanstack-router
-    updated: true
-  - changelogIds:
-      - leaner-server-rendering.md
+      - simplify-tanstack-start.md
+      - tanstack-start-private-ssr-entry.md
+      - tanstack-start-render-data-hydration.md
     id: npm:@bgub/fig-tanstack-start
     updated: true
   - changelogIds:
-      - leaner-vite-transforms.md
-    id: npm:@bgub/fig-vite
+      - preserve-router-provider-hydration-paths.md
+      - reduce-server-link-allocations.md
+      - server-link-rendering.md
+      - server-route-asset-cache.md
+      - simplify-tanstack-router.md
+    id: npm:@bgub/fig-tanstack-router
+    updated: true
+  - id: npm:@bgub/fig-vite
     updated: true
 npm:packages:
   - distTag: latest
@@ -46,10 +123,11 @@ npm:packages:
   - id: npm:@bgub/fig-demo-client
   - id: npm:@bgub/fig-demo-hmr
   - id: npm:@bgub/fig-demo-payload
-  - id: npm:@bgub/fig-demo-ssr
   - id: npm:@bgub/fig-demo-tanstack-router
+  - id: npm:@bgub/fig-demo-ssr
   - id: npm:@bgub/fig-demo-tanstack-start
   - id: npm:@bgub/fig-devtools
+  - id: npm:@bgub/fig-ui
   - distTag: latest
     id: npm:@bgub/fig-dom
   - distTag: latest
@@ -59,8 +137,8 @@ npm:packages:
   - distTag: latest
     id: npm:@bgub/fig-server
   - distTag: latest
-    id: npm:@bgub/fig-tanstack-router
-  - distTag: latest
     id: npm:@bgub/fig-tanstack-start
+  - distTag: latest
+    id: npm:@bgub/fig-tanstack-router
   - distTag: latest
     id: npm:@bgub/fig-vite

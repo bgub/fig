@@ -1,3 +1,40 @@
+## @bgub/fig-tanstack-router@0.1.0-alpha.7
+
+### Preserve router provider hydration paths
+
+Server rendering now preserves the provider child slot occupied by the client
+transition lifecycle. Route descendants therefore derive the same `useId`
+paths on the server and during hydration.
+
+### Reduce server link allocations
+
+Server-rendered router links now mark their client navigation behavior directly
+instead of resolving a synthetic click mixin. Links without state props, binds,
+or mixins also avoid creating empty state objects and composition wrappers.
+Payload rendering continues to reject links whose client navigation behavior
+would otherwise be lost.
+
+### Reduce server link rendering overhead
+
+Links rendered on the server now skip browser-only lifecycle, subscription,
+preload, and event setup. Server and client links retain matching component
+trees for stable hydration, while Payload rendering continues to reject links
+whose navigation behavior cannot be serialized.
+
+### Reuse server route asset plans
+
+Server rendering now builds each route match's asset plan once and reuses it
+for match content, head tags, and body scripts. TanStack's inline-CSS manifest
+is snapshotted once per render so its generated wrappers do not defeat the
+cache.
+
+### Simplify the TanStack Router adapter
+
+The adapter now centralizes route-head translation, constructs shared link
+props once, stabilizes match-value selectors, and isolates client navigation
+lifecycle handling behind one internal module. Public routing, SSR, hydration,
+asset, and navigation behavior are unchanged.
+
 ## @bgub/fig-tanstack-router@0.1.0-alpha.6
 
 ### Reduce server-render and TanStack Start overhead

@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-server":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Serialize preload headers on demand

@@ -1,6 +1,8 @@
 ---
 packages:
-  "@bgub/fig-tanstack-start": patch
+  "@bgub/fig-tanstack-start":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Hydrate render-discovered Fig data

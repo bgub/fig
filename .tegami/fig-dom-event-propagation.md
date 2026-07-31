@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-dom":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
 ---
 
 ## Preserve stopped propagation on read-only DOM events

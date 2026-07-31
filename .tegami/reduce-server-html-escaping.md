@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-server":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-server)
 ---
 
 ## Reduce server HTML escaping work

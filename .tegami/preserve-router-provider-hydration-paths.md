@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-tanstack-router":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Preserve router provider hydration paths
