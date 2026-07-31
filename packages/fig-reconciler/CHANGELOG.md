@@ -1,3 +1,17 @@
+## @bgub/fig-reconciler@0.1.0-alpha.7
+
+### Allow interactive transitions to interrupt native animations
+
+`transition()` and the function returned by `useTransition()` now accept
+`viewTransition: "interrupt"`. When another native View Transition is already
+animating, Fig skips it, waits for its cleanup to settle, and immediately
+commits the latest rendered state, starting a new transition when that commit
+has participating boundaries. The default remains serialized so navigations
+and streamed reveals retain uninterrupted motion. Interruptible DOM
+transitions also drop the implicit full-page snapshot so controls outside
+explicit transition surfaces stay live and can express the next intent by
+pointer before the current animation finishes.
+
 ## @bgub/fig-reconciler@0.1.0-alpha.3
 
 ### Renderers now install their reconciler implementation

@@ -1,3 +1,24 @@
+## @bgub/fig-tanstack-start@0.1.0-alpha.7
+
+### Simplify the TanStack Start adapter
+
+The adapter now uses its renderer directly in the default request path,
+centralizes data-store transport validation, simplifies Payload document
+injection, and avoids parsing asset-free modules during stylesheet analysis.
+Public request, hydration, Payload, and compiler behavior is unchanged.
+
+### Reduce the TanStack Start production SSR graph
+
+The private default server entry now composes TanStack's handler with a shared
+Fig renderer module. This keeps Payload response rendering and its compiled
+application-reference manifest out of the production SSR service without
+adding another public package entrypoint.
+
+### Hydrate render-discovered Fig data
+
+TanStack Start now snapshots Fig data after the document render is ready, so
+values first loaded by route components hydrate without duplicate client loads.
+
 ## @bgub/fig-tanstack-start@0.1.0-alpha.6
 
 ### Reduce server-render and TanStack Start overhead

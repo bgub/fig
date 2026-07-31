@@ -1,6 +1,8 @@
 ---
 packages:
-  "@bgub/fig-tanstack-router": patch
+  "@bgub/fig-tanstack-router":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-router)
 ---
 
 ## Reuse server route asset plans

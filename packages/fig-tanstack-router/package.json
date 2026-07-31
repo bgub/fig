@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-tanstack-router",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "description": "TanStack Router adapter for Fig",
   "keywords": [
     "fig",

@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-tanstack-start":
-    type: patch
+    replay:
+      - exit-prerelease(npm:@bgub/fig-tanstack-start)
 ---
 
 ## Simplify the TanStack Start adapter

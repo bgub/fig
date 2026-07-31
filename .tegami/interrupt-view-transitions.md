@@ -1,11 +1,14 @@
 ---
 packages:
   "@bgub/fig":
-    type: minor
+    replay:
+      - exit-prerelease(npm:@bgub/fig)
   "@bgub/fig-dom":
-    type: minor
+    replay:
+      - exit-prerelease(npm:@bgub/fig-dom)
   "@bgub/fig-reconciler":
-    type: minor
+    replay:
+      - exit-prerelease(npm:@bgub/fig-reconciler)
 ---
 
 ## Allow interactive transitions to interrupt native animations
