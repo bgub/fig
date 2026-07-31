@@ -63,6 +63,24 @@ describe("RadioGroup", () => {
     expect(changes[0]?.details.trigger).toBe(medium);
   });
 
+  it("keeps the latest rapid native selection", async () => {
+    const container = await renderGroup({ defaultValue: "small" });
+    const [small, medium, large] = radios(container);
+
+    await act(() => {
+      for (const radio of [medium, large, small]) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    expect(radios(container).map((radio) => radio.checked)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
   it("submits the checked value with the form", async () => {
     const container = await render(
       <form data-form="">

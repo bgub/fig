@@ -130,7 +130,11 @@ export function useRadioGroup<Value = unknown>(
   const formReset = useMemo(() => createFormReset(reset), []);
   const select = useStableEvent(
     (next: unknown, event: Event, trigger: Element) => {
-      if (sameValue(next, value)) return;
+      // Native changes may arrive faster than uncontrolled state commits. A
+      // later selection can therefore equal the stale rendered value while an
+      // older update is still queued; it must supersede that update rather
+      // than being dropped.
+      if (controlled && sameValue(next, value)) return;
       if (readOnly) {
         requestReconcile();
         return;

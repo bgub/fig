@@ -599,9 +599,10 @@ test("wires a field around native form controls", async ({ page }) => {
   // The field owns the relationships between the control and its text.
   const controlId = await email.getAttribute("id");
   expect(await label.getAttribute("for")).toBe(controlId);
-  expect(await email.getAttribute("aria-describedby")).toBe(
-    await hint.getAttribute("id"),
-  );
+  const hintId = await hint.getAttribute("id");
+  if (hintId === null)
+    throw new Error("Expected the field hint to have an id.");
+  await expect(email).toHaveAttribute("aria-describedby", hintId);
   // Any value marks a boolean attribute present, so assert the property.
   await expect(email).toHaveJSProperty("required", true);
 
