@@ -1,0 +1,12 @@
+---
+packages:
+  "@bgub/fig-server":
+    type: patch
+---
+
+## Simplify server rendering internals
+
+Payload rendering now serializes child arrays and asset resources directly
+into their destination buffers, while shared server paths avoid transient
+metadata, callback, and dispatcher allocations. Public rendering behavior and
+wire formats are unchanged.

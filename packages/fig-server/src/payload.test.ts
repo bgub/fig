@@ -236,6 +236,16 @@ describe("payload rendering", () => {
     expect(Object.keys(payloadApi)).toEqual(["renderToPayloadStream"]);
   });
 
+  it("preserves sparse root child slots on the wire", async () => {
+    const children: FigNode[] = [];
+    children.length = 2;
+    children[1] = "child";
+
+    expect(await renderToPayloadRows(children)).toEqual([
+      { id: 0, tag: "model", value: [null, "child"] },
+    ]);
+  });
+
   it("serializes client references with normal JSX props", async () => {
     const LikeButton = clientReference<{
       initialCount: number;

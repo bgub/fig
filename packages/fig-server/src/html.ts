@@ -214,9 +214,10 @@ function serializeStyle(value: unknown): string {
     throw new Error("The style prop must be an object during server render.");
   }
 
+  const styles = value as Record<string, unknown>;
   let serialized = "";
-  for (const name of Object.keys(value)) {
-    const item = (value as Record<string, unknown>)[name];
+  for (const name of Object.keys(styles)) {
+    const item = styles[name];
     if (emptyValue(item)) continue;
     if (
       typeof item !== "string" &&

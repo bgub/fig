@@ -23,27 +23,15 @@ export class PayloadAssets {
     private readonly resolveClientReference?: ResolveClientReferenceAssets,
   ) {}
 
-  serialize(value: unknown): SerializedAssetResource[] {
-    const input = isFigAssetResource(value)
-      ? [value]
-      : Array.isArray(value)
-        ? value
-        : [];
-    const serialized: SerializedAssetResource[] = [];
-
-    for (const resource of input) {
-      if (!isFigAssetResource(resource)) continue;
-      // Delivery assets are request-global and persistent, so the first
-      // definition wins. Metadata remains owner-scoped and may repeat.
-      if (assetResourceDestination(resource) === "stream") {
-        const key = assetResourceKey(resource);
-        if (this.emittedKeys.has(key)) continue;
-        this.emittedKeys.add(key);
-      }
-      serialized.push(serializeAssetResource(resource));
+  append(value: unknown, output: SerializedAssetResource[]): void {
+    if (isFigAssetResource(value)) {
+      this.appendResource(value, output);
+      return;
     }
-
-    return serialized;
+    if (!Array.isArray(value)) return;
+    for (const resource of value) {
+      if (isFigAssetResource(resource)) this.appendResource(resource, output);
+    }
   }
 
   serializeClientReference(
@@ -51,13 +39,24 @@ export class PayloadAssets {
   ): SerializedAssetResource[] {
     const declared = clientReferenceAssets(reference);
     const resolved = this.resolveClientReference?.({ id: reference.id });
-    if (resolved === undefined) return this.serialize(declared);
-    if (isFigAssetResource(resolved)) {
-      return this.serialize([...declared, resolved]);
+    const serialized: SerializedAssetResource[] = [];
+    this.append(declared, serialized);
+    this.append(resolved, serialized);
+    return serialized;
+  }
+
+  private appendResource(
+    resource: FigAssetResource,
+    output: SerializedAssetResource[],
+  ): void {
+    // Delivery assets are request-global and persistent, so the first
+    // definition wins. Metadata remains owner-scoped and may repeat.
+    if (assetResourceDestination(resource) === "stream") {
+      const key = assetResourceKey(resource);
+      if (this.emittedKeys.has(key)) return;
+      this.emittedKeys.add(key);
     }
-    return this.serialize(
-      Array.isArray(resolved) ? [...declared, ...resolved] : declared,
-    );
+    output.push(serializeAssetResource(resource));
   }
 }
 

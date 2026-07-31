@@ -55,13 +55,12 @@ import {
   type ContextValues,
   type StackFrame,
   cloneContextValues,
-  componentStack,
   createStaticDispatcher,
   type Deferred,
   deferred,
-  errorMessage,
   noLane,
   noop,
+  serverErrorPayload,
   streamFlowBlocked,
   streamHighWaterMark,
   withContextValue,
@@ -328,10 +327,8 @@ function retryTask(request: PayloadRequest, task: Task): void {
       // The retry re-discovers nothing already deduped by request.assets, so
       // this attempt's assets must ship now; the task still settles into id.
       flushFrameAssets(frame, task.id);
-      error.then(
-        () => pingTask(request, task),
-        () => pingTask(request, task),
-      );
+      const ping = () => pingTask(request, task);
+      error.then(ping, ping);
       return;
     }
 
@@ -351,6 +348,7 @@ function finishTask(request: PayloadRequest): void {
 }
 
 function emitDataRows(request: PayloadRequest): void {
+  if (request.pendingDataSnapshots.size === 0) return;
   const entries: FigDataHydrationEntry[] = [];
 
   for (const snapshot of request.pendingDataSnapshots.values()) {
@@ -569,7 +567,7 @@ function serializeHostElement(
     frame.imagePreloadsSuppressed,
   );
   if (preload !== null) {
-    frame.pendingAssets.push(...frame.request.assets.serialize(preload));
+    frame.request.assets.append(preload, frame.pendingAssets);
   }
 
   const previousImagePreloadsSuppressed = frame.imagePreloadsSuppressed;
@@ -620,14 +618,17 @@ function serializeFunctionComponent(
   frame: RenderFrame,
 ): PayloadModel {
   const assetCheckpoint = frame.pendingAssets.length;
-  frame.pendingAssets.push(
-    ...frame.request.assets.serialize(frame.request.componentAssets?.(type)),
+  frame.request.assets.append(
+    frame.request.componentAssets?.(type),
+    frame.pendingAssets,
   );
   frame.dispatcher ??= createPayloadDispatcher(frame);
   const previousDispatcher = setCurrentDispatcher(frame.dispatcher);
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
   const previousStack = frame.stack;
-  frame.stack = { name: type.name || "Anonymous", parent: previousStack };
+  if (__DEV__ || frame.request.onError !== undefined) {
+    frame.stack = { name: type.name || "Anonymous", parent: previousStack };
+  }
 
   try {
     if (
@@ -675,7 +676,7 @@ function serializeAssets(props: Props, frame: RenderFrame): PayloadModel {
   // Buffered, not emitted: the owning row id is decided at scope exit (see
   // RenderFrame.pendingAssets). Dedupe happens here, so a retried subtree
   // does not re-buffer assets an earlier attempt already shipped.
-  frame.pendingAssets.push(...frame.request.assets.serialize(props.assets));
+  frame.request.assets.append(props.assets, frame.pendingAssets);
   return serializeNode(props.children, frame);
 }
 
@@ -725,9 +726,28 @@ function serializeTreeArray(
   value: FigNode[],
   frame: RenderFrame,
 ): PayloadModel[] {
-  return flattenChildArrays(value).map((child) =>
-    serializeNodeOrLazy(child, frame),
-  );
+  // Array.map preserves sparse root slots, which encode as null on the wire.
+  // Once nested arrays are flattened, iteration intentionally makes holes
+  // explicit undefined children, matching the existing flattening semantics.
+  if (!value.some(Array.isArray)) {
+    return value.map((child) => serializeNodeOrLazy(child, frame));
+  }
+  const serialized: PayloadModel[] = [];
+  appendTreeArray(value, frame, serialized);
+  return serialized;
+}
+
+// Payload flattens nested child arrays without dropping empty children or
+// merging text; the client performs normal child collection after decoding.
+function appendTreeArray(
+  children: FigNode[],
+  frame: RenderFrame,
+  output: PayloadModel[],
+): void {
+  for (const child of children) {
+    if (Array.isArray(child)) appendTreeArray(child, frame, output);
+    else output.push(serializeNodeOrLazy(child, frame));
+  }
 }
 
 function serializeValue(value: unknown, frame: RenderFrame): PayloadModel {
@@ -797,10 +817,8 @@ function outlineTask(
     stackForError(wakeable, frame.stack),
   );
 
-  wakeable.then(
-    () => pingTask(request, task),
-    () => pingTask(request, task),
-  );
+  const ping = () => pingTask(request, task);
+  wakeable.then(ping, ping);
 
   return outline;
 }
@@ -848,18 +866,11 @@ function errorRowPayload(
   error: unknown,
   stack: StackFrame | null,
 ): ServerErrorPayload {
-  const info = {
-    componentStack: componentStack(stackForError(error, stack)),
-  };
-  if (request.onError === undefined) {
-    return __DEV__ ? { message: errorMessage(error) } : {};
-  }
-
-  try {
-    return request.onError(error, info) ?? {};
-  } catch {
-    return {};
-  }
+  return serverErrorPayload(
+    error,
+    stackForError(error, stack),
+    request.onError,
+  );
 }
 
 function recordErrorStack(error: unknown, stack: StackFrame | null): void {
@@ -983,24 +994,6 @@ function closeWithError(request: PayloadRequest, error: unknown): void {
 
 function abortPayloadRequest(request: PayloadRequest, reason?: unknown): void {
   closeWithError(request, reason ?? new PayloadRequestCancelledError());
-}
-
-// Wire-format flattening only: unlike the shared collectChildren, this keeps
-// empty children and does NOT merge adjacent text — the client decodes rows
-// and re-collects children itself, so merging here would double-apply. Flat
-// input (the common case) is returned untouched.
-function flattenChildArrays(children: FigNode[]): FigNode[] {
-  if (!children.some(Array.isArray)) return children;
-
-  const collected: FigNode[] = [];
-  for (const child of children) {
-    if (Array.isArray(child)) {
-      for (const nested of flattenChildArrays(child)) collected.push(nested);
-    } else {
-      collected.push(child);
-    }
-  }
-  return collected;
 }
 
 function invalidChildError(value: unknown): Error {

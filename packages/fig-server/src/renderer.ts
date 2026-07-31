@@ -81,15 +81,14 @@ import {
   type ContextValues,
   type StackFrame,
   cloneContextValues,
-  componentStack,
   createStaticDispatcher,
   type Deferred,
   deferred,
   noLane,
   noop,
+  serverErrorPayload,
   streamHighWaterMark,
   withContextValue,
-  errorMessage,
 } from "./shared.ts";
 import type { RenderTreeNode } from "./render-tree.ts";
 import type {
@@ -1325,7 +1324,9 @@ function markBoundaryClientRendered(
 ): void {
   if (boundary.status !== "client-rendered") {
     boundary.status = "client-rendered";
-    boundary.error = payload ?? reportBoundaryError(request, error, stack);
+    boundary.error =
+      payload ??
+      serverErrorPayload(error, stackForError(error, stack), request.onError);
   }
 
   boundary.completedSegments.length = 0;
@@ -1388,23 +1389,6 @@ function finishRootShell(request: Request): void {
 
   if (!request.prerender) sealHead(request);
   request.shellReady.resolve(undefined);
-}
-
-function reportBoundaryError(
-  request: Request,
-  error: unknown,
-  stack: StackFrame | null,
-): ServerErrorPayload {
-  const info = { componentStack: componentStack(stackForError(error, stack)) };
-  if (request.onError === undefined) {
-    return __DEV__ ? { message: errorMessage(error) } : {};
-  }
-
-  try {
-    return request.onError(error, info) ?? {};
-  } catch {
-    return {};
-  }
 }
 
 function recordErrorStack(error: unknown, stack: StackFrame | null): void {

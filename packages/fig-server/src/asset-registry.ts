@@ -62,8 +62,11 @@ export class AssetResourceRegistry {
     owner: object,
     resources: readonly FigAssetResource[],
   ): void {
-    const metadata = resources.filter(isMetadataResource);
-    if (metadata.length === 0) {
+    let metadata: MetadataResource[] | null = null;
+    for (const resource of resources) {
+      if (isMetadataResource(resource)) (metadata ??= []).push(resource);
+    }
+    if (metadata === null) {
       this.metadataByOwner.delete(owner);
       return;
     }
@@ -95,12 +98,13 @@ export class AssetResourceRegistry {
     metadata: HeadMetadataHtml,
     sink: AssetSink,
   ): void {
-    const preconnects: FigAssetResource[] = [];
-    const criticalPreloads: FigAssetResource[] = [];
-    const stylesheets: FigAssetResource[] = [];
-    const afterMetadata: FigAssetResource[] = [];
+    const preconnects: DeliveryResource[] = [];
+    const criticalPreloads: DeliveryResource[] = [];
+    const stylesheets: DeliveryResource[] = [];
+    const afterMetadata: DeliveryResource[] = [];
 
     for (const resource of resources) {
+      if (isMetadataResource(resource)) continue;
       if (resource.kind === "preconnect") {
         preconnects.push(resource);
       } else if (
@@ -150,11 +154,10 @@ export class AssetResourceRegistry {
     }
 
     return {
-      preamble: [
-        ...buckets.charset,
-        ...buckets.parser,
-        ...buckets.viewport,
-      ].join(""),
+      preamble:
+        buckets.charset.join("") +
+        buckets.parser.join("") +
+        buckets.viewport.join(""),
       metadata: buckets.metadata.join(""),
     };
   }

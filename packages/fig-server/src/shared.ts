@@ -13,6 +13,11 @@ import type {
   StableEventCallerArgs,
 } from "@bgub/fig/internal";
 import { escapeAttribute } from "./escaping.ts";
+import type { ServerErrorPayload, ServerRenderOptions } from "./types.ts";
+
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 export type ContextValues = Map<FigContext<unknown>, unknown[]>;
 
@@ -33,30 +38,18 @@ interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
   preloadData<TArgs extends unknown[], TValue>(
+    this: void,
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
   readData<TArgs extends unknown[], TValue>(
+    this: void,
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
-  readPromise<T>(promise: PromiseLike<T>): T;
+  readPromise<T>(this: void, promise: PromiseLike<T>): T;
   updateError: string;
-  useId(): string;
-}
-
-function contextStack(
-  values: ContextValues,
-  context: FigContext<unknown>,
-): unknown[] {
-  let stack = values.get(context);
-
-  if (stack === undefined) {
-    stack = [];
-    values.set(context, stack);
-  }
-
-  return stack;
+  useId(this: void): string;
 }
 
 export function withContextValue<T>(
@@ -65,7 +58,11 @@ export function withContextValue<T>(
   value: unknown,
   callback: () => T,
 ): T {
-  const stack = contextStack(values, context);
+  let stack = values.get(context);
+  if (stack === undefined) {
+    stack = [];
+    values.set(context, stack);
+  }
   stack.push(value);
 
   try {
@@ -133,12 +130,6 @@ export function streamFlowBlocked(
   return typeof desiredSize === "number" && desiredSize <= 0;
 }
 
-function resolveInitialState<S>(initialState: S | (() => S)): S {
-  return typeof initialState === "function"
-    ? (initialState as () => S)()
-    : initialState;
-}
-
 export function createStaticDispatcher(
   options: StaticDispatcherOptions,
 ): RenderDispatcher {
@@ -148,7 +139,10 @@ export function createStaticDispatcher(
 
   return {
     useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
-      const value = resolveInitialState(initialState);
+      const value =
+        typeof initialState === "function"
+          ? (initialState as () => S)()
+          : initialState;
       return [value, rejectUpdate];
     },
     useActionState<S, Args extends unknown[]>(
@@ -157,9 +151,7 @@ export function createStaticDispatcher(
     ): [S, ActionStateRunner<Args>, boolean] {
       return [initialState, rejectUpdate, false];
     },
-    useId(): string {
-      return options.useId();
-    },
+    useId: options.useId,
     useDeferredValue<T>(
       value: T,
       _initialValue: T | undefined,
@@ -195,21 +187,9 @@ export function createStaticDispatcher(
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
     },
-    readData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      args: TArgs,
-    ): TValue {
-      return options.readData(resource, args);
-    },
-    preloadData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      args: TArgs,
-    ): void {
-      options.preloadData(resource, args);
-    },
-    readPromise<T>(promise: PromiseLike<T>): T {
-      return options.readPromise(promise);
-    },
+    readData: options.readData,
+    preloadData: options.preloadData,
+    readPromise: options.readPromise,
   };
 }
 
@@ -237,6 +217,21 @@ export function componentStack(stack: StackFrame | null): string {
     frames.push(`    at ${frame.name}`);
   }
   return frames.length === 0 ? "" : `\n${frames.join("\n")}`;
+}
+
+export function serverErrorPayload(
+  error: unknown,
+  stack: StackFrame | null,
+  onError: ServerRenderOptions["onError"],
+): ServerErrorPayload {
+  if (onError === undefined) {
+    return __DEV__ ? { message: errorMessage(error) } : {};
+  }
+  try {
+    return onError(error, { componentStack: componentStack(stack) }) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 export function nonceAttribute(nonce: string | undefined): string {
