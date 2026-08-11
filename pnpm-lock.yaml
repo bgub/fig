@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: false
   excludeLinksFromLockfile: false
 
+overrides:
+  js-yaml@>=4.0.0 <4.3.1: 4.3.1
+
 importers:
 
   .:
@@ -28,7 +31,7 @@ importers:
         version: 12.1.0(size-limit@12.1.0(jiti@2.7.0))
       '@tsdown/css':
         specifier: 0.22.7
-        version: 0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.19))(postcss@8.5.19)(tsdown@0.22.7)(yaml@2.9.0)
+        version: 0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.26))(postcss@8.5.26)(tsdown@0.22.7)(yaml@2.9.0)
       '@types/node':
         specifier: ^20.19.0
         version: 20.19.43
@@ -57,11 +60,11 @@ importers:
         specifier: ^0.15.3
         version: 0.15.3
       postcss:
-        specifier: ^8.5.19
-        version: 8.5.19
+        specifier: ^8.5.26
+        version: 8.5.26
       postcss-import:
         specifier: ^16.1.1
-        version: 16.1.1(postcss@8.5.19)
+        version: 16.1.1(postcss@8.5.26)
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -206,8 +209,8 @@ importers:
         specifier: ^4.3.2
         version: 4.3.2
       postcss:
-        specifier: ^8.5.19
-        version: 8.5.19
+        specifier: ^8.5.26
+        version: 8.5.26
       tailwindcss:
         specifier: ^4.3.2
         version: 4.3.2
@@ -304,7 +307,7 @@ importers:
   packages/fig-refresh:
     dependencies:
       '@bgub/fig-reconciler':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../fig-reconciler
 
   packages/fig-server:
@@ -341,7 +344,7 @@ importers:
         specifier: ^8.0.1
         version: 8.0.1(@babel/core@8.0.1)
       '@bgub/fig-vite':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../fig-vite
       '@tanstack/router-core':
         specifier: 1.171.15
@@ -1950,8 +1953,8 @@ packages:
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
-  js-yaml@4.3.0:
-    resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
+  js-yaml@4.3.1:
+    resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
 
   jsesc@3.1.0:
@@ -2066,8 +2069,8 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  nanoid@3.3.16:
-    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
+  nanoid@3.3.18:
+    resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -2181,8 +2184,8 @@ packages:
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
-  postcss@8.5.19:
-    resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
+  postcss@8.5.26:
+    resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   prettier@3.9.5:
@@ -2272,8 +2275,18 @@ packages:
     peerDependencies:
       seroval: ^1.0
 
+  seroval-plugins@1.6.2:
+    resolution: {integrity: sha512-TfxuUjlbBESzUOWdTkTKqvSmav0ABym+itetDXLK6mDz8SmrpdI30aF8RTXE8Bvq+tH/1yIDkvy3W0lfQb1ipQ==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      seroval: ^1.0
+
   seroval@1.5.5:
     resolution: {integrity: sha512-bSjOuPcwPKLSJNhr9+bZxA20nQxVle5J5MNsYRVE6cIg7KpRLXGupymePavu0jrxlPiPsr4xGZSB8yUY2sH2sw==}
+    engines: {node: '>=10'}
+
+  seroval@1.6.2:
+    resolution: {integrity: sha512-mPT+SD2TrlB6wvte1KkYOYUkubaTbd6pZ/6Kk3C9nxzrHmCZyhxOO7XGAeL7f+yLKZglzGtM9odUVvg/EhO+vQ==}
     engines: {node: '>=10'}
 
   siginfo@2.0.0:
@@ -3327,7 +3340,7 @@ snapshots:
       '@alloc/quick-lru': 5.2.0
       '@tailwindcss/node': 4.3.2
       '@tailwindcss/oxide': 4.3.2
-      postcss: 8.5.19
+      postcss: 8.5.26
       tailwindcss: 4.3.2
 
   '@tailwindcss/vite@4.3.2(vite@8.1.4(@types/node@20.19.43)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))':
@@ -3381,8 +3394,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.0
       cookie-es: 3.1.1
-      seroval: 1.5.5
-      seroval-plugins: 1.5.5(seroval@1.5.5)
+      seroval: 1.6.2
+      seroval-plugins: 1.6.2(seroval@1.6.2)
 
   '@tanstack/router-generator@1.167.21':
     dependencies:
@@ -3438,7 +3451,7 @@ snapshots:
       '@tanstack/router-core': 1.171.15
       '@tanstack/start-fn-stubs': 1.162.0
       '@tanstack/start-storage-context': 1.167.17
-      seroval: 1.5.5
+      seroval: 1.6.2
 
   '@tanstack/start-fn-stubs@1.162.0': {}
 
@@ -3456,7 +3469,7 @@ snapshots:
       lightningcss: 1.32.0
       pathe: 2.0.3
       picomatch: 4.0.5
-      seroval: 1.5.5
+      seroval: 1.6.2
       source-map: 0.7.6
       srvx: 0.11.22
       tinyglobby: 0.2.17
@@ -3488,7 +3501,7 @@ snapshots:
       '@tanstack/start-storage-context': 1.167.17
       fetchdts: 0.1.7
       h3-v2: h3@2.0.1-rc.20
-      seroval: 1.5.5
+      seroval: 1.6.2
     transitivePeerDependencies:
       - crossws
 
@@ -3500,15 +3513,15 @@ snapshots:
 
   '@tanstack/virtual-file-routes@1.162.0': {}
 
-  '@tsdown/css@0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.19))(postcss@8.5.19)(tsdown@0.22.7)(yaml@2.9.0)':
+  '@tsdown/css@0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.26))(postcss@8.5.26)(tsdown@0.22.7)(yaml@2.9.0)':
     dependencies:
       lightningcss: 1.32.0
-      postcss-load-config: 6.0.1(jiti@2.7.0)(postcss@8.5.19)(yaml@2.9.0)
+      postcss-load-config: 6.0.1(jiti@2.7.0)(postcss@8.5.26)(yaml@2.9.0)
       rolldown: 1.1.5
       tsdown: 0.22.7(@tsdown/css@0.22.7)(typescript@6.0.3)
     optionalDependencies:
-      postcss: 8.5.19
-      postcss-import: 16.1.1(postcss@8.5.19)
+      postcss: 8.5.26
+      postcss-import: 16.1.1(postcss@8.5.26)
     transitivePeerDependencies:
       - jiti
       - tsx
@@ -3907,7 +3920,7 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  js-yaml@4.3.0:
+  js-yaml@4.3.1:
     dependencies:
       argparse: 2.0.1
 
@@ -3993,7 +4006,7 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nanoid@3.3.16: {}
+  nanoid@3.3.18: {}
 
   nanoid@5.1.16: {}
 
@@ -4083,26 +4096,26 @@ snapshots:
 
   portless@0.15.3: {}
 
-  postcss-import@16.1.1(postcss@8.5.19):
+  postcss-import@16.1.1(postcss@8.5.26):
     dependencies:
-      postcss: 8.5.19
+      postcss: 8.5.26
       postcss-value-parser: 4.2.0
       read-cache: 1.0.0
       resolve: 1.22.12
 
-  postcss-load-config@6.0.1(jiti@2.7.0)(postcss@8.5.19)(yaml@2.9.0):
+  postcss-load-config@6.0.1(jiti@2.7.0)(postcss@8.5.26)(yaml@2.9.0):
     dependencies:
       lilconfig: 3.1.3
     optionalDependencies:
       jiti: 2.7.0
-      postcss: 8.5.19
+      postcss: 8.5.26
       yaml: 2.9.0
 
   postcss-value-parser@4.2.0: {}
 
-  postcss@8.5.19:
+  postcss@8.5.26:
     dependencies:
-      nanoid: 3.3.16
+      nanoid: 3.3.18
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -4186,7 +4199,13 @@ snapshots:
     dependencies:
       seroval: 1.5.5
 
+  seroval-plugins@1.6.2(seroval@1.6.2):
+    dependencies:
+      seroval: 1.6.2
+
   seroval@1.5.5: {}
+
+  seroval@1.6.2: {}
 
   siginfo@2.0.0: {}
 
@@ -4272,7 +4291,7 @@ snapshots:
       tree-kill: 1.2.2
       unconfig-core: 7.5.0
     optionalDependencies:
-      '@tsdown/css': 0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.19))(postcss@8.5.19)(tsdown@0.22.7)(yaml@2.9.0)
+      '@tsdown/css': 0.22.7(jiti@2.7.0)(postcss-import@16.1.1(postcss@8.5.26))(postcss@8.5.26)(tsdown@0.22.7)(yaml@2.9.0)
       typescript: 6.0.3
     transitivePeerDependencies:
       - '@ts-macro/tsc'
@@ -4323,7 +4342,7 @@ snapshots:
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.19
+      postcss: 8.5.26
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -4382,7 +4401,7 @@ snapshots:
       '@oozcitak/dom': 2.0.2
       '@oozcitak/infra': 2.0.2
       '@oozcitak/util': 10.0.0
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
 
   yallist@3.1.1: {}
 

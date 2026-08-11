@@ -122,7 +122,7 @@
     "dist-development"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "test": "vitest run --config ../../vite.config.ts src"
   },
   "author": "Ben Gubler <nebrelbug@gmail.com>",

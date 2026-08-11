@@ -33,7 +33,7 @@
     "dist-development"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "prepack": "pnpm build",
     "test": "vitest run --config ../../vite.config.ts src"
   },

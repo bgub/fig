@@ -1,6 +1,14 @@
 # Releases
 
-Fig uses Tegami to version the public packages and create grouped GitHub releases. All eight public packages belong to one `fig` release group, use the `alpha` prerelease channel, and receive the same version bump. The five renderer/core packages publish to npm and JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only. npm publishes prerelease versions under `latest`, so the default install always resolves to the newest Fig release even while its SemVer version includes an `alpha` prerelease suffix.
+Fig uses Tegami to version the public packages and create grouped GitHub releases. Packages that share a private protocol or implementation are versioned together; packages connected through public interfaces release independently:
+
+| Release group | Packages |
+| --- | --- |
+| `fig` | `@bgub/fig`, `@bgub/fig-reconciler`, `@bgub/fig-dom`, `@bgub/fig-server` |
+| `fig-tooling` | `@bgub/fig-refresh`, `@bgub/fig-vite` |
+| `fig-tanstack` | `@bgub/fig-tanstack-router`, `@bgub/fig-tanstack-start` |
+
+Every group currently uses the `alpha` prerelease channel, synchronizes version bumps among its members, and publishes under npm's `latest` tag. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
 
 ## Contributor workflow
 
@@ -16,7 +24,7 @@ packages:
 ## Describe the user-visible change
 ```
 
-The highest requested bump is applied to the entire release group. Changes to private demos, tooling, tests, or documentation do not need a changelog unless they affect a public package.
+The highest requested bump is applied within each affected release group. A changelog that names packages from multiple groups advances each of those groups independently. Changes to private demos, tests, or documentation do not need a changelog unless they affect a public package.
 
 ## CI workflow
 
@@ -24,7 +32,7 @@ On each push to `main`, `.github/workflows/publish.yml` runs `pnpm tegami ci`:
 
 1. Pending changelogs produce or update the Version Packages pull request.
 2. Merging that pull request publishes the committed versions to JSR and npm.
-3. Tegami creates one `fig@<version>` tag and grouped GitHub release.
+3. Tegami creates one tag and GitHub release for every affected group: `fig@<version>`, `fig-tooling@<version>`, or `fig-tanstack@<version>`.
 
 The JSR adapter publishes JSR first. It records no separate release state: Tegami's committed publish lock is authoritative, while registry metadata is used to make retries idempotent.
 

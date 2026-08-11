@@ -116,6 +116,8 @@ function assertDevBundle(target: string): string {
   return `node ${workspacePath("scripts/assert-dev-bundle.mjs")} ${target}`;
 }
 
+const stripDeclarationMapComments = `node ${workspacePath("scripts/strip-declaration-map-comments.mjs")} dist`;
+
 const packageConfig = packConfigFor(packagePath);
 export default defineConfig(
   packageConfig === undefined ? {} : withPackageCwd(packageConfig),
@@ -141,6 +143,7 @@ function packConfigFor(path: string): PackConfig | undefined {
     const primary = {
       ...config,
       define: isDevSourcePack ? figDevDefine : figProductionDefine,
+      onSuccess: stripDeclarationMapComments,
     };
     return developmentLibraries.has(path)
       ? [
@@ -172,7 +175,17 @@ function packConfigFor(path: string): PackConfig | undefined {
         sourcemap: true,
       };
     case "apps/demo-client":
-      return demoClientPackConfig();
+      return {
+        entry: ["./src/main.tsx"],
+        alias: sourceAliases,
+        platform: "browser",
+        deps: {
+          alwaysBundle: [figPackages, reactPackages],
+        },
+        define: demoBrowserDefine,
+        onSuccess: assertDevBundle("dist/main.js"),
+        sourcemap: true,
+      };
     case "apps/demo-payload":
       return [
         {
@@ -210,7 +223,9 @@ function packConfigFor(path: string): PackConfig | undefined {
           entry: ["./src/server.tsx"],
           alias: isDevSourcePack ? sourceAliases : undefined,
           define: figDevDefine,
-          deps: figServerDeps(),
+          deps: isDevSourcePack
+            ? { alwaysBundle: [figPackages] }
+            : { neverBundle: [figPackages] },
           platform: "node",
           sourcemap: true,
         },
@@ -230,26 +245,6 @@ function packConfigFor(path: string): PackConfig | undefined {
     default:
       return undefined;
   }
-}
-
-function figServerDeps() {
-  return isDevSourcePack
-    ? { alwaysBundle: [figPackages] }
-    : { neverBundle: [figPackages] };
-}
-
-function demoClientPackConfig(): PackConfig {
-  return {
-    entry: ["./src/main.tsx"],
-    alias: sourceAliases,
-    platform: "browser",
-    deps: {
-      alwaysBundle: [figPackages, reactPackages],
-    },
-    define: demoBrowserDefine,
-    onSuccess: assertDevBundle("dist/main.js"),
-    sourcemap: true,
-  };
 }
 
 function withPackageCwd(config: PackConfig): PackConfig {

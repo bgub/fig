@@ -7,6 +7,9 @@ autoInstallPeers: false
 allowBuilds:
   esbuild: true
 
+overrides:
+  "js-yaml@>=4.0.0 <4.3.1": 4.3.1
+
 minimumReleaseAgeExclude:
   - "@tanstack/router-generator@1.167.21"
   - "@tanstack/router-plugin@1.168.22"

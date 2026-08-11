@@ -2,19 +2,32 @@ import { tegami } from "tegami";
 import { github } from "tegami/plugins/github";
 import { jsrRelease } from "./jsr.mts";
 
-export const jsrPackageNames = [
+export const runtimePackageNames = [
   "@bgub/fig",
   "@bgub/fig-reconciler",
   "@bgub/fig-dom",
-  "@bgub/fig-refresh",
   "@bgub/fig-server",
 ] as const;
 
-export const publicPackageNames = [
-  ...jsrPackageNames,
+export const toolingPackageNames = [
+  "@bgub/fig-refresh",
   "@bgub/fig-vite",
+] as const;
+
+export const tanstackPackageNames = [
   "@bgub/fig-tanstack-router",
   "@bgub/fig-tanstack-start",
+] as const;
+
+export const jsrPackageNames = [
+  ...runtimePackageNames,
+  "@bgub/fig-refresh",
+] as const;
+
+export const publicPackageNames = [
+  ...runtimePackageNames,
+  ...toolingPackageNames,
+  ...tanstackPackageNames,
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
@@ -22,6 +35,18 @@ export function createFigRelease(cwd = process.cwd()) {
     cwd,
     groups: {
       fig: {
+        prerelease: "alpha",
+        syncBump: true,
+        syncGitTag: true,
+        npm: { distTag: "latest" },
+      },
+      "fig-tooling": {
+        prerelease: "alpha",
+        syncBump: true,
+        syncGitTag: true,
+        npm: { distTag: "latest" },
+      },
+      "fig-tanstack": {
         prerelease: "alpha",
         syncBump: true,
         syncGitTag: true,
@@ -52,11 +77,11 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig": { group: "fig" },
       "@bgub/fig-dom": { group: "fig" },
       "@bgub/fig-reconciler": { group: "fig" },
-      "@bgub/fig-refresh": { group: "fig" },
       "@bgub/fig-server": { group: "fig" },
-      "@bgub/fig-vite": { group: "fig" },
-      "@bgub/fig-tanstack-router": { group: "fig" },
-      "@bgub/fig-tanstack-start": { group: "fig" },
+      "@bgub/fig-refresh": { group: "fig-tooling" },
+      "@bgub/fig-vite": { group: "fig-tooling" },
+      "@bgub/fig-tanstack-router": { group: "fig-tanstack" },
+      "@bgub/fig-tanstack-start": { group: "fig-tanstack" },
     },
     plugins: [
       jsrRelease({ publishOrder: jsrPackageNames }),

@@ -19,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "prepack": "pnpm build",
     "test": "vitest run --config ../../vite.config.ts src"
   },
@@ -37,7 +37,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@bgub/fig-reconciler": "workspace:*"
+    "@bgub/fig-reconciler": "workspace:^"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

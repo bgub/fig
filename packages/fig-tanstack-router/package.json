@@ -26,7 +26,7 @@
     "COMPATIBILITY.md"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "prepack": "pnpm build",
     "test": "vitest run --config ../../vite.config.ts src"
   },
@@ -50,8 +50,8 @@
     "@tanstack/store": "0.9.3"
   },
   "peerDependencies": {
-    "@bgub/fig": "workspace:*",
-    "@bgub/fig-dom": "workspace:*"
+    "@bgub/fig": "workspace:^",
+    "@bgub/fig-dom": "workspace:^"
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*",

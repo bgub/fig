@@ -7,10 +7,13 @@ import {
   createFigRelease,
   jsrPackageNames,
   publicPackageNames,
+  runtimePackageNames,
+  tanstackPackageNames,
+  toolingPackageNames,
 } from "./config.mts";
 import { jsrRelease, synchronizeJsrManifest } from "./jsr.mts";
 
-void test("release graph contains one synchronized public group", async () => {
+void test("release graph contains three synchronized public groups", async () => {
   const context = await createFigRelease()._internal.context();
   assert.deepEqual(
     context.graph
@@ -20,16 +23,24 @@ void test("release graph contains one synchronized public group", async () => {
     [...publicPackageNames].sort(),
   );
 
-  const group = context.graph.getGroup("fig");
-  assert.ok(group !== undefined);
-  assert.equal(group.options.prerelease, "alpha");
-  assert.equal(group.options.npm?.distTag, "latest");
-  assert.equal(group.options.syncBump, true);
-  assert.equal(group.options.syncGitTag, true);
-  assert.deepEqual(
-    group.packages.map((pkg) => pkg.name).sort(),
-    [...publicPackageNames].sort(),
-  );
+  const expectedGroups = [
+    ["fig", runtimePackageNames],
+    ["fig-tooling", toolingPackageNames],
+    ["fig-tanstack", tanstackPackageNames],
+  ] as const;
+
+  for (const [name, packageNames] of expectedGroups) {
+    const group = context.graph.getGroup(name);
+    assert.ok(group !== undefined);
+    assert.equal(group.options.prerelease, "alpha");
+    assert.equal(group.options.npm?.distTag, "latest");
+    assert.equal(group.options.syncBump, true);
+    assert.equal(group.options.syncGitTag, true);
+    assert.deepEqual(
+      group.packages.map((pkg) => pkg.name).sort(),
+      [...packageNames].sort(),
+    );
+  }
 });
 
 void test("JSR manifests expose every JSR package's npm entries", async () => {

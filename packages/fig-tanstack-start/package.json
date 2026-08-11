@@ -46,7 +46,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.ts && node ../../scripts/strip-declaration-map-comments.mjs dist",
+    "build": "tsdown --config ../../tsdown.config.ts",
     "prepack": "pnpm build",
     "test": "vitest run --config ../../vite.config.ts src"
   },
@@ -67,16 +67,16 @@
   "dependencies": {
     "@babel/core": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
-    "@bgub/fig-vite": "workspace:*",
+    "@bgub/fig-vite": "workspace:^",
     "@tanstack/router-core": "1.171.15",
     "@tanstack/start-client-core": "1.170.14",
     "@tanstack/start-plugin-core": "1.171.22",
     "@tanstack/start-server-core": "1.169.17"
   },
   "peerDependencies": {
-    "@bgub/fig": "workspace:*",
-    "@bgub/fig-dom": "workspace:*",
-    "@bgub/fig-server": "workspace:*",
+    "@bgub/fig": "workspace:^",
+    "@bgub/fig-dom": "workspace:^",
+    "@bgub/fig-server": "workspace:^",
     "@bgub/fig-tanstack-router": "workspace:*",
     "vite": ">=7.0.0"
   },
