@@ -15,11 +15,16 @@ type PreventAssetResourceHostProps = Props & {
   [PreventAssetResourceHoistSymbol]?: true;
 };
 
+/** Describes asset resource blocking. */
 export type AssetResourceBlocking = "reveal" | "none";
+/** Describes cross origin. */
 export type CrossOrigin = "anonymous" | "use-credentials" | "";
+/** Describes fetch priority. */
 export type FetchPriority = "high" | "low" | "auto";
+/** Describes asset resource destination. */
 export type AssetResourceDestination = "head" | "stream";
 
+/** Describes Fig asset resource. */
 export type FigAssetResource =
   | StylesheetResource
   | PreloadResource
@@ -34,6 +39,7 @@ interface ResourceBase {
   key?: string;
 }
 
+/** Describes stylesheet resource. */
 export interface StylesheetResource extends ResourceBase {
   blocking?: AssetResourceBlocking;
   crossorigin?: CrossOrigin;
@@ -43,6 +49,7 @@ export interface StylesheetResource extends ResourceBase {
   precedence?: string;
 }
 
+/** Describes preload resource. */
 export interface PreloadResource extends ResourceBase {
   as: string;
   crossorigin?: CrossOrigin;
@@ -55,6 +62,7 @@ export interface PreloadResource extends ResourceBase {
   type?: string;
 }
 
+/** Describes module preload resource. */
 export interface ModulePreloadResource extends ResourceBase {
   crossorigin?: CrossOrigin;
   fetchpriority?: FetchPriority;
@@ -62,6 +70,7 @@ export interface ModulePreloadResource extends ResourceBase {
   kind: "modulepreload";
 }
 
+/** Describes script resource. */
 export interface ScriptResource extends ResourceBase {
   async?: boolean;
   crossorigin?: CrossOrigin;
@@ -71,6 +80,7 @@ export interface ScriptResource extends ResourceBase {
   src: string;
 }
 
+/** Describes font resource. */
 export interface FontResource extends ResourceBase {
   crossorigin?: CrossOrigin;
   fetchpriority?: FetchPriority;
@@ -79,12 +89,14 @@ export interface FontResource extends ResourceBase {
   type: string;
 }
 
+/** Describes preconnect resource. */
 export interface PreconnectResource extends ResourceBase {
   crossorigin?: CrossOrigin;
   href: string;
   kind: "preconnect";
 }
 
+/** Describes title resource. */
 export interface TitleResource extends ResourceBase {
   kind: "title";
   value: string;
@@ -98,6 +110,7 @@ type DistributiveOmit<Value, Key extends PropertyKey> = Value extends unknown
   ? Omit<Value, Key>
   : never;
 
+/** Describes meta resource. */
 export type MetaResource =
   | (MetaResourceBase & {
       charset: string;
@@ -128,8 +141,10 @@ export type MetaResource =
       property?: never;
     });
 
+/** Describes meta resource options. */
 export type MetaResourceOptions = DistributiveOmit<MetaResource, "kind">;
 
+/** Describes Fig asset resource list. */
 export type FigAssetResourceList =
   | FigAssetResource
   | readonly FigAssetResource[];
@@ -137,15 +152,18 @@ export type FigAssetResourceList =
 // Asset resources a client reference contributes when it renders. Eager for
 // hand-written lists; a thunk for bundler-manifest resolution that may not be
 // available until serialization time, or that maps paths differently per build.
+/** Describes client reference assets. */
 export type ClientReferenceAssets =
   | FigAssetResourceList
   | (() => FigAssetResourceList);
 
+/** Describes assets props. */
 export interface AssetsProps {
   assets: FigAssetResourceList;
   children?: FigNode;
 }
 
+/** Assets. */
 export function assets(
   value: FigAssetResourceList,
   children?: FigNode,
@@ -153,6 +171,7 @@ export function assets(
   return createElement(Assets, { assets: value }, children);
 }
 
+/** Stylesheet. */
 export function stylesheet(
   href: string,
   options: Omit<StylesheetResource, "href" | "kind"> = {},
@@ -160,6 +179,7 @@ export function stylesheet(
   return { ...options, href, kind: "stylesheet" };
 }
 
+/** Preload. */
 export function preload(
   href: string,
   as: string,
@@ -174,6 +194,7 @@ export function preload(
   };
 }
 
+/** Modulepreload. */
 export function modulepreload(
   href: string,
   options: Omit<ModulePreloadResource, "href" | "kind"> = {},
@@ -181,6 +202,7 @@ export function modulepreload(
   return { ...options, href, kind: "modulepreload" };
 }
 
+/** Script. */
 export function script(
   src: string,
   options: Omit<ScriptResource, "kind" | "src"> = {},
@@ -188,6 +210,7 @@ export function script(
   return { ...options, kind: "script", src };
 }
 
+/** Font. */
 export function font(
   href: string,
   type: string,
@@ -196,6 +219,7 @@ export function font(
   return { ...options, href, kind: "font", type };
 }
 
+/** Preconnect. */
 export function preconnect(
   href: string,
   options: Omit<PreconnectResource, "href" | "kind"> = {},
@@ -203,14 +227,17 @@ export function preconnect(
   return { ...options, href, kind: "preconnect" };
 }
 
+/** Title. */
 export function title(value: string): TitleResource {
   return { kind: "title", value };
 }
 
+/** Meta. */
 export function meta(options: MetaResourceOptions): MetaResource {
   return { ...options, kind: "meta" };
 }
 
+/** Checks whether Fig asset resource. */
 export function isFigAssetResource(value: unknown): value is FigAssetResource {
   if (typeof value !== "object" || value === null || !("kind" in value)) {
     return false;
@@ -231,6 +258,7 @@ export function isFigAssetResource(value: unknown): value is FigAssetResource {
   }
 }
 
+/** Client reference assets. */
 export function clientReferenceAssets(
   reference: FigClientReference,
 ): readonly FigAssetResource[] {
@@ -247,6 +275,7 @@ export function clientReferenceAssets(
   return Array.isArray(list) ? list : [];
 }
 
+/** Asset resource key. */
 export function assetResourceKey(resource: FigAssetResource): string {
   // A document carries a single <title>; collapse every title to one key even
   // when an author supplies an explicit key, so the singleton invariant cannot
@@ -288,6 +317,7 @@ export function assetResourceKey(resource: FigAssetResource): string {
   }
 }
 
+/** Asset resource destination. */
 export function assetResourceDestination(
   resource: FigAssetResource,
 ): AssetResourceDestination {
@@ -296,6 +326,7 @@ export function assetResourceDestination(
     : "stream";
 }
 
+/** Asset resource from host props. */
 export function assetResourceFromHostProps(
   type: string,
   props: Props,
@@ -315,6 +346,7 @@ export function assetResourceFromHostProps(
   );
 }
 
+/** Prevent asset resource hoist. */
 export function preventAssetResourceHoist<P extends Props>(props: P): P {
   Object.defineProperty(props, PreventAssetResourceHoistSymbol, {
     enumerable: true,
@@ -323,6 +355,7 @@ export function preventAssetResourceHoist<P extends Props>(props: P): P {
   return props;
 }
 
+/** Asset resource from host attributes. */
 export function assetResourceFromHostAttributes(
   type: string,
   getAttribute: (name: string) => unknown,
@@ -330,6 +363,7 @@ export function assetResourceFromHostAttributes(
   return assetResourceFromHostValues(type, getAttribute, undefined, false);
 }
 
+/** Describes asset resource host props. */
 export type AssetResourceHostProps = Record<string, string | true>;
 
 // Canonical host props for hoisted asset-resource elements, shared by the
@@ -337,6 +371,7 @@ export type AssetResourceHostProps = Record<string, string | true>;
 // cannot drift. `true` marks a boolean attribute (bare on the server,
 // empty-string in the DOM). Server-only attributes (id, nonce) stay with the
 // server writer; title/meta are written by their own paths.
+/** Asset resource host props. */
 export function assetResourceHostProps(
   resource: FigAssetResource,
   props: AssetResourceHostProps = {},
@@ -439,6 +474,7 @@ export function assetResourceHostProps(
   return props;
 }
 
+/** Asset resource from host values. */
 export function assetResourceFromHostValues(
   type: string,
   prop: (name: string) => unknown,

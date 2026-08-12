@@ -13,6 +13,7 @@ import type {
 } from "@bgub/fig";
 import type { RenderTreeCollector } from "./render-tree.ts";
 
+/** Describes server render options. */
 export interface ServerRenderOptions {
   /**
    * Prefix for generated streaming Suspense and useId identifiers.
@@ -54,6 +55,7 @@ export interface ServerRenderOptions {
   signal?: AbortSignal;
 }
 
+/** Describes server prerender options. */
 export interface ServerPrerenderOptions extends ServerRenderOptions {
   /**
    * Render a full document. The root must render an <html> element with a
@@ -62,10 +64,12 @@ export interface ServerPrerenderOptions extends ServerRenderOptions {
   document?: boolean;
 }
 
+/** Describes server error info. */
 export interface ServerErrorInfo {
   componentStack: string;
 }
 
+/** Describes server error payload. */
 export interface ServerErrorPayload {
   digest?: string;
   message?: string;
@@ -88,6 +92,7 @@ interface ServerStreamRenderResult {
   stream: ReadableStream<Uint8Array>;
 }
 
+/** Describes server preload header options. */
 export interface ServerPreloadHeaderOptions {
   /** Include only resources that are safe for this response's cache policy. */
   filter?: (resource: ServerPreloadHeaderResource) => boolean;
@@ -99,6 +104,7 @@ type HeaderPreloadResource = PreloadResource & {
   href: string;
 };
 
+/** Describes server preload header resource. */
 export type ServerPreloadHeaderResource = Readonly<
   | Exclude<FigAssetResource, { kind: "meta" | "preload" | "script" | "title" }>
   | HeaderPreloadResource
@@ -106,13 +112,16 @@ export type ServerPreloadHeaderResource = Readonly<
 
 // Document mode is the fragment result minus the head accessors: the
 // document renderer injects the sealed head into the stream itself.
+/** Describes server document render result. */
 export type ServerDocumentRenderResult = ServerStreamRenderResult;
 
+/** Describes server fragment render result. */
 export interface ServerFragmentRenderResult extends ServerStreamRenderResult {
   getHead(this: void): string;
   headReady: Promise<string>;
 }
 
+/** Describes server prerender result. */
 export interface ServerPrerenderResult {
   data: FigDataHydrationEntry[];
   /**

@@ -3,11 +3,13 @@ const attributeEscapePatternGlobal = /[&"<>]/g;
 const textEscapePattern = /[&<>]/;
 const textEscapePatternGlobal = /[&<>]/g;
 
+/** Escape text. */
 export function escapeText(value: string): string {
   if (!textEscapePattern.test(value)) return value;
   return value.replace(textEscapePatternGlobal, escapeTextCharacter);
 }
 
+/** Escape attribute. */
 export function escapeAttribute(value: string): string {
   if (!attributeEscapePattern.test(value)) return value;
   return value.replace(attributeEscapePatternGlobal, escapeAttributeCharacter);
@@ -29,6 +31,7 @@ function escapeTextCharacter(character: string): string {
 // Script elements are raw-text elements: HTML entities are not decoded in
 // their contents, so escape only characters that can terminate the element
 // or executable source.
+/** Escape script text. */
 export function escapeScriptText(value: string): string {
   return value
     .replaceAll("<", "\\u003C")
@@ -36,6 +39,7 @@ export function escapeScriptText(value: string): string {
     .replaceAll("\u2029", "\\u2029");
 }
 
+/** Escape script JSON. */
 export function escapeScriptJson(value: unknown): string {
   return escapeScriptText(JSON.stringify(value));
 }

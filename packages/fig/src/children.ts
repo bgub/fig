@@ -10,6 +10,7 @@ import { isThenable } from "./thenables.ts";
 
 // What normalization leaves behind: arrays are flattened, null/undefined/
 // booleans are dropped, and numbers are stringified into (merged) text.
+/** Describes normalized child. */
 export type NormalizedChild =
   | FigElement<any>
   | FigPortal<any>
@@ -20,6 +21,7 @@ export type NormalizedChild =
 // Adjacent text merging here MUST match on both sides: the server emits
 // merged text nodes into HTML, and hydration matches them against the
 // client's fiber children — divergence is a hydration mismatch.
+/** Collect children. */
 export function collectChildren(node: FigNode): NormalizedChild[] {
   if (Array.isArray(node)) return collectArrayChildren(node);
 
@@ -100,12 +102,14 @@ function appendTextChild(children: NormalizedChild[], text: string): void {
   }
 }
 
+/** Invalid child error. */
 export function invalidChildError(value: unknown): Error {
   return new Error(
     `Invalid Fig child: ${describeInvalidChild(value)}. Render a string, number, element, promise, array, boolean, null, or undefined.`,
   );
 }
 
+/** Describes invalid child. */
 export function describeInvalidChild(value: unknown): string {
   if (typeof value !== "object" || value === null) return typeof value;
 

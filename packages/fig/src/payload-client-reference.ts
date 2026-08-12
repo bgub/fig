@@ -8,6 +8,7 @@ import { readPromise } from "./hooks.ts";
 import { assets as attachAssets, type FigAssetResource } from "./resource.ts";
 import { isThenable, trackThenable } from "./thenables.ts";
 
+/** Describes payload client reference. */
 export interface PayloadClientReference {
   assets?: readonly FigAssetResource[];
   exportName?: string;
@@ -15,6 +16,7 @@ export interface PayloadClientReference {
   ssr?: boolean;
 }
 
+/** Describes resolve client reference. */
 export type ResolveClientReference = (
   reference: PayloadClientReference,
 ) => ElementType<any> | PromiseLike<ElementType<any>> | undefined;
@@ -40,6 +42,7 @@ const resolverEntries = new WeakMap<
   Map<string, ElementType<any>>
 >();
 
+/** Creates payload client reference resolver. */
 export function createPayloadClientReferenceResolver(
   resolve: ResolveClientReference,
 ): PayloadClientReferenceResolver {

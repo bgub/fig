@@ -5,15 +5,19 @@ import type { TransitionOptions } from "./transition.ts";
 
 // The useState updater: accepts the next state, or an updater function of
 // the previous state for stale-closure safety.
+/** Describes state setter. */
 export type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
+/** Describes external store subscribe. */
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
 // Fig appends the AbortSignal after the runner's args (the data-loader
 // shape). The signal aborts when a newer run supersedes this one, when the
 // owning component unmounts, and when an enclosing Activity hides.
+/** Describes action state action. */
 export type ActionStateAction<S, Args extends unknown[]> = (
   previousState: S,
   ...argsAndSignal: [...Args, AbortSignal]
 ) => S | PromiseLike<S>;
+/** Describes action state runner. */
 export type ActionStateRunner<Args extends unknown[]> = (...args: Args) => void;
 
 /**
@@ -35,6 +39,7 @@ export type StartTransition = (
 ) => void;
 type Callback = (...args: never[]) => unknown;
 
+/** Describes render dispatcher. */
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, StateSetter<S>];
   useActionState<S, Args extends unknown[]>(
@@ -72,9 +77,12 @@ export interface RenderDispatcher {
   readPromise<T>(promise: PromiseLike<T>): T;
 }
 
+/** Describes effect callback. */
 export type EffectCallback = (signal: AbortSignal) => undefined;
+/** Describes dependency list. */
 export type DependencyList = readonly unknown[];
 
+/** Describes stable event caller args. */
 export type StableEventCallerArgs<Args extends unknown[]> = Args extends [
   ...infer CallerArgs,
   AbortSignal,
@@ -86,6 +94,7 @@ export type StableEventCallerArgs<Args extends unknown[]> = Args extends [
 // it, so a declared trailing signal is stripped from the callable signature.
 let currentDispatcher: RenderDispatcher | null = null;
 
+/** Returns state. */
 export function useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
   return resolveDispatcher().useState(initialState);
 }
@@ -109,10 +118,12 @@ export function useActionState<S, Args extends unknown[]>(
   return resolveDispatcher().useActionState(action, initialState);
 }
 
+/** Returns ID. */
 export function useId(): string {
   return resolveDispatcher().useId();
 }
 
+/** Returns deferred value. */
 export function useDeferredValue<T>(value: T, initialValue?: T): T {
   return resolveDispatcher().useDeferredValue(
     value,
@@ -121,14 +132,17 @@ export function useDeferredValue<T>(value: T, initialValue?: T): T {
   );
 }
 
+/** Returns memo. */
 export function useMemo<T>(calculate: () => T, deps: DependencyList): T {
   return resolveDispatcher().useMemo(calculate, deps);
 }
 
+/** Returns transition. */
 export function useTransition(): [boolean, StartTransition] {
   return resolveDispatcher().useTransition();
 }
 
+/** Returns callback. */
 export function useCallback<T extends Callback>(
   callback: T,
   deps: DependencyList,
@@ -136,6 +150,7 @@ export function useCallback<T extends Callback>(
   return resolveDispatcher().useMemo(() => callback, deps);
 }
 
+/** Returns reactive. */
 export function useReactive(
   effect: EffectCallback,
   deps?: DependencyList,
@@ -143,6 +158,7 @@ export function useReactive(
   resolveDispatcher().useReactive(effect, deps);
 }
 
+/** Returns before paint. */
 export function useBeforePaint(
   effect: EffectCallback,
   deps?: DependencyList,
@@ -150,6 +166,7 @@ export function useBeforePaint(
   resolveDispatcher().useBeforePaint(effect, deps);
 }
 
+/** Returns before layout. */
 export function useBeforeLayout(
   effect: EffectCallback,
   deps?: DependencyList,
@@ -157,6 +174,7 @@ export function useBeforeLayout(
   resolveDispatcher().useBeforeLayout(effect, deps);
 }
 
+/** Returns sync external store. */
 export function useSyncExternalStore<T>(
   subscribe: ExternalStoreSubscribe,
   getSnapshot: () => T,
@@ -169,24 +187,28 @@ export function useSyncExternalStore<T>(
   );
 }
 
+/** Returns stable event. */
 export function useStableEvent<Args extends unknown[], Result>(
   handler: (...args: Args) => Result,
 ): (...args: StableEventCallerArgs<Args>) => Result {
   return resolveDispatcher().useStableEvent(handler);
 }
 
+/** Reads context. */
 export function readContext<T>(context: FigContext<T>): T {
   return resolveDispatcher(
     "readContext can only be called while rendering a component.",
   ).readContext(context);
 }
 
+/** Reads promise. */
 export function readPromise<T>(promise: PromiseLike<T>): T {
   return resolveDispatcher(
     "readPromise can only be called while rendering a component.",
   ).readPromise(promise);
 }
 
+/** Reads data. */
 export function readData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
@@ -196,6 +218,7 @@ export function readData<TArgs extends unknown[], TValue>(
   ).readData(resource, args);
 }
 
+/** Preloads data. */
 export function preloadData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
@@ -208,6 +231,7 @@ export function preloadData<TArgs extends unknown[], TValue>(
   resolveDataStore().preloadData(resource, ...args);
 }
 
+/** Sets current dispatcher. */
 export function setCurrentDispatcher(
   dispatcher: RenderDispatcher | null,
 ): RenderDispatcher | null {

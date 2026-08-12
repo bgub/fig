@@ -1,3 +1,8 @@
+/**
+ * Host-agnostic fiber reconciliation APIs for building Fig renderers.
+ *
+ * @module
+ */
 import {
   type ActionStateAction,
   type ActionStateRunner,
@@ -192,8 +197,10 @@ import {
   shouldYieldToHost,
 } from "./scheduler.ts";
 
+/** Describes event priority. */
 export type EventPriority = "default" | "continuous" | "discrete";
 
+/** Runs with event priority. */
 export function runWithEventPriority<T>(
   priority: EventPriority,
   callback: () => T,
@@ -223,15 +230,19 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 setTransitionHandler(runWithTransition);
 
 type Component = (props: Props & { children?: FigNode }) => FigNode;
+/** Describes host node. */
 type HostNode<Instance, TextInstance> = Instance | TextInstance;
+/** Describes parent. */
 type Parent<Container, Instance> = Container | Instance;
 type FiberType = ElementType | FigContext<unknown> | null;
 
+/** Describes dehydrated suspense error. */
 export interface DehydratedSuspenseError {
   digest?: string;
   message?: string;
 }
 
+/** Describes dehydrated suspense boundary. */
 export interface DehydratedSuspenseBoundary<
   Instance = unknown,
   TextInstance = unknown,
@@ -244,6 +255,7 @@ export interface DehydratedSuspenseBoundary<
   forceClientRender: boolean;
 }
 
+/** The asset resource owner brand. */
 declare const AssetResourceOwnerBrand: unique symbol;
 
 /** Stable opaque identity for one fiber's asset-resource ownership. */
@@ -251,6 +263,7 @@ export interface AssetResourceOwner {
   readonly [AssetResourceOwnerBrand]: true;
 }
 
+/** Describes host configuration. */
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
     type: string,
@@ -403,6 +416,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
 
 // Capability types describe coherent host method groups for renderers that
 // implement them. Plain regroupings of HostConfig members do not earn aliases.
+/** Describes host hydration configuration. */
 export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
@@ -415,6 +429,7 @@ export type HostHydrationConfig<Container, Instance, TextInstance> = Required<
 > &
   Pick<HostConfig<Container, Instance, TextInstance>, "commitHydratedInstance">;
 
+/** Describes host activity configuration. */
 export type HostActivityConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
@@ -428,6 +443,7 @@ export type HostActivityConfig<Container, Instance, TextInstance> = Required<
   >
 >;
 
+/** Describes host suspense hydration configuration. */
 export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
   Required<
     Pick<
@@ -442,6 +458,7 @@ export type HostSuspenseHydrationConfig<Container, Instance, TextInstance> =
     >
   >;
 
+/** Describes host portal configuration. */
 export type HostPortalConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
@@ -449,6 +466,7 @@ export type HostPortalConfig<Container, Instance, TextInstance> = Required<
   >
 >;
 
+/** Describes host hoisted asset configuration. */
 export type HostHoistedAssetConfig<Container, Instance, TextInstance> =
   Required<
     Pick<
@@ -460,6 +478,7 @@ export type HostHoistedAssetConfig<Container, Instance, TextInstance> =
     >
   >;
 
+/** Describes host singleton configuration. */
 export type HostSingletonConfig<Container, Instance, TextInstance> = Required<
   Pick<
     HostConfig<Container, Instance, TextInstance>,
@@ -469,12 +488,14 @@ export type HostSingletonConfig<Container, Instance, TextInstance> = Required<
   >
 >;
 
+/** Describes Fig root. */
 export interface FigRoot {
   data: FigDataStoreHandle;
   render(children: FigNode): void;
   unmount(): void;
 }
 
+/** Describes Fig root options. */
 export interface FigRootOptions {
   /** Adopt a store populated before the renderer root was created. */
   dataStore?: FigDataStoreController;
@@ -486,6 +507,7 @@ export interface FigRootOptions {
   onUncaughtError?: (error: unknown, info: ErrorInfo) => void;
 }
 
+/** Describes recoverable error info. */
 export interface RecoverableErrorInfo extends ErrorInfo {
   actual?: string;
   boundaryId?: string;
@@ -496,8 +518,10 @@ export interface RecoverableErrorInfo extends ErrorInfo {
   source: "hydration" | "server";
 }
 
+/** Describes hydration target result. */
 export type HydrationTargetResult = "none" | "hydrated" | "blocked";
 
+/** Describes Fig renderer. */
 export interface FigRenderer<Container, Instance = unknown> {
   batchedUpdates<T>(this: void, callback: () => T): T;
   createRoot(
@@ -829,6 +853,7 @@ const NoHydrationInitialElement = Symbol("fig.no-hydration-initial-element");
 
 class HydrationMismatchError extends Error {}
 
+/** Creates renderer. */
 export function createRenderer<Container, Instance, TextInstance>(
   host: HostConfig<Container, Instance, TextInstance>,
 ): FigRenderer<Container, Instance> {

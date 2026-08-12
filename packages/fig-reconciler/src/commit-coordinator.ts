@@ -1,12 +1,21 @@
+/**
+ * Commit coordination contracts shared by Fig renderers.
+ *
+ * @module
+ */
+/** Describes reconciler commit result. */
 export type ReconcilerCommitResult = false | "committed" | "deferred";
+/** Describes reconciler work priority. */
 export type ReconcilerWorkPriority =
   | "blocking"
   | "transition"
   | "suspense"
   | "idle";
 
+/** The reconciler commit coordinator host types. */
 declare const ReconcilerCommitCoordinatorHostTypes: unique symbol;
 
+/** Describes reconciler commit context. */
 export interface ReconcilerCommitContext<Container> {
   readonly container: Container;
   readonly finishedWork: object;
@@ -19,6 +28,7 @@ export interface ReconcilerCommitContext<Container> {
   ): Result | undefined;
 }
 
+/** Describes reconciler commit coordinator. */
 export interface ReconcilerCommitCoordinator<Container, Instance> {
   // Invariant, type-only host identity. A coordinator created for one
   // renderer's container/instance pair cannot be installed on another.

@@ -1,3 +1,8 @@
+/**
+ * Browser DOM rendering APIs for Fig applications.
+ *
+ * @module
+ */
 import type { FigNode, FigPortal, Key } from "@bgub/fig";
 import { createPortalNode } from "@bgub/fig/internal";
 import type {
@@ -35,8 +40,10 @@ export {
 
 export type { Container, FigRoot, FigRootOptions, RecoverableErrorInfo };
 
+/** The flush sync. */
 export const flushSync = domRenderer.flushSync;
 
+/** Creates root. */
 export function createRoot(
   container: Container,
   options?: FigRootOptions,
@@ -46,6 +53,7 @@ export function createRoot(
   return withEventTeardown(root, container);
 }
 
+/** Hydrates root. */
 export function hydrateRoot(
   container: Container,
   children: FigNode,
@@ -60,6 +68,7 @@ export function hydrateRoot(
   return withEventTeardown(root, container);
 }
 
+/** Creates portal. */
 export function createPortal(
   children: FigNode,
   container: Container,

@@ -1,3 +1,4 @@
+/** Describes transition options. */
 export interface TransitionOptions {
   types?: readonly string[];
   /**
@@ -8,6 +9,7 @@ export interface TransitionOptions {
   viewTransition?: "interrupt";
 }
 
+/** Describes transition handler. */
 export type TransitionHandler = <T>(
   callback: () => T,
   options?: TransitionOptions,
@@ -27,6 +29,7 @@ export function transition<T>(
   return transitionHandler(callback, options);
 }
 
+/** Sets transition handler. */
 export function setTransitionHandler(
   handler: TransitionHandler,
 ): TransitionHandler {

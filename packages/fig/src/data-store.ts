@@ -24,12 +24,14 @@ import {
 
 declare const __FIG_DEV__: boolean | undefined;
 
+/** Describes data resource options. */
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   load?: DataResourceLoader<TArgs, TValue>;
 }
 
+/** Describes data store host. */
 export interface DataStoreHost<Owner extends object, Lane> {
   getLane(): Lane;
   inactiveRetentionMs?: number;
@@ -40,6 +42,7 @@ export interface DataStoreHost<Owner extends object, Lane> {
   schedule(owner: Owner, lane: Lane): void;
 }
 
+/** Describes data store. */
 export interface DataStore<
   Owner extends object = object,
   Lane = unknown,
@@ -123,6 +126,7 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 const dataStoreFactory: FigDataStoreFactory = createRendererDataStore;
 
+/** Data resource. */
 export function dataResource<TArgs extends unknown[], TValue>(
   options: DataResourceOptions<TArgs, TValue>,
 ): DataResource<TArgs, TValue> {
@@ -136,6 +140,7 @@ export function dataResource<TArgs extends unknown[], TValue>(
   return resource;
 }
 
+/** Ensures data. */
 export function ensureData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
@@ -143,6 +148,7 @@ export function ensureData<TArgs extends unknown[], TValue>(
   return resolveDataMutationStore("ensureData").ensureData(resource, ...args);
 }
 
+/** Invalidates data. */
 export function invalidateData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
@@ -150,20 +156,24 @@ export function invalidateData<TArgs extends unknown[], TValue>(
   resolveDataMutationStore("invalidateData").invalidateData(resource, ...args);
 }
 
+/** Invalidates data error. */
 export function invalidateDataError(error: unknown): boolean {
   return resolveDataMutationStore("invalidateDataError").invalidateDataError(
     error,
   );
 }
 
+/** Invalidates data key. */
 export function invalidateDataKey(key: DataResourceKey): void {
   resolveDataMutationStore("invalidateDataKey").invalidateDataKey(key);
 }
 
+/** Invalidates data prefix. */
 export function invalidateDataPrefix(prefix: DataResourceKey): void {
   resolveDataMutationStore("invalidateDataPrefix").invalidateDataPrefix(prefix);
 }
 
+/** Refreshes data. */
 export function refreshData<TArgs extends unknown[], TValue>(
   resource: DataResource<TArgs, TValue>,
   ...args: TArgs
@@ -175,6 +185,7 @@ export function refreshData<TArgs extends unknown[], TValue>(
 // wherever Fig is executing — render, event handlers, actions, effects — and
 // keep the reference: unlike the free functions above, the handle's methods
 // still work after an `await`, where the ambient slot is gone.
+/** Reads data store. */
 export function readDataStore(): FigDataStoreHandle {
   return resolveCurrentDataStore(
     "readDataStore() must be called synchronously while Fig is executing — " +
@@ -187,6 +198,7 @@ interface DataStoreControllerState {
   host: FigDataStoreHost | null;
 }
 
+/** Creates data store. */
 export function createDataStore(
   options: FigDataStoreOptions = {},
 ): FigDataStoreController {
@@ -201,6 +213,7 @@ export function createDataStore(
   return store;
 }
 
+/** Checks whether data store controller. */
 export function isDataStoreController(
   value: unknown,
 ): value is FigDataStoreController {
@@ -211,6 +224,7 @@ export function isDataStoreController(
   );
 }
 
+/** Attach data store. */
 export function attachDataStore(
   controller: FigDataStoreController,
   host: FigDataStoreHost,
@@ -243,12 +257,14 @@ function resolveDataMutationStore(name: string): FigDataStore {
   );
 }
 
+/** Creates renderer data store. */
 export function createRendererDataStore<Owner extends object, Lane>(
   host: DataStoreHost<Owner, Lane>,
 ): DataStore<Owner, Lane> {
   return new DefaultDataStore(host);
 }
 
+/** Normalizes data resource key. */
 export function normalizeDataResourceKey(key: DataResourceKey): string {
   return normalizeKey(key).canonical;
 }
@@ -1408,10 +1424,12 @@ function scheduleStoreTimer(callback: () => void, delay: number): TimerHandle {
   return timer;
 }
 
+/** Runs with data store. */
 export function runWithDataStore<T>(store: FigDataStore, callback: () => T): T {
   return store.run(callback);
 }
 
+/** Current data store. */
 export function currentDataStore(): FigDataStore {
   return resolveCurrentDataStore();
 }

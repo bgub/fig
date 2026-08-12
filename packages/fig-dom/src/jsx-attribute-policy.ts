@@ -11,10 +11,12 @@ import type {
 // snapshot. Keep external vocabulary churn in jsx-attributes.generated.ts and
 // Fig-specific decisions here.
 
+/** Describes empty prop value. */
 export type EmptyPropValue = false | null | undefined;
 
 type AttributeValue = string | number | true | EmptyPropValue;
 
+/** Describes host style. */
 export type HostStyle = Readonly<Record<string, string | EmptyPropValue>>;
 
 interface FigHostProps<E extends Element> {
@@ -93,6 +95,7 @@ type SvgAttributes<Tag extends keyof SvgAttributeNameByTag> =
   | FigGlobalAttributeName
   | SvgLegacyAttributeName;
 
+/** Describes host props. */
 export type HostProps<
   E extends Element,
   AttributeName extends string = never,

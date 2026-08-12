@@ -1,3 +1,8 @@
+/**
+ * Host-agnostic View Transition coordination for Fig renderers.
+ *
+ * @module
+ */
 import type {
   Props,
   ViewTransitionCallback,
@@ -45,8 +50,10 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+/** Describes view transition commit result. */
 export type ViewTransitionCommitResult = ReconcilerCommitResult;
 
+/** Describes view transition surface measurement. */
 export interface ViewTransitionSurfaceMeasurement {
   // Width/height changes of statically positioned surfaces relayout their
   // parent; absolutely positioned ones do not.
@@ -58,21 +65,25 @@ export interface ViewTransitionSurfaceMeasurement {
   y: number;
 }
 
+/** Describes view transition mutation result. */
 export interface ViewTransitionMutationResult {
   canceledNames: string[];
   cancelRootSnapshot: boolean;
 }
 
+/** Describes view transition commit options. */
 export interface ViewTransitionCommitOptions {
   readonly interrupt: boolean;
   readonly types: readonly string[];
 }
 
+/** Describes view transition surface snapshots. */
 export interface ViewTransitionSurfaceSnapshots {
   readonly old: boolean;
   readonly new: boolean;
 }
 
+/** Describes view transition host configuration. */
 export interface ViewTransitionHostConfig<Container, Instance> {
   commit(
     this: void,
@@ -136,6 +147,7 @@ interface ViewTransitionCollection<Instance> {
 const ViewTransitionEligibleLanes =
   AllTransitionLanes | RetryLanes | DeferredLane | IdleLane;
 
+/** Creates view transition commit coordinator. */
 export function createViewTransitionCommitCoordinator<Container, Instance>(
   host: ViewTransitionHostConfig<Container, Instance>,
 ): ReconcilerCommitCoordinator<Container, Instance> {

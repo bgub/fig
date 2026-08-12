@@ -19,6 +19,7 @@ export function configureDomRefreshScheduler(
   }
 }
 
+/** Schedules refresh. */
 export function scheduleRefresh(update: RefreshUpdate): void {
   if (scheduleDomRefresh === null) {
     (pendingUpdates ??= []).push(update);

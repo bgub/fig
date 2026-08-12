@@ -6,6 +6,7 @@
 // second pass. Suspended content attaches under its boundary when the task
 // resumes; content still pending when the collector is read simply is not
 // there yet.
+/** Describes render tree kind. */
 export type RenderTreeKind =
   | "activity"
   | "assets"
@@ -20,6 +21,7 @@ export type RenderTreeKind =
   | "text"
   | "view-transition";
 
+/** Describes render tree node. */
 export interface RenderTreeNode {
   children: RenderTreeNode[];
   key: string | number | null;
@@ -28,10 +30,12 @@ export interface RenderTreeNode {
   props: Record<string, unknown>;
 }
 
+/** Describes render tree collector. */
 export interface RenderTreeCollector {
   readonly tree: RenderTreeNode;
 }
 
+/** Creates render tree collector. */
 export function createRenderTreeCollector(): RenderTreeCollector {
   return {
     tree: {

@@ -1,3 +1,8 @@
+/**
+ * Runtime registration and update APIs for Fig Fast Refresh.
+ *
+ * @module
+ */
 import type {
   RefreshAdapter,
   RefreshFamily,
@@ -34,6 +39,7 @@ function resolveFamilyByType(type: unknown): RefreshFamily | undefined {
 
 // Register a component version under a stable id (e.g. "src/App.tsx#App"). The
 // first version creates a family; later versions of the same id queue an update.
+/** Register. */
 export function register(type: unknown, id: string): void {
   const key = asKey(type);
   if (key === null || familiesByType.has(key)) return;
@@ -50,6 +56,7 @@ export function register(type: unknown, id: string): void {
 
 // Record a component's hook signature. Differing signatures between versions
 // (or forceReset) mean a remount; identical signatures re-render in place.
+/** Sets signature. */
 export function setSignature(
   type: unknown,
   key: string,
@@ -61,6 +68,7 @@ export function setSignature(
 
 // Connect the runtime to a renderer-owned reconciler. The adapter installs the
 // family resolver and schedules updates through the same reconciler instance.
+/** Injects renderer. */
 export function injectRenderer(renderer: RefreshAdapter): void {
   if (renderers.has(renderer)) return;
 
@@ -74,6 +82,7 @@ export function injectRenderer(renderer: RefreshAdapter): void {
 
 // Apply queued registrations: advance each family to its newest version, bucket
 // it as updated (re-render in place) or stale (remount), and drive the renderers.
+/** Performs refresh. */
 export function performRefresh(): RefreshUpdate | null {
   if (pendingUpdates.length === 0) return null;
 

@@ -1,3 +1,4 @@
+/** Describes data resource key input. */
 export type DataResourceKeyInput =
   | string
   | number
@@ -6,16 +7,20 @@ export type DataResourceKeyInput =
   | readonly DataResourceKeyInput[]
   | { readonly [key: string]: DataResourceKeyInput };
 
+/** Describes data resource key. */
 export type DataResourceKey = readonly [string, ...DataResourceKeyInput[]];
 
+/** Describes data resource load context. */
 export interface DataResourceLoadContext {
   signal: AbortSignal;
 }
 
+/** Describes data resource loader. */
 export type DataResourceLoader<TArgs extends unknown[], TValue> = (
   ...argsAndContext: [...TArgs, DataResourceLoadContext]
 ) => TValue | PromiseLike<TValue>;
 
+/** Describes data resource. */
 export interface DataResource<
   TArgs extends unknown[] = unknown[],
   TValue = unknown,
@@ -26,6 +31,7 @@ export interface DataResource<
   readonly load?: DataResourceLoader<TArgs, TValue>;
 }
 
+/** Describes data refresh result. */
 export type DataRefreshResult<T> =
   | { status: "fulfilled"; value: T }
   | { status: "rejected"; error: unknown; staleValue?: T }
@@ -40,17 +46,20 @@ export type DataRefreshResult<T> =
       staleValue?: T;
     };
 
+/** Describes Fig data hydration entry. */
 export interface FigDataHydrationEntry {
   key: DataResourceKey;
   value: unknown;
 }
 
+/** Describes Fig data entry status. */
 export type FigDataEntryStatus =
   | "pending"
   | "fulfilled"
   | "rejected"
   | "refreshing";
 
+/** Describes data store entry snapshot. */
 export interface DataStoreEntrySnapshot {
   canonicalKey: string;
   error?: unknown;
@@ -70,6 +79,7 @@ export interface DataStoreEntrySnapshot {
 // synchronous prefix of actions and transitions, and effects. After an
 // `await` the slot is gone, so async flows capture this handle first and call
 // its methods instead.
+/** Describes Fig data store handle. */
 export interface FigDataStoreHandle {
   // The awaitable read for code outside render (route loaders, actions after
   // an await): resolve the value this key would render with — the cached
@@ -110,11 +120,13 @@ export interface FigDataStoreController extends FigDataStoreHandle {
   snapshot(): FigDataHydrationEntry[];
 }
 
+/** Describes Fig data store options. */
 export interface FigDataStoreOptions {
   initialData?: readonly FigDataHydrationEntry[];
   partition?: DataResourceKeyInput;
 }
 
+/** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
   commitDataDependencies(owner: object, previousOwner: object | null): void;
   deleteDataOwner(owner: object): void;
@@ -136,23 +148,28 @@ export interface FigDataStore extends FigDataStoreHandle {
 // The host callbacks a renderer hands to the data-store factory. Structurally
 // compatible with @bgub/fig's DataStoreHost so its renderer store can
 // register directly.
+/** Describes Fig data store host. */
 export interface FigDataStoreHost {
   getLane(): unknown;
   partition?: DataResourceKeyInput;
   schedule(owner: object, lane: unknown): void;
 }
 
+/** Describes Fig data store factory. */
 export type FigDataStoreFactory = (host: FigDataStoreHost) => FigDataStore;
 
 // The internal, generation-guarded metadata a store attaches to each loader
 // context (symbol-keyed: DataResourceLoadContext stays { signal } publicly).
 // Adapters use the resolved key and decode Payload rows through the calling
 // store without recomputing identity or exposing these capabilities to loaders.
+/** Describes load context hydrate. */
 export type LoadContextHydrate = (
   entries: readonly FigDataHydrationEntry[],
 ) => void;
+/** Describes load context attribute error. */
 export type LoadContextAttributeError = (error: unknown) => void;
 
+/** Describes load context capabilities. */
 export interface LoadContextCapabilities {
   attributeError: LoadContextAttributeError;
   hydrate: LoadContextHydrate;
@@ -166,6 +183,7 @@ type DataResourceLoadContextWithCapabilities = DataResourceLoadContext & {
   [LoadContextCapabilitiesSymbol]?: LoadContextCapabilities;
 };
 
+/** Define load context capabilities. */
 export function defineLoadContextCapabilities(
   context: DataResourceLoadContext,
   capabilities: LoadContextCapabilities,
@@ -177,6 +195,7 @@ export function defineLoadContextCapabilities(
   });
 }
 
+/** Load context capabilities. */
 export function loadContextCapabilities(
   context: DataResourceLoadContext,
 ): LoadContextCapabilities | undefined {
@@ -189,6 +208,7 @@ const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;
 
+/** Resolves current data store. */
 export function resolveCurrentDataStore(
   message = "Data resource APIs require a Fig data store.",
 ): FigDataStore {
@@ -196,6 +216,7 @@ export function resolveCurrentDataStore(
   return currentDataStore;
 }
 
+/** Sets current data store. */
 export function setCurrentDataStore(
   store: FigDataStore | null,
 ): FigDataStore | null {
@@ -204,6 +225,7 @@ export function setCurrentDataStore(
   return previousStore;
 }
 
+/** Marks data resource error. */
 export function markDataResourceError(
   error: unknown,
   key: DataResourceKey,
@@ -225,6 +247,7 @@ export function markDataResourceError(
   keys.push(key);
 }
 
+/** Data resource keys for error. */
 export function dataResourceKeysForError(
   error: unknown,
 ): DataResourceKey[] | undefined {

@@ -5,6 +5,7 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+/** Describes mixin context. */
 export interface MixinContext {
   /** The intrinsic host name receiving this mixin. */
   readonly type: string;
@@ -12,15 +13,19 @@ export interface MixinContext {
   readonly props: Readonly<Props>;
 }
 
+/** Describes empty mixin value. */
 export type EmptyMixinValue = false | 0 | 0n | "" | null | undefined;
 
+/** Describes mixin input. */
 export type MixinInput =
   | MixinDescriptor
   | EmptyMixinValue
   | ReadonlyArray<MixinInput>;
 
+/** Describes mixin result. */
 export type MixinResult = Props | MixinInput;
 
+/** Describes mixin type. */
 export type MixinType<TArgs extends unknown[] = unknown[]> = (
   context: MixinContext,
   ...args: TArgs
@@ -31,12 +36,14 @@ type MixinRuntimeType = (
   ...args: unknown[]
 ) => MixinResult;
 
+/** Describes mixin descriptor. */
 export interface MixinDescriptor {
   readonly $$typeof: symbol;
   readonly args: readonly unknown[];
   readonly type: MixinRuntimeType;
 }
 
+/** Describes mixin factory. */
 export type MixinFactory<TArgs extends unknown[]> = (
   ...args: TArgs
 ) => MixinDescriptor;
@@ -44,6 +51,7 @@ export type MixinFactory<TArgs extends unknown[]> = (
 // Registered symbols: descriptors and contexts must stay recognizable when
 // duplicate copies of this module are live (linked source next to a
 // prebundled copy).
+/** The Fig mixin symbol. */
 export const FigMixinSymbol = Symbol.for("fig.mixin");
 const FigMixinSlotSymbol = Symbol.for("fig.mixin-slot");
 const FigClientOnlyHostBehaviorSymbol = Symbol.for(
@@ -68,6 +76,7 @@ export function createMixin<TArgs extends unknown[]>(
 
 const maximumResolvedMixins = 1024;
 
+/** Resolves host mix. */
 export function resolveHostMix<P extends Props>(type: string, input: P): P {
   const props: Props = input;
   const mix = props.mix;
@@ -138,10 +147,12 @@ interface MixinRuntimeContext extends MixinContext {
   readonly [FigMixinSlotSymbol]: string;
 }
 
+/** Mixin slot. */
 export function mixinSlot(context: MixinContext): string {
   return (context as MixinRuntimeContext)[FigMixinSlotSymbol];
 }
 
+/** Marks client only host behavior. */
 export function markClientOnlyHostBehavior(
   context: MixinContext,
   behavior: string,
@@ -149,6 +160,7 @@ export function markClientOnlyHostBehavior(
   markClientOnlyHostProps(context.props, behavior);
 }
 
+/** Marks client only host props. */
 export function markClientOnlyHostProps(value: object, behavior: string): void {
   const props = value as ClientOnlyHostProps;
   if (props[FigClientOnlyHostBehaviorSymbol] !== undefined) return;
@@ -158,6 +170,7 @@ export function markClientOnlyHostProps(value: object, behavior: string): void {
   });
 }
 
+/** Client only host behavior. */
 export function clientOnlyHostBehavior(props: object): string | undefined {
   const behavior = (props as ClientOnlyHostProps)[
     FigClientOnlyHostBehaviorSymbol

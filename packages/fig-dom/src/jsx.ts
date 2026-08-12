@@ -36,6 +36,7 @@ type OpenHostPropsByTag<TagNameMap> = {
 };
 
 // Overlapping tag names (a, script, style, title) take the HTML typing.
+/** Describes host intrinsic elements. */
 export type HostIntrinsicElements = HtmlHostPropsByTag<HTMLElementTagNameMap> &
   SvgHostPropsByTag<Omit<SVGElementTagNameMap, keyof HTMLElementTagNameMap>> &
   OpenHostPropsByTag<

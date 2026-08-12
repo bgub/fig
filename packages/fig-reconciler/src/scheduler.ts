@@ -160,6 +160,7 @@ export function scheduleCallback(
   };
 }
 
+/** Act. */
 export async function act<T>(
   callback: () => T | PromiseLike<T>,
 ): Promise<Awaited<T>> {

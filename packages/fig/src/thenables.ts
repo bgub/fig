@@ -1,3 +1,4 @@
+/** Describes thenable. */
 export type Thenable<T = unknown> = PromiseLike<T> & object;
 
 type ThenableRecord<T> =
@@ -35,10 +36,12 @@ function recordFor<T>(thenable: PromiseLike<T>): ThenableRecord<T> {
 // Starts tracking without reading. Preloaders call this when they begin a
 // load so that a thenable settled before its first render read resolves
 // synchronously instead of suspending for one retry beat.
+/** Tracks thenable. */
 export function trackThenable<T>(thenable: PromiseLike<T>): void {
   recordFor(thenable);
 }
 
+/** Reads thenable. */
 export function readThenable<T>(thenable: PromiseLike<T>): T {
   const record = recordFor(thenable);
   if (record.status === "fulfilled") return record.value;
@@ -46,6 +49,7 @@ export function readThenable<T>(thenable: PromiseLike<T>): T {
   throw thenable;
 }
 
+/** Checks whether thenable. */
 export function isThenable(value: unknown): value is Thenable {
   if (
     (typeof value !== "object" && typeof value !== "function") ||

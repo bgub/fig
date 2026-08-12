@@ -14,6 +14,7 @@ import {
 } from "./payload-decoder.ts";
 import { encodePayloadKey } from "./payload-key.ts";
 
+/** Describes payload source. */
 export type PayloadSource =
   | Response
   | {
@@ -21,11 +22,13 @@ export type PayloadSource =
       stream: ReadableStream<Uint8Array>;
     };
 
+/** Describes payload component load context. */
 export interface PayloadComponentLoadContext {
   key: DataResourceKey;
   signal: AbortSignal;
 }
 
+/** Describes payload component loader. */
 export interface PayloadComponentLoader<
   TProps extends object,
 > extends PayloadDecoderOptions {
@@ -35,6 +38,7 @@ export interface PayloadComponentLoader<
   ): PayloadSource | PromiseLike<PayloadSource>;
 }
 
+/** Describes payload component options. */
 export interface PayloadComponentOptions<
   TProps extends object,
 > extends PayloadDecoderOptions {
@@ -43,6 +47,7 @@ export interface PayloadComponentOptions<
   load: PayloadComponentLoader<TProps>;
 }
 
+/** Describes payload component. */
 export interface PayloadComponent<TProps extends object> extends DataResource<
   [TProps],
   AwaitedFigNode

@@ -1,3 +1,8 @@
+/**
+ * Core Fig APIs for elements, hooks, data resources, asset resources, and transitions.
+ *
+ * @module
+ */
 export { createContext, type FigContext } from "./context.ts";
 // Data-protocol types referenced by public renderer APIs (root.data,
 // createRoot({ initialData }), the server results' getData()). Types only:

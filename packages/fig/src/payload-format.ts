@@ -16,6 +16,7 @@ import type {
 // a serializer implementation detail. Delivery assets prepare eagerly at row
 // arrival; document metadata stays attached to its owning decoded row until
 // that row commits.
+/** Describes serialized asset resource. */
 export type SerializedAssetResource =
   | {
       crossorigin?: StylesheetResource["crossorigin"];
@@ -114,6 +115,7 @@ export type PayloadModel =
   | PayloadElementModel
   | PayloadSpecialModel;
 
+/** Describes payload element model. */
 export type PayloadElementModel = {
   $fig: "element";
   id?: number;
@@ -122,6 +124,7 @@ export type PayloadElementModel = {
   type: string | PayloadSpecialModel;
 };
 
+/** Describes payload special model. */
 export type PayloadSpecialModel =
   | { $fig: "array"; id: number; value: PayloadModel[] }
   | { $fig: "bigint"; value: string }
@@ -157,6 +160,7 @@ export type PayloadValueSpecialModel = Extract<
   }
 >;
 
+/** Describes payload data hydration entry. */
 export type PayloadDataHydrationEntry = Omit<FigDataHydrationEntry, "value"> & {
   value: PayloadModel;
 };
@@ -307,6 +311,7 @@ export function errorFromPayloadValue(value: PayloadErrorValue): Error & {
     : Object.assign(error, { digest: value.digest });
 }
 
+/** Describes payload graph encode context. */
 export interface PayloadGraphEncodeContext {
   // Ids are dense and monotonic: id = position in `defined` + 1, so rollback
   // is popping the stack. A reverse id→object map would be redundant state.
@@ -341,10 +346,12 @@ function createPayloadGraphDecodeContext(): PayloadGraphDecodeContext {
   return context;
 }
 
+/** Creates payload graph encode context. */
 export function createPayloadGraphEncodeContext(): PayloadGraphEncodeContext {
   return { defined: [], ids: new WeakMap() };
 }
 
+/** Checks whether plain payload value. */
 export function isPlainPayloadValue(value: unknown): boolean {
   return (
     value === null ||
@@ -366,6 +373,7 @@ export function encodePayloadValue(value: unknown): PayloadModel {
   return encodePayloadValueWithGraph(value, createPayloadGraphEncodeContext());
 }
 
+/** Encodes payload value with graph. */
 export function encodePayloadValueWithGraph(
   value: unknown,
   graph: PayloadGraphEncodeContext,
@@ -422,6 +430,7 @@ export function encodePayloadValueWithGraph(
   throw new Error(`Cannot serialize ${typeof value} into the payload.`);
 }
 
+/** Serializes payload map. */
 export function serializePayloadMap(
   value: Map<unknown, unknown>,
   graph: PayloadGraphEncodeContext,
@@ -435,6 +444,7 @@ export function serializePayloadMap(
   return { $fig: "map", id, entries };
 }
 
+/** Serializes payload set. */
 export function serializePayloadSet(
   value: Set<unknown>,
   graph: PayloadGraphEncodeContext,
@@ -466,12 +476,14 @@ function definePayloadGraphObject(
   return id;
 }
 
+/** Checkpoint payload graph. */
 export function checkpointPayloadGraph(
   graph: PayloadGraphEncodeContext,
 ): number {
   return graph.defined.length;
 }
 
+/** Rollback payload graph. */
 export function rollbackPayloadGraph(
   graph: PayloadGraphEncodeContext,
   checkpoint: number,
@@ -481,6 +493,7 @@ export function rollbackPayloadGraph(
   }
 }
 
+/** Define payload graph element. */
 export function definePayloadGraphElement(
   graph: PayloadGraphEncodeContext,
   value: object,
@@ -490,6 +503,7 @@ export function definePayloadGraphElement(
   return definePayloadGraphObject(graph, value);
 }
 
+/** Serializes payload array. */
 export function serializePayloadArray<T>(
   value: readonly T[],
   graph: PayloadGraphEncodeContext,
@@ -501,6 +515,7 @@ export function serializePayloadArray<T>(
   return { $fig: "array", id, value: value.map(encodeChild) };
 }
 
+/** Serializes payload plain object. */
 export function serializePayloadPlainObject(
   value: object,
   graph: PayloadGraphEncodeContext,
@@ -701,6 +716,7 @@ export function decodePayloadNumber(
   }
 }
 
+/** Encodes payload data entries. */
 export function encodePayloadDataEntries(
   entries: readonly FigDataHydrationEntry[],
 ): PayloadDataHydrationEntry[] {
@@ -711,6 +727,7 @@ export function encodePayloadDataEntries(
   }));
 }
 
+/** Decodes payload data entries. */
 export function decodePayloadDataEntries(
   entries: readonly PayloadDataHydrationEntry[],
 ): FigDataHydrationEntry[] {
@@ -721,6 +738,7 @@ export function decodePayloadDataEntries(
   }));
 }
 
+/** Checks whether payload special model. */
 export function isPayloadSpecialModel(
   model: object,
 ): model is PayloadElementModel | PayloadSpecialModel {

@@ -4,6 +4,7 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+/** Describes bind. */
 export type Bind<T extends Element = Element> = (
   node: T,
   signal: AbortSignal,
@@ -23,6 +24,7 @@ const bindSlots = new WeakMap<Element, BindSlot>();
 // element is already hidden is covered too.
 const suspendedBindElements = new WeakSet<Element>();
 
+/** Compose bind. */
 export function composeBind<T extends Element = Element>(
   ...binds: Array<Bind<T> | false | null | undefined>
 ): Bind<T> {

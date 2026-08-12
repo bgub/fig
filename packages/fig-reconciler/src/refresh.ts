@@ -1,3 +1,8 @@
+/**
+ * Renderer-side contracts for Fig Fast Refresh.
+ *
+ * @module
+ */
 import { setRefreshHandlerState } from "./refresh-internal.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
@@ -8,15 +13,18 @@ const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 // the latest implementation. The handler is module-global within one
 // renderer-owned reconciler so module-level reconcile helpers can consult it.
 // In production no handler is ever set, so this collapses to identity paths.
+/** Describes refresh family. */
 export interface RefreshFamily {
   current: unknown;
 }
 
+/** Describes refresh update. */
 export interface RefreshUpdate {
   staleFamilies: Set<RefreshFamily>;
   updatedFamilies: Set<RefreshFamily>;
 }
 
+/** Describes refresh adapter. */
 export interface RefreshAdapter {
   setRefreshHandler(
     handler: (type: unknown) => RefreshFamily | undefined,
@@ -24,6 +32,7 @@ export interface RefreshAdapter {
   scheduleRefresh(update: RefreshUpdate): void;
 }
 
+/** Sets refresh handler. */
 export function setRefreshHandler(
   handler: ((type: unknown) => RefreshFamily | undefined) | null,
 ): void {

@@ -1,3 +1,8 @@
+/**
+ * JSX runtime functions and types used by Fig-aware compilers.
+ *
+ * @module
+ */
 import {
   type ElementType,
   type FigElement,
@@ -8,8 +13,10 @@ import {
 } from "./element.ts";
 import { resolveHostMix } from "./mixin.ts";
 
+/** Describes JSX props. */
 type JSXProps = Record<string, unknown>;
 
+/** The JSX, jsxs, and JSX dev. */
 export function jsx(
   type: ElementType,
   props: JSXProps | null,
@@ -47,6 +54,7 @@ export { Fragment, jsx as jsxs, jsx as jsxDEV };
 // Core's JSX namespace is renderer-neutral. Host-prop vocabulary belongs to
 // renderer runtimes such as @bgub/fig-dom/jsx-runtime, so using core directly
 // as jsxImportSource rejects intrinsic tags.
+/** Type definitions for JSX. */
 export namespace JSX {
   // The type of a JSX expression, and what function components may return:
   // any renderable node (elements, strings, numbers, booleans, null, arrays).

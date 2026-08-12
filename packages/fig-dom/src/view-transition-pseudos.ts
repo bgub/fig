@@ -1,6 +1,7 @@
 import type { ViewTransitionSurface } from "@bgub/fig";
 import type { ViewTransitionSurfaceSnapshots } from "@bgub/fig-reconciler/view-transitions";
 
+/** Describes view transition pseudo element. */
 export interface ViewTransitionPseudoElement {
   readonly selector: string;
   animate(
@@ -11,6 +12,7 @@ export interface ViewTransitionPseudoElement {
   getComputedStyle(): CSSStyleDeclaration;
 }
 
+/** Describes view transition pseudo elements. */
 export interface ViewTransitionPseudoElements {
   readonly group: ViewTransitionPseudoElement;
   readonly imagePair: ViewTransitionPseudoElement;
@@ -33,6 +35,7 @@ export function createDOMViewTransitionSurface(
   return surface;
 }
 
+/** Gets view transition pseudo elements. */
 export function getViewTransitionPseudoElements(
   surface: ViewTransitionSurface,
 ): ViewTransitionPseudoElements {

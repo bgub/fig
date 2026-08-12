@@ -1,3 +1,8 @@
+/**
+ * Client-side decoding and reference types for Fig's server-component payload.
+ *
+ * @module
+ */
 import type { FigDataHydrationEntry } from "./data.ts";
 import {
   type AwaitedFigNode,
@@ -49,11 +54,13 @@ export {
   type ResolveClientReference,
 };
 
+/** Describes payload decode completion. */
 export type PayloadDecodeCompletion =
   | { status: "aborted" }
   | { status: "complete" }
   | { status: "failed"; error: unknown };
 
+/** Describes payload decode options. */
 export interface PayloadDecodeOptions {
   /**
    * Receives decoded `data` rows for hydration into a data store. The

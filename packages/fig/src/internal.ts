@@ -1,3 +1,8 @@
+/**
+ * Shared internal contracts used by Fig renderer packages. These APIs are not intended for application code.
+ *
+ * @module
+ */
 export {
   collectChildren,
   describeInvalidChild,

@@ -1,3 +1,8 @@
+/**
+ * Streaming and prerendering APIs for rendering Fig trees on servers.
+ *
+ * @module
+ */
 import type { FigNode } from "@bgub/fig";
 import { createServerRenderRequest } from "./renderer.ts";
 import type {
@@ -19,6 +24,7 @@ export {
 // output form. Stream results are returned synchronously — a shell failure
 // rejects `shellReady` (and the stream); there is no callback channel.
 
+/** Renders to stream. */
 export function renderToStream(
   node: FigNode,
   options: ServerRenderOptions = {},
@@ -26,6 +32,7 @@ export function renderToStream(
   return createServerRenderRequest(node, options);
 }
 
+/** Renders to document stream. */
 export function renderToDocumentStream(
   node: FigNode,
   options: ServerRenderOptions = {},

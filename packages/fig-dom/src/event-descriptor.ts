@@ -5,8 +5,10 @@ import {
 } from "@bgub/fig";
 import { markClientOnlyHostBehavior, mixinSlot } from "@bgub/fig/internal";
 
+/** Describes event options. */
 export type EventOptions = Pick<AddEventListenerOptions, "capture" | "passive">;
 
+/** Describes event callback. */
 export type EventCallback<E extends Event = Event> = (
   event: E,
   signal: AbortSignal,
@@ -63,11 +65,13 @@ export function on<K extends keyof HTMLElementEventMap>(
   callback: EventCallback<HTMLElementEventMap[K]>,
   options?: EventOptions,
 ): MixinDescriptor;
+/** On. */
 export function on<E extends Event = Event>(
   type: string,
   callback: EventCallback<E>,
   options?: EventOptions,
 ): MixinDescriptor;
+/** On. */
 export function on(
   type: string,
   callback: EventCallback,

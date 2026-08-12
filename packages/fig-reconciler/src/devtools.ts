@@ -1,6 +1,12 @@
+/**
+ * Public snapshot and hook contracts for Fig DevTools integrations.
+ *
+ * @module
+ */
 import type { DependencyList, Props } from "@bgub/fig";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 
+/** Describes Fig DevTools fiber kind. */
 export type FigDevtoolsFiberKind =
   | "root"
   | "host"
@@ -15,6 +21,7 @@ export type FigDevtoolsFiberKind =
   | "activity"
   | "view-transition";
 
+/** Describes Fig DevTools hook kind. */
 export type FigDevtoolsHookKind =
   | "state"
   | "action-state"
@@ -28,11 +35,13 @@ export type FigDevtoolsHookKind =
   | "before-paint"
   | "before-layout";
 
+/** Describes Fig DevTools effect phase. */
 export type FigDevtoolsEffectPhase =
   | "reactive"
   | "before-paint"
   | "before-layout";
 
+/** Describes Fig DevTools work label. */
 export type FigDevtoolsWorkLabel =
   | "sync"
   | "input"
@@ -45,6 +54,7 @@ export type FigDevtoolsWorkLabel =
   | "deferred"
   | "selective-hydration";
 
+/** Describes Fig DevTools hook snapshot. */
 export interface FigDevtoolsHookSnapshot {
   id: number;
   kind: FigDevtoolsHookKind;
@@ -54,6 +64,7 @@ export interface FigDevtoolsHookSnapshot {
   active?: boolean;
 }
 
+/** Describes Fig DevTools fiber snapshot. */
 export interface FigDevtoolsFiberSnapshot {
   id: number;
   parentId: number | null;
@@ -73,6 +84,7 @@ export interface FigDevtoolsFiberSnapshot {
   children: FigDevtoolsFiberSnapshot[];
 }
 
+/** Describes Fig DevTools host snapshot. */
 export interface FigDevtoolsHostSnapshot {
   kind: "element" | "text";
   tagName?: string;
@@ -80,6 +92,7 @@ export interface FigDevtoolsHostSnapshot {
   text?: string;
 }
 
+/** Describes Fig DevTools root snapshot. */
 export interface FigDevtoolsRootSnapshot {
   id: number;
   rendererId: number;
@@ -92,21 +105,25 @@ export interface FigDevtoolsRootSnapshot {
   tree: FigDevtoolsFiberSnapshot;
 }
 
+/** Describes Fig DevTools element inspection. */
 export interface FigDevtoolsElementInspection {
   rootId: number;
   fiberId: number;
 }
 
+/** Describes Fig DevTools commit inspection. */
 export interface FigDevtoolsCommitInspection {
   inspectElement(target: unknown): FigDevtoolsElementInspection | null;
   elementForFiber(fiberId: number): unknown;
 }
 
+/** Describes Fig DevTools renderer info. */
 export interface FigDevtoolsRendererInfo {
   name: string;
   packageName: string;
 }
 
+/** Describes Fig DevTools global hook. */
 export interface FigDevtoolsGlobalHook {
   inject(renderer: FigDevtoolsRendererInfo): number;
   onCommitRoot(

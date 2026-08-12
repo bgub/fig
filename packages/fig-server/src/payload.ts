@@ -1,3 +1,8 @@
+/**
+ * Server-side encoding APIs for Fig's server-component payload.
+ *
+ * @module
+ */
 import type { DataResourceKeyInput } from "@bgub/fig";
 import {
   type AwaitedFigNode,
@@ -75,16 +80,19 @@ declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
+/** Describes payload render result. */
 export interface PayloadRenderResult {
   allReady: Promise<void>;
   contentType: string;
   stream: ReadableStream<Uint8Array>;
 }
 
+/** Describes payload component. */
 export type PayloadComponent = (
   props: Props & { children?: FigNode },
 ) => FigNode;
 
+/** Describes payload render options. */
 export interface PayloadRenderOptions {
   clientReferenceAssets?: (metadata: { id: string }) => FigAssetResourceList;
   componentAssets?: (
@@ -179,6 +187,7 @@ type TreePropMode = "children" | "suspense" | null;
 type OutlineKind = "lazy" | "promise";
 type PayloadOutline = Extract<PayloadSpecialModel, { $fig: OutlineKind }>;
 
+/** Renders to payload stream. */
 export function renderToPayloadStream(
   node: FigNode,
   options: PayloadRenderOptions = {},
