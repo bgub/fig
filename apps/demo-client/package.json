@@ -8,7 +8,7 @@
     "dev": "portless",
     "dev:app": "node ../dev/static-server-cli.mjs",
     "dev:build": "tsdown --config ../../tsdown.config.ts --watch --no-clean",
-    "serve": "sh -c 'python3 -m http.server \"${PORT:-4173}\" --bind 127.0.0.1'",
+    "serve": "node ../dev/static-server-cli.mjs",
     "test:e2e": "sh ../../scripts/free-port.sh 4182 && playwright test"
   },
   "portless": {
@@ -24,8 +24,8 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "@types/node": "^26.2.0",
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:node24",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4"
   }

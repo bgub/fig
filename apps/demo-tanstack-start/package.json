@@ -23,16 +23,16 @@
     "@bgub/fig-tanstack-router": "workspace:*",
     "@bgub/fig-tanstack-start": "workspace:*",
     "@bgub/fig-ui": "workspace:*",
-    "@tanstack/devtools": "0.13.0",
-    "@tanstack/history": "1.162.1",
-    "@tanstack/router-core": "1.171.21",
-    "@tanstack/store": "0.11.1"
+    "@tanstack/devtools": "catalog:",
+    "@tanstack/history": "catalog:",
+    "@tanstack/router-core": "catalog:",
+    "@tanstack/store": "catalog:"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "catalog:",
     "@tailwindcss/vite": "4.3.3",
-    "@types/node": "^26.2.0",
-    "tailwindcss": "^4.3.3",
-    "vite": "8.2.1"
+    "@types/node": "catalog:node24",
+    "tailwindcss": "catalog:",
+    "vite": "catalog:"
   }
 }

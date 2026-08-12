@@ -19,8 +19,11 @@ export default defineConfig({
   webServer: {
     command:
       process.env.FIG_E2E_PREBUILT === "1"
-        ? `python3 -m http.server ${port} --bind 127.0.0.1`
-        : `pnpm build:e2e && python3 -m http.server ${port} --bind 127.0.0.1`,
+        ? "pnpm serve"
+        : "pnpm build:e2e && pnpm serve",
+    env: {
+      PORT: String(port),
+    },
     reuseExistingServer: false,
     timeout: 120_000,
     url: `http://127.0.0.1:${port}/`,

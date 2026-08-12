@@ -55,7 +55,7 @@
   },
   "peerDependencies": {
     "@bgub/fig-server": "workspace:*",
-    "@tanstack/devtools": "0.12.5"
+    "@tanstack/devtools": "catalog:"
   },
   "peerDependenciesMeta": {
     "@bgub/fig-server": {
@@ -67,6 +67,6 @@
   },
   "devDependencies": {
     "@bgub/fig-server": "workspace:*",
-    "@tanstack/devtools": "0.13.0"
+    "@tanstack/devtools": "catalog:"
   }
 }

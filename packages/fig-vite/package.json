@@ -50,8 +50,8 @@
   },
   "devDependencies": {
     "@bgub/fig-dom": "workspace:*",
-    "@types/node": "^26.2.0",
-    "vite": "8.2.1"
+    "@types/node": "catalog:node20",
+    "vite": "catalog:"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

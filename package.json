@@ -211,10 +211,10 @@
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "catalog:",
     "@size-limit/preset-small-lib": "^13.0.3",
     "@tsdown/css": "0.22.14",
-    "@types/node": "^26.2.0",
+    "@types/node": "catalog:node24",
     "@vitest/coverage-v8": "4.1.10",
     "happy-dom": "^20.11.2",
     "html-element-attributes": "3.5.0",
@@ -223,7 +223,7 @@
     "oxlint": "1.78.0",
     "oxlint-tsgolint": "7.0.2001",
     "portless": "^0.15.5",
-    "postcss": "^8.5.26",
+    "postcss": "catalog:",
     "postcss-import": "^16.1.1",
     "react": "19.2.8",
     "react-reconciler": "0.33.0",
@@ -233,11 +233,11 @@
     "tsdown": "0.22.14",
     "turbo": "2.10.9",
     "typescript": "^7.0.2",
-    "vite": "8.2.1",
+    "vite": "catalog:",
     "vitest": "4.1.10"
   },
   "engines": {
     "node": ">=24 <25"
   },
-  "packageManager": "pnpm@11.13.1"
+  "packageManager": "pnpm@11.21.0"
 }
