@@ -131,7 +131,9 @@ function packConfigFor(path: string): PackConfig | undefined {
     const browser = browserLibraries.has(path);
     const config: UserConfig = {
       entry: libraryEntry,
-      dts: true,
+      dts: {
+        tsconfig: workspacePath("tsconfig.build.json"),
+      },
       deps:
         path === "packages/fig-tanstack-start"
           ? { neverBundle: [/^virtual:fig-tanstack-start\//] }
