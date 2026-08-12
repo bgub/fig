@@ -35,19 +35,16 @@ export function createFigRelease(cwd = process.cwd()) {
     cwd,
     groups: {
       fig: {
-        prerelease: "alpha",
         syncBump: true,
         syncGitTag: true,
         npm: { distTag: "latest" },
       },
       "fig-tooling": {
-        prerelease: "alpha",
         syncBump: true,
         syncGitTag: true,
         npm: { distTag: "latest" },
       },
       "fig-tanstack": {
-        prerelease: "alpha",
         syncBump: true,
         syncGitTag: true,
         npm: { distTag: "latest" },

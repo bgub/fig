@@ -13,7 +13,7 @@ import {
 } from "./config.mts";
 import { jsrRelease, synchronizeJsrManifest } from "./jsr.mts";
 
-void test("release graph contains three synchronized public groups", async () => {
+void test("release graph contains three stable synchronized public groups", async () => {
   const context = await createFigRelease()._internal.context();
   assert.deepEqual(
     context.graph
@@ -32,7 +32,7 @@ void test("release graph contains three synchronized public groups", async () =>
   for (const [name, packageNames] of expectedGroups) {
     const group = context.graph.getGroup(name);
     assert.ok(group !== undefined);
-    assert.equal(group.options.prerelease, "alpha");
+    assert.equal(group.options.prerelease, undefined);
     assert.equal(group.options.npm?.distTag, "latest");
     assert.equal(group.options.syncBump, true);
     assert.equal(group.options.syncGitTag, true);
@@ -86,18 +86,12 @@ void test("synchronizeJsrManifest updates only the version", async () => {
 }\n`;
   await writeFile(path, source);
 
-  assert.equal(
-    await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0-alpha.0"),
-    true,
-  );
+  assert.equal(await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0"), true);
   assert.equal(
     await readFile(path, "utf8"),
-    source.replace('"version": "0.0.1"', '"version": "0.1.0-alpha.0"'),
+    source.replace('"version": "0.0.1"', '"version": "0.1.0"'),
   );
-  assert.equal(
-    await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0-alpha.0"),
-    false,
-  );
+  assert.equal(await synchronizeJsrManifest(path, "@bgub/fig", "0.1.0"), false);
 });
 
 void test("synchronizeJsrManifest rejects the wrong package", async () => {
@@ -115,7 +109,7 @@ void test("jsrRelease validates unpublished packages during dry runs", async () 
   const dir = await mkdtemp(join(tmpdir(), "fig-jsr-release-"));
   await writeFile(
     join(dir, "jsr.json"),
-    '{"name":"@bgub/fig","version":"0.0.2-alpha.0"}\n',
+    '{"name":"@bgub/fig","version":"0.0.2"}\n',
   );
 
   const commands: Array<{ command: string; args: string[]; cwd: string }> = [];
@@ -130,7 +124,7 @@ void test("jsrRelease validates unpublished packages during dry runs", async () 
     id,
     name: "@bgub/fig",
     path: dir,
-    version: "0.0.2-alpha.0",
+    version: "0.0.2",
   };
   const plan = {
     options: { dryRun: true },
@@ -174,11 +168,11 @@ void test("jsrRelease publishes dependencies before their consumers", async () =
         await mkdir(path, { recursive: true });
         await writeFile(
           join(path, "jsr.json"),
-          `${JSON.stringify({ name, version: "0.1.0-alpha.0" })}\n`,
+          `${JSON.stringify({ name, version: "0.1.0" })}\n`,
         );
         return [
           `npm:${name}`,
-          { id: `npm:${name}`, name, path, version: "0.1.0-alpha.0" },
+          { id: `npm:${name}`, name, path, version: "0.1.0" },
         ] as const;
       }),
     ),

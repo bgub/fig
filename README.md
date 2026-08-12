@@ -8,7 +8,7 @@ It also adds simple and intuitive primitives for data (streaming and revalidatio
 
 Fig would not exist without React. I have enormous respect for the React team and their work; Fig deliberately builds on their ideas, often keeps their syntax, and explores what a clean-slate implementation can do differently. Fig also takes inspiration from Remix 3.
 
-Fig is a working alpha. The DOM renderer, streaming SSR, hydration, data resources, payload protocol, and custom-renderer API are implemented and tested. The ecosystem is still small, APIs may change before 1.0, and Fig is not a drop-in replacement for React libraries.
+Fig is a stable pre-1.0 project. The DOM renderer, streaming SSR, hydration, data resources, payload protocol, and custom-renderer API are implemented and tested. The ecosystem is still small, minor releases may change APIs before 1.0, and Fig is not a drop-in replacement for React libraries.
 
 ## Why Fig?
 
@@ -262,7 +262,7 @@ Use a demo package's `dev:app` script to run the underlying server without Portl
 
 ## Releases
 
-Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release eight public packages as one alpha-versioned group. The five renderer/core packages publish to npm and JSR; the Vite package and two TanStack adapters publish to npm. Contributor tooling requires Node.js 24.
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release eight public packages across independently versioned runtime, tooling, and TanStack adapter groups. Packages publish stable pre-1.0 versions under npm's `latest` tag. The five source-distributed packages publish to npm and JSR; the Vite package and two TanStack adapters publish to npm only. Contributor tooling requires Node.js 24.
 
 Add a changelog for a publishable change with `pnpm tegami`, or create an explicit `.tegami/<description>.md` file:
 

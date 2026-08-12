@@ -8,7 +8,7 @@ Fig uses Tegami to version the public packages and create grouped GitHub release
 | `fig-tooling` | `@bgub/fig-refresh`, `@bgub/fig-vite` |
 | `fig-tanstack` | `@bgub/fig-tanstack-router`, `@bgub/fig-tanstack-start` |
 
-Every group currently uses the `alpha` prerelease channel, synchronizes version bumps among its members, and publishes under npm's `latest` tag. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
+Every group publishes stable pre-1.0 versions under npm's `latest` tag and synchronizes version bumps among its members. Patch releases preserve compatibility within the current `0.x` minor line; minor releases may make breaking changes until the affected packages reach 1.0. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
 
 ## Contributor workflow
 
