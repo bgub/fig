@@ -1,109 +1,58 @@
-import { transition, useBeforePaint, useCallback, useMemo } from "@bgub/fig";
+import { transition, useBeforePaint, useCallback } from "@bgub/fig";
 import type { RouterHistory } from "@tanstack/history";
 import {
+  type AnyRouteMatch,
   type AnyRouter,
   getLocationChangeInfo,
   setupScrollRestoration,
+  trimPathRight,
 } from "@tanstack/router-core";
-import { batch } from "@tanstack/store";
 import { useRouter } from "./hooks.tsx";
 
 type HistoryUpdate = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
+type TransitionRouter = AnyRouter & { _cancelTransition?: () => void };
 
-type RouterTransitionState = {
-  active: boolean;
-  generation: number;
-  initialLoadStarted: boolean;
-  phase: "idle" | "loading" | "loaded" | "mounting";
-};
+export function settleTransition(
+  acknowledgement: NonNullable<AnyRouter["_rendered"]>,
+  rendered: boolean,
+): void {
+  const settle = acknowledgement[1];
+  acknowledgement.length = 0;
+  settle?.(rendered);
+}
 
-export function Transitioner(): null {
-  const router = useRouter<AnyRouter>();
-  const state = useMemo<RouterTransitionState>(
-    () => ({
-      active: false,
-      generation: 0,
-      initialLoadStarted: false,
-      phase: "idle",
-    }),
-    [router],
-  );
-  const settleLifecycle = useCallback(() => {
-    if (state.phase === "idle") return;
-    const isLoading = router.stores.isLoading.get();
-    const hasPending = router.stores.hasPending.get();
-    const isTransitioning = router.stores.isTransitioning.get();
-    const changeInfo = getLocationChangeInfo(
-      router.stores.location.get(),
-      router.stores.resolvedLocation.get(),
-    );
-    if (!isLoading && state.phase === "loading") {
-      state.phase = "loaded";
-      router.emit({ type: "onLoad", ...changeInfo });
-    }
-    if (!isLoading && !hasPending && state.phase === "loaded") {
-      state.phase = "mounting";
-      router.emit({ type: "onBeforeRouteMount", ...changeInfo });
-    }
-    if (!isLoading && !hasPending && !isTransitioning) {
-      state.phase = "idle";
-      router.emit({ type: "onResolved", ...changeInfo });
-      batch(() => {
-        router.stores.status.set("idle");
-        router.stores.resolvedLocation.set(router.stores.location.get());
-      });
-    }
-  }, [router, state]);
-  const runRouterTransition = useCallback(
-    (callback: () => void) => {
-      const startsPending = !router.stores.isTransitioning.get();
-      if (startsPending) router.stores.isTransitioning.set(true);
-
-      let result: unknown;
-      try {
-        if (
-          startsPending ||
-          !router.stores.pendingMatches
-            .get()
-            .some((match) => match.status === "pending")
-        ) {
-          transition(() => {
-            result = callback();
-          });
-        } else {
-          result = callback();
-        }
-      } catch (error) {
-        if (startsPending) router.stores.isTransitioning.set(false);
-        throw error;
-      }
-
-      const promise = result as PromiseLike<unknown>;
-      if (typeof promise?.then !== "function") {
-        if (startsPending) router.stores.isTransitioning.set(false);
-        return;
-      }
-
-      const generation = ++state.generation;
-      state.phase = "loading";
-      const finish = () => {
-        if (state.active && state.generation === generation) {
-          router.stores.isTransitioning.set(false);
-        }
-      };
-      void promise.then(finish, (error: unknown) => {
-        finish();
-        queueMicrotask(() => {
-          throw error;
+export function Transitioner({
+  render,
+}: {
+  render: (matches: Array<AnyRouteMatch>) => void;
+}): null {
+  const router = useRouter<AnyRouter>() as TransitionRouter;
+  const acknowledgement = (router._rendered ??= []);
+  const startTransition = useCallback(
+    (callback: () => void, expected: Array<AnyRouteMatch>) =>
+      new Promise<boolean>((resolve, reject) => {
+        settleTransition(acknowledgement, false);
+        acknowledgement.push(expected, resolve);
+        transition(() => {
+          try {
+            render(expected);
+            callback();
+          } catch (error) {
+            if (acknowledgement[1] === resolve) acknowledgement.length = 0;
+            reject(error);
+          }
         });
-      });
-    },
-    [router, state],
+      }),
+    [acknowledgement, render, router],
+  );
+  const cancelTransition = useCallback(
+    () => settleTransition(acknowledgement, false),
+    [acknowledgement],
   );
   const commitWithoutRouterViewTransition = useCallback(
     (commit: () => Promise<void>) => {
       router.shouldViewTransition = undefined;
-      void commit();
+      return commit();
     },
     [router],
   );
@@ -112,23 +61,15 @@ export function Transitioner(): null {
     (signal) => {
       const previousStartTransition = router.startTransition;
       const previousStartViewTransition = router.startViewTransition;
-      const subscriptions = [
-        router.stores.isLoading.subscribe(settleLifecycle),
-        router.stores.hasPending.subscribe(settleLifecycle),
-        router.stores.isTransitioning.subscribe(settleLifecycle),
-      ];
-      state.active = true;
-      router.startTransition = runRouterTransition;
+      const previousCancelTransition = router._cancelTransition;
+      router.startTransition = startTransition;
       router.startViewTransition = commitWithoutRouterViewTransition;
+      router._cancelTransition = cancelTransition;
       signal.addEventListener(
         "abort",
         () => {
-          for (const subscription of subscriptions) {
-            subscription.unsubscribe();
-          }
-          state.active = false;
-          state.generation += 1;
-          if (router.startTransition === runRouterTransition) {
+          cancelTransition();
+          if (router.startTransition === startTransition) {
             router.startTransition = previousStartTransition;
           }
           if (
@@ -136,8 +77,8 @@ export function Transitioner(): null {
           ) {
             router.startViewTransition = previousStartViewTransition;
           }
-          if (router.stores.isTransitioning.get()) {
-            router.stores.isTransitioning.set(false);
+          if (router._cancelTransition === cancelTransition) {
+            router._cancelTransition = previousCancelTransition;
           }
         },
         { once: true },
@@ -145,11 +86,10 @@ export function Transitioner(): null {
       return undefined;
     },
     [
+      cancelTransition,
       commitWithoutRouterViewTransition,
       router,
-      runRouterTransition,
-      settleLifecycle,
-      state,
+      startTransition,
     ],
   );
 
@@ -161,29 +101,49 @@ export function Transitioner(): null {
       });
       signal.addEventListener("abort", unsubscribe, { once: true });
 
-      if (state.initialLoadStarted) return undefined;
-      state.initialLoadStarted = true;
+      router.updateLatestLocation();
+      const location = router.latestLocation;
       const nextLocation = router.buildLocation({
         _includeValidateSearch: true,
         hash: true,
         params: true,
         search: true,
         state: true,
-        to: router.latestLocation.pathname,
+        to: location.pathname,
       });
-      if (router.latestLocation.publicHref !== nextLocation.publicHref) {
-        void router
-          .commitLocation({ ...nextLocation, replace: true })
-          .catch(logRouterLoadError);
-      } else if (
-        router.ssr === undefined &&
-        router.stores.matchesId.get().length === 0
+      if (
+        trimPathRight(location.publicHref) !==
+        trimPathRight(nextLocation.publicHref)
       ) {
+        void router
+          .commitLocation({
+            ...nextLocation,
+            ignoreBlocker: true,
+            replace: true,
+          })
+          .catch(logRouterLoadError);
+        return undefined;
+      }
+
+      const resolvedLocation = router.stores.resolvedLocation.get();
+      if (
+        resolvedLocation?.href === location.href &&
+        resolvedLocation.state.__TSR_key === location.state.__TSR_key
+      ) {
+        acknowledgement.push(router.stores.matches.get(), (rendered) => {
+          if (rendered) {
+            router.emit({
+              type: "onRendered",
+              ...getLocationChangeInfo(resolvedLocation, resolvedLocation),
+            });
+          }
+        });
+      } else if (router.ssr === undefined && !router._tx) {
         void router.load().catch(logRouterLoadError);
       }
       return undefined;
     },
-    [router, router.history, router.options.scrollRestoration, state],
+    [acknowledgement, router, router.history],
   );
 
   return null;

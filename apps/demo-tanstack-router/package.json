@@ -17,11 +17,11 @@
     "@bgub/fig": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
-    "@tanstack/router-core": "1.171.15"
+    "@tanstack/router-core": "1.171.21"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "postcss": "^8.5.26",
-    "tailwindcss": "^4.3.2"
+    "tailwindcss": "^4.3.3"
   }
 }

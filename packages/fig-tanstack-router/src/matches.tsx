@@ -16,9 +16,7 @@ import {
   type AnyRoute,
   type AnyRouteMatch,
   type AnyRouter,
-  createControlledPromise,
   deepEqual,
-  getLocationChangeInfo,
   isNotFound,
   type RegisteredRouter,
   rootRouteId,
@@ -39,7 +37,7 @@ import {
 } from "./route-assets.ts";
 import type { AsyncRouteComponent } from "./route.tsx";
 import { useReadableStore } from "./store.ts";
-import { Transitioner } from "./transitioner.tsx";
+import { settleTransition, Transitioner } from "./transitioner.tsx";
 
 declare const __FIG_DEV__: boolean | undefined;
 
@@ -57,6 +55,7 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
   router,
   ...options
 }: RouterProviderProps<TRouter>): FigNode {
+  const [, renderMatches] = useState<Array<AnyRouteMatch>>([]);
   if (Object.keys(options).length > 0) {
     if ("context" in options) {
       options.context = {
@@ -72,11 +71,14 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     () => ({ manifest, ownerDocument, router }),
     [manifest, ownerDocument, router],
   );
+  const transitioner = router.isServer
+    ? createElement(ServerTransitioner)
+    : createElement(Transitioner, { render: renderMatches });
 
   return createElement(
     RouterContext,
     { value: contextValue },
-    createElement(router.isServer ? ServerTransitioner : Transitioner),
+    transitioner,
     createElement(Matches),
   );
 }
@@ -85,47 +87,22 @@ function ServerTransitioner(): null {
   return null;
 }
 
-function OnRendered(): FigNode {
-  const router = useRouter<AnyRouter>();
-  type ResolvedLocation = ReturnType<typeof router.stores.resolvedLocation.get>;
-  const state = useMemo<{ previous: ResolvedLocation }>(
-    () => ({ previous: undefined }),
-    [router],
-  );
-  const resolvedLocationKey = useReadableStore(
-    router.stores.resolvedLocation,
-    (location) => location?.state.__TSR_key,
-  );
-
-  useBeforePaint(() => {
-    const current = router.stores.resolvedLocation.get();
-    const previous = state.previous;
-    if (
-      current !== undefined &&
-      (previous === undefined || previous.href !== current.href)
-    ) {
-      router.emit({
-        type: "onRendered",
-        ...getLocationChangeInfo(
-          router.stores.location.get(),
-          previous ?? current,
-        ),
-      });
-    }
-    state.previous = current;
-    return undefined;
-  }, [resolvedLocationKey, router, state]);
-
-  return null;
-}
-
 export function Matches(): FigNode {
   const router = useRouter<AnyRouter>();
-  const firstMatchId = useReadableStore(router.stores.firstId);
+  const currentMatches = useReadableStore(router.stores.matches);
+  const acknowledgement = router._rendered;
+  const matches = acknowledgement?.[0] ?? currentMatches;
+  const firstRouteId = matches[0]?.routeId;
+  useBeforePaint(() => {
+    if (acknowledgement?.[0] === matches) {
+      settleTransition(acknowledgement, true);
+    }
+    return undefined;
+  }, [acknowledgement, matches]);
   const content =
-    firstMatchId === undefined
+    firstRouteId === undefined
       ? null
-      : createElement(Match, { matchId: firstMatchId });
+      : createElement(Match, { routeId: firstRouteId });
   if (router.isServer || router.ssr !== undefined) return content;
 
   const rootRoute = router.routesById[rootRouteId];
@@ -142,17 +119,36 @@ export function Matches(): FigNode {
   );
 }
 
-function Match({ matchId }: { matchId: string }): FigNode {
+function Match({ routeId }: { routeId: string }): FigNode {
   const { manifest, router } = readRouterContext();
   const [manualResetKey, setManualResetKey] = useState(0);
-  const store = router.stores.matchStores.get(matchId);
-  if (store === undefined) {
-    throw new Error(`Could not find route match ${JSON.stringify(matchId)}.`);
+  const store = router.stores.getMatchStore(routeId);
+  const retained = useMemo(() => ({ match: store.get() }), [store]);
+  const errorReset = useMemo(
+    () => ({ controller: undefined as AbortController | undefined, key: 0 }),
+    [],
+  );
+  const retainMatch = useCallback(
+    (next: AnyRouteMatch | undefined) => {
+      if (next !== undefined) retained.match = next;
+      return retained.match;
+    },
+    [retained],
+  );
+  const match = useReadableStore(store, retainMatch);
+  if (match === undefined) {
+    throw new Error(`Could not find route match ${JSON.stringify(routeId)}.`);
   }
-  const match = useReadableStore(store);
-  const route = router.routesById[match.routeId];
+  const route = router.routesById[routeId];
   if (route === undefined) {
     throw new Error(`Could not find route ${JSON.stringify(match.routeId)}.`);
+  }
+  if (
+    match.status === "error" &&
+    errorReset.controller !== match.abortController
+  ) {
+    errorReset.controller = match.abortController;
+    errorReset.key += 1;
   }
   if (
     __DEV__ &&
@@ -187,7 +183,7 @@ function Match({ matchId }: { matchId: string }): FigNode {
 
   const pending = PendingComponent ? createElement(PendingComponent) : null;
   let content: FigNode = createElement(MatchContent, { match, route });
-  if (noSsr || match._displayPending) {
+  if (noSsr) {
     content = createElement(ClientOnly, { fallback: pending }, content);
   }
   if (shouldWrapInSuspense) {
@@ -196,14 +192,14 @@ function Match({ matchId }: { matchId: string }): FigNode {
 
   const matchContent = createElement(
     MatchContext,
-    { value: store },
+    { value: { match, store } },
     ErrorComponent || NotFoundComponent
       ? createElement(
           ErrorBoundary,
           {
             key:
               match.status === "error"
-                ? `route-error:${match.fetchCount}`
+                ? `route-error:${errorReset.key}`
                 : `route:${manualResetKey}`,
             fallback: (error) => {
               if (isNotFound(error)) {
@@ -227,9 +223,9 @@ function Match({ matchId }: { matchId: string }): FigNode {
                     error,
                   );
                   void router.invalidate().then(() => {
-                    const updatedMatch = router.stores.matchStores
-                      .get(match.id)
-                      ?.get();
+                    const updatedMatch = router.stores
+                      .getMatchStore(match.routeId)
+                      .get();
                     if (updatedMatch?.status !== "error") {
                       setManualResetKey((key) => key + 1);
                     }
@@ -258,7 +254,6 @@ function Match({ matchId }: { matchId: string }): FigNode {
   if (route.parentRoute?.id !== rootRouteId) return ownedMatchContent;
   return [
     ownedMatchContent,
-    router.isServer ? null : createElement(OnRendered),
     router.options.scrollRestoration && router.isServer
       ? renderScrollRestorationScript(router)
       : null,
@@ -274,31 +269,14 @@ function MatchContent({
 }): FigNode {
   const router = useRouter<AnyRouter>();
 
-  if (match._displayPending)
-    return readMatchPromise(router, match, "displayPendingPromise");
-  if (match._forcePending)
-    return readMatchPromise(router, match, "minPendingPromise");
   if (match.status === "pending") {
-    const pendingMinMs =
-      route.options.pendingMinMs ?? router.options.defaultPendingMinMs;
+    const loadPromise = router._tx?.[5];
+    if (loadPromise !== undefined) readPromise(loadPromise);
     const PendingComponent =
       route.options.pendingComponent ?? router.options.defaultPendingComponent;
-    const currentMatch = router.getMatch(match.id);
-    if (
-      pendingMinMs &&
-      PendingComponent &&
-      !router.isServer &&
-      currentMatch !== undefined &&
-      currentMatch._nonReactive.minPendingPromise === undefined
-    ) {
-      const minPendingPromise = createControlledPromise<void>();
-      currentMatch._nonReactive.minPendingPromise = minPendingPromise;
-      setTimeout(() => {
-        minPendingPromise.resolve();
-        currentMatch._nonReactive.minPendingPromise = undefined;
-      }, pendingMinMs);
-    }
-    return readMatchPromise(router, match, "loadPromise");
+    return PendingComponent === undefined
+      ? null
+      : createElement(PendingComponent);
   }
   if (match.status === "error") {
     const ErrorComponent =
@@ -310,9 +288,6 @@ function MatchContent({
       });
     }
     throw match.error;
-  }
-  if (match.status === "redirected") {
-    return readMatchPromise(router, match, "loadPromise");
   }
   if (match.status === "notFound") return renderNotFound(router, route, match);
 
@@ -330,22 +305,6 @@ function MatchContent({
     : createElement(Component, {
         key: remountDeps ? JSON.stringify(remountDeps) : undefined,
       });
-}
-
-type MatchPromiseKey =
-  | "displayPendingPromise"
-  | "loadPromise"
-  | "minPendingPromise";
-
-function readMatchPromise(
-  router: AnyRouter,
-  match: AnyRouteMatch,
-  key: MatchPromiseKey,
-): FigNode {
-  const promise =
-    router.getMatch(match.id)?._nonReactive[key] ?? match._nonReactive[key];
-  if (promise !== undefined) readPromise(promise);
-  return null;
 }
 
 function ClientOnly({
@@ -390,11 +349,10 @@ function renderScrollRestorationScript(router: AnyRouter): FigNode {
 
 export function Outlet(): FigNode {
   const router = useRouter<AnyRouter>();
-  const parentMatchStore = readContext(MatchContext);
-  const parentMatch = parentMatchStore?.get();
-  const matchIds = useReadableStore(router.stores.matchesId);
-  const parentIndex = matchIds.findIndex((id) => id === parentMatch?.id);
-  if (parentMatch?.globalNotFound === true) {
+  const parentMatch = readContext(MatchContext)?.match;
+  const routeIds = useReadableStore(router.stores.ids);
+  const parentIndex = routeIds.indexOf(parentMatch?.routeId ?? "");
+  if (parentMatch?._notFound === true) {
     const route = router.routesById[parentMatch.routeId];
     if (route === undefined) {
       throw new Error(
@@ -404,10 +362,10 @@ export function Outlet(): FigNode {
     return renderNotFound(router, route, parentMatch);
   }
   if (parentMatch !== undefined && parentIndex === -1) return null;
-  const childMatchId = matchIds[parentIndex + 1];
-  return childMatchId === undefined
+  const childRouteId = routeIds[parentIndex + 1];
+  return childRouteId === undefined
     ? null
-    : createElement(Match, { matchId: childMatchId });
+    : createElement(Match, { routeId: childRouteId });
 }
 
 export function HeadContent(): FigNode {

@@ -171,7 +171,7 @@ export async function act<T>(
   actScopeDepth = previousActScopeDepth + 1;
 
   try {
-    const result = await callback();
+    const result = await settleActCallback(callback(), queue);
 
     actScopeDepth = previousActScopeDepth;
     if (previousActScopeDepth === 0) {
@@ -183,6 +183,50 @@ export async function act<T>(
     actScopeDepth = previousActScopeDepth;
     actQueue = previousActQueue;
   }
+}
+
+async function settleActCallback<T>(
+  result: T | PromiseLike<T>,
+  queue: Task[],
+): Promise<Awaited<T>> {
+  if (!isThenable(result)) return result as Awaited<T>;
+
+  let settled = false;
+  let failed = false;
+  let value: unknown;
+  const settlement = Promise.resolve(result).then(
+    (next) => {
+      settled = true;
+      value = next;
+    },
+    (error: unknown) => {
+      settled = true;
+      failed = true;
+      value = error;
+    },
+  );
+
+  // Let an async callback reach its next suspension point before work it
+  // scheduled is flushed. This preserves callback-local assertions while
+  // allowing promises that depend on a render to settle.
+  await Promise.resolve();
+  while (!settled) {
+    flushActQueue(queue);
+    if (!settled) {
+      await Promise.race([settlement, waitForActMacrotask()]);
+    }
+  }
+  await settlement;
+  if (failed) throw value;
+  return value as Awaited<T>;
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as PromiseLike<unknown>).then === "function"
+  );
 }
 
 async function flushActQueueUntilSettled(queue: Task[]): Promise<void> {

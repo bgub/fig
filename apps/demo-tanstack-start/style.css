@@ -214,26 +214,26 @@
   }
 
   :root:active-view-transition-type(
-    fig-tabs-right
-  )::view-transition-old(tabs-demo-panel) {
+      fig-tabs-right
+    )::view-transition-old(tabs-demo-panel) {
     animation-name: tabs-demo-slide-out-left;
   }
 
   :root:active-view-transition-type(
-    fig-tabs-right
-  )::view-transition-new(tabs-demo-panel) {
+      fig-tabs-right
+    )::view-transition-new(tabs-demo-panel) {
     animation-name: tabs-demo-slide-in-right;
   }
 
   :root:active-view-transition-type(
-    fig-tabs-left
-  )::view-transition-old(tabs-demo-panel) {
+      fig-tabs-left
+    )::view-transition-old(tabs-demo-panel) {
     animation-name: tabs-demo-slide-out-right;
   }
 
   :root:active-view-transition-type(
-    fig-tabs-left
-  )::view-transition-new(tabs-demo-panel) {
+      fig-tabs-left
+    )::view-transition-new(tabs-demo-panel) {
     animation-name: tabs-demo-slide-in-left;
   }
 

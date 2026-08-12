@@ -8,7 +8,7 @@ interface HandlerContext {
   responseHeaders: Headers;
   router: {
     options: { context: { data: FigDataStoreController }; ssr?: never };
-    stores: { statusCode: { get(): number } };
+    _serverResult: { type: "render"; status: 200 };
   };
 }
 
@@ -101,7 +101,7 @@ async function invokeFactoryHandler(
     responseHeaders: new Headers(),
     router: {
       options: { context: startData.context },
-      stores: { statusCode: { get: () => 200 } },
+      _serverResult: { type: "render", status: 200 },
     },
   });
   startData.context.data.dispose();

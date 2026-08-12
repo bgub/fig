@@ -219,7 +219,7 @@ describe("@bgub/fig-tanstack-router", () => {
       preserved: "kept",
     });
     expect(router.options.defaultPreload).toBe("render");
-    expect(router.stores.getRouteMatchStore("/").get()?.loaderData).toBe(
+    expect(router.stores.getMatchStore("/").get()?.loaderData).toBe(
       "provider:kept",
     );
 
@@ -238,7 +238,7 @@ describe("@bgub/fig-tanstack-router", () => {
       label: "updated",
       preserved: "kept",
     });
-    expect(router.stores.getRouteMatchStore("/").get()?.loaderData).toBe(
+    expect(router.stores.getMatchStore("/").get()?.loaderData).toBe(
       "updated:kept",
     );
   });
@@ -278,7 +278,7 @@ describe("@bgub/fig-tanstack-router", () => {
     await act(() => waitForRouterLoading(router));
 
     expect(container.querySelector("h1")?.textContent).toBe("home");
-    expect(router.stores.isTransitioning.get()).toBe(true);
+    expect(router.stores.status.get()).toBe("pending");
 
     resolveSlow?.();
     await act(() => navigation);
@@ -287,7 +287,6 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.querySelector("h1")?.textContent).toBe("slow");
     expect(events).toEqual(navigationLifecycle);
     expect(router.stores.status.get()).toBe("idle");
-    expect(router.stores.isTransitioning.get()).toBe(false);
     expect(router.stores.resolvedLocation.get()?.pathname).toBe("/slow");
 
     unsubscribe();
@@ -409,7 +408,7 @@ describe("@bgub/fig-tanstack-router", () => {
       vi.mocked(router.history.subscribe).mock.calls.length,
     );
     expect(router.startTransition).toBe(previousStartTransition);
-    expect(router.stores.isTransitioning.get()).toBe(false);
+    expect(router._rendered).toEqual([]);
   });
 
   it("delays pending UI and preserves its minimum display duration", async () => {
@@ -467,8 +466,8 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(container.textContent).toBe("loading");
 
     await vi.advanceTimersByTimeAsync(1);
-    await navigation;
     await vi.runAllTimersAsync();
+    await navigation;
     expect(container.textContent).toBe("ready");
   });
 
@@ -1131,7 +1130,7 @@ describe("@bgub/fig-tanstack-router", () => {
     const rendersBeforeUpdate = renders;
 
     await act(() => {
-      router.stores.loadedAt.set((loadedAt) => loadedAt + 1);
+      router.stores.status.set("pending");
     });
 
     expect(renders).toBe(rendersBeforeUpdate);
@@ -1143,12 +1142,12 @@ describe("@bgub/fig-tanstack-router", () => {
       component: () => {
         const selected = useRouterState({
           select: (state) => ({
-            loadedAt: state.loadedAt,
+            status: state.status,
             stable: { label: "stable" },
           }),
         });
         stableValues.push(selected.stable);
-        return createElement("span", null, String(selected.loadedAt));
+        return createElement("span", null, selected.status);
       },
     });
     const router = createRouter({
@@ -1165,7 +1164,7 @@ describe("@bgub/fig-tanstack-router", () => {
     const stableBeforeUpdate = stableValues.at(-1);
 
     await act(() => {
-      router.stores.loadedAt.set((loadedAt) => loadedAt + 1);
+      router.stores.status.set("pending");
     });
 
     expect(stableValues.at(-1)).toBe(stableBeforeUpdate);
@@ -1234,13 +1233,15 @@ describe("@bgub/fig-tanstack-router", () => {
     await router.load();
 
     const broadSubscribe = vi.spyOn(router.stores.__store, "subscribe");
-    const firstMatchSubscribe = vi.spyOn(router.stores.firstId, "subscribe");
+    const matchesSubscribe = vi.spyOn(router.stores.matches, "subscribe");
     const locationSubscribe = vi.spyOn(router.stores.location, "subscribe");
     const match = router.stores.matches
       .get()
       .find((candidate) => candidate.routeId === "/users/$id");
     const matchStore =
-      match === undefined ? undefined : router.stores.matchStores.get(match.id);
+      match === undefined
+        ? undefined
+        : router.stores.getMatchStore(match.routeId);
     if (matchStore === undefined) throw new Error("Missing user match store.");
     const matchSubscribe = vi.spyOn(matchStore, "subscribe");
     const container = document.createElement("div");
@@ -1251,7 +1252,7 @@ describe("@bgub/fig-tanstack-router", () => {
 
     expect(container.textContent).toBe("/users/42:42");
     expect(broadSubscribe).not.toHaveBeenCalled();
-    expect(firstMatchSubscribe).toHaveBeenCalledOnce();
+    expect(matchesSubscribe).toHaveBeenCalledOnce();
     expect(locationSubscribe).toHaveBeenCalledOnce();
     expect(matchSubscribe).toHaveBeenCalledTimes(2);
   });
@@ -1315,7 +1316,7 @@ describe("@bgub/fig-tanstack-router", () => {
       key: () => ["route-reset"],
       load: async () => {
         loads += 1;
-        if (loads === 1) throw new Error("failed once");
+        if (loads < 3) throw new Error(`failed ${loads}`);
         return "recovered";
       },
     });
@@ -1348,7 +1349,7 @@ describe("@bgub/fig-tanstack-router", () => {
     await act(() => waitForMatches(router));
 
     expect(container.querySelector("#route-error")?.textContent).toBe(
-      "failed once",
+      "failed 1",
     );
     expect(onCatch).toHaveBeenCalledOnce();
     expect(onCatch.mock.calls[0]?.[1]).toMatchObject({
@@ -1358,6 +1359,10 @@ describe("@bgub/fig-tanstack-router", () => {
 
     await act(() => resetRoute?.());
     expect(loads).toBe(2);
+    await act(() => waitForText(container, "failed 2"));
+
+    await act(() => resetRoute?.());
+    expect(loads).toBe(3);
     await act(() => waitForText(container, "recovered"));
 
     expect(container.textContent).toBe("recovered");
@@ -1423,7 +1428,7 @@ describe("@bgub/fig-tanstack-router", () => {
     );
     expect(loads).toBe(1);
     expect(
-      router.stores.getRouteMatchStore("/users/$id").get()?.loaderData,
+      router.stores.getMatchStore("/users/$id").get()?.loaderData,
     ).toBeUndefined();
 
     // Freshness lives in the store: invalidating the resource re-renders the
@@ -1773,10 +1778,7 @@ async function waitForHref(router: AnyRouter, href: string): Promise<void> {
 
 async function waitForMatches(router: AnyRouter): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (
-      router.stores.matchesId.get().length > 0 &&
-      !router.stores.isLoading.get()
-    ) {
+    if (router.stores.ids.get().length > 0 && !router.state.isLoading) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1786,7 +1788,7 @@ async function waitForMatches(router: AnyRouter): Promise<void> {
 
 async function waitForRouterLoading(router: AnyRouter): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (router.stores.isLoading.get()) return;
+    if (router.stores.status.get() === "pending") return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("Router did not start loading.");
@@ -1795,9 +1797,7 @@ async function waitForRouterLoading(router: AnyRouter): Promise<void> {
 async function waitForRouterIdle(router: AnyRouter): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (
-      router.stores.matchesId.get().length > 0 &&
-      !router.stores.isLoading.get() &&
-      !router.stores.isTransitioning.get() &&
+      router.stores.ids.get().length > 0 &&
       router.stores.status.get() === "idle" &&
       router.stores.resolvedLocation.get()?.href ===
         router.stores.location.get().href
@@ -1808,10 +1808,9 @@ async function waitForRouterIdle(router: AnyRouter): Promise<void> {
   }
   throw new Error(
     `Router did not settle: ${JSON.stringify({
-      isLoading: router.stores.isLoading.get(),
-      isTransitioning: router.stores.isTransitioning.get(),
+      isLoading: router.state.isLoading,
       location: router.stores.location.get().href,
-      matches: router.stores.matchesId.get(),
+      matches: router.stores.ids.get(),
       resolvedLocation: router.stores.resolvedLocation.get()?.href,
       status: router.stores.status.get(),
     })}`,
@@ -1830,8 +1829,7 @@ async function waitForNavigationLifecycle(
     `Router emitted ${events.length} of ${navigationLifecycle.length} events: ${JSON.stringify(
       {
         events,
-        isLoading: router.stores.isLoading.get(),
-        isTransitioning: router.stores.isTransitioning.get(),
+        isLoading: router.state.isLoading,
         resolvedLocation: router.stores.resolvedLocation.get()?.href,
         status: router.stores.status.get(),
       },

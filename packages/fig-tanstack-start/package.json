@@ -68,10 +68,10 @@
     "@babel/core": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
     "@bgub/fig-vite": "workspace:^",
-    "@tanstack/router-core": "1.171.15",
-    "@tanstack/start-client-core": "1.170.14",
-    "@tanstack/start-plugin-core": "1.171.22",
-    "@tanstack/start-server-core": "1.169.17"
+    "@tanstack/router-core": "1.171.21",
+    "@tanstack/start-client-core": "1.170.21",
+    "@tanstack/start-plugin-core": "1.171.33",
+    "@tanstack/start-server-core": "1.169.25"
   },
   "peerDependencies": {
     "@bgub/fig": "workspace:^",
@@ -85,7 +85,7 @@
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
-    "vite": "8.1.4"
+    "vite": "8.2.1"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -233,7 +233,7 @@ describe("@bgub/fig-tanstack-start server", () => {
     expect(html.match(/tsr-scroll-restoration-v1_3/g)).toHaveLength(1);
     expect(loads).toBe(1);
     expect(
-      router.stores.getRouteMatchStore("/users/$id").get()?.loaderData,
+      router.stores.getMatchStore("/users/$id").get()?.loaderData,
     ).toBeUndefined();
 
     function User(): FigNode {

@@ -76,8 +76,11 @@ interface RouterContextValue {
 }
 
 export const RouterContext = createContext<RouterContextValue | null>(null);
-export const MatchContext =
-  createContext<RouterReadableStore<AnyRouteMatch> | null>(null);
+type MatchContextValue = {
+  match: AnyRouteMatch;
+  store: RouterReadableStore<AnyRouteMatch | undefined>;
+};
+export const MatchContext = createContext<MatchContextValue | null>(null);
 const missingMatch = Symbol("missing route match");
 const noSelection = Symbol("no selection");
 const missingMatchStore = {
@@ -287,12 +290,12 @@ function blockerLocation<TRouter extends AnyRouter>(
   location: HistoryLocation,
 ): BlockerLocationUnion<TRouter> {
   const parsed = router.parseLocation(location);
-  const matched = router.getMatchedRoutes(parsed.pathname);
+  const [, params, foundRoute] = router.getMatchedRoutes(parsed.pathname);
   return {
-    fullPath: matched.foundRoute?.fullPath ?? parsed.pathname,
-    params: matched.routeParams,
+    fullPath: foundRoute?.fullPath ?? parsed.pathname,
+    params,
     pathname: parsed.pathname,
-    routeId: matched.foundRoute?.id ?? "__notFound__",
+    routeId: foundRoute?.id ?? "__notFound__",
     search: parsed.search,
   } as BlockerLocationUnion<TRouter>;
 }
@@ -358,11 +361,12 @@ export function useMatchValue<TValue>(
   shouldThrow = true,
 ): unknown {
   const router = useRouter<AnyRouter>();
-  const nearestMatchStore = readContext(MatchContext);
-  const store =
-    from === undefined || nearestMatchStore?.get().routeId === from
-      ? nearestMatchStore
-      : router.stores.getRouteMatchStore(from);
+  const nearestMatch = readContext(MatchContext);
+  const useNearestMatch =
+    from === undefined || nearestMatch?.match.routeId === from;
+  const store = useNearestMatch
+    ? nearestMatch?.store
+    : router.stores.getMatchStore(from);
   const select = options?.select;
   const selectValue = useCallback(
     (match: AnyRouteMatch) => {
@@ -377,9 +381,14 @@ export function useMatchValue<TValue>(
   });
 
   const selectPresentMatch = useCallback(
-    (match: AnyRouteMatch | undefined) =>
-      match === undefined ? missingMatch : selectMatch(match),
-    [selectMatch],
+    (match: AnyRouteMatch | undefined) => {
+      const presentMatch =
+        match ?? (useNearestMatch ? nearestMatch?.match : undefined);
+      return presentMatch === undefined
+        ? missingMatch
+        : selectMatch(presentMatch);
+    },
+    [nearestMatch, selectMatch, useNearestMatch],
   );
   const selected = useReadableStore(
     store ?? missingMatchStore,
@@ -599,7 +608,12 @@ export function useMatchRoute<
   TRouter extends AnyRouter = RegisteredRouter,
 >(): MatchRouteFn<TRouter> {
   const router = useRouter<TRouter>();
-  useReadableStore(router.stores.matchRouteDeps);
+  useReadableStore(router.stores.location, (location) => location.href);
+  useReadableStore(
+    router.stores.resolvedLocation,
+    (location) => location?.href,
+  );
+  useReadableStore(router.stores.status);
   return useCallback(
     (options: UseMatchRouteOptions<TRouter>) => {
       const { pending, caseSensitive, fuzzy, includeSearch, ...location } =

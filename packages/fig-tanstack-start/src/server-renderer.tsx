@@ -63,7 +63,10 @@ export async function renderRouterToStream({
       router,
       new Response(stream as unknown as BodyInit, {
         headers: responseHeaders,
-        status: router.stores.statusCode.get(),
+        status:
+          router._serverResult?.type === "render"
+            ? router._serverResult.status
+            : 200,
       }),
     );
   } catch (error) {

@@ -22,7 +22,7 @@
     "@bgub/fig-server": "workspace:*"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
-    "@types/node": "^20.19.0"
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.2.0"
   }
 }

@@ -10,10 +10,10 @@ export const tanStackCompatibilityProfile = {
     startServer: "@tanstack/start-server-core",
   },
   versions: {
-    routerCore: "1.171.15",
-    startClientCore: "1.170.14",
-    startPluginCore: "1.171.22",
-    startServerCore: "1.169.17",
+    routerCore: "1.171.21",
+    startClientCore: "1.170.21",
+    startPluginCore: "1.171.33",
+    startServerCore: "1.169.25",
   },
 } as const;
 

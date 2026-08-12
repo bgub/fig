@@ -112,6 +112,22 @@ describe("scheduler", () => {
     expect(calls).toEqual(["first", "second", "third"]);
   });
 
+  it("flushes scheduled work awaited by an async act callback", async () => {
+    const calls: string[] = [];
+
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          scheduleCallback(NormalPriority, () => {
+            calls.push("render");
+            resolve();
+          });
+        }),
+    );
+
+    expect(calls).toEqual(["render"]);
+  });
+
   it("does not construct a MessageChannel at import time", async () => {
     // A MessagePort with a message handler refs the Node event loop forever,
     // so an import-time channel keeps any process that transitively imports
