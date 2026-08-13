@@ -63,7 +63,7 @@ A successful navigation reports lifecycle events in this order:
 
 History changes trigger loading and normalize the URL with replace when needed. A hydrated or already-populated router does not repeat its initial load. All subscriptions and transition overrides follow the provider lifetime.
 
-`useBlocker` uses the modern object form. It may directly return a boolean/promise decision or, with `withResolver: true`, expose `proceed` and `reset`. `useCanGoBack` subscribes to Router's location index.
+`useBlocker` uses the modern object form. It may directly return a boolean/promise decision or, with `withResolver: true`, expose `proceed` and `reset`. Overlapping resolver decisions queue in evaluation order. Blocker decisions settle only the link attempt they evaluated; overlapping or programmatic navigation cannot clear another link's transition state. `useCanGoBack` subscribes to Router's location index.
 
 Ordinary navigation replaces the route tree. Retaining routes with Activity would require a separate keep-alive contract for state, effects, and data ownership.
 

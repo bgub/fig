@@ -17,6 +17,8 @@ export {
   createMemoryHistory,
 } from "@tanstack/history";
 export type { RouterHistory } from "@tanstack/history";
+export { useBlocker } from "./blocker.tsx";
+export type { ShouldBlockFn, UseBlockerOpts } from "./blocker.tsx";
 export { ensureRouteData } from "./data-context.ts";
 export type { RouteDataContext } from "./data-context.ts";
 export {
@@ -46,7 +48,6 @@ export type {
 export {
   MatchRoute,
   Navigate,
-  useBlocker,
   useCanGoBack,
   useLoaderDeps,
   useLocation,
@@ -63,8 +64,6 @@ export {
 export type {
   MakeMatchRouteOptions,
   MatchRouteFn,
-  ShouldBlockFn,
-  UseBlockerOpts,
   UseMatchesOptions,
   UseMatchesResult,
   UseMatchRouteOptions,

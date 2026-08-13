@@ -5,6 +5,7 @@ import {
   useCallback,
   useMemo,
   useReactive,
+  useStableEvent,
   useState,
 } from "@bgub/fig";
 import { markClientOnlyHostProps } from "@bgub/fig/internal";
@@ -18,6 +19,7 @@ import {
   removeTrailingSlash,
 } from "@tanstack/router-core";
 import { useRouter } from "./hooks.tsx";
+import { runNavigationAttempt } from "./navigation-lifecycle.ts";
 import { useReadableStore } from "./store.ts";
 
 type AnchorProps = HostIntrinsicElements["a"];
@@ -53,6 +55,11 @@ type LinkImplementationProps<
   router: RegisteredRouter;
 };
 
+type ClientLinkLifecycle = {
+  finishNavigation?: () => void;
+  preloadTimeout?: ReturnType<typeof setTimeout>;
+};
+
 export function Link<
   const TFrom extends string = string,
   const TTo extends string | undefined = undefined,
@@ -79,25 +86,20 @@ function ClientLink<
   const resolvedLocation = useReadableStore(router.stores.resolvedLocation);
   const currentLocation = resolvedLocation ?? router.stores.location.get();
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const state = useMemo<{
-    preloadTimeout?: ReturnType<typeof setTimeout>;
-    unsubscribe?: () => void;
-  }>(() => ({}), []);
+  const lifecycle = useMemo<ClientLinkLifecycle>(() => ({}), []);
   useBeforePaint(
     (signal) => {
       signal.addEventListener(
         "abort",
         () => {
-          state.unsubscribe?.();
-          if (state.preloadTimeout !== undefined) {
-            clearTimeout(state.preloadTimeout);
-          }
+          lifecycle.finishNavigation?.();
+          cancelPendingPreload(lifecycle);
         },
         { once: true },
       );
       return undefined;
     },
-    [state],
+    [lifecycle, router],
   );
   const {
     anchorProps,
@@ -105,10 +107,10 @@ function ClientLink<
     dangerous,
     disabled,
     external,
-    href,
     isActive,
     mix,
     stateMix,
+    toHref,
   } = resolveLinkState(router, currentLocation, props);
   const preload =
     props.reloadDocument || external || dangerous || props.href !== undefined
@@ -116,22 +118,22 @@ function ClientLink<
       : (props.preload ?? router.options.defaultPreload);
   const preloadDelay =
     props.preloadDelay ?? router.options.defaultPreloadDelay ?? 0;
+  const intentPreload = preload === "intent";
   const renderedChildren =
     typeof children === "function"
       ? children({ isActive, isTransitioning })
       : children;
 
-  const preloadRoute = useCallback(() => {
+  const preloadRoute = useStableEvent(() => {
     void router
       .preloadRoute<TFrom, TTo, TMaskFrom, TMaskTo>(props)
       .catch((error: unknown) => {
         console.warn("Error preloading route", error);
       });
-  }, [href, router]);
-
+  });
   useReactive(() => {
     if (!disabled && preload === "render") preloadRoute();
-  }, [disabled, preload, preloadRoute]);
+  }, [disabled, preload, preloadRoute, router, toHref]);
 
   const viewportBind = useCallback(
     (element: HTMLAnchorElement, signal: AbortSignal): undefined => {
@@ -152,22 +154,23 @@ function ClientLink<
   );
 
   const beginIntentPreload = () => {
-    if (disabled || preload !== "intent") return;
+    if (disabled || !intentPreload) return;
     if (preloadDelay === 0) {
       preloadRoute();
-      return;
+    } else if (lifecycle.preloadTimeout === undefined) {
+      lifecycle.preloadTimeout = setTimeout(() => {
+        lifecycle.preloadTimeout = undefined;
+        preloadRoute();
+      }, preloadDelay);
     }
-    if (state.preloadTimeout !== undefined) return;
-    state.preloadTimeout = setTimeout(() => {
-      state.preloadTimeout = undefined;
-      preloadRoute();
-    }, preloadDelay);
   };
   const cancelIntentPreload = () => {
-    if (state.preloadTimeout === undefined) return;
-    clearTimeout(state.preloadTimeout);
-    state.preloadTimeout = undefined;
+    cancelPendingPreload(lifecycle);
   };
+  useBeforePaint(() => {
+    if (disabled || !intentPreload) cancelPendingPreload(lifecycle);
+    return undefined;
+  }, [disabled, intentPreload, lifecycle]);
 
   return createElement(
     "a",
@@ -206,27 +209,38 @@ function ClientLink<
             return;
           }
           event.preventDefault();
-          state.unsubscribe?.();
+          lifecycle.finishNavigation?.();
           setIsTransitioning(true);
+          let navigationAttempt:
+            | ReturnType<typeof runNavigationAttempt>
+            | undefined;
+          let cancelNavigation!: () => void;
           const unsubscribe = router.subscribe("onResolved", () => {
-            unsubscribe();
-            state.unsubscribe = undefined;
-            setIsTransitioning(false);
+            if (navigationAttempt?.isBlockerPending() !== true) {
+              cancelNavigation();
+            }
           });
-          state.unsubscribe = unsubscribe;
-          void router.navigate<
-            RegisteredRouter,
-            TTo,
-            TFrom,
-            TMaskFrom,
-            TMaskTo
-          >(props);
+          cancelNavigation = () => {
+            unsubscribe();
+            if (lifecycle.finishNavigation !== cancelNavigation) return;
+            lifecycle.finishNavigation = undefined;
+            setIsTransitioning(false);
+          };
+          lifecycle.finishNavigation = cancelNavigation;
+          navigationAttempt = runNavigationAttempt(
+            router,
+            cancelNavigation,
+            () =>
+              router.navigate<RegisteredRouter, TTo, TFrom, TMaskFrom, TMaskTo>(
+                props,
+              ),
+          );
         }),
-        preload === "intent" && on("mouseenter", beginIntentPreload),
-        preload === "intent" && on("mouseleave", cancelIntentPreload),
-        preload === "intent" && on("focus", beginIntentPreload),
-        preload === "intent" && on("blur", cancelIntentPreload),
-        preload === "intent" &&
+        intentPreload && on("mouseenter", beginIntentPreload),
+        intentPreload && on("mouseleave", cancelIntentPreload),
+        intentPreload && on("focus", beginIntentPreload),
+        intentPreload && on("blur", cancelIntentPreload),
+        intentPreload &&
           on("touchstart", () => {
             if (!disabled) preloadRoute();
           }),
@@ -398,10 +412,10 @@ function resolveLinkState<
     dangerous,
     disabled,
     external,
-    href,
     isActive,
     mix,
     stateMix,
+    toHref: next?.href,
   };
 }
 
@@ -411,6 +425,12 @@ function combineServerLinkMixins(
 ): LinkStateProps["mix"] {
   if (first) return second ? [first, second] : first;
   return second;
+}
+
+function cancelPendingPreload(lifecycle: ClientLinkLifecycle): void {
+  if (lifecycle.preloadTimeout === undefined) return;
+  clearTimeout(lifecycle.preloadTimeout);
+  lifecycle.preloadTimeout = undefined;
 }
 
 function combineLinkBinds(

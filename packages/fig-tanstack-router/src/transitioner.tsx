@@ -43,7 +43,7 @@ export function Transitioner({
           }
         });
       }),
-    [acknowledgement, render, router],
+    [acknowledgement, render],
   );
   const cancelTransition = useCallback(
     () => settleTransition(acknowledgement, false),

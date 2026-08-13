@@ -5,15 +5,8 @@ import {
   useBeforePaint,
   useCallback,
   useMemo,
-  useState,
 } from "@bgub/fig";
-import type {
-  BlockerFnArgs,
-  HistoryAction,
-  HistoryLocation,
-} from "@tanstack/history";
 import {
-  type AnyRoute,
   type AnyRouteMatch,
   type AnyRouter,
   type DeepPartial,
@@ -28,7 +21,6 @@ import {
   type Manifest,
   type MatchRouteOptions,
   type NavigateOptions,
-  type ParseRoute,
   replaceEqualDeep,
   type RegisteredRouter,
   type ResolveRoute,
@@ -154,160 +146,10 @@ export function useLocation<
   return useReadableStore(router.stores.location, select) as TLocation;
 }
 
-type BlockerLocation<
-  out TRouteId = string,
-  out TFullPath = string,
-  out TParams = unknown,
-  out TSearch = unknown,
-> = {
-  fullPath: TFullPath;
-  params: TParams;
-  pathname: string;
-  routeId: TRouteId;
-  search: TSearch;
-};
-
-type BlockerLocationUnion<
-  TRouter extends AnyRouter = RegisteredRouter,
-  TRoute extends AnyRoute = ParseRoute<TRouter["routeTree"]>,
-> = TRoute extends AnyRoute
-  ? BlockerLocation<
-      TRoute["id"],
-      TRoute["fullPath"],
-      TRoute["types"]["allParams"],
-      TRoute["types"]["fullSearchSchema"]
-    >
-  : never;
-
-type BlockerResolver<TRouter extends AnyRouter = RegisteredRouter> =
-  | {
-      action: HistoryAction;
-      current: BlockerLocationUnion<TRouter>;
-      next: BlockerLocationUnion<TRouter>;
-      proceed: () => void;
-      reset: () => void;
-      status: "blocked";
-    }
-  | {
-      action: undefined;
-      current: undefined;
-      next: undefined;
-      proceed: undefined;
-      reset: undefined;
-      status: "idle";
-    };
-
-export type ShouldBlockFn<TRouter extends AnyRouter = RegisteredRouter> =
-  (args: {
-    action: HistoryAction;
-    current: BlockerLocationUnion<TRouter>;
-    next: BlockerLocationUnion<TRouter>;
-  }) => boolean | Promise<boolean>;
-
-export type UseBlockerOpts<
-  TRouter extends AnyRouter = RegisteredRouter,
-  TWithResolver extends boolean = boolean,
-> = {
-  disabled?: boolean;
-  enableBeforeUnload?: boolean | (() => boolean);
-  shouldBlockFn: ShouldBlockFn<TRouter>;
-  withResolver?: TWithResolver;
-};
-
-export function useBlocker<
-  TRouter extends AnyRouter = RegisteredRouter,
-  TWithResolver extends boolean = false,
->(
-  options: UseBlockerOpts<TRouter, TWithResolver>,
-): TWithResolver extends true ? BlockerResolver<TRouter> : void {
-  const {
-    disabled = false,
-    enableBeforeUnload = true,
-    shouldBlockFn,
-    withResolver = false,
-  } = options;
-  const router = useRouter<TRouter>();
-  const [resolver, setResolver] =
-    useState<BlockerResolver<TRouter>>(idleBlockerResolver);
-
-  useBeforePaint(
-    (signal) => {
-      if (disabled) return undefined;
-      let settlePending: ((shouldBlock: boolean) => void) | undefined;
-      const unblock = router.history.block({
-        enableBeforeUnload,
-        blockerFn: async (args: BlockerFnArgs) => {
-          const current = blockerLocation(router, args.currentLocation);
-          const next = blockerLocation(router, args.nextLocation);
-          const shouldBlock = await shouldBlockFn({
-            action: args.action,
-            current,
-            next,
-          });
-          if (!withResolver || !shouldBlock) return shouldBlock;
-
-          const resolved = await new Promise<boolean>((resolve) => {
-            settlePending = resolve;
-            setResolver({
-              action: args.action,
-              current,
-              next,
-              proceed: () => resolve(false),
-              reset: () => resolve(true),
-              status: "blocked",
-            });
-          });
-          settlePending = undefined;
-          setResolver(idleBlockerResolver);
-          return resolved;
-        },
-      });
-      signal.addEventListener(
-        "abort",
-        () => {
-          unblock();
-          settlePending?.(false);
-        },
-        { once: true },
-      );
-      return undefined;
-    },
-    [disabled, enableBeforeUnload, router, shouldBlockFn, withResolver],
-  );
-
-  return (withResolver ? resolver : undefined) as TWithResolver extends true
-    ? BlockerResolver<TRouter>
-    : void;
-}
-
 export function useCanGoBack(): boolean {
   const router = useRouter<AnyRouter>();
   return useReadableStore(router.stores.location, router.history.canGoBack);
 }
-
-function blockerLocation<TRouter extends AnyRouter>(
-  router: TRouter,
-  location: HistoryLocation,
-): BlockerLocationUnion<TRouter> {
-  const parsed = router.parseLocation(location);
-  const [, params, foundRoute] = router.getMatchedRoutes(parsed.pathname);
-  return {
-    fullPath: foundRoute?.fullPath ?? parsed.pathname,
-    params,
-    pathname: parsed.pathname,
-    routeId: foundRoute?.id ?? "__notFound__",
-    search: parsed.search,
-  } as BlockerLocationUnion<TRouter>;
-}
-
-const idleBlockerResolver = {
-  action: undefined,
-  current: undefined,
-  next: undefined,
-  proceed: undefined,
-  reset: undefined,
-  status: "idle",
-} as const;
 
 type TypedMatchOptions<
   TRouter extends AnyRouter,

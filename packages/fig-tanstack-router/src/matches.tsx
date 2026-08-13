@@ -72,7 +72,7 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     [manifest, ownerDocument, router],
   );
   const transitioner = router.isServer
-    ? createElement(ServerTransitioner)
+    ? null
     : createElement(Transitioner, { render: renderMatches });
 
   return createElement(
@@ -81,10 +81,6 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     transitioner,
     createElement(Matches),
   );
-}
-
-function ServerTransitioner(): null {
-  return null;
 }
 
 export function Matches(): FigNode {

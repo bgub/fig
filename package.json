@@ -203,7 +203,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "25 kB"
+      "limit": "25.1 kB"
     }
   ],
   "devDependencies": {

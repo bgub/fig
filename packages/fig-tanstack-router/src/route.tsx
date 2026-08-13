@@ -225,16 +225,7 @@ declare module "@tanstack/router-core" {
   interface RouteExtensions<
     in out TId extends string,
     in out TFullPath extends string,
-  > {
-    Link: LinkComponentRoute<TFullPath>;
-    notFound: (options?: NotFoundError) => NotFoundError;
-    useLoaderDeps: UseLoaderDepsRoute<TId>;
-    useMatch: UseMatchRoute<TId>;
-    useNavigate: () => UseNavigateResult<TFullPath>;
-    useParams: UseParamsRoute<TId>;
-    useRouteContext: UseRouteContextRoute<TId>;
-    useSearch: UseSearchRoute<TId>;
-  }
+  > extends RouteApiMethods<TId, TFullPath> {}
 
   interface UpdatableRouteOptionsExtensions {
     component?: RouteComponent;
