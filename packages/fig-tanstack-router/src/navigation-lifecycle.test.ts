@@ -12,6 +12,40 @@ import {
 } from "./navigation-lifecycle.ts";
 
 describe("navigation broker", () => {
+  it("settles an attributed attempt when a blocker rejects", async () => {
+    const router = makeRouter();
+    const blockHistory = vi.spyOn(router.history, "block");
+    const failure = new Error("blocker failed");
+    const unregister = registerNavigationBlocker(router, {
+      blockerFn: async () => {
+        throw failure;
+      },
+      enableBeforeUnload: () => true,
+    });
+    const historyBlocker = blockHistory.mock.calls[0]?.[0];
+    if (historyBlocker === undefined) throw new Error("Missing blocker.");
+    const cancel = vi.fn();
+    let blockerResult: Promise<boolean> | undefined;
+
+    const attempt = runNavigationAttempt(router, cancel, () => {
+      blockerResult = historyBlocker.blockerFn({
+        action: "PUSH",
+        currentLocation: router.history.location,
+        nextLocation: {
+          ...router.history.location,
+          href: "/next",
+          pathname: "/next",
+        },
+      });
+    });
+    if (blockerResult === undefined) throw new Error("Blocker did not run.");
+    await expect(blockerResult).rejects.toBe(failure);
+
+    expect(attempt.isBlockerPending()).toBe(false);
+    expect(cancel).toHaveBeenCalledOnce();
+    unregister();
+  });
+
   it("reports blocked attempts through one history blocker", async () => {
     const router = makeRouter();
     const blockHistory = vi.spyOn(router.history, "block");

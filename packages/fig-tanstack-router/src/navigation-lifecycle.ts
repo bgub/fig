@@ -105,6 +105,9 @@ async function runNavigationBlockers(
       }
     }
     return false;
+  } catch (error) {
+    attempt?.onBlocked();
+    throw error;
   } finally {
     if (attempt !== undefined) attempt.blockersPending = false;
   }
