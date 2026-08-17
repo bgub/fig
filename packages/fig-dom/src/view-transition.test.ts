@@ -14,9 +14,14 @@ import {
   type StartTransition,
   type ViewTransitionEvent,
 } from "@bgub/fig";
+import {
+  VIEW_TRANSITION_CLASS_ATTRIBUTE,
+  VIEW_TRANSITION_NAME_ATTRIBUTE,
+} from "@bgub/fig/internal";
 import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
 import { createRoot, hydrateRoot } from "./index.ts";
+import { hydrateElement } from "./props.ts";
 import { viewTransitionHostConfig } from "./view-transition.ts";
 import {
   enableViewTransitions,
@@ -63,6 +68,22 @@ function stubDomOrderRects(container: HTMLElement, selector: string): void {
 }
 
 describe("ViewTransition", () => {
+  it("ignores annotated capture styles using canonical CSSOM names", () => {
+    const section = document.createElement("section");
+    section.setAttribute(VIEW_TRANSITION_NAME_ATTRIBUTE, "card name");
+    section.setAttribute(VIEW_TRANSITION_CLASS_ATTRIBUTE, "fade");
+    section.style.setProperty("view-transition-name", "card\\ name");
+    section.style.setProperty("view-transition-class", "fade");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      hydrateElement(section, {});
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("passes unioned types to the browser and scopes lifecycle surfaces to the animation", async () => {
     const container = document.createElement("div");
     document.body.append(container);

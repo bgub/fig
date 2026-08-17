@@ -7,10 +7,15 @@ import {
   useState,
   ViewTransition,
 } from "@bgub/fig";
+import {
+  VIEW_TRANSITION_CLASS_ATTRIBUTE,
+  VIEW_TRANSITION_NAME_ATTRIBUTE,
+} from "@bgub/fig/internal";
 import { prerender, renderToHtml } from "@bgub/fig-server";
 import type { DehydratedSuspenseBoundary } from "@bgub/fig-reconciler";
 import { describe, expect, it } from "vitest";
 import { type Bind, createRoot, flushSync, hydrateRoot, on } from "./index.ts";
+import { hydrateElement } from "./props.ts";
 import {
   enclosingSuspenseBoundaryStart,
   isWithinSuspenseBoundary,
@@ -519,6 +524,67 @@ describe("@bgub/fig-dom hydration", () => {
       "Hydration preserved extra server attributes or styles on <button>: " +
         "style.fontWeight. They were preserved, so this element now differs " +
         "from a pure client render.",
+    ]);
+  });
+
+  it("ignores streamed View Transition capture styles during hydration", () => {
+    const section = new FakeElement("section");
+    section.setAttribute(VIEW_TRANSITION_NAME_ATTRIBUTE, "card name");
+    section.setAttribute(VIEW_TRANSITION_CLASS_ATTRIBUTE, "fade");
+    section.setAttribute(
+      "style",
+      "view-transition-name: card\\ name; view-transition-class: fade",
+    );
+    section.style.viewTransitionName = "card\\ name";
+    section.style.viewTransitionClass = "fade";
+    const errors: string[] = [];
+    const originalError = console.error;
+    const originalCSS = globalThis.CSS;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+    globalThis.CSS = {
+      escape: (value) => value.replaceAll(" ", "\\ "),
+    } as typeof CSS;
+
+    try {
+      hydrateElement(section as unknown as Element, {});
+    } finally {
+      console.error = originalError;
+      globalThis.CSS = originalCSS;
+    }
+
+    expect(errors).toEqual([]);
+  });
+
+  it("still reports authored server styles beside capture styles", () => {
+    const section = new FakeElement("section");
+    section.setAttribute(VIEW_TRANSITION_NAME_ATTRIBUTE, "card");
+    section.setAttribute(VIEW_TRANSITION_CLASS_ATTRIBUTE, "fade");
+    section.setAttribute(
+      "style",
+      "font-weight: bold; view-transition-name: card; " +
+        "view-transition-class: authored",
+    );
+    section.style.fontWeight = "bold";
+    section.style.viewTransitionName = "card";
+    section.style.viewTransitionClass = "authored";
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+
+    try {
+      hydrateElement(section as unknown as Element, {});
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors).toEqual([
+      "Hydration preserved extra server attributes or styles on <section>: " +
+        "style, style.fontWeight, style.viewTransitionClass. They were " +
+        "preserved, so this element now differs from a pure client render.",
     ]);
   });
 

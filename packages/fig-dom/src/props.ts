@@ -1,4 +1,8 @@
 import type { Props } from "@bgub/fig";
+import {
+  VIEW_TRANSITION_CLASS_ATTRIBUTE,
+  VIEW_TRANSITION_NAME_ATTRIBUTE,
+} from "@bgub/fig/internal";
 import { updateBind } from "./bind.ts";
 import { eventDescriptorsFromProps } from "./event-descriptor.ts";
 import { updateEvents } from "./events.ts";
@@ -156,7 +160,16 @@ export function hydrateElement(element: Element, nextProps: Props): void {
   // style prop into the same declaration and runs the bind callback (which
   // may set attributes), so a post-update enumeration could not tell
   // server-set names from client-set ones.
-  const serverStyles = __DEV__ ? hydratedStyleNames(element) : [];
+  let serverStyles: string[] = [];
+  let styleAttributeIsCaptureOnly = false;
+  if (__DEV__) {
+    const hydratedStyles = hydratedStyleNames(element);
+    serverStyles = hydratedStyles.filter(
+      (name) => !annotatedViewTransitionStyle(element, name),
+    );
+    styleAttributeIsCaptureOnly =
+      hydratedStyles.length > 0 && serverStyles.length === 0;
+  }
   const serverAttributes = __DEV__ ? attributeNames(element) : [];
 
   updateElement(element, {}, nextProps, { hydrating: true });
@@ -167,6 +180,7 @@ export function hydrateElement(element: Element, nextProps: Props): void {
       nextProps,
       serverStyles,
       serverAttributes,
+      styleAttributeIsCaptureOnly,
     );
   }
 }
@@ -179,6 +193,7 @@ function warnExtraHydratedAttributes(
   nextProps: Props,
   serverStyles: readonly string[],
   serverAttributes: readonly string[],
+  ignoreStyleAttribute: boolean,
 ): void {
   if (serverAttributes.length === 0 && serverStyles.length === 0) return;
 
@@ -206,6 +221,7 @@ function warnExtraHydratedAttributes(
   for (const name of serverAttributes) {
     const attribute = hostAttributeName(name, html);
     if (attribute.startsWith("data-fig-")) continue;
+    if (ignoreStyleAttribute && attribute === "style") continue;
     if (!expectedAttributes.has(attribute)) extra.push(name);
   }
 
@@ -217,6 +233,48 @@ function warnExtraHydratedAttributes(
     `Hydration preserved extra server attributes or styles on <${type}>: ` +
       `${extra.sort().join(", ")}. They were preserved, so this element now ` +
       "differs from a pure client render.",
+  );
+}
+
+// Streaming reveals copy their data-fig-vt-* annotations into inline styles
+// for the browser's capture. The runtime currently assigns the raw annotation,
+// while client transitions use CSS.escape; accept either representation so
+// hydration recognizes the same renderer-owned declaration on both paths.
+function annotatedViewTransitionStyle(element: Element, name: string): boolean {
+  // hydrateElement calls this only for names returned by hydratedStyleNames,
+  // which means the element exposed a style target.
+  const style = (element as HTMLElement).style;
+  let attribute: string;
+  let value: string;
+  switch (name) {
+    case "view-transition-name":
+    case "viewTransitionName":
+      attribute = VIEW_TRANSITION_NAME_ATTRIBUTE;
+      value =
+        style.viewTransitionName ||
+        style.getPropertyValue?.("view-transition-name") ||
+        "";
+      break;
+    case "view-transition-class":
+    case "viewTransitionClass":
+      attribute = VIEW_TRANSITION_CLASS_ATTRIBUTE;
+      value =
+        style.viewTransitionClass ||
+        style.getPropertyValue?.("view-transition-class") ||
+        "";
+      break;
+    default:
+      return false;
+  }
+
+  const marker = element.getAttribute(attribute);
+  if (marker === null) return false;
+
+  const normalizedValue = value.trim();
+  const normalizedMarker = marker.trim();
+  const escapedMarker = globalThis.CSS?.escape?.(normalizedMarker);
+  return (
+    normalizedValue === normalizedMarker || normalizedValue === escapedMarker
   );
 }
 

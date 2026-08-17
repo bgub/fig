@@ -127,6 +127,8 @@ The host then runs the normal mutation work inside one `document.startViewTransi
 
 If a layout candidate did not move, Fig removes its live name and hides the already-captured old pseudo-group with a zero-duration animation. Author styles are restored when the transition becomes ready. Hosts without measurement support keep every candidate.
 
+During a streamed reveal, hydration may attach while the browser is capturing annotated surfaces. Hydration diagnostics ignore inline `view-transition-name` and `view-transition-class` declarations that match the element's `data-fig-vt-*` annotations; when every inline declaration matches, the `style` attribute itself is also omitted from the diagnostic. Unrelated server-only styles on the same element are still reported.
+
 ## Root Snapshot
 
 The browser captures the whole page by default. Fig cancels that root snapshot when all layout changes are already covered by named surfaces. Untouched regions then remain live and interactive while those groups animate.
