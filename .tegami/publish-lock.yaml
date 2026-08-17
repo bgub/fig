@@ -1,34 +1,26 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-dom\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n  \"@bgub/fig-refresh\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Document every JSR entrypoint and exported symbol\n\nAll Fig packages now publish module documentation for every JSR entrypoint and\nAPI documentation for their exported symbols. This makes the generated JSR\nreference complete and improves package discovery and quality scores.\n"
-    filename: jsr-package-documentation.md
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Fix TanStack Router link lifecycles\n\nLinks now preload their current unmasked destination after masked-link updates\nand settle per-link transition state when navigation resolves, a blocker\ncancels the attempt, or a blocker callback fails. Navigation blocker callbacks\nstay current without reinstalling a pending resolver. Adapter internals and\ntests are split along their lifecycle and subsystem boundaries.\n"
+    filename: fix-tanstack-link-lifecycle.md
     v: 0.0.0
 core:packages:
-  - changelogIds:
-      - jsr-package-documentation.md
-    id: npm:@bgub/fig
-    updated: true
-  - changelogIds:
-      - jsr-package-documentation.md
-    id: npm:@bgub/fig-dom
-    updated: true
-  - changelogIds:
-      - jsr-package-documentation.md
-    id: npm:@bgub/fig-reconciler
-    updated: true
-  - changelogIds:
-      - jsr-package-documentation.md
-    id: npm:@bgub/fig-refresh
-    updated: true
-  - changelogIds:
-      - jsr-package-documentation.md
-    id: npm:@bgub/fig-server
-    updated: true
-  - id: npm:@bgub/fig-tanstack-router
+  - id: npm:@bgub/fig
     updated: false
+  - id: npm:@bgub/fig-dom
+    updated: false
+  - id: npm:@bgub/fig-reconciler
+    updated: false
+  - id: npm:@bgub/fig-refresh
+    updated: false
+  - id: npm:@bgub/fig-server
+    updated: false
+  - changelogIds:
+      - fix-tanstack-link-lifecycle.md
+    id: npm:@bgub/fig-tanstack-router
+    updated: true
   - id: npm:@bgub/fig-tanstack-start
-    updated: false
-  - id: npm:@bgub/fig-vite
     updated: true
+  - id: npm:@bgub/fig-vite
+    updated: false
 npm:packages:
   - distTag: latest
     id: npm:@bgub/fig
@@ -46,11 +38,5 @@ npm:packages:
     id: npm:@bgub/fig-tanstack-start
   - distTag: latest
     id: npm:@bgub/fig-vite
-  - id: npm:@bgub/fig-demo-client
-  - id: npm:@bgub/fig-demo-payload
-  - id: npm:@bgub/fig-demo-ssr
-  - id: npm:@bgub/fig-devtools
   - id: npm:@bgub/fig-demo-tanstack-start
-  - id: npm:@bgub/fig-demo-hmr
   - id: npm:@bgub/fig-demo-tanstack-router
-  - id: npm:@bgub/fig-ui
