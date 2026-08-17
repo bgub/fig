@@ -85,7 +85,7 @@
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-server": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
-    "@types/node": "catalog:node22",
+    "@types/node": "catalog:node24",
     "vite": "catalog:"
   },
   "engines": {

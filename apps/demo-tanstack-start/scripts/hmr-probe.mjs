@@ -39,7 +39,14 @@ try {
   });
   page.on("pageerror", (error) => errors.push(String(error)));
 
-  await page.goto(`${base}/asset-lab`, { waitUntil: "networkidle" });
+  const response = await page.goto(`${base}/asset-lab`, {
+    waitUntil: "networkidle",
+  });
+  if (response === null || !response.ok()) {
+    throw new Error(
+      `HMR probe page failed to load: ${response?.status() ?? "no response"} ${response?.statusText() ?? ""}`.trim(),
+    );
+  }
   const island = page.getByRole("button", { name: /Client asset island/ });
   await island.click();
   await page.getByText("clicks: 1").waitFor();
