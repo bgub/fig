@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-reconciler",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Fig reconciler",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
@@ -69,7 +69,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@bgub/fig": "0.1.1"
+    "@bgub/fig": "0.1.2"
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*"

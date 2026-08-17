@@ -1,3 +1,12 @@
+## @bgub/fig-dom@0.1.2
+
+### Ignore temporary view transition styles during hydration
+
+Hydration diagnostics no longer report inline view transition declarations
+that match a streamed surface's `data-fig-vt-*` annotations, including the
+otherwise capture-only `style` attribute. Unrelated authored server styles on
+the same element continue to produce the normal diagnostic.
+
 ## @bgub/fig-dom@0.1.1
 
 ### Document every JSR entrypoint and exported symbol
