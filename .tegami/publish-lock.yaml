@@ -1,23 +1,23 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Ignore temporary view transition styles during hydration\n\nHydration diagnostics no longer report inline view transition declarations\nthat match a streamed surface's `data-fig-vt-*` annotations, including the\notherwise capture-only `style` attribute. Unrelated authored server styles on\nthe same element continue to produce the normal diagnostic.\n"
-    filename: ignore-view-transition-hydration-styles.md
+  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n---\n\n## Fix consecutive TanStack Router view transitions\n\nTanStack Router history loads now retain their promises inside Fig's transition\nscope, so preloaded, cached, back, and forward routes continue to animate shared\nelements across consecutive client-side navigations.\n"
+    filename: fix-tanstack-consecutive-view-transitions.md
     v: 0.0.0
 core:packages:
   - id: npm:@bgub/fig
-    updated: true
-  - changelogIds:
-      - ignore-view-transition-hydration-styles.md
-    id: npm:@bgub/fig-dom
-    updated: true
+    updated: false
+  - id: npm:@bgub/fig-dom
+    updated: false
   - id: npm:@bgub/fig-reconciler
-    updated: true
+    updated: false
   - id: npm:@bgub/fig-refresh
     updated: false
-  - id: npm:@bgub/fig-tanstack-router
-    updated: false
-  - id: npm:@bgub/fig-tanstack-start
-    updated: false
   - id: npm:@bgub/fig-server
+    updated: false
+  - changelogIds:
+      - fix-tanstack-consecutive-view-transitions.md
+    id: npm:@bgub/fig-tanstack-router
+    updated: true
+  - id: npm:@bgub/fig-tanstack-start
     updated: true
   - id: npm:@bgub/fig-vite
     updated: false
@@ -31,18 +31,12 @@ npm:packages:
   - distTag: latest
     id: npm:@bgub/fig-refresh
   - distTag: latest
+    id: npm:@bgub/fig-server
+  - distTag: latest
     id: npm:@bgub/fig-tanstack-router
   - distTag: latest
     id: npm:@bgub/fig-tanstack-start
   - distTag: latest
-    id: npm:@bgub/fig-server
-  - distTag: latest
     id: npm:@bgub/fig-vite
-  - id: npm:@bgub/fig-demo-client
-  - id: npm:@bgub/fig-demo-payload
-  - id: npm:@bgub/fig-demo-ssr
-  - id: npm:@bgub/fig-devtools
   - id: npm:@bgub/fig-demo-tanstack-start
-  - id: npm:@bgub/fig-demo-hmr
   - id: npm:@bgub/fig-demo-tanstack-router
-  - id: npm:@bgub/fig-ui
