@@ -679,50 +679,6 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(userRouteApi.id).toBe("/users/$id");
   });
 
-  it("keeps a link navigation in its transition scope until it settles", async () => {
-    const router = makeRouter();
-    const container = document.createElement("div");
-    const root = createRoot(container);
-    mountedRoots.push(root);
-
-    await act(() => root.render(createElement(RouterProvider, { router })));
-    await act(() => waitForRouterIdle(router));
-
-    let finishNavigation!: () => void;
-    const navigation = new Promise<void>((resolve) => {
-      finishNavigation = resolve;
-    });
-    const navigate = vi.spyOn(router, "navigate").mockReturnValue(navigation);
-    let transitionResult: unknown;
-    const previousTransitionHandler = setTransitionHandler((callback) => {
-      const result = callback();
-      transitionResult = result;
-      return result;
-    });
-
-    try {
-      container
-        .querySelector<HTMLAnchorElement>("#user-link")
-        ?.dispatchEvent(
-          new MouseEvent("click", { bubbles: true, cancelable: true }),
-        );
-
-      expect(navigate).toHaveBeenCalledOnce();
-      expect(transitionResult).toBeInstanceOf(Promise);
-      let transitionSettled = false;
-      void Promise.resolve(transitionResult).then(() => {
-        transitionSettled = true;
-      });
-      await Promise.resolve();
-      expect(transitionSettled).toBe(false);
-
-      finishNavigation();
-      await expect(Promise.resolve(transitionResult)).resolves.toBeUndefined();
-    } finally {
-      setTransitionHandler(previousTransitionHandler);
-    }
-  });
-
   it("keeps a history navigation promise in its transition scope", async () => {
     const router = makeRouter();
     const container = document.createElement("div");

@@ -1,7 +1,6 @@
 import {
   createElement,
   type FigNode,
-  transition,
   useBeforePaint,
   useCallback,
   useMemo,
@@ -210,44 +209,32 @@ function ClientLink<
             return;
           }
           event.preventDefault();
-          void transition(() => {
-            lifecycle.finishNavigation?.();
-            setIsTransitioning(true);
-            let navigationAttempt:
-              | ReturnType<typeof runNavigationAttempt>
-              | undefined;
-            let finishTransition!: () => void;
-            const transitionFinished = new Promise<void>((resolve) => {
-              finishTransition = resolve;
-            });
-            let cancelNavigation!: () => void;
-            const unsubscribe = router.subscribe("onResolved", () => {
-              if (navigationAttempt?.isBlockerPending() !== true) {
-                cancelNavigation();
-              }
-            });
-            cancelNavigation = () => {
-              unsubscribe();
-              finishTransition();
-              if (lifecycle.finishNavigation !== cancelNavigation) return;
-              lifecycle.finishNavigation = undefined;
-              setIsTransitioning(false);
-            };
-            lifecycle.finishNavigation = cancelNavigation;
-            navigationAttempt = runNavigationAttempt(
-              router,
-              cancelNavigation,
-              () =>
-                router.navigate<
-                  RegisteredRouter,
-                  TTo,
-                  TFrom,
-                  TMaskFrom,
-                  TMaskTo
-                >(props),
-            );
-            return Promise.race([navigationAttempt.result, transitionFinished]);
+          lifecycle.finishNavigation?.();
+          setIsTransitioning(true);
+          let navigationAttempt:
+            | ReturnType<typeof runNavigationAttempt>
+            | undefined;
+          let cancelNavigation!: () => void;
+          const unsubscribe = router.subscribe("onResolved", () => {
+            if (navigationAttempt?.isBlockerPending() !== true) {
+              cancelNavigation();
+            }
           });
+          cancelNavigation = () => {
+            unsubscribe();
+            if (lifecycle.finishNavigation !== cancelNavigation) return;
+            lifecycle.finishNavigation = undefined;
+            setIsTransitioning(false);
+          };
+          lifecycle.finishNavigation = cancelNavigation;
+          navigationAttempt = runNavigationAttempt(
+            router,
+            cancelNavigation,
+            () =>
+              router.navigate<RegisteredRouter, TTo, TFrom, TMaskFrom, TMaskTo>(
+                props,
+              ),
+          );
         }),
         intentPreload && on("mouseenter", beginIntentPreload),
         intentPreload && on("mouseleave", cancelIntentPreload),

@@ -12,20 +12,6 @@ import {
 } from "./navigation-lifecycle.ts";
 
 describe("navigation broker", () => {
-  it("preserves the result of a brokered navigation", () => {
-    const router = makeRouter();
-    const unregister = registerNavigationBlocker(router, {
-      blockerFn: () => false,
-      enableBeforeUnload: () => false,
-    });
-    const navigation = Promise.resolve();
-
-    const attempt = runNavigationAttempt(router, vi.fn(), () => navigation);
-
-    expect(attempt.result).toBe(navigation);
-    unregister();
-  });
-
   it("settles an attributed attempt when a blocker rejects", async () => {
     const router = makeRouter();
     const blockHistory = vi.spyOn(router.history, "block");
