@@ -1,3 +1,11 @@
+## @bgub/fig-tanstack-router@0.1.2
+
+### Fix consecutive TanStack Router view transitions
+
+TanStack Router history loads now retain their promises inside Fig's transition
+scope, so preloaded, cached, back, and forward routes continue to animate shared
+elements across consecutive client-side navigations.
+
 ## @bgub/fig-tanstack-router@0.1.1
 
 ### Fix TanStack Router link lifecycles
