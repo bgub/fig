@@ -11,17 +11,18 @@ type NavigationAttempt = {
   onBlocked: () => void;
 };
 
-type NavigationAttemptHandle = {
+type NavigationAttemptHandle<TResult> = {
   isBlockerPending: () => boolean;
+  result: TResult;
 };
 
 type NavigationBroker = {
   blockers: Set<RegisteredNavigationBlocker>;
   pendingAttempt?: NavigationAttempt;
-  runAttempt: (
+  runAttempt: <TResult>(
     onBlocked: () => void,
-    navigate: () => void,
-  ) => NavigationAttemptHandle;
+    navigate: () => TResult,
+  ) => NavigationAttemptHandle<TResult>;
   unregisterHistoryBlocker: () => void;
 };
 
@@ -42,15 +43,17 @@ export function registerNavigationBlocker(
   };
 }
 
-export function runNavigationAttempt(
+export function runNavigationAttempt<TResult>(
   router: AnyRouter,
   onBlocked: () => void,
-  navigate: () => void,
-): NavigationAttemptHandle {
+  navigate: () => TResult,
+): NavigationAttemptHandle<TResult> {
   const broker = navigationBrokers.get(router);
   if (broker === undefined) {
-    navigate();
-    return settledNavigationAttempt;
+    return {
+      isBlockerPending: () => false,
+      result: navigate(),
+    };
   }
   return broker.runAttempt(onBlocked, navigate);
 }
@@ -72,22 +75,23 @@ function createNavigationBroker(router: AnyRouter): NavigationBroker {
   return broker;
 }
 
-function runBrokerAttempt(
+function runBrokerAttempt<TResult>(
   broker: NavigationBroker,
   onBlocked: () => void,
-  navigate: () => void,
-): NavigationAttemptHandle {
+  navigate: () => TResult,
+): NavigationAttemptHandle<TResult> {
   const attempt = { blockersPending: true, onBlocked };
   broker.pendingAttempt = attempt;
+  let result!: TResult;
   try {
-    navigate();
+    result = navigate();
   } finally {
     if (broker.pendingAttempt === attempt) {
       broker.pendingAttempt = undefined;
       attempt.blockersPending = false;
     }
   }
-  return { isBlockerPending: () => attempt.blockersPending };
+  return { isBlockerPending: () => attempt.blockersPending, result };
 }
 
 async function runNavigationBlockers(
@@ -112,7 +116,3 @@ async function runNavigationBlockers(
     if (attempt !== undefined) attempt.blockersPending = false;
   }
 }
-
-const settledNavigationAttempt: NavigationAttemptHandle = {
-  isBlockerPending: () => false,
-};

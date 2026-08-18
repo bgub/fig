@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { createElement, type FigNode, useState } from "@bgub/fig";
+import { setTransitionHandler } from "@bgub/fig/internal";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -765,7 +766,7 @@ describe("Link", () => {
     expect(secondShouldBlock).not.toHaveBeenCalled();
   });
 
-  it("clears transition state when a later blocker cancels navigation", async () => {
+  it("settles the transition when a later blocker cancels navigation", async () => {
     const allowNavigation = vi.fn(async () => false);
     const blockNavigation = vi.fn(() => true);
 
@@ -807,25 +808,48 @@ describe("Link", () => {
 
     await act(() => root.render(createElement(RouterProvider, { router })));
     const link = container.querySelector<HTMLAnchorElement>("#blocked-link");
-    await act(async () => {
-      link?.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          button: 0,
-          cancelable: true,
-        }),
-      );
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (blockNavigation.mock.calls.length > 0) return;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      throw new Error("The later navigation blocker was not called.");
+    let transitionResult: unknown;
+    const previousTransitionHandler = setTransitionHandler((callback) => {
+      const result = callback();
+      transitionResult = result;
+      return result;
     });
 
-    expect(allowNavigation).toHaveBeenCalledOnce();
-    expect(blockNavigation).toHaveBeenCalledOnce();
-    expect(link?.textContent).toBe("idle");
-    expect(router.history.location.pathname).toBe("/");
+    try {
+      await act(async () => {
+        link?.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            button: 0,
+            cancelable: true,
+          }),
+        );
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (blockNavigation.mock.calls.length > 0) return;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        throw new Error("The later navigation blocker was not called.");
+      });
+
+      expect(allowNavigation).toHaveBeenCalledOnce();
+      expect(blockNavigation).toHaveBeenCalledOnce();
+      expect(link?.textContent).toBe("idle");
+      expect(router.history.location.pathname).toBe("/");
+      expect(transitionResult).toBeInstanceOf(Promise);
+      await expect(
+        Promise.race([
+          Promise.resolve(transitionResult).then(
+            () => "settled",
+            () => "settled",
+          ),
+          new Promise<string>((resolve) =>
+            setTimeout(() => resolve("pending"), 10),
+          ),
+        ]),
+      ).resolves.toBe("settled");
+    } finally {
+      setTransitionHandler(previousTransitionHandler);
+    }
   });
 
   it("keeps an allowed navigation transitioning when a programmatic navigation is blocked", async () => {
