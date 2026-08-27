@@ -33,6 +33,7 @@ import {
   isViewTransition,
   type NormalizedChild,
   type RenderDispatcher,
+  type BrowserRenderReason,
   readThenable,
   setCurrentDataStore,
   setCurrentDispatcher,
@@ -81,6 +82,7 @@ import {
   type ContextValues,
   type StackFrame,
   cloneContextValues,
+  componentStack,
   createStaticDispatcher,
   type Deferred,
   deferred,
@@ -125,6 +127,7 @@ export interface Request {
   nextActivityId: number;
   nextViewTransitionId: number;
   nonce?: string;
+  onBrowserBailout?: ServerRenderOptions["onBrowserBailout"];
   onError?: ServerRenderOptions["onError"];
   pendingRootTasks: number;
   pingedTasks: Task[];
@@ -244,7 +247,11 @@ export interface SuspenseBoundary {
   metadataVisible: boolean;
 }
 
-type BoundaryStatus = "pending" | "completed" | "client-rendered";
+type BoundaryStatus =
+  | "browser-rendered"
+  | "client-rendered"
+  | "completed"
+  | "pending";
 type SegmentStatus = "pending" | "rendering" | "completed" | "flushed";
 type HostNamespace = "html" | "mathml" | "svg";
 
@@ -255,6 +262,12 @@ interface ServerViewTransitionContext {
 }
 
 const errorStacks = new WeakMap<object, StackFrame>();
+const browserBailoutBrand = Symbol("fig.browser-bailout");
+
+interface BrowserBailout {
+  readonly [browserBailoutBrand]: true;
+  readonly reason?: BrowserRenderReason;
+}
 // Emitted between two adjacent text writes that come from different
 // normalized text children (component seams, resumed suspended segments).
 // The HTML parser merges back-to-back character data into ONE DOM text node,
@@ -310,6 +323,7 @@ export function createServerRenderRequest(
     nextActivityId: 0,
     nextViewTransitionId: 0,
     nonce: options.nonce,
+    onBrowserBailout: options.onBrowserBailout,
     onError: options.onError,
     pendingRootTasks: 0,
     pingedTasks: [],
@@ -556,6 +570,9 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     contextValues: frame.contextValues,
     externalStoreError:
       "useSyncExternalStore requires getServerSnapshot during server render.",
+    readBrowser(reason) {
+      throw browserBailout(reason);
+    },
     readPromise(promise) {
       throwIfAborting(frame.request);
       return readThenable(promise);
@@ -810,7 +827,11 @@ function renderFunctionComponent(
   const previousDataStore = setCurrentDataStore(frame.request.dataStore);
   const previousStack = frame.stack;
   const previousLocalIdCounter = frame.localIdCounter;
-  if (__DEV__ || frame.request.onError !== undefined) {
+  if (
+    __DEV__ ||
+    frame.request.onBrowserBailout !== undefined ||
+    frame.request.onError !== undefined
+  ) {
     frame.stack = { name: type.name || "Anonymous", parent: previousStack };
   }
   frame.localIdCounter = 0;
@@ -949,7 +970,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     // suspend seam and contentFrame always has a boundary, so it spawns a
     // suspended task and continues instead of throwing.
     contentSegment.status = "completed";
-    markBoundaryClientRendered(frame.request, boundary, error, frame.stack);
+    markBoundaryForClientRender(frame.request, boundary, error, frame.stack);
   }
 
   // Surfaces after the boundary must not reuse suffixes the branches
@@ -1258,7 +1279,10 @@ function settleTask(
   if (boundary === null) {
     request.pendingRootTasks -= 1;
     if (outcome === "errored") {
-      fatalError(request, error);
+      fatalError(
+        request,
+        isBrowserBailout(error) ? browserBailoutError(error) : error,
+      );
       return;
     }
     if (request.pendingRootTasks === 0) finishRootShell(request);
@@ -1266,7 +1290,7 @@ function settleTask(
     boundary.pendingTasks -= 1;
 
     if (outcome === "errored") {
-      markBoundaryClientRendered(request, boundary, error, stack);
+      markBoundaryForClientRender(request, boundary, error, stack);
     } else if (outcome === "completed" && segment.parentFlushed) {
       boundary.completedSegments.push(segment);
     }
@@ -1329,6 +1353,13 @@ function markBoundaryClientRendered(
       serverErrorPayload(error, stackForError(error, stack), request.onError);
   }
 
+  discardBoundaryServerWork(request, boundary);
+}
+
+function discardBoundaryServerWork(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
   boundary.completedSegments.length = 0;
   request.completedBoundaries.delete(boundary);
   request.partialBoundaries.delete(boundary);
@@ -1343,6 +1374,84 @@ function markBoundaryClientRendered(
 
   if (boundary.parentFlushed) {
     request.clientRenderedBoundaries.add(boundary);
+  }
+}
+
+function markBoundaryBrowserRendered(
+  request: Request,
+  boundary: SuspenseBoundary,
+  bailout: BrowserBailout,
+  stack: StackFrame | null,
+): void {
+  if (boundary.status !== "browser-rendered") {
+    boundary.status = "browser-rendered";
+    boundary.error = null;
+    reportBrowserBailout(request, bailout, stackForError(bailout, stack));
+  }
+
+  discardBoundaryServerWork(request, boundary);
+}
+
+function markBoundaryForClientRender(
+  request: Request,
+  boundary: SuspenseBoundary,
+  error: unknown,
+  stack: StackFrame | null,
+): void {
+  if (isBrowserBailout(error)) {
+    markBoundaryBrowserRendered(request, boundary, error, stack);
+    return;
+  }
+  markBoundaryClientRendered(request, boundary, error, stack);
+}
+
+function browserBailout(reason?: BrowserRenderReason): BrowserBailout {
+  return reason === undefined
+    ? { [browserBailoutBrand]: true }
+    : { [browserBailoutBrand]: true, reason };
+}
+
+function isBrowserBailout(value: unknown): value is BrowserBailout {
+  return (
+    typeof value === "object" && value !== null && browserBailoutBrand in value
+  );
+}
+
+function browserBailoutError(
+  bailout: BrowserBailout,
+  message = "A component requires browser rendering, but it is not inside a Suspense boundary.",
+): Error {
+  let cause: unknown;
+  try {
+    cause =
+      typeof bailout.reason === "function" ? bailout.reason() : bailout.reason;
+  } catch (error) {
+    cause = error;
+  }
+
+  const error = new Error(message);
+  if (cause !== undefined) {
+    (error as Error & { cause?: unknown }).cause = cause;
+  }
+  return error;
+}
+
+function reportBrowserBailout(
+  request: Request,
+  bailout: BrowserBailout,
+  stack: StackFrame | null,
+): void {
+  const error = browserBailoutError(
+    bailout,
+    "The server left a Suspense boundary for browser rendering.",
+  );
+  const report = request.onBrowserBailout;
+  if (report === undefined) return;
+
+  try {
+    report(error, { componentStack: componentStack(stack) });
+  } catch {
+    // Reporting must not turn an intentional browser render into a failure.
   }
 }
 

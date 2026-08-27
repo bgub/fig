@@ -100,6 +100,8 @@ export {
   resolveHostMix,
 } from "./mixin.ts";
 export {
+  type BrowserRenderReason,
+  readBrowser,
   type RenderDispatcher,
   setCurrentDispatcher,
   type StableEventCallerArgs,
@@ -151,6 +153,7 @@ export {
   EARLY_EVENT_QUEUE_PROPERTY,
   HYDRATION_SKIP_ATTRIBUTE,
   REPLAYABLE_EVENT_TYPES,
+  SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
   SUSPENSE_END_MARKER,

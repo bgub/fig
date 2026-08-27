@@ -21,6 +21,7 @@ Fig keeps React's modern runtime ideas—fibers, lanes, hooks, Suspense, streami
 - There is no `useRef`. Use `bind` for DOM access and `useMemo(() => ({ current: null }), [])` for mutable storage.
 - There is no `memo()`. Fig's bailouts preserve child identity automatically; memoize a child element when you intentionally want to pin a subtree.
 - React's `use(resource)` is split into `readContext`, `readPromise`, and `readData`.
+- React DOM's `use(browser())` is the direct `readBrowser(reason?)` DOM read.
 - `useStableEvent` is the general stable-callback primitive. It is not limited to effects and receives Fig's trailing signal.
 - Async transitions keep post-`await` updates in the transition. Hook transitions and actions are cancellable; actions are last-run-wins rather than serial.
 - Server action transport belongs to frameworks.
@@ -108,4 +109,5 @@ See [Architecture](./architecture.md) and [Renderer authoring](./renderer-author
 | `useEffectEvent`               | `useStableEvent`             |
 | `startTransition`              | `transition`                 |
 | `use(context)`, `use(promise)` | `readContext`, `readPromise` |
+| `use(browser(reason))`         | `readBrowser(reason)`        |
 | RSC / Flight                   | Payload                      |

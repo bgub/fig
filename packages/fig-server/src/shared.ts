@@ -8,6 +8,7 @@ import type {
   StartTransition,
 } from "@bgub/fig";
 import type {
+  BrowserRenderReason,
   DataResource,
   RenderDispatcher,
   StableEventCallerArgs,
@@ -42,6 +43,7 @@ interface StaticDispatcherOptions {
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
+  readBrowser(this: void, reason?: BrowserRenderReason): void;
   readData<TArgs extends unknown[], TValue>(
     this: void,
     resource: DataResource<TArgs, TValue>,
@@ -187,6 +189,7 @@ export function createStaticDispatcher(
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
     },
+    readBrowser: options.readBrowser,
     readData: options.readData,
     preloadData: options.preloadData,
     readPromise: options.readPromise,

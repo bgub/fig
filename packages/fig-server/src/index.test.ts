@@ -31,6 +31,7 @@ import {
   ViewTransition,
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
+import { readBrowser } from "@bgub/fig-dom";
 import {
   prerender,
   renderToDocumentHtml,
@@ -433,6 +434,69 @@ describe("@bgub/fig-server", () => {
     );
     expect(result.html).not.toContain("fig:suspense:pending");
     expect(result.html).not.toContain("__figSSR");
+  });
+
+  it("prerenders browser-only content as an intentional browser boundary", async () => {
+    const errors: unknown[] = [];
+    const bailouts: Array<{ error: Error; stack: string }> = [];
+    let reasonCalls = 0;
+
+    function BrowserOnly(): FigNode {
+      readBrowser(() => {
+        reasonCalls += 1;
+        return new Error("uses localStorage");
+      });
+      return createElement("p", null, "Browser content");
+    }
+
+    const result = await prerender(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(BrowserOnly, null),
+      ),
+      {
+        identifierPrefix: "test",
+        onBrowserBailout(error, info) {
+          bailouts.push({ error, stack: info.componentStack });
+        },
+        onError(error) {
+          errors.push(error);
+          return { message: "unexpected" };
+        },
+      },
+    );
+
+    expect(errors).toEqual([]);
+    expect(reasonCalls).toBe(1);
+    expect(bailouts).toHaveLength(1);
+    const bailout = bailouts[0];
+    if (bailout === undefined) throw new Error("Expected browser bailout.");
+    expect(bailout.error.message).toBe(
+      "The server left a Suspense boundary for browser rendering.",
+    );
+    expect((bailout.error as Error & { cause?: unknown }).cause).toEqual(
+      new Error("uses localStorage"),
+    );
+    expect(bailout.stack).toContain("at BrowserOnly");
+    expect(result.html).toBe(
+      '<!--fig:suspense:browser--><template id="test-b-0"></template><em>Loading</em><!--/fig:suspense-->',
+    );
+  });
+
+  it("rejects browser-only rendering outside Suspense", async () => {
+    function BrowserOnly(): FigNode {
+      readBrowser("uses localStorage");
+      return createElement("p", null, "Browser content");
+    }
+
+    await expect(prerender(createElement(BrowserOnly, null))).rejects.toEqual(
+      expect.objectContaining({
+        cause: "uses localStorage",
+        message:
+          "A component requires browser rendering, but it is not inside a Suspense boundary.",
+      }),
+    );
   });
 
   it("prerender resolves with static fallbacks when aborted after the shell", async () => {
@@ -2043,6 +2107,38 @@ describe("@bgub/fig-server", () => {
     expect(stacks[0]).toContain("at Broken");
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain('__figSSR.x("test-b-0","digest-1","Server failed")');
+  });
+
+  it("streams browser-only boundaries without reporting server errors", async () => {
+    const errors: unknown[] = [];
+
+    function BrowserOnly(): FigNode {
+      readBrowser("uses localStorage");
+      return createElement("p", null, "Browser content");
+    }
+
+    const result = renderToStream(
+      createElement(
+        Suspense,
+        { fallback: createElement("em", null, "Loading") },
+        createElement(BrowserOnly, null),
+      ),
+      {
+        identifierPrefix: "test",
+        onError(error) {
+          errors.push(error);
+          return { message: "unexpected" };
+        },
+      },
+    );
+
+    await result.allReady;
+    const html = await readStream(result.stream);
+
+    expect(errors).toEqual([]);
+    expect(html).toContain("<em>Loading</em>");
+    expect(html).toContain('__figSSR.x("test-b-0","","",1)');
+    expect(html).not.toContain("uses localStorage");
   });
 
   it("includes server Suspense error messages in development without onError", async () => {

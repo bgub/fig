@@ -12,7 +12,12 @@ import {
 } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { act } from "./act.ts";
-import { createRoot, flushSync, insertAssetResources } from "./index.ts";
+import {
+  createRoot,
+  flushSync,
+  insertAssetResources,
+  readBrowser,
+} from "./index.ts";
 import {
   deferred,
   waitForHostTurns,
@@ -23,6 +28,26 @@ import {
 installFakeDocument();
 
 describe("@bgub/fig-dom", () => {
+  it("renders browser-only components without evaluating lazy reasons", async () => {
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    let reasonCalls = 0;
+
+    function BrowserOnly(): FigNode {
+      readBrowser(() => {
+        reasonCalls += 1;
+        return "browser API";
+      });
+      return createElement("p", null, "Browser content");
+    }
+
+    root.render(createElement(BrowserOnly, null));
+    await waitForHostTurns();
+
+    expect(container.textContent).toBe("Browser content");
+    expect(reasonCalls).toBe(0);
+  });
+
   it("renders and updates host elements", async () => {
     const container = new FakeElement("root");
     const root = createRoot(container as unknown as Element);

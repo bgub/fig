@@ -13,7 +13,7 @@ For example, `useState` belongs to core because every renderer uses it. `createR
 The one mechanical exception is JSX. `@bgub/fig-dom/jsx-runtime` re-exports the core transform functions while adding the DOM-specific `JSX` namespace TypeScript needs.
 
 - `@bgub/fig` owns the component model: elements, JSX transforms, components, hooks, read verbs, transitions, mixin descriptors, client references, asset creators, and data resources.
-- `@bgub/fig-dom` owns the browser: roots, hydration, portals, `flushSync`, native events, binds, DOM asset insertion, Payload loading, Fast Refresh wiring, and DOM test utilities.
+- `@bgub/fig-dom` owns the browser: roots, hydration, portals, `flushSync`, browser-only rendering, native events, binds, DOM asset insertion, Payload loading, Fast Refresh wiring, and DOM test utilities.
 - `@bgub/fig-reconciler` owns renderer authoring: `createRenderer`, `HostConfig`, event priority, the scheduler, DevTools, refresh, and test subpaths.
 - `@bgub/fig-server` owns HTML server rendering and the server half of Payload. Its `./html` subpath exports the escaping helpers frameworks need when writing companion markup.
 - `@bgub/fig/payload` owns browser-safe Payload decoding. Browser code never imports `@bgub/fig-server` to decode.

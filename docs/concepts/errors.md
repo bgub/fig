@@ -17,6 +17,8 @@ An `ErrorBoundary` does not catch:
 - server-render errors, which use client-render markers; or
 - host commit failures.
 
+`readBrowser()` is also not an error. During HTML server rendering it leaves the nearest Suspense fallback for intentional browser rendering, reports only through the optional server `onBrowserBailout`, and does not reach `onRecoverableError` during hydration.
+
 ## Retrying Data Errors
 
 The normal recovery loop has no special side channel:

@@ -102,6 +102,8 @@ React's broad `use(resource)` becomes three explicit operations:
 - `readPromise(promise)` reads by promise identity.
 - `readData(resource, ...args)` reads by data-resource key.
 
+Fig DOM adds one host-specific read: `readBrowser(reason?)` marks the current component for browser-only rendering. During HTML server rendering it leaves the closest Suspense boundary in its fallback state; during browser rendering it returns normally. It lives in `@bgub/fig-dom` because the browser, not the component model, defines the behavior.
+
 They do not consume hook slots. Context reads still participate in bailout invalidation: if a provider value changes, Fig finds and schedules the consumers that would otherwise be skipped, stopping at nested providers of the same context.
 
 A promise used directly as a child is read implicitly because its child position already tells Fig where the result belongs. Use `readPromise` when a promise value affects props or branching instead.

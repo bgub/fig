@@ -39,6 +39,9 @@ export type StartTransition = (
 ) => void;
 type Callback = (...args: never[]) => unknown;
 
+/** Describes why a component requires browser rendering. */
+export type BrowserRenderReason = string | (() => unknown);
+
 /** Describes render dispatcher. */
 export interface RenderDispatcher {
   useState<S>(initialState: S | (() => S)): [S, StateSetter<S>];
@@ -74,6 +77,7 @@ export interface RenderDispatcher {
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): void;
+  readBrowser(reason?: BrowserRenderReason): void;
   readPromise<T>(promise: PromiseLike<T>): T;
 }
 
@@ -199,6 +203,13 @@ export function readContext<T>(context: FigContext<T>): T {
   return resolveDispatcher(
     "readContext can only be called while rendering a component.",
   ).readContext(context);
+}
+
+/** Marks the current component as requiring browser rendering. */
+export function readBrowser(reason?: BrowserRenderReason): void {
+  resolveDispatcher(
+    "readBrowser can only be called while rendering a component.",
+  ).readBrowser(reason);
 }
 
 /** Reads promise. */

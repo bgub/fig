@@ -62,6 +62,25 @@ The `data` handle belongs to this request. Passing `dataStore` adopts a store po
 
 Function components may return promises. The renderer invokes the component once, retains that promise as a child slot, and resumes the slot through normal streaming when it resolves.
 
+## Browser-Only Rendering
+
+`readBrowser(reason?)` from `@bgub/fig-dom` marks a component as requiring the browser. During HTML server rendering, Fig stops rendering that component, leaves the nearest Suspense fallback in the output, and marks the boundary for intentional browser rendering. Hydration replaces the fallback with the component without reporting `onRecoverableError`.
+
+```tsx
+function SavedDraft() {
+  readBrowser("The draft is stored in localStorage.");
+  return <Editor initialValue={localStorage.getItem("draft") ?? ""} />;
+}
+
+<Suspense fallback={<p>Loading draft…</p>}>
+  <SavedDraft />
+</Suspense>;
+```
+
+The optional reason is a string or a lazy `() => unknown`. Lazy reasons run only when the HTML server encounters the read, never in the browser. A browser-only read without an enclosing Suspense boundary is a fatal shell error.
+
+`onBrowserBailout(error, info)` reports each boundary left for the browser. The reason is available as `error.cause`, and `info.componentStack` identifies the read. Reporting is separate from `onError`: browser-only rendering is intentional, its reason is never serialized, and a throwing reporter is ignored.
+
 ## Prerender
 
 `prerender(node, { document? })` waits for every server task before it emits HTML. Completed Suspense content therefore appears in its logical position and no reveal runtime is needed.
@@ -70,6 +89,7 @@ It returns `{ html, head, data }` and is Fig's static-generation primitive.
 
 - The head is sealed only after content settles, so it describes the final visible tree.
 - A failed boundary writes the same client-render marker and fallback shape that streaming would produce.
+- A browser-only boundary writes its intentional browser marker and fallback.
 - Aborting after the shell produces static fallbacks. Aborting before the shell rejects.
 - A source that never settles will keep prerender pending, so callers should pass a signal.
 
