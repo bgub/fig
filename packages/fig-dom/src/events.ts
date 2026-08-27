@@ -558,7 +558,12 @@ function dispatchRootEvent(
       targetListenerTarget === null
         ? null
         : (containerRecords.get(targetListenerTarget) ?? null);
-    if (targetRecord?.portalOwner?.root === root) return;
+    if (
+      targetListenerTarget === root ||
+      targetRecord?.portalOwner?.root === root
+    ) {
+      return;
+    }
     if (!targetWithinRoot(listenerTarget, event.target)) return;
   }
   if (hydrateForEvent(root, type, event) === "blocked") return;
