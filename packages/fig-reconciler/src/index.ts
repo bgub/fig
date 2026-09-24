@@ -2477,14 +2477,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     return primary === null ? (node?.child ?? null) : primary.sibling;
   }
 
-  function cloneSuspendedPrimary(node: F | null, parent: F): F | null {
+  function cloneSuspendedPrimary(node: F | null, parent: F, root: R): F | null {
     let first: F | null = null;
     let previous: F | null = null;
 
     for (let current = node; current !== null; current = current.sibling) {
       const clone = createWorkInProgress(current, current.props);
       clone.return = parent;
-      clone.child = cloneSuspendedPrimary(current.child, clone);
+      clone.child = cloneSuspendedPrimary(current.child, clone, root);
+      // These owners did not render, but their hooks are becoming hidden.
+      // Publish that visibility before the commit's live-hook parity check.
+      if (clone.memoizedState !== null)
+        recordCommitWork(root.commitIndex, clone);
       clone.sibling = null;
       // The cloned primary is committed hidden while the boundary stays
       // suspended; it has no schedulable work. Any pending update inside it is
@@ -5185,7 +5189,11 @@ export function createRenderer<Container, Instance, TextInstance>(
         currentPrimary,
         "hidden",
       );
-      primary.child = cloneSuspendedPrimary(currentPrimary.child, primary);
+      primary.child = cloneSuspendedPrimary(
+        currentPrimary.child,
+        primary,
+        root,
+      );
       primary.flags |= VisibilityFlag;
       primary.memoizedProps = primary.props;
       // The hidden primary is committed but not begun/completed this pass, so
@@ -5882,7 +5890,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   // Bailed-out (cloned) fibers share their hook state objects with the last
   // rendered generation, so their instances already hold the published
-  // values; the queue therefore only carries rendered fibers. This walk
+  // values unless Suspense moves them under a hidden primary. Those preserved
+  // owners are indexed while cloning so visibility is published too. This walk
   // proves that assumption on every dev commit.
   function assertLiveHookInstanceParity(node: F | null): void {
     visitRenderedFiberHooks(node, (owner, hook) => {
