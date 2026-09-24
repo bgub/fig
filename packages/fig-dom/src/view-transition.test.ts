@@ -1517,91 +1517,199 @@ describe("ViewTransition", () => {
     }
   });
 
-  it("commits a ready sibling after an animation even while another transition is suspended", async () => {
+  it("coalesces separate ready queues while an animation waits", async () => {
     const container = document.createElement("div");
     document.body.append(container);
-    let setSlow: StateSetter<Promise<string> | null> = () => undefined;
-    let setFast: StateSetter<string> = () => undefined;
-    let resolveSlow: (value: string) => void = () => undefined;
-    const slow = new Promise<string>((resolve) => {
-      resolveSlow = resolve;
-    });
-    let finishAnimation: () => void = () => undefined;
-    const animation = new Promise<void>((resolve) => {
-      finishAnimation = () => resolve();
-    });
+    const renders: string[] = [];
     const commits: string[] = [];
+    let setLabel: StateSetter<string> | null = null;
+    let setOther: StateSetter<string> | null = null;
+    let setExtra: StateSetter<string> | null = null;
+    let releaseFirst: () => void = () => undefined;
+    const firstFinished = new Promise<void>((done) => {
+      releaseFirst = done;
+    });
     const ownerDocument = document as unknown as MockViewTransitionDocument & {
       __figViewTransition?: unknown;
     };
     const previousStart = ownerDocument.startViewTransition;
+
     ownerDocument.startViewTransition = (update) => {
+      const first = commits.length === 0;
       update();
       commits.push(container.textContent ?? "");
-      return {
-        ready: Promise.resolve(),
-        finished: commits.length === 1 ? animation : Promise.resolve(),
-      };
+      return first
+        ? { finished: firstFinished, ready: Promise.resolve() }
+        : { finished: Promise.resolve(), ready: Promise.resolve() };
     };
-    function Slow() {
-      const [value, set] = useState<Promise<string> | null>(null);
-      setSlow = set;
+
+    function App() {
+      const [label, set] = useState("A");
+      setLabel = set;
+      const [other, updateOther] = useState("");
+      setOther = updateOther;
+      const [extra, updateExtra] = useState("");
+      setExtra = updateExtra;
+      renders.push(label + other + extra);
       return createElement(
-        Suspense,
-        { fallback: "loading" },
-        createElement(Message, { value }),
+        ViewTransition,
+        { name: "card" },
+        createElement("section", null, label + other + extra),
       );
     }
-    function Message({ value }: { value: Promise<string> | null }) {
-      return createElement(
-        "p",
-        null,
-        value === null ? "old" : readPromise(value),
-      );
-    }
-    function Fast() {
-      const [value, set] = useState("A");
-      setFast = set;
-      return createElement("p", null, value);
-    }
+
     try {
       const root = createRoot(container);
-      await act(() =>
-        root.render(
-          createElement(
-            ViewTransition,
-            { name: "panel" },
-            createElement(Slow, null),
-            createElement(Fast, null),
-          ),
-        ),
-      );
-      await act(() => transition(() => setFast("B")));
-      expect(commits).toEqual(["oldB"]);
-      await act(() => transition(() => setSlow(slow)));
-      await act(() => transition(() => setFast("C")));
-      // C is ready, but the browser animation still owns the commit window.
-      expect(container.textContent).toBe("oldB");
-      finishAnimation();
-      await act(async () => {
-        await animation;
+      await act(() => root.render(createElement(App, null)));
+      await act(() => transition(() => setLabel?.("B")));
+
+      expect(commits).toEqual(["B"]);
+
+      // C parks first; D and E arrive on separate queues in the same turn.
+      // All three must render before the current animation releases commit.
+      await act(() => transition(() => setLabel?.("C")));
+      await act(() => {
+        transition(() => setOther?.("D"));
+        transition(() => setExtra?.("E"));
       });
-      expect(container.textContent).toBe("oldC");
-      expect(commits).toEqual(["oldB", "oldC"]);
-      resolveSlow("new");
+
+      expect(renders).toContain("C");
+      expect(renders).toContain("CDE");
+      expect(container.textContent).toBe("B");
+      expect(commits).toEqual(["B"]);
+
+      // The next animation goes directly to the combined ready state.
+      releaseFirst();
       await act(async () => {
-        await slow;
+        await firstFinished;
       });
-      expect(container.textContent).toBe("newC");
+
+      expect(commits).toEqual(["B", "CDE"]);
+      expect(container.textContent).toBe("CDE");
       root.unmount();
     } finally {
-      finishAnimation();
-      resolveSlow("new");
+      releaseFirst();
       ownerDocument.startViewTransition = previousStart;
       ownerDocument.__figViewTransition = null;
       container.remove();
     }
   });
+
+  it.each([
+    { boundary: true, sharedQueue: false },
+    { boundary: false, sharedQueue: false },
+    { boundary: true, sharedQueue: true },
+  ])(
+    "preserves only independent parked work when a candidate suspends ($boundary, $sharedQueue)",
+    async ({ boundary, sharedQueue }) => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      let setSlow: StateSetter<Promise<string> | null> = () => undefined;
+      let setFast: StateSetter<string | Promise<string>> = () => undefined;
+      let setOther: StateSetter<string> = () => undefined;
+      let resolveSlow: (value: string) => void = () => undefined;
+      const slow = new Promise<string>((resolve) => {
+        resolveSlow = resolve;
+      });
+      let finishAnimation: () => void = () => undefined;
+      const animation = new Promise<void>((resolve) => {
+        finishAnimation = () => resolve();
+      });
+      const commits: string[] = [];
+      const ownerDocument =
+        document as unknown as MockViewTransitionDocument & {
+          __figViewTransition?: unknown;
+        };
+      const previousStart = ownerDocument.startViewTransition;
+      ownerDocument.startViewTransition = (update) => {
+        update();
+        commits.push(container.textContent ?? "");
+        return {
+          ready: Promise.resolve(),
+          finished: commits.length === 1 ? animation : Promise.resolve(),
+        };
+      };
+      function Slow() {
+        const [value, set] = useState<Promise<string> | null>(null);
+        setSlow = set;
+        const message = createElement(Message, { value });
+        return boundary
+          ? createElement(Suspense, { fallback: "loading" }, message)
+          : message;
+      }
+      function Message({ value }: { value: Promise<string> | null }) {
+        return createElement(
+          "p",
+          null,
+          value === null ? "old" : readPromise(value),
+        );
+      }
+      function Fast() {
+        const [value, set] = useState<string | Promise<string>>("A");
+        setFast = set;
+        const [other, updateOther] = useState("");
+        setOther = updateOther;
+        return createElement(
+          Suspense,
+          { fallback: "loading" },
+          createElement(FastMessage, { value, other }),
+        );
+      }
+      function FastMessage({
+        value,
+        other,
+      }: {
+        value: string | Promise<string>;
+        other: string;
+      }) {
+        return createElement(
+          "p",
+          null,
+          (typeof value === "string" ? value : readPromise(value)) + other,
+        );
+      }
+      try {
+        const root = createRoot(container);
+        await act(() =>
+          root.render(
+            createElement(
+              ViewTransition,
+              { name: "panel" },
+              createElement(Slow, null),
+              createElement(Fast, null),
+            ),
+          ),
+        );
+        await act(() => transition(() => setFast("B")));
+        expect(commits).toEqual(["oldB"]);
+        await act(() => transition(() => setFast("C")));
+        await act(() => {
+          transition(() => (sharedQueue ? setFast(slow) : setSlow(slow)));
+          transition(() => setOther("D"));
+        });
+        // C is ready, but the browser animation still owns the commit window.
+        expect(container.textContent).toBe("oldB");
+        finishAnimation();
+        await act(async () => {
+          await animation;
+        });
+        expect(container.textContent).toBe(sharedQueue ? "oldBD" : "oldCD");
+        expect(commits).toEqual(["oldB", sharedQueue ? "oldBD" : "oldCD"]);
+        resolveSlow("new");
+        await act(async () => {
+          await slow;
+        });
+        expect(container.textContent).toBe(sharedQueue ? "oldnewD" : "newCD");
+        root.unmount();
+      } finally {
+        finishAnimation();
+        resolveSlow("new");
+        ownerDocument.startViewTransition = previousStart;
+        ownerDocument.__figViewTransition = null;
+        container.remove();
+      }
+    },
+  );
 
   it("commits after 60 seconds when an animation never finishes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

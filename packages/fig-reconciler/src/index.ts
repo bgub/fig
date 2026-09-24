@@ -147,6 +147,7 @@ import {
   DefaultHydrationLane,
   DefaultLane,
   DeferredLane,
+  getEntangledLanes,
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
@@ -774,6 +775,9 @@ interface FiberRoot<Container, Instance, TextInstance>
   // newer work supersedes the parked tree so the latest state commits when
   // the animation ends.
   parkedCoordinatedCommit: boolean;
+  // Independently ready lanes included in a speculative extension of a parked
+  // render. A newly added transition suspending must not strand these lanes.
+  coalescedReadyLanes: Lanes;
   dataStore: FigDataStore;
   contextValues: Map<FigContext<unknown>, unknown>;
   contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
@@ -1075,6 +1079,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       renderLanes: NoLanes,
       pendingCoordinatedCommit: false,
       parkedCoordinatedCommit: false,
+      coalescedReadyLanes: NoLanes,
       dataStore,
       contextValues: new Map(),
       contextStack: [],
@@ -1354,6 +1359,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       performRootWork(root, forceSync);
     } catch (error) {
       if (error === PreservedSuspense) {
+        root.suspendedLanes &= ~root.coalescedReadyLanes;
         restartRootWork(root);
         scheduleRoot(root);
         return;
@@ -1366,8 +1372,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (isThenable(error)) {
         const suspendedLanes = root.renderLanes;
+        const readyLanes = root.coalescedReadyLanes;
         restartRootWork(root);
-        markRootSuspended(root, suspendedLanes);
+        markRootSuspended(root, suspendedLanes & ~readyLanes);
         attachPing(root, error, suspendedLanes);
         scheduleRoot(root);
         return;
@@ -1476,33 +1483,37 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     flushPendingReactiveEffects(root);
 
+    let nextLanes: Lanes;
     if (root.parkedCoordinatedCommit) {
       root.parkedCoordinatedCommit = false;
-      // The parked tree's lanes were never marked finished, so they are
-      // still inside pendingLanes; anything beyond them is newer work.
-      const supersededByNewerWork =
-        (root.pendingLanes & ~root.renderLanes) !== NoLanes;
-      if (
-        !supersededByNewerWork &&
-        root.wip === null &&
-        root.finishedWork !== null
-      ) {
-        // Nothing changed while the animation ran: commit the parked tree
-        // as-is (commitRoot re-parks it if yet another transition started
-        // in between, e.g. a streaming reveal).
+      const readyLanes = root.renderLanes;
+      // The parked lanes have already rendered. Look beyond them for new work
+      // instead of repeatedly selecting the same ready tree until commit.
+      const candidate = getNextLanes(root, NoLanes, readyLanes);
+      if (candidate === NoLanes && root.finishedWork !== null) {
         if (commitRoot(root, root.finishedWork)) return;
         finishRootWork(root);
         flushPostCommitSyncWork();
         return;
       }
-      // Newer work supersedes the parked commit — React cancels its
-      // suspended commit the same way. restartRootWork restores the update
-      // queues the parked render consumed, and the fresh render below
-      // absorbs the parked lanes, so the latest state commits instead.
       restartRootWork(root);
+      nextLanes = candidate;
+      if (
+        candidate !== NoLanes &&
+        includesOnlyTransitions(readyLanes) &&
+        includesOnlyTransitions(candidate)
+      ) {
+        // Extend one lane/dependency group at a time. If it suspends, retry the
+        // previously ready work independently; shared-queue dependencies must
+        // still suspend together. Successful extensions become the next ready
+        // tree and can absorb another candidate before the animation finishes.
+        root.coalescedReadyLanes =
+          readyLanes & ~getEntangledLanes(root, candidate);
+        nextLanes |= readyLanes;
+      }
+    } else {
+      nextLanes = getNextLanes(root, root.renderLanes);
     }
-
-    const nextLanes = getNextLanes(root, root.renderLanes);
     if (nextLanes === NoLanes && root.wip === null) {
       root.callback = null;
       root.callbackPriority = NoLane;
@@ -1571,6 +1582,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
+    root.coalescedReadyLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
     // Retries recorded by the discarded render die with it; their thenables
@@ -4027,10 +4039,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function parkCoordinatedCommit(root: R): void {
     root.parkedCoordinatedCommit = true;
+    root.coalescedReadyLanes = NoLanes;
     // The scheduler callback that carried this attempt is spent; clear it so
     // the coordinator's resume callback (or a newer update) is not deduped.
     root.callback = null;
     root.callbackPriority = NoLane;
+    if (getNextLanes(root, NoLanes, root.renderLanes) !== NoLanes) {
+      scheduleRoot(root);
+    }
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {

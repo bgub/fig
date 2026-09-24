@@ -149,8 +149,12 @@ export function getHighestPriorityLanes(lanes: Lanes): Lanes {
   return lane;
 }
 
-export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
-  const pending = root.pendingLanes;
+export function getNextLanes(
+  root: LaneRoot,
+  wipLanes: Lanes = NoLanes,
+  excludedLanes: Lanes = NoLanes,
+): Lanes {
+  const pending = root.pendingLanes & ~excludedLanes;
   if (pending === NoLanes) return NoLanes;
 
   const unblocked = pending & ~root.suspendedLanes;

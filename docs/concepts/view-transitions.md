@@ -145,7 +145,7 @@ Only commit waits. Rendering continues normally:
 
 1. An eligible tree finishes while another transition is active.
 2. Fig parks it before any commit phase or effect runs.
-3. A newer render may replace that parked tree. Transitions updating the same state queue remain entangled, so a later selection absorbs the earlier parked selection and the next animation uses the latest state. Unrelated suspended transitions do not join that group merely because they share a root.
+3. Fig tries adding newer transition work to that parked tree one dependency group at a time. Separate ready queues coalesce into the next animation. If an added group suspends, previously ready independent lanes remain eligible and other ready groups can still join them. Transitions updating the same state queue remain entangled, so their readiness cannot be separated; a later selection supersedes the earlier parked selection.
 4. When the animation finishes, the latest state commits and starts the next transition.
 
 Urgent sync and default-lane commits never park. Unannotated server reveals do not park either. A 60-second safeguard releases a commit or reveal if the prior browser transition never settles.
