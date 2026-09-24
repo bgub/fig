@@ -81,6 +81,32 @@ describe("TanStack Start Payload compiler", () => {
     ).resolves.toEqual([]);
   });
 
+  it("compiles an imported context as an Isomorphic client reference", async () => {
+    const code = `
+      import { Isomorphic } from "@bgub/fig-tanstack-start/payload";
+      import { Theme } from "./theme.ts";
+      export function Page() {
+        return <Isomorphic component={Theme} value="dark" />;
+      }
+    `;
+    const boundaries = await analyzeIsomorphicBoundaries(code, "/app/page.tsx");
+    expect(boundaries).toEqual([
+      { importedName: "Theme", localName: "Theme", source: "./theme.ts" },
+    ]);
+    const output = await transformPayloadModule(
+      code,
+      "/app/page.tsx?fig-payload-module=1",
+      boundaries.map((boundary) => ({
+        ...boundary,
+        referenceId: "theme#Theme",
+      })),
+    );
+    expect(output?.code).toContain(
+      'component={_createIsomorphicReference("theme#Theme")}',
+    );
+    expect(output?.code).toContain('value="dark"');
+  });
+
   it("compiles only explicit Isomorphic component props into references", async () => {
     const code = `
       import { Isomorphic as Hydrate } from "@bgub/fig-tanstack-start/payload";

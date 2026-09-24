@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import {
   clientReference,
+  createContext,
+  readContext,
   createDataStore,
   type DataResourceKey,
   isValidElement,
@@ -8,12 +10,19 @@ import {
 } from "@bgub/fig";
 import {
   createPayloadComponent,
+  createRoot,
+  flushSync,
   type PayloadComponentLoader,
 } from "@bgub/fig-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import { payloadTransportMarkerId } from "./document-markers.ts";
 import { injectPayloadDocument } from "./payload-internal.ts";
-import { Isomorphic, serverPayload } from "./payload.ts";
+import {
+  decodePayloadStream,
+  createPayloadClientReferenceResolver,
+} from "@bgub/fig/payload";
+import { renderToPayloadStream } from "@bgub/fig-server/payload";
+import { Isomorphic, serverPayload, type IsomorphicProps } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
 
@@ -32,6 +41,58 @@ describe("TanStack Start payload resources", () => {
     expect(node.type).toBe(Counter);
     expect(node.props).toEqual({ initial: 3 });
   });
+
+  for (const asynchronous of [false, true]) {
+    it(`preserves Isomorphic context providers through ${asynchronous ? "async" : "sync"} client resolution`, async () => {
+      const Theme = createContext("light");
+      expectTypeOf<
+        IsomorphicProps<typeof Theme>["value"]
+      >().toEqualTypeOf<string>();
+      function Label() {
+        return <span>{readContext(Theme)}</span>;
+      }
+      const ThemeRef = clientReference<{ value: string; children?: FigNode }>({
+        id: "theme#Theme",
+      });
+      const LabelRef = clientReference({ id: "theme#Label" });
+      // The compiler replaces the imported Theme and Label with these references.
+      const result = renderToPayloadStream(
+        <Theme value="server-only">
+          <Isomorphic component={LabelRef} />
+          <Isomorphic component={ThemeRef} value="dark">
+            <Isomorphic component={LabelRef} />
+            <Isomorphic component={ThemeRef} value="nested">
+              <Isomorphic component={LabelRef} />
+            </Isomorphic>
+            <Isomorphic component={LabelRef} />
+          </Isomorphic>
+          <Isomorphic component={LabelRef} />
+        </Theme>,
+      );
+      const resolver = createPayloadClientReferenceResolver((reference) => {
+        const component = reference.id === "theme#Theme" ? Theme : Label;
+        return asynchronous ? Promise.resolve(component) : component;
+      });
+      const decoded = await decodePayloadStream(result.stream, {
+        resolveClientReference: resolver,
+      });
+      const container = document.createElement("div");
+      const root = createRoot(container);
+      try {
+        flushSync(() => root.render(decoded));
+        await expect
+          .poll(() =>
+            Array.from(
+              container.querySelectorAll("span"),
+              (span) => span.textContent,
+            ),
+          )
+          .toEqual(["light", "dark", "nested", "dark", "light"]);
+      } finally {
+        root.unmount();
+      }
+    });
+  }
 
   it("rejects an Isomorphic boundary missed by the compiler", () => {
     function Counter(): FigNode {

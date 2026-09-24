@@ -99,7 +99,7 @@ Allowed operations include:
 
 State, effects, transitions, actions, and stable events throw in development. Otherwise they would silently freeze server state into the wire. `bind` and component-level function-bearing `mix` props fail serialization. Host mixins resolve before serialization, so safe results such as ARIA props remain while client-only `on()` behavior throws.
 
-Context is consumed during server rendering and is not serialized. A client-reference island reads client context from the location where the decoded tree is mounted. To pass server context into an island, use props or a client provider component.
+An ordinary context provider in a Payload render is consumed on the server and is not serialized. A client-reference island reads client context from the location where the decoded tree is mounted. To provide a value to client descendants, pass props or render the context itself as a client reference, as shown below.
 
 ## Client References
 
@@ -110,6 +110,41 @@ Ids are opaque. Fig tooling commonly authors `"<module>#<export>"`, but the serv
 `resolveClientReference(reference)` receives the full decoded object and returns a component, a promise for one, or `undefined`. Resolution starts as soon as the row arrives, overlapping module loading with the rest of the stream. An SSR-capable reference may render through a registered server implementation during server-side decoding.
 
 TanStack Start applications normally combine `createPayloadComponent`, `serverPayload`, and `<Isomorphic component={Counter} />`. Its compiler creates references, manifests, resolvers, and CSS metadata. A `.payload.tsx` filename is only a convention; the `serverPayload` callback defines the Payload boundary.
+
+### Context providers through Isomorphic
+
+`Isomorphic` accepts an imported Fig context directly. A wrapper provider component is unnecessary:
+
+```tsx
+// theme.tsx
+import { createContext, readContext } from "@bgub/fig";
+
+export const Theme = createContext("light");
+
+export function ThemeLabel() {
+  return <span>Theme: {readContext(Theme)}</span>;
+}
+```
+
+```tsx
+// page.payload.tsx
+import { createPayloadComponent } from "@bgub/fig-dom";
+import { Isomorphic, serverPayload } from "@bgub/fig-tanstack-start/payload";
+import { Theme, ThemeLabel } from "./theme.tsx";
+
+export const Page = createPayloadComponent({
+  key: ["theme-page"],
+  load: serverPayload(() => (
+    <Isomorphic component={Theme} value="dark">
+      <Isomorphic component={ThemeLabel} />
+    </Isomorphic>
+  )),
+});
+```
+
+The compiler emits a client reference to the imported `Theme` export. Payload transports that reference, its serializable `value`, and its children. The decoder resolves the original context and creates its provider, so `ThemeLabel` renders “Theme: dark.” Nested providers override the value for their descendants and restore the outer value for siblings.
+
+This boundary is explicit. Replacing `<Isomorphic component={Theme} value="dark">` with ordinary `<Theme value="dark">` scopes server context reads only; it does not transport the provider to client descendants. Similarly, an Isomorphic provider does not establish server context for Payload components evaluated inside its children.
 
 ## Server API
 
