@@ -98,3 +98,9 @@ No scheduler package or `unstable_` API is published.
 `@bgub/fig-reconciler/devtools` emits commit snapshots. `@bgub/fig-reconciler/refresh` swaps Fast Refresh component families while preserving state, or remounts when a hook signature changes.
 
 `@bgub/fig-reconciler/test-utils` exports `act`. It shares the same scheduler instance as the renderer, so tests flush work scheduled through either entry.
+
+## Fragment Bind Capability
+
+A renderer can supply `commitFragment(owner, instances, bind, hidden)` and `removeFragment(owner)` together. The reconciler validates support before committing a bound Fragment, assigns a stable opaque owner across fiber generations, and publishes first-level host instances after mutations and before layout effects. Membership excludes text, portals, hidden branches, and hoisted assets. Even empty groups receive commits. Deletion releases the owner, including root error cleanup.
+
+The host owns the handle, bind signal, subscriptions, and development lifetime checks. Bound fragments carry a static subtree flag so commits skip branches without group bindings. Renderers without this capability continue to support ordinary fragments and reject fragment binds.

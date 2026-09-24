@@ -19,6 +19,7 @@ import {
   updateHoistedResource,
 } from "./asset-resources.ts";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
+import { commitFragment, removeFragment } from "./fragment.ts";
 import { resumeBind, suspendBind } from "./bind.ts";
 import {
   type Container,
@@ -64,6 +65,8 @@ function isDocumentContainer(container: Container): container is Document {
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: createDomElement,
+  commitFragment,
+  removeFragment,
   createTextInstance: (text) => document.createTextNode(text),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must

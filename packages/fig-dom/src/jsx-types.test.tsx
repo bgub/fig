@@ -1,3 +1,4 @@
+import { Fragment } from "@bgub/fig";
 import { createMixin, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
 import { type Bind, on } from "./index.ts";
@@ -152,3 +153,27 @@ describe("@bgub/fig-dom JSX types", () => {
     expect(typeof typeChecks).toBe("function");
   });
 });
+
+// Fragment handles are specialized by the DOM JSX runtime, without DOM types in core.
+const fragmentWithBind = (
+  <Fragment
+    bind={(group, signal) => {
+      group.focus();
+      group.focusLast();
+      group.getClientRects();
+      signal.throwIfAborted();
+    }}
+  >
+    <input />
+  </Fragment>
+);
+void fragmentWithBind;
+const invalidFragmentBind = (
+  <Fragment
+    // @ts-expect-error Fragment handles are not host elements.
+    bind={(element: HTMLDivElement) => {
+      element.focus();
+    }}
+  />
+);
+void invalidFragmentBind;

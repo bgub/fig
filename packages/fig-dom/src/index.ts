@@ -20,6 +20,7 @@ import { type Container, registerRoot, unregisterRoot } from "./events.ts";
 import { domRenderer } from "./renderer.ts";
 
 export { insertAssetResources } from "./asset-resources.ts";
+export type { FragmentInstance } from "./fragment.ts";
 export type { Bind } from "./bind.ts";
 export { composeBind };
 export { type EventCallback, type EventOptions, on };

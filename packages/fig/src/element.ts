@@ -179,8 +179,24 @@ export interface FigAssets {
   readonly $$typeof: symbol;
 }
 
-/** The fragment. */
-export const Fragment = Symbol.for("fig.fragment");
+/** Renderer-neutral Fragment props. Renderer JSX types specialize the handle. */
+export interface FragmentProps {
+  children?: FigNode;
+  bind?(instance: unknown, signal: AbortSignal): undefined;
+}
+
+const FigFragmentSymbol = Symbol.for("fig.fragment");
+
+/** A wrapper-free group recognized by renderers, not executed as a component. */
+export interface FigFragment {
+  (props: FragmentProps): FigNode;
+  readonly $$typeof: typeof FigFragmentSymbol;
+}
+
+export const Fragment: FigFragment = Object.assign(
+  (props: FragmentProps) => props.children,
+  { $$typeof: FigFragmentSymbol } as const,
+);
 /** The Fig element symbol. */
 export const FigElementSymbol = Symbol.for("fig.element");
 /** The Fig client reference symbol. */
