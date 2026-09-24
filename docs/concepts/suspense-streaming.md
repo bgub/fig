@@ -22,7 +22,7 @@ If the content finishes before its parent flushes, Fig writes it inline and need
 <!--fig:suspense:completed-->...content...<!--/fig:suspense-->
 ```
 
-Prerendered boundaries always use this completed-inline form unless they fail.
+Prerendered boundaries use this completed-inline form unless they fail or are left intentionally for browser rendering. Those cases use `fig:suspense:client` and `fig:suspense:browser` respectively, followed by the fallback.
 
 ## Staged Segments
 
@@ -32,7 +32,7 @@ The operations are:
 
 - `c(boundaryId, segmentId, metadata?)` completes a boundary. It replaces the fallback, marks the boundary completed, and applies an optional title/meta snapshot in the same operation.
 - `s(placeholderId, segmentId)` fills a partial segment inside content that is still streaming.
-- `x(boundaryId, digest, message)` marks a boundary for client rendering and wakes its hydration retry.
+- `x(boundaryId, digest, message, browser?)` marks a boundary for client rendering and wakes its hydration retry. The browser flag records an intentional browser-only render instead of a recoverable server error.
 - `r(ids, fn)` waits for blocking stylesheets before revealing content.
 - `ac` and `ax` are the matching completion and error operations for content inside a hidden Activity template.
 
@@ -48,4 +48,4 @@ Streaming reveals share the document's `__figViewTransition` mutex with client c
 
 Fig DOM parses the comments into `DehydratedSuspenseBoundary` objects and exposes them through the reconciler's hydration hooks. A boundary may remain dehydrated until background work or user interaction asks for it. Retries use the boundary's `__figRetry` hook.
 
-Server errors recover through the `x` client-render marker. There is no second hidden error channel in the document.
+Server errors recover through the `x` client-render marker. Browser-only boundaries use the same retry path with a distinct marker so hydration does not report a recoverable error. Reasons remain server-only and never enter the document.

@@ -8,6 +8,8 @@
 export const SUSPENSE_MARKER_PREFIX = "fig:suspense:";
 /** The suspense completed marker. */
 export const SUSPENSE_COMPLETED_MARKER = "fig:suspense:completed";
+/** The suspense browser-rendered marker. */
+export const SUSPENSE_BROWSER_MARKER = "fig:suspense:browser";
 /** The suspense client marker. */
 export const SUSPENSE_CLIENT_MARKER = "fig:suspense:client";
 /** The suspense pending prefix. */

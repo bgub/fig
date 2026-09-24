@@ -40,6 +40,7 @@ import {
   type PayloadDecodeCompletion,
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
+import { readBrowser } from "@bgub/fig-dom";
 import { describe, expect, it } from "vitest";
 import * as payloadApi from "./payload.ts";
 import { renderToPayloadStream } from "./payload.ts";
@@ -179,6 +180,7 @@ function withTestDispatcher<T>(run: () => T): T {
     contextValues: new Map(),
     externalStoreError: "no external store",
     preloadData: () => undefined,
+    readBrowser: () => undefined,
     readData: () => {
       throw new Error("no data store");
     },
@@ -319,6 +321,26 @@ describe("payload rendering", () => {
           message:
             "Client-only host behavior from test() cannot be serialized in " +
             "a payload; move it into a client reference.",
+        },
+      },
+    ]);
+  });
+
+  it("rejects browser-only reads in serialized components", async () => {
+    function BrowserOnly(): FigNode {
+      readBrowser("uses localStorage");
+      return createElement("p", null, "Browser content");
+    }
+
+    await expect(
+      renderToPayloadRows(createElement(BrowserOnly, null)),
+    ).resolves.toEqual([
+      {
+        id: 0,
+        tag: "error",
+        value: {
+          message:
+            "readBrowser cannot be used during payload render: serialized components do not run in the browser. Move browser-only behavior into a client reference.",
         },
       },
     ]);

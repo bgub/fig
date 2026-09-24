@@ -395,6 +395,11 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     contextValues: frame.contextValues,
     externalStoreError:
       "useSyncExternalStore requires getServerSnapshot during payload render.",
+    readBrowser() {
+      throw new Error(
+        "readBrowser cannot be used during payload render: serialized components do not run in the browser. Move browser-only behavior into a client reference.",
+      );
+    },
     readPromise: readThenable,
     readData(resource, args) {
       return frame.request.dataStore.readData(resource, args, frame);

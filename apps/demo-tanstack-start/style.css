@@ -119,6 +119,56 @@
   }
 }
 
+.fig-devtools-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.fig-devtools-pane {
+  position: sticky;
+  z-index: 2147483647;
+  top: 0;
+  width: min(420px, 34vw);
+  min-width: 360px;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--fig-tanstack-border);
+  background: var(--fig-tanstack-card);
+}
+
+.fig-devtools-pane:has(.fig-devtools.is-closed) {
+  width: 0;
+  min-width: 0;
+  overflow: visible;
+  border-left: 0;
+}
+
+@media (max-width: 780px) {
+  .fig-devtools-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .fig-devtools-pane,
+  .fig-devtools-pane:has(.fig-devtools.is-closed) {
+    position: static;
+    width: 0;
+    min-width: 0;
+    height: 0;
+    overflow: visible;
+    border-top: 0;
+    border-left: 0;
+  }
+
+  .fig-devtools-pane:not(:has(.fig-devtools.is-closed)) {
+    width: auto;
+    height: min(620px, 70vh);
+    overflow: hidden;
+    border-top: 1px solid var(--fig-tanstack-border);
+  }
+}
+
 @layer utilities {
   .fig-tanstack-shell {
     background: var(--fig-tanstack-bg);

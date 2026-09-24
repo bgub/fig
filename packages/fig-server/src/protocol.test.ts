@@ -19,13 +19,19 @@ interface TestRuntime {
     boundaryId: string,
     digest: string,
     message: string,
+    browser?: boolean,
   ): void;
   c(
     boundaryId: string,
     segmentId: string,
     metadata?: MetadataSnapshotEntry[],
   ): void;
-  x(boundaryId: string, digest: string, message: string): void;
+  x(
+    boundaryId: string,
+    digest: string,
+    message: string,
+    browser?: boolean,
+  ): void;
 }
 
 type RetriableComment = Comment & { __figRetry?: () => void };
@@ -225,6 +231,19 @@ describe("server streaming protocol", () => {
     expect(start.data).toBe("fig:suspense:client");
     expect(boundaryPlaceholder.dataset.dgst).toBe("digest-1");
     expect(boundaryPlaceholder.dataset.msg).toBe("Server failed");
+    expect(calls).toEqual(["retry"]);
+  });
+
+  it("marks intentional browser-rendered boundaries without error metadata", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, start } = createPendingBoundary(root);
+
+    installRuntime().x("b", "", "", true);
+
+    expect(start.data).toBe("fig:suspense:browser");
+    expect(boundaryPlaceholder.dataset.dgst).toBeUndefined();
+    expect(boundaryPlaceholder.dataset.msg).toBeUndefined();
     expect(calls).toEqual(["retry"]);
   });
 

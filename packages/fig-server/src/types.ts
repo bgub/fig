@@ -31,6 +31,8 @@ export interface ServerRenderOptions {
     error: unknown,
     info: ServerErrorInfo,
   ) => ServerErrorPayload | undefined;
+  /** Reports an intentional browser-only Suspense fallback. */
+  onBrowserBailout?: (error: Error, info: ServerErrorInfo) => void;
   clientReferenceFallback?: (
     reference: FigClientReference,
     props: Props,

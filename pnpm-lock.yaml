@@ -272,18 +272,9 @@ importers:
       '@bgub/fig-ui':
         specifier: workspace:*
         version: link:../../packages/fig-ui
-      '@tanstack/devtools':
-        specifier: 'catalog:'
-        version: 0.14.0(csstype@3.2.3)
-      '@tanstack/history':
-        specifier: 'catalog:'
-        version: 1.162.1
       '@tanstack/router-core':
         specifier: 'catalog:'
         version: 1.171.21
-      '@tanstack/store':
-        specifier: 'catalog:'
-        version: 0.11.1
     devDependencies:
       '@playwright/test':
         specifier: 'catalog:'

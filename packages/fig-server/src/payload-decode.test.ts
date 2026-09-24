@@ -56,6 +56,7 @@ function withTestDispatcher<T>(run: () => T): T {
     contextValues: new Map(),
     externalStoreError: "no external store",
     preloadData: () => undefined,
+    readBrowser: () => undefined,
     readData: () => {
       throw new Error("no data store");
     },

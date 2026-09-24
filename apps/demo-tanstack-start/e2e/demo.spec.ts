@@ -22,21 +22,30 @@ test("hydrates the themed document and persists shell changes", async ({
     "dark",
   );
   await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
+  const devtools = page.locator("[data-fig-devtools]");
+  await expect(devtools).toHaveAttribute("data-theme", "dark");
 
   await page.getByRole("button", { name: "Light" }).click();
   await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
+  await expect(devtools).toHaveAttribute("data-theme", "light");
   await page.reload({ waitUntil: "commit" });
   await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("button", { name: "System" }).click();
+  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
+  await expect(devtools).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(devtools).toHaveAttribute("data-theme", "light");
   expect(errors()).toEqual([]);
 });
 
-test("includes the Fig DevTools overlay", async ({ page }) => {
+test("includes the standalone Fig DevTools sidebar", async ({ page }) => {
   const errors = collectBrowserErrors(page);
   await page.goto("/", { waitUntil: "commit" });
   await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
 
-  await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
-  const devtools = page.locator("[data-fig-devtools]");
+  const devtools = page.locator("#fig-devtools-pane [data-fig-devtools]");
   await expect(devtools).toBeVisible();
   await expect(
     devtools.getByText("Fig DevTools", { exact: true }),
@@ -47,6 +56,38 @@ test("includes the Fig DevTools overlay", async ({ page }) => {
   await expect(
     devtools.locator(".fig-devtools__tree-button").first(),
   ).toBeVisible();
+
+  await devtools.locator(".fig-devtools__tree-button").first().hover();
+  const inspectionOverlay = page.locator(".fig-devtools__inspect-overlay");
+  await expect(inspectionOverlay).toBeVisible();
+  const overlayZIndex = await inspectionOverlay.evaluate((element) =>
+    Number(getComputedStyle(element).zIndex),
+  );
+  const paneZIndex = await page
+    .locator("#fig-devtools-pane")
+    .evaluate((element) => Number(getComputedStyle(element).zIndex));
+  expect(paneZIndex).toBeGreaterThan(overlayZIndex);
+
+  const disclosure = devtools.locator(".fig-devtools__tree-toggle").nth(2);
+  const label = disclosure.locator("xpath=following-sibling::button");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await label.hover();
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+
+  const treePane = devtools.locator(".fig-devtools__tree-pane");
+  await treePane.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+    element.scrollTop = 1;
+    element.dispatchEvent(new Event("scroll"));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect
+    .poll(() => treePane.evaluate((element) => element.scrollLeft))
+    .toBe(0);
   expect(errors()).toEqual([]);
 });
 
