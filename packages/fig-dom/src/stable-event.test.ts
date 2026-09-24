@@ -25,6 +25,7 @@ describe("@bgub/fig-dom stable events", () => {
     const signals: AbortSignal[] = [];
     const handlers: Array<() => void> = [];
     const errors: unknown[] = [];
+    const fallbackBeforeLayoutAborted: boolean[] = [];
 
     function Actions() {
       const fire = useStableEvent((signal: AbortSignal) => {
@@ -40,11 +41,19 @@ describe("@bgub/fig-dom stable events", () => {
       if (loading) readPromise(pending.promise);
       return actions;
     }
+    function Fallback() {
+      useBeforeLayout(() => {
+        handlers.at(-1)!();
+        // Snapshot now: host mutations will abort the signal later anyway.
+        fallbackBeforeLayoutAborted.push(signals.at(-1)!.aborted);
+      }, []);
+      return createElement("p", null, "Loading");
+    }
     function App({ loading }: { loading: boolean }) {
       return createElement(
         Suspense,
         {
-          fallback: createElement("p", null, "Loading"),
+          fallback: createElement(Fallback, null),
         },
         createElement(Body, { loading }),
       );
@@ -65,6 +74,8 @@ describe("@bgub/fig-dom stable events", () => {
 
       flushSync(() => root.render(createElement(App, { loading: true })));
       expect(errors).toEqual([]);
+      expect(fallbackBeforeLayoutAborted.length).toBeGreaterThan(0);
+      expect(fallbackBeforeLayoutAborted.every(Boolean)).toBe(true);
       expect(signals[0].aborted).toBe(true);
       fire();
       expect(signals.at(-1)?.aborted).toBe(true);
