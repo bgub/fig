@@ -1,3 +1,9 @@
+## @bgub/fig@0.2.0
+
+### Preserve Activity boundaries through Payload
+
+Server components can return Activity boundaries whose modes, keys, and nested children survive Payload decoding. Hidden content remains hidden during subsequent HTML and client rendering.
+
 ## @bgub/fig@0.1.1
 
 ### Document every JSR entrypoint and exported symbol

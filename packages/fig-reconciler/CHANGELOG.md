@@ -1,3 +1,9 @@
+## @bgub/fig-reconciler@0.2.0
+
+### Independent transition scheduling
+
+Ready transitions can commit while unrelated transitions in the same root are suspended. Transitions sharing a state queue stay coordinated, preserving related updates and View Transition coalescing. Async continuation attribution is unchanged.
+
 ## @bgub/fig-reconciler@0.1.3
 
 ### Preserve stable-event visibility when Suspense shows a fallback
