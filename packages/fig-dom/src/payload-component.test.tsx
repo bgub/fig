@@ -1,11 +1,15 @@
 import {
+  Activity,
+  clientReference,
   createDataStore,
   createElement,
   isValidElement,
   Suspense,
+  useReactive,
 } from "@bgub/fig";
 import { renderToPayloadStream } from "@bgub/fig-server/payload";
 import { describe, expect, it } from "vitest";
+import { act } from "./act.ts";
 import { createPayloadComponent, createRoot, flushSync } from "./index.ts";
 import {
   FakeElement,
@@ -16,6 +20,54 @@ import {
 installFakeDocument();
 
 describe("createPayloadComponent", () => {
+  it("reveals a hidden Payload Activity on refresh without replacing its client DOM", async () => {
+    const signals: AbortSignal[] = [];
+    function Panel() {
+      useReactive((signal) => {
+        signals.push(signal);
+      }, []);
+      return <span>panel content</span>;
+    }
+    const PanelReference = clientReference({ id: "activity-panel" });
+    let mode: "hidden" | "visible" = "hidden";
+    const Page = createPayloadComponent<Record<string, never>>({
+      key: ["activity-page"],
+      load: () =>
+        payloadSource(
+          <Activity key="panel" mode={mode}>
+            <PanelReference />
+          </Activity>,
+        ),
+      resolveClientReference: () => Panel,
+    });
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+
+    try {
+      await root.data.ensureData(Page, {});
+      await act(() => root.render(<Page />));
+
+      const span = container.childNodes[0] as FakeElement;
+      expect(span.textContent).toBe("panel content");
+      expect(span.style.display).toBe("none");
+      expect(signals).toEqual([]);
+
+      mode = "visible";
+      await act(async () => {
+        const result = await root.data.refreshData(Page, {});
+        expect(result.status).toBe("fulfilled");
+      });
+
+      expect(container.childNodes[0]).toBe(span);
+      expect(span.style.display).toBe("");
+      // The first effect activation strict-cycles on reveal in development.
+      expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    } finally {
+      await act(() => root.unmount());
+    }
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
   it("renders a payload tree as a component", async () => {
     const ProfilePage = createPayloadComponent<{ id: string }>({
       key: ["profile"],
