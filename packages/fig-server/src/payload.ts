@@ -544,7 +544,13 @@ function serializeElement(
   }
 
   if (isActivity(type)) {
-    return serializeNode(element.props.children, frame);
+    return serializeElementModel(
+      element,
+      { $fig: "activity" },
+      frame,
+      preserveIdentity,
+      "children",
+    );
   }
 
   if (isViewTransition(type)) {

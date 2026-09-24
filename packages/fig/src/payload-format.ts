@@ -126,6 +126,7 @@ export type PayloadElementModel = {
 
 /** Describes payload special model. */
 export type PayloadSpecialModel =
+  | { $fig: "activity" }
   | { $fig: "array"; id: number; value: PayloadModel[] }
   | { $fig: "bigint"; value: string }
   | { $fig: "client"; id: number }
@@ -745,6 +746,7 @@ export function isPayloadSpecialModel(
   if (!("$fig" in model)) return false;
 
   switch (model.$fig) {
+    case "activity":
     case "array":
     case "bigint":
     case "client":

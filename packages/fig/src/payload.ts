@@ -5,6 +5,7 @@
  */
 import type { FigDataHydrationEntry } from "./data.ts";
 import {
+  Activity,
   type AwaitedFigNode,
   createElement,
   type ElementType,
@@ -563,6 +564,8 @@ class PayloadDecoder {
         }
         return chunk.result.value;
       }
+      case "activity":
+        return Activity;
       case "fragment":
         return Fragment;
       case "lazy":

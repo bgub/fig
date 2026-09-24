@@ -1,4 +1,5 @@
 import {
+  Activity,
   type AwaitedFigNode,
   assets,
   clientReference,
@@ -23,7 +24,7 @@ import {
   type PayloadDecodeOptions,
 } from "@bgub/fig/payload";
 import { describe, expect, it } from "vitest";
-import { renderToStream } from "./index.ts";
+import { prerender, renderToStream } from "./index.ts";
 import { renderToPayloadStream } from "./payload.ts";
 import { createStaticDispatcher, deferred } from "./shared.ts";
 import { readStream } from "./test-utils.ts";
@@ -287,6 +288,59 @@ describe("renderToPayloadStream → decodePayloadStream", () => {
     expect(hydrated).toEqual([
       { key: ["decode-user", "one"], value: { name: "Grace" } },
     ]);
+  });
+
+  it.each(["hidden", "visible"] as const)(
+    "preserves a %s Activity boundary through Payload and HTML rendering",
+    async (mode) => {
+      const { decode } = decodeRender(
+        createElement(
+          Activity,
+          { key: "panel", mode },
+          createElement("span", null, "panel content"),
+        ),
+      );
+      const root = (await decode) as FigElement;
+      expect(root.type).toBe(Activity);
+      expect(root.key).toBe("panel");
+      expect(root.props.mode).toBe(mode);
+      const { html } = await prerender(root);
+      expect(html).toContain("<span>panel content</span>");
+      expect(html.includes("<template data-fig-activity")).toBe(
+        mode === "hidden",
+      );
+    },
+  );
+
+  it("retains nested Activity boundaries around suspended server children", async () => {
+    const pending = deferred<string>();
+    function Message() {
+      return createElement("span", null, readPromise(pending.promise));
+    }
+    const { decode, done } = decodeRender(
+      createElement(
+        Activity,
+        { mode: "hidden" },
+        createElement(
+          Activity,
+          { mode: "visible" },
+          createElement(
+            Suspense,
+            { fallback: "loading" },
+            createElement(Message, null),
+          ),
+        ),
+      ),
+    );
+    const root = (await decode) as FigElement;
+    expect(root.type).toBe(Activity);
+    expect((root.props.children as FigElement).type).toBe(Activity);
+    pending.resolve("resolved");
+    await done;
+    const { html } = await prerender(root);
+    expect(html).toContain("<template data-fig-activity");
+    expect(html).toContain("<span>resolved</span>");
+    expect(html).not.toContain("loading");
   });
 
   it("round-trips request context provided at the render root", async () => {
