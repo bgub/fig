@@ -47,6 +47,7 @@ export {
   type FigPortal,
   type FigViewTransition,
   Fragment,
+  type FragmentProps,
   isValidElement,
   type Key,
   type LazyLoader,

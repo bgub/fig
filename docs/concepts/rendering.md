@@ -10,7 +10,7 @@ For a gentler introduction to fibers and lanes, read [Fiber architecture](../2-f
 
 Elements are plain objects branded with a string-keyed `$$typeof` symbol. `FigNode` is the one public children type: elements, portals, promises, text, booleans, empty values, and arrays. `AwaitedFigNode` exists only for APIs whose outer promise must assimilate a root thenable; it is not another children type.
 
-`Fragment` is a symbol. `Suspense`, `Activity`, `ErrorBoundary`, `Assets`, and `ViewTransition` are branded callable values so TypeScript treats them like components.
+`Fragment`, `Suspense`, `Activity`, `ErrorBoundary`, `Assets`, and `ViewTransition` are branded callable values so TypeScript treats them like components. Renderers interpret these boundaries rather than execute their functions. Fragment binding is renderer-owned; core keeps its handle opaque.
 
 `lazy(load)` is a component built over `readPromise`. Its loader returns the component itself—there is no `{ default }` unwrapping—and preserves that component's props.
 
