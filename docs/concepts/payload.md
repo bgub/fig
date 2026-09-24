@@ -101,6 +101,12 @@ State, effects, transitions, actions, and stable events throw in development. Ot
 
 Context is consumed during server rendering and is not serialized. A client-reference island reads client context from the location where the decoded tree is mounted. To pass server context into an island, use props or a client provider component.
 
+## Activity Boundaries
+
+Payload preserves `Activity` elements, including their keys, modes, and children. Decoding creates ordinary Activity boundaries, so hidden content remains hidden during HTML rendering and client rendering and uses the existing Activity hydration and reveal lifecycle. Nested boundaries and suspended server children retain their structure.
+
+A hidden boundary does not skip execution of its server components: Payload still computes and streams their output. Visibility and client effect lifetimes belong to the decoded boundary.
+
 ## Client References
 
 `clientReference({ id, assets?, ssr? })` creates a component that serializes as a reference instead of executing in Payload.
