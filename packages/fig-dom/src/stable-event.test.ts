@@ -1,6 +1,8 @@
 import {
   Activity,
   createElement,
+  readPromise,
+  Suspense,
   useBeforeLayout,
   useReactive,
   useStableEvent,
@@ -10,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
 import {
   waitForHostTurns,
+  deferred,
   FakeElement,
   installFakeDocument,
 } from "./test-utils.ts";
@@ -17,6 +20,129 @@ import {
 installFakeDocument();
 
 describe("@bgub/fig-dom stable events", () => {
+  it("publishes stable-event visibility when Suspense preserves and reveals a primary tree", async () => {
+    const pending = deferred<string>();
+    const signals: AbortSignal[] = [];
+    const handlers: Array<() => void> = [];
+    const errors: unknown[] = [];
+
+    function Actions() {
+      const fire = useStableEvent((signal: AbortSignal) => {
+        signals.push(signal);
+      });
+      useBeforeLayout(() => {
+        handlers.push(fire);
+      }, []);
+      return createElement("button", null, "Task");
+    }
+    const actions = createElement(Actions, null);
+    function Body({ loading }: { loading: boolean }) {
+      if (loading) readPromise(pending.promise);
+      return actions;
+    }
+    function App({ loading }: { loading: boolean }) {
+      return createElement(
+        Suspense,
+        {
+          fallback: createElement("p", null, "Loading"),
+        },
+        createElement(Body, { loading }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError: (error) => {
+        errors.push(error);
+      },
+    });
+    try {
+      flushSync(() => root.render(createElement(App, { loading: false })));
+      const button = container.childNodes[0];
+      const fire = handlers.at(-1)!;
+      fire();
+      expect(signals.at(-1)?.aborted).toBe(false);
+
+      flushSync(() => root.render(createElement(App, { loading: true })));
+      expect(errors).toEqual([]);
+      expect(signals[0].aborted).toBe(true);
+      fire();
+      expect(signals.at(-1)?.aborted).toBe(true);
+
+      pending.resolve("ready");
+      await waitForHostTurns();
+      expect(errors).toEqual([]);
+      expect(container.textContent).toBe("Task");
+      expect(container.childNodes[0]).toBe(button);
+      expect(handlers.at(-1)).toBe(fire);
+      fire();
+      expect(signals.at(-1)?.aborted).toBe(false);
+    } finally {
+      flushSync(() => root.unmount());
+    }
+    expect(signals.at(-1)?.aborted).toBe(true);
+  });
+
+  it("does not publish a handler from discarded work when a later sibling suspends", async () => {
+    const pending = deferred<string>();
+    const calls: Array<{ value: number; aborted: boolean }> = [];
+    const handlers: Array<() => void> = [];
+
+    function Actions({ value }: { value: number }) {
+      const fire = useStableEvent((signal: AbortSignal) => {
+        calls.push({ value, aborted: signal.aborted });
+      });
+      useBeforeLayout(() => {
+        handlers.push(fire);
+      }, []);
+      return createElement("button", null, value);
+    }
+    function Gate({ loading }: { loading: boolean }) {
+      if (loading) readPromise(pending.promise);
+      return null;
+    }
+    function App({ loading, value }: { loading: boolean; value: number }) {
+      return createElement(
+        Suspense,
+        {
+          fallback: createElement("p", null, "Loading"),
+        },
+        createElement(Actions, { value }),
+        createElement(Gate, { loading }),
+      );
+    }
+
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    try {
+      flushSync(() =>
+        root.render(createElement(App, { loading: false, value: 1 })),
+      );
+      const fire = handlers.at(-1)!;
+      fire();
+      flushSync(() =>
+        root.render(createElement(App, { loading: true, value: 2 })),
+      );
+      fire();
+      // A second capture must also publish the committed, hidden handler.
+      flushSync(() =>
+        root.render(createElement(App, { loading: true, value: 3 })),
+      );
+      fire();
+      expect(calls).toEqual([
+        { value: 1, aborted: false },
+        { value: 1, aborted: true },
+        { value: 1, aborted: true },
+      ]);
+      pending.resolve("ready");
+      await waitForHostTurns();
+      fire();
+      expect(calls.at(-1)).toEqual({ value: 3, aborted: false });
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  });
+
   it("returns a stable handler that reads the latest committed render", async () => {
     const calls: string[] = [];
     const handlers: Array<(suffix: string) => void> = [];

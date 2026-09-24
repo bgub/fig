@@ -86,6 +86,7 @@ The index is an optimization, not a second source of truth:
 
 - each fiber appears at most once;
 - a Suspense or error capture truncates entries created by its discarded subtree;
+- Suspense re-indexes preserved hook owners when moving the primary tree into hidden state, so stable-event visibility publishes before before-layout effects;
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.
 
