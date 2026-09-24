@@ -61,3 +61,41 @@ The callback returns nothing. Its signal aborts when the callback identity chang
 In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, so use `useBeforePaint` when you need layout measurement.
 
 `on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.
+
+## Fragment DOM Access
+
+An explicit `Fragment` can bind a group of elements without adding a DOM wrapper:
+
+```tsx
+import { Fragment } from "@bgub/fig";
+import type { FragmentInstance } from "@bgub/fig-dom";
+
+function observeFields(
+  group: FragmentInstance,
+  signal: AbortSignal,
+): undefined {
+  const observer = new ResizeObserver(updateLayout);
+  group.observeUsing(observer);
+  signal.addEventListener("abort", () => group.unobserveUsing(observer));
+}
+
+<Fragment bind={observeFields}>
+  <NameField />
+  <EmailField />
+</Fragment>;
+```
+
+The DOM JSX runtime infers `FragmentInstance` for inline callbacks. Core owns Fragment and its renderer-neutral props; Fig DOM owns the handle type. Shorthand `<>` cannot accept a bind.
+
+A handle tracks the committed first-level DOM elements produced by its descendants, traversing components and nested fragments. It excludes text nodes, portals, hoisted asset nodes, and hidden Activity branches. It is not a DOM node and cannot receive host props or mixins. A group's elements may be empty, and subsequent child commits update the same handle without rerunning an unchanged bind.
+
+- `focus(options?)` and `focusLast(options?)` search descendants in DOM order for the first or last focusable element; `blur()` blurs the active descendant.
+- `getClientRects()` returns the concatenated client rectangles of first-level elements.
+- `observeUsing(observer)` and `unobserveUsing(observer)` manage an IntersectionObserver or ResizeObserver across first-level elements. Membership changes attach new elements and detach removed elements automatically. Stopping observation does not disconnect the observer from unrelated targets.
+- `addEventListener(type, listener, options?)` and `removeEventListener(type, listener, options?)` attach native listeners to first-level elements. `currentTarget` is the actual element. Capture identity follows native boolean/options normalization; `once` applies per element, and an aborted options signal prevents registration on future elements. These are direct native listeners; `on()` remains the API for Fig's delegated event behavior.
+
+Binds run after host mutations and before `useBeforePaint`. Their signals abort on callback replacement, deletion, or an enclosing Activity hiding. First attachment follows the development run/abort/run check. Hiding also empties the handle and removes its observations and listeners; revealing reruns the bind on the same handle. Keyed moves retain the handle and do not rerun the bind. Deletion empties the handle permanently. Registration methods are intended for the active bind lifetime. Bind failures follow the root host-commit error path, with subscriptions released during teardown.
+
+Server HTML rendering ignores fragment binds. Hydration binds only claimed host nodes; still-dehydrated descendants join after their own hydration commits. Payload rejects a function-valued bind, so interactive groups belong inside client references.
+
+This initial API does not provide scrolling, synthetic group dispatch, or document-position comparisons. A Fragment is not an EventTarget or a synthetic DOM parent.

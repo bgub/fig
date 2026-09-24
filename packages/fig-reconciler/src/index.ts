@@ -101,6 +101,7 @@ import {
   PlacementFlag,
   SingletonStaticFlag,
   StaticFlagsMask,
+  FragmentStaticFlag,
   StoreConsistencyFlag,
   TextContentFlag,
   UpdateFlag,
@@ -271,6 +272,16 @@ export interface HostConfig<Container, Instance, TextInstance> {
     parent: Parent<Container, Instance>,
   ): Instance;
   createTextInstance(text: string): TextInstance;
+  // Fragment membership is published after host mutation and before layout
+  // effects. Owners survive keyed moves; instances exclude portals, hidden
+  // branches, text, and hoisted assets. Both methods form one capability.
+  commitFragment?(
+    owner: object,
+    instances: readonly Instance[],
+    bind: unknown,
+    hidden: boolean,
+  ): void;
+  removeFragment?(owner: object): void;
   validateInstanceNesting?(
     type: string,
     props: Props,
@@ -913,6 +924,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   // both fiber generations share) makes membership generation-agnostic.
   let hasHiddenBoundaries = false;
   const hiddenStates = new Set<ActivityState<Instance>>();
+  const fragmentOwners = new WeakMap<F, object>();
+
   let activityHostConfig: ActivityVisibilityHostConfig | null = null;
   let activityHydrationHostConfig: ActivityHydrationHostConfig | null = null;
   let hoistedAssetHostConfig: HostHoistedAssetConfig<
@@ -1691,6 +1704,23 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
     node.lanes &= ~root.renderLanes;
+
+    if (
+      node.tag === FragmentTag &&
+      node.props.bind != null &&
+      node.props.bind !== false
+    ) {
+      if (typeof node.props.bind !== "function") {
+        throw new Error("The Fragment bind prop must be a function.");
+      }
+      if (
+        host.commitFragment === undefined ||
+        host.removeFragment === undefined
+      ) {
+        throw new Error("This renderer does not support Fragment binds.");
+      }
+      node.flags |= FragmentStaticFlag;
+    }
 
     if (node.tag === FunctionTag) {
       renderFunction(node, root);
@@ -3902,6 +3932,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
+          commitFragments(finishedWork.child);
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
           attachCommittedSuspenseRetries(root, suspenseRetries);
@@ -4666,6 +4697,43 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
+  function commitFragments(first: F | null): void {
+    if (host.commitFragment === undefined) return;
+    walkFiberForest(first, (node) => {
+      if ((node.flags & FragmentStaticFlag) !== 0) {
+        const owner =
+          fragmentOwners.get(node) ??
+          (node.alternate === null
+            ? undefined
+            : fragmentOwners.get(node.alternate)) ??
+          {};
+        fragmentOwners.set(node, owner);
+        if (node.alternate !== null) fragmentOwners.set(node.alternate, owner);
+        const hidden = isInsideHiddenBoundary(node);
+        const instances: Instance[] = [];
+        if (!hidden) {
+          walkFiberForest(node.child, (child) => {
+            if (
+              child.tag === PortalTag ||
+              isHiddenBoundary(child) ||
+              isHoistedFiber(child)
+            )
+              return false;
+            if (child.tag === HostTag) {
+              instances.push(child.stateNode as Instance);
+              return false;
+            }
+            return true;
+          });
+        }
+        commitHostMutation(node, () =>
+          host.commitFragment?.(owner, instances, node.props.bind, hidden),
+        );
+      }
+      return (node.subtreeFlags & FragmentStaticFlag) !== 0;
+    });
+  }
+
   function commitDataDependencies(root: R): void {
     for (const cursor of root.commitIndex) {
       if (!cursor.dataDependenciesDirty) continue;
@@ -4752,6 +4820,16 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function deleteFiberDataOwner(node: F, store: R["dataStore"]): void {
+    const fragmentOwner =
+      fragmentOwners.get(node) ??
+      (node.alternate === null
+        ? undefined
+        : fragmentOwners.get(node.alternate));
+    if (fragmentOwner !== undefined) {
+      fragmentOwners.delete(node);
+      if (node.alternate !== null) fragmentOwners.delete(node.alternate);
+      commitHostMutation(node, () => host.removeFragment?.(fragmentOwner));
+    }
     store.releaseDataOwner(node);
     if (node.alternate !== null) store.releaseDataOwner(node.alternate);
     // A hidden boundary removed from the tree stops counting toward
@@ -5418,7 +5496,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.child = null;
     next.sibling = null;
     next.index = current.index;
-    // Exactly the host identity bits survive the clone, in both directions:
+    // Host identity and fragment binding capabilities survive the clone:
     // - HoistedStaticFlag MUST carry. It is set once, when the instance is
     //   resolved, and never re-derived; a clone without it would misroute
     //   commit work — most dangerously deletion, where host.removeChild at
@@ -5427,13 +5505,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     // - SingletonStaticFlag MUST carry so placement and deletion continue to
     //   acquire/release the persistent host instance instead of inserting or
     //   removing it.
+    // - FragmentStaticFlag MUST carry so hidden/adopted groups retain their
+    //   commit-time membership and bind lifetime.
     // - ViewTransitionStaticFlag MUST NOT carry. complete() re-derives it
     //   for every fiber a render visits, so carrying it only matters for
     //   clones that never complete (cloneSuspendedPrimary's captured hidden
     //   trees): their stale bit would survive into the hidden Activity's
     //   subtree summary and advertise view-transition boundaries in commits
     //   that have no live view-transition work.
-    next.flags = current.flags & (HoistedStaticFlag | SingletonStaticFlag);
+    next.flags =
+      current.flags &
+      (HoistedStaticFlag | SingletonStaticFlag | FragmentStaticFlag);
     next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;

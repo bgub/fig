@@ -38,7 +38,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "34.2 kB"
+      "limit": "35.3 kB"
     },
     {
       "path": "packages/fig-ui/dist/accordion.js",
@@ -179,21 +179,21 @@
     {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
-      "limit": "26.5 kB"
+      "limit": "27.6 kB"
     },
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "29.8 kB"
+      "limit": "30.8 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "37.5 kB"
+      "limit": "38.5 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "17.6 kB"
+      "limit": "17.8 kB"
     },
     {
       "name": "Fig TanStack Router Start surface",

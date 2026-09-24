@@ -37,6 +37,8 @@ export const HoistedStaticFlag = 1 << 13;
 // releases its managed contents without removing the singleton itself.
 export const SingletonStaticFlag = 1 << 15;
 
+export const FragmentStaticFlag = 1 << 16;
+
 export type Flag = number;
 
 export const MutationMask =
@@ -54,7 +56,10 @@ const SubtreeMaskedFlags =
 // Static facts survive commits and bailouts so adopted and deleted subtrees
 // remain searchable without rebuilding their summaries.
 export const StaticFlagsMask =
-  ViewTransitionStaticFlag | HoistedStaticFlag | SingletonStaticFlag;
+  ViewTransitionStaticFlag |
+  HoistedStaticFlag |
+  SingletonStaticFlag |
+  FragmentStaticFlag;
 
 export function childSubtreeFlags(node: {
   flags: Flag;
