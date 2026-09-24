@@ -133,4 +133,9 @@ export {
   type TitleResource,
   title,
 } from "./resource.ts";
-export { transition, type TransitionOptions } from "./transition.ts";
+export {
+  transition,
+  type TransitionOptions,
+  type TransitionCallback,
+  type TransitionUpdate,
+} from "./transition.ts";
