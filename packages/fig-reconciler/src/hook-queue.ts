@@ -1,5 +1,5 @@
 import type { StateSetter } from "@bgub/fig";
-import { type Lane, NoLane } from "./lanes.ts";
+import { type Lane, type Lanes, NoLane } from "./lanes.ts";
 
 export type StateUpdate<S> = S | ((previous: S) => S);
 
@@ -13,6 +13,7 @@ export class HookUpdate<S> {
 }
 
 export interface HookQueue<S> {
+  transitionLanes: Lanes;
   pending: HookUpdate<S> | null;
   dispatch: StateSetter<S> | null;
 }

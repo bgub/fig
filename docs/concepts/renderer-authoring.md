@@ -91,6 +91,8 @@ The scheduler is internal. It runs work across macrotasks with five priority lev
 
 It prefers `setImmediate`, then a lazily created browser `MessageChannel`, then `setTimeout`. Commit calls `requestPaint()` so the scheduler yields after visible mutations. A task may return a continuation callback to resume later.
 
+Ordinary transition lanes are selected independently, including expired and pinged work. Pending updates sharing a hook state queue entangle their lanes, and selection expands those dependencies transitively. Queue dependencies survive abandoned or parked renders and are cleared when committed work drains the queue; completed edges are removed before lane reuse. Retry lanes and deferred transition lanes retain their grouped selection. The [Hooks concept](./hooks.md#transitions) owns the observable transition contract.
+
 No scheduler package or `unstable_` API is published.
 
 ## Development And Testing Subpaths

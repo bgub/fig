@@ -70,7 +70,15 @@ Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effec
 
 ## Transitions
 
-`transition(callback, options?)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` remain inside the same transition. Both the top-level function and the hook's `start` function accept `{ types?: readonly string[]; viewTransition?: "interrupt" }`; native animation types and interruption are described in the [View Transitions concept](./view-transitions.md#transition-options).
+`transition(callback, options?)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` retain transition priority through the ambient fallback described below. Both the top-level function and the hook's `start` function accept `{ types?: readonly string[]; viewTransition?: "interrupt" }`; native animation types and interruption are described in the [View Transitions concept](./view-transitions.md#transition-options).
+
+Transitions on unrelated state queues can render and commit independently within one root. When one transition suspends under an already-revealed Suspense boundary, it retains its previous content without holding a ready sibling transition or that sibling's pending indicator.
+
+Updates assigned to one transition lane render together. Pending transitions that update the same state queue are entangled: they render together, including other updates in those transitions. This lets newer selections supersede older ones without exposing half of a related update. Dependencies are transitive across shared queues and are retired when work completes. Sync/default updates retain their higher priority and queue rebasing behavior.
+
+Independence is a scheduling policy, not a promise of a separate lane for every operation: the finite lane pool can reuse a pending lane. Async continuation attribution is also unchanged: pending async callbacks keep an ambient transition-priority fallback, which cannot distinguish overlapping callbacks. Post-`await` updates may share a lane even when they belong to different operations. Explicit async ownership is a separate concern.
+
+A ready commit may still wait for an active browser View Transition. Related updates continue to coalesce while that commit is parked; see [View Transitions](./view-transitions.md#one-transition-at-a-time).
 
 Each `useTransition` hook is one cancellation domain. Starting another run aborts and retires the previous one:
 

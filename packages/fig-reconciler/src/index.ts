@@ -3199,6 +3199,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     lane = hiddenSubtreeLane(fiber, lane);
     const update = new HookUpdate(action, lane);
     queue.pending = mergeQueues(queue.pending, update);
+    if (includesSomeLane(AllTransitionLanes, lane)) {
+      const root = rootOfOrNull(fiber);
+      if (root !== null) {
+        // Only transitions sharing this state queue must render together. Keep
+        // dependencies across suspended/parked renders, until they commit.
+        queue.transitionLanes =
+          (queue.transitionLanes & root.pendingLanes) | lane;
+        markRootEntangled(root, queue.transitionLanes);
+      }
+    }
     scheduleFiber(fiber, lane);
   }
 
@@ -5875,6 +5885,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitLiveHookInstance(owner: F, hook: Hook): void {
+    // Clear only on commit: a speculative render may empty the queue and then
+    // suspend or park. Its updates still need to join newer updates until they
+    // commit. Also avoid retaining old bits when the lane allocator wraps.
+    if (hook.baseQueue === null && hook.queue.pending === null) {
+      hook.queue.transitionLanes = NoLanes;
+    }
+
     if (isStableEventHook(hook)) {
       const instance = hook.memoizedState.instance;
       instance.handler = hook.memoizedState.next;
@@ -6382,7 +6399,7 @@ function createHook<S>(kind: HookKind, state: S): Hook<S> {
     memoizedState: state,
     baseState: state,
     baseQueue: null,
-    queue: { pending: null, dispatch: null },
+    queue: { pending: null, dispatch: null, transitionLanes: NoLanes },
     next: null,
   };
 }

@@ -1517,6 +1517,92 @@ describe("ViewTransition", () => {
     }
   });
 
+  it("commits a ready sibling after an animation even while another transition is suspended", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    let setSlow: StateSetter<Promise<string> | null> = () => undefined;
+    let setFast: StateSetter<string> = () => undefined;
+    let resolveSlow: (value: string) => void = () => undefined;
+    const slow = new Promise<string>((resolve) => {
+      resolveSlow = resolve;
+    });
+    let finishAnimation: () => void = () => undefined;
+    const animation = new Promise<void>((resolve) => {
+      finishAnimation = () => resolve();
+    });
+    const commits: string[] = [];
+    const ownerDocument = document as unknown as MockViewTransitionDocument & {
+      __figViewTransition?: unknown;
+    };
+    const previousStart = ownerDocument.startViewTransition;
+    ownerDocument.startViewTransition = (update) => {
+      update();
+      commits.push(container.textContent ?? "");
+      return {
+        ready: Promise.resolve(),
+        finished: commits.length === 1 ? animation : Promise.resolve(),
+      };
+    };
+    function Slow() {
+      const [value, set] = useState<Promise<string> | null>(null);
+      setSlow = set;
+      return createElement(
+        Suspense,
+        { fallback: "loading" },
+        createElement(Message, { value }),
+      );
+    }
+    function Message({ value }: { value: Promise<string> | null }) {
+      return createElement(
+        "p",
+        null,
+        value === null ? "old" : readPromise(value),
+      );
+    }
+    function Fast() {
+      const [value, set] = useState("A");
+      setFast = set;
+      return createElement("p", null, value);
+    }
+    try {
+      const root = createRoot(container);
+      await act(() =>
+        root.render(
+          createElement(
+            ViewTransition,
+            { name: "panel" },
+            createElement(Slow, null),
+            createElement(Fast, null),
+          ),
+        ),
+      );
+      await act(() => transition(() => setFast("B")));
+      expect(commits).toEqual(["oldB"]);
+      await act(() => transition(() => setSlow(slow)));
+      await act(() => transition(() => setFast("C")));
+      // C is ready, but the browser animation still owns the commit window.
+      expect(container.textContent).toBe("oldB");
+      finishAnimation();
+      await act(async () => {
+        await animation;
+      });
+      expect(container.textContent).toBe("oldC");
+      expect(commits).toEqual(["oldB", "oldC"]);
+      resolveSlow("new");
+      await act(async () => {
+        await slow;
+      });
+      expect(container.textContent).toBe("newC");
+      root.unmount();
+    } finally {
+      finishAnimation();
+      resolveSlow("new");
+      ownerDocument.startViewTransition = previousStart;
+      ownerDocument.__figViewTransition = null;
+      container.remove();
+    }
+  });
+
   it("commits after 60 seconds when an animation never finishes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const container = document.createElement("div");

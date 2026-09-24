@@ -15,6 +15,9 @@ import {
   includesSomeLane,
   type LaneRoot,
   markRootEntangled,
+  markRootFinished,
+  markRootSuspended,
+  markRootPinged,
   markRootUpdated,
   mergeLanes,
   NoLanes,
@@ -251,5 +254,43 @@ describe("lanes", () => {
     expect(getEntangledLanes(laneRoot, TransitionLane1)).toBe(
       TransitionLane1 | TransitionLane2 | TransitionLane3,
     );
+  });
+  it("selects unrelated transitions separately, including expired and pinged work", () => {
+    const laneRoot = root();
+    markRootUpdated(laneRoot, TransitionLane1 | TransitionLane2);
+    expect(getNextLanes(laneRoot)).toBe(TransitionLane1);
+    laneRoot.expiredLanes = TransitionLane1 | TransitionLane2;
+    expect(getNextLanes(laneRoot)).toBe(TransitionLane1);
+    markRootSuspended(laneRoot, TransitionLane1 | TransitionLane2);
+    expect(getNextLanes(laneRoot)).toBe(NoLanes);
+    markRootPinged(laneRoot, TransitionLane1 | TransitionLane2);
+    expect(getNextLanes(laneRoot)).toBe(TransitionLane1);
+    markRootFinished(laneRoot, TransitionLane2);
+    expect(getNextLanes(laneRoot)).toBe(TransitionLane2);
+  });
+
+  it("includes newly entangled work when continuing an in-progress transition", () => {
+    const laneRoot = root();
+    markRootUpdated(laneRoot, TransitionLane1 | TransitionLane2);
+    markRootEntangled(laneRoot, TransitionLane1 | TransitionLane2);
+    expect(getNextLanes(laneRoot, TransitionLane1)).toBe(
+      TransitionLane1 | TransitionLane2,
+    );
+  });
+
+  it("does not resume suspended in-progress work ahead of a ready transition", () => {
+    const laneRoot = root();
+    markRootUpdated(laneRoot, TransitionLane1 | TransitionLane2);
+    markRootSuspended(laneRoot, TransitionLane1);
+    expect(getNextLanes(laneRoot, TransitionLane1)).toBe(TransitionLane2);
+  });
+
+  it("drops completed dependency edges before a lane is reused", () => {
+    const laneRoot = root();
+    markRootUpdated(laneRoot, TransitionLane1 | TransitionLane2);
+    markRootEntangled(laneRoot, TransitionLane1 | TransitionLane2);
+    markRootFinished(laneRoot, TransitionLane2);
+    markRootUpdated(laneRoot, TransitionLane1);
+    expect(getEntangledLanes(laneRoot, TransitionLane2)).toBe(TransitionLane2);
   });
 });

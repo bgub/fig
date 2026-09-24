@@ -138,8 +138,8 @@ export function getHighestPriorityLane(lanes: Lanes): Lane {
 export function getHighestPriorityLanes(lanes: Lanes): Lanes {
   const lane = getHighestPriorityLane(lanes);
 
-  if (includesSomeLane(AllTransitionLanes, lane)) {
-    return lanes & AllTransitionLanes;
+  if (includesSomeLane(TransitionDeferredLanes, lane)) {
+    return lanes & TransitionDeferredLanes;
   }
 
   if (includesSomeLane(RetryLanes, lane)) {
@@ -155,7 +155,7 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
 
   const unblocked = pending & ~root.suspendedLanes;
   const pinged = pending & root.pingedLanes;
-  let next = root.expiredLanes & unblocked;
+  let next = getHighestPriorityLanes(root.expiredLanes & unblocked);
   if (next === NoLanes) {
     next = getHighestPriorityLanes(unblocked);
 
@@ -165,7 +165,7 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
       const expiredPinged = root.expiredLanes & pinged;
       next =
         expiredPinged !== NoLanes
-          ? expiredPinged
+          ? getHighestPriorityLanes(expiredPinged)
           : getHighestPriorityLanes(pinged);
     }
   }
@@ -175,10 +175,10 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
   if (
     wipLanes !== NoLanes &&
     wipLanes !== next &&
-    !includesSomeLane(root.expiredLanes, wipLanes) &&
+    !includesSomeLane(root.expiredLanes | root.suspendedLanes, wipLanes) &&
     getHighestPriorityLane(next) >= getHighestPriorityLane(wipLanes)
   ) {
-    return wipLanes;
+    return getEntangledLanes(root, wipLanes);
   }
 
   return getEntangledLanes(root, next);
@@ -223,6 +223,16 @@ export function markRootFinished(root: LaneRoot, remainingLanes: Lanes): void {
     const lane = 1 << index;
     root.entanglements[index] = NoLanes;
     root.expirationTimes[index] = NoTimestamp;
+    lanes &= ~lane;
+  }
+
+  // A surviving lane must not retain an edge to a completed lane: that bit
+  // may be allocated to unrelated work on the next trip around the pool.
+  lanes = root.entangledLanes;
+  while (lanes !== NoLanes) {
+    const index = laneToIndex(lanes);
+    const lane = 1 << index;
+    root.entanglements[index] &= remainingLanes;
     lanes &= ~lane;
   }
 }
