@@ -50,7 +50,7 @@ Browser routers use reactive TanStack Store atoms. Server routers use non-reacti
 
 `RouterProvider` merges supplied options and route context before rendering, so the first loader sees them. Later updates preserve context fields the provider does not replace.
 
-In the browser, navigation begins inside a Fig transition. The previous route stays visible while the next route loads. If Router Core intentionally publishes pending UI after `pendingMs`, that commit is urgent. The adapter tracks the full async lifetime in `router.state.isTransitioning` and ignores completion from superseded navigation.
+In the browser, each navigation render is scheduled inside a Fig transition. Route loading itself does not keep an ambient transition scope open. The previous route stays visible while the next route loads. If Router Core intentionally publishes pending UI after `pendingMs`, that commit is urgent. The adapter tracks the full async lifetime in `router.state.isTransitioning` and ignores completion from superseded navigation.
 
 TanStack's document-level view-transition wrapper is disabled. Route animation belongs to Fig's structural `<ViewTransition>` boundaries; the two systems must not nest browser transitions.
 

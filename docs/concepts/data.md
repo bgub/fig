@@ -139,7 +139,7 @@ Invalidating a hydrate-only entry leaves its current value readable. Only later 
 
 ## Ambient And Explicit Stores
 
-Free data functions use the ambient store only while Fig is running synchronously: render, event dispatch, effects, or the synchronous prefix of an action or transition. That ambient slot is gone after `await`.
+Free data functions use the ambient store only while Fig is running synchronously: render, event dispatch, effects, or the synchronous prefix of an action or transition. That ambient slot is gone after `await`. A transition’s explicit `update(() => ...)` restores its captured store for the synchronous callback; otherwise use a captured handle.
 
 Async code captures an explicit handle before yielding:
 

@@ -285,7 +285,7 @@ describe("@bgub/fig-dom hooks", () => {
     expect(container.textContent).toBe("Idle Loaded");
   });
 
-  it("keeps post-await async transition updates in the transition lane", async () => {
+  it("schedules explicit post-await updates in the owning transition lane", async () => {
     const gate = deferred<void>();
     const content = deferred<string>();
     let start: StartTransition | null = null;
@@ -323,9 +323,9 @@ describe("@bgub/fig-dom hooks", () => {
       show as ((value: Promise<string>) => void) | null,
     );
 
-    startTransition(async () => {
+    startTransition(async (_signal, update) => {
       await gate.promise;
-      showValue(content.promise);
+      update(() => showValue(content.promise));
     });
     await waitForHostTurns();
     expect(container.textContent).toBe("Pending Ready");

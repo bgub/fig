@@ -27,6 +27,7 @@ import {
   type StartTransition,
   type StateSetter,
   type TransitionOptions,
+  type TransitionCallback,
   type ViewTransitionProps,
 } from "@bgub/fig";
 import {
@@ -2927,10 +2928,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
 
       const instance = hook.memoizedState.instance;
-      start = (
-        callback: (signal: AbortSignal) => void | PromiseLike<void>,
-        options?: TransitionOptions,
-      ) => {
+      start = (callback: TransitionCallback, options?: TransitionOptions) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Transitions cannot be started while rendering a component.",
@@ -2972,7 +2970,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function runLatest<T>(
     instance: RunInstance,
     fiber: F,
-    run: (signal: AbortSignal) => T | PromiseLike<T>,
+    run: TransitionCallback<T | PromiseLike<T>>,
     updatePending: (delta: 1 | -1, lane: Lane) => void,
     settled: (
       lane: Lane,
@@ -2999,14 +2997,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       settled(lane, value, failed, asynchronous);
     };
 
-    // A run started after the owner unmounted (deletion severs the fiber's
-    // root path) still executes for its side effects, just without an
-    // ambient data store; its settlements schedule into the void.
+    // A stale starter still receives its callback, but its explicit update
+    // handle has no authority after the owner unmounts.
     const store = rootOfOrNull(fiber)?.dataStore;
+    if (store === undefined) controller.abort();
     let result: T | PromiseLike<T>;
     try {
       const invoke = () =>
-        runWithTransitionLane(lane, () => run(controller.signal), options);
+        runWithTransitionLane(lane, run, options, controller);
       result = store === undefined ? invoke() : store.run(invoke);
     } catch (error) {
       settle(error, true, false);

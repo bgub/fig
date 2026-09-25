@@ -713,10 +713,12 @@ function ResourcesPage() {
               </Command>
               <Command
                 run={() =>
-                  startTransition(async () => {
+                  startTransition(async (_signal, update) => {
                     await delayValue(undefined, 250);
-                    setMessage(
-                      delayedMessage(messageText("Transitioned", theme)),
+                    update(() =>
+                      setMessage(
+                        delayedMessage(messageText("Transitioned", theme)),
+                      ),
                     );
                   })
                 }

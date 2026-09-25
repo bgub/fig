@@ -86,7 +86,7 @@ Loads are generation-guarded. If a newer load supersedes an older one, the old s
 
 Every root owns a data store. Server renders get a fresh store per request. There's no process-global data cache.
 
-The free functions `preloadData`, the four invalidation variants, and `refreshData` use an ambient store. That ambient store exists only while Fig is executing synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects. After an `await`, capture an explicit handle first:
+The free functions `preloadData`, the four invalidation variants, and `refreshData` use an ambient store. That ambient store exists only while Fig is executing synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects. A transition’s explicit `update` callback restores its captured store. For other work after an `await`, capture an explicit handle first:
 
 ```ts
 import { readDataStore } from "@bgub/fig";

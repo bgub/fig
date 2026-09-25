@@ -28,6 +28,7 @@ import {
   requestUpdateLane,
   runWithPriority,
   runWithTransition,
+  runWithTransitionLane,
   SelectiveHydrationLane,
   SyncLane,
   TotalLanes,
@@ -154,10 +155,11 @@ describe("lanes", () => {
     let transitionLane = NoLanes;
 
     const pending = runWithTransition(
-      async () => {
+      async (_signal, update) => {
         transitionLane = requestUpdateLane();
         await gate;
-        expect(requestUpdateLane()).toBe(transitionLane);
+        expect(requestUpdateLane()).toBe(DefaultLane);
+        update(() => expect(requestUpdateLane()).toBe(transitionLane));
         expect(getCurrentTransitionTypes(transitionLane)).toEqual(
           new Set(["navigation"]),
         );
@@ -293,4 +295,99 @@ describe("lanes", () => {
     markRootUpdated(laneRoot, TransitionLane1);
     expect(getEntangledLanes(laneRoot, TransitionLane2)).toBe(TransitionLane2);
   });
+});
+
+it("attributes overlapping async updates to their own scope and leaves unrelated work alone", async () => {
+  let resolveA!: () => void;
+  let resolveB!: () => void;
+  const gateA = new Promise<void>((resolve) => {
+    resolveA = resolve;
+  });
+  const gateB = new Promise<void>((resolve) => {
+    resolveB = resolve;
+  });
+  const lanes: number[] = [];
+  const afterAwait: number[] = [];
+  let laneA = NoLanes;
+  let laneB = NoLanes;
+  const a = runWithTransition(async (_signal, update) => {
+    laneA = requestUpdateLane();
+    await gateA;
+    afterAwait.push(requestUpdateLane());
+    update(() => {
+      lanes.push(requestUpdateLane());
+    });
+  });
+  const b = runWithTransition(async (_signal, update) => {
+    laneB = requestUpdateLane();
+    await gateB;
+    afterAwait.push(requestUpdateLane());
+    update(() => {
+      lanes.push(requestUpdateLane());
+    });
+  });
+  expect(laneA).not.toBe(laneB);
+  expect(requestUpdateLane()).toBe(DefaultLane);
+  resolveB();
+  await b;
+  expect(lanes).toEqual([laneB]);
+  expect(requestUpdateLane()).toBe(DefaultLane);
+  resolveA();
+  await a;
+  expect(lanes).toEqual([laneB, laneA]);
+  expect(afterAwait).toEqual([DefaultLane, DefaultLane]);
+});
+
+it("retires an explicit scope on settlement and restores priority after a thrown update", async () => {
+  let late!: import("@bgub/fig").TransitionUpdate;
+  let scopeSignal!: AbortSignal;
+  const calls: string[] = [];
+  await runWithTransition(async (signal, update) => {
+    scopeSignal = signal;
+    late = update;
+    await Promise.resolve();
+    expect(() =>
+      update(() => {
+        throw new Error("update failed");
+      }),
+    ).toThrow("update failed");
+    expect(requestUpdateLane()).toBe(DefaultLane);
+    update(() => {
+      calls.push("live");
+    });
+  });
+  expect(scopeSignal.aborted).toBe(true);
+  late(() => {
+    calls.push("late");
+  });
+  expect(calls).toEqual(["live"]);
+});
+
+it("releases transition options immediately on cancellation before promise settlement", async () => {
+  const controller = new AbortController();
+  let resolve!: () => void;
+  const gate = new Promise<void>((done) => {
+    resolve = done;
+  });
+  let late!: import("@bgub/fig").TransitionUpdate;
+  const pending = runWithTransitionLane(
+    TransitionLane1,
+    (_signal, update) => {
+      late = update;
+      return gate;
+    },
+    { types: ["cancelled"] },
+    controller,
+  );
+  expect(getCurrentTransitionTypes(TransitionLane1)).toEqual(
+    new Set(["cancelled"]),
+  );
+  controller.abort();
+  expect(getCurrentTransitionTypes(TransitionLane1)).toBe(null);
+  late(() => {
+    throw new Error("retired callback ran");
+  });
+  resolve();
+  await pending;
+  expect(getCurrentTransitionTypes(TransitionLane1)).toBe(null);
 });
