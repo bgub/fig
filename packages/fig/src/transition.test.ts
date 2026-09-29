@@ -55,6 +55,7 @@ it("retires a throwing scope and rejects asynchronous update callbacks", () => {
     runTransitionScope(
       (signal, update) => {
         captured = signal;
+        // @ts-expect-error Transition updates must not return promises.
         update(async () => {
           await Promise.resolve();
         });
@@ -63,4 +64,21 @@ it("retires a throwing scope and rejects asynchronous update callbacks", () => {
     ),
   ).toThrow("Transition update callbacks must be synchronous.");
   expect(captured.aborted).toBe(true);
+});
+
+it("accepts synchronous return values and rejects PromiseLike update results", () => {
+  transition((_signal, update) => {
+    let calls = 0;
+    update(() => {
+      calls++;
+    });
+    update(() => calls++);
+    expect(calls).toBe(2);
+
+    const thenable: PromiseLike<void> = Promise.resolve();
+    expect(() => {
+      // @ts-expect-error Transition updates must not return thenables.
+      update(() => thenable);
+    }).toThrow("Transition update callbacks must be synchronous.");
+  });
 });

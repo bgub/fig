@@ -6,7 +6,7 @@ Fig keeps React's hook model but gives long-lived callbacks one consistent clean
 
 ## The Signal Contract
 
-A callback that outlives its call site receives a signal and returns nothing. The signal aborts when that particular run no longer owns the work.
+A callback that outlives its call site receives a signal. The signal aborts when that particular run no longer owns the work. Effect callbacks return nothing; transition callbacks may return a promise that defines their lifetime, and actions return their next state or a promise for it.
 
 | Callback | Signal aborts on |
 | --- | --- |
@@ -14,9 +14,10 @@ A callback that outlives its call site receives a signal and returns nothing. Th
 | `bind` | identity change, unmount, Activity hide |
 | `on()` handlers | re-entry, listener removal |
 | `useStableEvent` handlers | re-entry, unmount, Activity hide |
-| `useTransition` callbacks | superseding run, unmount, Activity hide |
+| `useTransition` callbacks | callback settlement, superseding run, unmount, Activity hide |
+| `transition()` callbacks | callback settlement |
 | `ViewTransition.onTransition` | native view transition finishes |
-| `useActionState` actions | superseding run, unmount, Activity hide |
+| `useActionState` actions | action settlement, superseding run, unmount, Activity hide |
 | data-resource loaders | a newer value publishes, rejection, store disposal, entry eviction |
 
 The signal is always the lifetime indicator. Fig callbacks never return cleanup functions.
@@ -89,7 +90,7 @@ start(async (signal, update) => {
 });
 ```
 
-`update` runs its callback synchronously and restores the previous priority and data-store context afterward, including on throw. It also restores the data store captured when the transition began, so free data APIs work inside it. An async `update` callback is invalid and throws; await outside it and call `update` again for each synchronous group of updates. Errors from a live update propagate to its caller.
+`update` runs its callback synchronously and restores the previous priority and data-store context afterward, including on throw. It also restores the data store captured when the transition began, so free data APIs work inside it. The callback type rejects promise and thenable return values; synchronous return values are allowed and ignored. Await outside `update` and call it again for each synchronous group of updates. A runtime check also throws if an untyped caller returns a thenable, but it cannot cancel an async callback that has already started: its continuation can still run outside the scope. Errors from a live update propagate to its caller.
 
 The returned callback promise defines the scope lifetime. The signal aborts and the entire `update` callback becomes inert when the callback settles, throws, or is cancelled. Synchronous callbacks close on return. A saved `update` handle cannot extend that lifetime; return or await all asynchronous work that needs it. Signal retirement does not mean all scheduled work has committed.
 

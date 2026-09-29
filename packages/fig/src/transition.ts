@@ -12,8 +12,14 @@ export interface TransitionOptions {
   viewTransition?: "interrupt";
 }
 
-/** Runs synchronous work owned by a live transition. Calls after retirement are inert. */
-export type TransitionUpdate = (callback: () => void) => void;
+/**
+ * Runs synchronous work owned by a live transition. Promise and thenable results
+ * are rejected; other return values are ignored. Calls after retirement are inert.
+ */
+export type TransitionUpdate = <Result>(
+  callback: (() => Result) &
+    (Extract<Result, PromiseLike<unknown>> extends never ? unknown : never),
+) => void;
 
 /** The signal and explicit update scope belong to this callback invocation. */
 export type TransitionCallback<T = void | PromiseLike<void>> = (
