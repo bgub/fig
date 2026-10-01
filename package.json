@@ -19,7 +19,7 @@
     "test:bench": "node --test benchmarks/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mts",
     "test:dom": "turbo run test --filter=@bgub/fig-dom",
-    "test:e2e": "pnpm test:browser && pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
+    "test:e2e": "pnpm test:browser && pnpm test:hydration && pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
     "test:hmr": "FIG_DEV_SOURCE= turbo run build --filter=@bgub/fig-demo-tanstack-start... && pnpm --filter @bgub/fig-demo-tanstack-start probe:hmr",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
@@ -27,7 +27,8 @@
     "tegami": "node scripts/tegami.mts",
     "size": "size-limit",
     "test:popup": "pnpm test:browser",
-    "test:browser": "playwright test --config tests/browser/playwright.config.cjs"
+    "test:browser": "playwright test --config tests/browser/playwright.config.cjs",
+    "test:hydration": "playwright test packages/fig-dom/e2e/hydration-forms.spec.ts --workers=1"
   },
   "size-limit": [
     {

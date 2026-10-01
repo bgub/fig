@@ -32,12 +32,28 @@ If the marker belongs to a boundary nested inside another dehydrated boundary, t
 
 Renderers without this host lookup can fall back to searching the fiber tree.
 
+## Form State Adoption
+
+Hydration preserves the live `value`, `checked`, and selection of server-rendered form controls, including controlled fields. Typing, autofill, and selection changes can happen before the bundle loads or while a Suspense boundary remains dehydrated.
+
+At a successful hydration commit, Fig compares each input, textarea, and select with its normalized initial `value`/`checked` or `defaultValue`/`defaultChecked`. A difference queues one adoption notification per field, reflecting its current state rather than a history of keystrokes. Both controlled and uncontrolled fields participate. Unchanged fields receive no notification; radios notify only the selected member.
+
+After commit exits, Fig dispatches `input` followed by `change` through its event replay path. Capture, bubbling, event priority, batching, and handler `AbortSignal`s behave as with other replayed events. These inferred events are untrusted and have no historical input data. Fig does not replay a click or browser default action. If a real input/change event triggers synchronous hydration, Fig delivers that event during adoption and suppresses its duplicate delegated delivery. A checkbox or radio click that triggers hydration likewise coalesces the native input/change events from that same activation; later interactions deliver normally.
+
+Notifications run before synchronous renders queued by binds or `useBeforePaint`, so handlers can adopt the live state before another controlled render resets it. Handlers may call `flushSync`; writes to other pending fields wait until all adoption handlers have read their live state. Any writes committed during adoption then apply. Ordinary controlled writes resume after adoption, so an application that ignores the notification can still reset the field on its next render.
+
+Applications should update controlled state synchronously in `on("input", ...)` or `on("change", ...)`, as appropriate for their field. Updates deliberately deferred through a transition are not guaranteed to precede an immediate controlled render. Uncontrolled fields keep their existing default-only ownership rules.
+
+Hydration that is abandoned or whose targets are removed sends no adoption notifications. Client rendering after structural mismatch recovery creates new controls and cannot preserve edits in replaced DOM.
+
+This is Fig's default behavior, with no feature flag. Its precedent is React's experimental [`enableHydrationChangeEvent` implementation](https://github.com/react/react/pull/33129) and the [follow-up that flushes replay between commits](https://github.com/react/react/pull/33130). Fig uses its own native event names rather than React's synthetic `onChange` mapping.
+
 ## Mismatch Recovery
 
 Fig handles mismatch types differently:
 
 - Extra server attributes and styles remain in place, with a development warning. Browser extensions and edge middleware may have added them.
-- Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; uncontrolled hydration still preserves a live selection changed by the user before hydration.
+- Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; hydration preserves a live selection changed by the user before hydration.
 - Text mismatches recover by client-rendering the root and report through `onRecoverableError`. Without a root handler, Fig reports the error to the console.
 - Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary.
 - If that boundary contains a `Document`'s `<html>` element, recovery escalates to the root because a document cannot temporarily contain two document elements.
