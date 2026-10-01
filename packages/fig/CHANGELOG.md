@@ -1,3 +1,17 @@
+## @bgub/fig@1.0.0
+
+### Preserve Activity boundaries through Payload
+
+Server components can return Activity boundaries whose modes, keys, and nested children survive Payload decoding. Hidden content remains hidden during subsequent HTML and client rendering.
+
+### Explicit async transition ownership
+
+Transition callbacks now receive `(signal, update)`. Wrap post-await updates in `update(() => ...)` to schedule them in the original transition and restore its data store. Pending async callbacks no longer capture unrelated updates. Update handles become inert on callback settlement or cancellation. Action result scheduling remains automatic; arbitrary post-await setters have ordinary priority. Router history loading no longer opens a long-lived transition scope.
+
+The `update` callback's type rejects promise and thenable return values to catch accidental async callbacks before runtime.
+
+Migration: transition and action signals now abort on every settlement, including successful completion. Abort listeners perform lifetime cleanup; `signal.aborted` alone does not identify cancellation or failure. Successful action results still commit, and `isPending` may remain true after the signal retires while rendering waits to commit.
+
 ## @bgub/fig@0.1.1
 
 ### Document every JSR entrypoint and exported symbol
