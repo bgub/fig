@@ -9,7 +9,7 @@ import {
 import { renderToHtml } from "@bgub/fig-server";
 import { describe, expect, it, vi } from "vitest";
 import { act } from "./act.ts";
-import { flushSync, hydrateRoot, on } from "./index.ts";
+import { adoptFormState, flushSync, hydrateRoot, on } from "./index.ts";
 
 describe("hydration form adoption", () => {
   it("adopts a pre-hydration edit before an effect-triggered sync render", () => {
@@ -29,9 +29,9 @@ describe("hydration form adoption", () => {
       return createElement("input", {
         value,
         "data-tick": tick,
-        mix: on("input", (event) => {
+        mix: adoptFormState((node) => {
           notifications++;
-          setValue((event.target as HTMLInputElement).value);
+          setValue((node as HTMLInputElement).value);
         }),
       });
     }
@@ -129,6 +129,56 @@ function edit(element: Element, scenario: ControlCase): void {
 
 describe.each(controls)("$name hydration", (scenario) => {
   it.each([false, true])(
+    "respects field ownership without an adopter (uncontrolled=%s)",
+    (uncontrolled) => {
+      const container = document.createElement("div");
+      container.innerHTML = scenario.html;
+      const element = container.firstElementChild as Element;
+      edit(element, scenario);
+      const events = vi.fn();
+      let state: ControlCase["initial"] = scenario.initial;
+      let rerender: () => void = () => {};
+      function App() {
+        const [value] = useState(scenario.initial);
+        const [tick, setTick] = useState(0);
+        state = value;
+        rerender = () => setTick((previous) => previous + 1);
+        const prop =
+          typeof value === "boolean"
+            ? uncontrolled
+              ? "defaultChecked"
+              : "checked"
+            : uncontrolled
+              ? "defaultValue"
+              : "value";
+        return createElement(
+          scenario.tag,
+          {
+            ...scenario.props,
+            [prop]: value,
+            "data-tick": tick,
+            mix: [on("input", events), on("change", events)],
+          },
+          ...(scenario.children ?? []),
+        );
+      }
+      const root = flushSync(() => hydrateRoot(container, createElement(App)));
+      expect(state).toEqual(scenario.initial);
+      expect(liveValue(element, scenario)).toEqual(
+        uncontrolled ? scenario.edited : state,
+      );
+      expect(events).not.toHaveBeenCalled();
+      flushSync(rerender);
+      expect(liveValue(element, scenario)).toEqual(
+        uncontrolled ? scenario.edited : state,
+      );
+      expect(element.getAttribute("data-tick")).toBe("1");
+      expect(events).not.toHaveBeenCalled();
+      flushSync(() => root.unmount());
+    },
+  );
+
+  it.each([false, true])(
     "preserves and notifies with uncontrolled=%s",
     (uncontrolled) => {
       const container = document.createElement("div");
@@ -159,10 +209,10 @@ describe.each(controls)("$name hydration", (scenario) => {
             [prop]: uncontrolled ? scenario.initial : value,
             "data-tick": tick,
             mix: [
-              on("input", (event) => {
-                notifications.push(event.type);
+              adoptFormState((node) => {
+                notifications.push("adopt");
                 if (!uncontrolled)
-                  setValue(liveValue(event.target as Element, scenario));
+                  setValue(liveValue(node as Element, scenario));
               }),
               on("change", (event) => {
                 notifications.push(event.type);
@@ -180,7 +230,7 @@ describe.each(controls)("$name hydration", (scenario) => {
       );
       expect(liveValue(element, scenario)).toEqual(scenario.edited);
       expect(state).toEqual(uncontrolled ? scenario.initial : scenario.edited);
-      expect(notifications).toEqual(["input", "change"]);
+      expect(notifications).toEqual(["adopt"]);
       expect(element.getAttribute("data-tick")).toBe("1");
       flushSync(() => root.unmount());
     },
@@ -200,8 +250,8 @@ describe.each(controls)("$name hydration", (scenario) => {
             ...scenario.props,
             [prop]: scenario.initial,
             mix: [
-              on("input", () => {
-                notifications.push("input");
+              adoptFormState(() => {
+                notifications.push("adopt");
               }),
               on("change", () => {
                 notifications.push("change");
@@ -238,9 +288,9 @@ it("adopts a radio group using only the selected member's notifications", () => 
           name: "choice",
           value: choice,
           checked: value === choice,
-          mix: on("change", (event) => {
+          mix: adoptFormState((node) => {
             notified.push(choice);
-            flushSync(() => setValue((event.target as HTMLInputElement).value));
+            flushSync(() => setValue((node as HTMLInputElement).value));
           }),
         }),
       ),
@@ -257,7 +307,7 @@ it("adopts a radio group using only the selected member's notifications", () => 
   container.remove();
 });
 
-it("allows a replay handler to flushSync without erasing other pending fields", () => {
+it("allows an adoption callback to flushSync without erasing other pending fields", () => {
   const container = document.createElement("div");
   container.innerHTML =
     '<div><input value="Server"><input value="Server"></div>';
@@ -273,8 +323,8 @@ it("allows a replay handler to flushSync without erasing other pending fields", 
       ...values.map((value, index) =>
         createElement("input", {
           value,
-          mix: on("input", (event) => {
-            const live = (event.target as HTMLInputElement).value;
+          mix: adoptFormState((node) => {
+            const live = (node as HTMLInputElement).value;
             adopted.push(live);
             flushSync(() =>
               setValues((previous) =>
@@ -299,14 +349,58 @@ it("resumes controlled writes on subsequent renders", () => {
   container.innerHTML = '<input value="Server">';
   const input = container.firstElementChild as HTMLInputElement;
   input.value = "User typed";
-  const root = flushSync(() =>
-    hydrateRoot(container, createElement("input", { value: "Server" })),
-  );
+  let reset: () => void = () => {};
+  function App() {
+    const [value, setValue] = useState("Server");
+    reset = () => setValue("Server");
+    return createElement("input", {
+      value,
+      mix: adoptFormState((node) => {
+        setValue(node.value);
+      }),
+    });
+  }
+  const root = flushSync(() => hydrateRoot(container, createElement(App)));
   expect(input.value).toBe("User typed");
-  flushSync(() => root.render(createElement("input", { value: "Server" })));
+  flushSync(reset);
   expect(input.value).toBe("Server");
   flushSync(() => root.unmount());
 });
+
+it.each([false, true])(
+  "respects radio checked ownership independently of its value (uncontrolled=%s)",
+  (uncontrolled) => {
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<div><input type="radio" name="choice" value="a" checked><input type="radio" name="choice" value="b"></div>';
+    document.body.append(container);
+    const [a, b] = Array.from(container.querySelectorAll("input"));
+    b!.checked = true;
+    const tree = () =>
+      createElement(
+        "div",
+        null,
+        ...["a", "b"].map((value) =>
+          createElement("input", {
+            type: "radio",
+            name: "choice",
+            value,
+            [uncontrolled ? "defaultChecked" : "checked"]: value === "a",
+          }),
+        ),
+      );
+    const root = flushSync(() => hydrateRoot(container, tree()));
+    expect([a!.checked, b!.checked]).toEqual(
+      uncontrolled ? [false, true] : [true, false],
+    );
+    flushSync(() => root.render(tree()));
+    expect([a!.checked, b!.checked]).toEqual(
+      uncontrolled ? [false, true] : [true, false],
+    );
+    flushSync(() => root.unmount());
+    container.remove();
+  },
+);
 
 it("does not duplicate an input event that forces shell hydration", () => {
   const container = document.createElement("div");
@@ -323,8 +417,8 @@ it("does not duplicate an input event that forces shell hydration", () => {
     }, []);
     return createElement("input", {
       value,
-      mix: on("input", (event) => {
-        const live = (event.target as HTMLInputElement).value;
+      mix: adoptFormState((node) => {
+        const live = (node as HTMLInputElement).value;
         events.push(live);
         setValue(live);
       }),
@@ -349,8 +443,8 @@ it("applies a value normalized by flushSync inside a hydration notification", ()
     const [value, setValue] = useState("Server");
     return createElement("input", {
       value,
-      mix: on("input", (event) => {
-        const live = (event.target as HTMLInputElement).value;
+      mix: adoptFormState((node) => {
+        const live = (node as HTMLInputElement).value;
         flushSync(() => setValue(live.toUpperCase()));
       }),
     });
@@ -377,9 +471,9 @@ it("adopts edits when a selectively hydrated Suspense boundary becomes ready", a
     }, []);
     return createElement("input", {
       value,
-      mix: on("input", (event) => {
+      mix: adoptFormState((node) => {
         notifications++;
-        setValue((event.target as HTMLInputElement).value);
+        setValue((node as HTMLInputElement).value);
       }),
     });
   }
@@ -427,8 +521,8 @@ it("does not notify form edits from a failed hydration commit", () => {
         container,
         createElement("input", {
           value: "Server",
-          mix: on("input", () => {
-            notifications.push("input");
+          mix: adoptFormState(() => {
+            notifications.push("adopt");
           }),
           bind: () => {
             throw new Error("Bind failed");
@@ -465,7 +559,7 @@ it("does not infer edits from duplicate single-select values", () => {
         "select",
         {
           value: "a",
-          mix: on("input", () => {
+          mix: adoptFormState(() => {
             notifications++;
           }),
         },
@@ -478,7 +572,7 @@ it("does not infer edits from duplicate single-select values", () => {
   flushSync(() => root.unmount());
 });
 
-it("reports replay-handler errors without clearing the hydrated tree or losing other edits", () => {
+it("reports adoption-callback errors without clearing the hydrated tree or losing other edits", () => {
   const container = document.createElement("div");
   container.innerHTML =
     '<div><input value="Server"><input value="Server"></div>';
@@ -497,14 +591,14 @@ it("reports replay-handler errors without clearing the hydrated tree or losing o
       null,
       createElement("input", {
         value: "Server",
-        mix: on("input", () => {
+        mix: adoptFormState(() => {
           throw error;
         }),
       }),
       createElement("input", {
         value,
-        mix: on("input", (event) => {
-          setValue((event.target as HTMLInputElement).value);
+        mix: adoptFormState((node) => {
+          setValue((node as HTMLInputElement).value);
         }),
       }),
     );
@@ -530,4 +624,212 @@ it("reports replay-handler errors without clearing the hydrated tree or losing o
     flushSync(() => root?.unmount());
     vi.unstubAllGlobals();
   }
+});
+
+it.each(controls)(
+  "applies client state to an untouched $name without adoption",
+  (scenario) => {
+    const container = document.createElement("div");
+    container.innerHTML = scenario.html;
+    const field = container.firstElementChild!;
+    const adopted = vi.fn();
+    const prop = typeof scenario.initial === "boolean" ? "checked" : "value";
+    const root = flushSync(() =>
+      hydrateRoot(
+        container,
+        createElement(
+          scenario.tag,
+          {
+            ...scenario.props,
+            [prop]: scenario.edited,
+            mix: adoptFormState(adopted),
+          },
+          ...(scenario.children ?? []),
+        ),
+      ),
+    );
+    expect(liveValue(field, scenario)).toEqual(scenario.edited);
+    expect(adopted).not.toHaveBeenCalled();
+    flushSync(() => root.unmount());
+  },
+);
+
+it("uses textarea children as the SSR baseline without inventing edit events", () => {
+  const container = document.createElement("div");
+  container.innerHTML = "<textarea>Server</textarea>";
+  const adopted = vi.fn();
+  const input = vi.fn();
+  const change = vi.fn();
+  const root = flushSync(() =>
+    hydrateRoot(
+      container,
+      createElement(
+        "textarea",
+        {
+          mix: [
+            adoptFormState(adopted),
+            on("input", input),
+            on("change", change),
+          ],
+        },
+        "Server",
+      ),
+    ),
+  );
+  expect((container.firstElementChild as HTMLTextAreaElement).value).toBe(
+    "Server",
+  );
+  expect(adopted).not.toHaveBeenCalled();
+  expect(input).not.toHaveBeenCalled();
+  expect(change).not.toHaveBeenCalled();
+  flushSync(() => root.unmount());
+});
+
+it("preserves uncontrolled edits without invoking ordinary handlers", () => {
+  const container = document.createElement("div");
+  container.innerHTML = '<input value="Server">';
+  const input = container.firstElementChild as HTMLInputElement;
+  input.value = "User typed";
+  const events = vi.fn();
+  const root = flushSync(() =>
+    hydrateRoot(
+      container,
+      createElement("input", {
+        defaultValue: "Server",
+        mix: [on("input", events), on("change", events)],
+      }),
+    ),
+  );
+  expect(input.value).toBe("User typed");
+  expect(events).not.toHaveBeenCalled();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(events).toHaveBeenCalledTimes(1);
+  flushSync(() => root.unmount());
+});
+
+it("delivers a hydration-triggering input normally alongside explicit adoption", () => {
+  const container = document.createElement("div");
+  container.innerHTML = '<input value="Server">';
+  const input = container.firstElementChild as HTMLInputElement;
+  const adopted: string[] = [];
+  const events: Event[] = [];
+  function App() {
+    const [value, setValue] = useState("Server");
+    return createElement("input", {
+      value,
+      mix: [
+        adoptFormState((node) => {
+          adopted.push(node.value);
+          setValue(node.value);
+        }),
+        on("input", (event) => {
+          events.push(event);
+          setValue((event.target as HTMLInputElement).value);
+        }),
+      ],
+    });
+  }
+  const root = hydrateRoot(container, createElement(App));
+  input.value = "User typed";
+  const event = new Event("input", { bubbles: true });
+  input.dispatchEvent(event);
+  flushSync(() => {});
+  expect(adopted).toEqual(["User typed"]);
+  expect(events).toEqual([event]);
+  expect(input.value).toBe("User typed");
+  flushSync(() => root.unmount());
+});
+
+it("aborts adoption signals on callback replacement and removal without adopting again", () => {
+  const container = document.createElement("div");
+  container.innerHTML = '<input value="Server">';
+  (container.firstElementChild as HTMLInputElement).value = "Edited";
+  const signals: AbortSignal[] = [];
+  const callback = (
+    _node: HTMLInputElement,
+    signal: AbortSignal,
+  ): undefined => {
+    signals.push(signal);
+  };
+  const root = flushSync(() =>
+    hydrateRoot(
+      container,
+      createElement("input", {
+        mix: adoptFormState(callback),
+      }),
+    ),
+  );
+  expect(signals).toHaveLength(1);
+  expect(signals[0]!.aborted).toBe(false);
+  flushSync(() =>
+    root.render(createElement("input", { mix: adoptFormState(callback) })),
+  );
+  expect(signals[0]!.aborted).toBe(false);
+  flushSync(() =>
+    root.render(createElement("input", { mix: adoptFormState(() => {}) })),
+  );
+  expect(signals[0]!.aborted).toBe(true);
+  expect(signals).toHaveLength(1);
+  flushSync(() => root.unmount());
+});
+
+it.each(["mixin", "node"])(
+  "aborts adoption signals when the %s is removed",
+  (mode) => {
+    const container = document.createElement("div");
+    container.innerHTML = '<input value="Server">';
+    (container.firstElementChild as HTMLInputElement).value = "Edited";
+    let signal: AbortSignal | undefined;
+    const root = flushSync(() =>
+      hydrateRoot(
+        container,
+        createElement("input", {
+          mix: adoptFormState((_node, currentSignal) => {
+            signal = currentSignal;
+          }),
+        }),
+      ),
+    );
+    expect(signal?.aborted).toBe(false);
+    if (mode === "mixin") flushSync(() => root.render(createElement("input")));
+    else flushSync(() => root.unmount());
+    expect(signal?.aborted).toBe(true);
+    if (mode === "mixin") flushSync(() => root.unmount());
+  },
+);
+
+it("continues other adopters when a callback throws", () => {
+  const container = document.createElement("div");
+  container.innerHTML = '<input value="Server">';
+  (container.firstElementChild as HTMLInputElement).value = "Edited";
+  const error = new Error("Adopter failed");
+  const report = vi.fn();
+  const next = vi.fn();
+  vi.stubGlobal("reportError", report);
+  try {
+    const root = flushSync(() =>
+      hydrateRoot(
+        container,
+        createElement("input", {
+          mix: [
+            adoptFormState(() => {
+              throw error;
+            }),
+            adoptFormState(next),
+          ],
+        }),
+      ),
+    );
+    expect(report).toHaveBeenCalledExactlyOnceWith(error);
+    expect(next).toHaveBeenCalledTimes(1);
+    flushSync(() => root.unmount());
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("rejects adoption on a non-form host", () => {
+  expect(() => createElement("div", { mix: adoptFormState(() => {}) })).toThrow(
+    "adoptFormState() requires an input, textarea, or select.",
+  );
 });

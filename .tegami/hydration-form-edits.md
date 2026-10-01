@@ -1,11 +1,11 @@
 ---
 packages:
-  "@bgub/fig-dom": patch
+  "@bgub/fig-dom": minor
   "@bgub/fig-reconciler": patch
 ---
 
-### Preserve form edits made before hydration
+### Preserve pre-hydration form edits with explicit state adoption
 
-Hydration now preserves edited input, textarea, checkbox, radio, and select state by default. Changed fields receive input/change notifications after hydration commits and before synchronous follow-up renders, allowing controlled state to adopt the user's edits. Uncontrolled fields keep their existing preservation behavior. Replay handlers can use flushSync without erasing other pending form edits.
+Hydration automatically preserves edits to uncontrolled inputs, textareas, checkboxes, radios, and selects. Controlled fields preserve edits when they declare the new `adoptFormState((node, signal) => ...)` mixin and synchronously adopt live browser state; otherwise hydration applies application state. Binding abstractions can compose the mixin with their setter and native listeners. It preserves native event timing: no inferred input/change/click events are dispatched.
 
-Checkbox and radio activation events coalesce even when adoption rejects the edit. Event-handler errors report globally without clearing the hydrated tree or interrupting other listeners.
+Edit detection uses the browser-normalized SSR baseline, including textarea children and select defaults. Untouched fields take client initial state; checkbox/radio adoption waits for activation or cancellation to settle. Synchronous adoption updates and re-entrant flushSync calls protect other pending fields. Callback errors report globally without clearing the tree or stopping other adopters.

@@ -35,7 +35,7 @@ The hoisted update hook owns the complete update, including text. If it returns 
 
 General host hydration requires methods for finding hydratable children and siblings, adopting element and text instances, and clearing the container. `commitHydratedInstance` is optional.
 
-A renderer may queue hydration notifications during `commitHydratedInstance` and drain them in the optional `flushHydrationEvents(container)` hook. The reconciler calls this after completed root work has been reset and commit has exited, before follow-up synchronous renders. Notifications can call `flushSync`. This also applies when a commit coordinator defers a commit; parked or abandoned work does not flush notifications. Fig DOM uses the hook to let form handlers adopt pre-hydration edits.
+A renderer may queue hydration notifications during `commitHydratedInstance` and drain them in the optional `flushHydrationEvents(container)` hook. The reconciler calls this after completed root work has been reset and commit has exited, before follow-up synchronous renders. Notifications can call `flushSync`. This is a host notification seam; it need not dispatch native events. This also applies when a commit coordinator defers a commit; parked or abandoned work does not flush notifications. Fig DOM uses the hook to invoke explicit form-adoption callbacks for pre-hydration edits.
 
 Suspense hydration adds a complete group for:
 

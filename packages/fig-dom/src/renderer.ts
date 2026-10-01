@@ -29,6 +29,7 @@ import {
   flushHydrationFormChanges,
   discardHydrationFormChanges,
   setEventBatching,
+  setFormAdoptionFlushing,
 } from "./events.ts";
 import {
   shouldRestoreControlledFormState,
@@ -233,6 +234,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 export const domRenderer: FigRenderer<Container, Element> =
   createRenderer(hostConfig);
 setEventBatching(domRenderer.batchedUpdates);
+setFormAdoptionFlushing(domRenderer.flushSync);
 configureDomRefreshScheduler(domRenderer.scheduleRefresh);
 
 // Real templates hold children in a content fragment; test doubles hold
