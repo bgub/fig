@@ -46,6 +46,8 @@ The Fig adapter subscribes each feature to the smallest store available:
 
 Browser routers use reactive TanStack Store atoms. Server routers use non-reactive stores because the server reads each value once.
 
+The adapter uses Router Core's conditional `isServer` export so browser bundles can discard server rendering and store branches. Development and test builds fall back to the router's runtime server flag when that export is undefined.
+
 ## Navigation
 
 `RouterProvider` merges supplied options and route context before rendering, so the first loader sees them. Later updates preserve context fields the provider does not replace.
@@ -93,6 +95,8 @@ TanStack's server router stores are non-reactive. Adapter reads therefore use th
 Within each match, authored links and manifest stylesheets are discovered before generated module preloads. Render-blocking CSS therefore begins loading before the route's JavaScript dependency hints without changing authored stylesheet order.
 
 `HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker. When Start builds side-effect CSS imports with `server.build.inlineCss`, the server style carries TanStack's hydration marker and the client's empty manifest placeholder adopts its text. Hydration therefore retains the inlined CSS instead of replacing it with an empty style. `hydrateStart` scopes that adoption to the container's document; standalone roots targeting a non-global document pass it to `RouterProvider` as `ownerDocument`.
+
+During SSR, `Scripts` takes Router Core's initial hydration tags once. Bootstrap tags precede the positioned body scripts, and the hydration stream boundary follows them. Router Core inserts late hydration records only after that boundary. Client renders do not consume server hydration tags.
 
 `assetCrossOrigin` is a router option because route assets are translated before the document renders. The server nonce applies to both registry assets and positioned tags.
 

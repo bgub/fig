@@ -71,7 +71,9 @@ The Payload compiler's Babel implementation loads only after a gated application
 
 The private default server entry composes TanStack's `createStartHandler` with Fig's narrow renderer module. The public `renderRouterToStream` and `createFigStartHandler` APIs delegate to the same renderer, but their combined server module is not the default entry's dependency: it also owns Payload response rendering and its compiled application-reference manifest. The package build shares the renderer implementation without exposing another package entrypoint.
 
-TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's versioned compatibility profile privately uses Solid identifiers, pins the participating TanStack versions, and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph.
+TanStack currently recognizes only React, Solid, and Vue framework targets. Fig's compatibility profile privately uses Solid identifiers and maps generated Router, Start, and RPC imports back to Fig packages. No Solid runtime enters the client graph. The workspace catalog owns the exact TanStack version pins; both adapters reference that catalog. Conformance tests resolve each adapter's installed TanStack dependencies and check their versions against the catalog.
+
+The current catalog pins Router Core `1.171.34`, Start Client Core `1.170.34`, Start Plugin Core `1.171.49`, and Start Server Core `1.169.39`. These versions include the server-function input and response validation fix for [GHSA-qx66-fv34-fjm8](https://github.com/TanStack/router/security/advisories/GHSA-qx66-fv34-fjm8). Upgrade the participating cores together so compiler, client transport, and server handling share the same contract.
 
 Applications mirror the generated compatibility ids with TypeScript paths. A future native Fig target can replace this aliasing without changing runtime ownership.
 

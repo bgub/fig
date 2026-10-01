@@ -121,8 +121,10 @@ describe("TanStack route asset translation", () => {
         {
           as: "font",
           crossOrigin: "anonymous",
+          fetchPriority: "high",
           href: "/font.woff2",
           rel: "preload",
+          referrerPolicy: "no-referrer",
           type: "font/woff2",
         },
         { href: "/route.js", rel: "modulepreload" },
@@ -140,7 +142,14 @@ describe("TanStack route asset translation", () => {
           css: ["/manifest.css"],
           preloads: ["/manifest.js"],
           scripts: [
-            { attrs: { async: true, src: "/manifest-async.js" } },
+            {
+              attrs: {
+                async: true,
+                crossOrigin: "anonymous",
+                crossorigin: "use-credentials",
+                src: "/manifest-async.js",
+              },
+            },
             { attrs: { src: "/manifest-ordered.js" } },
           ],
         },
@@ -155,8 +164,10 @@ describe("TanStack route asset translation", () => {
       {
         as: "font",
         crossorigin: "anonymous",
+        fetchpriority: "high",
         href: "/font.woff2",
         kind: "preload",
+        referrerpolicy: "no-referrer",
         type: "font/woff2",
       },
       { href: "/route.js", kind: "modulepreload" },
@@ -172,7 +183,12 @@ describe("TanStack route asset translation", () => {
       },
       { async: true, kind: "script", src: "/head-async.js" },
       { async: true, kind: "script", src: "/body-async.js" },
-      { async: true, kind: "script", src: "/manifest-async.js" },
+      {
+        async: true,
+        crossorigin: "use-credentials",
+        kind: "script",
+        src: "/manifest-async.js",
+      },
     ]);
     expect(result.links).toEqual([
       {

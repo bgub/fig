@@ -26,6 +26,66 @@ afterEach(() => {
 });
 
 describe("Link", () => {
+  it("honors exact search matching and explicit undefined values", async () => {
+    const rootRoute = createRootRoute({
+      component: () => (
+        <main>
+          <Link id="partial-search" search={{ tab: "profile" }} to="/">
+            Partial search
+          </Link>
+          <Link
+            activeOptions={{ exact: true }}
+            id="exact-search"
+            search={{ tab: "profile" }}
+            to="/"
+          >
+            Exact search
+          </Link>
+          <Link id="implicit-undefined" search={{ tab: undefined }} to="/">
+            Implicit undefined
+          </Link>
+          <Link
+            activeOptions={{ explicitUndefined: true }}
+            id="explicit-undefined"
+            search={{ tab: undefined }}
+            to="/"
+          >
+            Explicit undefined
+          </Link>
+        </main>
+      ),
+      validateSearch: (search): { extra?: string; tab?: string } => search,
+    });
+    const router = createRouter({
+      history: createMemoryHistory({
+        initialEntries: ["/?tab=profile&extra=value"],
+      }),
+      routeTree: rootRoute,
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+
+    expect(container.querySelector("#partial-search")).toHaveProperty(
+      "dataset.status",
+      "active",
+    );
+    expect(
+      container.querySelector("#exact-search")?.getAttribute("data-status"),
+    ).toBeNull();
+    expect(container.querySelector("#implicit-undefined")).toHaveProperty(
+      "dataset.status",
+      "active",
+    );
+    expect(
+      container
+        .querySelector("#explicit-undefined")
+        ?.getAttribute("data-status"),
+    ).toBeNull();
+  });
+
   it("uses a native anchor and only hijacks unmodified primary clicks", async () => {
     const router = makeLinkRouter();
     const container = document.createElement("div");

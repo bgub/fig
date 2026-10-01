@@ -12,10 +12,13 @@ cleanupUnusedCatalogs: true
 
 catalog:
   "@playwright/test": ^1.62.1
-  "@tanstack/devtools": 0.14.0
-  "@tanstack/history": 1.162.1
-  "@tanstack/router-core": 1.171.21
-  "@tanstack/store": 0.11.1
+  "@tanstack/devtools": 0.15.0
+  "@tanstack/history": 1.162.4
+  "@tanstack/router-core": 1.171.34
+  "@tanstack/start-client-core": 1.170.34
+  "@tanstack/start-plugin-core": 1.171.49
+  "@tanstack/start-server-core": 1.169.39
+  "@tanstack/store": 0.11.2
   postcss: ^8.5.26
   tailwindcss: ^4.3.3
   vite: 8.2.1
@@ -28,12 +31,6 @@ catalogs:
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
-
-packageExtensions:
-  # @tanstack/devtools 0.14.0 imports @neodrag/core without declaring it.
-  "@tanstack/devtools@0.14.0":
-    dependencies:
-      "@neodrag/core": 3.0.0-next.11
 
 overrides:
   "js-yaml@>=4.0.0 <4.3.2": 4.3.2

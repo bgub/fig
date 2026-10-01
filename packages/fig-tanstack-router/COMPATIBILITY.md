@@ -4,7 +4,7 @@
 applications. It is not intended to reproduce every convenience or deprecated
 alias from another framework adapter.
 
-The conformance target is `@tanstack/router-core@1.171.15`. The owning
+The conformance target is `@tanstack/router-core@1.171.34`. The owning
 [concept document](https://github.com/bgub/fig/blob/main/docs/concepts/tanstack-router.md)
 defines the detailed contracts and rationale; this page is the quick
 compatibility reference.

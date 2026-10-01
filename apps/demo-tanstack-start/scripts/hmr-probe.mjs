@@ -3,7 +3,7 @@
 // update. The source file is restored even if the probe fails.
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 import { createServer } from "vite";
 
 const file = new URL("../src/components/AssetLabIsland.tsx", import.meta.url);
@@ -47,6 +47,18 @@ try {
       `HMR probe page failed to load: ${response?.status() ?? "no response"} ${response?.statusText() ?? ""}`.trim(),
     );
   }
+  await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
+  const devtools = page.locator("[data-fig-devtools]");
+  await expect(
+    devtools.getByText("Fig DevTools", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    devtools.getByText("Fig TanStack Start", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    devtools.locator(".fig-devtools__tree-button").first(),
+  ).toBeVisible();
+
   const island = page.getByRole("button", { name: /Client asset island/ });
   await island.click();
   await page.getByText("clicks: 1").waitFor();
