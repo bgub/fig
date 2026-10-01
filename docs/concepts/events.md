@@ -42,7 +42,7 @@ If a click, key, or pointer event targets a dehydrated Suspense boundary, Fig qu
 
 The initial hydration shell behaves the same way. A discrete interaction can pull the whole first hydration commit forward synchronously.
 
-Edited server-rendered form fields also receive `input` and `change` adoption notifications after hydration commits, before follow-up synchronous renders. These report the current live state once; unchanged fields do not notify and radios notify only the selected member. See [form state adoption](./hydration.md#form-state-adoption) for timing and controlled-state requirements.
+Hydration preserves edits to uncontrolled fields without manufacturing native events. Controlled fields preserve edits when they declare `adoptFormState()` and synchronously update application state; otherwise hydration applies application state. See [form state adoption](./hydration.md#form-state-adoption). Ordinary `input`, `change`, and `click` handlers keep platform timing, including cancellation of checkbox/radio activation.
 
 ## Events Before The Bundle Loads
 

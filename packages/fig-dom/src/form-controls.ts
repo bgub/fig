@@ -32,83 +32,103 @@ export function releaseHydratedFormState(
     for (const update of updates.values()) update();
 }
 
-export function hydratedFormChanged(element: Element, props: Props): boolean {
+export type HydratedFormState =
+  | { kind: "checked"; checked: boolean }
+  | { kind: "value"; value: string }
+  | { kind: "select"; values: readonly string[] };
+
+// Read the SSR baseline before client props or binds can change defaults.
+// A fresh browser control normalizes server attributes without carrying the
+// live control's dirty flags, autofill, or selection into the comparison.
+export function initialHydratedFormState(
+  element: Element,
+): HydratedFormState | null {
   const type = elementName(element);
-  if (type === "select") return hydratedSelectChanged(element, props);
-  if (type !== "input" && type !== "textarea") return false;
-  const inputType = String(
-    props.type ?? element.getAttribute("type") ?? "text",
-  ).toLowerCase();
-  if (type === "input" && (inputType === "checkbox" || inputType === "radio")) {
-    const checked = (element as HTMLInputElement).checked;
-    return checked !== ((props.checked ?? props.defaultChecked) === true);
+  if (type === "select") {
+    if (element.ownerDocument !== undefined) {
+      const probe = element.ownerDocument.createElement("select");
+      for (const name of ["multiple", "size"]) {
+        const value = element.getAttribute(name);
+        if (value !== null) probe.setAttribute(name, value);
+      }
+      probe.innerHTML = element.innerHTML;
+      return { kind: "select", values: selectedOptionValues(probe) };
+    }
+    // Renderer test doubles have no ownerDocument or native normalization.
+    const defaults: string[] = [];
+    let fallback: string | null = null;
+    visitDescendantOptions(element, (option) => {
+      if (fallback === null && !optionDisabled(option))
+        fallback = optionValue(option);
+      if (option.getAttribute("selected") !== null)
+        defaults.push(optionValue(option));
+    });
+    const multiple = element.getAttribute("multiple") !== null;
+    return {
+      kind: "select",
+      values: multiple
+        ? defaults
+        : defaults.length > 0
+          ? defaults.slice(-1)
+          : Number(element.getAttribute("size") ?? 0) <= 1 && fallback !== null
+            ? [fallback]
+            : [],
+    };
   }
+  if (type !== "input" && type !== "textarea") return null;
+  const inputType = (element.getAttribute("type") ?? "text").toLowerCase();
+  if (type === "input" && (inputType === "checkbox" || inputType === "radio"))
+    return {
+      kind: "checked",
+      checked: element.getAttribute("checked") !== null,
+    };
   if (
     type === "input" &&
-    (inputType === "file" ||
-      inputType === "submit" ||
-      inputType === "reset" ||
-      inputType === "button")
+    ["file", "submit", "reset", "button", "hidden", "image"].includes(inputType)
   )
-    return false;
-  let expected = String(props.value ?? props.defaultValue ?? "");
-  if (type === "textarea") expected = expected.replace(/\r\n?/g, "\n");
+    return null;
+  let value =
+    type === "textarea"
+      ? ((element as HTMLTextAreaElement).defaultValue ??
+        element.textContent ??
+        "")
+      : (element.getAttribute("value") ?? "");
+  if (type === "textarea") value = value.replace(/\r\n?/g, "\n");
   else if (element.ownerDocument !== undefined) {
-    // Let the browser normalize date/number/range/color and other input
-    // values without ever assigning to the live field.
     const probe = element.ownerDocument.createElement("input");
     probe.type = inputType;
-    for (const name of ["min", "max", "step"]) {
-      const constraint = props[name] ?? element.getAttribute(name);
-      if (constraint != null) probe.setAttribute(name, String(constraint));
+    for (const name of ["min", "max", "step", "multiple"]) {
+      const constraint = element.getAttribute(name);
+      if (constraint !== null) probe.setAttribute(name, constraint);
     }
-    probe.value = expected;
-    expected = probe.value;
+    probe.value = value;
+    value = probe.value;
   }
-  return (element as HTMLInputElement).value !== expected;
+  return { kind: "value", value };
 }
 
-function hydratedSelectChanged(element: Element, props: Props): boolean {
-  const value = props.value ?? props.defaultValue;
-  let selectedOption: Element | null = null;
-  let fallback: Element | null = null;
-  const multiple = props.multiple === true;
-  const selectedValues = new Set(Array.isArray(value) ? value.map(String) : []);
-  if (!multiple) {
-    visitDescendantOptions(element, (option) => {
-      if (fallback === null && !optionDisabled(option)) fallback = option;
-      if (value == null && (option as HTMLOptionElement).defaultSelected)
-        selectedOption = option;
-      if (
-        selectedOption === null &&
-        value != null &&
-        optionValue(option) === String(value)
-      )
-        selectedOption = option;
-    });
-    if (selectedOption === null && Number(props.size ?? 0) <= 1)
-      selectedOption = fallback;
-  }
-  let changed = false;
-  let currentValue: string | null = null;
+export function hydratedFormChanged(
+  element: Element,
+  initial: HydratedFormState,
+): boolean {
+  if (initial.kind === "checked")
+    return (element as HTMLInputElement).checked !== initial.checked;
+  if (initial.kind === "value")
+    return (element as HTMLInputElement).value !== initial.value;
+  const values = selectedOptionValues(element);
+  return (
+    values.length !== initial.values.length ||
+    values.some((value, index) => value !== initial.values[index])
+  );
+}
+
+function selectedOptionValues(element: Element): string[] {
+  const values: string[] = [];
   visitDescendantOptions(element, (option) => {
-    const selected = (option as HTMLOptionElement).selected;
-    if (!multiple) {
-      if (selected) currentValue = optionValue(option);
-      return;
-    }
-    const expected =
-      value == null
-        ? (option as HTMLOptionElement).defaultSelected
-        : selectedValues.has(optionValue(option));
-    if (selected !== expected) changed = true;
+    if ((option as HTMLOptionElement).selected)
+      values.push(optionValue(option));
   });
-  // A single select controls a value, not which duplicate-valued option
-  // represents it. Do not infer an edit from that browser choice.
-  return multiple
-    ? changed
-    : currentValue !==
-        (selectedOption === null ? null : optionValue(selectedOption));
+  return values;
 }
 
 function optionDisabled(option: Element): boolean {
@@ -142,20 +162,19 @@ export function updateFormControl(
   }
 
   // Hydration adopts live browser state. Pending notifications also protect
-  // other edited fields from a flushSync inside a replay handler.
-  if (options.hydrating === true && (type === "input" || type === "textarea"))
-    return;
+  // other edited fields from a flushSync inside an adoption callback.
   const pendingUpdates = pendingHydrationChanges.get(element);
   if (pendingUpdates !== undefined) {
+    if (options.hydrating === true) return;
     pendingUpdates.set(name, () =>
       updateFormControl(element, type, name, value, props, options),
     );
     return;
   }
 
-  // Defaults live-write only on the instance's first client render. A
-  // default that appears later must not clobber user-edited state.
-  const initial = options.initial === true && options.hydrating !== true;
+  // Defaults live-write on initial mount or untouched hydration. A default
+  // that appears later must not clobber user-edited state.
+  const initial = options.initial === true || options.hydrating === true;
 
   if (name === "value") {
     if (!isEmptyPropValue(value)) setFormValue(element, value);
@@ -189,8 +208,7 @@ export function updateSelect(
     return;
   }
 
-  const preservingHydration =
-    options.hydrating === true || pendingUpdates !== undefined;
+  const preservingHydration = pendingUpdates !== undefined;
   const previous = selectStates.get(element);
   const state: SelectState = {
     appliedDefault: previous?.appliedDefault === true || !controlled,
@@ -203,7 +221,10 @@ export function updateSelect(
   };
   selectStates.set(element, state);
 
-  if (!preservingHydration && (controlled || options.initial === true)) {
+  if (
+    !preservingHydration &&
+    (controlled || options.initial === true || options.hydrating === true)
+  ) {
     applySelectValue(element, state.selectedValues);
   }
 }
