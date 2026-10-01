@@ -913,9 +913,20 @@ describe("@bgub/fig-server", () => {
     function App() {
       const [isPending, startTransition] = useTransition();
       let value = "Initial";
-      startTransition(() => {
-        value = "Updated";
+      let scopeSignal: AbortSignal | undefined;
+      startTransition((signal, update) => {
+        scopeSignal = signal;
+        expect(signal.aborted).toBe(false);
+        update(() => {
+          value = "Updated";
+        });
+        queueMicrotask(() =>
+          update(() => {
+            throw new Error("retired server update ran");
+          }),
+        );
       });
+      expect(scopeSignal?.aborted).toBe(true);
 
       return createElement(
         "span",

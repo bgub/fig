@@ -224,7 +224,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loaded");
   });
 
-  it("keeps post-await transition helper updates in the transition lane", async () => {
+  it("keeps explicitly scoped post-await helper updates in the transition lane", async () => {
     const gate = deferred<void>();
     const pending = deferred<string>();
     let setValue: ((value: Promise<string> | null) => void) | null = null;
@@ -254,9 +254,9 @@ describe("@bgub/fig-dom suspense", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Ready");
 
-    void transition(async () => {
+    void transition(async (_signal, update) => {
       await gate.promise;
-      setValue?.(pending.promise);
+      update(() => setValue?.(pending.promise));
     });
     await waitForHostTurns();
     expect(container.textContent).toBe("Ready");

@@ -22,7 +22,7 @@ Fig keeps React's modern runtime ideas—fibers, lanes, hooks, Suspense, streami
 - There is no `memo()`. Fig's bailouts preserve child identity automatically; memoize a child element when you intentionally want to pin a subtree.
 - React's `use(resource)` is split into `readContext`, `readPromise`, and `readData`.
 - `useStableEvent` is the general stable-callback primitive. It is not limited to effects and receives Fig's trailing signal.
-- Async transitions keep post-`await` updates in the transition. Hook transitions and actions are cancellable; actions are last-run-wins rather than serial.
+- Async transitions provide `(signal, update)`; wrap post-`await` work in `update` to retain its original transition ownership. Hook transitions and actions are cancellable; actions are last-run-wins rather than serial.
 - Server action transport belongs to frameworks.
 
 See [Hooks](./hooks.md) and [Rendering](./rendering.md).
@@ -53,7 +53,7 @@ See [View Transitions](./view-transitions.md).
 
 - Data resources live in `@bgub/fig`. Their array keys are canonical identities shared by reads, mutations, hydration, and Payload.
 - The main freshness operations are `invalidateData` (mark stale) and `refreshData` (fetch now and return a result union).
-- Ambient data functions work only during Fig's synchronous execution window. Capture `readDataStore()` or use `root.data` after `await`.
+- Ambient data functions work only during Fig's synchronous execution window. Capture `readDataStore()`, use `root.data`, or re-enter an explicit transition `update` after `await`.
 - Renderers install the store lazily from a resource; importing Fig does not register a global store.
 - Asset resources replace React's implicit hoistables with plain descriptors such as `stylesheet`, `preload`, `script`, `title`, and `meta`.
 

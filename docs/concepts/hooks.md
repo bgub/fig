@@ -6,7 +6,7 @@ Fig keeps React's hook model but gives long-lived callbacks one consistent clean
 
 ## The Signal Contract
 
-A callback that outlives its call site receives a signal and returns nothing. The signal aborts when that particular run no longer owns the work.
+A callback that outlives its call site receives a signal. The signal aborts when that particular run no longer owns the work. Effect callbacks return nothing; transition callbacks may return a promise that defines their lifetime, and actions return their next state or a promise for it.
 
 | Callback | Signal aborts on |
 | --- | --- |
@@ -14,12 +14,15 @@ A callback that outlives its call site receives a signal and returns nothing. Th
 | `bind` | identity change, unmount, Activity hide |
 | `on()` handlers | re-entry, listener removal |
 | `useStableEvent` handlers | re-entry, unmount, Activity hide |
-| `useTransition` callbacks | superseding run, unmount, Activity hide |
+| `useTransition` callbacks | callback settlement, superseding run, unmount, Activity hide |
+| `transition()` callbacks | callback settlement |
 | `ViewTransition.onTransition` | native view transition finishes |
-| `useActionState` actions | superseding run, unmount, Activity hide |
+| `useActionState` actions | action settlement, superseding run, unmount, Activity hide |
 | data-resource loaders | a newer value publishes, rejection, store disposal, entry eviction |
 
 The signal is always the lifetime indicator. Fig callbacks never return cleanup functions.
+
+For transitions and actions, an aborted signal means the callback no longer owns work. Successful return or fulfillment aborts it too; `signal.aborted` does not distinguish success, failure, and cancellation. Abort listeners are lifetime cleanup and run on normal completion as well as cancellation. Check the signal inside a still-running callback to avoid publishing cancelled work; use the callback's result or error to determine its outcome. Aborting on successful settlement does not discard the action's returned value.
 
 ## State
 
@@ -70,13 +73,28 @@ Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effec
 
 ## Transitions
 
-`transition(callback, options?)` and `useTransition()` mark lower-priority work. Async callbacks keep `isPending` true until they settle, and updates after `await` retain transition priority through the ambient fallback described below. Both the top-level function and the hook's `start` function accept `{ types?: readonly string[]; viewTransition?: "interrupt" }`; native animation types and interruption are described in the [View Transitions concept](./view-transitions.md#transition-options).
+`transition(callback, options?)` and `useTransition()` mark lower-priority work. Callbacks receive `(signal, update)`. Synchronous updates inherit transition priority; after `await`, use `update(() => ...)` to re-enter the original transition. Async hook callbacks keep `isPending` true until they settle and their scheduled updates commit. Both the top-level function and the hook's `start` function accept `{ types?: readonly string[]; viewTransition?: "interrupt" }`; native animation types and interruption are described in the [View Transitions concept](./view-transitions.md#transition-options).
 
 Transitions on unrelated state queues can render and commit independently within one root. When one transition suspends under an already-revealed Suspense boundary, it retains its previous content without holding a ready sibling transition or that sibling's pending indicator.
 
 Updates assigned to one transition lane render together. Pending transitions that update the same state queue are entangled: they render together, including other updates in those transitions. This lets newer selections supersede older ones without exposing half of a related update. Dependencies are transitive across shared queues and are retired when work completes. Sync/default updates retain their higher priority and queue rebasing behavior.
 
-Independence is a scheduling policy, not a promise of a separate lane for every operation: the finite lane pool can reuse a pending lane. Async continuation attribution is also unchanged: pending async callbacks keep an ambient transition-priority fallback, which cannot distinguish overlapping callbacks. Post-`await` updates may share a lane even when they belong to different operations. Explicit async ownership is a separate concern.
+Independence is a scheduling policy, not a promise of a separate lane for every operation: the finite lane pool can reuse a pending lane. Each explicit `update` re-enters its captured lane even when other async callbacks are pending. Unwrapped post-`await` setters and unrelated events use their ordinary scheduling priority; pending promises never establish an ambient transition lane.
+
+```tsx
+const [isPending, start] = useTransition();
+start(async (signal, update) => {
+  const results = await fetchResults({ signal });
+  update(() => {
+    setResults(results);
+    setSelectedResult(null);
+  });
+});
+```
+
+`update` runs its callback synchronously and restores the previous priority and data-store context afterward, including on throw. It also restores the data store captured when the transition began, so free data APIs work inside it. The callback type rejects promise and thenable return values; synchronous return values are allowed and ignored. Await outside `update` and call it again for each synchronous group of updates. A runtime check also throws if an untyped caller returns a thenable, but it cannot cancel an async callback that has already started: its continuation can still run outside the scope. Errors from a live update propagate to its caller.
+
+The returned callback promise defines the scope lifetime. The signal aborts and the entire `update` callback becomes inert when the callback settles, throws, or is cancelled. Synchronous callbacks close on return. A saved `update` handle cannot extend that lifetime; return or await all asynchronous work that needs it. Signal retirement does not mean all scheduled work has committed.
 
 A ready commit may still wait for an active browser View Transition. Related updates continue to coalesce while that commit is parked; see [View Transitions](./view-transitions.md#one-transition-at-a-time).
 
@@ -86,13 +104,17 @@ Each `useTransition` hook is one cancellation domain. Starting another run abort
 - its eventual rejection is swallowed; and
 - state it already committed stays committed.
 
-Abort is a signal to stop, not an undo operation. The top-level `transition()` has no signal because it has no hook identity to supersede and no component lifetime to follow.
+Unmounting the owner or hiding its enclosing Activity also retires the run. Abort is a signal to stop, not an undo operation: already committed state stays committed, and arbitrary code outside `update` is not suppressed. A stale starter called after unmount receives an already-aborted signal and an inert update handle.
+
+Top-level `transition()` uses the same `(signal, update)` contract and returns the callback result unchanged. Its lifetime follows callback settlement; it has no hook owner to supersede or unmount. Server and renderer-free scopes use the same callback lifetime, without client scheduling.
 
 ## Actions
 
 `useActionState(action, initialState)` keeps React's argument order and adds an `AbortSignal` after the runner's arguments. Declare that final parameter so TypeScript can infer the argument tuple.
 
-Actions are last-run-wins. A generation counter prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. Server action transport belongs to framework integrations.
+Actions are last-run-wins. A generation counter prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. The signal also aborts when the action settles. Fig schedules the returned value in the action’s own transition lane automatically; arbitrary post-`await` setters inside the action have ordinary priority. Server action transport belongs to framework integrations.
+
+Prefer returning the next action state rather than scheduling it through a separate setter. The returned value retains its transition lane even when unrelated async transitions are pending. The action signal retires on settlement, while `isPending` can remain true until that value commits (for example, if rendering it suspends). Actions receive no `update` handle; use `useTransition` when a workflow needs explicit ownership of several post-`await` setters.
 
 ## Other Hooks
 

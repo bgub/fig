@@ -51,7 +51,7 @@ const [isPending, start] = useTransition();
 start((signal) => refresh(signal), { types: ["refresh"] });
 ```
 
-Fig records types when an update reaches a root, rather than reading mutable global state at commit time. Nested scopes on the same lane union their types in insertion order, duplicate values collapse, and a commit unions the types of all rendered lanes. Types therefore follow the updates they label across async callbacks and concurrent roots without leaking into unrelated retries, deferred reveals, or later commits.
+Fig records types when an update reaches a root, rather than reading mutable global state at commit time. Nested scopes on the same lane union their types in insertion order, duplicate values collapse, and a commit unions the types of all rendered lanes. Types therefore follow the updates they label across async callbacks and concurrent roots without leaking into unrelated retries, deferred reveals, or later commits. After `await`, call the transition’s explicit `update` to retain that ownership. Scope options release on callback settlement or cancellation; options already recorded on scheduled root work remain attached to that work.
 
 When the resulting list is non-empty, Fig DOM calls `document.startViewTransition({ update, types })`. It keeps the callback-only browser form for an untyped transition.
 

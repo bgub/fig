@@ -6,12 +6,14 @@ import type {
   FigContext,
   StateSetter,
   StartTransition,
+  TransitionCallback,
 } from "@bgub/fig";
 import type {
   DataResource,
   RenderDispatcher,
   StableEventCallerArgs,
 } from "@bgub/fig/internal";
+import { runTransitionScope } from "@bgub/fig/internal";
 import { escapeAttribute } from "./escaping.ts";
 import type { ServerErrorPayload, ServerRenderOptions } from "./types.ts";
 
@@ -193,12 +195,10 @@ export function createStaticDispatcher(
   };
 }
 
-// Server transitions run synchronously to completion; the signal never
-// aborts because there is no supersede/unmount lifecycle during a request.
-function startServerTransition(
-  callback: (signal: AbortSignal) => void | PromiseLike<void>,
-): void {
-  void callback(new AbortController().signal);
+// There is no scheduling priority on the server, but callback lifetimes and
+// explicit update scopes obey the same contract as client transitions.
+function startServerTransition(callback: TransitionCallback): void {
+  void runTransitionScope(callback, (run) => run());
 }
 
 function rejectStableEventCall<Args extends unknown[], Result>(

@@ -208,6 +208,11 @@ const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;
 
+/** Captures an optional data store for synchronous scope re-entry. */
+export function getCurrentDataStore(): FigDataStore | null {
+  return currentDataStore;
+}
+
 /** Resolves current data store. */
 export function resolveCurrentDataStore(
   message = "Data resource APIs require a Fig data store.",

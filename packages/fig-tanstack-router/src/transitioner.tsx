@@ -97,7 +97,7 @@ export function Transitioner({
     (signal) => {
       setupScrollRestoration(router);
       const unsubscribe = router.history.subscribe((update: HistoryUpdate) => {
-        void transition(() => router.load(update)).catch(logRouterLoadError);
+        void router.load(update).catch(logRouterLoadError);
       });
       signal.addEventListener("abort", unsubscribe, { once: true });
 

@@ -679,7 +679,7 @@ describe("@bgub/fig-tanstack-router", () => {
     expect(userRouteApi.id).toBe("/users/$id");
   });
 
-  it("keeps a history navigation promise in its transition scope", async () => {
+  it("does not make route loading an ambient async transition", async () => {
     const router = makeRouter();
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -691,17 +691,19 @@ describe("@bgub/fig-tanstack-router", () => {
     const navigation = new Promise<void>(() => undefined);
     const load = vi.spyOn(router, "load").mockReturnValue(navigation);
     const transitionResults: unknown[] = [];
-    const previousTransitionHandler = setTransitionHandler((callback) => {
-      const result = callback();
-      transitionResults.push(result);
-      return result;
-    });
+    const previousTransitionHandler = setTransitionHandler(
+      (callback, options) => {
+        const result = previousTransitionHandler(callback, options);
+        transitionResults.push(result);
+        return result;
+      },
+    );
 
     try {
       router.history.push("/users/42");
 
       expect(load).toHaveBeenCalledOnce();
-      expect(transitionResults).toContain(navigation);
+      expect(transitionResults).toEqual([]);
     } finally {
       setTransitionHandler(previousTransitionHandler);
     }

@@ -120,15 +120,17 @@ const Theme = createContext("light");
 ```tsx
 const [isPending, start] = useTransition();
 
-start(async (signal) => {
+start(async (signal, update) => {
   const results = await fetch(`/api/heavy?q=${q}`, { signal }).then((r) =>
     r.json(),
   );
-  setResults(results); // post-await updates stay in the transition
+  update(() => setResults(results));
 });
 ```
 
-Superseded and unmounted runs are aborted and retired: their pending slot releases immediately. A callback that ignores an abort signal and keeps running may still update state. (`useActionState`, unlike transitions, generation-guards results so the last run wins.) Top-level `transition(cb)` exists for scopes without a hook.
+Use `update` for transition-owned work after `await`. It runs synchronously in the original transition, and becomes inert when the callback settles, is superseded, or its owner unmounts or hides. Unwrapped setters after `await` run at ordinary priority. Top-level `transition` accepts the same `(signal, update)` callback for scopes without a hook.
+
+Transition and action signals also abort on successful completion. Treat `signal.aborted` as “this callback's lifetime has ended”; the returned value or error tells you whether it succeeded. Abort listeners run on success as well as cancellation, and the signal may already be aborted while `isPending` is still true because the scheduled UI has not committed yet. In `useActionState`, return the next state to keep its update in the action's transition lane; a separate setter after `await` has ordinary priority.
 
 ### SSR
 

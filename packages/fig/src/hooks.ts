@@ -1,7 +1,7 @@
 import type { FigContext } from "./context.ts";
 import type { DataResource, FigDataStore } from "./data.ts";
 import { resolveCurrentDataStore } from "./data.ts";
-import type { TransitionOptions } from "./transition.ts";
+import type { TransitionCallback, TransitionOptions } from "./transition.ts";
 
 // The useState updater: accepts the next state, or an updater function of
 // the previous state for stale-closure safety.
@@ -11,7 +11,7 @@ export type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
 export type ExternalStoreSubscribe = (callback: () => void) => () => void;
 // Fig appends the AbortSignal after the runner's args (the data-loader
 // shape). The signal aborts when a newer run supersedes this one, when the
-// owning component unmounts, and when an enclosing Activity hides.
+// owning component unmounts, when an enclosing Activity hides, or on settlement.
 /** Describes action state action. */
 export type ActionStateAction<S, Args extends unknown[]> = (
   previousState: S,
@@ -23,18 +23,19 @@ export type ActionStateRunner<Args extends unknown[]> = (...args: Args) => void;
 /**
  * Runs state updates scheduled by `callback` at transition priority. If
  * `callback` returns a thenable, `useTransition` keeps `isPending` true until
- * it settles and updates after an `await` remain in the transition priority
- * scope.
+ * it settles and its scheduled updates commit. Use the supplied update callback
+ * to explicitly re-enter the transition after an await.
  *
  * The callback receives an `AbortSignal` that aborts when a newer transition
  * starts from the same hook, when the owning component unmounts, and when an
- * enclosing Activity hides. Each `useTransition` hook is one cancellation
+ * enclosing Activity hides. It also aborts when the callback settles, closing
+ * its explicit update handle. Each `useTransition` hook is one cancellation
  * domain — use separate hooks for independently cancellable workflows. An
- * aborted run is retired: its pending slot is released immediately and its
+ * cancelled run is retired: its pending slot is released immediately and its
  * settlement (including an aborted fetch's rejection) is inert.
  */
 export type StartTransition = (
-  callback: (signal: AbortSignal) => void | PromiseLike<void>,
+  callback: TransitionCallback,
   options?: TransitionOptions,
 ) => void;
 type Callback = (...args: never[]) => unknown;
@@ -103,13 +104,14 @@ export function useState<S>(initialState: S | (() => S)): [S, StateSetter<S>] {
  * Tracks state returned by a client-side action. The action receives the
  * previous committed state first, then the runner's arguments, then an
  * `AbortSignal` Fig appends (declare the trailing signal parameter — it also
- * drives `Args` inference). Async actions run in a transition priority scope
- * and keep `isPending` true until they settle.
+ * drives `Args` inference). Fig schedules the returned value in the action’s
+ * transition lane and keeps `isPending` true until settlement and commit.
+ * Arbitrary post-await setters have ordinary priority.
  *
  * Runs are last-run-wins: starting a new run aborts the previous one's
  * signal and retires it — a retired run's settlement (value or rejection)
  * never touches state or pending. The signal also aborts on unmount and
- * when an enclosing Activity hides.
+ * when an enclosing Activity hides or the action settles.
  */
 export function useActionState<S, Args extends unknown[]>(
   action: ActionStateAction<S, Args>,
