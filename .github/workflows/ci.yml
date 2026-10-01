@@ -35,6 +35,12 @@ jobs:
       # Static checks
       - run: pnpm check
 
+      - name: Validate JSR packages
+        run: |
+          for package in fig fig-reconciler fig-dom fig-server fig-refresh; do
+            pnpm --dir "packages/$package" exec jsr publish --dry-run
+          done
+
       # Tests
       - run: pnpm test
 

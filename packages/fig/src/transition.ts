@@ -51,7 +51,7 @@ export function transition<T>(
 export function runTransitionScope<T>(
   callback: TransitionCallback<T>,
   enter: <Result>(run: () => Result) => Result,
-  controller = new AbortController(),
+  controller: AbortController = new AbortController(),
 ): T {
   const signal = controller.signal;
   const store = getCurrentDataStore();
