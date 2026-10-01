@@ -404,6 +404,9 @@ export interface HostConfig<Container, Instance, TextInstance> {
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
   completeRootHydration?(container: Container): void;
+  // Runs outside commit, before any follow-up render. May dispatch events
+  // whose handlers use flushSync.
+  flushHydrationEvents?(container: Container): void;
   removeDehydratedSuspenseBoundary?(
     boundary: DehydratedSuspenseBoundary<Instance, TextInstance>,
   ): void;
@@ -1257,6 +1260,22 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
+  const pendingHydrationEventContainers = new Set<Container>();
+
+  function flushHydrationEvents(container: Container): void {
+    if (host.flushHydrationEvents === undefined) return;
+    pendingHydrationEventContainers.add(container);
+    flushPendingHydrationEvents();
+  }
+
+  function flushPendingHydrationEvents(): void {
+    if (commitDepth > 0) return;
+    for (const container of pendingHydrationEventContainers) {
+      pendingHydrationEventContainers.delete(container);
+      host.flushHydrationEvents?.(container);
+    }
+  }
+
   function flushPostCommitSyncWork(): void {
     if (
       commitDepth > 0 ||
@@ -1494,6 +1513,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (candidate === NoLanes && root.finishedWork !== null) {
         if (commitRoot(root, root.finishedWork)) return;
         finishRootWork(root);
+        flushHydrationEvents(root.container);
         flushPostCommitSyncWork();
         return;
       }
@@ -1560,6 +1580,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
     finishRootWork(root);
+    flushHydrationEvents(root.container);
     flushPostCommitSyncWork();
   }
 
@@ -3954,6 +3975,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (!root.pendingCoordinatedCommit) return;
         root.pendingCoordinatedCommit = false;
         finishRootWork(root);
+        flushHydrationEvents(root.container);
         flushPostCommitSyncWork();
       };
       if (commitCoordinator !== null) {
@@ -4000,7 +4022,10 @@ export function createRenderer<Container, Instance, TextInstance>(
               }
               return undefined;
             } finally {
-              if (isDeferredCommit) commitDepth -= 1;
+              if (isDeferredCommit) {
+                commitDepth -= 1;
+                flushPendingHydrationEvents();
+              }
             }
           },
         };
@@ -4032,6 +4057,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       return false;
     } finally {
       commitDepth -= 1;
+      flushPendingHydrationEvents();
     }
   }
 

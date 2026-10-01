@@ -5,10 +5,11 @@ import {
 } from "@bgub/fig/internal";
 import { updateBind } from "./bind.ts";
 import { eventDescriptorsFromProps } from "./event-descriptor.ts";
-import { updateEvents } from "./events.ts";
+import { queueHydrationFormChange, updateEvents } from "./events.ts";
 import {
   type HostUpdateOptions,
   hydratedFormAttributeName,
+  hydratedFormChanged,
   isFormProp,
   optionMatchesInheritedSelectValue,
   updateFormControl,
@@ -172,6 +173,8 @@ export function hydrateElement(element: Element, nextProps: Props): void {
   }
   const serverAttributes = __DEV__ ? attributeNames(element) : [];
 
+  if (hydratedFormChanged(element, nextProps))
+    queueHydrationFormChange(element);
   updateElement(element, {}, nextProps, { hydrating: true });
 
   if (__DEV__ && nextProps.suppressHydrationWarning !== true) {

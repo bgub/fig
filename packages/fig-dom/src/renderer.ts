@@ -26,6 +26,8 @@ import {
   registerPortalContainer,
   removePortalContainer,
   replayQueuedEvents,
+  flushHydrationFormChanges,
+  discardHydrationFormChanges,
   setEventBatching,
 } from "./events.ts";
 import {
@@ -136,6 +138,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
+    discardHydrationFormChanges(container);
     clearDomChildren(container, isDocumentContainer(container));
     // Hydration-mismatch recovery may detach queued event targets; drain them.
     queueMicrotask(replayQueuedEvents);
@@ -157,6 +160,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   commitUpdate: updateElement,
   commitHydratedInstance: hydrateElement,
+  flushHydrationEvents: flushHydrationFormChanges,
   getActivityBoundary: activityBoundary,
   getFirstActivityHydratable: (boundary) =>
     nextHydratableNode(

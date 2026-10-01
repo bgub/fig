@@ -17,6 +17,10 @@ import {
   withCurrentTarget,
   withPropagationState,
 } from "./event-propagation.ts";
+import {
+  holdHydratedFormState,
+  releaseHydratedFormState,
+} from "./form-controls.ts";
 import { isElementNode, parentOf } from "./tree.ts";
 
 /** Describes container. */
@@ -278,6 +282,7 @@ function adoptEarlyEvents(root: Container): void {
 }
 
 export function unregisterRoot(container: Container): void {
+  discardHydrationFormChanges(container);
   const record = containerRecords.get(container);
   if (record === undefined) return;
 
@@ -483,6 +488,145 @@ export function removePortalContainer(container: Container): void {
   }
 }
 
+const hydrationFormChanges = new Set<Element>();
+let hydratingFormEvent: Event | null = null;
+const replayedFormEvents = new WeakMap<Event, Set<Container>>();
+const hydrationActivations = new WeakMap<
+  Element,
+  { root: Container; event: Event; remaining: number }
+>();
+
+function markFormEventReplayed(event: Event, root: Container): void {
+  let roots = replayedFormEvents.get(event);
+  if (roots === undefined) {
+    roots = new Set();
+    replayedFormEvents.set(event, roots);
+  }
+  roots.add(root);
+}
+
+function consumeHydrationActivation(root: Container, event: Event): boolean {
+  if (!event.isTrusted || !isElementNode(event.target)) return false;
+  const bit = event.type === "input" ? 1 : event.type === "change" ? 2 : 0;
+  const activation = hydrationActivations.get(event.target);
+  if (
+    bit === 0 ||
+    activation?.root !== root ||
+    (activation.remaining & bit) === 0 ||
+    // An activation nested inside the hydration click has its own events.
+    activation.event.eventPhase !== 0
+  )
+    return false;
+  activation.remaining &= ~bit;
+  if (activation.remaining === 0) hydrationActivations.delete(event.target);
+  markFormEventReplayed(event, root);
+  return true;
+}
+
+export function queueHydrationFormChange(element: Element): void {
+  holdHydratedFormState(element);
+  hydrationFormChanges.add(element);
+}
+
+export function discardHydrationFormChanges(container: Container): void {
+  for (const element of hydrationFormChanges) {
+    const listenerTarget = listenerTargetFor(element);
+    const root =
+      listenerTarget === null
+        ? null
+        : (containerRecords.get(listenerTarget)?.portalOwner?.root ??
+          listenerTarget);
+    if (root !== null && root !== container) continue;
+    hydrationFormChanges.delete(element);
+    releaseHydratedFormState(element, false);
+  }
+}
+
+export function flushHydrationFormChanges(container: Container): void {
+  const targets: Array<{ element: Element; listenerTarget: Container }> = [];
+  for (const element of hydrationFormChanges) {
+    const listenerTarget = listenerTargetFor(element);
+    if (listenerTarget === null) {
+      hydrationFormChanges.delete(element);
+      releaseHydratedFormState(element, false);
+      continue;
+    }
+    const record = containerRecords.get(listenerTarget);
+    const root = record?.portalOwner?.root ?? listenerTarget;
+    if (root !== container) continue;
+    hydrationFormChanges.delete(element);
+    targets.push({ element, listenerTarget });
+  }
+  if (targets.length === 0) return;
+  const sourceEvent = hydratingFormEvent;
+  try {
+    // One adoption batch protects every edited field until handlers have read
+    // live state. No click replay: it could activate/toggle a checkable field.
+    batch(() => {
+      for (const { element, listenerTarget } of targets) {
+        if (!targetWithinRoot(listenerTarget, element)) continue;
+        replayHydrationFormChange(
+          element,
+          container,
+          listenerTarget,
+          sourceEvent,
+        );
+      }
+    });
+  } finally {
+    for (const { element, listenerTarget } of targets)
+      releaseHydratedFormState(
+        element,
+        targetWithinRoot(listenerTarget, element),
+      );
+  }
+}
+
+function replayHydrationFormChange(
+  element: Element,
+  root: Container,
+  listenerTarget: Container,
+  sourceEvent: Event | null,
+): void {
+  const inputType = element.getAttribute("type")?.toLowerCase();
+  // Radios notify only the selected member. Both changed members stay
+  // protected until adoption, since writing its peer can uncheck it.
+  if (inputType === "radio" && !(element as HTMLInputElement).checked) return;
+  const checkable = inputType === "checkbox" || inputType === "radio";
+  if (
+    sourceEvent?.type === "click" &&
+    sourceEvent.target === element &&
+    checkable
+  ) {
+    // Browser activation emits input/change after click dispatch. We already
+    // notify here; handlers may then adopt, format, or reject the live state.
+    const activation = { root, event: sourceEvent, remaining: 3 };
+    hydrationActivations.set(element, activation);
+    setTimeout(() => {
+      if (hydrationActivations.get(element) === activation)
+        hydrationActivations.delete(element);
+    }, 0);
+  }
+  const textInput =
+    element.localName === "textarea" ||
+    (element.localName === "input" && !checkable);
+  for (const type of ["input", "change"]) {
+    const liveEvent =
+      sourceEvent?.target === element && sourceEvent.type === type
+        ? sourceEvent
+        : null;
+    const EventConstructor =
+      type === "input" && textInput && typeof InputEvent === "function"
+        ? InputEvent
+        : Event;
+    const event = liveEvent ?? new EventConstructor(type, { bubbles: true });
+    if (liveEvent === null)
+      Object.defineProperty(event, "target", { value: element });
+    else markFormEventReplayed(event, root);
+    dispatchReplayedEvent({ event, root, listenerTarget, type });
+  }
+}
+
 export function replayQueuedEvents(): void {
   // Replays preserve the user's input order per root: a still-blocked entry
   // stalls later entries of ITS root only, so an independent root's
@@ -562,6 +706,11 @@ function dispatchRootEvent(
     if (!targetWithinRoot(listenerTarget, event.target)) return;
   }
   if (hydrateForEvent(root, type, event) === "blocked") return;
+  if (
+    replayedFormEvents.get(event)?.has(root) ||
+    consumeHydrationActivation(root, event)
+  )
+    return;
 
   const entries = extractDispatches(
     root,
@@ -600,6 +749,13 @@ function hydrateForEvent(
   type: string,
   event: Event,
 ): HydrationTargetResult {
+  if (type === "click" && isElementNode(event.target)) {
+    // A cancelled activation has no input/change. A later click starts fresh,
+    // even in the same task before the expiration timer has run.
+    const activation = hydrationActivations.get(event.target);
+    if (activation?.event.eventPhase === 0)
+      hydrationActivations.delete(event.target);
+  }
   const hydrate = containerRecords.get(root)?.hydrate ?? null;
   if (hydrate === null) return "none";
 
@@ -608,9 +764,17 @@ function hydrateForEvent(
   if (previousResult !== undefined) return previousResult;
 
   const priority = eventPriority(type);
-  const result = runWithEventPriority(priority, () =>
-    hydrate(event.target, priority),
-  );
+  const previousFormEvent = hydratingFormEvent;
+  if (type === "input" || type === "change" || type === "click")
+    hydratingFormEvent = event;
+  let result: HydrationTargetResult;
+  try {
+    result = runWithEventPriority(priority, () =>
+      hydrate(event.target, priority),
+    );
+  } finally {
+    hydratingFormEvent = previousFormEvent;
+  }
   if (results === undefined) {
     results = new WeakMap();
     eventHydrationResults.set(event, results);
@@ -741,6 +905,14 @@ function invokeDispatches(
 
     try {
       dispatchEventSlot(entry, event);
+    } catch (error) {
+      // A delegated callback is a native listener: reporting its error must
+      // not stop other listeners or turn event replay into a render failure.
+      if (typeof reportError === "function") reportError(error);
+      else
+        setTimeout(() => {
+          throw error;
+        });
     } finally {
       // A slot detached mid-dispatch still ran — it was subscribed when the
       // event fired — but its signal must end aborted per the abort-on-removal

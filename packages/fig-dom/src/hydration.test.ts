@@ -350,8 +350,8 @@ describe("@bgub/fig-dom hydration", () => {
       console.error = originalError;
     }
 
-    expect(optionA.selected).toBe(false);
-    expect(optionB.selected).toBe(true);
+    expect(optionA.selected).toBe(true);
+    expect(optionB.selected).toBe(false);
     expect(errors).toEqual([
       "Hydration preserved extra server attributes or styles on <option>: " +
         "selected. They were preserved, so this element now differs from " +
@@ -2443,7 +2443,7 @@ describe("@bgub/fig-dom hydration", () => {
     });
   });
 
-  it("hydrates controlled form values", () => {
+  it("preserves controlled form edits during hydration", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
     input.setAttribute("value", "Server");
@@ -2459,7 +2459,7 @@ describe("@bgub/fig-dom hydration", () => {
     );
 
     expect(container.childNodes).toEqual([input]);
-    expect(input.value).toBe("Client");
+    expect(input.value).toBe("User typed");
     expect(input.defaultValue).toBe("Server");
     expect(input.attributes.value).toBe("Server");
   });

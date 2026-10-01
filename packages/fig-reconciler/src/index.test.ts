@@ -314,6 +314,69 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Deferred");
   });
 
+  it.each([
+    "ordinary",
+    "inline-deferred",
+    "deferred",
+    "deferred-inner-capture",
+  ])(
+    "flushes hydration notifications outside commit before sync follow-up work (%s)",
+    (mode) => {
+      const container = new TestElement("root");
+      let setCount: ((value: number) => void) | undefined;
+      let replay = true;
+      const seen: string[] = [];
+      const renderer = createRenderer({
+        ...host,
+        flushHydrationEvents() {
+          if (!replay) return;
+          replay = false;
+          seen.push(container.textContent);
+          renderer.flushSync(() => setCount?.(1));
+          // If this hook ran inside commit, flushSync would be deferred.
+          seen.push(container.textContent);
+        },
+      });
+      let complete: (() => void) | undefined;
+      if (mode !== "ordinary") {
+        let first = true;
+        renderer.installCommitCoordinator({
+          name: "hydration-replay-coordinator",
+          commit(context) {
+            if (!first) return false;
+            first = false;
+            complete = () => {
+              context.runMutation(() => {
+                if (mode === "deferred-inner-capture")
+                  context.captureFinished();
+              });
+              if (mode !== "deferred-inner-capture") context.captureFinished();
+            };
+            if (mode === "inline-deferred") complete();
+            return "deferred";
+          },
+        });
+      }
+      function App() {
+        const [count, set] = useState(0);
+        setCount = set;
+        useBeforePaint(() => {
+          renderer.flushSync(() => set(2));
+        }, []);
+        return createElement("span", null, String(count));
+      }
+      const root = renderer.createRoot(container);
+      renderer.flushSync(() => root.render(createElement(App, null)));
+      if (mode === "deferred" || mode === "deferred-inner-capture") {
+        expect(seen).toEqual([]);
+        complete?.();
+      }
+      expect(seen).toEqual(["0", "1"]);
+      expect(container.textContent).toBe("1");
+      root.unmount();
+    },
+  );
+
   it("rejects capture completion before the mutation transaction", () => {
     const renderer = createRenderer(host);
     const root = renderer.createRoot(new TestElement("root"));

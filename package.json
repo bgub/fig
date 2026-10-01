@@ -18,12 +18,13 @@
     "test:bench": "node --test benchmarks/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mts",
     "test:dom": "turbo run test --filter=@bgub/fig-dom",
-    "test:e2e": "pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
+    "test:e2e": "pnpm test:hydration && pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
     "test:hmr": "FIG_DEV_SOURCE= turbo run build --filter=@bgub/fig-demo-tanstack-start... && pnpm --filter @bgub/fig-demo-tanstack-start probe:hmr",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
     "tegami": "node scripts/tegami.mts",
-    "size": "size-limit"
+    "size": "size-limit",
+    "test:hydration": "playwright test packages/fig-dom/e2e/hydration-forms.spec.ts --workers=1"
   },
   "size-limit": [
     {
@@ -38,7 +39,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "34.5 kB"
+      "limit": "35.6 kB"
     },
     {
       "path": "packages/fig-ui/dist/accordion.js",
@@ -179,21 +180,21 @@
     {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
-      "limit": "26.8 kB"
+      "limit": "27.9 kB"
     },
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "30 kB"
+      "limit": "31.2 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "37.7 kB"
+      "limit": "38.8 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "17.8 kB"
+      "limit": "17.9 kB"
     },
     {
       "name": "Fig TanStack Router Start surface",
