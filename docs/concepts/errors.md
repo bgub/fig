@@ -35,6 +35,10 @@ An uncaught render error is rethrown to a `flushSync` caller. Outside `flushSync
 
 Hydration recovery reports through `onRecoverableError`. If the root does not provide a handler, Fig reports the recoverable error to the console. Fig DOM does not provide React's root-level `onCaughtError`; a boundary's `onError` prop owns caught-error reporting.
 
+DOM event-handler errors, including hydration replay handlers, follow native listener semantics: they report globally through `reportError` (or a detached task when it is unavailable). They do not clear the rendered tree or interrupt other listeners unless the handler explicitly stops propagation.
+
+Hydration form-adoption callback errors also report globally without clearing the tree or stopping other adopters. A synchronous render failure triggered by application updates still follows the ordinary root error contract.
+
 ## Server Errors And Digests
 
 Server errors cross the wire only through:

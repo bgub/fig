@@ -1,5 +1,5 @@
 import { createElement, type FigNode } from "@bgub/fig";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // White-box import of the reconciler's lane module (aliased to source, so it
 // shares state with the reconciler under test): lanes are the precise
 // observable for handler priority — any public projection would collapse
@@ -522,6 +522,59 @@ describe("@bgub/fig-dom events", () => {
 
     expect(calls).toEqual(["child:first", "child:second"]);
   });
+
+  it.each([false, true])(
+    "reports handler errors and continues delegated dispatch (capture=%s)",
+    (capture) => {
+      const container = new FakeElement("root");
+      const root = createRoot(container as unknown as Element);
+      const error = new Error("Handler failed");
+      const report = vi.fn();
+      const calls: string[] = [];
+      vi.stubGlobal("reportError", report);
+      try {
+        flushSync(() =>
+          root.render(
+            createElement(
+              "main",
+              {
+                mix: on("click", () => {
+                  calls.push("parent");
+                }),
+              },
+              createElement("button", {
+                mix: [
+                  on(
+                    "click",
+                    () => {
+                      throw error;
+                    },
+                    { capture },
+                  ),
+                  on(
+                    "click",
+                    () => {
+                      calls.push("child");
+                    },
+                    { capture },
+                  ),
+                ],
+              }),
+            ),
+          ),
+        );
+        const main = container.childNodes[0] as FakeElement;
+        const button = main.childNodes[0] as FakeElement;
+        expect(() => button.dispatch("click")).not.toThrow();
+        expect(report).toHaveBeenCalledExactlyOnceWith(error);
+        expect(calls).toEqual(["child", "parent"]);
+        expect(container.childNodes).toEqual([main]);
+      } finally {
+        flushSync(() => root.unmount());
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("delegates the native bubbling focusin/focusout with Fig bubble semantics", () => {
     for (const type of ["focusin", "focusout"]) {

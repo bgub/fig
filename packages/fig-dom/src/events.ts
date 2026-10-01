@@ -17,6 +17,13 @@ import {
   withCurrentTarget,
   withPropagationState,
 } from "./event-propagation.ts";
+import {
+  holdHydratedFormState,
+  releaseHydratedFormState,
+  hydratedFormChanged,
+  type HydratedFormState,
+} from "./form-controls.ts";
+import { detachFormAdoption, invokeFormAdoption } from "./form-adoption.ts";
 import { isElementNode, parentOf } from "./tree.ts";
 
 /** Describes container. */
@@ -278,6 +285,7 @@ function adoptEarlyEvents(root: Container): void {
 }
 
 export function unregisterRoot(container: Container): void {
+  discardHydrationFormChanges(container);
   const record = containerRecords.get(container);
   if (record === undefined) return;
 
@@ -395,6 +403,7 @@ export function attachElementEvents(element: Element): void {
 }
 
 export function detachElementEvents(element: Element): void {
+  detachFormAdoption(element);
   const slots = eventSlots.get(element);
   if (slots === undefined) return;
   for (const slot of slots) removeEventSlot(slot);
@@ -481,6 +490,132 @@ export function removePortalContainer(container: Container): void {
   for (const key of parentRecord.listeners.keys()) {
     releaseRootListener(container, key);
   }
+}
+
+interface HydrationFormChange {
+  initial: HydratedFormState;
+  activation: Event | null;
+}
+const hydrationFormChanges = new Map<Element, HydrationFormChange>();
+let hydratingFormEvent: Event | null = null;
+let flushAdoptionUpdates: Batch = (callback) => callback();
+
+export function setFormAdoptionFlushing(flush: Batch): void {
+  flushAdoptionUpdates = flush;
+}
+
+export function queueHydrationFormChange(
+  element: Element,
+  initial: HydratedFormState,
+): void {
+  holdHydratedFormState(element);
+  const source = hydratingFormEvent;
+  const inputType = isElementNode(source?.target)
+    ? source.target.getAttribute("type")?.toLowerCase()
+    : null;
+  const activation =
+    source?.type === "click" &&
+    (inputType === "checkbox" || inputType === "radio")
+      ? source
+      : null;
+  hydrationFormChanges.set(element, { initial, activation });
+}
+
+export function discardHydrationFormChanges(container: Container): void {
+  for (const [element] of hydrationFormChanges) {
+    const listenerTarget = listenerTargetFor(element);
+    const root =
+      listenerTarget === null
+        ? null
+        : (containerRecords.get(listenerTarget)?.portalOwner?.root ??
+          listenerTarget);
+    if (root !== null && root !== container) continue;
+    hydrationFormChanges.delete(element);
+    releaseHydratedFormState(element, false);
+  }
+}
+
+export function flushHydrationFormChanges(container: Container): void {
+  const targets: Array<{
+    element: Element;
+    listenerTarget: Container;
+    change: HydrationFormChange;
+  }> = [];
+  for (const [element, change] of hydrationFormChanges) {
+    const listenerTarget = listenerTargetFor(element);
+    if (listenerTarget === null) {
+      hydrationFormChanges.delete(element);
+      releaseHydratedFormState(element, false);
+      continue;
+    }
+    const record = containerRecords.get(listenerTarget);
+    const root = record?.portalOwner?.root ?? listenerTarget;
+    if (root !== container) continue;
+    // Leave queued targets registered until delivery so unmount/recovery can
+    // cancel a batch waiting for browser activation to finish.
+    targets.push({ element, listenerTarget, change });
+  }
+  if (targets.length === 0) return;
+  const deliver = () => {
+    const pending = targets.filter(
+      ({ element, change }) => hydrationFormChanges.get(element) === change,
+    );
+    if (pending.length === 0) return;
+    // Trusted events can run a microtask checkpoint between listeners. If
+    // dispatch is still active, a task must wait for cancellation to settle.
+    if (
+      pending.some(
+        ({ change }) =>
+          change.activation !== null && change.activation.eventPhase !== 0,
+      )
+    ) {
+      setTimeout(deliver, 0);
+      return;
+    }
+    for (const { element } of pending) hydrationFormChanges.delete(element);
+    try {
+      // flushSync drains synchronous adoption updates while all pending fields
+      // remain protected. Transition-deferred updates deliberately do not adopt.
+      flushAdoptionUpdates(() =>
+        batch(() => {
+          for (const { element, listenerTarget, change } of pending) {
+            if (
+              !targetWithinRoot(listenerTarget, element) ||
+              !hydratedFormChanged(element, change.initial)
+            )
+              continue;
+            if (
+              element.getAttribute("type")?.toLowerCase() === "radio" &&
+              !(element as HTMLInputElement).checked
+            )
+              continue;
+            runWithRootScope(container, () =>
+              runWithEventPriority("discrete", () => {
+                invokeFormAdoption(element, reportHandlerError);
+              }),
+            );
+          }
+        }),
+      );
+    } finally {
+      for (const { element, listenerTarget } of pending)
+        releaseHydratedFormState(
+          element,
+          targetWithinRoot(listenerTarget, element),
+        );
+    }
+  };
+  // Checkbox/radio click state is tentative until dispatch and its default
+  // action finish. Start at the next microtask and recheck dispatch; held
+  // writes prevent intervening controlled commits from changing the result.
+  if (
+    targets.some(
+      ({ change }) =>
+        change.activation !== null && change.activation.eventPhase !== 0,
+    )
+  )
+    queueMicrotask(deliver);
+  else deliver();
 }
 
 export function replayQueuedEvents(): void {
@@ -608,9 +743,17 @@ function hydrateForEvent(
   if (previousResult !== undefined) return previousResult;
 
   const priority = eventPriority(type);
-  const result = runWithEventPriority(priority, () =>
-    hydrate(event.target, priority),
-  );
+  const previousFormEvent = hydratingFormEvent;
+  if (type === "input" || type === "change" || type === "click")
+    hydratingFormEvent = event;
+  let result: HydrationTargetResult;
+  try {
+    result = runWithEventPriority(priority, () =>
+      hydrate(event.target, priority),
+    );
+  } finally {
+    hydratingFormEvent = previousFormEvent;
+  }
   if (results === undefined) {
     results = new WeakMap();
     eventHydrationResults.set(event, results);
@@ -741,6 +884,10 @@ function invokeDispatches(
 
     try {
       dispatchEventSlot(entry, event);
+    } catch (error) {
+      // A delegated callback is a native listener: reporting its error must
+      // not stop other listeners or turn event replay into a render failure.
+      reportHandlerError(error);
     } finally {
       // A slot detached mid-dispatch still ran — it was subscribed when the
       // event fired — but its signal must end aborted per the abort-on-removal
@@ -751,6 +898,14 @@ function invokeDispatches(
       }
     }
   }
+}
+
+function reportHandlerError(error: unknown): void {
+  if (typeof reportError === "function") reportError(error);
+  else
+    setTimeout(() => {
+      throw error;
+    });
 }
 
 function dispatchEventSlot(entry: DispatchEntry, event: Event): void {

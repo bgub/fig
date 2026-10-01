@@ -62,6 +62,8 @@ const labelled = createMixin((context, label: string) => ({
 - There's no onChange-that-is-really-onInput. `on("input")` is what you want; `change` fires on commit.
 - The `signal` aborts on re-entry and on listener removal.
 
+For controlled server-rendered fields, add `adoptFormState((node, signal) => ...)` from `@bgub/fig-dom` alongside the native listener to adopt edits made before hydration. Uncontrolled fields preserve edits automatically. Controlled fields preserve edits when they declare adoption; otherwise hydration applies application state. Adoption updates state without manufacturing events. See [form state adoption](./concepts/hydration.md#form-state-adoption).
+
 ### Effects: AbortSignal in, nothing out
 
 Effects receive a signal and must return `undefined` — a React-style returned cleanup is a type error. Abort _is_ the cleanup: Fig aborts the signal on dependency change and on unmount.

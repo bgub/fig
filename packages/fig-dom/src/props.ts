@@ -3,12 +3,15 @@ import {
   VIEW_TRANSITION_CLASS_ATTRIBUTE,
   VIEW_TRANSITION_NAME_ATTRIBUTE,
 } from "@bgub/fig/internal";
+import { hasFormAdoption, updateFormAdoption } from "./form-adoption.ts";
 import { updateBind } from "./bind.ts";
 import { eventDescriptorsFromProps } from "./event-descriptor.ts";
-import { updateEvents } from "./events.ts";
+import { queueHydrationFormChange, updateEvents } from "./events.ts";
 import {
   type HostUpdateOptions,
   hydratedFormAttributeName,
+  hydratedFormChanged,
+  initialHydratedFormState,
   isFormProp,
   optionMatchesInheritedSelectValue,
   updateFormControl,
@@ -36,6 +39,7 @@ export function updateElement(
 ): void {
   if ("mix" in previousProps || "mix" in nextProps) {
     updateEvents(element, eventDescriptorsFromProps(nextProps));
+    updateFormAdoption(element, nextProps);
   }
 
   const type = elementName(element);
@@ -172,6 +176,17 @@ export function hydrateElement(element: Element, nextProps: Props): void {
   }
   const serverAttributes = __DEV__ ? attributeNames(element) : [];
 
+  const initialFormState = initialHydratedFormState(element);
+  if (
+    initialFormState !== null &&
+    // Checkable inputs control checked, while value names a radio's choice.
+    ((initialFormState.kind === "checked"
+      ? nextProps.checked
+      : nextProps.value) === undefined ||
+      hasFormAdoption(nextProps)) &&
+    hydratedFormChanged(element, initialFormState)
+  )
+    queueHydrationFormChange(element, initialFormState);
   updateElement(element, {}, nextProps, { hydrating: true });
 
   if (__DEV__ && nextProps.suppressHydrationWarning !== true) {

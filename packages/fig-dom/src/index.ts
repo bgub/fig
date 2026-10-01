@@ -19,6 +19,11 @@ import {
 import { type Container, registerRoot, unregisterRoot } from "./events.ts";
 import { domRenderer } from "./renderer.ts";
 
+export {
+  adoptFormState,
+  type FormStateAdopter,
+  type FormControl,
+} from "./form-adoption.ts";
 export { insertAssetResources } from "./asset-resources.ts";
 export type { Bind } from "./bind.ts";
 export { composeBind };
