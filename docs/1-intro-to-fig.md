@@ -130,6 +130,8 @@ start(async (signal, update) => {
 
 Use `update` for transition-owned work after `await`. It runs synchronously in the original transition, and becomes inert when the callback settles, is superseded, or its owner unmounts or hides. Unwrapped setters after `await` run at ordinary priority. Top-level `transition` accepts the same `(signal, update)` callback for scopes without a hook.
 
+Transition and action signals also abort on successful completion. Treat `signal.aborted` as “this callback's lifetime has ended”; the returned value or error tells you whether it succeeded. Abort listeners run on success as well as cancellation, and the signal may already be aborted while `isPending` is still true because the scheduled UI has not committed yet. In `useActionState`, return the next state to keep its update in the action's transition lane; a separate setter after `await` has ordinary priority.
+
 ### SSR
 
 Fig handles SSR and streaming similarly to React, but there are some implementation differences.

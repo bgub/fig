@@ -22,6 +22,8 @@ A callback that outlives its call site receives a signal. The signal aborts when
 
 The signal is always the lifetime indicator. Fig callbacks never return cleanup functions.
 
+For transitions and actions, an aborted signal means the callback no longer owns work. Successful return or fulfillment aborts it too; `signal.aborted` does not distinguish success, failure, and cancellation. Abort listeners are lifetime cleanup and run on normal completion as well as cancellation. Check the signal inside a still-running callback to avoid publishing cancelled work; use the callback's result or error to determine its outcome. Aborting on successful settlement does not discard the action's returned value.
+
 ## State
 
 `useState` returns `[state, setState]`. The setter accepts a value or an updater function:
@@ -111,6 +113,8 @@ Top-level `transition()` uses the same `(signal, update)` contract and returns t
 `useActionState(action, initialState)` keeps React's argument order and adds an `AbortSignal` after the runner's arguments. Declare that final parameter so TypeScript can infer the argument tuple.
 
 Actions are last-run-wins. A generation counter prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. The signal also aborts when the action settles. Fig schedules the returned value in the action’s own transition lane automatically; arbitrary post-`await` setters inside the action have ordinary priority. Server action transport belongs to framework integrations.
+
+Prefer returning the next action state rather than scheduling it through a separate setter. The returned value retains its transition lane even when unrelated async transitions are pending. The action signal retires on settlement, while `isPending` can remain true until that value commits (for example, if rendering it suspends). Actions receive no `update` handle; use `useTransition` when a workflow needs explicit ownership of several post-`await` setters.
 
 ## Other Hooks
 
