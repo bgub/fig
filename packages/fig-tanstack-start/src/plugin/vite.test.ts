@@ -1,13 +1,14 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Alias, EnvironmentOptions, UserConfig } from "vite";
+import { parse } from "yaml";
 import {
   createCompilerRpcModules,
   incompatibleRuntimeModules,
   rewriteFrameworkImports,
-  tanStackCompatibilityProfile,
 } from "./compatibility-profile.ts";
 import {
   compilerSourceIdFilter,
@@ -131,18 +132,37 @@ describe("tanstackStart", () => {
     );
   });
 
-  it("pins the compatibility profile to the installed Start core contract", async () => {
-    const packageJson = JSON.parse(
-      await readFile(new URL("../../package.json", import.meta.url), "utf8"),
-    ) as { dependencies: Record<string, string> };
+  it.each(["fig-tanstack-router", "fig-tanstack-start"])(
+    "%s installs the TanStack versions pinned in the workspace catalog",
+    async (packageName) => {
+      const packageUrl = new URL(
+        `../../../${packageName}/package.json`,
+        import.meta.url,
+      );
+      const packageJson = JSON.parse(await readFile(packageUrl, "utf8")) as {
+        dependencies: Record<string, string>;
+      };
+      const workspace = parse(
+        await readFile(
+          new URL("../../../../pnpm-workspace.yaml", import.meta.url),
+          "utf8",
+        ),
+      ) as { catalog: Record<string, string> };
+      const require = createRequire(packageUrl);
+      const tanStackDependencies = Object.entries(
+        packageJson.dependencies,
+      ).filter(([name]) => name.startsWith("@tanstack/"));
 
-    expect(tanStackCompatibilityProfile.versions).toEqual({
-      routerCore: packageJson.dependencies["@tanstack/router-core"],
-      startClientCore: packageJson.dependencies["@tanstack/start-client-core"],
-      startPluginCore: packageJson.dependencies["@tanstack/start-plugin-core"],
-      startServerCore: packageJson.dependencies["@tanstack/start-server-core"],
-    });
-  });
+      expect(tanStackDependencies.length).toBeGreaterThan(0);
+      for (const [name, specifier] of tanStackDependencies) {
+        expect(specifier, name).toBe("catalog:");
+        const installedPackage = JSON.parse(
+          await readFile(require.resolve(`${name}/package.json`), "utf8"),
+        ) as { version: string };
+        expect(installedPackage.version, name).toBe(workspace.catalog[name]);
+      }
+    },
+  );
 
   it("rewrites generated Start imports without admitting Solid runtime modules", () => {
     const transformed = rewriteFrameworkImports(
@@ -173,6 +193,7 @@ describe("tanstackStart", () => {
       "existing-include",
       "@bgub/fig-tanstack-router > @tanstack/history",
       "@tanstack/router-core",
+      "@tanstack/router-core/isServer",
       "@tanstack/router-core/scroll-restoration-script",
       "@tanstack/router-core/ssr/client",
       "@bgub/fig-tanstack-router > @tanstack/store",

@@ -36,6 +36,7 @@ const tanstackStartClientAliases = tanstackStartClientModules.map((id) => ({
 const optimizedClientModules = [
   `${figRouterPackage} > @tanstack/history`,
   "@tanstack/router-core",
+  "@tanstack/router-core/isServer",
   "@tanstack/router-core/scroll-restoration-script",
   "@tanstack/router-core/ssr/client",
   `${figRouterPackage} > @tanstack/store`,

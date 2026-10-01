@@ -68,10 +68,10 @@
     "@babel/core": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
     "@bgub/fig-vite": "workspace:^",
-    "@tanstack/router-core": "1.171.21",
-    "@tanstack/start-client-core": "1.170.21",
-    "@tanstack/start-plugin-core": "1.171.33",
-    "@tanstack/start-server-core": "1.169.25"
+    "@tanstack/router-core": "catalog:",
+    "@tanstack/start-client-core": "catalog:",
+    "@tanstack/start-plugin-core": "catalog:",
+    "@tanstack/start-server-core": "catalog:"
   },
   "peerDependencies": {
     "@bgub/fig": "workspace:^",
@@ -86,7 +86,8 @@
     "@bgub/fig-server": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
     "@types/node": "catalog:node24",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=22.12.0"

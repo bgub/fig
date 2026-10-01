@@ -16,12 +16,14 @@ import {
   type AnyRoute,
   type AnyRouteMatch,
   type AnyRouter,
+  composeSsrBodyScripts,
   deepEqual,
   isNotFound,
   type RegisteredRouter,
   rootRouteId,
 } from "@tanstack/router-core";
 import { getScrollRestorationScriptForRouter } from "@tanstack/router-core/scroll-restoration-script";
+import { isServer } from "@tanstack/router-core/isServer";
 import { dataStoreFromContext } from "./data-context.ts";
 import {
   MatchContext,
@@ -71,9 +73,10 @@ export function RouterProvider<TRouter extends AnyRouter = RegisteredRouter>({
     () => ({ manifest, ownerDocument, router }),
     [manifest, ownerDocument, router],
   );
-  const transitioner = router.isServer
-    ? createElement(ServerTransitioner)
-    : createElement(Transitioner, { render: renderMatches });
+  const transitioner =
+    (isServer ?? router.isServer)
+      ? createElement(ServerTransitioner)
+      : createElement(Transitioner, { render: renderMatches });
 
   return createElement(
     RouterContext,
@@ -103,7 +106,7 @@ export function Matches(): FigNode {
     firstRouteId === undefined
       ? null
       : createElement(Match, { routeId: firstRouteId });
-  if (router.isServer || router.ssr !== undefined) return content;
+  if ((isServer ?? router.isServer) || router.ssr !== undefined) return content;
 
   const rootRoute = router.routesById[rootRouteId];
   const PendingComponent =
@@ -254,7 +257,7 @@ function Match({ routeId }: { routeId: string }): FigNode {
   if (route.parentRoute?.id !== rootRouteId) return ownedMatchContent;
   return [
     ownedMatchContent,
-    router.options.scrollRestoration && router.isServer
+    router.options.scrollRestoration && (isServer ?? router.isServer)
       ? renderScrollRestorationScript(router)
       : null,
   ];
@@ -281,7 +284,7 @@ function MatchContent({
   if (match.status === "error") {
     const ErrorComponent =
       route.options.errorComponent ?? router.options.defaultErrorComponent;
-    if (router.isServer && ErrorComponent) {
+    if ((isServer ?? router.isServer) && ErrorComponent) {
       return createElement(ErrorComponent, {
         error: match.error,
         reset: doNothing,
@@ -393,9 +396,13 @@ export function Scripts(): FigNode {
     selectTags,
     deepEqual,
   );
-  const buffered = router.serverSsr?.takeBufferedScripts();
   const tags =
-    buffered === undefined ? selectedTags : [buffered, ...selectedTags];
+    (isServer ?? router.isServer)
+      ? composeSsrBodyScripts(
+          [selectedTags, []],
+          router.serverSsr?.takeInitialHydrationScriptTags(),
+        )
+      : selectedTags;
   return tags.map((tag) => renderPositionedRouterTag(tag));
 }
 

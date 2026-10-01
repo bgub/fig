@@ -30,23 +30,18 @@ test("hydrates the themed document and persists shell changes", async ({
   expect(errors()).toEqual([]);
 });
 
-test("includes the Fig DevTools overlay", async ({ page }) => {
+test("omits both Devtools UIs from the production client", async ({ page }) => {
   const errors = collectBrowserErrors(page);
   await page.goto("/", { waitUntil: "commit" });
   await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
 
-  await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
-  const devtools = page.locator("[data-fig-devtools]");
-  await expect(devtools).toBeVisible();
   await expect(
-    devtools.getByText("Fig DevTools", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    devtools.getByText("Fig TanStack Start", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    devtools.locator(".fig-devtools__tree-button").first(),
-  ).toBeVisible();
+    page.getByRole("button", { name: "Open TanStack Devtools" }),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-fig-devtools]")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => "__FIG_DEVTOOLS_GLOBAL_HOOK__" in window),
+  ).toBe(false);
   expect(errors()).toEqual([]);
 });
 
