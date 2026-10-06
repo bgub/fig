@@ -23,8 +23,9 @@ export function createFormReset(onReset: () => void) {
         "reset",
         (event) => {
           queueMicrotask(() => {
-            if (!controller.signal.aborted && !event.defaultPrevented)
-              onReset();
+            // Rebinding replaces the listener's controller, but a pending
+            // reset still belongs to the widget while it has inputs here.
+            if (forms.has(form) && !event.defaultPrevented) onReset();
           });
         },
         { signal: controller.signal },

@@ -26,7 +26,11 @@ export function createToastRegistry(
   onTimeout: (registration: ToastRegistration) => void,
 ) {
   const toasts = new Map<HTMLElement, TimerRegistration>();
+  // Binds abort before reattaching on a render. Keep a removed host's timer
+  // through that commit so rebinding it does not restart its lifetime.
+  const pendingRemoval = new WeakMap<HTMLElement, TimerRegistration>();
   const paused = new Set<PauseReason>();
+  let hoveredRegion: HTMLElement | undefined;
   const regions = createPartCollection<Document>(registrationChanged);
 
   function bindRegion(node: HTMLElement, signal: AbortSignal): void {
@@ -42,11 +46,19 @@ export function createToastRegistry(
     });
     syncVisibility();
     onAbort(signal, () => {
-      syncVisibility();
-      if (regions.items().length === 0) {
-        setPaused("focus", false);
-        setPaused("pointer", false);
-      }
+      queueMicrotask(() => {
+        syncVisibility();
+        const mounted = regions.items();
+        if (!mounted.some((entry) => entry.node === node)) {
+          setPointerPaused(node, false);
+          setPaused(
+            "focus",
+            mounted.some((entry) =>
+              entry.node.contains(entry.node.ownerDocument.activeElement),
+            ),
+          );
+        }
+      });
     });
   }
 
@@ -55,7 +67,8 @@ export function createToastRegistry(
     signal: AbortSignal,
     config: { readonly duration: number | null; readonly value: unknown },
   ): void {
-    const previous = toasts.get(node);
+    const previous = toasts.get(node) ?? pendingRemoval.get(node);
+    pendingRemoval.delete(node);
     const preserve =
       previous !== undefined &&
       previous.duration === config.duration &&
@@ -81,10 +94,21 @@ export function createToastRegistry(
     registrationChanged();
     onAbort(signal, () => {
       if (toasts.get(node) !== registration) return;
-      clear(registration);
       toasts.delete(node);
+      pendingRemoval.set(node, registration);
+      queueMicrotask(() => {
+        if (pendingRemoval.get(node) !== registration) return;
+        pendingRemoval.delete(node);
+        clear(registration);
+      });
       registrationChanged();
     });
+  }
+
+  function setPointerPaused(node: HTMLElement, pause: boolean): void {
+    if (pause) hoveredRegion = node;
+    else if (hoveredRegion === node) hoveredRegion = undefined;
+    setPaused("pointer", hoveredRegion !== undefined);
   }
 
   function setPaused(reason: PauseReason, pause: boolean): void {
@@ -145,6 +169,7 @@ export function createToastRegistry(
     bindRegion,
     bindToast,
     setPaused,
+    setPointerPaused,
     validate,
   };
 }

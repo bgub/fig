@@ -806,6 +806,81 @@ describe("Tabs", () => {
     }
   });
 
+  it.each([false, true])(
+    "measures padded tab boxes with scaled scrollbars: %s",
+    async (scrollbar) => {
+      let update = () => {};
+      function BoxTabs(): FigNode {
+        const tabs = useTabs({ defaultValue: "a" });
+        const indicator = useTabsIndicator();
+        const [count, setCount] = useState(0);
+        update = () => setCount(count + 1);
+        return (
+          <div data-count={count}>
+            <div
+              aria-label="Box tabs"
+              style={{
+                boxSizing: "content-box",
+                width: "200px",
+                height: "40px",
+                padding: "10px",
+                border: "2px solid",
+              }}
+              mix={[tabs.list(), indicator.list()]}
+            >
+              <button
+                style={{
+                  boxSizing: "content-box",
+                  width: "100px",
+                  height: "20px",
+                  padding: "10px",
+                  border: "2px solid",
+                }}
+                mix={tabs.tab("a")}
+              >
+                A
+              </button>
+              <span data-indicator="" mix={indicator.indicator()} />
+            </div>
+            <div mix={tabs.panel("a")}>Panel</div>
+          </div>
+        );
+      }
+      const container = await render(<BoxTabs />);
+      const list = requiredElement(container, '[role="tablist"]');
+      const tab = tabElements(container)[0];
+      mockRect(list, 0, 0, scrollbar ? 448 : 224, scrollbar ? 168 : 64);
+      mockRect(
+        tab,
+        scrollbar ? 24 : 12,
+        scrollbar ? 24 : 12,
+        scrollbar ? 248 : 124,
+        scrollbar ? 88 : 44,
+      );
+      if (scrollbar)
+        Object.defineProperties(list, {
+          offsetWidth: { value: 224 },
+          offsetHeight: { value: 84 },
+        });
+      Object.defineProperties(list, {
+        clientLeft: { value: 2 },
+        clientTop: { value: 2 },
+      });
+      await act(update);
+      const indicator = requiredElement(container, "[data-indicator]");
+      expect(indicator.style.getPropertyValue("--active-tab-width")).toBe(
+        "124px",
+      );
+      expect(indicator.style.getPropertyValue("--active-tab-left")).toBe(
+        "10px",
+      );
+      expect(indicator.style.getPropertyValue("--active-tab-top")).toBe("10px");
+      expect(indicator.style.getPropertyValue("--active-tab-height")).toBe(
+        "44px",
+      );
+    },
+  );
+
   it("positions an optional indicator and observes it only while mounted", async () => {
     const observers: FakeResizeObserver[] = [];
     class FakeResizeObserver {

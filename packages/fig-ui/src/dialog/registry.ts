@@ -13,19 +13,26 @@ export type DialogRegistry = ReturnType<typeof createDialogRegistry>;
  * restoration, inert background, and Escape — so the widget only decides when
  * it should be open and keeps its labelling in step with the committed DOM.
  */
-export function createDialogRegistry(
-  registrationChanged: () => void,
-  generated: {
-    readonly descriptionId: string;
-    readonly titleId: string;
-  },
-) {
+export function createDialogRegistry(registrationChanged: () => void) {
   const parts = createPartCollection<"description" | "dialog" | "title">(
     registrationChanged,
   );
 
-  function bindDialog(node: HTMLElement, signal: AbortSignal): void {
-    if (node instanceof HTMLDialogElement) parts.bind(node, signal, "dialog");
+  let backdropPress: boolean | undefined;
+
+  const references = new WeakMap<
+    HTMLElement,
+    { readonly title: boolean; readonly description: boolean }
+  >();
+
+  function bindDialog(
+    node: HTMLElement,
+    signal: AbortSignal,
+    automatic: { readonly title: boolean; readonly description: boolean },
+  ): void {
+    if (!(node instanceof HTMLDialogElement)) return;
+    references.set(node, automatic);
+    parts.bind(node, signal, "dialog");
   }
 
   function node(): HTMLDialogElement | null {
@@ -37,21 +44,16 @@ export function createDialogRegistry(
   function sync(open: boolean): void {
     const current = node();
     if (current === null) return;
-    syncPartReference(
-      current,
-      "aria-labelledby",
-      part("title")?.id,
-      generated.titleId,
-      !current.hasAttribute("aria-label"),
-    );
-    syncPartReference(
-      current,
-      "aria-describedby",
-      part("description")?.id,
-      generated.descriptionId,
-      true,
-    );
-    assertAccessibleName(current, "dialog");
+    if (!open) backdropPress = undefined;
+    const automatic = references.get(current);
+    if (automatic?.title) {
+      setIdReference(current, "aria-labelledby", part("title")?.id);
+    }
+    if (automatic?.description) {
+      setIdReference(current, "aria-describedby", part("description")?.id);
+    }
+    // Closed shells may defer their title and content until opened.
+    if (open) assertAccessibleName(current, "dialog");
     if (open && !current.open) current.showModal();
     else if (!open && current.open) current.close();
   }
@@ -60,6 +62,14 @@ export function createDialogRegistry(
     bindDescription: (partNode: HTMLElement, signal: AbortSignal) =>
       parts.bind(partNode, signal, "description"),
     bindDialog,
+    noteBackdropPress: (outside: boolean | undefined) => {
+      backdropPress = outside;
+    },
+    takeBackdropPress: () => {
+      const outside = backdropPress;
+      backdropPress = undefined;
+      return outside;
+    },
     bindTitle: (partNode: HTMLElement, signal: AbortSignal) =>
       parts.bind(partNode, signal, "title"),
     node,
@@ -70,22 +80,5 @@ export function createDialogRegistry(
     const matches = parts.items().filter((entry) => entry.value === kind);
     assertSinglePart(matches, `dialog ${kind}`);
     return matches.at(-1)?.node;
-  }
-}
-
-function syncPartReference(
-  node: HTMLElement,
-  name: string,
-  mountedId: string | undefined,
-  generatedId: string,
-  useWhenMissing: boolean,
-): void {
-  const current = node.getAttribute(name);
-  if (mountedId !== undefined) {
-    if (current === generatedId || (current === null && useWhenMissing)) {
-      setIdReference(node, name, mountedId);
-    }
-  } else if (current === generatedId) {
-    setIdReference(node, name, undefined);
   }
 }

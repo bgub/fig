@@ -66,6 +66,7 @@ function createTabsIndicatorRegistry(registrationChanged: () => void) {
   const indicator = createPartSlot(registrationChanged);
   const list = createPartSlot(registrationChanged);
   let observer: ResizeObserver | null = null;
+  let observed: HTMLElement[] = [];
 
   function bindIndicator(node: HTMLElement, signal: AbortSignal): void {
     indicator.bind(node, signal);
@@ -93,10 +94,20 @@ function createTabsIndicatorRegistry(registrationChanged: () => void) {
     if (typeof ResizeObserver === "undefined") return;
     // Resize delivery must only measure; re-observing would schedule another
     // initial notification even when none of the observed sizes changed.
-    observer ??= new ResizeObserver(updatePosition);
-    observer.disconnect();
-    if (listNode !== null) observer.observe(listNode);
-    for (const tab of ownedTabs(listNode)) observer.observe(tab);
+    if (observer === null) {
+      observer = new ResizeObserver(updatePosition);
+      observed = [];
+    }
+    const tabs = ownedTabs(listNode);
+    const targets = listNode === null ? tabs : [listNode, ...tabs];
+    if (
+      targets.length !== observed.length ||
+      targets.some((target, index) => target !== observed[index])
+    ) {
+      observer.disconnect();
+      for (const target of targets) observer.observe(target);
+      observed = targets;
+    }
   }
 
   function updatePosition(): void {
@@ -142,10 +153,14 @@ function positionTabsIndicator(
   const listRect = list.getBoundingClientRect();
   const tabStyle = getComputedStyle(tab);
   const listStyle = getComputedStyle(list);
-  const width = parseFloat(tabStyle.width) || tabRect.width;
-  const height = parseFloat(tabStyle.height) || tabRect.height;
-  const listWidth = parseFloat(listStyle.width) || listRect.width;
-  const listHeight = parseFloat(listStyle.height) || listRect.height;
+  const width = borderBoxSize(tabStyle, "width", tabRect.width);
+  const height = borderBoxSize(tabStyle, "height", tabRect.height);
+  // Layout dimensions include scrollbar gutters; computed content-box sizes
+  // do not. Dividing by the latter mistakes a scrollbar for extra scaling.
+  const listWidth =
+    list.offsetWidth || borderBoxSize(listStyle, "width", listRect.width);
+  const listHeight =
+    list.offsetHeight || borderBoxSize(listStyle, "height", listRect.height);
   const scaleX = listWidth > 0 ? listRect.width / listWidth : 1;
   const scaleY = listHeight > 0 ? listRect.height / listHeight : 1;
   const left = scaleX
@@ -169,4 +184,25 @@ function positionTabsIndicator(
     style.setProperty(`--active-tab-${edge}`, `${box[edge]}px`);
   }
   indicator.hidden = !(width > 0 && height > 0);
+}
+
+function borderBoxSize(
+  style: CSSStyleDeclaration,
+  dimension: "width" | "height",
+  fallback: number,
+): number {
+  const size = parseFloat(style[dimension]);
+  if (!Number.isFinite(size)) return fallback;
+  if (style.boxSizing === "border-box") return size;
+  const edges =
+    dimension === "width"
+      ? (["Left", "Right"] as const)
+      : (["Top", "Bottom"] as const);
+  return edges.reduce(
+    (total, edge) =>
+      total +
+      (parseFloat(style[`padding${edge}`]) || 0) +
+      (parseFloat(style[`border${edge}Width`]) || 0),
+    size,
+  );
 }

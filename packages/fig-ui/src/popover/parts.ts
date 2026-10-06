@@ -57,6 +57,7 @@ export const popoverMixin = /* @__PURE__ */ createMixin(
         // Light dismiss, Escape, and the declarative trigger all arrive here as
         // a cancelable beforetoggle, so a handler can refuse any of them.
         on("beforetoggle", (event) => {
+          if (event.defaultPrevented) return;
           const next = toggledOpen(event);
           if (next === undefined) return;
           if (!state.requestOpen(next, event, undefined))
@@ -65,7 +66,6 @@ export const popoverMixin = /* @__PURE__ */ createMixin(
         on("toggle", (event) => {
           const next = toggledOpen(event);
           if (next === undefined) return;
-          state.registry.noteToggle(next);
           state.requestOpen(next, event, undefined);
         }),
       ],

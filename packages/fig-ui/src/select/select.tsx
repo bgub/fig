@@ -81,6 +81,7 @@ export interface SelectProps<Value = unknown> extends SelectOptions<Value> {
 type SelectRegistry = ReturnType<typeof createListbox>;
 
 interface SelectState {
+  readonly automaticLabels: WeakSet<HTMLElement>;
   readonly bindHiddenInput: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindTrigger: (node: HTMLElement, signal: AbortSignal) => void;
   readonly disabled: boolean;
@@ -105,54 +106,59 @@ interface SelectOptionState {
 }
 
 const selectTriggerBehavior = /* @__PURE__ */ createMixin(
-  (context: MixinContext, state: SelectState) => ({
-    ...triggerProps(context, { disabled: state.disabled, id: state.triggerId }),
-    "aria-activedescendant":
-      state.open && state.highlighted !== null
-        ? (state.registry.option(state.highlighted)?.node.id ??
-          state.idFor(state.highlighted, "option"))
-        : undefined,
-    "aria-haspopup": "listbox",
-    "aria-readonly": state.readOnly ? "true" : undefined,
-    "data-readonly": state.readOnly ? "" : undefined,
-    disabled: state.disabled ? true : undefined,
-    bind: bindPart(context, state.bindTrigger),
-    mix: on("keydown", (event) => {
-      if (
-        state.disabled ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey
-      ) {
-        return;
-      }
-      const moved = state.registry.move(state.highlighted, event.key);
-      if (moved !== undefined) {
-        event.preventDefault();
-        state.setHighlighted(moved.value);
-        if (!state.open) state.popover.setOpen(true);
-        return;
-      }
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        if (!state.open) {
-          state.popover.setOpen(true);
+  (context: MixinContext, state: SelectState) => {
+    const disabled = state.disabled || context.props.disabled === true;
+    return {
+      ...triggerProps(context, { disabled, id: state.triggerId }),
+      "aria-activedescendant":
+        state.open && state.highlighted !== null
+          ? (state.registry.option(state.highlighted)?.node.id ??
+            state.idFor(state.highlighted, "option"))
+          : undefined,
+      "aria-haspopup": "listbox",
+      "aria-readonly": state.readOnly ? "true" : undefined,
+      "data-readonly": state.readOnly ? "" : undefined,
+      disabled: disabled ? true : undefined,
+      bind: bindPart(context, state.bindTrigger),
+      mix: on("keydown", (event) => {
+        if (event.defaultPrevented) return;
+        if (
+          disabled ||
+          event.isComposing ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey
+        ) {
           return;
         }
-        const highlighted = state.registry.option(state.highlighted);
-        if (highlighted !== undefined && !state.readOnly) {
-          state.select(highlighted, event);
+        const moved = state.registry.move(state.highlighted, event.key);
+        if (moved !== undefined) {
+          event.preventDefault();
+          state.setHighlighted(moved.value);
+          if (!state.open) state.popover.setOpen(true);
+          return;
         }
-        return;
-      }
-      const match = state.registry.typeahead(state.highlighted, event.key);
-      if (match === undefined) return;
-      state.setHighlighted(match.value);
-      if (!state.open && !state.readOnly) state.select(match, event);
-    }),
-    role: "combobox",
-  }),
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (!state.open) {
+            state.popover.setOpen(true);
+            return;
+          }
+          const highlighted = state.registry.option(state.highlighted);
+          if (highlighted !== undefined && !state.readOnly) {
+            state.select(highlighted, event);
+          }
+          return;
+        }
+        const match = state.registry.typeahead(state.highlighted, event.key);
+        if (match === undefined) return;
+        state.setHighlighted(match.value);
+        if (!state.open && !state.readOnly) state.select(match, event);
+      }),
+      role: "combobox",
+    };
+  },
 );
 
 const selectTriggerMixin = /* @__PURE__ */ createMixin(
@@ -164,30 +170,49 @@ const selectTriggerMixin = /* @__PURE__ */ createMixin(
 );
 
 const selectPopupBehavior = /* @__PURE__ */ createMixin(
-  (context: MixinContext, state: SelectState) => ({
-    "aria-labelledby": context.props["aria-labelledby"] ?? state.triggerId,
-    bind: bindPart(context, state.registry.bindContainer),
-    mix: [
-      on("pointerdown", (event) => {
-        if (state.registry.optionAt(event.target) !== undefined) {
-          event.preventDefault();
-        }
+  (context: MixinContext, state: SelectState) => {
+    const automaticLabel =
+      context.props["aria-labelledby"] == null &&
+      context.props["aria-label"] === undefined;
+    return {
+      "aria-labelledby":
+        context.props["aria-labelledby"] ??
+        (context.props["aria-label"] === undefined
+          ? state.triggerId
+          : undefined),
+      bind: bindPart(context, (node, signal) => {
+        if (
+          automaticLabel &&
+          context.props["aria-labelledby"] === state.triggerId
+        )
+          state.automaticLabels.add(node);
+        else state.automaticLabels.delete(node);
+        state.registry.bindContainer(node, signal);
       }),
-      on("click", (event) => {
-        const option = state.registry.optionAt(event.target);
-        if (option === undefined) return;
-        if (option.disabled) event.preventDefault();
-        else if (event.button === 0) state.select(option, event);
-      }),
-      on("pointermove", (event) => {
-        const option = state.registry.optionAt(event.target);
-        if (option !== undefined && !option.disabled) {
-          state.setHighlighted(option.value);
-        }
-      }),
-    ],
-    role: "listbox",
-  }),
+      mix: [
+        on("pointerdown", (event) => {
+          if (state.registry.optionAt(event.target) !== undefined) {
+            event.preventDefault();
+          }
+        }),
+        on("click", (event) => {
+          if (event.defaultPrevented) return;
+          const option = state.registry.optionAt(event.target);
+          if (option === undefined) return;
+          if (option.disabled) event.preventDefault();
+          else if (event.button === 0) state.select(option, event);
+        }),
+        on("pointermove", (event) => {
+          if (event.pointerType === "touch") return;
+          const option = state.registry.optionAt(event.target);
+          if (option !== undefined && !option.disabled) {
+            state.setHighlighted(option.value);
+          }
+        }),
+      ],
+      role: "listbox",
+    };
+  },
 );
 
 const selectPopupMixin = /* @__PURE__ */ createMixin(
@@ -218,6 +243,11 @@ const selectOptionMixin = /* @__PURE__ */ createMixin(
       "data-selected": own.selected ? "" : undefined,
       id: context.props.id ?? state.idFor(own.value, "option"),
       role: "option",
+      type:
+        context.type === "button"
+          ? (context.props.type ?? "button")
+          : undefined,
+      tabindex: -1,
     };
   },
 );
@@ -262,6 +292,7 @@ export function useSelect<Value = unknown>(
     onOpenChange: options.onOpenChange,
     open: options.open,
   });
+  const automaticLabels = useMemo(() => new WeakSet<HTMLElement>(), []);
   const trigger = useMemo(() => createPartSlot(registrationChanged), []);
   const initialValue = useMemo(() => options.defaultValue ?? null, []);
   const reset = useStableEvent(() => {
@@ -275,7 +306,13 @@ export function useSelect<Value = unknown>(
     },
   );
   const select = useStableEvent((option: ListboxOption, event: Event) => {
-    if (disabled || readOnly) return;
+    if (
+      disabled ||
+      readOnly ||
+      option.disabled ||
+      trigger.node()?.matches(":disabled")
+    )
+      return;
     if (sameValue(option.value, value)) {
       popover.setOpen(false);
       return;
@@ -301,12 +338,13 @@ export function useSelect<Value = unknown>(
         (value === null && !explicitDefault);
       if (shouldRepair) {
         const fallback = mounted.find((entry) => !entry.disabled);
-        if (fallback !== undefined) {
+        const next = fallback === undefined ? null : fallback.value;
+        if (!sameValue(next, value)) {
           const details = createChangeDetails(null);
-          emitChange(fallback.value, details);
+          emitChange(next, details);
           if (!details.isCanceled) {
-            setUncontrolled({ value: fallback.value as Value });
-            setHighlighted(fallback.value);
+            setUncontrolled({ value: next as Value | null });
+            setHighlighted(next);
           }
         }
       }
@@ -323,7 +361,7 @@ export function useSelect<Value = unknown>(
     const triggerNode = trigger.node();
     const popupNode = registry.containerNode();
     if (triggerNode !== null && popupNode !== null) {
-      if (popupNode.getAttribute("aria-labelledby") === triggerId) {
+      if (automaticLabels.has(popupNode)) {
         setIdReference(popupNode, "aria-labelledby", triggerNode.id);
       }
       const optionId =
@@ -340,6 +378,7 @@ export function useSelect<Value = unknown>(
   const idFor = usePartIds();
   const getFormValue = options.getFormValue ?? String;
   const state: SelectState = {
+    automaticLabels,
     bindHiddenInput: formReset.bind,
     bindTrigger: trigger.bind,
     disabled,

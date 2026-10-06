@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
-import { type FigNode, useState } from "@bgub/fig";
+import { createMixin, type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
+import { useCheckbox } from "../checkbox/checkbox.tsx";
+import { useRadioGroup } from "../radio-group/radio-group.tsx";
+import { useSwitch } from "../switch/switch.tsx";
+import { useCombobox } from "../combobox/combobox.tsx";
 import { Field, useField } from "./field.tsx";
 
 const roots: FigRoot[] = [];
@@ -131,6 +135,89 @@ describe("Field", () => {
     expect(input.getAttribute("aria-labelledby")).toBe("email-label");
   });
 
+  it("updates label relationships when custom ids change", async () => {
+    let rename = () => {};
+    function RenamedField(): FigNode {
+      const field = useField();
+      const [suffix, setSuffix] = useState("before");
+      rename = () => setSuffix("after");
+      return (
+        <>
+          <label id={`label-${suffix}`} mix={field.label()}>
+            Email
+          </label>
+          <input id={`control-${suffix}`} mix={field.control()} />
+        </>
+      );
+    }
+    const container = await render(<RenamedField />);
+    await act(rename);
+    expect(required(container, "label").getAttribute("for")).toBe(
+      "control-after",
+    );
+    expect(required(container, "input").getAttribute("aria-labelledby")).toBe(
+      "label-after",
+    );
+  });
+
+  it("preserves authored label relationships across id changes", async () => {
+    let rename = () => {};
+    function AuthoredField(): FigNode {
+      const field = useField();
+      const [suffix, setSuffix] = useState("before");
+      rename = () => setSuffix("after");
+      return (
+        <>
+          <span id="external-label">External label</span>
+          <label
+            id={`label-${suffix}`}
+            for="external-control"
+            mix={field.label()}
+          >
+            Email
+          </label>
+          <input
+            id={`control-${suffix}`}
+            aria-labelledby="external-label"
+            mix={field.control()}
+          />
+        </>
+      );
+    }
+    const container = await render(<AuthoredField />);
+    await act(rename);
+    expect(required(container, "label").getAttribute("for")).toBe(
+      "external-control",
+    );
+    expect(required(container, "input").getAttribute("aria-labelledby")).toBe(
+      "external-label",
+    );
+  });
+
+  it("honors label overrides from later mixins", async () => {
+    const labelOverride = createMixin(() => ({ for: "other-control" }));
+    const controlOverride = createMixin(() => ({
+      "aria-labelledby": "other-label",
+    }));
+    const container = await render(
+      <Field>
+        {(field) => (
+          <>
+            <span id="other-label">External</span>
+            <label mix={[field.label(), labelOverride()]}>Local</label>
+            <input mix={[field.control(), controlOverride()]} />
+          </>
+        )}
+      </Field>,
+    );
+    expect(required(container, "label").getAttribute("for")).toBe(
+      "other-control",
+    );
+    expect(required(container, "input").getAttribute("aria-labelledby")).toBe(
+      "other-label",
+    );
+  });
+
   it("follows an error that appears after a descendant renders it", async () => {
     function LateError(): FigNode {
       const field = useField({ invalid: true });
@@ -211,4 +298,61 @@ function required(container: Element, selector: string): HTMLElement {
   const element = container.querySelector<HTMLElement>(selector);
   if (element === null) throw new Error(`Expected ${selector}.`);
   return element;
+}
+
+for (const source of ["field", "host", "widget"] as const) {
+  it.each(["checkbox", "switch", "radio", "combobox", "native"])(
+    `preserves and clears ${source} constraints on %s controls`,
+    async (kind) => {
+      let setConstrained: (value: boolean) => void = () => {};
+      function ComposedField(): FigNode {
+        const [constrained, set] = useState(true);
+        setConstrained = set;
+        const constraints = { disabled: constrained, required: constrained };
+        const field = useField(source === "field" ? constraints : {});
+        const checkbox = useCheckbox(source === "widget" ? constraints : {});
+        const toggle = useSwitch(source === "widget" ? constraints : {});
+        const radio = useRadioGroup(source === "widget" ? constraints : {});
+        const combo = useCombobox(source === "widget" ? constraints : {});
+        const widget =
+          kind === "checkbox"
+            ? checkbox.control()
+            : kind === "switch"
+              ? toggle.control()
+              : kind === "radio"
+                ? radio.radio("a")
+                : kind === "combobox"
+                  ? combo.input()
+                  : undefined;
+        const hostConstraints = source === "host" ? constraints : {};
+        return (
+          <>
+            <label mix={field.label()}>Value</label>
+            <input
+              {...hostConstraints}
+              mix={
+                widget === undefined
+                  ? field.control()
+                  : source === "widget"
+                    ? [widget, field.control()]
+                    : [field.control(), widget]
+              }
+            />
+            {kind === "combobox" ? <div mix={combo.popup()} /> : null}
+          </>
+        );
+      }
+      const container = await render(<ComposedField />);
+      const input = required(container, "input") as HTMLInputElement;
+      const hasConstraint = source !== "widget" || kind !== "native";
+      expect(input.disabled).toBe(hasConstraint);
+      // Combobox does not have a required option; native/Field own validity.
+      expect(input.required).toBe(
+        hasConstraint && !(source === "widget" && kind === "combobox"),
+      );
+      await act(() => setConstrained(false));
+      expect(input.disabled).toBe(false);
+      expect(input.required).toBe(false);
+    },
+  );
 }

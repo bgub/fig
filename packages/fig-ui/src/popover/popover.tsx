@@ -12,7 +12,7 @@ import type {
 import { useOpenState } from "../internal/open-state.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { popoverMixin, popoverTriggerMixin } from "./parts.ts";
-import { createPopoverRegistry } from "./registry.ts";
+import { createPopoverRegistry, registerPopoverSource } from "./registry.ts";
 
 export type PopoverOpenChangeDetails = OpenChangeDetails;
 
@@ -63,12 +63,14 @@ export function usePopover(options: PopoverOptions = {}): PopoverParts {
 
   const state = { open, popoverId, registry, requestOpen };
 
-  return {
+  const parts: PopoverParts = {
     open,
     popover: () => popoverMixin(state),
     setOpen,
     trigger: () => popoverTriggerMixin(state),
   };
+  registerPopoverSource(parts, registry.bindSource);
+  return parts;
 }
 
 /**

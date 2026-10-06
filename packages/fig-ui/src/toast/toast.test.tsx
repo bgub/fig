@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
+import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
@@ -109,6 +109,111 @@ describe("ToastRegion", () => {
 
     await act(() => outside.focus());
     await act(() => wait(40));
+    expect(calls).toEqual(["timeout"]);
+  });
+
+  it.each(["focus", "pointer"])(
+    "keeps the %s pause through a rerender",
+    async (kind) => {
+      const calls: string[] = [];
+      let rerender = () => {};
+      function UpdatingToast(): FigNode {
+        const [count, setCount] = useState(0);
+        rerender = () => setCount(count + 1);
+        return (
+          <div data-count={count}>
+            <Example
+              duration={30}
+              onDismiss={(_value, details) => calls.push(details.reason)}
+            />
+          </div>
+        );
+      }
+      const container = await render(<UpdatingToast />);
+      if (kind === "focus")
+        await act(() => required(container, "button").focus());
+      else
+        await pointer(required(container, '[role="region"]'), "pointerenter");
+      await act(rerender);
+      await act(() => wait(50));
+      expect(calls).toEqual([]);
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      if (kind === "focus") await act(() => outside.focus());
+      else
+        await pointer(required(container, '[role="region"]'), "pointerleave");
+      await act(() => wait(40));
+      expect(calls).toEqual(["timeout"]);
+    },
+  );
+
+  it.each(["pointer", "focus"])(
+    "clears stale %s pause when the region host is replaced",
+    async (kind) => {
+      const calls: string[] = [];
+      let replace = () => {};
+      function ChangingRegion(): FigNode {
+        const [version, setVersion] = useState(0);
+        replace = () => setVersion(version + 1);
+        const toast = useToastRegion({
+          onDismiss: (_value, details) => calls.push(details.reason),
+        });
+        return (
+          <div key={version} mix={toast.region()}>
+            <div mix={toast.toast("saved", { duration: 30 })}>
+              <button>Toast action</button>
+            </div>
+          </div>
+        );
+      }
+      const container = await render(<ChangingRegion />);
+      if (kind === "pointer")
+        await pointer(required(container, '[role="region"]'), "pointerenter");
+      else await act(() => required(container, "button").focus());
+      await act(replace);
+      await act(() => wait(50));
+      expect(calls).toEqual(["timeout"]);
+    },
+  );
+
+  it("cancels a removed toast's timer", async () => {
+    const calls: string[] = [];
+    let remove = () => {};
+    function Removable(): FigNode {
+      const [shown, setShown] = useState(true);
+      remove = () => setShown(false);
+      return shown ? (
+        <Example
+          duration={30}
+          onDismiss={(_value, details) => calls.push(details.reason)}
+        />
+      ) : null;
+    }
+    await render(<Removable />);
+    await act(remove);
+    await act(() => wait(50));
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps the original expiration deadline through a rerender", async () => {
+    const calls: string[] = [];
+    let rerender = () => {};
+    function UpdatingToast(): FigNode {
+      const [count, setCount] = useState(0);
+      rerender = () => setCount(count + 1);
+      return (
+        <div data-count={count}>
+          <Example
+            duration={90}
+            onDismiss={(_value, details) => calls.push(details.reason)}
+          />
+        </div>
+      );
+    }
+    await render(<UpdatingToast />);
+    await act(() => wait(60));
+    await act(rerender);
+    await act(() => wait(50));
     expect(calls).toEqual(["timeout"]);
   });
 

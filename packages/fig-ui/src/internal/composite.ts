@@ -1,5 +1,9 @@
 import { assertUniqueValues } from "./diagnostics.ts";
 
+declare const __FIG_DEV__: boolean | undefined;
+
+const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
+
 export type Orientation = "horizontal" | "vertical";
 
 export interface CompositeItem {
@@ -62,7 +66,9 @@ export function createComposite(options: CompositeOptions) {
   function bindContainer(node: HTMLElement, signal: AbortSignal): void {
     const binding = { node };
     container = binding;
-    items();
+    // Eager duplicate validation is development-only. Scanning every mounted
+    // item for each registration would make production binding quadratic.
+    if (__DEV__) items();
     options.registrationChanged?.();
     onAbort(signal, () => {
       if (container !== binding) return;
@@ -79,7 +85,9 @@ export function createComposite(options: CompositeOptions) {
   ): void {
     const registration = { disabled, node, value };
     registrations.set(node, registration);
-    items();
+    // Eager duplicate validation is development-only. Scanning every mounted
+    // item for each registration would make production binding quadratic.
+    if (__DEV__) items();
     options.registrationChanged?.();
     onAbort(signal, () => {
       if (registrations.get(node) !== registration) return;
@@ -157,7 +165,13 @@ export function createComposite(options: CompositeOptions) {
     event: KeyboardEvent,
     move: FocusMoveOptions,
   ): CompositeItem | undefined {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey
+    ) {
       return undefined;
     }
     const current = itemAt(event.target);

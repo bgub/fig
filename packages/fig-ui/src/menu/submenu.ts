@@ -3,13 +3,16 @@ import {
   type FigNode,
   type MixinContext,
   type MixinDescriptor,
+  useBeforePaint,
   useMemo,
   useStableEvent,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
+import { bindPart } from "../internal/parts.ts";
 import { type MenuOptions, type MenuParts, useMenu } from "./menu.tsx";
 import {
   type MenuFocusTarget,
+  type MenuController,
   menuClosesOnSelect,
   menuController,
   registerMenuController,
@@ -42,15 +45,24 @@ interface SubmenuState {
 }
 
 const submenuTriggerBehavior = /* @__PURE__ */ createMixin(
-  (_context: MixinContext, state: SubmenuState) => ({
+  (context: MixinContext, state: SubmenuState) => ({
+    bind: bindPart(context, () => {
+      if (state.disabled) state.hover(undefined, false);
+    }),
     "aria-disabled": state.disabled ? "true" : undefined,
     "data-disabled": state.disabled ? "" : undefined,
     mix: [
       on("keydown", (event) => {
-        if (state.disabled) return;
+        state.hover(undefined, false);
+        if (
+          event.defaultPrevented ||
+          event.isComposing ||
+          event.keyCode === 229 ||
+          state.disabled
+        )
+          return;
         if (event.key !== submenuOpenKey(event.currentTarget)) return;
         event.preventDefault();
-        state.hover(undefined, false);
         state.setOpen(true, "first");
       }),
       on("pointerenter", (event) => {
@@ -68,13 +80,19 @@ const submenuMenuBehavior = /* @__PURE__ */ createMixin(
   (_context: MixinContext, state: SubmenuState) => ({
     mix: [
       on("keydown", (event) => {
+        state.hover(undefined, false);
+        if (
+          event.defaultPrevented ||
+          event.isComposing ||
+          event.keyCode === 229
+        )
+          return;
         if (event.key === "Tab") {
           state.closeTree();
           return;
         }
         if (event.key !== submenuCloseKey(event.currentTarget)) return;
         event.preventDefault();
-        state.hover(undefined, false);
         state.setOpen(false);
       }),
       on("pointerenter", (event) => {
@@ -89,11 +107,19 @@ const submenuMenuBehavior = /* @__PURE__ */ createMixin(
 
 const submenuTriggerMixin = /* @__PURE__ */ createMixin(
   (
-    _context: MixinContext,
-    parentItem: MixinDescriptor,
-    trigger: MixinDescriptor,
+    context: MixinContext,
+    parent: MenuController,
+    child: MenuController,
+    value: unknown,
     state: SubmenuState,
-  ) => [parentItem, trigger, submenuTriggerBehavior(state)],
+  ) => {
+    const disabled = state.disabled || context.props.disabled === true;
+    return [
+      parent.submenuTrigger(value, disabled),
+      child.trigger(false, disabled),
+      submenuTriggerBehavior({ ...state, disabled }),
+    ];
+  },
 );
 
 const submenuMenuMixin = /* @__PURE__ */ createMixin(
@@ -116,7 +142,7 @@ export function useMenuSubmenu<ParentValue, Value = unknown>(
     onSelect: (selected, details, signal) => {
       menuOptions.onSelect?.(selected, details, signal);
       if (!details.isCanceled && menuClosesOnSelect(details)) {
-        parentController.closeTree();
+        parentController.closeTree(focusedItem());
       }
     },
   });
@@ -148,9 +174,20 @@ export function useMenuSubmenu<ParentValue, Value = unknown>(
       );
     },
   );
-  const closeTree = useStableEvent(() => {
+  useBeforePaint(() => {
+    if (!parent.open || disabled) hover(undefined, false);
+  });
+  function focusedItem(): Element | undefined {
+    const popup = controller.popup();
+    const active = popup?.ownerDocument.activeElement;
+    return active !== null && active !== undefined && popup?.contains(active)
+      ? active
+      : undefined;
+  }
+  const closeTree = useStableEvent((focusOrigin?: Element) => {
+    const origin = focusOrigin ?? focusedItem();
     menu.setOpen(false);
-    parentController.closeTree();
+    parentController.closeTree(origin);
   });
   const state = {
     closeTree,
@@ -165,11 +202,7 @@ export function useMenuSubmenu<ParentValue, Value = unknown>(
     ...menu,
     menu: () => submenuMenuMixin(menu.menu(), state),
     trigger: () =>
-      submenuTriggerMixin(
-        parentController.submenuTrigger(value, disabled),
-        controller.trigger(false),
-        state,
-      ),
+      submenuTriggerMixin(parentController, controller, value, state),
   };
   registerMenuController(parts, { ...controller, closeTree });
   return parts;
@@ -192,7 +225,8 @@ function submenuCloseKey(target: EventTarget | null): string {
 
 function rightToLeft(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  const direction = target.closest("[dir]")?.getAttribute("dir");
-  if (direction === "rtl" || direction === "ltr") return direction === "rtl";
-  return getComputedStyle(target).direction === "rtl";
+  const direction = getComputedStyle(target).direction;
+  return direction
+    ? direction === "rtl"
+    : target.closest("[dir]")?.getAttribute("dir") === "rtl";
 }

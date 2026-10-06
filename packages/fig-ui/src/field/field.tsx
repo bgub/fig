@@ -56,10 +56,14 @@ interface FieldState {
 }
 
 type FieldPart =
-  | { readonly kind: "control"; readonly describedBy: string | undefined }
+  | {
+      readonly kind: "control";
+      readonly describedBy: string | undefined;
+      readonly autoLabel: boolean;
+    }
   | { readonly kind: "description" }
   | { readonly kind: "error" }
-  | { readonly kind: "label" };
+  | { readonly kind: "label"; readonly autoFor: boolean };
 
 interface FieldMessageOwnState {
   readonly id: string;
@@ -71,9 +75,13 @@ const defaultError = Symbol("fig-ui.field.error");
 const fieldLabelMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState) => {
     expectHost(context, "field label", "label");
+    const autoFor = context.props.for == null;
     return {
       bind: bindPart(context, (node, signal) =>
-        state.bind(node, signal, { kind: "label" }),
+        state.bind(node, signal, {
+          kind: "label",
+          autoFor: autoFor && context.props.for === state.controlId,
+        }),
       ),
       // A wrapping label needs no `for`, but pointing at the control also works
       // when the two are siblings, which is the arrangement that needs help.
@@ -84,21 +92,30 @@ const fieldLabelMixin = /* @__PURE__ */ createMixin(
 );
 
 const fieldControlMixin = /* @__PURE__ */ createMixin(
-  (context: MixinContext, state: FieldState) => ({
-    "aria-labelledby":
-      context.props["aria-labelledby"] ??
-      (context.props["aria-label"] === undefined ? state.labelId : undefined),
-    "aria-invalid": state.invalid ? "true" : undefined,
-    bind: bindPart(context, (node, signal) =>
-      state.bind(node, signal, {
-        describedBy: context.props["aria-describedby"],
-        kind: "control",
-      }),
-    ),
-    disabled: state.disabled ? true : undefined,
-    id: context.props.id ?? state.controlId,
-    required: state.required ? true : undefined,
-  }),
+  (context: MixinContext, state: FieldState) => {
+    const autoLabel =
+      context.props["aria-labelledby"] == null &&
+      context.props["aria-label"] === undefined;
+    return {
+      "aria-labelledby":
+        context.props["aria-labelledby"] ??
+        (context.props["aria-label"] === undefined ? state.labelId : undefined),
+      "aria-invalid": state.invalid ? "true" : undefined,
+      bind: bindPart(context, (node, signal) =>
+        state.bind(node, signal, {
+          describedBy: context.props["aria-describedby"],
+          autoLabel:
+            autoLabel &&
+            context.props["aria-labelledby"] === state.labelId &&
+            context.props["aria-label"] === undefined,
+          kind: "control",
+        }),
+      ),
+      disabled: state.disabled ? true : context.props.disabled,
+      id: context.props.id ?? state.controlId,
+      required: state.required ? true : context.props.required,
+    };
+  },
 );
 
 const fieldDescriptionMixin = /* @__PURE__ */ createMixin(
@@ -149,16 +166,12 @@ export function useField(options: FieldOptions = {}): FieldParts {
     const control = controls.at(-1);
     if (control === undefined) return;
     const node = control.node;
-    const labelNode = labels.at(-1)?.node;
-    if (labelNode !== undefined) {
-      if (labelNode.getAttribute("for") === controlId) {
-        labelNode.setAttribute("for", node.id);
-      }
-      if (node.getAttribute("aria-labelledby") === labelId) {
-        setIdReference(node, "aria-labelledby", labelNode.id);
-      }
-    } else if (node.getAttribute("aria-labelledby") === labelId) {
-      setIdReference(node, "aria-labelledby", undefined);
+    const label = labels.at(-1);
+    if (label?.value.kind === "label" && label.value.autoFor) {
+      label.node.setAttribute("for", node.id);
+    }
+    if (control.value.kind === "control" && control.value.autoLabel) {
+      setIdReference(node, "aria-labelledby", label?.node.id);
     }
     assertControlLabel(node);
     const descriptions = registrations

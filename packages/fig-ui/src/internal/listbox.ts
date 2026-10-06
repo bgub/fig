@@ -27,9 +27,14 @@ export function createListbox(name: string, registrationChanged: () => void) {
     signal.addEventListener(
       "abort",
       () => {
-        if (searchTimer !== undefined) clearTimeout(searchTimer);
-        searchTimer = undefined;
-        search = "";
+        // A render rebinds this same host synchronously. Only a real removal
+        // or replacement ends the current typeahead session.
+        queueMicrotask(() => {
+          if (composite.containerNode() === node) return;
+          if (searchTimer !== undefined) clearTimeout(searchTimer);
+          searchTimer = undefined;
+          search = "";
+        });
       },
       { once: true },
     );

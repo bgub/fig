@@ -549,6 +549,16 @@ mounted descriptions followed by active errors. Pass stable keys to
 `description(key)` and `error(key)` when rendering repeated messages; errors
 are referenced only while `invalid` is true.
 
+## Inline lists and deferred dialog content
+
+- `useCombobox({ inline: true })` renders a list in document flow; `open: true`
+  keeps it visible. Escape remains available to an enclosing dialog.
+- A Dialog can render its content conditionally on `dialog.open`; its title must
+  be present when it opens. Closed shells can defer mounting their contents.
+
+See the [widget contracts](../../docs/concepts/widgets.md) for behavior and
+composition details.
+
 ## Development diagnostics
 
 Development builds reject markup that would silently discard a widget's

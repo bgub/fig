@@ -52,7 +52,6 @@ interface TooltipState {
   readonly bindPopup: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindTrigger: (node: HTMLElement, signal: AbortSignal) => void;
   readonly disabled: boolean;
-  readonly noteToggle: (open: boolean) => void;
   readonly open: boolean;
   readonly requestOpen: (
     open: boolean,
@@ -106,6 +105,7 @@ const tooltipTriggerMixin = /* @__PURE__ */ createMixin(
       }),
       on("keydown", (event) => {
         if (
+          event.defaultPrevented ||
           event.key !== "Escape" ||
           !(event.currentTarget instanceof Element)
         ) {
@@ -127,6 +127,7 @@ const tooltipMixin = /* @__PURE__ */ createMixin(
       id: state.tooltipId,
       mix: [
         on("beforetoggle", (event) => {
+          if (event.defaultPrevented) return;
           const next = toggledOpen(event);
           if (
             next !== undefined &&
@@ -138,7 +139,6 @@ const tooltipMixin = /* @__PURE__ */ createMixin(
         on("toggle", (event) => {
           const next = toggledOpen(event);
           if (next === undefined) return;
-          state.noteToggle(next);
           state.requestOpen(next, event, undefined);
         }),
         on("pointerenter", (event) => {
@@ -188,12 +188,17 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
     ) => {
       if (timer.value !== undefined) clearTimeout(timer.value);
       timer.value = undefined;
-      if (next === undefined) return;
+      if (next === undefined || (next && disabled)) return;
       const wait =
         requestedDelay === -1 ? (next ? delay : closeDelay) : requestedDelay;
+      const anchor = registry.anchor();
       timer.value = setTimeout(() => {
         timer.value = undefined;
-        if (!signal.aborted) requestOpen(next, event, trigger);
+        // A root can outlive a removed/replaced trigger. Its old pointer
+        // intent must not open a tooltip for the new host. Rebinding the same
+        // DOM host on a render still preserves the pending intent.
+        if (!signal.aborted && (!next || registry.anchor() === anchor))
+          requestOpen(next, event, trigger);
       }, wait);
       signal.addEventListener(
         "abort",
@@ -207,6 +212,10 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
   );
 
   useBeforePaint(() => {
+    if (disabled && timer.value !== undefined) {
+      clearTimeout(timer.value);
+      timer.value = undefined;
+    }
     registry.sync(open, anchorName);
   });
 
@@ -214,10 +223,19 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
     bindPopup: registry.bindPopup,
     bindTrigger: registry.bindAnchor,
     disabled,
-    noteToggle: registry.noteToggle,
     open,
     requestOpen,
-    schedule,
+    schedule: (next, event, trigger, wait) => {
+      const anchor = registry.anchor();
+      // Ignore hover before invoking the stable event, which aborts any
+      // pending focus timer even when its callback returns immediately.
+      if (
+        (event.type === "pointerenter" || event.type === "pointerleave") &&
+        anchor?.contains(anchor.ownerDocument.activeElement)
+      )
+        return;
+      schedule(next, event, trigger, wait);
+    },
     tooltipId,
   };
 

@@ -12,6 +12,7 @@ import type {
 } from "./registry.ts";
 
 interface MenuTriggerOwnState {
+  readonly disabled?: boolean;
   readonly openWithArrows: boolean;
 }
 
@@ -33,6 +34,12 @@ const menuTriggerBehavior = /* @__PURE__ */ createMixin(
     // Click already opens through popovertarget; these are the keys the
     // pattern adds, and each one says where focus should land.
     mix: on("keydown", (event) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229)
+        return;
+      if (own.disabled) {
+        if (event.key === "Enter" || event.key === " ") event.preventDefault();
+        return;
+      }
       if (
         event.key === "Enter" ||
         (own.openWithArrows && event.key === "ArrowDown")
@@ -48,38 +55,88 @@ const menuTriggerBehavior = /* @__PURE__ */ createMixin(
 );
 
 const menuBehavior = /* @__PURE__ */ createMixin(
-  (context: MixinContext, state: MenuPartState) => ({
-    "aria-labelledby":
-      context.props["aria-labelledby"] ??
-      (context.props["aria-label"] === undefined ? state.triggerId : undefined),
-    bind: bindPart(context, (node, signal) =>
-      state.registry.bindContainer(node, signal),
-    ),
-    mix: on("keydown", (event) => {
-      if (event.defaultPrevented) return;
-      // Escape and light dismiss belong to the platform; everything that
-      // moves or commits inside the menu belongs here.
-      if (event.key === "Tab") {
-        state.close();
-        return;
-      }
-      const item = state.registry.menuItemAt(event.target);
-      if (item !== undefined && (event.key === "Enter" || event.key === " ")) {
-        if (item.kind === "submenu") return;
-        event.preventDefault();
-        if (!item.disabled && !(item.kind === "radio" && item.checked)) {
-          state.activate(item, event);
+  (context: MixinContext, state: MenuPartState) => {
+    const automaticLabel =
+      context.props["aria-labelledby"] == null &&
+      context.props["aria-label"] === undefined;
+    return {
+      "aria-labelledby":
+        context.props["aria-labelledby"] ??
+        (context.props["aria-label"] === undefined
+          ? state.triggerId
+          : undefined),
+      bind: bindPart(context, (node, signal) =>
+        state.registry.bindMenu(
+          node,
+          signal,
+          automaticLabel &&
+            context.props["aria-labelledby"] === state.triggerId &&
+            context.props["aria-label"] === undefined,
+        ),
+      ),
+      mix: on("keydown", (event) => {
+        if (
+          event.defaultPrevented ||
+          event.isComposing ||
+          event.keyCode === 229
+        )
+          return;
+        // Escape and light dismiss belong to the platform; everything that
+        // moves or commits inside the menu belongs here.
+        if (event.key === "Tab") {
+          state.close();
+          return;
         }
-        return;
-      }
-      const moved = state.registry.moveFocus(event, {
-        loop: true,
-        orientation: "vertical",
-      });
-      if (moved === undefined) state.registry.focusByTypeahead(event.key);
-    }),
-    role: "menu",
-  }),
+        const item = state.registry.menuItemAt(event.target);
+        if (
+          item !== undefined &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          if (item.kind === "submenu") return;
+          event.preventDefault();
+          if (!item.disabled && !(item.kind === "radio" && item.checked)) {
+            state.activate(item, event);
+          }
+          return;
+        }
+        if (item === undefined) {
+          // Empty/loading menus focus the container. Once items arrive, a
+          // navigation key enters the list without requiring a reopen.
+          if (
+            event.target !== event.currentTarget ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey
+          )
+            return;
+          if (event.key === "ArrowDown" || event.key === "Home") {
+            event.preventDefault();
+            state.open("first");
+          } else if (event.key === "ArrowUp" || event.key === "End") {
+            event.preventDefault();
+            state.open("last");
+          } else state.registry.focusByTypeahead(event.key);
+          return;
+        }
+        const moved = state.registry.moveFocus(event, {
+          loop: true,
+          orientation: "vertical",
+        });
+        if (
+          moved === undefined &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !(event.isComposing || event.keyCode === 229)
+        ) {
+          state.registry.focusByTypeahead(event.key);
+        }
+      }),
+      role: "menu",
+      tabindex: context.props.tabindex ?? -1,
+    };
+  },
 );
 
 /**
@@ -119,6 +176,7 @@ export const menuItemMixin = /* @__PURE__ */ createMixin(
       ),
       "data-checked": own.checked ? "" : undefined,
       mix: on("click", (event) => {
+        if (event.defaultPrevented) return;
         if (disabled) {
           event.preventDefault();
           return;

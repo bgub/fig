@@ -70,10 +70,11 @@ const toggleMixin = /* @__PURE__ */ createMixin(
       bind: bindPart(context, state.noteInput),
       checked: state.checked,
       "data-checked": state.checked ? "" : undefined,
-      "data-disabled": state.disabled ? "" : undefined,
+      "data-disabled":
+        state.disabled || context.props.disabled === true ? "" : undefined,
       "data-indeterminate": state.indeterminate ? "" : undefined,
       "data-readonly": state.readOnly ? "" : undefined,
-      disabled: state.disabled ? true : undefined,
+      disabled: state.disabled ? true : context.props.disabled,
       // The browser has already toggled by the time this runs, so the control
       // reports what happened rather than deciding it.
       mix: [
@@ -89,7 +90,7 @@ const toggleMixin = /* @__PURE__ */ createMixin(
       ],
       name: context.props.name ?? state.name,
       "aria-readonly": state.readOnly ? "true" : undefined,
-      required: state.required ? true : undefined,
+      required: state.required ? true : context.props.required,
       role: state.role,
       type: "checkbox",
       value: context.props.value ?? state.value,
@@ -142,18 +143,23 @@ export function useToggleControl(
 
   const toggle = useStableEvent(
     (next: boolean, event: Event, node: Element) => {
-      if (next === tracker.checked) return;
-      if (readOnly) {
+      if (
+        event.defaultPrevented ||
+        disabled ||
+        node.matches(":disabled") ||
+        readOnly
+      ) {
         requestReconcile();
         return;
       }
+      if (next === tracker.checked) return;
       const details = createChangeDetails(event, node);
       emitCheckedChange(next, details);
       if (details.isCanceled) {
         requestReconcile();
         return;
       }
-      tracker.checked = next;
+      if (!controlled) tracker.checked = next;
       // The box is already ticked. When that did not become state, reconcile
       // so the committed props re-assert.
       if (controlled) requestReconcile();
@@ -166,7 +172,7 @@ export function useToggleControl(
     const details = createChangeDetails(null);
     emitCheckedChange(next, details);
     if (details.isCanceled) return;
-    tracker.checked = next;
+    if (!controlled) tracker.checked = next;
     if (controlled) requestReconcile();
     else setUncontrolled(next);
   });

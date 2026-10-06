@@ -94,6 +94,7 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
     "data-readonly": state.readOnly ? "" : undefined,
     mix: [
       on("click", (event) => {
+        if (event.defaultPrevented) return;
         const option = state.registry.optionAt(event.target);
         if (option === undefined) return;
         if (state.disabled || option.disabled) {
@@ -112,6 +113,7 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
         }
       }),
       on("pointermove", (event) => {
+        if (event.pointerType === "touch") return;
         if (state.disabled) return;
         const option = state.registry.optionAt(event.target);
         if (option !== undefined && !option.disabled) {
@@ -119,8 +121,15 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
         }
       }),
       on("keydown", (event) => {
+        if (event.defaultPrevented) return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[role="listbox"]') !== event.currentTarget
+        )
+          return;
         if (
           state.disabled ||
+          event.isComposing ||
           event.altKey ||
           event.ctrlKey ||
           event.metaKey ||
@@ -174,6 +183,10 @@ const listboxOptionMixin = /* @__PURE__ */ createMixin(
       "data-selected": own.selected ? "" : undefined,
       id: context.props.id ?? state.idFor(own.value, "option"),
       role: "option",
+      type:
+        context.type === "button"
+          ? (context.props.type ?? "button")
+          : undefined,
       tabindex: -1,
     };
   },
@@ -221,9 +234,11 @@ export function useListbox<Value = unknown>(
         if (controlled) requestReconcile();
         return;
       }
-      tracker.values = next;
       if (controlled) requestReconcile();
-      else setUncontrolled(next);
+      else {
+        tracker.values = next;
+        setUncontrolled(next);
+      }
     },
   );
   const select = useStableEvent((option: ListboxOption, event: Event) => {

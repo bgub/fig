@@ -134,11 +134,16 @@ export function useRadioGroup<Value = unknown>(
       // later selection can therefore equal the stale rendered value while an
       // older update is still queued; it must supersede that update rather
       // than being dropped.
-      if (controlled && sameValue(next, value)) return;
-      if (readOnly) {
+      if (
+        event.defaultPrevented ||
+        disabled ||
+        trigger.matches(":disabled") ||
+        readOnly
+      ) {
         requestReconcile();
         return;
       }
+      if (controlled && sameValue(next, value)) return;
       const details = createChangeDetails(event, trigger);
       emitChange(next, details);
       if (details.isCanceled) {

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
+import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,8 @@ import {
   type DialogParts,
   useDialog,
 } from "./dialog.tsx";
+
+import { createDialogRegistry } from "./registry.ts";
 
 const roots: FigRoot[] = [];
 
@@ -22,6 +24,21 @@ afterEach(async () => {
 });
 
 describe("Dialog", () => {
+  it("still rejects an unnamed lazy dialog before it becomes modal", () => {
+    const registry = createDialogRegistry(() => {});
+    const node = document.createElement("dialog");
+    document.body.append(node);
+    const controller = new AbortController();
+    registry.bindDialog(node, controller.signal, {
+      title: true,
+      description: true,
+    });
+    expect(() => registry.sync(false)).not.toThrow();
+    expect(() => registry.sync(true)).toThrow("requires an accessible name");
+    expect(node.open).toBe(false);
+    controller.abort();
+  });
+
   it("opens the native element and names it from its own parts", async () => {
     const container = await renderDialog({});
     const dialog = dialogElement(container);
@@ -40,6 +57,103 @@ describe("Dialog", () => {
     expect(dialog.open).toBe(true);
     expect(dialog.hasAttribute("data-open")).toBe(true);
     expect(trigger.hasAttribute("data-open")).toBe(true);
+  });
+
+  it("mounts lazy content before opening and clears its references when closed", async () => {
+    function LazyDialog(): FigNode {
+      const dialog = useDialog();
+      return (
+        <>
+          <button data-trigger="" mix={dialog.trigger()}>
+            Settings
+          </button>
+          <dialog data-dialog="" mix={dialog.dialog()}>
+            {dialog.open ? (
+              <>
+                <h2 id="lazy-title" mix={dialog.title()}>
+                  Settings
+                </h2>
+                <p id="lazy-description" mix={dialog.description()}>
+                  Preferences
+                </p>
+                <button data-close="" mix={dialog.dismiss()}>
+                  Done
+                </button>
+              </>
+            ) : null}
+          </dialog>
+        </>
+      );
+    }
+    const container = await render(<LazyDialog />);
+    const node = dialogElement(container);
+    expect(node.open).toBe(false);
+    expect(node.hasAttribute("aria-labelledby")).toBe(false);
+    for (let index = 0; index < 2; index++) {
+      await click(requiredElement(container, "[data-trigger]"));
+      expect(node.open).toBe(true);
+      expect(node.getAttribute("aria-labelledby")).toBe("lazy-title");
+      expect(node.getAttribute("aria-describedby")).toBe("lazy-description");
+      await click(requiredElement(container, "[data-close]"));
+      expect(node.open).toBe(false);
+      expect(node.children.length).toBe(0);
+      expect(node.hasAttribute("aria-labelledby")).toBe(false);
+      expect(node.hasAttribute("aria-describedby")).toBe(false);
+    }
+  });
+
+  it("updates custom title and description references after a rerender", async () => {
+    let rename = () => {};
+    function RenamedDialog(): FigNode {
+      const dialog = useDialog();
+      const [suffix, setSuffix] = useState("before");
+      rename = () => setSuffix("after");
+      return (
+        <dialog data-dialog="" mix={dialog.dialog()}>
+          <h2 id={`title-${suffix}`} mix={dialog.title()}>
+            Settings
+          </h2>
+          <p id={`description-${suffix}`} mix={dialog.description()}>
+            Edit settings
+          </p>
+        </dialog>
+      );
+    }
+    const container = await render(<RenamedDialog />);
+    await act(rename);
+    expect(dialogElement(container).getAttribute("aria-labelledby")).toBe(
+      "title-after",
+    );
+    expect(dialogElement(container).getAttribute("aria-describedby")).toBe(
+      "description-after",
+    );
+  });
+
+  it("removes a custom description reference when its part unmounts", async () => {
+    let hide = () => {};
+    function ChangingDescription(): FigNode {
+      const dialog = useDialog();
+      const [shown, setShown] = useState(true);
+      hide = () => setShown(false);
+      return (
+        <dialog data-dialog="" mix={dialog.dialog()}>
+          <h2 mix={dialog.title()}>Settings</h2>
+          {shown ? (
+            <p id="custom-description" mix={dialog.description()}>
+              Edit settings
+            </p>
+          ) : null}
+        </dialog>
+      );
+    }
+    const container = await render(<ChangingDescription />);
+    expect(dialogElement(container).getAttribute("aria-describedby")).toBe(
+      "custom-description",
+    );
+    await act(hide);
+    expect(dialogElement(container).hasAttribute("aria-describedby")).toBe(
+      false,
+    );
   });
 
   it("closes from a dismiss control and reports the change", async () => {
@@ -104,6 +218,54 @@ describe("Dialog", () => {
     await clickAt(dialog, 10, 10);
     expect(dialog.open).toBe(false);
   });
+
+  it.each(["content", "padding"])(
+    "does not dismiss a drag that starts on dialog %s",
+    async (target) => {
+      const container = await renderDialog({ defaultOpen: true });
+      const dialog = dialogElement(container);
+      mockRect(dialog, 100, 100, 200, 200);
+      const start =
+        target === "content"
+          ? requiredElement(container, "[data-title]")
+          : dialog;
+      await act(() =>
+        start.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            clientX: 150,
+            clientY: 150,
+            button: 0,
+          }),
+        ),
+      );
+      await act(() =>
+        dialog.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            clientX: 10,
+            clientY: 10,
+            button: 0,
+          }),
+        ),
+      );
+      await clickAt(dialog, 10, 10);
+      expect(dialog.open).toBe(true);
+      // A later complete backdrop gesture must still dismiss normally.
+      await act(() =>
+        dialog.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            clientX: 10,
+            clientY: 10,
+            button: 0,
+          }),
+        ),
+      );
+      await clickAt(dialog, 10, 10);
+      expect(dialog.open).toBe(false);
+    },
+  );
 
   it("keeps a backdrop click from closing when the option is off", async () => {
     const container = await renderDialog({

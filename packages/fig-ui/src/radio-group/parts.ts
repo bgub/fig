@@ -70,7 +70,7 @@ export const radioMixin = /* @__PURE__ */ createMixin(
       "data-readonly": state.readOnly ? "" : undefined,
       disabled: disabled ? true : undefined,
       name: context.props.name ?? state.name,
-      required: state.required ? true : undefined,
+      required: state.required ? true : context.props.required,
       type: "radio",
       // The submitted value is the string form of the identity. Supply a
       // `value` prop when the two should differ.

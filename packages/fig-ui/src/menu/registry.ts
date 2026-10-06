@@ -23,6 +23,7 @@ export function createMenuRegistry() {
     item: '[role^="menuitem"]',
     name: "menu",
   });
+  const automaticLabels = new WeakSet<HTMLElement>();
   const registrations = new Map<HTMLElement, MenuItemRegistration>();
 
   function bindMenuItem(
@@ -43,5 +44,21 @@ export function createMenuRegistry() {
     return item === undefined ? undefined : registrations.get(item.node);
   }
 
-  return { ...composite, bindMenuItem, menuItemAt };
+  function bindMenu(
+    node: HTMLElement,
+    signal: AbortSignal,
+    automaticLabel: boolean,
+  ): void {
+    if (automaticLabel) automaticLabels.add(node);
+    else automaticLabels.delete(node);
+    composite.bindContainer(node, signal);
+  }
+
+  return {
+    ...composite,
+    bindMenu,
+    bindMenuItem,
+    menuItemAt,
+    hasAutomaticLabel: (node: HTMLElement) => automaticLabels.has(node),
+  };
 }

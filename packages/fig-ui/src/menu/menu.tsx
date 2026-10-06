@@ -14,6 +14,7 @@ import type {
   OpenChangeHandler,
 } from "../internal/open-state.ts";
 import { type PopoverOptions, usePopover } from "../popover/popover.tsx";
+import { bindPopoverSource } from "../popover/registry.ts";
 import { menuItemMixin, menuMixin, menuTriggerMixin } from "./parts.ts";
 import {
   markMenuClose,
@@ -85,15 +86,19 @@ export function useMenu<Value = unknown>(
     open: boolean;
     pending: MenuFocusTarget | null;
     trigger: HTMLElement | null;
-  }>(() => ({ open: popover.open, pending: null, trigger: null }), []);
+    triggerSignal?: AbortSignal;
+    closingFocus?: Element;
+  }>(() => ({ open: false, pending: null, trigger: null }), []);
 
   const noteTrigger = useStableEvent(
     (node: HTMLElement, signal: AbortSignal) => {
+      bindPopoverSource(popover, node, signal);
       tracker.trigger = node;
+      tracker.triggerSignal = signal;
       signal.addEventListener(
         "abort",
         () => {
-          if (tracker.trigger === node) tracker.trigger = null;
+          if (tracker.triggerSignal === signal) tracker.trigger = null;
         },
         { once: true },
       );
@@ -107,11 +112,11 @@ export function useMenu<Value = unknown>(
   );
 
   const open = useStableEvent((at: "first" | "last") => {
-    tracker.pending = at;
-    popover.setOpen(true);
+    setOpen(true, at);
   });
 
-  const close = useStableEvent(() => {
+  const close = useStableEvent((focusOrigin?: Element) => {
+    tracker.closingFocus = focusOrigin;
     popover.setOpen(false);
   });
 
@@ -131,7 +136,12 @@ export function useMenu<Value = unknown>(
 
   const setOpen = useStableEvent(
     (next: boolean, focus: MenuFocusTarget = "first") => {
-      if (next) tracker.pending = focus;
+      if (next) {
+        if (popover.open) {
+          tracker.pending = null;
+          focusItem(focus);
+        } else tracker.pending = focus;
+      }
       popover.setOpen(next);
     },
   );
@@ -141,10 +151,7 @@ export function useMenu<Value = unknown>(
   useBeforePaint(() => {
     const menu = registry.containerNode();
     if (menu !== null) {
-      if (
-        tracker.trigger !== null &&
-        menu.getAttribute("aria-labelledby") === triggerId
-      ) {
+      if (tracker.trigger !== null && registry.hasAutomaticLabel(menu)) {
         menu.setAttribute("aria-labelledby", tracker.trigger.id);
       }
       assertAccessibleName(menu, "menu");
@@ -152,21 +159,30 @@ export function useMenu<Value = unknown>(
     if (popover.open === tracker.open) return;
     tracker.open = popover.open;
     if (popover.open) {
+      tracker.closingFocus = undefined;
       const focus = tracker.pending;
       tracker.pending = null;
-      if (focus !== false) {
-        const items = registry.items();
-        const target = focus === "last" ? items[items.length - 1] : items[0];
-        target?.node.focus();
-      }
+      focusItem(focus);
       return;
     }
     // Light dismiss moves focus itself, so only take it back when it is still
     // inside the menu that just closed.
-    if (registry.containsFocus() || tracker.trigger === null) {
+    if (
+      registry.containsFocus() ||
+      (tracker.closingFocus !== undefined &&
+        tracker.closingFocus === tracker.trigger?.ownerDocument.activeElement)
+    ) {
       tracker.trigger?.focus();
     }
+    tracker.closingFocus = undefined;
   });
+
+  function focusItem(focus: MenuFocusTarget | null): void {
+    if (focus === false) return;
+    const items = registry.items();
+    const target = focus === "last" ? items[items.length - 1] : items[0];
+    (target?.node ?? registry.containerNode())?.focus();
+  }
 
   const state = {
     activate,
@@ -212,6 +228,8 @@ export function useMenu<Value = unknown>(
   };
   registerMenuController(parts, {
     closeTree: close,
+    bindTrigger: noteTrigger,
+    popup: registry.containerNode,
     setOpen,
     submenuTrigger: (value, itemDisabled) =>
       menuItemMixin(state, {
@@ -221,8 +239,8 @@ export function useMenu<Value = unknown>(
         kind: "submenu",
         value,
       }),
-    trigger: (openWithArrows) =>
-      menuTriggerMixin(state, popover.trigger(), { openWithArrows }),
+    trigger: (openWithArrows, disabled = false) =>
+      menuTriggerMixin(state, popover.trigger(), { openWithArrows, disabled }),
   });
   return parts;
 }

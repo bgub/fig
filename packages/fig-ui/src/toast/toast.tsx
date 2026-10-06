@@ -96,8 +96,14 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
         }
         state.registry.setPaused("focus", false);
       }),
-      on("pointerenter", () => state.registry.setPaused("pointer", true)),
-      on("pointerleave", () => state.registry.setPaused("pointer", false)),
+      on("pointerenter", (event) => {
+        if (event.currentTarget instanceof HTMLElement)
+          state.registry.setPointerPaused(event.currentTarget, true);
+      }),
+      on("pointerleave", (event) => {
+        if (event.currentTarget instanceof HTMLElement)
+          state.registry.setPointerPaused(event.currentTarget, false);
+      }),
     ],
     role: "region",
   }),
@@ -121,6 +127,7 @@ const toastDismissMixin = /* @__PURE__ */ createMixin(
     return {
       ...triggerProps(context, { disabled: false }),
       mix: on("click", (event) => {
+        if (event.defaultPrevented) return;
         if (event.currentTarget instanceof Element) {
           state.dismiss(value, "dismiss", event, event.currentTarget);
         }

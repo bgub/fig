@@ -86,6 +86,8 @@ export function useAccordion<Value = unknown>(
     readonly value: readonly Value[];
   }>(() => ({ value: options.defaultValue ?? [] }));
   const values = controlledValue ?? uncontrolled.value;
+  const tracker = useMemo(() => ({ values }), []);
+  tracker.values = values;
   const registrationChanged = useRegistrationReconcile();
   const registry = useMemo(
     () =>
@@ -117,16 +119,19 @@ export function useAccordion<Value = unknown>(
 
   const toggle = useStableEvent(
     (value: unknown, event: Event, trigger: Element) => {
-      const open = values.some((entry) => sameValue(entry, value));
+      // Consecutive activations can arrive before the previous state commits.
+      const current = tracker.values;
+      const open = current.some((entry) => sameValue(entry, value));
       if (open && !collapsible && !multiple) return;
       const next = open
-        ? values.filter((entry) => !sameValue(entry, value))
+        ? current.filter((entry) => !sameValue(entry, value))
         : multiple
-          ? [...values, value as Value]
+          ? [...current, value as Value]
           : [value as Value];
       const details = createChangeDetails(event, trigger);
       emitChange(next, details);
       if (details.isCanceled || controlled) return;
+      tracker.values = next;
       setUncontrolled({ value: next });
     },
   );

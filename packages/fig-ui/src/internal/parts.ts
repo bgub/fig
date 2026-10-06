@@ -22,19 +22,20 @@ export function bindPart(
  * the superseded signal aborts, so only the current element may clear the slot.
  */
 export function createPartSlot(registrationChanged: () => void) {
-  let current: HTMLElement | null = null;
+  let current: { readonly node: HTMLElement } | null = null;
 
   function bind(node: HTMLElement, signal: AbortSignal): void {
-    current = node;
+    const registration = { node };
+    current = registration;
     registrationChanged();
     onAbort(signal, () => {
-      if (current !== node) return;
+      if (current !== registration) return;
       current = null;
       registrationChanged();
     });
   }
 
-  return { bind, node: () => current };
+  return { bind, node: () => current?.node ?? null };
 }
 
 /** Tracks every mounted host for a repeatable or cardinality-checked part. */
@@ -65,6 +66,7 @@ export function activateOnClick(
   activate: (item: CompositeItem, event: MouseEvent) => void,
 ): (event: MouseEvent) => void {
   return (event) => {
+    if (event.defaultPrevented) return;
     const item = registry.itemAt(event.target);
     if (item === undefined) return;
     if (item.disabled) {
@@ -77,8 +79,8 @@ export function activateOnClick(
 
 /**
  * The host props every activating item shares. Disabled items stay focusable
- * so their state stays discoverable, so a native button deliberately does not
- * receive `disabled`.
+ * so their state stays discoverable: explicit widget disability uses ARIA
+ * instead of native `disabled`. Otherwise preserve the caller's native prop.
  */
 export function triggerProps(
   context: MixinContext,
@@ -87,7 +89,10 @@ export function triggerProps(
   return {
     "aria-disabled": options.disabled ? "true" : undefined,
     "data-disabled": options.disabled ? "" : undefined,
-    disabled: context.type === "button" ? undefined : context.props.disabled,
+    disabled:
+      context.type === "button" && options.disabled
+        ? undefined
+        : context.props.disabled,
     id: context.props.id ?? options.id,
     type:
       context.type === "button" ? (context.props.type ?? "button") : undefined,

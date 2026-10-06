@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
+import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,6 +16,31 @@ afterEach(async () => {
 });
 
 describe("Select", () => {
+  it("ignores typeahead keystrokes during IME composition", async () => {
+    const container = await render(<Example />);
+    const trigger = required(container, "[data-trigger]");
+    await act(() =>
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(options(container)[0].getAttribute("aria-selected")).toBe("true");
+    expect(options(container)[1].getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("keeps a multi-character typeahead search across selection renders", async () => {
+    const container = await render(<Example />);
+    const trigger = required(container, "[data-trigger]");
+    await keydown(trigger, "b");
+    await keydown(trigger, "l");
+    expect(trigger.textContent).toBe("blueberry");
+  });
+
   it("selects the first enabled option and wires a listbox popup", async () => {
     const container = await render(<Example />);
     const trigger = required(container, "[data-trigger]");
@@ -55,6 +80,77 @@ describe("Select", () => {
     await keydown(trigger, "b");
 
     expect(trigger.textContent).toBe("blueberry");
+  });
+
+  it("keeps native button options out of sequential focus", async () => {
+    function Buttons(): FigNode {
+      const select = useSelect();
+      return (
+        <>
+          <button mix={select.trigger()}>Choose</button>
+          <div mix={select.popup()}>
+            <button mix={select.option("apple")}>Apple</button>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<Buttons />);
+    expect(options(container)[0].tabIndex).toBe(-1);
+    expect((options(container)[0] as HTMLButtonElement).type).toBe("button");
+  });
+
+  it("updates the popup name when a custom trigger id changes", async () => {
+    let rename = () => {};
+    function RenamedSelect(): FigNode {
+      const select = useSelect();
+      const [id, setId] = useState("before");
+      rename = () => setId("after");
+      return (
+        <>
+          <button id={id} mix={select.trigger()}>
+            Fruit
+          </button>
+          <div mix={select.popup()}>
+            <div mix={select.option("apple")}>Apple</div>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<RenamedSelect />);
+    await act(rename);
+    expect(
+      required(container, '[role="listbox"]').getAttribute("aria-labelledby"),
+    ).toBe("after");
+  });
+
+  it("preserves an authored label while switching back to automatic labelling", async () => {
+    let advance = () => {};
+    function ChangingLabel(): FigNode {
+      const widget = useSelect();
+      const [step, setStep] = useState(0);
+      advance = () => setStep(step + 1);
+      return (
+        <>
+          <span id="external">External name</span>
+          <button id={`trigger-${step}`} mix={widget.trigger()}>
+            Actions
+          </button>
+          <div
+            aria-labelledby={step === 1 ? "external" : undefined}
+            mix={widget.popup()}
+          >
+            <div mix={widget.option("apple")}>Apple</div>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<ChangingLabel />);
+    const popup = required(container, '[role="listbox"]');
+    expect(popup.getAttribute("aria-labelledby")).toBe("trigger-0");
+    await act(advance);
+    expect(popup.getAttribute("aria-labelledby")).toBe("external");
+    await act(advance);
+    expect(popup.getAttribute("aria-labelledby")).toBe("trigger-2");
   });
 
   it("submits and resets its uncontrolled selection", async () => {
@@ -136,3 +232,29 @@ async function keydown(element: HTMLElement, key: string): Promise<void> {
     ),
   );
 }
+
+it("does not select through an open popup whose native trigger is disabled", async () => {
+  const changes: Array<string | null> = [];
+  function Disabled(): FigNode {
+    const select = useSelect<string>({
+      defaultValue: "apple",
+      open: true,
+      onValueChange: (value) => changes.push(value),
+    });
+    return (
+      <>
+        <button disabled mix={select.trigger()}>
+          Fruit
+        </button>
+        <div mix={select.popup()}>
+          <div mix={select.option("apple")}>Apple</div>
+          <div mix={select.option("banana")}>Banana</div>
+        </div>
+      </>
+    );
+  }
+  const container = await render(<Disabled />);
+  await click(options(container)[1]);
+  expect(changes).toEqual([]);
+  expect(options(container)[0].getAttribute("aria-selected")).toBe("true");
+});
