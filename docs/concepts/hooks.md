@@ -67,7 +67,7 @@ The handler receives a trailing `AbortSignal`, but callers do not pass it:
 (...args: Args) => Result
 ```
 
-Handlers update at commit before `useBeforeLayout` runs. Reentrant calls from abort listeners retire the superseded invocation, and each invocation receives its own signal. Teardown marks the handler inactive before notifying abort listeners, so a call during teardown receives an aborted signal. Revealing an outer Activity does not reactivate handlers inside a still-hidden nested Activity. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
+Handlers update at commit before `useBeforeLayout` runs. Reentrant calls from abort listeners retire the superseded invocation, and each invocation receives its own signal. Before running teardown callbacks, Fig marks stable events, transition starters, and action runners inactive across every subtree being deleted or hidden. This includes owners skipped by render bailouts, and happens before effect, subscription, or data cleanup can call another affected hook. Calls during teardown therefore receive aborted signals; kept siblings remain active. Revealing an outer Activity does not reactivate handlers inside a still-hidden nested Activity. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
 
 Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effects. Event handlers, timers, and subscriptions may all call them.
 
