@@ -4,6 +4,7 @@ import {
   Suspense,
   transition,
   type StateSetter,
+  useBeforePaint,
   useState,
 } from "@bgub/fig";
 import { afterEach, expect, it, vi } from "vitest";
@@ -106,6 +107,105 @@ it("preserves functional updates made while suspended primary content is hidden"
   expect(container.textContent).toBe("20");
 });
 
+it.each(["promise", "urgent reveal"] as const)(
+  "reveals attempted rebase history without committing stale state on %s",
+  async (resume) => {
+    const gate = deferred<void>();
+    let setCount!: StateSetter<number>;
+    let setBlocked!: StateSetter<boolean>;
+    const commits: number[] = [];
+    function Counter({ blocked }: { blocked: boolean }) {
+      const [count, set] = useState(0);
+      setCount = set;
+      if (count === 11 && blocked) readPromise(gate.promise);
+      useBeforePaint(() => {
+        commits.push(count);
+      });
+      return createElement("span", null, count);
+    }
+    function App() {
+      const [blocked, set] = useState(true);
+      setBlocked = set;
+      return createElement(
+        Suspense,
+        { fallback: createElement("i", null, "loading") },
+        createElement(Counter, { blocked }),
+      );
+    }
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    roots.push(root);
+    flushSync(() => root.render(createElement(App)));
+    setCount((value) => value + 1);
+    flushSync(() => setCount((value) => value + 10));
+    expect(container.textContent).toBe("10");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("10loading");
+    commits.length = 0;
+    if (resume === "promise") gate.resolve(undefined);
+    else flushSync(() => setBlocked(false));
+    await waitForHostTurns();
+    expect(container.textContent).toBe("11");
+    expect(commits).toEqual([11]);
+    gate.resolve(undefined);
+    await waitForHostTurns();
+  },
+);
+
+it("keeps rebase priorities when a rendered fallback is abandoned", async () => {
+  const gate = deferred<void>();
+  let setCount!: StateSetter<number>;
+  let renderedFallback = false;
+  let interrupted = false;
+  let committedFallback = false;
+  let urgentText = "";
+  function Counter({ blocked }: { blocked: boolean }) {
+    const [count, set] = useState(0);
+    setCount = set;
+    if (count === 11 && blocked) readPromise(gate.promise);
+    return createElement("span", null, count);
+  }
+  function Fallback() {
+    renderedFallback = true;
+    useBeforePaint(() => {
+      committedFallback = true;
+    });
+    return createElement("i", null, "loading");
+  }
+  const tree = (blocked: boolean) =>
+    createElement(
+      Suspense,
+      { fallback: createElement(Fallback) },
+      createElement(Counter, { blocked }),
+    );
+  const container = new FakeElement("root");
+  const root = createRoot(container as unknown as Element);
+  roots.push(root);
+  flushSync(() => root.render(tree(true)));
+  const shouldYield = scheduler.shouldYieldToHost;
+  vi.spyOn(scheduler, "shouldYieldToHost").mockImplementation(() => {
+    if (renderedFallback && !interrupted) {
+      interrupted = true;
+      scheduler.requestPaint();
+      queueMicrotask(() => {
+        flushSync(() => root.render(tree(false)));
+        urgentText = container.textContent;
+      });
+      return true;
+    }
+    return shouldYield();
+  });
+  setCount((value) => value + 1);
+  flushSync(() => setCount((value) => value + 10));
+  await waitForHostTurns(15);
+  expect(interrupted).toBe(true);
+  expect(committedFallback).toBe(false);
+  expect(urgentText).toBe("10");
+  expect(container.textContent).toBe("11");
+  gate.resolve(undefined);
+  await waitForHostTurns();
+});
+
 it("retains a suspended transition update when urgent work commits on the same queue", async () => {
   const gate = deferred<string>();
   let set: StateSetter<number> = () => {};
@@ -137,51 +237,55 @@ it("retains a suspended transition update when urgent work commits on the same q
   expect(container.textContent).toBe("11");
 });
 
-it("does not promote skipped transition state when a sync suspension reveals before the transition", async () => {
-  const gate = deferred<string>();
-  let setCount: StateSetter<number> = () => {};
-  let setSibling: StateSetter<number> = () => {};
-  let setBlocked: StateSetter<boolean> = () => {};
-  function Counter({ blocked }: { blocked: boolean }) {
-    const [count, set] = useState(0);
-    setCount = set;
-    if (count >= 10 && blocked) readPromise(gate.promise);
-    return createElement("span", null, count);
-  }
-  function Sibling() {
-    const [count, set] = useState(0);
-    setSibling = set;
-    return createElement("b", null, "|", count);
-  }
-  function App() {
-    const [blocked, set] = useState(true);
-    setBlocked = set;
-    return createElement(
-      "main",
-      null,
-      createElement(
-        Suspense,
-        { fallback: createElement("i", null, "loading") },
-        createElement(Counter, { blocked }),
-      ),
-      createElement(Sibling, null),
-    );
-  }
-  const container = new FakeElement("root");
-  const root = createRoot(container as unknown as Element);
-  roots.push(root);
-  flushSync(() => root.render(createElement(App, null)));
-  transition(() => {
-    setCount((value) => value + 1);
-    setSibling((value) => value + 1);
-  });
-  flushSync(() => setCount((value) => value + 10));
-  flushSync(() => setBlocked(false));
-  expect(container.textContent).toBe("10|0");
-  gate.resolve("ready");
-  await waitForHostTurns();
-  expect(container.textContent).toBe("11|1");
-});
+it.each([false, true])(
+  "does not promote skipped transition state when a sync suspension reveals before the transition (rebased: %s)",
+  async (rebased) => {
+    const gate = deferred<string>();
+    let setCount: StateSetter<number> = () => {};
+    let setSibling: StateSetter<number> = () => {};
+    let setBlocked: StateSetter<boolean> = () => {};
+    function Counter({ blocked }: { blocked: boolean }) {
+      const [count, set] = useState(0);
+      setCount = set;
+      if (count >= 10 && blocked) readPromise(gate.promise);
+      return createElement("span", null, count);
+    }
+    function Sibling() {
+      const [count, set] = useState(0);
+      setSibling = set;
+      return createElement("b", null, "|", count);
+    }
+    function App() {
+      const [blocked, set] = useState(true);
+      setBlocked = set;
+      return createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("i", null, "loading") },
+          createElement(Counter, { blocked }),
+        ),
+        createElement(Sibling, null),
+      );
+    }
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    roots.push(root);
+    flushSync(() => root.render(createElement(App, null)));
+    transition(() => {
+      setCount((value) => value + 1);
+      setSibling((value) => value + 1);
+    });
+    if (rebased) flushSync(() => setCount((value) => value));
+    flushSync(() => setCount((value) => value + 10));
+    flushSync(() => setBlocked(false));
+    expect(container.textContent).toBe("10|0");
+    gate.resolve("ready");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("11|1");
+  },
+);
 
 it("retires committed root-transition dependencies before the lane pool wraps", async () => {
   const gate = deferred<string>();

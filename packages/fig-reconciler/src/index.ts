@@ -563,6 +563,12 @@ interface QueuedHook<S = any> extends Hook<S> {
   queue: HookQueue<S>;
 }
 
+interface RetryQueueRead {
+  candidate: QueuedHook;
+  committed: QueuedHook | null;
+  lanes: Lanes;
+}
+
 interface Effect {
   phase: EffectPhase;
   create: EffectCallback;
@@ -749,7 +755,7 @@ interface Fiber<
   // the committed visibility state.
   boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
   // Queue reads from a discarded primary, released only if fallback commits.
-  retryQueueReads?: QueuedHook[];
+  retryQueueReads: RetryQueueRead[] | undefined;
   // Suspense/ErrorBoundary only: root commit-index length when this boundary
   // began, so a capture can truncate entries queued by its discarded subtree.
   commitIndexCheckpoint?: number;
@@ -5152,15 +5158,28 @@ export function createRenderer<Container, Instance, TextInstance>(
     // at commit, to the fiber identity the commit blessed.
     attachPing(root, thenable, lanes);
     root.pendingSuspenseRetries.push({ boundary, thenable, lanes });
-    const retryReads: QueuedHook[] = [];
+    const retryReads: RetryQueueRead[] = [];
     for (const owner of root.commitIndex.slice(
       boundary.commitIndexCheckpoint,
     )) {
       if (owner.retryQueueReads !== undefined)
         retryReads.push(...owner.retryQueueReads);
+      let previous = owner.alternate?.memoizedState ?? null;
+      // Preserved clones did not attempt their queues. Nested fallbacks carry
+      // their actual reads above; do not release an unvisited sibling's lanes.
+      if (owner.memoizedState === previous) continue;
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
-        if (isQueuedHook(hook) && hook.readThrough > hook.queue.offset)
-          retryReads.push(hook);
+        if (isQueuedHook(hook)) {
+          const committed =
+            previous !== null && isQueuedHook(previous) ? previous : null;
+          if (
+            hook.readThrough > hook.queue.offset ||
+            committed?.baseQueue != null
+          ) {
+            retryReads.push({ candidate: hook, committed, lanes });
+          }
+        }
+        previous = previous?.next ?? null;
       }
     }
     rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
@@ -5557,6 +5576,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       assetResourceOwner: null,
       boundaryState: null,
       hiddenState: null,
+      // Keep fresh and reused fibers on the same object layout. Adding this
+      // during cloning makes repeated Suspense and error recovery much slower.
+      retryQueueReads: undefined,
     };
   }
 
@@ -5906,8 +5928,18 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitLiveHookInstances(root: R): void {
     for (const owner of root.commitIndex) {
-      for (const hook of owner.retryQueueReads ?? []) {
-        releaseQueueLanes(hook.queue, hook.readThrough, root.renderLanes);
+      for (const { candidate, committed, lanes } of owner.retryQueueReads ??
+        []) {
+        releaseQueueLanes(candidate.queue, candidate.readThrough, lanes);
+        if (committed?.baseQueue != null) {
+          // The hidden clone shares its committed hook. Publish retry lanes
+          // only now; an abandoned fallback must leave rebase history intact.
+          committed.baseQueue = committed.baseQueue.map((update) =>
+            includesSomeLane(update.lane, lanes)
+              ? { action: update.action, lane: NoLane }
+              : update,
+          );
+        }
       }
       owner.retryQueueReads = undefined;
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
