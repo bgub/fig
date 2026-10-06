@@ -23,6 +23,69 @@ import {
 const never = new Promise<never>(() => undefined);
 
 describe("@bgub/fig", () => {
+  it("validates rendered values without retaining discarded or committed reads", () => {
+    const owner = {};
+    const resource = dataResource<[], string>({ key: () => ["consistency"] });
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+    store.hydrate([{ key: ["consistency"], value: "first" }]);
+    expect(store.readData(resource, [], owner)).toBe("first");
+    store.hydrate([{ key: ["consistency"], value: "first" }]);
+    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    store.hydrate([{ key: ["consistency"], value: "second" }]);
+    expect(store.readData(resource, [], owner)).toBe("second");
+    expect(store.areDataDependenciesConsistent(owner)).toBe(false);
+    store.resetDataDependencies(owner);
+    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    expect(store.readData(resource, [], owner)).toBe("second");
+    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    store.commitDataDependencies(owner, null);
+    store.hydrate([{ key: ["consistency"], value: "third" }]);
+    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    store.dispose();
+  });
+
+  it.each(["pending", "rejected"])(
+    "subscribes to %s reads without treating them as value snapshots",
+    (status) => {
+      const owner = {};
+      const resource = dataResource<[], string | undefined>({
+        key: () => ["consistency"],
+        ...(status === "pending" ? { load: () => never } : {}),
+      });
+      const store = createRendererDataStore<object, null>({
+        getLane: () => null,
+        schedule: () => undefined,
+      });
+      try {
+        let thrown: unknown;
+        try {
+          store.readData(resource, [], owner);
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeDefined();
+        expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+        store.commitDataDependencies(owner, null);
+        expect(store.inspectDataDependencyCanonicalKeys(owner)).toEqual([
+          '["consistency"]',
+        ]);
+
+        store.hydrate([{ key: ["consistency"], value: undefined }]);
+        expect(store.readData(resource, [], owner)).toBeUndefined();
+        store.hydrate([{ key: ["consistency"], value: "next" }]);
+        expect(store.readData(resource, [], owner)).toBe("next");
+        expect(store.areDataDependenciesConsistent(owner)).toBe(false);
+        store.commitDataDependencies(owner, null);
+        expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+      } finally {
+        store.dispose();
+      }
+    },
+  );
+
   it("recognizes root-neutral data store controllers", () => {
     expect(isDataStoreController(createDataStore())).toBe(true);
     expect(

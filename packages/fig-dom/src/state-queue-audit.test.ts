@@ -5,13 +5,16 @@ import {
   transition,
   type StateSetter,
   useState,
+  useDeferredValue,
 } from "@bgub/fig";
+import { renderToHtml } from "@bgub/fig-server";
 import { afterEach, expect, it, vi } from "vitest";
 import * as scheduler from "../../fig-reconciler/src/scheduler.ts";
-import { createRoot, type FigRoot, flushSync } from "./index.ts";
+import { createRoot, type FigRoot, flushSync, hydrateRoot } from "./index.ts";
 import {
   deferred,
   FakeElement,
+  FakeText,
   installFakeDocument,
   waitForHostTurns,
 } from "./test-utils.ts";
@@ -219,6 +222,46 @@ it("retires committed root-transition dependencies before the lane pool wraps", 
   gate.resolve("ready");
   await waitForHostTurns();
   expect(container.textContent).toBe("independent:ready");
+});
+
+it("hydrates deferred values using the server value rather than a client mount placeholder", async () => {
+  function App() {
+    const value = useDeferredValue("ready", "loading");
+    return createElement("span", null, value);
+  }
+  expect(await renderToHtml(createElement(App))).toBe("<span>ready</span>");
+  const container = new FakeElement("root");
+  const span = new FakeElement("span");
+  span.appendChild(new FakeText("ready"));
+  container.appendChild(span);
+  const errors: unknown[] = [];
+  flushSync(() => {
+    roots.push(
+      hydrateRoot(container as unknown as Element, createElement(App), {
+        onRecoverableError(error) {
+          errors.push(error);
+        },
+      }),
+    );
+  });
+  expect(errors).toEqual([]);
+  expect(container.childNodes).toEqual([span]);
+  expect(container.textContent).toBe("ready");
+  await waitForHostTurns();
+  expect(container.textContent).toBe("ready");
+});
+
+it("still renders the initial deferred placeholder on a client-only mount", async () => {
+  function App() {
+    return createElement("span", null, useDeferredValue("ready", "loading"));
+  }
+  const container = new FakeElement("root");
+  const root = createRoot(container as unknown as Element);
+  roots.push(root);
+  flushSync(() => root.render(createElement(App)));
+  expect(container.textContent).toBe("loading");
+  await waitForHostTurns();
+  expect(container.textContent).toBe("ready");
 });
 
 it("retains attempted updates when an outer fallback discards an inner fallback", async () => {

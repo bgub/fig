@@ -119,7 +119,7 @@ Prefer returning the next action state rather than scheduling it through a separ
 ## Other Hooks
 
 - `useMemo` and `useCallback` preserve values and callback identities.
-- `useDeferredValue` renders a lower-priority version of a value.
+- `useDeferredValue` renders a lower-priority version of a value. An optional initial placeholder applies to client-only mounts; server rendering and hydration both use the current value so valid server DOM is retained.
 - `useSyncExternalStore` requires `getServerSnapshot` during server rendering and hydration. Hidden Activity subscriptions wait until reveal.
 - `useId` creates SSR-stable ids under the root's `identifierPrefix`. Server rendering and hydration derive ids from the same canonical element path. A dehydrated Suspense or Activity boundary preserves that path across intervening client updates, while purely client-mounted components use the separate `fig-C-*` namespace.
 - There is no `useRef`. Use `useMemo(() => ({ current: null }), [])` for mutable storage and `bind` for DOM access.

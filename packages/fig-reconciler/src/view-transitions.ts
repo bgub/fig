@@ -854,6 +854,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
       let didRunMutation = false;
+      let abandoned = false;
       let didFinish = false;
       let controller: AbortController | null = null;
 
@@ -863,12 +864,20 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
         () => applyOldViewTransitionSurfaces(plan),
         () => {
           didRunMutation = true;
-          return (
-            context.runMutation(() => resolveViewTransitionPlan(plan)) ?? {
-              canceledNames: [],
-              cancelRootSnapshot: false,
-            }
+          const result = context.runMutation(() =>
+            resolveViewTransitionPlan(plan),
           );
+          if (result !== undefined) return result;
+          abandoned = true;
+          return {
+            canceledNames: [
+              ...new Set([
+                ...plan.oldSurfaces.map((surface) => surface.name),
+                ...plan.newSurfaces.map((surface) => surface.name),
+              ]),
+            ],
+            cancelRootSnapshot: true,
+          };
         },
         (active) => {
           try {
@@ -878,7 +887,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
             // fails before mutation so the reconciler can fall back normally.
             if (didRunMutation) context.captureFinished();
           }
-          if (active && !didFinish && controller === null) {
+          if (active && !abandoned && !didFinish && controller === null) {
             controller = new AbortController();
             dispatchViewTransitionCallbacks(plan, controller.signal);
           }

@@ -562,7 +562,7 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readData(resource, args) {
       throwIfAborting(frame.request);
-      return frame.request.dataStore.readData(resource, args, frame);
+      return frame.request.dataStore.readData(resource, args);
     },
     preloadData(resource, args) {
       throwIfAborting(frame.request);

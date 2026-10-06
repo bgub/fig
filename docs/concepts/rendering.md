@@ -96,6 +96,12 @@ Placements, visibility changes, and hydration still use flags and pruned tree wa
 
 View transitions assign indexed mutations to the nearest transition boundary, to the root, or to nothing when a portal breaks ownership. This avoids another subtree walk without changing which mutations count.
 
+## External Store Consistency
+
+Before committing concurrent work, Fig rechecks the external-store snapshots and data-resource values read by visible components in the sparse commit index. A mismatch or snapshot error discards the speculative tree and retries synchronously before host mutations or effects publish it. This also applies when `flushSync` finishes work that previously yielded, or when a finished tree resumes after being parked by a commit coordinator. A coordinator that delays the mutation transaction revalidates once more at mutation time. Stale transactions release their prepared capture without publishing hooks, effects, host mutations, or capture callbacks; fresh work is then scheduled. Fresh synchronous renders do not need the additional yield-consistency pass. Hydration keeps its server snapshot contract and reconciles the client snapshot after hydration commits.
+
+Subscription teardown clears ownership before invoking user cleanup, so reentrant notifications and throwing cleanups cannot reuse a retired subscription. Subscription-time snapshot errors schedule the consuming component instead of escaping the store notification callback, allowing its ErrorBoundary to handle the error during render. This follows React's [precommit consistency validation](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberWorkLoop.js) and [snapshot-change detection](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberHooks.js).
+
 ## Suspense Retries
 
 When a fallback preserves an already committed primary, commit releases the original lane ownership of the update prefixes that primary attempted, making them eligible for retry. Updates that render skipped, or that arrived after its read boundaries, retain their priority. Discarding a fallback before commit does not change incoming queue history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.

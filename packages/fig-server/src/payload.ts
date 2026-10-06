@@ -397,7 +397,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
       "useSyncExternalStore requires getServerSnapshot during payload render.",
     readPromise: readThenable,
     readData(resource, args) {
-      return frame.request.dataStore.readData(resource, args, frame);
+      return frame.request.dataStore.readData(resource, args);
     },
     preloadData(resource, args) {
       frame.request.dataStore.preloadData(resource, ...args);

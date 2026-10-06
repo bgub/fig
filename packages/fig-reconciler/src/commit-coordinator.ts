@@ -22,6 +22,12 @@ export interface ReconcilerCommitContext<Container> {
   readonly priority: ReconcilerWorkPriority;
   readonly root: object;
   captureFinished(this: void): void;
+  /**
+   * Runs a still-consistent transaction and its post-mutation callback.
+   * A deferred transaction may be abandoned if a store changed meanwhile;
+   * then no host mutation runs, the callback is skipped, and undefined is returned. Release any prepared
+   * capture and still call captureFinished so the reconciler can retry.
+   */
   runMutation<Result>(
     this: void,
     afterMutation: () => Result,

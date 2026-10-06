@@ -150,7 +150,7 @@ Only commit waits. Rendering continues normally:
 
 Urgent sync and default-lane commits never park. Unannotated server reveals do not park either. A 60-second safeguard releases a commit or reveal if the prior browser transition never settles.
 
-Once the browser invokes a deferred transition callback, the root remains frozen only for that short capture window. Errors thrown there follow the normal root uncaught-error path. Hosts without the reconciler's suspension hook fall back to the same chained wait in Fig DOM.
+Once the browser invokes a deferred transition callback, the root remains frozen only for that short capture window. Hook implementations and before-layout effects publish inside the actual mutation transaction, so callbacks invoked during the deferred interval still observe the committed tree. If store snapshots changed before mutation, Fig abandons the stale capture, cancels its planned surfaces and root snapshot, suppresses its transition callbacks, and retries the render after releasing the capture. Errors thrown there follow the normal root uncaught-error path. Hosts without the reconciler's suspension hook fall back to the same chained wait in Fig DOM.
 
 ## Server Streaming
 

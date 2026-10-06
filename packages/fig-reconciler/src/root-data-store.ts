@@ -63,7 +63,7 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     readData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
       args: TArgs,
-      owner: object,
+      owner?: object,
     ): TValue {
       return installStore(resource).readData(resource, args, owner);
     },
@@ -99,6 +99,9 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       ...args: TArgs
     ): Promise<DataRefreshResult<TValue>> {
       return installStore(resource).refreshData(resource, ...args);
+    },
+    areDataDependenciesConsistent(owner: object): boolean {
+      return inner?.areDataDependenciesConsistent(owner) ?? true;
     },
     commitDataDependencies(owner: object, previousOwner: object | null): void {
       inner?.commitDataDependencies(owner, previousOwner);

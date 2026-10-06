@@ -128,6 +128,7 @@ export interface FigDataStoreOptions {
 
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
+  areDataDependenciesConsistent(owner: object): boolean;
   commitDataDependencies(owner: object, previousOwner: object | null): void;
   deleteDataOwner(owner: object): void;
   releaseDataOwner(owner: object): void;
@@ -137,11 +138,11 @@ export interface FigDataStore extends FigDataStoreHandle {
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the
-  // subscribing owner trails them.
+  // optional subscribing owner trails them. Server reads omit the owner.
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner: object,
+    owner?: object,
   ): TValue;
 }
 

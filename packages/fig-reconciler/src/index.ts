@@ -1476,6 +1476,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function performRootWork(root: R, forceSync: boolean): void {
     if (root.pendingCoordinatedCommit) return;
+    // flushSync may finish work that already yielded. Finishing synchronously
+    // does not undo an external-store mutation between its earlier chunks.
+    const resumedConcurrentWork =
+      root.wip !== null &&
+      !isSyncLane(getHighestPriorityLane(root.renderLanes));
 
     if (root.pendingLanes === NoLanes && root.wip === null) {
       pendingRoots.delete(root);
@@ -1492,6 +1497,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       // instead of repeatedly selecting the same ready tree until commit.
       const candidate = getNextLanes(root, NoLanes, readyLanes);
       if (candidate === NoLanes && root.finishedWork !== null) {
+        if (retryInconsistentStores(root)) return;
         if (commitRoot(root, root.finishedWork)) return;
         finishRootWork(root);
         flushPostCommitSyncWork();
@@ -1556,6 +1562,13 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
+    if (
+      (!forceSync || resumedConcurrentWork) &&
+      !isSyncLane(getHighestPriorityLane(root.renderLanes)) &&
+      retryInconsistentStores(root)
+    )
+      return;
+
     if (root.finishedWork !== null && commitRoot(root, root.finishedWork)) {
       return;
     }
@@ -1586,8 +1599,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (root.pendingSuspenseRetries.length > 0) {
       root.pendingSuspenseRetries = [];
     }
+    // Abandoned attempts can remain reachable through alternate fibers even
+    // when the next attempt bails out. Release their speculative data values.
     for (const owner of root.commitIndex) {
       owner.retryQueueReads = undefined;
+      if (owner.dataDependenciesDirty)
+        root.dataStore.resetDataDependencies(owner);
     }
     clearCommitIndex(root.commitIndex);
     resetHydrationPointers(root);
@@ -2869,9 +2886,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): T {
     const fiber = requireRenderingFiber();
     const oldHook = updateHook(DeferredValueHook) as Hook<T> | null;
+    // Server rendering uses the current value, so hydration must match it.
+    // Only a client mount should briefly render the optional initial value.
     let next =
       oldHook === null
-        ? initialDeferredValue(value, initialValue, hasInitialValue)
+        ? rootOf(fiber).isHydrating
+          ? value
+          : initialDeferredValue(value, initialValue, hasInitialValue)
         : oldHook.memoizedState;
 
     if (!Object.is(next, value)) {
@@ -3848,11 +3869,15 @@ export function createRenderer<Container, Instance, TextInstance>(
         suspenseRetries = root.pendingSuspenseRetries;
         root.pendingSuspenseRetries = [];
       }
-      commitLiveHookInstances(root);
-      if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-      if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
-      commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+      let abandoned = false;
       const commitHostChanges = () => {
+        // A coordinator may defer this transaction. Publish hook instances and
+        // run before-layout effects only when its host mutation actually begins.
+        commitLiveHookInstances(root);
+        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
+        if (hasHiddenBoundaries)
+          armRevealedHiddenBoundaries(finishedWork.child);
+        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
         const recoveringHydration = root.clearContainerBeforeCommit;
         if (recoveringHydration) {
           requireHydrationHostConfig().clearContainer(root.container);
@@ -3939,7 +3964,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       const finishDeferredCommit = () => {
         if (!root.pendingCoordinatedCommit) return;
         root.pendingCoordinatedCommit = false;
-        finishRootWork(root);
+        if (abandoned) {
+          resetRootWork(root);
+          scheduleRoot(root);
+        } else finishRootWork(root);
         flushPostCommitSyncWork();
       };
       if (commitCoordinator !== null) {
@@ -3969,6 +3997,13 @@ export function createRenderer<Container, Instance, TextInstance>(
             const isDeferredCommit = root.pendingCoordinatedCommit;
             if (isDeferredCommit) commitDepth += 1;
             try {
+              if (isDeferredCommit && markInconsistentStores(root)) {
+                // The coordinator's plan belongs to the old render. Let it
+                // release that plan, then retry after captureFinished; never
+                // expose stale host state to its afterMutation callback.
+                abandoned = true;
+                return undefined;
+              }
               commitHostChanges();
               completeCommit();
               return afterMutation();
@@ -5992,6 +6027,48 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hook.kind === StableEventHook;
   }
 
+  function retryInconsistentStores(root: R): boolean {
+    if (!markInconsistentStores(root)) return false;
+    resetRootWork(root);
+    performRootWork(root, true);
+    return true;
+  }
+
+  function markInconsistentStores(root: R): boolean {
+    // Hydration intentionally reads the server snapshot. Its normal post-commit
+    // check schedules the first client snapshot without discarding server DOM.
+    if (root.isHydrating) return false;
+    let inconsistent = false;
+    const lane = getHighestPriorityLane(root.renderLanes);
+    for (const owner of root.commitIndex) {
+      if (hasHiddenBoundaries && isInsideHiddenBoundary(owner)) continue;
+      let changed =
+        owner.dataDependenciesDirty &&
+        !root.dataStore.areDataDependenciesConsistent(owner);
+      if (!changed && (owner.flags & StoreConsistencyFlag) !== 0) {
+        for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+          if (!isExternalStoreHook(hook)) continue;
+          const state = hook.memoizedState;
+          try {
+            changed = !Object.is(state.getSnapshot(), state.value);
+          } catch {
+            // Retry in render, where the nearest ErrorBoundary can handle it.
+            changed = true;
+          }
+          if (changed) break;
+        }
+      }
+      if (!changed) continue;
+      inconsistent = true;
+      // Preserve the render's lanes, but invalidate even props-equal readers
+      // on both trees so the retry cannot adopt a stale committed snapshot.
+      markLanes(owner, lane);
+      scheduleParentPath(owner.return, lane);
+      scheduleParentPath(owner.alternate?.return ?? null, lane);
+    }
+    return inconsistent;
+  }
+
   function commitExternalStores(root: R): void {
     for (const cursor of root.commitIndex) {
       if ((cursor.flags & StoreConsistencyFlag) === 0) continue;
@@ -6042,8 +6119,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const instance = state.instance;
 
     if (instance.committedSubscribe !== state.subscribe) {
-      instance.unsubscribe?.();
-      instance.unsubscribe = null;
+      unsubscribeExternalStore(state);
       instance.committedSubscribe = state.subscribe;
     }
 
@@ -6068,8 +6144,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): void {
     if (owner === null) return;
 
-    const latestValue = instance.getSnapshot();
-    if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, lane);
+    try {
+      if (Object.is(instance.getSnapshot(), instance.value)) return;
+    } catch {
+      // A snapshot failure belongs to the consuming render's error boundary,
+      // not to the store's notification callback or an unrelated commit.
+    }
+    scheduleFiber(owner, lane);
   }
 
   function requestExternalStoreUpdateLane(): Lane {
@@ -6366,10 +6447,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (state.instance.owner !== null) {
       rootOf(state.instance.owner).externalStores.delete(state.instance);
     }
-    state.instance.unsubscribe?.();
+    const unsubscribe = state.instance.unsubscribe;
+    // Retire before user cleanup: it may synchronously notify this listener,
+    // or throw and cause root error recovery to visit these hooks again.
     state.instance.unsubscribe = null;
     state.instance.committedSubscribe = null;
     state.instance.owner = null;
+    unsubscribe?.();
   }
 }
 
