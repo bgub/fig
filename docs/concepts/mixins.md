@@ -55,10 +55,12 @@ Returned props compose shallowly. To extend `style`, `bind`, or another structur
 
 ## Built-In Mixins
 
-`on()` from `@bgub/fig-dom` is currently the only built-in mixin:
+`on()` from `@bgub/fig-dom` declares native listeners:
 
 ```tsx
 <button mix={[on("click", save), enabled && on("pointerenter", preload)]} />
 ```
 
 Its native event and `AbortSignal` behavior belong to the [event contract](./events.md). Future built-ins should come from real behavior-composition needs, not from filling out a catalog.
+
+`adoptFormState()` from `@bgub/fig-dom` declares a one-time callback for edits made to an input, textarea, or select before hydration. The callback receives the native node and an `AbortSignal`; it opts controlled fields into preserving edits and updates controlled state synchronously without synthesizing native events. Binding abstractions can compose this mixin with their state setter and native listeners. Its ownership and timing belong to the [hydration contract](./hydration.md#form-state-adoption).

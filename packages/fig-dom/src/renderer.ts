@@ -26,7 +26,10 @@ import {
   registerPortalContainer,
   removePortalContainer,
   replayQueuedEvents,
+  flushHydrationFormChanges,
+  discardHydrationFormChanges,
   setEventBatching,
+  setFormAdoptionFlushing,
 } from "./events.ts";
 import {
   shouldRestoreControlledFormState,
@@ -136,6 +139,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   shouldCommitUpdate: (type, _previousProps, nextProps) =>
     shouldRestoreControlledFormState(type, nextProps),
   clearContainer: (container) => {
+    discardHydrationFormChanges(container);
     clearDomChildren(container, isDocumentContainer(container));
     // Hydration-mismatch recovery may detach queued event targets; drain them.
     queueMicrotask(replayQueuedEvents);
@@ -157,6 +161,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   },
   commitUpdate: updateElement,
   commitHydratedInstance: hydrateElement,
+  flushHydrationEvents: flushHydrationFormChanges,
   getActivityBoundary: activityBoundary,
   getFirstActivityHydratable: (boundary) =>
     nextHydratableNode(
@@ -229,6 +234,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
 export const domRenderer: FigRenderer<Container, Element> =
   createRenderer(hostConfig);
 setEventBatching(domRenderer.batchedUpdates);
+setFormAdoptionFlushing(domRenderer.flushSync);
 configureDomRefreshScheduler(domRenderer.scheduleRefresh);
 
 // Real templates hold children in a content fragment; test doubles hold

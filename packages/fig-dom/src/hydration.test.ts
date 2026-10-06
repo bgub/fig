@@ -2443,7 +2443,7 @@ describe("@bgub/fig-dom hydration", () => {
     });
   });
 
-  it("hydrates controlled form values", () => {
+  it("applies controlled state during hydration without an adopter", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
     input.setAttribute("value", "Server");
@@ -2487,6 +2487,7 @@ describe("@bgub/fig-dom hydration", () => {
   it("preserves uncontrolled checked edits during hydration", () => {
     const container = new FakeElement("root");
     const input = new FakeElement("input");
+    input.setAttribute("type", "checkbox");
     input.setAttribute("checked", "true");
     input.defaultChecked = true;
     input.checked = false;
