@@ -67,7 +67,7 @@ The handler receives a trailing `AbortSignal`, but callers do not pass it:
 (...args: Args) => Result
 ```
 
-Handlers update at commit before `useBeforeLayout` runs. Reentrant calls from abort listeners retire the superseded invocation, and each invocation receives its own signal. Teardown marks the handler inactive before notifying abort listeners, so a call during teardown receives an aborted signal. Revealing an outer Activity does not reactivate handlers inside a still-hidden nested Activity. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
+Handlers update at commit before `useBeforeLayout` runs. Reentrant calls from abort listeners retire the superseded invocation, and each invocation receives its own signal. Before running teardown callbacks, Fig marks stable events, transition starters, and action runners inactive across every subtree being deleted or hidden. This includes owners skipped by render bailouts, and happens before effect, subscription, or data cleanup can call another affected hook. Calls during teardown therefore receive aborted signals; kept siblings remain active. Revealing an outer Activity does not reactivate handlers inside a still-hidden nested Activity. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
 
 Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effects. Event handlers, timers, and subscriptions may all call them.
 
@@ -105,6 +105,8 @@ Each `useTransition` hook is one cancellation domain. Starting another run abort
 - state it already committed stays committed.
 
 Unmounting the owner or hiding its enclosing Activity also retires the run. Abort is a signal to stop, not an undo operation: already committed state stays committed, and arbitrary code outside `update` is not suppressed. A saved starter called after unmount or while its Activity is hidden receives an already-aborted signal and an inert update handle. It does not acquire a pending slot. Reentrant starts from abort listeners are newer runs and retain ownership over the invocation that triggered cleanup.
+
+Owner retirement also disables saved `update` handles before any teardown callback runs, including cleanup in an earlier sibling. Signals abort in the normal per-hook cleanup order; during that interval, a retiring owner's `update` is already inert even if its signal has not yet aborted. Kept siblings retain update authority. Revealing an Activity permits new runs but never revives a retired run's saved handle.
 
 Top-level `transition()` uses the same `(signal, update)` contract and returns the callback result unchanged. Its lifetime follows callback settlement; it has no hook owner to supersede or unmount. Server and renderer-free scopes use the same callback lifetime, without client scheduling.
 

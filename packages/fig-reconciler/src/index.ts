@@ -2951,7 +2951,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         runLatest(
           instance,
           fiber,
-          callback,
+          (signal, update) =>
+            callback(signal, (run) => {
+              // Teardown retires all owners before individual cleanups abort
+              // their signals. Saved updates must respect that earlier cutoff.
+              if (instance.live) update(run);
+            }),
           updatePending,
           (lane, value, failed, asynchronous) => {
             updatePending(-1, lane);
@@ -3855,8 +3860,19 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.pendingSuspenseRetries = [];
       }
       commitLiveHookInstances(root);
+      if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
       if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-      if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
+      if (root.needsCommitDeletions) {
+        // Retire every deleted owner before any effect, unsubscribe, or data
+        // cleanup can call a hook in another deletion. Bound each walk so kept
+        // siblings remain live.
+        for (const owner of root.commitIndex) {
+          if (owner.deletions === null) continue;
+          for (const deleted of owner.deletions) {
+            walkFiberSubtree(deleted, deactivateFiberHooks);
+          }
+        }
+      }
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
       const commitHostChanges = () => {
         const recoveringHydration = root.clearContainerBeforeCommit;
@@ -4191,6 +4207,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.element = null;
 
     if (root.current.child !== null) {
+      walkFiberForest(root.current.child, deactivateFiberHooks);
       deleteFiberDataTree(root.current.child);
       abortFiberEffects(root.current);
     }
@@ -5859,7 +5876,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function armRevealedHiddenBoundaries(node: F | null): void {
+  function prepareHiddenBoundaryHooks(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
       const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
@@ -5871,13 +5888,18 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (
         cursor.tag === ActivityTag &&
         (cursor.flags & VisibilityFlag) !== 0 &&
-        !activityHidden(cursor.props) &&
         cursor.child !== null
       ) {
+        if (activityHidden(cursor.props)) {
+          // Bailouts can leave descendants outside the commit index. Retire
+          // the whole forest before cleanup in this or any sibling boundary.
+          walkFiberForest(cursor.child, deactivateFiberHooks);
+          continue;
+        }
         armDeferredEffects(cursor.child);
       }
 
-      if (subtreeVisibility) armRevealedHiddenBoundaries(cursor.child);
+      if (subtreeVisibility) prepareHiddenBoundaryHooks(cursor.child);
     }
   }
 
@@ -6337,6 +6359,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       abortFiberHooks(cursor, retirePending);
     });
+  }
+
+  // This pass invokes no user code. Controllers stay attached until cleanup
+  // so their signals and pending slots are retired exactly once as before.
+  function deactivateFiberHooks(owner: F): void {
+    for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+      if (isStableEventHook(hook)) hook.memoizedState.instance.live = false;
+      if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+        (
+          hook.memoizedState as
+            | TransitionState
+            | ActionState<unknown, unknown[]>
+        ).instance.live = false;
+      }
+    }
   }
 
   function abortFiberHooks(owner: F, retirePending: boolean): void {
