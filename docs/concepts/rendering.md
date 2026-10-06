@@ -58,7 +58,7 @@ Suspense boundaries always run their begin phase because hidden primary content 
 
 Development is always strict; there is no `StrictMode` component or opt-out.
 
-Each component invocation runs once as a shadow pass and once for real. Fig discards the shadow hooks, effects, and consumed update queues. First-time effects and binds also run, abort, and run again with a fresh signal.
+Each component invocation runs once as a shadow pass and once for real. Fig discards the shadow hook state and effects; queue reads never consume incoming updates. First-time effects and binds also run, abort, and run again with a fresh signal.
 
 Server rendering never double-invokes. Production removes the client checks through compile-time `__FIG_DEV__` gates.
 
@@ -78,7 +78,9 @@ Fig DOM permits this for `<html>`, `<head>`, and `<body>`, where extensions may 
 
 ## Commit And Batching
 
-Batching is automatic. Updates from the same tick and root renders coalesce; `flushSync` is the escape hatch. After mutations, commit calls `requestPaint()` so the scheduler yields before starting more work.
+Batching is automatic. Updates from the same tick and root renders coalesce; `flushSync` is the escape hatch. Root renders are queued by lane and rebased like component state. An urgent child update uses committed root props while a lower-priority root render remains pending; replaying skipped work cannot overwrite a newer synchronous root render. Root queues are processed inside the root work unit, after retiring its consumed lanes, just like component queues. Each queue reads through a captured position in its update history without removing updates. Commit acknowledges only that observed prefix; updates arriving later remain pending. Abandoned renders and strict shadow passes discard their candidate state without restoring queues. Priority rebasing retains skipped updates and replays subsequent applied updates in dispatch order. After mutations, commit calls `requestPaint()` so the scheduler yields before starting more work.
+
+Root renders and state, transition, and action hooks carry update queues and rebase state. Other hook kinds retain only their own value or lifecycle state, without allocating unused queues.
 
 Fig records fiber-local commit work in a sparse per-root index during render. Effects, data subscriptions, external stores, deletions, caught errors, live hooks, and ordinary host updates can then commit without scanning the entire finished tree.
 
@@ -95,6 +97,8 @@ Placements, visibility changes, and hydration still use flags and pruned tree wa
 View transitions assign indexed mutations to the nearest transition boundary, to the root, or to nothing when a portal breaks ownership. This avoids another subtree walk without changing which mutations count.
 
 ## Suspense Retries
+
+When a fallback preserves an already committed primary, commit releases the original lane ownership of the update prefixes that primary attempted, making them eligible for retry. Updates that render skipped, or that arrived after its read boundaries, retain their priority. Discarding a fallback before commit does not change incoming queue history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
 
 Every suspension installs two kinds of wake-up:
 

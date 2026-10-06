@@ -3,64 +3,43 @@ import { type Lane, type Lanes, NoLane } from "./lanes.ts";
 
 export type StateUpdate<S> = S | ((previous: S) => S);
 
-export class HookUpdate<S> {
-  next: HookUpdate<S> = this;
-
-  constructor(
-    readonly action: StateUpdate<S>,
-    public lane: Lane,
-  ) {}
+export interface HookUpdate<S> {
+  readonly action: StateUpdate<S>;
+  readonly lane: Lane;
 }
 
 export interface HookQueue<S> {
   transitionLanes: Lanes;
-  pending: HookUpdate<S> | null;
+  pending: HookUpdate<S>[] | null;
+  // Absolute position of the first pending update.
+  offset: number;
   dispatch: StateSetter<S> | null;
 }
 
-// Hook queues are circular lists whose tail points at the first update. These
-// operations keep the pointer manipulation in one place so render retries and
-// rebasing share exactly the same ordering rules.
-export function mergeQueues<S>(
-  baseQueue: HookUpdate<S> | null,
-  pendingQueue: HookUpdate<S>,
-): HookUpdate<S> {
-  if (baseQueue === null) return pendingQueue;
-
-  const baseFirst = baseQueue.next;
-  const pendingFirst = pendingQueue.next;
-  baseQueue.next = pendingFirst;
-  pendingQueue.next = baseFirst;
-  return pendingQueue;
+// A committed hook acknowledges only its observed prefix. Updates appended
+// while rendering or during commit stay pending for the next attempt.
+export function acknowledgeQueue<S>(
+  queue: HookQueue<S>,
+  through: number,
+): void {
+  const count = through - queue.offset;
+  if (count <= 0 || queue.pending === null) return;
+  if (count === queue.pending.length) queue.pending = null;
+  else queue.pending.splice(0, count);
+  queue.offset = through;
 }
 
-export function cloneUpdateNode<S>(update: HookUpdate<S>): HookUpdate<S> {
-  return new HookUpdate(update.action, update.lane);
-}
-
-export function cloneQueue<S>(
-  queue: HookUpdate<S> | null,
-): HookUpdate<S> | null {
-  return queue === null ? null : cloneQueueNodes(queue);
-}
-
-export function cloneQueueNodes<S>(queue: HookUpdate<S>): HookUpdate<S> {
-  const first = queue.next;
-  let clone = cloneUpdateNode(first);
-  let update = first.next;
-
-  while (update !== first) {
-    clone = mergeQueues(clone, cloneUpdateNode(update));
-    update = update.next;
+// A committed fallback makes attempted updates eligible on its retry lane.
+// Skipped updates and updates arriving after the read boundary keep priority.
+export function releaseQueueLanes<S>(
+  queue: HookQueue<S>,
+  through: number,
+  lanes: Lanes,
+): void {
+  if (queue.pending === null) return;
+  for (let i = 0; i < through - queue.offset; i += 1) {
+    const update = queue.pending[i];
+    if ((update.lane & lanes) !== NoLane)
+      queue.pending[i] = { action: update.action, lane: NoLane };
   }
-
-  return clone;
-}
-
-export function clearQueueLanes<S>(queue: HookUpdate<S>): void {
-  let update = queue.next;
-  do {
-    update.lane = NoLane;
-    update = update.next;
-  } while (update !== queue.next);
 }

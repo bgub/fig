@@ -14,6 +14,7 @@ import {
   type StartTransition,
   stylesheet,
   title,
+  transition,
   useBeforeLayout,
   useBeforePaint,
   useSyncExternalStore,
@@ -211,6 +212,36 @@ afterEach(() => {
 });
 
 describe("reconciler", () => {
+  it("does not expose a pending root transition during an urgent child update", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let increment = () => {};
+    function App({ label }: { label: string }) {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("span", null, `${label}:${count}`);
+    }
+    flushSync(() => root.render(createElement(App, { label: "old" })));
+    transition(() => root.render(createElement(App, { label: "new" })));
+    flushSync(increment);
+    expect(container.textContent).toBe("old:1");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("new:1");
+  });
+
+  it("rebases skipped root renders without replacing a newer synchronous root", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    flushSync(() => root.render(createElement("span", null, "initial")));
+    transition(() => root.render(createElement("span", null, "pending")));
+    flushSync(() => root.render(createElement("span", null, "latest")));
+    expect(container.textContent).toBe("latest");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("latest");
+  });
+
   it("installs one commit coordinator idempotently", () => {
     const renderer = createRenderer(host);
     const container = new TestElement("root");
@@ -2713,6 +2744,8 @@ describe("reconciler", () => {
 
     await flushed;
 
-    expect(textAfterFlush).toBe("count:1second");
+    expect(textAfterFlush).toBe("count:1first");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("count:1second");
   });
 });
