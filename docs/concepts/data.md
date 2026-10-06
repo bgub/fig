@@ -129,11 +129,13 @@ Invalidation also clears cached rejections and stored refresh errors, allowing t
 - `aborted`, because it was superseded, evicted, or its store was disposed; or
 - `unsupported`, for a resource with no browser loader.
 
-A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
+A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, including a rejection with an `undefined` reason, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
 
 For example, if a profile page already shows Ada and a background refresh fails, the page keeps showing Ada. Fig reports the failed refresh to the caller but does not turn the visible profile into an error screen or retry on every render.
 
-All settlements are generation-guarded. Results from superseded work are inert.
+All settlements are generation-guarded. Results from superseded work are inert. Load replacement and retirement publish their state before invoking abort listeners, which may synchronously refresh, hydrate, invalidate, or dispose the store. Work started by those listeners retains its own generation and pending result; the retiring operation cannot overwrite or detach it. A replacement loader does not run if an abort listener supersedes it or disposes the store before it starts.
+
+Reading a loader result's `then` property may throw. That failure follows normal load rejection handling, including preserving a stale value and resolving `refreshData` with a rejected result.
 
 Invalidating a hydrate-only entry leaves its current value readable. Only later server or Payload hydration can replace it.
 
@@ -162,7 +164,7 @@ When passing a pre-created store, configure `partition` and `initialData` at sto
 
 `snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
 
-Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate.
+Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate. A batch stops if an abort listener disposes the store while an earlier entry is being replaced.
 
 During Payload navigation, data rows travel in the same response as the serialized route tree. A separate endpoint loader is needed only for later browser cache misses and refreshes.
 

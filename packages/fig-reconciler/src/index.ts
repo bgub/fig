@@ -595,11 +595,11 @@ interface MemoState<T> {
 }
 
 // One cancellable run per hook: supersede/unmount/hide abort the controller
-// and bump the generation, which retires the run — retired settlements are
+// and clear its ownership, which retires the run — retired settlements are
 // fully inert (no pending decrement, rejections swallowed).
 interface RunInstance {
   controller: AbortController | null;
-  generation: number;
+  live: boolean;
 }
 
 interface TransitionState {
@@ -2902,7 +2902,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateTransitionHook(): [boolean, StartTransition] {
     const initialState: TransitionState = {
-      instance: { controller: null, generation: 0 },
+      instance: { controller: null, live: false },
       pendingCount: 0,
       start: null,
     };
@@ -2966,7 +2966,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   // A transition and an action are the same cancellable effect up to how
   // their result is folded into state. This owns the shared protocol: one
-  // scope, one generation token, and settlements from only the latest run.
+  // scope, one owning controller, and settlements from only the latest run.
   function runLatest<T>(
     instance: RunInstance,
     fiber: F,
@@ -2980,27 +2980,32 @@ export function createRenderer<Container, Instance, TextInstance>(
     ) => void,
     options?: TransitionOptions,
   ): void {
-    if (retireRun(instance)) updatePending(-1, DefaultLane);
     const lane = claimNextTransitionLane();
     const controller = new AbortController();
-    const generation = (instance.generation += 1);
-    instance.controller = controller;
-    updatePending(1, SyncLane);
+    const store = rootOfOrNull(fiber)?.dataStore;
+    const live = instance.live && store !== undefined;
+    if (live) {
+      const previous = instance.controller;
+      // Publish ownership and its pending slot before abort listeners can
+      // start a newer run. A reentrant start must supersede this invocation.
+      instance.controller = controller;
+      if (previous !== null) updatePending(-1, DefaultLane);
+      updatePending(1, SyncLane);
+      previous?.abort();
+    } else controller.abort();
 
     const settle = (
       value: unknown,
       failed: boolean,
       asynchronous: boolean,
     ): void => {
-      if (generation !== instance.generation) return;
+      if (instance.controller !== controller) return;
       instance.controller = null;
       settled(lane, value, failed, asynchronous);
     };
 
     // A stale starter still receives its callback, but its explicit update
     // handle has no authority after the owner unmounts.
-    const store = rootOfOrNull(fiber)?.dataStore;
-    if (store === undefined) controller.abort();
     let result: T | PromiseLike<T>;
     try {
       const invoke = () =>
@@ -3128,10 +3133,15 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
 
-        instance.controller?.abort();
-        instance.controller = new AbortController();
-        if (!instance.live) instance.controller.abort();
-        return handler(...args, instance.controller.signal);
+        const previous = instance.controller;
+        const controller = new AbortController();
+        // Abort listeners are synchronous and may re-enter this event. Publish
+        // this invocation first, so a nested invocation can retire it rather
+        // than being overwritten when the outer abort returns.
+        instance.controller = controller;
+        previous?.abort();
+        if (!instance.live) controller.abort();
+        return handler(...args, controller.signal);
       },
     };
 
@@ -3862,8 +3872,19 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.pendingSuspenseRetries = [];
       }
       commitLiveHookInstances(root);
+      if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
       if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-      if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
+      if (root.needsCommitDeletions) {
+        // Retire every deleted owner before any effect, unsubscribe, or data
+        // cleanup can call a hook in another deletion. Bound each walk so kept
+        // siblings remain live.
+        for (const owner of root.commitIndex) {
+          if (owner.deletions === null) continue;
+          for (const deleted of owner.deletions) {
+            walkFiberSubtree(deleted, deactivateFiberHooks);
+          }
+        }
+      }
       commitEffects(root, finishedWork.child, BeforeLayoutEffect);
       const commitHostChanges = () => {
         const recoveringHydration = root.clearContainerBeforeCommit;
@@ -4199,6 +4220,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.element = null;
 
     if (root.current.child !== null) {
+      walkFiberForest(root.current.child, deactivateFiberHooks);
       deleteFiberDataTree(root.current.child);
       abortFiberEffects(root.current);
     }
@@ -5840,7 +5862,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function armRevealedHiddenBoundaries(node: F | null): void {
+  function prepareHiddenBoundaryHooks(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
       const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
@@ -5852,41 +5874,63 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (
         cursor.tag === ActivityTag &&
         (cursor.flags & VisibilityFlag) !== 0 &&
-        !activityHidden(cursor.props) &&
         cursor.child !== null
       ) {
+        if (activityHidden(cursor.props)) {
+          // Bailouts can leave descendants outside the commit index. Retire
+          // the whole forest before cleanup in this or any sibling boundary.
+          walkFiberForest(cursor.child, deactivateFiberHooks);
+          continue;
+        }
         armDeferredEffects(cursor.child);
       }
 
-      if (subtreeVisibility) armRevealedHiddenBoundaries(cursor.child);
+      if (subtreeVisibility) prepareHiddenBoundaryHooks(cursor.child);
     }
   }
 
   // Re-arms effects that were deferred or aborted while hidden so the
   // regular commit phases run them in order during the reveal commit.
   function armDeferredEffects(node: F): void {
-    visitFiberHooks(node, (owner, hook) => {
-      if (hook.kind === StableEventHook) {
-        const state = hook.memoizedState as StableEventState;
-        const instance = state.instance;
-        instance.handler = state.next;
-        instance.live = true;
-        return;
+    // Revealing an inner boundary does not make it visible when an outer
+    // boundary remains hidden. Likewise, do not revive a hidden descendant
+    // while reconnecting the visible portion of a revealed subtree.
+    if (isInsideHiddenBoundary(node)) return;
+    walkFiberForest(node, (owner) => {
+      if (isHiddenBoundary(owner)) return false;
+      for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+        if (hook.kind === StableEventHook) {
+          const state = hook.memoizedState as StableEventState;
+          const instance = state.instance;
+          instance.handler = state.next;
+          instance.live = true;
+          continue;
+        }
+
+        if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+          (
+            hook.memoizedState as
+              | TransitionState
+              | ActionState<unknown, unknown[]>
+          ).instance.live = true;
+          continue;
+        }
+
+        if (!isEffectHook(hook.kind)) continue;
+
+        const effect = hook.memoizedState as Effect;
+        if (effect.controller !== null) continue;
+
+        const effects = (owner.effects ??= []);
+        if (!effects.includes(effect)) effects.push(effect);
+        const root = rootOf(owner);
+        recordCommitWork(root.commitIndex, owner, EffectFlag);
+        markSubtreeFlag(owner, EffectFlag);
+        markCommitEffectPhase(root, effect.phase);
+        // Re-armed owners that did not re-render are not in the commit index
+        // yet; the arming pass runs before every effect pass consumes it.
       }
-
-      if (!isEffectHook(hook.kind)) return;
-
-      const effect = hook.memoizedState as Effect;
-      if (effect.controller !== null) return;
-
-      const effects = (owner.effects ??= []);
-      if (!effects.includes(effect)) effects.push(effect);
-      const root = rootOf(owner);
-      recordCommitWork(root.commitIndex, owner, EffectFlag);
-      markSubtreeFlag(owner, EffectFlag);
-      markCommitEffectPhase(root, effect.phase);
-      // Re-armed owners that did not re-render are not in the commit index
-      // yet; the arming pass runs before every effect pass consumes it.
+      return true;
     });
   }
 
@@ -5916,6 +5960,11 @@ export function createRenderer<Container, Instance, TextInstance>(
       const state = hook.memoizedState as ActionState<unknown, unknown[]>;
       state.instance.action = state.action;
       state.instance.value = state.value;
+    }
+    if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+      (
+        hook.memoizedState as TransitionState | ActionState<unknown, unknown[]>
+      ).instance.live = !hasHiddenBoundaries || !isInsideHiddenBoundary(owner);
     }
   }
 
@@ -6204,19 +6253,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  // Deliberately traverses adopted subtrees: unmount aborts and commit-time
-  // external store checks must reach hooks that did not re-render.
-  function visitFiberHooks(
-    node: F | null,
-    visitor: (owner: F, hook: Hook) => void,
-  ): void {
-    walkFiberForest(node, (cursor) => {
-      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
-        visitor(cursor, hook);
-      }
-    });
-  }
-
   function visitRenderedFiberHooks(
     node: F | null,
     visitor: (owner: F, hook: Hook) => void,
@@ -6295,6 +6331,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
+  // This pass invokes no user code. Controllers stay attached until cleanup
+  // so their signals and pending slots are retired exactly once as before.
+  function deactivateFiberHooks(owner: F): void {
+    for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+      if (isStableEventHook(hook)) hook.memoizedState.instance.live = false;
+      if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+        (
+          hook.memoizedState as
+            | TransitionState
+            | ActionState<unknown, unknown[]>
+        ).instance.live = false;
+      }
+    }
+  }
+
   function abortFiberHooks(owner: F, retirePending: boolean): void {
     for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
@@ -6302,14 +6353,16 @@ export function createRenderer<Container, Instance, TextInstance>(
         unsubscribeExternalStore(hook.memoizedState);
       if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
-        instance.controller?.abort();
+        const controller = instance.controller;
         instance.controller = null;
-        // Calls after unmount (or while hidden) still run the last committed
-        // handler, but with a signal that is already aborted.
+        // Retire before invoking synchronous abort listeners: a listener may
+        // re-enter this event during unmount or hide.
         instance.live = false;
+        controller?.abort();
       }
       if (hook.kind === TransitionHook) {
         const state = hook.memoizedState as TransitionState;
+        state.instance.live = false;
         if (retireRun(state.instance) && retirePending) {
           scheduleHookUpdate(
             owner,
@@ -6324,6 +6377,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       if (hook.kind === ActionStateHook) {
         const state = hook.memoizedState as ActionState<unknown, unknown[]>;
+        state.instance.live = false;
         if (retireRun(state.instance) && retirePending) {
           scheduleHookUpdate(
             owner,
@@ -6418,14 +6472,13 @@ function createHook<S>(kind: HookKind, state: S): Hook<S> {
   };
 }
 
-// Aborts and retires the instance's live run (if any): its generation is
-// invalidated so any later settlement is inert. Returns whether a run was
+// Aborts and retires the instance's live run (if any): clearing ownership
+// makes any later settlement inert. Returns whether a run was
 // retired, so callers release its pending slot exactly once.
 function retireRun(instance: RunInstance): boolean {
   const controller = instance.controller;
   if (controller === null) return false;
   instance.controller = null;
-  instance.generation += 1;
   controller.abort();
   return true;
 }
@@ -6437,7 +6490,13 @@ function createActionState<S, Args extends unknown[]>(
   return {
     action,
     error: NoActionStateError,
-    instance: { action, controller: null, generation: 0, runner: null, value },
+    instance: {
+      action,
+      controller: null,
+      live: false,
+      runner: null,
+      value,
+    },
     pending: 0,
     value,
   };

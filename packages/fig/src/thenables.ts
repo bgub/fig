@@ -18,16 +18,22 @@ function recordFor<T>(thenable: PromiseLike<T>): ThenableRecord<T> {
   if (record === undefined) {
     record = { status: "pending" };
     thenableRecords.set(key, record);
-    thenable.then(
-      (value) => {
-        record = { status: "fulfilled", value };
-        thenableRecords.set(key, record);
-      },
-      (reason: unknown) => {
-        record = { reason, status: "rejected" };
-        thenableRecords.set(key, record);
-      },
-    );
+    const settle = (next: ThenableRecord<T>) => {
+      // Custom thenables can call both callbacks or throw after fulfilling.
+      // Preserve the first settlement, just as native promise resolution does.
+      if (record?.status !== "pending") return;
+      record = next;
+      thenableRecords.set(key, next);
+    };
+    try {
+      thenable.then(
+        (value) => settle({ status: "fulfilled", value }),
+        (reason: unknown) => settle({ reason, status: "rejected" }),
+      );
+    } catch (reason) {
+      // A failed subscription is a cached rejection, not a forever-pending read.
+      settle({ reason, status: "rejected" });
+    }
   }
 
   return record;
