@@ -91,6 +91,30 @@ describe("@bgub/fig-dom events", () => {
     expect(lanes).toEqual([SyncLane, SyncLane]);
   });
 
+  it.each([
+    "beforetoggle",
+    "toggle",
+    "cancel",
+    "close",
+    "reset",
+    "pointercancel",
+    "touchcancel",
+  ] as const)("runs native %s state changes at discrete priority", (type) => {
+    const lanes: number[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() =>
+      root.render(
+        createElement("div", {
+          mix: on(type, () => lanes.push(requestUpdateLane())),
+        }),
+      ),
+    );
+    (container.childNodes[0] as FakeElement).dispatch(type);
+    expect(lanes).toEqual([SyncLane]);
+    flushSync(() => root.unmount());
+  });
+
   it("ignores falsy event entries without shifting listener slots", () => {
     const aborts: string[] = [];
     const calls: string[] = [];

@@ -94,6 +94,8 @@ The index is an optimization, not a second source of truth:
 
 Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index.
 
+Fig DOM moves existing nodes with native `moveBefore()` when available and its same-document and connectivity requirements are satisfied. This preserves focus, animation, and native popover/dialog state during keyed reordering. On browsers without atomic moves, ordinary insertion restores focus without scrolling, unless a blur handler chose another target. Both paths capture and restore DOM selection inside the focused subtree because atomic moves can still reset live ranges. After an atomic move, restoration only repairs the browser's automatic range reset; a custom element's `connectedMoveCallback` can instead change or clear the selection. Selection direction is preserved, and restoration is skipped when focus moved elsewhere or the selected nodes have been removed. New nodes still use ordinary insertion; deletion and hiding do not restore focus.
+
 View transitions assign indexed mutations to the nearest transition boundary, to the root, or to nothing when a portal breaks ownership. This avoids another subtree walk without changing which mutations count.
 
 ## External Store Consistency

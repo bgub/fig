@@ -24,7 +24,7 @@ Changing only the callback updates the existing listener. Changing its event typ
 
 Bubbling events are delegated at the root and dispatched through the logical Fig tree. This includes portals: an event inside a portal bubbles through the component that created it, even though the DOM nodes live elsewhere.
 
-Fig maps each event to discrete, continuous, or default priority. Dispatch also runs inside the batching scope, so updates from one event commit together.
+Fig maps each event to discrete, continuous, or default priority. Native `beforetoggle`, `toggle`, `cancel`, `close`, `reset`, `pointercancel`, and `touchcancel` events use discrete priority, so a browser-driven dismissal or cancellation settles alongside the input that follows it. A lower-priority dismissal can otherwise leave stale open state in a click render and reopen a popup the browser just closed. Dispatch also runs inside the batching scope, so updates from one event commit together.
 
 ## Native Propagation
 

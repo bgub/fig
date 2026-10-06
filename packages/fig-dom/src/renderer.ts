@@ -33,6 +33,7 @@ import {
   updateParentSelect,
 } from "./form-controls.ts";
 import { hydrateElement, updateElement } from "./props.ts";
+import { insertDomNode } from "./placement.ts";
 import { configureDomRefreshScheduler } from "./refresh-internal.ts";
 import {
   enclosingSuspenseBoundaryStart,
@@ -141,7 +142,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     queueMicrotask(replayQueuedEvents);
   },
   insertBefore: (parent, child, before) => {
-    parent.insertBefore(child, before);
+    insertDomNode(parent, child, before);
     // Live insertion: re-assert a controlled select's value, but never
     // re-apply an uncontrolled default — the user owns the live selection
     // (defaults are mount-time only, matching React).
