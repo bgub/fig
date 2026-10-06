@@ -106,6 +106,8 @@ Each `useTransition` hook is one cancellation domain. Starting another run abort
 
 Unmounting the owner or hiding its enclosing Activity also retires the run. Abort is a signal to stop, not an undo operation: already committed state stays committed, and arbitrary code outside `update` is not suppressed. A saved starter called after unmount or while its Activity is hidden receives an already-aborted signal and an inert update handle. It does not acquire a pending slot. Reentrant starts from abort listeners are newer runs and retain ownership over the invocation that triggered cleanup.
 
+Owner retirement also disables saved `update` handles before any teardown callback runs, including cleanup in an earlier sibling. Signals abort in the normal per-hook cleanup order; during that interval, a retiring owner's `update` is already inert even if its signal has not yet aborted. Kept siblings retain update authority. Revealing an Activity permits new runs but never revives a retired run's saved handle.
+
 Top-level `transition()` uses the same `(signal, update)` contract and returns the callback result unchanged. Its lifetime follows callback settlement; it has no hook owner to supersede or unmount. Server and renderer-free scopes use the same callback lifetime, without client scheduling.
 
 ## Actions

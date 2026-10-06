@@ -2944,7 +2944,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         runLatest(
           instance,
           fiber,
-          callback,
+          (signal, update) =>
+            callback(signal, (run) => {
+              // Teardown retires all owners before individual cleanups abort
+              // their signals. Saved updates must respect that earlier cutoff.
+              if (instance.live) update(run);
+            }),
           updatePending,
           (lane, value, failed, asynchronous) => {
             updatePending(-1, lane);

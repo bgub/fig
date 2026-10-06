@@ -1,5 +1,7 @@
 import {
   Activity,
+  type StartTransition,
+  type TransitionUpdate,
   createElement,
   useActionState,
   useBeforePaint,
@@ -11,6 +13,7 @@ import {
 import { expect, it } from "vitest";
 import { createRoot, flushSync } from "./index.ts";
 import {
+  deferred,
   FakeElement,
   installFakeDocument,
   waitForHostTurns,
@@ -221,3 +224,109 @@ it("retires all owners before uncaught-error cleanup", () => {
     root.unmount();
   }
 });
+
+it.each(["hide", "delete", "unmount", "error"] as const)(
+  "retires saved transition updates before sibling cleanup during %s",
+  async (mode) => {
+    let tearingDown = false;
+    let start!: StartTransition;
+    let savedUpdate!: TransitionUpdate;
+    let updateValue!: (value: number) => void;
+    let keptUpdate!: TransitionUpdate;
+    let startKept!: StartTransition;
+    let calls = 0;
+    let keptCalls = 0;
+    const pending = deferred<void>();
+    const error = new Error("render failed");
+    function Cleanup() {
+      useBeforePaint((signal) => {
+        signal.addEventListener("abort", () => {
+          if (!tearingDown) return;
+          savedUpdate(() => {
+            calls += 1;
+            updateValue(1);
+          });
+          keptUpdate(() => {
+            keptCalls += 1;
+          });
+        });
+      }, []);
+      return null;
+    }
+    function Receiver() {
+      const [value, setValue] = useState(0);
+      const [isPending, run] = useTransition();
+      start = run;
+      updateValue = setValue;
+      return `${value}:${isPending}`;
+    }
+    function Kept() {
+      const [, run] = useTransition();
+      startKept = run;
+      return null;
+    }
+    function Broken(): never {
+      throw error;
+    }
+    const children = [
+      createElement(Cleanup, { key: "cleanup" }),
+      createElement(Receiver, { key: "receiver" }),
+    ];
+    const kept = createElement(Kept, { key: "kept" });
+    function tree(retiring: boolean) {
+      return [
+        retiring && mode === "delete"
+          ? null
+          : createElement(
+              Activity,
+              { key: "activity", mode: retiring ? "hidden" : "visible" },
+              children,
+            ),
+        kept,
+      ];
+    }
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element, {
+      onUncaughtError: () => {},
+    });
+    try {
+      flushSync(() => root.render(tree(false)));
+      start((_signal, update) => {
+        savedUpdate = update;
+        return pending.promise;
+      });
+      startKept((_signal, update) => {
+        keptUpdate = update;
+        return pending.promise;
+      });
+      tearingDown = true;
+      if (mode === "unmount") root.unmount();
+      else if (mode === "error") {
+        expect(() =>
+          flushSync(() => root.render(createElement(Broken, null))),
+        ).toThrow(error);
+      } else flushSync(() => root.render(tree(true)));
+      tearingDown = false;
+      expect(calls).toBe(0);
+      expect(keptCalls).toBe(mode === "hide" || mode === "delete" ? 1 : 0);
+      if (mode === "hide") {
+        flushSync(() => root.render(tree(false)));
+        savedUpdate(() => {
+          calls += 1;
+          updateValue(1);
+        });
+        await waitForHostTurns();
+        expect(calls).toBe(0);
+        expect(container.textContent).toBe("0:false");
+        start((_signal, update) => update(() => updateValue(2)));
+        await waitForHostTurns();
+        expect(container.textContent).toBe("2:false");
+      }
+    } finally {
+      tearingDown = false;
+      root.unmount();
+      pending.resolve(undefined);
+      await waitForHostTurns();
+    }
+  },
+);
