@@ -1648,30 +1648,31 @@ export function createRenderer<Container, Instance, TextInstance>(
       abandonActivityHydration(root, error instanceof HydrationMismatchError);
     }
 
-    if (isThenable(error)) {
-      const boundary = findSuspenseBoundary(node);
-      if (boundary !== null) {
-        unwindContextTo(root, boundary);
-        return captureSuspenseBoundary(boundary, error);
+    const suspended = isThenable(error);
+    const mismatch = error instanceof HydrationMismatchError;
+    // The return chain is also the handler stack. Restore each provider as
+    // we leave its scope, stopping before the boundary that handles the throw.
+    // A boundary cannot catch its own render, or catch again in its fallback.
+    for (let frame: F | null = node; frame !== null; frame = frame.return) {
+      if (frame !== node && frame.boundaryState === null) {
+        if (suspended && frame.tag === SuspenseTag) {
+          return captureSuspenseBoundary(frame, error);
+        }
+        if (!suspended && !mismatch && frame.tag === ErrorBoundaryTag) {
+          return captureErrorBoundary(frame, error, node);
+        }
       }
-
-      unwindContextTo(root, null);
-      throw error;
+      if (
+        frame.tag === ContextProviderTag &&
+        root.contextStack[root.contextStack.length - 1]?.provider === frame
+      ) {
+        popContextProvider(frame, root);
+      }
     }
 
-    if (error instanceof HydrationMismatchError) {
-      unwindContextTo(root, null);
-      throw error;
+    if (!suspended && !mismatch) {
+      root.uncaughtErrorInfo = errorInfoFor(node, error);
     }
-
-    const boundary = findErrorBoundary(node);
-    if (boundary !== null) {
-      unwindContextTo(root, boundary);
-      return captureErrorBoundary(boundary, error, node);
-    }
-
-    unwindContextTo(root, null);
-    rootOf(node).uncaughtErrorInfo = errorInfoFor(node, error);
     throw error;
   }
 
@@ -3400,29 +3401,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.contextStack.push({ context, hadPrevious, previous, provider: node });
   }
 
-  function popContextProvider(node: F): void {
-    const root = rootOf(node);
+  function popContextProvider(node: F, root = rootOf(node)): void {
     const entry = root.contextStack.pop();
     if (entry === undefined || entry.provider !== node) {
       resetContextStack(root);
       return;
     }
     restoreContextEntry(root, entry);
-  }
-
-  function unwindContextTo(root: R, node: F | null): void {
-    while (root.contextStack.length > 0) {
-      const entry = root.contextStack[root.contextStack.length - 1];
-      if (node !== null && isAncestorOf(entry.provider, node)) return;
-      restoreContextEntry(
-        root,
-        root.contextStack.pop() as ContextStackEntry<
-          Container,
-          Instance,
-          TextInstance
-        >,
-      );
-    }
   }
 
   function restoreContextEntry(
@@ -3439,13 +3424,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   function resetContextStack(root: R): void {
     root.contextValues = new Map();
     root.contextStack = [];
-  }
-
-  function isAncestorOf(ancestor: F, node: F): boolean {
-    for (let parent: F | null = node; parent !== null; parent = parent.return) {
-      if (parent === ancestor) return true;
-    }
-    return false;
   }
 
   function addContextDependency(
@@ -5172,16 +5150,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     markRootPinged(root, lanes);
     pendingRoots.add(root);
     scheduleRoot(root);
-  }
-
-  function findSuspenseBoundary(node: F): F | null {
-    for (let parent = node.return; parent !== null; parent = parent.return) {
-      if (parent.tag === SuspenseTag && fiberSuspenseState(parent) === null) {
-        return parent;
-      }
-    }
-
-    return null;
   }
 
   function findErrorBoundary(node: F): F | null {

@@ -12,6 +12,28 @@ const workspaceRoot = fileURLToPath(new URL("..", import.meta.url));
 
 void describe("bench-reconciler", () => {
   void it(
+    "releases unmounted Suspense samples in both runtimes",
+    { timeout: 60_000 },
+    async () => {
+      const options = {
+        cwd: workspaceRoot,
+        env: { ...process.env, NODE_ENV: "production" },
+        timeout: 60_000,
+      };
+      await execFileAsync(
+        "pnpm",
+        ["exec", "turbo", "run", "build", "--filter=@bgub/fig-reconciler..."],
+        options,
+      );
+      await execFileAsync(
+        process.execPath,
+        ["--expose-gc", "benchmarks/fixtures/suspense-retention.mjs"],
+        options,
+      );
+    },
+  );
+
+  void it(
     "writes paired Fig and React runtime results",
     { timeout: 60_000 },
     async () => {

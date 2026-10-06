@@ -17,8 +17,6 @@ const viewTransitionRuntimes = runtimes.filter(
     runtime.ViewTransition !== undefined && runtime.transition !== undefined,
 );
 
-const neverResolves = new Promise(() => undefined);
-
 function createBenchmarkComponents(runtime) {
   const ThemeContext = runtime.createContext("default");
   const state = {
@@ -229,7 +227,7 @@ function createBenchmarkComponents(runtime) {
     return runtime.createElement("span", null, "ready");
   }
 
-  function SuspenseSiblingTree({ suspend, suspendedIndex, width }) {
+  function SuspenseSiblingTree({ promise, suspend, suspendedIndex, width }) {
     return runtime.createElement(
       "section",
       null,
@@ -241,11 +239,54 @@ function createBenchmarkComponents(runtime) {
             key: index,
           },
           runtime.createElement(SuspenseMaybeSuspend, {
-            promise: neverResolves,
+            promise,
             suspend: suspend && index === suspendedIndex,
           }),
         ),
       ),
+    );
+  }
+
+  function SuspenseContextFallback() {
+    state.metrics.componentRenders += 1;
+    state.metrics.contextReads += 1;
+    return runtime.createElement(
+      "span",
+      null,
+      runtime.readContext(ThemeContext),
+    );
+  }
+
+  function SuspenseProviderTree({ promise, width }) {
+    const children = Array.from({ length: width }, (_, index) => {
+      let child = runtime.createElement(SuspenseMaybeSuspend, {
+        promise,
+        suspend: true,
+      });
+      for (let depth = 0; depth < 32; depth += 1) {
+        child = runtime.createElement(
+          runtime.providerFor(ThemeContext),
+          {
+            value: "inner",
+          },
+          child,
+        );
+      }
+      return runtime.createElement(
+        runtime.Suspense,
+        {
+          key: index,
+          fallback: runtime.createElement(SuspenseContextFallback),
+        },
+        child,
+      );
+    });
+    return runtime.createElement(
+      runtime.providerFor(ThemeContext),
+      {
+        value: "outer",
+      },
+      children,
     );
   }
 
@@ -259,6 +300,7 @@ function createBenchmarkComponents(runtime) {
     SparseCommitTree,
     SparseContextTree,
     SuspenseSiblingTree,
+    SuspenseProviderTree,
     state,
     ViewTransitionRows,
   };
@@ -534,15 +576,19 @@ function measureSparseCommitLeafUpdate(runtime, rows, iterations) {
 }
 
 function measureSuspenseReveal(runtime, rows, iterations) {
+  // Retry listeners must become collectible with this batch of roots.
+  const promise = new Promise(() => undefined);
   return measureWithRoots(runtime, iterations, {
     setup: (roots) =>
       renderAll(runtime, roots, runtime.components.SuspenseSiblingTree, {
+        promise,
         suspend: true,
         suspendedIndex: Math.max(0, Math.min(rows - 1, rows >> 1)),
         width: Math.max(10, rows),
       }),
     run: (roots) =>
       renderAll(runtime, roots, runtime.components.SuspenseSiblingTree, {
+        promise,
         suspend: false,
         suspendedIndex: Math.max(0, Math.min(rows - 1, rows >> 1)),
         width: Math.max(10, rows),
@@ -607,6 +653,27 @@ function deepTreeShape(rows) {
   if (rows <= 100) return { depth: 3, fanout: 4 };
   if (rows <= 1000) return { depth: 4, fanout: 5 };
   return { depth: 5, fanout: 5 };
+}
+
+function measureSuspenseProviderUnwind(runtime, rows, iterations) {
+  const width = Math.max(1, Math.ceil(rows / 32));
+  const promise = new Promise(() => undefined);
+  return measureWithRoots(runtime, iterations, {
+    run: (roots) =>
+      renderAll(runtime, roots, runtime.components.SuspenseProviderTree, {
+        promise,
+        width,
+      }),
+    validate(roots) {
+      for (const { container } of roots) {
+        if (container.textContent !== "outer".repeat(width)) {
+          throw new Error(
+            "Suspense fallback retained an unwound provider value.",
+          );
+        }
+      }
+    },
+  });
 }
 
 export function clientScenariosForRows(rows) {
@@ -745,6 +812,14 @@ export function clientScenariosForRows(rows) {
       rows,
       measure: (runtime, iterations) =>
         measureSparseCommitLeafUpdate(runtime, rows, iterations),
+      runtimes,
+    },
+    {
+      group: "suspense",
+      name: "suspense.provider-unwind",
+      rows,
+      measure: (runtime, iterations) =>
+        measureSuspenseProviderUnwind(runtime, rows, iterations),
       runtimes,
     },
     {
