@@ -67,7 +67,7 @@ The handler receives a trailing `AbortSignal`, but callers do not pass it:
 (...args: Args) => Result
 ```
 
-Handlers update at commit before `useBeforeLayout` runs. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
+Handlers update at commit before `useBeforeLayout` runs. Reentrant calls from abort listeners retire the superseded invocation, and each invocation receives its own signal. Teardown marks the handler inactive before notifying abort listeners, so a call during teardown receives an aborted signal. Revealing an outer Activity does not reactivate handlers inside a still-hidden nested Activity. Calling one after unmount uses the last committed handler with an already-aborted signal. Calling one during client or server render throws, and the strict shadow render never publishes a handler.
 
 Unlike React's `useEffectEvent`, Fig's stable events are not restricted to effects. Event handlers, timers, and subscriptions may all call them.
 
@@ -104,7 +104,7 @@ Each `useTransition` hook is one cancellation domain. Starting another run abort
 - its eventual rejection is swallowed; and
 - state it already committed stays committed.
 
-Unmounting the owner or hiding its enclosing Activity also retires the run. Abort is a signal to stop, not an undo operation: already committed state stays committed, and arbitrary code outside `update` is not suppressed. A stale starter called after unmount receives an already-aborted signal and an inert update handle.
+Unmounting the owner or hiding its enclosing Activity also retires the run. Abort is a signal to stop, not an undo operation: already committed state stays committed, and arbitrary code outside `update` is not suppressed. A saved starter called after unmount or while its Activity is hidden receives an already-aborted signal and an inert update handle. It does not acquire a pending slot. Reentrant starts from abort listeners are newer runs and retain ownership over the invocation that triggered cleanup.
 
 Top-level `transition()` uses the same `(signal, update)` contract and returns the callback result unchanged. Its lifetime follows callback settlement; it has no hook owner to supersede or unmount. Server and renderer-free scopes use the same callback lifetime, without client scheduling.
 
@@ -112,7 +112,7 @@ Top-level `transition()` uses the same `(signal, update)` contract and returns t
 
 `useActionState(action, initialState)` keeps React's argument order and adds an `AbortSignal` after the runner's arguments. Declare that final parameter so TypeScript can infer the argument tuple.
 
-Actions are last-run-wins. A generation counter prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. The signal also aborts when the action settles. Fig schedules the returned value in the action’s own transition lane automatically; arbitrary post-`await` setters inside the action have ordinary priority. Server action transport belongs to framework integrations.
+Actions are last-run-wins. Saved runners invoked after unmount or while hidden receive an aborted signal, and their results cannot publish or acquire pending state. Controller identity prevents a retired run from changing state, error, or pending status after a newer run starts. Fig does not use React 19's serial action queue. The signal also aborts when the action settles. Fig schedules the returned value in the action’s own transition lane automatically; arbitrary post-`await` setters inside the action have ordinary priority. Server action transport belongs to framework integrations.
 
 Prefer returning the next action state rather than scheduling it through a separate setter. The returned value retains its transition lane even when unrelated async transitions are pending. The action signal retires on settlement, while `isPending` can remain true until that value commits (for example, if rendering it suspends). Actions receive no `update` handle; use `useTransition` when a workflow needs explicit ownership of several post-`await` setters.
 
@@ -133,6 +133,8 @@ React's broad `use(resource)` becomes three explicit operations:
 - `readData(resource, ...args)` reads by data-resource key.
 
 They do not consume hook slots. Context reads still participate in bailout invalidation: if a provider value changes, Fig finds and schedules the consumers that would otherwise be skipped, stopping at nested providers of the same context.
+
+Promise reads cache the first settlement by identity. A custom thenable that throws while being subscribed is cached as rejected; repeated reads throw the same reason. Subsequent settlement callbacks or throws cannot replace an already-settled result.
 
 A promise used directly as a child is read implicitly because its child position already tells Fig where the result belongs. Use `readPromise` when a promise value affects props or branching instead.
 
