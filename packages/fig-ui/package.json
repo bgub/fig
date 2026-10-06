@@ -30,6 +30,12 @@
       "import": "./dist/combobox.js",
       "default": "./dist/combobox.js"
     },
+    "./command": {
+      "types": "./dist/command.d.ts",
+      "fig-development": "./dist-development/command.js",
+      "import": "./dist/command.js",
+      "default": "./dist/command.js"
+    },
     "./dialog": {
       "types": "./dist/dialog.d.ts",
       "fig-development": "./dist-development/dialog.js",
@@ -54,6 +60,12 @@
       "import": "./dist/menu.js",
       "default": "./dist/menu.js"
     },
+    "./menu/context-menu": {
+      "types": "./dist/menu/context-menu.d.ts",
+      "fig-development": "./dist-development/menu/context-menu.js",
+      "import": "./dist/menu/context-menu.js",
+      "default": "./dist/menu/context-menu.js"
+    },
     "./menu/submenu": {
       "types": "./dist/menu/submenu.d.ts",
       "fig-development": "./dist-development/menu/submenu.js",
@@ -77,6 +89,12 @@
       "fig-development": "./dist-development/select.js",
       "import": "./dist/select.js",
       "default": "./dist/select.js"
+    },
+    "./slider": {
+      "types": "./dist/slider.d.ts",
+      "fig-development": "./dist-development/slider.js",
+      "import": "./dist/slider.js",
+      "default": "./dist/slider.js"
     },
     "./switch": {
       "types": "./dist/switch.d.ts",

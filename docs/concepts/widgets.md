@@ -528,14 +528,85 @@ Toast lifetimes and focus/pointer pauses survive rebinding the same DOM hosts du
 
 The optional tabs indicator measures border boxes, including padding and borders, when calculating its CSS properties. Resize notifications update measurements without replacing unchanged observer subscriptions.
 
-## Inline Combobox
+## Inline Combobox and Command
 
 `useCombobox({ inline: true })` keeps the listbox in document flow instead of using the native top layer. Open state still controls visibility: use `open: true` for an always-visible list. Closed inline lists are hidden in server HTML as well as after hydration. Changing between inline and popup layout clears the previous layout's visibility and anchor positioning. Inline lists leave Escape available to an enclosing Dialog or Popover; popup mode consumes Escape to close its list. Keyboard navigation, active descendants, labels, controlled values, cancellation, and form resets use the same Combobox behavior in both modes. Keyboard navigation scrolls the highlighted option into view after the list opens, while DOM focus stays on the input. Pointer highlighting does not initiate scrolling.
 
 Authored native `readonly` and inherited fieldset disability block edits and selection through an open list. A read-only input consumes Enter on an active option without selecting it or accidentally submitting its form. Earlier handlers can cancel input events and preserve the current query.
 
+`useCommand(options)` and `Command` compose an always-open inline Combobox into searchable actions. Import them from `~/ui/command/command.tsx`. Items are explicit data, not discovered by walking rendered children:
+
+```tsx
+const commands = [
+  { value: "copy", label: "Copy", keywords: ["duplicate"], group: "Edit" },
+  { value: "paste", label: "Paste", group: "Edit", disabled: true },
+];
+const command = useCommand({
+  items: commands,
+  onAction: (item, details, signal) => runCommand(item.value, signal),
+});
+
+<>
+  <input aria-label="Commands" mix={command.input()} />
+  <div mix={command.list()}>
+    <div mix={command.group("Edit")}>
+      {command.items.map((item) => (
+        <button key={item.value} mix={command.item(item)}>
+          {item.label}
+        </button>
+      ))}
+    </div>
+  </div>
+  <p mix={command.emptyMessage()}>No matching commands</p>
+</>;
+```
+
+Item values must be unique and non-null. Stable values preserve highlighted identity when callers replace item data. Default filtering is case-insensitive substring matching over labels and keywords; it trims the search query and preserves caller order. `filter: false` accepts externally filtered results; a predicate provides custom matching. Keep item arrays stable between edits to reuse the search index and avoid refiltering on highlight-only renders. This is not a virtualized collection.
+
+`inputValue`/`defaultInputValue` and `onInputValueChange` control the search query. Canceled edits restore the prior query. Form reset restores `defaultInputValue` for an uncontrolled query or reasserts the controlled query. `items`, `inputValue`, and `empty` are readable state. `group(label)` labels groups and hides groups with no matches; `emptyMessage()` exposes an empty-results status. Render only the returned items and place empty results outside the listbox. Disabled results remain visible but cannot invoke actions. Commands never store a selection or replace the query with an action label, so invoking the same command repeatedly works. Applications own action effects and whether a surrounding Dialog closes. `onAction` receives the selected item, native-event details, and an abort signal.
+
+## Context Menu
+
+`useContextMenu(options)` and `ContextMenu` live in the optional `~/ui/menu/context-menu.tsx` module. They return Menu parts, including checkbox, radio, and submenu composition, with a context-aware `trigger()`:
+
+```tsx
+const menu = useContextMenu({ onSelect: (value) => runCommand(value) });
+
+<>
+  <div mix={menu.trigger()}>Right-click or press Shift+F10 here</div>
+  <div mix={menu.menu()}>
+    <button mix={menu.item("copy")}>Copy</button>
+  </div>
+</>;
+```
+
+The trigger is keyboard reachable by default. Right-click opens at the pointer; ContextMenu and Shift+F10 open at the trigger edge. Normal clicks retain their native behavior. Root `disabled`, live native host disability (including a disabled fieldset), and an earlier event handler's `preventDefault()` suppress opening. Open-change callbacks receive the invoking native event and may cancel. Opening focuses the first menu item; existing Menu semantics handle selection, submenus, closing, and focus return. Touch uses the browser's native context-menu event; no custom long-press gesture or drag recognizer is installed.
+
+Point positioning respects text direction and visual viewport bounds, including resize and scrolling. The popup gets viewport-constrained size and scrolling while open. Layout listeners and observers exist only while open, scheduled measurements coalesce per animation frame, and replacing an open host transfers positioning to the new host. The trigger also supplies the native popover source without becoming a CSS anchor, preserving the parent popup when the context menu is mounted elsewhere. Ordinary menus do not import this positioning code.
+
+## Slider
+
+`useSlider(options)` and `Slider` live in `~/ui/slider/slider.tsx` and coordinate one native `<input type="range">`. The API takes a single numeric value; it does not imply multi-thumb support:
+
+```tsx
+const volume = useSlider({ defaultValue: 0.5, min: 0, max: 1, step: 0.1 });
+
+<label>
+  Volume
+  <input name="volume" mix={volume.control()} />
+</label>;
+```
+
+Options are `value`, `defaultValue`, `min`, `max`, `step`, `disabled`, `readOnly`, `name`, `onValueChange`, and `onValueCommit`. Parts expose `value`, `control()`, and `setValue(number)`. The browser owns dragging, keyboard steps, focus, and form submission. Label the native input with a label or an explicit accessible name. Vertical presentation uses native CSS writing mode rather than a separate custom pointer implementation.
+
+Defaults are min 0, max 100, step 1, and the midpoint snapped to step. An explicit minimum makes the step base unambiguous. Non-finite bounds fall back to defaults; non-positive or non-finite steps fall back to 1. `step: "any"` disables snapping. Values clamp to bounds and snap to valid steps, with ties toward the higher value; a maximum at or below the minimum yields the minimum. Changing bounds normalizes the exposed value without reporting a user action.
+
+`onValueChange` receives cancelable change details and an abort signal. Native `input` requests changes; native `change` reports completion through `onValueCommit`, whose details are a notification, not an undo operation. Controlled refusals and canceled requests restore the DOM value. `setValue()` requests a value change with no native event and never emits a commit. A canceled or unchanged imperative request preserves any pending user commit. An accepted controlled change still commits when input and change arrive in the same batch. Form reset restores the initial uncontrolled value or the current controlled value without calling change/commit callbacks. Read-only sliders remain focusable and submitted, but pointer and value-changing keyboard actions cannot alter them; Tab remains native. Disabled state uses the native attribute and preserves existing host, Field, and inherited fieldset constraints, including the native first-legend exception.
+
 ## Reference behavior and performance
 
 Dialog drag dismissal follows [Base UI’s inside-press protection](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/floating-ui-react/hooks/useDismiss.ts). Initial menu focus and focus return across sibling popups were checked against [MenuPopup](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/menu/popup/MenuPopup.tsx) and FloatingFocusManager; native host constraints were checked against MenuSubmenuTrigger and ComboboxInput.
 
-Composite registration performs eager uniqueness scans only in development. Production registration does not repeatedly query the full list for each bound item. Explicit navigation and reconciliation still inspect live DOM order. Combobox scrolls highlighted options only for keyboard navigation and shares one ordered option snapshot during before-paint reconciliation.
+The inline Combobox dismissal policy follows [Base UI's inline dismissal behavior](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/combobox/root/AriaCombobox.tsx). Command uses explicit item data and cached filtering rather than inspecting rendered children. Context Menu follows [Base UI's pointer and keyboard trigger model](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/context-menu/trigger/ContextMenuTrigger.tsx), while delegating touch context menus to the browser. Slider separates cancelable value changes from commit notifications, as does [Base UI Slider](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/slider/root/SliderRoot.tsx). Controlled inputs restore refused edits, consistent with [React DOM input restoration](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-dom-bindings/src/client/ReactDOMInput.js). These are behavioral references, not API or browser-support parity claims; Fig uses native host events, range inputs, dialogs, and popovers.
+
+Composite registration performs eager uniqueness scans only in development. Production registration does not repeatedly query the full list for each bound item. Explicit navigation/reconciliation reads still inspect live DOM order so reordered and independently mounted descendants remain correct. Combobox scrolls only for pending keyboard navigation, following [Base UI list navigation](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/floating-ui-react/hooks/useListNavigation.ts). Command search indexes and filtered results are memoized by input data/query, and Combobox before-paint reconciliation shares one ordered option snapshot. Slider value normalization is constant-time, with no layout reads or custom drag listeners.
