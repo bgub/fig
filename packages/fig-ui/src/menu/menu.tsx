@@ -8,6 +8,7 @@ import {
 } from "@bgub/fig";
 import type { ChangeDetails } from "../internal/changes.ts";
 import { createChangeDetails } from "../internal/changes.ts";
+import { isNativeEnabled } from "../internal/composite.ts";
 import { assertAccessibleName } from "../internal/diagnostics.ts";
 import { createPartSlot } from "../internal/registration.ts";
 import type {
@@ -170,7 +171,7 @@ export function useMenu<Value = unknown>(
 
   function focusItem(focus: MenuFocusTarget | null): void {
     if (focus === false) return;
-    const items = registry.items();
+    const items = registry.items().filter(isNativeEnabled);
     const target = focus === "last" ? items[items.length - 1] : items[0];
     (target?.node ?? registry.containerNode())?.focus();
   }

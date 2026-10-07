@@ -3,7 +3,11 @@ import {
   type ChangeDetails,
   createChangeDetails,
 } from "../internal/changes.ts";
-import { type CompositeItem, sameValue } from "../internal/composite.ts";
+import {
+  type CompositeItem,
+  isNativeEnabled,
+  sameValue,
+} from "../internal/composite.ts";
 import { useControllableValue } from "../internal/controllable-value.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { createTabsRegistry } from "./registry.ts";
@@ -84,14 +88,19 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
   );
 
   const resetHighlight = useStableEvent(() => {
-    const selected = value === null ? undefined : registry.item(value);
-    const next = selected ?? registry.items()[0];
+    const tabs = registry.items().filter(isNativeEnabled);
+    const selected =
+      value === null
+        ? undefined
+        : tabs.find((tab) => sameValue(tab.value, value));
+    const next = selected ?? tabs[0];
     if (next !== undefined) setHighlighted(next.value);
   });
 
   useBeforePaint(() => {
     registry.sync();
     const tabs = registry.items();
+    const focusable = tabs.filter(isNativeEnabled);
     const previous = tracker.value;
     const changed = !sameValue(previous, value);
 
@@ -102,7 +111,8 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
       // A repair committed in an earlier pass may not have rendered yet.
       if (sameValue(repair.value, previous)) return;
       const target =
-        repair.value === null ? tabs[0] : registry.item(repair.value);
+        focusable.find((tab) => sameValue(tab.value, repair.value)) ??
+        focusable[0];
       tracker.value = repair.value;
       if (target !== undefined) setHighlighted(target.value);
       selection.restore(
@@ -114,7 +124,7 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
     tracker.value = value;
 
     const next = nextHighlight(
-      tabs,
+      focusable,
       value,
       highlighted,
       changed && !registry.containsFocus(),
@@ -151,7 +161,8 @@ function planRepair(
     value === null
       ? undefined
       : tabs.find((tab) => sameValue(tab.value, value));
-  const disabled = selected?.disabled === true;
+  const disabled =
+    selected !== undefined && (selected.disabled || !isNativeEnabled(selected));
   const missing = selected === undefined && value !== null;
   // A root that was never told what to select picks the first enabled tab.
   const unselected = value === null && autoSelect;
@@ -162,7 +173,7 @@ function planRepair(
   }
   if (!disabled && !missing && !unselected) return null;
 
-  const enabled = tabs.find((tab) => !tab.disabled);
+  const enabled = tabs.find((tab) => !tab.disabled && isNativeEnabled(tab));
   // `undefined` is a usable tab value, so never collapse it with `??`.
   const fallback = enabled === undefined ? null : enabled.value;
   return sameValue(value, fallback) ? null : { value: fallback };

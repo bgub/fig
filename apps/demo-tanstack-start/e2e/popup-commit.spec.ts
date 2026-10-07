@@ -6,6 +6,142 @@ import { collectBrowserErrors } from "./browser-errors.ts";
 
 let fixture: string;
 
+test.describe("composite focus with native constraints", () => {
+  for (const constraint of ["native", "fieldset"]) {
+    test(`menu arrows and typeahead skip ${constraint} disability`, async ({
+      page,
+    }) => {
+      const errors = collectBrowserErrors(page);
+      await page.setContent(
+        `<div id="fixture" data-focus-kind="menu" data-constraint="${constraint}"></div>`,
+      );
+      await page.addScriptTag({ content: fixture });
+      const first = page.locator('[data-focus-item="first"]');
+      const middle = page.locator('[data-focus-item="middle"]');
+      const last = page.locator('[data-focus-item="last"]');
+      await expect(middle).toBeDisabled();
+      await page.locator("[data-focus-trigger]").press("ArrowDown");
+      await expect(first).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(last).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(first).toBeFocused();
+      await page.keyboard.press("l");
+      await expect(last).toBeFocused();
+      await page.keyboard.press("Home");
+      await expect(first).toBeFocused();
+      expect(errors()).toEqual([]);
+    });
+
+    test(`tabs arrows skip ${constraint} disability`, async ({ page }) => {
+      const errors = collectBrowserErrors(page);
+      await page.setContent(
+        `<div id="fixture" data-focus-kind="tabs" data-constraint="${constraint}"></div>`,
+      );
+      await page.addScriptTag({ content: fixture });
+      const first = page.locator('[data-focus-item="first"]');
+      const last = page.locator('[data-focus-item="last"]');
+      await expect(page.locator('[data-focus-item="middle"]')).toBeDisabled();
+      await first.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect(last).toBeFocused();
+      await expect(last).toHaveAttribute("tabindex", "0");
+      await page.keyboard.press("ArrowRight");
+      await expect(first).toBeFocused();
+      await page.keyboard.press("ArrowLeft");
+      await expect(last).toBeFocused();
+      expect(errors()).toEqual([]);
+    });
+  }
+
+  test("menu entry and edge keys skip native-disabled first and last items", async ({
+    page,
+  }) => {
+    const errors = collectBrowserErrors(page);
+    await page.setContent(
+      '<div id="fixture" data-focus-kind="menu" data-disabled="edges"></div>',
+    );
+    await page.addScriptTag({ content: fixture });
+    const middle = page.locator('[data-focus-item="middle"]');
+    const trigger = page.locator("[data-focus-trigger]");
+    await trigger.press("ArrowDown");
+    await expect(middle).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(middle).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(middle).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await trigger.press("ArrowUp");
+    await expect(middle).toBeFocused();
+    expect(errors()).toEqual([]);
+  });
+
+  test("a menu with only native-disabled items focuses its container", async ({
+    page,
+  }) => {
+    const errors = collectBrowserErrors(page);
+    await page.setContent(
+      '<div id="fixture" data-focus-kind="menu" data-disabled="all"></div>',
+    );
+    await page.addScriptTag({ content: fixture });
+    await page.locator("[data-focus-trigger]").press("ArrowDown");
+    await expect(page.locator("[data-focus-menu]")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator("[data-focus-menu]")).toBeFocused();
+    expect(errors()).toEqual([]);
+  });
+
+  for (const kind of ["menu", "tabs"]) {
+    test(`${kind} keeps ARIA-disabled items focusable`, async ({ page }) => {
+      const errors = collectBrowserErrors(page);
+      await page.setContent(
+        `<div id="fixture" data-focus-kind="${kind}" data-constraint="aria"></div>`,
+      );
+      await page.addScriptTag({ content: fixture });
+      const first = page.locator('[data-focus-item="first"]');
+      const middle = page.locator('[data-focus-item="middle"]');
+      if (kind === "menu") {
+        await page.locator("[data-focus-trigger]").press("ArrowDown");
+        await expect(first).toBeFocused();
+      } else await first.focus();
+      await page.keyboard.press(kind === "menu" ? "ArrowDown" : "ArrowRight");
+      await expect(middle).toBeFocused();
+      await expect(middle).toHaveAttribute("aria-disabled", "true");
+      await expect(middle).toHaveJSProperty("disabled", false);
+      await page.keyboard.press("Enter");
+      if (kind === "menu")
+        await expect(page.locator("[data-focus-trigger]")).toHaveAttribute(
+          "aria-expanded",
+          "true",
+        );
+      else await expect(first).toHaveAttribute("aria-selected", "true");
+      expect(errors()).toEqual([]);
+    });
+  }
+
+  test("a selected native-disabled tab leaves an enabled sequential tab stop", async ({
+    page,
+  }) => {
+    const errors = collectBrowserErrors(page);
+    await page.setContent(
+      '<div id="fixture" data-focus-kind="tabs" data-selected-disabled="true"></div>',
+    );
+    await page.addScriptTag({ content: fixture });
+    const first = page.locator('[data-focus-item="first"]');
+    const middle = page.locator('[data-focus-item="middle"]');
+    await expect(middle).toHaveAttribute("aria-selected", "true");
+    await expect(first).toHaveAttribute("tabindex", "0");
+    await expect(middle).toHaveAttribute("tabindex", "-1");
+    await page.locator("[data-outside]").focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator('[data-focus-item="last"]')).toBeFocused();
+    expect(errors()).toEqual([]);
+  });
+});
+
 test.beforeAll(async () => {
   // Exercise real native popover dismissal without depending on demo layout.
   const result = await build({

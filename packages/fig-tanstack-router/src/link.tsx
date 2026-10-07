@@ -446,11 +446,8 @@ function combineLinkBinds(
   first: LinkStateProps["bind"],
   second: LinkStateProps["bind"],
 ): LinkStateProps["bind"] {
-  const firstBind = typeof first === "function" ? first : undefined;
-  const secondBind = typeof second === "function" ? second : undefined;
-  return firstBind && secondBind
-    ? composeBind(firstBind, secondBind)
-    : (firstBind ?? secondBind);
+  if (first) return second ? composeBind(first, second) : first;
+  return second;
 }
 
 function linkPathIsActive(

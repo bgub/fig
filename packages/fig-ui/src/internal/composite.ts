@@ -163,7 +163,7 @@ export function createComposite(options: CompositeOptions) {
     }
     const current = itemAt(event.target);
     if (current === undefined) return undefined;
-    const ordered = items();
+    const ordered = items().filter(isNativeEnabled);
     if (!ordered.includes(current)) return undefined;
 
     const reachable =
@@ -206,7 +206,7 @@ export function createComposite(options: CompositeOptions) {
     const repeat = typeahead.length === 1 && typeahead === key.toLowerCase();
     typeahead = repeat ? typeahead : typeahead + key.toLowerCase();
 
-    const ordered = items();
+    const ordered = items().filter(isNativeEnabled);
     const active = ordered.findIndex(
       (entry) => entry.node === entry.node.ownerDocument.activeElement,
     );
@@ -261,6 +261,11 @@ function arrowDelta(
 
 export function sameValue(left: unknown, right: unknown): boolean {
   return left === right || Object.is(left, right);
+}
+
+/** Native disability blocks DOM focus; ARIA disability remains discoverable. */
+export function isNativeEnabled(item: CompositeItem): boolean {
+  return !item.node.matches(":disabled");
 }
 
 export function onAbort(signal: AbortSignal, callback: () => void): void {

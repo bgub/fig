@@ -5,6 +5,7 @@ import { useCombobox } from "@bgub/fig-ui/combobox";
 import { useMenu } from "@bgub/fig-ui/menu";
 import { usePopover } from "@bgub/fig-ui/popover";
 import { useTooltip } from "@bgub/fig-ui/tooltip";
+import { CompositeFocusFixture } from "./composite-focus.tsx";
 
 function PopupPeers({ controlled }: { controlled: boolean }): FigNode {
   // Peer hooks reconcile in the same commit, in declaration order.
@@ -70,6 +71,15 @@ const host = document.getElementById("fixture");
 if (host === null) throw new Error("Missing popup fixture host.");
 flushSync(() =>
   createRoot(host).render(
-    <PopupPeers controlled={host.dataset.controlled === "true"} />,
+    host.dataset.focusKind === undefined ? (
+      <PopupPeers controlled={host.dataset.controlled === "true"} />
+    ) : (
+      <CompositeFocusFixture
+        kind={host.dataset.focusKind}
+        constraint={host.dataset.constraint ?? "native"}
+        disabled={host.dataset.disabled ?? "middle"}
+        selectedDisabled={host.dataset.selectedDisabled === "true"}
+      />
+    ),
   ),
 );
