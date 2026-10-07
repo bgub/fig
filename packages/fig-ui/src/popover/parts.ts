@@ -24,9 +24,7 @@ export const popoverTriggerMixin = /* @__PURE__ */ createMixin(
       ...triggerProps(context, { disabled: false }),
       "aria-controls": state.popoverId,
       "aria-expanded": state.open ? "true" : "false",
-      bind: bindPart(context, (node, signal) =>
-        state.registry.bindTrigger(node, signal),
-      ),
+      bind: bindPart(context, state.registry.bindAnchor),
       "data-open": state.open ? "" : undefined,
       popovertarget: state.popoverId,
       // With popover support the browser toggles through popovertarget, which
@@ -48,9 +46,7 @@ export const popoverMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: PopoverPartState) => {
     expectPopupId(context, state.popoverId);
     return {
-      bind: bindPart(context, (node, signal) =>
-        state.registry.bindPopover(node, signal),
-      ),
+      bind: bindPart(context, state.registry.bindPopup),
       "data-open": state.open ? "" : undefined,
       id: state.popoverId,
       mix: [

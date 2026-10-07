@@ -2,7 +2,7 @@
 import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type TooltipOpenChangeHandler, useTooltip } from "./tooltip.tsx";
 
 const roots: FigRoot[] = [];
@@ -13,9 +13,37 @@ afterEach(async () => {
     if (root !== undefined) await act(() => root.unmount());
   }
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 describe("Tooltip", () => {
+  it("preserves a pending close when disabled", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let disable = () => {};
+    function App(): FigNode {
+      const [disabled, setDisabled] = useState(false);
+      disable = () => setDisabled(true);
+      const tooltip = useTooltip({
+        defaultOpen: true,
+        disabled,
+        closeDelay: 50,
+      });
+      return (
+        <>
+          <button mix={tooltip.trigger()}>Help</button>
+          <div mix={tooltip.tooltip()}>Hint</div>
+        </>
+      );
+    }
+    const container = await render(<App />);
+    await pointer(required(container, "button"), "pointerleave");
+    await act(disable);
+    await act(() => vi.advanceTimersByTimeAsync(49));
+    expect(required(container, '[role="tooltip"]').hidden).toBe(false);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(required(container, '[role="tooltip"]').hidden).toBe(true);
+  });
+
   it("describes its trigger and opens immediately for keyboard focus", async () => {
     const container = await render(<Example />);
     const trigger = required(container, "[data-trigger]");

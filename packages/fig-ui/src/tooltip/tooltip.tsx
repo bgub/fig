@@ -173,10 +173,10 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
   const id = useId();
   const tooltipId = options.id ?? `${id}-tooltip`;
   const anchorName = `--fig-tooltip-${id.replaceAll(/[^\w-]/g, "-")}`;
-  const timer = useMemo<{ value: ReturnType<typeof setTimeout> | undefined }>(
-    () => ({ value: undefined }),
-    [],
-  );
+  const timer = useMemo<{
+    value: ReturnType<typeof setTimeout> | undefined;
+    opening: boolean;
+  }>(() => ({ value: undefined, opening: false }), []);
 
   const schedule = useStableEvent(
     (
@@ -192,6 +192,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
       const wait =
         requestedDelay === -1 ? (next ? delay : closeDelay) : requestedDelay;
       const anchor = registry.anchor();
+      timer.opening = next;
       timer.value = setTimeout(() => {
         timer.value = undefined;
         // A root can outlive a removed/replaced trigger. Its old pointer
@@ -212,7 +213,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
   );
 
   useBeforePaint(() => {
-    if (disabled && timer.value !== undefined) {
+    if (disabled && timer.opening && timer.value !== undefined) {
       clearTimeout(timer.value);
       timer.value = undefined;
     }

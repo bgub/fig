@@ -63,7 +63,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4.4 kB"
+      "limit": "4.7 kB"
     },
     {
       "path": "packages/fig-ui/dist/field.js",
@@ -103,7 +103,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "3.5 kB"
+      "limit": "4 kB"
     },
     {
       "path": "packages/fig-ui/dist/menu/submenu.js",
@@ -111,7 +111,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4 kB"
+      "limit": "4.5 kB"
     },
     {
       "path": "packages/fig-ui/dist/popover.js",
@@ -151,7 +151,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.2 kB"
+      "limit": "1.3 kB"
     },
     {
       "path": "packages/fig-ui/dist/toast.js",

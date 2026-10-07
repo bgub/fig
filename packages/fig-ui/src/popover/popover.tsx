@@ -10,9 +10,10 @@ import type {
   OpenChangeHandler,
 } from "../internal/open-state.ts";
 import { useOpenState } from "../internal/open-state.ts";
+import { createAnchoredPopup } from "../internal/anchored-popup.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { popoverMixin, popoverTriggerMixin } from "./parts.ts";
-import { createPopoverRegistry, registerPopoverSource } from "./registry.ts";
+import { registerPopoverSource } from "./registry.ts";
 
 export type PopoverOpenChangeDetails = OpenChangeDetails;
 
@@ -47,7 +48,10 @@ export interface PopoverProps extends PopoverOptions {
  */
 export function usePopover(options: PopoverOptions = {}): PopoverParts {
   const requestReconcile = useRegistrationReconcile();
-  const registry = useMemo(() => createPopoverRegistry(requestReconcile), []);
+  const registry = useMemo(
+    () => createAnchoredPopup(requestReconcile, "popover"),
+    [],
+  );
   const { open, requestOpen, setOpen } = useOpenState({
     ...options,
     requestReconcile,

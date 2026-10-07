@@ -9,6 +9,7 @@ import {
 import type { ChangeDetails } from "../internal/changes.ts";
 import { createChangeDetails } from "../internal/changes.ts";
 import { assertAccessibleName } from "../internal/diagnostics.ts";
+import { createPartSlot } from "../internal/parts.ts";
 import type {
   OpenChangeDetails,
   OpenChangeHandler,
@@ -82,26 +83,17 @@ export function useMenu<Value = unknown>(
   const triggerId = `${id}-trigger`;
   const popover = usePopover(options);
   const registry = useMemo(() => createMenuRegistry(), []);
+  const trigger = useMemo(() => createPartSlot(() => {}), []);
   const tracker = useMemo<{
     open: boolean;
     pending: MenuFocusTarget | null;
-    trigger: HTMLElement | null;
-    triggerSignal?: AbortSignal;
     closingFocus?: Element;
-  }>(() => ({ open: false, pending: null, trigger: null }), []);
+  }>(() => ({ open: false, pending: null }), []);
 
   const noteTrigger = useStableEvent(
     (node: HTMLElement, signal: AbortSignal) => {
       bindPopoverSource(popover, node, signal);
-      tracker.trigger = node;
-      tracker.triggerSignal = signal;
-      signal.addEventListener(
-        "abort",
-        () => {
-          if (tracker.triggerSignal === signal) tracker.trigger = null;
-        },
-        { once: true },
-      );
+      trigger.bind(node, signal);
     },
   );
 
@@ -150,9 +142,10 @@ export function useMenu<Value = unknown>(
   // is what puts the element in the top layer, so the items are reachable.
   useBeforePaint(() => {
     const menu = registry.containerNode();
+    const triggerNode = trigger.node();
     if (menu !== null) {
-      if (tracker.trigger !== null && registry.hasAutomaticLabel(menu)) {
-        menu.setAttribute("aria-labelledby", tracker.trigger.id);
+      if (triggerNode !== null && registry.hasAutomaticLabel(menu)) {
+        menu.setAttribute("aria-labelledby", triggerNode.id);
       }
       assertAccessibleName(menu, "menu");
     }
@@ -170,9 +163,9 @@ export function useMenu<Value = unknown>(
     if (
       registry.containsFocus() ||
       (tracker.closingFocus !== undefined &&
-        tracker.closingFocus === tracker.trigger?.ownerDocument.activeElement)
+        tracker.closingFocus === triggerNode?.ownerDocument.activeElement)
     ) {
-      tracker.trigger?.focus();
+      triggerNode?.focus();
     }
     tracker.closingFocus = undefined;
   });

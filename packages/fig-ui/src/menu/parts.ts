@@ -127,8 +127,7 @@ const menuBehavior = /* @__PURE__ */ createMixin(
           moved === undefined &&
           !event.altKey &&
           !event.ctrlKey &&
-          !event.metaKey &&
-          !(event.isComposing || event.keyCode === 229)
+          !event.metaKey
         ) {
           state.registry.focusByTypeahead(event.key);
         }

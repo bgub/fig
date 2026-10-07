@@ -283,7 +283,7 @@ Native anchored popups reconcile against the current element’s `:popover-open`
 
 ## Tooltip
 
-`useTooltip(options)` and `Tooltip` coordinate one non-interactive description through `trigger()` and `tooltip()`. Keyboard focus opens immediately, mouse hover uses `delay` (500ms by default), pointer exit uses `closeDelay`, and Escape closes unless an earlier handler canceled the key event. Pointer entry and exit do not override keyboard focus on the trigger. Disabling a tooltip cancels any pending hover timer. Delayed opening belongs to the trigger host that started it: removing or replacing that host invalidates the opening, while rerendering the same host preserves it. A pending close still completes after trigger removal. Touch does not synthesize hover behavior.
+`useTooltip(options)` and `Tooltip` coordinate one non-interactive description through `trigger()` and `tooltip()`. Keyboard focus opens immediately, mouse hover uses `delay` (500ms by default), pointer exit uses `closeDelay`, and Escape closes unless an earlier handler canceled the key event. Pointer entry and exit do not override keyboard focus on the trigger. Disabling a tooltip cancels pending opening timers while preserving a pending close and its original deadline. Delayed opening belongs to the trigger host that started it: removing or replacing that host invalidates the opening, while rerendering the same host preserves it. A pending close still completes after trigger removal. Touch does not synthesize hover behavior.
 
 ```tsx
 const tooltip = useTooltip({ id: "save-help" });
@@ -512,7 +512,7 @@ Automated checks assert roles, relationships, state, keyboard movement, native f
 
 ### Input and lifetime invariants
 
-Controlled Listbox, Combobox, Checkbox, and Switch derive each request from the last committed prop. Repeated requests in one batch remain observable when the owner has not accepted them; multi-selection does not accumulate refused values. Uncontrolled widgets continue to accumulate accepted changes immediately. Native controls respect earlier canceled change events and live disability, including dispatched integration events. A disabled Select trigger cannot be bypassed by selecting from its already-open popup. Nested Listbox key events belong to the nearest Listbox, even when that inner Listbox is disabled.
+Controlled Accordion, Listbox, Combobox, Checkbox, and Switch derive each request from the last committed prop. Accordion ignores values from suspended renders; only accepted uncontrolled toggles accumulate before commit. Repeated requests in one batch remain observable when the owner has not accepted them; multi-selection does not accumulate refused values. Uncontrolled widgets continue to accumulate accepted changes immediately. Native controls respect earlier canceled change events and live disability, including dispatched integration events. A disabled Select trigger cannot be bypassed by selecting from its already-open popup. Nested Listbox key events belong to the nearest Listbox, even when that inner Listbox is disabled.
 
 Listbox, Select, and Combobox ignore keyboard events during IME composition. Their native button options default to `type="button"` and stay outside sequential focus (`tabindex="-1"`); keyboard focus remains on the controlling root, trigger, or input.
 

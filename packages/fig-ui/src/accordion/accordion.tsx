@@ -1,6 +1,7 @@
 import {
   type FigNode,
   type MixinDescriptor,
+  useBeforeLayout,
   useBeforePaint,
   useMemo,
   useStableEvent,
@@ -87,7 +88,10 @@ export function useAccordion<Value = unknown>(
   }>(() => ({ value: options.defaultValue ?? [] }));
   const values = controlledValue ?? uncontrolled.value;
   const tracker = useMemo(() => ({ values }), []);
-  tracker.values = values;
+  useBeforeLayout(() => {
+    // A suspended render must not publish values to the active event handler.
+    tracker.values = values;
+  });
   const registrationChanged = useRegistrationReconcile();
   const registry = useMemo(
     () =>
@@ -120,7 +124,7 @@ export function useAccordion<Value = unknown>(
   const toggle = useStableEvent(
     (value: unknown, event: Event, trigger: Element) => {
       // Consecutive activations can arrive before the previous state commits.
-      const current = tracker.values;
+      const current = controlled ? values : tracker.values;
       const open = current.some((entry) => sameValue(entry, value));
       if (open && !collapsible && !multiple) return;
       const next = open

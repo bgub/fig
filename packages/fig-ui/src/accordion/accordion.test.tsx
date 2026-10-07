@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import {
   type FigNode,
+  readPromise,
+  Suspense,
+  transition,
   useState,
   useTransition,
   ViewTransition,
@@ -29,6 +32,66 @@ afterEach(async () => {
 });
 
 describe("Accordion", () => {
+  it("ignores controlled values from a suspended render", async () => {
+    const pending = new Promise<void>(() => {});
+    const changes: Array<readonly string[]> = [];
+    let update = () => {};
+    function SuspendingAccordion({ value }: { value: string[] }): FigNode {
+      const accordion = useAccordion({
+        value,
+        multiple: true,
+        onValueChange: (next) => changes.push(next),
+      });
+      if (value.length > 0) readPromise(pending);
+      return (
+        <div mix={accordion.root()}>
+          <button mix={accordion.trigger("shipping")}>Shipping</button>
+          <section mix={accordion.panel("shipping")}>Shipping panel</section>
+        </div>
+      );
+    }
+    function App(): FigNode {
+      const [value, setValue] = useState<string[]>([]);
+      update = () => transition(() => setValue(["shipping"]));
+      return (
+        <Suspense fallback="Loading">
+          <SuspendingAccordion value={value} />
+        </Suspense>
+      );
+    }
+    const container = await render(<App />);
+    await act(update);
+    const [shipping] = triggers(container);
+    expect(shipping.getAttribute("aria-expanded")).toBe("false");
+    await click(shipping);
+    expect(changes).toEqual([["shipping"]]);
+  });
+
+  it.each([false, true])(
+    "only accumulates accepted uncontrolled toggles in a batch (controlled: %s)",
+    async (controlled) => {
+      const changes: Array<readonly string[]> = [];
+      const container = await renderAccordion({
+        multiple: true,
+        value: controlled ? [] : undefined,
+        onValueChange: (next) => changes.push(next),
+      });
+      const [shipping, billing] = triggers(container);
+      await act(() => {
+        shipping.click();
+        billing.click();
+        shipping.click();
+      });
+      expect(changes).toEqual(
+        controlled
+          ? [["shipping"], ["billing"], ["shipping"]]
+          : [["shipping"], ["shipping", "billing"], ["billing"]],
+      );
+      expect(shipping.getAttribute("aria-expanded")).toBe("false");
+      expect(billing.getAttribute("aria-expanded")).toBe(String(!controlled));
+    },
+  );
+
   it("connects headers and regions", async () => {
     const container = await renderAccordion({ defaultValue: ["shipping"] });
     const [shipping, billing] = triggers(container);
@@ -253,6 +316,7 @@ describe("Accordion", () => {
 });
 
 interface ExampleAccordionProps {
+  value?: readonly string[];
   collapsible?: boolean;
   defaultValue?: readonly string[];
   disabledValue?: string;
@@ -262,6 +326,7 @@ interface ExampleAccordionProps {
 
 function ExampleAccordion(props: ExampleAccordionProps): FigNode {
   const accordion = useAccordion<string>({
+    value: props.value,
     collapsible: props.collapsible,
     defaultValue: props.defaultValue,
     multiple: props.multiple,
