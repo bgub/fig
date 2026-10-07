@@ -4,6 +4,6 @@ packages:
     type: patch
 ---
 
-## Preserve text selection during atomic DOM moves
+## Preserve text selection across DOM commits
 
-Restore contenteditable selection boundaries and direction after native `moveBefore()` reorders a focused element or its ancestor, while respecting selection changes made by custom-element move callbacks. Real-browser regression coverage exercises native and fallback moves, input and textarea selection, focus chosen by blur handlers, scrolling, and native dialog/popover state in development and production builds.
+Capture input, textarea, and DOM selection once before mutations and restore surviving boundaries and direction before `useBeforePaint`. Cover accessible shadow roots, multi-node moves, and focused descendants of editing hosts. Skip removed endpoints and clamp shortened text offsets. Component layout policy runs after preservation, replacing per-move callback-intent heuristics with explicit commit ordering.

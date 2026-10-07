@@ -126,6 +126,14 @@ export class FakeElement {
     public namespaceURI = "http://www.w3.org/1999/xhtml",
   ) {}
 
+  get ownerDocument(): Document {
+    return globalThis.document;
+  }
+
+  getRootNode(): FakeElement {
+    return this.parentNode?.getRootNode() ?? this;
+  }
+
   get localName(): string {
     return this.tagName;
   }

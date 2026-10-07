@@ -21,6 +21,12 @@ Unlike `react-reconciler`, Fig has no mutation/persistence mode flags, host-cont
 
 Portal children use the normal mutation methods against their target. Optional portal hooks are lifecycle notifications for hosts that need to prepare and release containers.
 
+## Commit Mutation Scope
+
+Optional `commitMutation(container, mutate)` surrounds one synchronous host mutation phase. The host must call `mutate()` exactly once, synchronously, and propagate errors. It can capture host state before that call and restore it in `finally`. Hosts without the hook execute mutations directly.
+
+The scope includes deletions, host updates, placements, hydration changes, and Activity visibility changes. It runs after `useBeforeLayout` and finishes before `useBeforePaint`. A commit coordinator can delay the transaction, but the hook runs only when the coordinator actually invokes its mutation callback. State stays local to that invocation, including on failure. Fig DOM uses this scope to preserve focus and selection across the entire commit; component focus policy runs afterward in `useBeforePaint`.
+
 ## Hoisted Assets
 
 `resolveHoistedInstance(type, props, parent)` classifies and creates hoisted host elements. Returning `null` keeps the ordinary in-tree path. Returning an instance makes that placement permanent for the fiber's lifetime and bypasses the hydration cursor.

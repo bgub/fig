@@ -40,7 +40,7 @@ type StateSetter<S> = (next: S | ((previous: S) => S)) => void;
 The effect names describe when they run:
 
 - `useBeforeLayout` runs before host mutations. It corresponds to React's `useInsertionEffect`.
-- `useBeforePaint` runs after host mutations but before the browser paints. It corresponds to `useLayoutEffect`.
+- `useBeforePaint` runs after host mutations and host-state restoration but before the browser paints. In Fig DOM, it owns final component focus and selection policy after commit-level preservation. It corresponds to `useLayoutEffect`.
 - `useReactive` runs later at normal priority. It corresponds to `useEffect`.
 
 ```tsx

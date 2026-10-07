@@ -2,10 +2,12 @@
 packages:
   "@bgub/fig-dom":
     type: patch
+  "@bgub/fig-reconciler":
+    type: minor
 ---
 
-## Preserve focus during DOM moves
+## Preserve focus across DOM commits
 
-Keep focus when keyed reconciliation moves a focused element or its ancestor. Use native atomic moves where supported to preserve browser interaction and top-layer state; restore focus without scrolling after ordinary moves on older browsers, respecting another target selected by a blur handler.
+Add an optional synchronous `HostConfig.commitMutation` scope. Fig DOM captures focus before host mutations and restores surviving focus afterward, before component `useBeforePaint` callbacks choose their final focus policy. Mutation-time native event, custom-element, and bind callbacks may be overridden by restoration; native events continue to dispatch normally.
 
-The fallback also preserves contenteditable selection boundaries and direction when moving a focused subtree.
+Use atomic native moves when nodes share a shadow-including root to preserve browser-managed state, including native dialog/popover membership. Ordinary insertion remains the fallback. Removed or hidden elements are not restored, and focus restoration does not request scrolling.

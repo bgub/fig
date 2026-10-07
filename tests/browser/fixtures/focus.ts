@@ -1,4 +1,4 @@
-import { createElement } from "@bgub/fig";
+import { Activity, createElement, useBeforePaint } from "@bgub/fig";
 import { createRoot, flushSync } from "@bgub/fig-dom";
 
 type EditorKind =
@@ -15,16 +15,26 @@ declare global {
         kind: EditorKind,
         ancestor: boolean | "custom",
         fallback: boolean,
+        container?: Element | ShadowRoot,
       ): void;
       reverse(): void;
       nativeMoves(): number;
+      beforePaint: (() => void) | null;
+      reorder(keys: string[]): void;
+      remove(): void;
+      hide(): void;
     };
   }
 }
 
 window.focusFixture = {
-  mount(kind, ancestor, fallback) {
-    const root = createRoot(document.getElementById("root")!);
+  mount(
+    kind,
+    ancestor,
+    fallback,
+    container = document.getElementById("root")!,
+  ) {
+    const root = createRoot(container);
     let moves = 0;
     const editor = () => {
       const props = { id: "editor", key: "moved", "data-key": "moved" };
@@ -55,16 +65,27 @@ window.focusFixture = {
           );
       }
     };
-    const render = (keys: string[]) =>
-      root.render(
+    function List({
+      keys,
+      hidden = false,
+    }: {
+      keys: string[];
+      hidden?: boolean;
+    }) {
+      useBeforePaint(() => {
+        window.focusFixture.beforePaint?.();
+      }, [keys, hidden]);
+      return createElement(
+        Activity,
+        { mode: hidden ? "hidden" : "visible" },
         createElement(
           "div",
           { id: "list" },
           keys.map((key) =>
-            key === "other"
+            key !== "moved"
               ? createElement(
                   "button",
-                  { key, id: "other", "data-key": key },
+                  { key, id: key, "data-key": key },
                   "Other",
                 )
               : ancestor
@@ -77,8 +98,11 @@ window.focusFixture = {
           ),
         ),
       );
+    }
+    const render = (keys: string[], hidden = false) =>
+      root.render(createElement(List, { keys, hidden }));
     flushSync(() => render(["moved", "other"]));
-    const parent = document.getElementById("list")!;
+    const parent = container.querySelector("#list")!;
     if (fallback) {
       Object.defineProperty(parent, "moveBefore", { value: undefined });
     } else {
@@ -91,7 +115,15 @@ window.focusFixture = {
     window.focusFixture.reverse = () =>
       flushSync(() => render(["other", "moved"]));
     window.focusFixture.nativeMoves = () => moves;
+    window.focusFixture.reorder = (keys) => flushSync(() => render(keys));
+    window.focusFixture.remove = () => flushSync(() => render(["other"]));
+    window.focusFixture.hide = () =>
+      flushSync(() => render(["moved", "other"], true));
   },
   reverse() {},
   nativeMoves: () => 0,
+  beforePaint: null,
+  reorder() {},
+  remove() {},
+  hide() {},
 };

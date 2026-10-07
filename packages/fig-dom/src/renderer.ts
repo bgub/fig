@@ -33,6 +33,7 @@ import {
   updateParentSelect,
 } from "./form-controls.ts";
 import { hydrateElement, updateElement } from "./props.ts";
+import { preserveFocus } from "./focus.ts";
 import { insertDomNode } from "./placement.ts";
 import { configureDomRefreshScheduler } from "./refresh-internal.ts";
 import {
@@ -65,6 +66,7 @@ function isDocumentContainer(container: Container): container is Document {
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: createDomElement,
+  commitMutation: preserveFocus,
   createTextInstance: (text) => document.createTextNode(text),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must

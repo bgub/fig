@@ -357,6 +357,9 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousProps: Props,
     nextProps: Props,
   ): boolean;
+  // Wrap the synchronous host mutation phase, before before-paint effects.
+  // The host must invoke mutate exactly once and must not defer it.
+  commitMutation?(container: Container, mutate: () => void): void;
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -3842,24 +3845,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitDepth += 1;
     try {
       const attempt = root.attempt;
-      const commitHostChanges = () => {
-        // A coordinator may defer this transaction. Publish hook instances and
-        // run before-layout effects only when its host mutation actually begins.
-        commitLiveHookInstances(root);
-        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
-        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-        if (root.needsCommitDeletions) {
-          // Retire every deleted owner before any effect, unsubscribe, or data
-          // cleanup can call a hook in another deletion. Bound each walk so kept
-          // siblings remain live.
-          for (const owner of root.attempt.commitIndex) {
-            if (owner.deletions === null) continue;
-            for (const deleted of owner.deletions) {
-              walkFiberSubtree(deleted, deactivateFiberHooks);
-            }
-          }
-        }
-        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+      const mutate = () => {
         const recoveringHydration = root.clearContainerBeforeCommit;
         if (recoveringHydration) {
           requireHydrationHostConfig().clearContainer(root.container);
@@ -3888,6 +3874,27 @@ export function createRenderer<Container, Instance, TextInstance>(
           if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
         }
         root.clearContainerBeforeCommit = false;
+      };
+      const commitHostChanges = () => {
+        // A coordinator may defer this transaction. Publish hook instances and
+        // run before-layout effects only when its host mutation actually begins.
+        commitLiveHookInstances(root);
+        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
+        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
+        if (root.needsCommitDeletions) {
+          // Retire every deleted owner before any effect, unsubscribe, or data
+          // cleanup can call a hook in another deletion. Bound each walk so kept
+          // siblings remain live.
+          for (const owner of root.attempt.commitIndex) {
+            if (owner.deletions === null) continue;
+            for (const deleted of owner.deletions) {
+              walkFiberSubtree(deleted, deactivateFiberHooks);
+            }
+          }
+        }
+        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+        if (host.commitMutation) host.commitMutation(root.container, mutate);
+        else mutate();
       };
       const completeCommit = () => {
         // Recompute from committed reality: the eager render-time set is sticky, so

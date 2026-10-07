@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { createElement } from "@bgub/fig";
 import { afterEach, expect, it, vi } from "vitest";
-import { createRoot, flushSync, type FigRoot } from "./index.ts";
+import { createPortal, createRoot, flushSync, type FigRoot } from "./index.ts";
+import { preserveFocus } from "./focus.ts";
 import { insertDomNode } from "./placement.ts";
 
 const roots: FigRoot[] = [];
@@ -62,7 +63,7 @@ it("does not restore focus when a move disconnects the focused subtree", () => {
   expect(move).not.toHaveBeenCalled();
 });
 
-it("does not steal focus selected during a fallback insertion", () => {
+it("leaves focus policy to the commit wrapper during placement", () => {
   const parent = document.createElement("div");
   const moved = document.createElement("button");
   const other = document.createElement("button");
@@ -139,40 +140,98 @@ it("keeps focus in a descendant when its keyed ancestor moves", () => {
   expect([focused.selectionStart, focused.selectionEnd]).toEqual([2, 5]);
 });
 
-it.each([
-  [2, 8],
-  [8, 2],
-])(
-  "preserves a contenteditable selection from %i to %i during a fallback move",
-  (anchorOffset, focusOffset) => {
-    const parent = document.createElement("div");
-    Object.defineProperty(parent, "moveBefore", { value: undefined });
-    const editable = document.createElement("div");
-    editable.contentEditable = "true";
-    editable.tabIndex = 0;
-    editable.textContent = "Selected text";
-    parent.append(editable, document.createElement("span"));
-    document.body.append(parent);
+it("leaves selection policy to the commit wrapper during placement", () => {
+  const parent = document.createElement("div");
+  Object.defineProperty(parent, "moveBefore", { value: undefined });
+  const editable = document.createElement("div");
+  editable.contentEditable = "true";
+  editable.tabIndex = 0;
+  editable.textContent = "Selected text";
+  parent.append(editable, document.createElement("span"));
+  document.body.append(parent);
+  editable.focus();
+  const selection = document.getSelection()!;
+  selection.setBaseAndExtent(editable.firstChild!, 2, editable.firstChild!, 8);
+  const insert = parent.insertBefore.bind(parent);
+  vi.spyOn(parent, "insertBefore").mockImplementation((node, before) => {
+    const result = insert(node, before);
     editable.focus();
-    const selection = document.getSelection()!;
-    selection.setBaseAndExtent(
-      editable.firstChild!,
-      anchorOffset,
-      editable.firstChild!,
-      focusOffset,
+    selection.removeAllRanges();
+    return result;
+  });
+  insertDomNode(parent, editable, null);
+  expect(document.activeElement).toBe(editable);
+  expect(selection.rangeCount).toBe(0);
+});
+
+it("uses ordinary insertion between separate detached trees", () => {
+  const source = document.createElement("div");
+  const parent = document.createElement("div");
+  const child = document.createElement("input");
+  source.append(child);
+  const move = vi.fn();
+  Object.defineProperty(parent, "moveBefore", { value: move });
+  insertDomNode(parent, child, null);
+  expect(child.parentNode).toBe(parent);
+  expect(move).not.toHaveBeenCalled();
+});
+
+it("restores focus on a failed mutation without leaking its snapshot to the next commit", () => {
+  const parent = document.createElement("div");
+  const first = document.createElement("input");
+  const second = document.createElement("input");
+  parent.append(first, second);
+  document.body.append(parent);
+  first.focus();
+  expect(() =>
+    preserveFocus(parent, () => {
+      first.remove();
+      parent.append(first);
+      second.focus();
+      throw new Error("mutation failed");
+    }),
+  ).toThrow("mutation failed");
+  expect(document.activeElement).toBe(first);
+  second.focus();
+  preserveFocus(parent, () => {
+    second.remove();
+    parent.append(second);
+  });
+  expect(document.activeElement).toBe(second);
+});
+
+it("preserves same-document portal focus when the root is in an unfocused closed shadow tree", () => {
+  const host = document.createElement("div");
+  const target = document.createElement("div");
+  document.body.append(host, target);
+  const root = createRoot(host.attachShadow({ mode: "closed" }));
+  roots.push(root);
+  const render = (keys: string[]) =>
+    root.render(
+      createPortal(
+        createElement(
+          "div",
+          null,
+          keys.map((key) =>
+            createElement("input", {
+              key,
+              id: key,
+              defaultValue: "Selected text",
+            }),
+          ),
+        ),
+        target,
+      ),
     );
-    // Browsers reset this selection during detachment; happy-dom does not.
-    const insert = parent.insertBefore.bind(parent);
-    vi.spyOn(parent, "insertBefore").mockImplementation((node, before) => {
-      const result = insert(node, before);
-      selection.removeAllRanges();
-      return result;
-    });
-    insertDomNode(parent, editable, null);
-    expect(document.activeElement).toBe(editable);
-    expect(selection.toString()).toBe("lected");
-    expect(selection.anchorNode).toBe(editable.firstChild);
-    expect(selection.anchorOffset).toBe(anchorOffset);
-    expect(selection.focusOffset).toBe(focusOffset);
-  },
-);
+  flushSync(() => render(["moved", "other"]));
+  const input = target.querySelector<HTMLInputElement>("#moved")!;
+  input.focus();
+  input.setSelectionRange(2, 8, "backward");
+  flushSync(() => render(["other", "moved"]));
+  expect(document.activeElement).toBe(input);
+  expect([
+    input.selectionStart,
+    input.selectionEnd,
+    input.selectionDirection,
+  ]).toEqual([2, 8, "backward"]);
+});

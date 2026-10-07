@@ -58,7 +58,7 @@ DOM access uses a normal prop:
 
 The callback returns nothing. Its signal aborts when the callback identity changes or the node unmounts; moving the node does not re-run it. `composeBind` combines several binds and accepts falsy entries.
 
-In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, so use `useBeforePaint` when you need layout measurement.
+In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, before commit-level focus/selection restoration. Use `useBeforePaint` for layout measurement and final focus or selection policy; a focus choice made by a bind during mutation can be overwritten by restoration.
 
 `on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.
 
