@@ -133,11 +133,12 @@ export type FigDataReads = Map<string, { value: unknown } | undefined>;
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
   areDataDependenciesConsistent(reads: FigDataReads): boolean;
+  // Installs subscriptions, consumes reads, and reports whether they still match.
   commitDataDependencies(
     owner: object,
     previousOwner: object | null,
     reads?: FigDataReads,
-  ): void;
+  ): boolean;
   deleteDataOwner(owner: object): void;
   releaseDataOwner(owner: object): void;
   dispose(): void;

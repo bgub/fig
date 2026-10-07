@@ -4678,7 +4678,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function commitDataDependencies(root: R): void {
     for (const cursor of root.attempt.commitIndex) {
       if (!cursor.dataDependenciesDirty) continue;
-      root.dataStore.commitDataDependencies(
+      const consistent = root.dataStore.commitDataDependencies(
         cursor,
         cursor.alternate,
         root.attempt.reads.get(cursor)?.data,
@@ -4686,6 +4686,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       cursor.dataDependenciesDirty = false;
       if (cursor.alternate !== null)
         cursor.alternate.dataDependenciesDirty = false;
+      if (!consistent) {
+        const lane =
+          hasHiddenBoundaries && isInsideHiddenBoundary(cursor)
+            ? OffscreenLane
+            : SyncLane;
+        scheduleFiber(cursor, lane);
+        if (isSyncLane(lane)) needsPostCommitSyncFlush = true;
+      }
     }
   }
 

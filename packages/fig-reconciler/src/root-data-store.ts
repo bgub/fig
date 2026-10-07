@@ -108,8 +108,8 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       owner: object,
       previousOwner: object | null,
       reads?: FigDataReads,
-    ): void {
-      inner?.commitDataDependencies(owner, previousOwner, reads);
+    ): boolean {
+      return inner?.commitDataDependencies(owner, previousOwner, reads) ?? true;
     },
     deleteDataOwner(owner: object): void {
       inner?.deleteDataOwner(owner);

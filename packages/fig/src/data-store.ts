@@ -309,7 +309,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     owner: Owner,
     previousOwner: object | null,
     reads?: FigDataReads,
-  ): void {
+  ): boolean {
     // Committed subscriptions retain keys, never the speculative values.
     const nextKeys = reads === undefined ? null : new Set(reads.keys());
     const ownerKeys = this.ownerKeys.get(owner) ?? null;
@@ -317,14 +317,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       previousOwner === null
         ? null
         : (this.ownerKeys.get(previousOwner) ?? null);
-    reads?.clear();
 
     if (
       (nextKeys === null || nextKeys.size === 0) &&
       ownerKeys === null &&
       previousOwnerKeys === null
     ) {
-      return;
+      return true;
     }
 
     // Capture the entries this fiber's generations subscribed to before the
@@ -360,6 +359,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (orphanCandidates !== null) {
       for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
     }
+    // Cleanup and subscription callbacks can change an entry before this owner
+    // subscribes. Check after installing every subscription so no notification
+    // can fall between the catch-up check and subscription establishment.
+    const consistent =
+      reads === undefined || this.areDataDependenciesConsistent(reads);
+    reads?.clear();
+    return consistent;
   }
 
   releaseDataOwner(owner: object): void {

@@ -49,6 +49,52 @@ describe("@bgub/fig", () => {
     store.dispose();
   });
 
+  it.each(["before", "during"])(
+    "reports missed changes %s subscription without retaining read snapshots",
+    (timing) => {
+      const owner = {};
+      const reads: FigDataReads = new Map();
+      const resource = dataResource<[string], string>({ key: (key) => [key] });
+      const schedule = vi.fn();
+      let subscribing = false;
+      const store = createRendererDataStore<object, null>({
+        getLane: () => null,
+        schedule,
+        onEntryChange(entry) {
+          if (
+            subscribing &&
+            entry.key[0] === "first" &&
+            entry.subscriberCount === 1
+          ) {
+            subscribing = false;
+            store.hydrate([{ key: ["second"], value: "new" }]);
+          }
+        },
+      });
+      try {
+        store.hydrate([
+          { key: ["first"], value: "old" },
+          { key: ["second"], value: "old" },
+        ]);
+        store.readData(resource, ["first"], reads);
+        store.readData(resource, ["second"], reads);
+        if (timing === "before")
+          store.hydrate([{ key: ["second"], value: "new" }]);
+        else subscribing = true;
+        expect(store.commitDataDependencies(owner, null, reads)).toBe(false);
+        expect(schedule).not.toHaveBeenCalled();
+        expect(reads.size).toBe(0);
+        store.readData(resource, ["second"], reads);
+        expect(store.commitDataDependencies(owner, owner, reads)).toBe(true);
+        expect(reads.size).toBe(0);
+        store.hydrate([{ key: ["second"], value: "latest" }]);
+        expect(schedule).toHaveBeenCalledWith(owner, null);
+      } finally {
+        store.dispose();
+      }
+    },
+  );
+
   it.each(["pending", "rejected"])(
     "subscribes to %s reads without treating them as value snapshots",
     (status) => {
