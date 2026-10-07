@@ -546,6 +546,7 @@ it.each([false, true])(
         {
           canceledNames: snapshotChanged ? ["card"] : [],
           cancelRootSnapshot: true,
+          ...(snapshotChanged ? { cancelTransition: true } : {}),
         },
       ]);
       expect(container.textContent).toBe(

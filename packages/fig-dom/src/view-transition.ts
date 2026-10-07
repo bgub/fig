@@ -97,6 +97,12 @@ function commitViewTransition(
         if (interrupted || didMutate) return;
         didMutate = true;
         mutationResult = mutate();
+        if (mutationResult.cancelTransition) {
+          // A synchronous native callback runs before start returns its handle.
+          // In that case, cancel below as soon as the handle is available.
+          if (transition !== undefined) interrupt();
+          return;
+        }
         // Before the new capture: when measurement shows every change is
         // contained in a named boundary, drop the root's own snapshot so the
         // page-wide overlay does not swallow pointer events for the
@@ -110,6 +116,10 @@ function commitViewTransition(
           ? update
           : { types: [...options.types], update },
       );
+      if (mutationResult?.cancelTransition) {
+        interrupt();
+        return;
+      }
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
         hideCanceledSnapshots(owner, transition, () =>

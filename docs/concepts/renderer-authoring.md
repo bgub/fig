@@ -87,6 +87,8 @@ Synchronous work, including `flushSync`, discrete updates, and `unmount`, interr
 
 `@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, surface-resolution, and native-commit operations into a coordinator. The suspension and commit adapters receive the commit's transition types and interruption policy. The commit adapter also receives separate readiness and finished callbacks: readiness restores temporary host state and publishes lifecycle events, while finished aborts their signals. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
 
+When the View Transition mutation result includes `cancelTransition: true`, the candidate was stale or failed and the host must cancel the whole capture. Release temporary state and the animation lock, then report readiness with `false` and finish. Do not wait for the abandoned animation's readiness or completion; retries must be able to commit without an urgent update. Native cancellation is best-effort, and later callbacks must remain inert. This differs from `canceledNames` and `cancelRootSnapshot`, which suppress snapshots while a successful animation may continue.
+
 ## Scheduler
 
 The scheduler is internal. It runs work across macrotasks with five priority levels and starvation timeouts. Lane expiration handles aging at the update level; the scheduler's yield budget slices individual tasks.

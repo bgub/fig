@@ -69,6 +69,9 @@ export interface ViewTransitionSurfaceMeasurement {
 export interface ViewTransitionMutationResult {
   canceledNames: string[];
   cancelRootSnapshot: boolean;
+  // No candidate was published. Release the whole capture, not just its
+  // snapshots, so retries do not wait for an abandoned native animation.
+  cancelTransition?: boolean;
 }
 
 /** Describes view transition commit options. */
@@ -874,6 +877,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           mutation = result.kind;
           if (result.kind === "committed") return result.value;
           return {
+            cancelTransition: true,
             canceledNames: [
               ...new Set([
                 ...plan.oldSurfaces.map((surface) => surface.name),
