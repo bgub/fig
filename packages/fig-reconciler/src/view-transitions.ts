@@ -758,13 +758,18 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
   function restoreViewTransitionSurfaces(
     plan: ViewTransitionPlan<Instance>,
+    committed: boolean,
   ): void {
     const propsByInstance = new Map<Instance, Props>();
     for (const surface of plan.oldSurfaces) {
       propsByInstance.set(surface.instance, surface.props);
     }
-    for (const surface of plan.newSurfaces) {
-      propsByInstance.set(surface.instance, surface.props);
+    // Only published surfaces can replace the committed author's styles.
+    // A stale capture prepared the old tree but never applied the new props.
+    if (committed) {
+      for (const surface of plan.newSurfaces) {
+        propsByInstance.set(surface.instance, surface.props);
+      }
     }
 
     for (const [instance, props] of propsByInstance) {
@@ -879,7 +884,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
         },
         (active) => {
           try {
-            restoreViewTransitionSurfaces(plan);
+            restoreViewTransitionSurfaces(plan, mutation === "committed");
           } finally {
             // The host also cleans up prepared names when its native commit
             // fails before mutation so the reconciler can fall back normally.

@@ -434,76 +434,111 @@ it("keeps committed event handlers and before-layout effects unchanged until def
   }
 });
 
-it("cancels planned view-transition surfaces and callbacks for an abandoned store render", async () => {
-  const renderer = createAuditRenderer();
-  const container = new FakeElement("root");
-  const root = renderer.createRoot(container);
-  let value = "old";
-  let defer = true;
-  let finish = () => {};
-  let callbackCalls = 0;
-  const results: Array<{
-    canceledNames: string[];
-    cancelRootSnapshot: boolean;
-  }> = [];
-  const listeners = new Set<() => void>();
-  const subscribe = (listener: () => void) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
+it.each([false, true])(
+  "restores view-transition styles and dispatches callbacks only for committed store renders (snapshot changed: %s)",
+  async (snapshotChanged) => {
+    const renderer = createAuditRenderer();
+    const container = new FakeElement("root");
+    const root = renderer.createRoot(container);
+    let value = "old";
+    let defer = true;
+    let finish = () => {};
+    let callbackCalls = 0;
+    const firstStyle = {
+      viewTransitionName: "authored-old",
+      viewTransitionClass: "old-class",
     };
-  };
-  renderer.installCommitCoordinator(
-    createViewTransitionCommitCoordinator<FakeElement, FakeElement>({
-      apply: () => {},
-      restore: () => {},
-      commit: (_container, _options, prepare, mutate, ready, finished) => {
-        if (!defer) return false;
-        prepare();
-        finish = () => {
-          results.push(mutate());
-          ready(true);
-          finished();
-        };
-        return "deferred";
-      },
-    }),
-  );
-  function App({ label }: { label: string }) {
-    const snapshot = useSyncExternalStore(subscribe, () => value);
-    return createElement(
-      ViewTransition,
-      {
-        name: "card",
-        update: "fade",
-        onUpdate: () => {
-          callbackCalls += 1;
+    const secondStyle = {
+      viewTransitionName: "authored-new",
+      viewTransitionClass: "new-class",
+    };
+    const restoredStyles: unknown[] = [];
+    const results: Array<{
+      canceledNames: string[];
+      cancelRootSnapshot: boolean;
+    }> = [];
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    renderer.installCommitCoordinator(
+      createViewTransitionCommitCoordinator<FakeElement, FakeElement>({
+        apply: () => {},
+        restore: (_instance, props) => {
+          restoredStyles.push(props.style);
         },
-      },
-      createElement("span", null, label, snapshot),
+        commit: (_container, _options, prepare, mutate, ready, finished) => {
+          if (!defer) return false;
+          prepare();
+          finish = () => {
+            results.push(mutate());
+            ready(true);
+            finished();
+          };
+          return "deferred";
+        },
+      }),
     );
-  }
-  try {
-    renderer.flushSync(() =>
-      root.render(createElement(App, { label: "first:" })),
-    );
-    transition(() => root.render(createElement(App, { label: "second:" })));
-    await waitForHostTurns(10);
-    value = "new";
-    for (const listener of listeners) listener();
-    defer = false;
-    finish();
-    expect(results).toEqual([
-      { canceledNames: ["card"], cancelRootSnapshot: true },
-    ]);
-    expect(callbackCalls).toBe(0);
-    await waitForHostTurns(10);
-    expect(container.textContent).toBe("second:new");
-  } finally {
-    defer = false;
-    renderer.flushSync(() => root.unmount());
-  }
-});
+    function App({ label }: { label: string }) {
+      const snapshot = useSyncExternalStore(subscribe, () => value);
+      return createElement(
+        ViewTransition,
+        {
+          name: "card",
+          update: "fade",
+          onTransition: () => {
+            callbackCalls += 1;
+          },
+        },
+        createElement(
+          "span",
+          { style: label === "first:" ? firstStyle : secondStyle },
+          label,
+          snapshot,
+        ),
+      );
+    }
+    try {
+      renderer.flushSync(() =>
+        root.render(createElement(App, { label: "first:" })),
+      );
+      transition(() => root.render(createElement(App, { label: "second:" })));
+      await waitForHostTurns(10);
+      expect(container.textContent).toBe("first:old");
+      expect(restoredStyles).toEqual([]);
+      expect(callbackCalls).toBe(0);
+      if (snapshotChanged) {
+        value = "new";
+        for (const listener of listeners) listener();
+      }
+      defer = false;
+      finish();
+      expect(results).toEqual([
+        {
+          canceledNames: snapshotChanged ? ["card"] : [],
+          cancelRootSnapshot: true,
+        },
+      ]);
+      expect(container.textContent).toBe(
+        snapshotChanged ? "first:old" : "second:old",
+      );
+      expect(restoredStyles).toEqual([
+        snapshotChanged ? firstStyle : secondStyle,
+      ]);
+      expect(callbackCalls).toBe(snapshotChanged ? 0 : 1);
+      await waitForHostTurns(10);
+      expect(container.textContent).toBe(
+        snapshotChanged ? "second:new" : "second:old",
+      );
+    } finally {
+      defer = false;
+      renderer.flushSync(() => root.unmount());
+    }
+  },
+);
 
 it("replays a rejected deferred render and its late updates exactly once", () => {
   const renderer = createAuditRenderer();
