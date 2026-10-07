@@ -34,6 +34,8 @@ minimumReleaseAgeStrict: true
 
 overrides:
   "js-yaml@>=4.0.0 <4.3.2": 4.3.2
+  "seroval@>=0.12.0 <1.6.3": 1.6.8
+  "source-map-js@>=1.0.0 <1.2.2": 1.2.2
 
 update:
   githubActions: true

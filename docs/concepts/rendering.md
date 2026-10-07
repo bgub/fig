@@ -106,7 +106,7 @@ Subscription teardown clears ownership before invoking user cleanup, so reentran
 
 ## Suspense Retries
 
-When a fallback preserves an already committed primary, commit releases the original lane ownership of the update prefixes that primary attempted, making them eligible for retry. Updates that render skipped, or that arrived after its read boundaries, retain their priority. Discarding a fallback before commit does not change incoming queue history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
+When a fallback preserves an already committed primary, commit releases the original lane ownership of the updates that primary attempted, including pending prefixes and updates already retained in committed rebase history. This makes the complete attempted state eligible for retry without first revealing stale state. Each read retains the lanes of its attempt; updates that render skipped, or that arrived after its read boundaries, retain their priority. Preserved clones do not count as new reads. Discarding a fallback before commit changes neither incoming queue history nor committed rebase history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
 
 Every suspension installs two kinds of wake-up:
 

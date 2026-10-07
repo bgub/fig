@@ -562,6 +562,12 @@ interface QueuedHook<S = any> extends Hook<S> {
   queue: HookQueue<S>;
 }
 
+interface RetryQueueRead {
+  candidate: QueuedHook;
+  committed: QueuedHook | null;
+  lanes: Lanes;
+}
+
 interface Effect {
   phase: EffectPhase;
   create: EffectCallback;
@@ -748,7 +754,7 @@ interface Fiber<
   // the committed visibility state.
   boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
   // Queue reads from a discarded primary, released only if fallback commits.
-  retryQueueReads?: QueuedHook[];
+  retryQueueReads: RetryQueueRead[] | undefined;
   // Suspense/ErrorBoundary only: attempt ownership when this boundary began,
   // so capture releases all observations and work from its discarded subtree.
   renderCheckpoint?: RenderCheckpoint;
@@ -2943,7 +2949,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         runLatest(
           instance,
           fiber,
-          callback,
+          (signal, update) =>
+            callback(signal, (run) => {
+              // Teardown retires all owners before individual cleanups abort
+              // their signals. Saved updates must respect that earlier cutoff.
+              if (instance.live) update(run);
+            }),
           updatePending,
           (lane, value, failed, asynchronous) => {
             updatePending(-1, lane);
@@ -3843,9 +3854,19 @@ export function createRenderer<Container, Instance, TextInstance>(
         // A coordinator may defer this transaction. Publish hook instances and
         // run before-layout effects only when its host mutation actually begins.
         commitLiveHookInstances(root);
+        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
         if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-        if (hasHiddenBoundaries)
-          armRevealedHiddenBoundaries(finishedWork.child);
+        if (root.needsCommitDeletions) {
+          // Retire every deleted owner before any effect, unsubscribe, or data
+          // cleanup can call a hook in another deletion. Bound each walk so kept
+          // siblings remain live.
+          for (const owner of root.attempt.commitIndex) {
+            if (owner.deletions === null) continue;
+            for (const deleted of owner.deletions) {
+              walkFiberSubtree(deleted, deactivateFiberHooks);
+            }
+          }
+        }
         commitEffects(root, finishedWork.child, BeforeLayoutEffect);
         const recoveringHydration = root.clearContainerBeforeCommit;
         if (recoveringHydration) {
@@ -4180,6 +4201,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.element = null;
 
     if (root.current.child !== null) {
+      walkFiberForest(root.current.child, deactivateFiberHooks);
       deleteFiberDataTree(root.current.child);
       abortFiberEffects(root.current);
     }
@@ -5158,15 +5180,28 @@ export function createRenderer<Container, Instance, TextInstance>(
     // suspendedLanes). The boundary retry is recorded here but attached only
     // at commit, to the fiber identity the commit blessed.
     attachPing(root, thenable, lanes);
-    const retryReads: QueuedHook[] = [];
+    const retryReads: RetryQueueRead[] = [];
     for (const owner of root.attempt.commitIndex.slice(
       boundary.renderCheckpoint?.work,
     )) {
       if (owner.retryQueueReads !== undefined)
         retryReads.push(...owner.retryQueueReads);
+      let previous = owner.alternate?.memoizedState ?? null;
+      // Preserved clones did not attempt their queues. Nested fallbacks carry
+      // their actual reads above; do not release an unvisited sibling's lanes.
+      if (owner.memoizedState === previous) continue;
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
-        if (isQueuedHook(hook) && hook.readThrough > hook.queue.offset)
-          retryReads.push(hook);
+        if (isQueuedHook(hook)) {
+          const committed =
+            previous !== null && isQueuedHook(previous) ? previous : null;
+          if (
+            hook.readThrough > hook.queue.offset ||
+            committed?.baseQueue != null
+          ) {
+            retryReads.push({ candidate: hook, committed, lanes });
+          }
+        }
+        previous = previous?.next ?? null;
       }
     }
     rollbackBoundaryCommitWork(root, boundary);
@@ -5568,6 +5603,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       assetResourceOwner: null,
       boundaryState: null,
       hiddenState: null,
+      // Keep fresh and reused fibers on the same object layout. Adding this
+      // during cloning makes repeated Suspense and error recovery much slower.
+      retryQueueReads: undefined,
     };
   }
 
@@ -5848,7 +5886,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function armRevealedHiddenBoundaries(node: F | null): void {
+  function prepareHiddenBoundaryHooks(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
       const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
@@ -5860,13 +5898,18 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (
         cursor.tag === ActivityTag &&
         (cursor.flags & VisibilityFlag) !== 0 &&
-        !activityHidden(cursor.props) &&
         cursor.child !== null
       ) {
+        if (activityHidden(cursor.props)) {
+          // Bailouts can leave descendants outside the commit index. Retire
+          // the whole forest before cleanup in this or any sibling boundary.
+          walkFiberForest(cursor.child, deactivateFiberHooks);
+          continue;
+        }
         armDeferredEffects(cursor.child);
       }
 
-      if (subtreeVisibility) armRevealedHiddenBoundaries(cursor.child);
+      if (subtreeVisibility) prepareHiddenBoundaryHooks(cursor.child);
     }
   }
 
@@ -5917,8 +5960,18 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitLiveHookInstances(root: R): void {
     for (const owner of root.attempt.commitIndex) {
-      for (const hook of owner.retryQueueReads ?? []) {
-        releaseQueueLanes(hook.queue, hook.readThrough, root.renderLanes);
+      for (const { candidate, committed, lanes } of owner.retryQueueReads ??
+        []) {
+        releaseQueueLanes(candidate.queue, candidate.readThrough, lanes);
+        if (committed?.baseQueue != null) {
+          // The hidden clone shares its committed hook. Publish retry lanes
+          // only now; an abandoned fallback must leave rebase history intact.
+          committed.baseQueue = committed.baseQueue.map((update) =>
+            includesSomeLane(update.lane, lanes)
+              ? { action: update.action, lane: NoLane }
+              : update,
+          );
+        }
       }
       owner.retryQueueReads = undefined;
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
@@ -6357,6 +6410,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       abortFiberHooks(cursor, retirePending);
     });
+  }
+
+  // This pass invokes no user code. Controllers stay attached until cleanup
+  // so their signals and pending slots are retired exactly once as before.
+  function deactivateFiberHooks(owner: F): void {
+    for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+      if (isStableEventHook(hook)) hook.memoizedState.instance.live = false;
+      if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+        (
+          hook.memoizedState as
+            | TransitionState
+            | ActionState<unknown, unknown[]>
+        ).instance.live = false;
+      }
+    }
   }
 
   function abortFiberHooks(owner: F, retirePending: boolean): void {
