@@ -45,22 +45,56 @@ function commitViewTransition(
   if (start === undefined) return false;
 
   let didMutate = false;
+  let interrupted = false;
+  let captureReleased = false;
+  let transition: RunningViewTransition | undefined;
   let chained = false;
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
   let mutationResult: ViewTransitionMutationResult | null = null;
-  const notifyReady = once(onReady);
+  const notifyReady = once((active: boolean) => {
+    captureReleased = true;
+    onReady(active);
+  });
   const notifyFinished = once(onFinished);
+  const restoreRoot = (): void => {
+    const restore = restoreRootName;
+    restoreRootName = null;
+    restore?.();
+  };
   const finishUnanimated = (): void => {
-    restoreRootName?.();
+    restoreRoot();
     notifyReady(false);
     notifyFinished();
   };
 
+  const interrupt = (): void => {
+    if (interrupted || captureReleased) return;
+    interrupted = true;
+    try {
+      transition?.skipTransition?.();
+    } catch {
+      // Browser cancellation is best-effort; synchronous work must still run.
+    }
+    try {
+      if (!didMutate) {
+        didMutate = true;
+        mutate();
+      }
+    } finally {
+      if (owner[VIEW_TRANSITION_PENDING_PROPERTY] === transition) {
+        owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
+      }
+      finishUnanimated();
+    }
+  };
+
   const run = (): void => {
+    if (interrupted) return;
     prepareSnapshot();
     try {
       const update = () => {
+        if (interrupted || didMutate) return;
         didMutate = true;
         mutationResult = mutate();
         // Before the new capture: when measurement shows every change is
@@ -71,14 +105,16 @@ function commitViewTransition(
           restoreRootName = cancelRootViewTransitionName(owner);
         }
       };
-      const transition = start(
+      transition = start(
         options.types.length === 0
           ? update
           : { types: [...options.types], update },
       );
       if (transition !== undefined) {
         registerPendingTransition(owner, transition);
-        hideCanceledSnapshots(owner, transition, () => mutationResult);
+        hideCanceledSnapshots(owner, transition, () =>
+          interrupted ? null : mutationResult,
+        );
       }
       // Root-name restore waits for the transition to fully settle: putting
       // `view-transition-name: root` back on the live <html> while the
@@ -87,18 +123,26 @@ function commitViewTransition(
       // rest of the animation.
       const settleAfterTransition = transitionSettled(transition);
       if (settleAfterTransition === undefined) {
-        finishUnanimated();
+        if (!didMutate) interrupt();
+        else finishUnanimated();
       } else {
         if (transition?.ready === undefined) {
-          onSettled(settleAfterTransition, () => notifyReady(false));
+          onSettled(settleAfterTransition, () => {
+            if (!didMutate) interrupt();
+            else notifyReady(false);
+          });
         } else {
-          transition.ready.then(
-            () => notifyReady(true),
-            () => notifyReady(false),
-          );
+          transition.ready.then(() => {
+            if (!didMutate) interrupt();
+            else notifyReady(true);
+          }, interrupt);
         }
         const finish = (): void => {
-          restoreRootName?.();
+          if (!captureReleased) {
+            interrupt();
+            return;
+          }
+          restoreRoot();
           notifyFinished();
         };
         onSettled(settleAfterTransition, finish);
@@ -141,12 +185,12 @@ function commitViewTransition(
   // animation settles or times out; parking keeps rendering live.
   if (coordinateActiveViewTransition(owner, options.interrupt, run)) {
     chained = true;
-    return "deferred";
+    return { interrupt };
   }
 
   run();
   if (failedBeforeMutate) return false;
-  return didMutate ? "committed" : "deferred";
+  return captureReleased ? "committed" : { interrupt };
 }
 
 // Remove the root element from the new capture, remembering how to restore

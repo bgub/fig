@@ -253,7 +253,12 @@ it("keeps late capture callbacks from resetting a newer commit", () => {
     commit(context) {
       if (!defer) return false;
       capture.current = context;
-      return "deferred";
+      return {
+        interrupt() {
+          context.runMutation(() => undefined);
+          context.captureFinished();
+        },
+      };
     },
   });
   try {
@@ -292,7 +297,12 @@ it("returns an explicit failure after reporting a deferred mutation error", () =
     commit(context) {
       if (!defer) return false;
       capture.current = context;
-      return "deferred";
+      return {
+        interrupt() {
+          context.runMutation(() => undefined);
+          context.captureFinished();
+        },
+      };
     },
   });
   try {
@@ -330,7 +340,12 @@ it("does not expose stale store snapshots when a deferred mutation finally runs"
         });
         context.captureFinished();
       };
-      return "deferred";
+      return {
+        interrupt() {
+          context.runMutation(() => undefined);
+          context.captureFinished();
+        },
+      };
     },
   });
   function Reader() {
@@ -405,7 +420,12 @@ it("keeps committed event handlers and before-layout effects unchanged until def
         context.runMutation(() => {});
         context.captureFinished();
       };
-      return "deferred";
+      return {
+        interrupt() {
+          context.runMutation(() => undefined);
+          context.captureFinished();
+        },
+      };
     },
   });
   function App({ label }: { label: string }) {
@@ -478,7 +498,13 @@ it.each([false, true])(
             ready(true);
             finished();
           };
-          return "deferred";
+          return {
+            interrupt() {
+              mutate();
+              ready(false);
+              finished();
+            },
+          };
         },
       }),
     );
@@ -553,11 +579,14 @@ it("replays a rejected deferred render and its late updates exactly once", () =>
     name: "deferred-queue-audit",
     commit(context) {
       if (!defer) return false;
+      let completed = false;
       finish = () => {
+        if (completed) return;
+        completed = true;
         context.runMutation(() => captures.push(container.textContent));
         context.captureFinished();
       };
-      return "deferred";
+      return { interrupt: finish };
     },
   });
   function Counter() {
@@ -574,9 +603,9 @@ it("replays a rejected deferred render and its late updates exactly once", () =>
     defer = true;
     renderer.flushSync(() => set((value) => value * 10));
     expect(container.textContent).toBe("1:old");
-    renderer.flushSync(() => set((value) => value + 1));
     snapshot = "new";
     defer = false;
+    renderer.flushSync(() => set((value) => value + 1));
     finish();
     renderer.flushSync(() => {});
     expect(container.textContent).toBe("11:new");

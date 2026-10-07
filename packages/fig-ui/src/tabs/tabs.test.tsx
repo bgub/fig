@@ -722,7 +722,7 @@ describe("Tabs", () => {
     ).toEqual(["Security panel"]);
   });
 
-  it("interrupts an active Fig view transition with the latest selection", async () => {
+  it("flushes synchronous highlight repairs during view-transition capture", async () => {
     const container = await render(<TransitionTabs />);
     const ownerDocument = document as unknown as TransitionDocument;
     const previousStart = ownerDocument.startViewTransition;
@@ -759,7 +759,9 @@ describe("Tabs", () => {
       await click(security);
       await click(billing);
 
-      expect(skipped).toBe(1);
+      // Each panel commit repairs the controlled tab's highlight synchronously.
+      // Those repairs interrupt capture rather than waiting for browser readiness.
+      expect(skipped).toBe(2);
       expect(types).toEqual([["tabs-change"], ["tabs-change"]]);
       expect(updates).toEqual(["Security panel", "Billing panel"]);
       expect(billing.getAttribute("aria-selected")).toBe("true");

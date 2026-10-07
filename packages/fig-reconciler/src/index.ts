@@ -1326,7 +1326,11 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
-    if (root.pendingCapture) return;
+    if (
+      root.pendingCapture &&
+      !isSyncLane(getHighestPriorityLane(root.pendingLanes))
+    )
+      return;
 
     markStarvedLanesAsExpired(root, now());
 
@@ -1470,7 +1474,17 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingCapture) return;
+    const interruptedCapture = root.pendingCapture !== null;
+    if (root.pendingCapture) {
+      if (!forceSync) return;
+      // Keep commit-phase updates queued until restoration releases ownership.
+      commitDepth += 1;
+      try {
+        root.pendingCapture.interruptCapture();
+      } finally {
+        commitDepth -= 1;
+      }
+    }
     // flushSync may finish work that already yielded. Finishing synchronously
     // does not undo an external-store mutation between its earlier chunks.
     const resumedConcurrentWork =
@@ -1493,7 +1507,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       const candidate = getNextLanes(root, NoLanes, readyLanes);
       if (candidate === NoLanes && root.finishedWork !== null) {
         if (retryInconsistentStores(root)) return;
-        if (commitRoot(root, root.finishedWork)) return;
+        if (commitRoot(root, root.finishedWork, !interruptedCapture)) return;
         finishRootWork(root);
         flushPostCommitSyncWork();
         return;
@@ -1564,7 +1578,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     )
       return;
 
-    if (root.finishedWork !== null && commitRoot(root, root.finishedWork)) {
+    if (
+      root.finishedWork !== null &&
+      commitRoot(root, root.finishedWork, !interruptedCapture)
+    ) {
       return;
     }
     finishRootWork(root);
@@ -3838,8 +3855,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
-  function commitRoot(root: R, finishedWork: F): boolean {
+  function commitRoot(root: R, finishedWork: F, coordinate = true): boolean {
     if (
+      coordinate &&
       !root.pendingCapture &&
       commitCoordinator?.suspend?.(root, () => scheduleRoot(root)) === true
     ) {
@@ -3967,7 +3985,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         } else finishRootWork(root);
         flushPostCommitSyncWork();
       };
-      if (commitCoordinator !== null) {
+      if (coordinate && commitCoordinator !== null) {
         const context: ReconcilerCommitContext<Container> = {
           container: root.container,
           finishedWork,
@@ -4006,7 +4024,16 @@ export function createRenderer<Container, Instance, TextInstance>(
             }
           },
         };
-        switch (commitCoordinator.commit(context)) {
+        const result = commitCoordinator.commit(context);
+        if (typeof result === "object") {
+          candidate.defer(result.interrupt);
+          root.pendingCapture = candidate;
+          root.callback = null;
+          root.callbackPriority = NoLane;
+          if (candidate.captureReleased) finishDeferredCommit();
+          return true;
+        }
+        switch (result) {
           case false:
             if (candidate.outcome !== "pending") {
               throw new Error(
@@ -4021,13 +4048,6 @@ export function createRenderer<Container, Instance, TextInstance>(
               );
             }
             return false;
-          case "deferred":
-            candidate.defer();
-            root.pendingCapture = candidate;
-            root.callback = null;
-            root.callbackPriority = NoLane;
-            if (candidate.captureReleased) finishDeferredCommit();
-            return true;
         }
       }
       candidate.runMutation(() => undefined);

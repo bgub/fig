@@ -331,7 +331,12 @@ describe("reconciler", () => {
           context.runMutation(() => undefined);
           context.captureFinished();
         };
-        return "deferred";
+        return {
+          interrupt() {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          },
+        };
       },
     });
 
@@ -362,22 +367,26 @@ describe("reconciler", () => {
             context.runMutation(() => undefined);
             context.captureFinished();
           };
-          return "deferred";
+          return {
+            interrupt() {
+              context.runMutation(() => undefined);
+              context.captureFinished();
+            },
+          };
         },
       });
       function Content() {
         return createElement("span", null, readPromise(pending.promise));
       }
       const root = renderer.createRoot(container);
-      renderer.flushSync(() =>
-        root.render(
-          createElement(
-            Suspense,
-            { fallback: "Loading" },
-            createElement(Content),
-          ),
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Content),
         ),
       );
+      await waitForHostTurns();
       expect(container.textContent).toBe("");
       if (timing === "before") {
         pending.resolve("Ready");
@@ -401,7 +410,12 @@ describe("reconciler", () => {
       name: "broken-coordinator",
       commit(context) {
         context.captureFinished();
-        return "deferred";
+        return {
+          interrupt() {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          },
+        };
       },
     });
 

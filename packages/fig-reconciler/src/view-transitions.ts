@@ -860,6 +860,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       if (plan === null) return false;
       let mutation: "pending" | "committed" | "stale" | "failed" = "pending";
       let didFinish = false;
+      let didRestore = false;
       let controller: AbortController | null = null;
 
       return host.commit(
@@ -883,6 +884,8 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           };
         },
         (active) => {
+          if (didRestore) return;
+          didRestore = true;
           try {
             restoreViewTransitionSurfaces(plan, mutation === "committed");
           } finally {

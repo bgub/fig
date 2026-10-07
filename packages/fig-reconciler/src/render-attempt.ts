@@ -137,6 +137,7 @@ export class CommitCandidate {
   private mutation: MutationState = "pending";
   private released = false;
   private isDeferred = false;
+  private interrupt: (() => void) | null = null;
 
   constructor(
     private readonly attempt: { readonly disposed: boolean; dispose(): void },
@@ -154,8 +155,17 @@ export class CommitCandidate {
     return this.isDeferred;
   }
 
-  defer(): void {
+  defer(interrupt: () => void): void {
     this.isDeferred = true;
+    if (!this.released) this.interrupt = interrupt;
+  }
+
+  interruptCapture(): void {
+    this.interrupt?.();
+    if (!this.released)
+      throw new Error(
+        "A commit coordinator must release capture synchronously when interrupted.",
+      );
   }
 
   runMutation<Result>(
@@ -189,5 +199,6 @@ export class CommitCandidate {
         "A commit coordinator cannot finish capture before running the mutation transaction.",
       );
     this.released = true;
+    this.interrupt = null;
   }
 }
