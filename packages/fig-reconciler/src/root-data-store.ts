@@ -5,6 +5,7 @@ import type {
   FigDataHydrationEntry,
 } from "@bgub/fig";
 import {
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreFactory,
   type FigDataStoreHost,
@@ -63,9 +64,9 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     readData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
       args: TArgs,
-      owner: object,
+      reads?: FigDataReads,
     ): TValue {
-      return installStore(resource).readData(resource, args, owner);
+      return installStore(resource).readData(resource, args, reads);
     },
     preloadData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
@@ -100,17 +101,21 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     ): Promise<DataRefreshResult<TValue>> {
       return installStore(resource).refreshData(resource, ...args);
     },
-    commitDataDependencies(owner: object, previousOwner: object | null): void {
-      inner?.commitDataDependencies(owner, previousOwner);
+    areDataDependenciesConsistent(reads: FigDataReads): boolean {
+      return inner?.areDataDependenciesConsistent(reads) ?? true;
+    },
+    commitDataDependencies(
+      owner: object,
+      previousOwner: object | null,
+      reads?: FigDataReads,
+    ): boolean {
+      return inner?.commitDataDependencies(owner, previousOwner, reads) ?? true;
     },
     deleteDataOwner(owner: object): void {
       inner?.deleteDataOwner(owner);
     },
     releaseDataOwner(owner: object): void {
       inner?.releaseDataOwner(owner);
-    },
-    resetDataDependencies(owner: object): void {
-      inner?.resetDataDependencies(owner);
     },
     dispose(): void {
       disposed = true;

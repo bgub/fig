@@ -345,6 +345,54 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Deferred");
   });
 
+  it.each(["before", "after"])(
+    "retries a suspended tree when its promise resolves %s a deferred commit",
+    async (timing) => {
+      const renderer = createRenderer(host);
+      const container = new TestElement("root");
+      const pending = deferred<string>();
+      const capture: { finish: (() => void) | null } = { finish: null };
+      let deferNext = true;
+      renderer.installCommitCoordinator({
+        name: "suspense-deferred-commit",
+        commit(context) {
+          if (!deferNext) return false;
+          deferNext = false;
+          capture.finish = () => {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          };
+          return "deferred";
+        },
+      });
+      function Content() {
+        return createElement("span", null, readPromise(pending.promise));
+      }
+      const root = renderer.createRoot(container);
+      renderer.flushSync(() =>
+        root.render(
+          createElement(
+            Suspense,
+            { fallback: "Loading" },
+            createElement(Content),
+          ),
+        ),
+      );
+      expect(container.textContent).toBe("");
+      if (timing === "before") {
+        pending.resolve("Ready");
+        await waitForHostTurns();
+        expect(container.textContent).toBe("");
+      }
+      capture.finish?.();
+      expect(container.textContent).toBe("Loading");
+      if (timing === "after") pending.resolve("Ready");
+      await waitForHostTurns();
+      expect(container.textContent).toBe("Ready");
+      renderer.flushSync(() => root.unmount());
+    },
+  );
+
   it("rejects capture completion before the mutation transaction", () => {
     const renderer = createRenderer(host);
     const root = renderer.createRoot(new TestElement("root"));

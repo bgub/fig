@@ -126,22 +126,31 @@ export interface FigDataStoreOptions {
   partition?: DataResourceKeyInput;
 }
 
+// Attempt-owned observations. A missing snapshot records a read that threw;
+// wrapping successful values distinguishes a fulfilled undefined value.
+export type FigDataReads = Map<string, { value: unknown } | undefined>;
+
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
-  commitDataDependencies(owner: object, previousOwner: object | null): void;
+  areDataDependenciesConsistent(reads: FigDataReads): boolean;
+  // Installs subscriptions, consumes reads, and reports whether they still match.
+  commitDataDependencies(
+    owner: object,
+    previousOwner: object | null,
+    reads?: FigDataReads,
+  ): boolean;
   deleteDataOwner(owner: object): void;
   releaseDataOwner(owner: object): void;
-  resetDataDependencies(owner: object): void;
   dispose(): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the
-  // subscribing owner trails them.
+  // optional attempt-owned reads trail them. Server reads omit observations.
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner: object,
+    reads?: FigDataReads,
   ): TValue;
 }
 

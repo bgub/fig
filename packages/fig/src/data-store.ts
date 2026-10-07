@@ -10,6 +10,7 @@ import {
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreController,
   type FigDataStoreFactory,
@@ -275,7 +276,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
-  private readonly pendingOwnerKeys = new WeakMap<object, Set<string>>();
   private readonly partitionKey: string;
   private readonly preloadRetentionMs: number;
   private disposed = false;
@@ -291,21 +291,39 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
 
-  commitDataDependencies(owner: Owner, previousOwner: object | null): void {
-    const nextKeys = this.pendingOwnerKeys.get(owner) ?? null;
+  areDataDependenciesConsistent(reads: FigDataReads): boolean {
+    for (const [key, snapshot] of reads) {
+      if (snapshot === undefined) continue;
+      const entry = this.entries.get(key);
+      if (
+        entry === undefined ||
+        !entryHasValue(entry) ||
+        !Object.is(snapshot.value, entry.value)
+      )
+        return false;
+    }
+    return true;
+  }
+
+  commitDataDependencies(
+    owner: Owner,
+    previousOwner: object | null,
+    reads?: FigDataReads,
+  ): boolean {
+    // Committed subscriptions retain keys, never the speculative values.
+    const nextKeys = reads === undefined ? null : new Set(reads.keys());
     const ownerKeys = this.ownerKeys.get(owner) ?? null;
     const previousOwnerKeys =
       previousOwner === null
         ? null
         : (this.ownerKeys.get(previousOwner) ?? null);
-    this.pendingOwnerKeys.delete(owner);
 
     if (
       (nextKeys === null || nextKeys.size === 0) &&
       ownerKeys === null &&
       previousOwnerKeys === null
     ) {
-      return;
+      return true;
     }
 
     // Capture the entries this fiber's generations subscribed to before the
@@ -341,6 +359,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (orphanCandidates !== null) {
       for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
     }
+    // Cleanup and subscription callbacks can change an entry before this owner
+    // subscribes. Check after installing every subscription so no notification
+    // can fall between the catch-up check and subscription establishment.
+    const consistent =
+      reads === undefined || this.areDataDependenciesConsistent(reads);
+    reads?.clear();
+    return consistent;
   }
 
   releaseDataOwner(owner: object): void {
@@ -357,20 +382,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  resetDataDependencies(owner: object): void {
-    // Reads accumulate into pendingOwnerKeys as a render runs. A render attempt
-    // can be abandoned before commit (suspense retry, concurrent interruption,
-    // the strict shadow pass), and the work-in-progress fiber object is reused
-    // across attempts, so the keys must be cleared at the start of each render
-    // or stale dependencies from a discarded attempt would be committed.
-    this.pendingOwnerKeys.delete(owner);
-  }
-
   deleteDataOwner(
     owner: object,
     retainedKeys: ReadonlySet<string> | null = null,
   ): void {
-    this.pendingOwnerKeys.delete(owner);
     const keys = this.ownerKeys.get(owner);
     if (keys === undefined) return;
 
@@ -615,12 +630,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner: Owner,
+    reads?: FigDataReads,
   ): TValue {
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    this.addOwnerKey(owner, entry.storeKey);
+    // A read that throws still establishes a dependency, but has no snapshot.
+    if (reads !== undefined && !reads.has(entry.storeKey))
+      reads.set(entry.storeKey, undefined);
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
@@ -630,7 +647,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       });
     }
 
-    return this.readCurrentValue(entry);
+    const value = this.readCurrentValue<TValue>(entry);
+    // Retain the first successful read, even if a later read changes or throws.
+    if (reads !== undefined && reads.get(entry.storeKey) === undefined)
+      reads.set(entry.storeKey, { value });
+    return value;
   }
 
   refreshData<TArgs extends unknown[], TValue>(
@@ -675,16 +696,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     } finally {
       setCurrentDataStore(previousStore);
     }
-  }
-
-  private addOwnerKey(owner: Owner, key: string): void {
-    let keys = this.pendingOwnerKeys.get(owner);
-    if (keys === undefined) {
-      keys = new Set();
-      this.pendingOwnerKeys.set(owner, keys);
-    }
-
-    keys.add(key);
   }
 
   private entryFor<TArgs extends unknown[], TValue>(
