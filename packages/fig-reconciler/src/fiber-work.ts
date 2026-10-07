@@ -10,7 +10,7 @@ export const TextContentFlag = 1 << 3;
 export const VisibilityFlag = 1 << 5;
 export const DeletionFlag = 1 << 7;
 export const EffectFlag = 1 << 9;
-export const StoreConsistencyFlag = 1 << 11;
+export const ExternalStoreFlag = 1 << 11;
 // An Assets fiber owes its renderer a committed descriptor-list diff. Asset
 // work is sparse-indexed and out-of-band, so it never enters subtreeFlags.
 export const AssetFlag = 1 << 14;

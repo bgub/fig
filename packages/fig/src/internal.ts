@@ -21,6 +21,7 @@ export {
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreController,
   type FigDataStoreFactory,

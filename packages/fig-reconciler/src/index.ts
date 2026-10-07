@@ -49,11 +49,10 @@ import {
   type Thenable,
 } from "@bgub/fig/internal";
 import {
-  clearCommitIndex,
-  type CommitIndex,
-  recordCommitWork,
-  rollbackCommitIndex,
-} from "./commit-index.ts";
+  RenderAttempt,
+  type RenderCheckpoint,
+  type CommitCandidate,
+} from "./render-attempt.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
 import { devtoolsTypeName } from "./devtools-internal.ts";
 import type {
@@ -102,7 +101,7 @@ import {
   PlacementFlag,
   SingletonStaticFlag,
   StaticFlagsMask,
-  StoreConsistencyFlag,
+  ExternalStoreFlag,
   TextContentFlag,
   UpdateFlag,
   ViewTransitionStaticFlag,
@@ -750,9 +749,9 @@ interface Fiber<
   boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
   // Queue reads from a discarded primary, released only if fallback commits.
   retryQueueReads?: QueuedHook[];
-  // Suspense/ErrorBoundary only: root commit-index length when this boundary
-  // began, so a capture can truncate entries queued by its discarded subtree.
-  commitIndexCheckpoint?: number;
+  // Suspense/ErrorBoundary only: attempt ownership when this boundary began,
+  // so capture releases all observations and work from its discarded subtree.
+  renderCheckpoint?: RenderCheckpoint;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
 }
 
@@ -773,9 +772,9 @@ interface FiberRoot<Container, Instance, TextInstance>
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
-  pendingCoordinatedCommit: boolean;
+  pendingCapture: CommitCandidate | null;
   // finishedWork is rendered but its commit waits for a coordinator-owned
-  // operation to finish. Unlike pendingCoordinatedCommit (the sub-frame
+  // operation to finish. Unlike pendingCapture (the sub-frame
   // commit window, which freezes the root), a parked root keeps rendering:
   // newer work supersedes the parked tree so the latest state commits when
   // the animation ends.
@@ -792,11 +791,6 @@ interface FiberRoot<Container, Instance, TextInstance>
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
-  pendingSuspenseRetries: PendingSuspenseRetry<
-    Container,
-    Instance,
-    TextInstance
-  >[];
   attachedSuspenseRetries: WeakMap<
     object,
     WeakSet<Fiber<Container, Instance, TextInstance>>
@@ -807,13 +801,11 @@ interface FiberRoot<Container, Instance, TextInstance>
   uncaughtErrorInfo: ErrorInfo | null;
   commitEffectPhases: number;
   needsCommitDeletions: boolean;
-  // Commit work discovered during render: every fiber that rendered hooks,
-  // recorded deletions, or caught an error, in begin order (pre-order over
-  // the rendered region). Commit passes iterate this instead of walking the
-  // tree; each pass re-checks its own per-fiber predicate, so duplicate and
-  // stale entries are inert. Truncated to a boundary checkpoint when a
-  // capture discards its subtree; cleared on restart and after commit.
-  commitIndex: CommitIndex<Fiber<Container, Instance, TextInstance>>;
+  // All recording, rollback, and disposal go through the active attempt.
+  attempt: RenderAttempt<
+    Fiber<Container, Instance, TextInstance>,
+    PendingSuspenseRetry<Container, Instance, TextInstance>
+  >;
   // Boundaries that caught during the commit phase (effects, reactive
   // flushes). Kept outside the commit index: these must survive render restarts
   // until a later commit reports them.
@@ -862,13 +854,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 ): FigRenderer<Container, Instance> {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
-  // Shared read-only stand-in for the common no-retries commit; never pushed
-  // to (commits swap in a fresh array before recording anything).
-  const noSuspenseRetries: PendingSuspenseRetry<
-    Container,
-    Instance,
-    TextInstance
-  >[] = [];
   type ActivityHydrationHostConfig = Required<
     Pick<
       HostConfig<Container, Instance, TextInstance>,
@@ -980,7 +965,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       args: TArgs,
     ): TValue {
       const fiber = requireRenderingFiber();
-      return rootOf(fiber).dataStore.readData(resource, args, fiber);
+      const root = rootOf(fiber);
+      return root.dataStore.readData(
+        resource,
+        args,
+        root.attempt.dataReads(fiber),
+      );
     },
     preloadData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
@@ -1077,7 +1067,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       wip: null,
       finishedWork: null,
       renderLanes: NoLanes,
-      pendingCoordinatedCommit: false,
+      pendingCapture: null,
       parkedCoordinatedCommit: false,
       coalescedReadyLanes: NoLanes,
       dataStore,
@@ -1087,7 +1077,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
-      pendingSuspenseRetries: [],
       attachedSuspenseRetries: new WeakMap(),
       onRecoverableError:
         options.onRecoverableError ?? defaultOnRecoverableError,
@@ -1096,7 +1085,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      commitIndex: [],
+      attempt: new RenderAttempt(),
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1331,7 +1320,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
-    if (root.pendingCoordinatedCommit) return;
+    if (root.pendingCapture) return;
 
     markStarvedLanesAsExpired(root, now());
 
@@ -1475,7 +1464,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingCoordinatedCommit) return;
+    if (root.pendingCapture) return;
     // flushSync may finish work that already yielded. Finishing synchronously
     // does not undo an external-store mutation between its earlier chunks.
     const resumedConcurrentWork =
@@ -1541,7 +1530,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       root.finishedWork = createWorkInProgress(root.current, {
         children: null,
       });
-      recordCommitWork(root.commitIndex, root.finishedWork);
+      root.attempt.record(root.finishedWork);
       root.wip = root.finishedWork;
       prepareToHydrateRoot(root);
     }
@@ -1594,19 +1583,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.coalescedReadyLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
-    // Retries recorded by the discarded render die with it; their thenables
-    // stay covered by the root pings attached at capture time.
-    if (root.pendingSuspenseRetries.length > 0) {
-      root.pendingSuspenseRetries = [];
-    }
-    // Abandoned attempts can remain reachable through alternate fibers even
-    // when the next attempt bails out. Release their speculative data values.
-    for (const owner of root.commitIndex) {
-      owner.retryQueueReads = undefined;
-      if (owner.dataDependenciesDirty)
-        root.dataStore.resetDataDependencies(owner);
-    }
-    clearCommitIndex(root.commitIndex);
+    root.attempt.dispose();
+    root.attempt = new RenderAttempt();
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -1688,7 +1666,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
     if (node.tag === SuspenseTag || node.tag === ErrorBoundaryTag) {
-      node.commitIndexCheckpoint = root.commitIndex.length;
+      node.renderCheckpoint = root.attempt.checkpoint();
     }
 
     if (canBailout(node, root)) {
@@ -1981,7 +1959,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as Instance;
-    recordCommitWork(root.commitIndex, node, UpdateFlag | HydrationFlag);
+    root.attempt.record(node, UpdateFlag | HydrationFlag);
     root.hydrationParent = node;
     root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
       hydratable as Instance,
@@ -2014,7 +1992,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as TextInstance;
-    recordCommitWork(root.commitIndex, node, UpdateFlag);
+    root.attempt.record(node, UpdateFlag);
     root.nextHydratableInstance =
       hydrationHost.getNextHydratableSibling(hydratable);
 
@@ -2390,9 +2368,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
-    root.dataStore.resetDataDependencies(node);
+    root.attempt.resetReads(node);
     node.dataDependenciesDirty = true;
-    recordCommitWork(root.commitIndex, node);
+    root.attempt.record(node);
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -2518,8 +2496,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       clone.child = cloneSuspendedPrimary(current.child, clone, root);
       // These owners did not render, but their hooks are becoming hidden.
       // Publish that visibility before the commit's live-hook parity check.
-      if (clone.memoizedState !== null)
-        recordCommitWork(root.commitIndex, clone);
+      if (clone.memoizedState !== null) root.attempt.record(clone);
       clone.sibling = null;
       // The cloned primary is committed hidden while the boundary stays
       // suspended; it has no schedulable work. Any pending update inside it is
@@ -3104,7 +3081,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       value,
     };
 
-    recordCommitWork(root.commitIndex, fiber, StoreConsistencyFlag);
+    root.attempt.record(fiber, ExternalStoreFlag);
+    // Server reads intentionally differ from client snapshots until hydration
+    // commits. Only client reads create precommit validation obligations.
+    if (!root.isHydrating) root.attempt.observeStore(fiber, getSnapshot, value);
     appendHook(createHook(ExternalStoreHook, state));
     return value;
   }
@@ -3361,7 +3341,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       fiber.effects ??= [];
       fiber.effects.push(effect);
       const root = rootOf(fiber);
-      recordCommitWork(root.commitIndex, fiber, EffectFlag);
+      root.attempt.record(fiber, EffectFlag);
       markCommitEffectPhase(root, phase);
     }
   }
@@ -3580,7 +3560,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       (node.committedProps === null ||
         node.committedProps.assets !== node.props.assets)
     ) {
-      recordCommitWork(rootOf(node).commitIndex, node, AssetFlag);
+      rootOf(node).attempt.record(node, AssetFlag);
     }
 
     node.childLanes = childLanes;
@@ -3673,7 +3653,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       const updateFlags = hostUpdateFlags(old, next.props);
       if (updateFlags !== NoFlags) {
-        recordCommitWork(root.commitIndex, next, updateFlags);
+        root.attempt.record(next, updateFlags);
       }
       if (forcePlacement) {
         next.flags |= PlacementFlag;
@@ -3738,7 +3718,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         const updateFlags = hostUpdateFlags(matched, next.props);
         if (updateFlags !== NoFlags) {
-          recordCommitWork(root.commitIndex, next, updateFlags);
+          root.attempt.record(next, updateFlags);
         }
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
@@ -3773,7 +3753,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     parent.deletions ??= [];
     parent.deletions.push(child);
     root.needsCommitDeletions = true;
-    recordCommitWork(root.commitIndex, parent, DeletionFlag);
+    root.attempt.record(parent, DeletionFlag);
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -3849,7 +3829,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitRoot(root: R, finishedWork: F): boolean {
     if (
-      !root.pendingCoordinatedCommit &&
+      !root.pendingCapture &&
       commitCoordinator?.suspend?.(root, () => scheduleRoot(root)) === true
     ) {
       parkCoordinatedCommit(root);
@@ -3858,18 +3838,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     commitDepth += 1;
     try {
-      // Taken before any commit step runs: the closures below may defer
-      // completion across ticks (view transitions), and a later render must
-      // not see or clear this commit's retries. Most commits carry none —
-      // the shared empty list avoids a per-commit allocation, and holding
-      // root's own (empty) array instead would let a later render's pushes
-      // leak into this commit's deferred attach.
-      let suspenseRetries = noSuspenseRetries;
-      if (root.pendingSuspenseRetries.length > 0) {
-        suspenseRetries = root.pendingSuspenseRetries;
-        root.pendingSuspenseRetries = [];
-      }
-      let abandoned = false;
+      const attempt = root.attempt;
       const commitHostChanges = () => {
         // A coordinator may defer this transaction. Publish hook instances and
         // run before-layout effects only when its host mutation actually begins.
@@ -3939,7 +3908,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         try {
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
-          attachCommittedSuspenseRetries(root, suspenseRetries);
+          attachCommittedSuspenseRetries(root, attempt.retries);
           scheduleDehydratedSuspenseRetries(root);
           commitEffects(root, finishedWork.child, BeforePaintEffect);
           flushCaughtBoundaryErrors(root);
@@ -3950,7 +3919,6 @@ export function createRenderer<Container, Instance, TextInstance>(
           collectReactiveEffects(root, finishedWork.child);
           clearTransientFlags(finishedWork);
           scheduleReactiveEffects(root);
-          clearCommitIndex(root.commitIndex);
         }
         if (__DEV__ && root.devtools) {
           emitDevtoolsCommit(host, root);
@@ -3961,54 +3929,46 @@ export function createRenderer<Container, Instance, TextInstance>(
         // from commitRoot).
         requestPaint();
       };
+      const candidate = attempt.finish(
+        () => !markInconsistentStores(root, attempt),
+        () => {
+          commitHostChanges();
+          completeCommit();
+        },
+      );
       const finishDeferredCommit = () => {
-        if (!root.pendingCoordinatedCommit) return;
-        root.pendingCoordinatedCommit = false;
-        if (abandoned) {
+        // A late release belongs only to this candidate, never a newer attempt.
+        if (root.pendingCapture !== candidate) return;
+        root.pendingCapture = null;
+        if (candidate.outcome === "stale") {
           resetRootWork(root);
           scheduleRoot(root);
         } else finishRootWork(root);
         flushPostCommitSyncWork();
       };
       if (commitCoordinator !== null) {
-        let didRunMutation = false;
-        let didFinishCapture = false;
         const context: ReconcilerCommitContext<Container> = {
           container: root.container,
           finishedWork,
           priority: commitPriority(root.renderLanes),
           root,
           captureFinished() {
-            if (!didRunMutation) {
-              throw new Error(
-                "A commit coordinator cannot finish capture before running the mutation transaction.",
-              );
-            }
-            didFinishCapture = true;
+            candidate.releaseCapture();
             finishDeferredCommit();
           },
           runMutation(afterMutation) {
-            if (didRunMutation) {
-              throw new Error(
-                "A commit coordinator may run its mutation transaction only once.",
-              );
-            }
-            didRunMutation = true;
-            const isDeferredCommit = root.pendingCoordinatedCommit;
+            const isDeferredCommit = candidate.deferred;
             if (isDeferredCommit) commitDepth += 1;
             try {
-              if (isDeferredCommit && markInconsistentStores(root)) {
-                // The coordinator's plan belongs to the old render. Let it
-                // release that plan, then retry after captureFinished; never
-                // expose stale host state to its afterMutation callback.
-                abandoned = true;
-                return undefined;
-              }
-              commitHostChanges();
-              completeCommit();
-              return afterMutation();
+              return candidate.runMutation(afterMutation);
             } catch (error) {
-              if (!isDeferredCommit) throw error;
+              if (
+                !isDeferredCommit ||
+                root.pendingCapture !== candidate ||
+                root.attempt !== attempt ||
+                candidate.outcome !== "failed"
+              )
+                throw error;
               const info =
                 root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
               resetRootWork(root);
@@ -4019,7 +3979,7 @@ export function createRenderer<Container, Instance, TextInstance>(
                   throw error;
                 });
               }
-              return undefined;
+              return { kind: "failed" };
             } finally {
               if (isDeferredCommit) commitDepth -= 1;
             }
@@ -4027,29 +3987,29 @@ export function createRenderer<Container, Instance, TextInstance>(
         };
         switch (commitCoordinator.commit(context)) {
           case false:
-            if (didRunMutation) {
+            if (candidate.outcome !== "pending") {
               throw new Error(
                 "A commit coordinator returned false after running the mutation transaction.",
               );
             }
             break;
           case "committed":
-            if (!didRunMutation) {
+            if (candidate.outcome === "pending") {
               throw new Error(
                 'A commit coordinator returned "committed" without running the mutation transaction.',
               );
             }
             return false;
           case "deferred":
-            root.pendingCoordinatedCommit = true;
+            candidate.defer();
+            root.pendingCapture = candidate;
             root.callback = null;
             root.callbackPriority = NoLane;
-            if (didFinishCapture) finishDeferredCommit();
+            if (candidate.captureReleased) finishDeferredCommit();
             return true;
         }
       }
-      commitHostChanges();
-      completeCommit();
+      candidate.runMutation(() => undefined);
       return false;
     } finally {
       commitDepth -= 1;
@@ -4168,7 +4128,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    for (const boundary of root.commitIndex) {
+    for (const boundary of root.attempt.commitIndex) {
       flushCaughtBoundaryError(root, boundary);
     }
   }
@@ -4631,7 +4591,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // subtrees the walk will place apply while those nodes are still at their
   // old position (or detached); the insertion carries them over.
   function commitHostUpdates(root: R): void {
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if ((cursor.flags & HostUpdateMask) === 0 || !isHost(cursor)) continue;
       if ((cursor.flags & (HydrationFlag | PlacementFlag)) !== 0) continue;
       // First commits belong to placement/assembly — except text, whose
@@ -4668,7 +4628,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitDeletions(root: R): void {
     const store = root.dataStore;
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
         ? hostParentFor(cursor)
@@ -4716,9 +4676,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDataDependencies(root: R): void {
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (!cursor.dataDependenciesDirty) continue;
-      root.dataStore.commitDataDependencies(cursor, cursor.alternate);
+      root.dataStore.commitDataDependencies(
+        cursor,
+        cursor.alternate,
+        root.attempt.reads.get(cursor)?.data,
+      );
       cursor.dataDependenciesDirty = false;
       if (cursor.alternate !== null)
         cursor.alternate.dataDependenciesDirty = false;
@@ -4728,7 +4692,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function commitAssetResourceUpdates(root: R): void {
     if (host.commitAssetResources === undefined) return;
 
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if ((cursor.flags & AssetFlag) === 0) continue;
       commitHostMutation(cursor, () =>
         host.commitAssetResources?.(
@@ -5186,10 +5150,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     // suspendedLanes). The boundary retry is recorded here but attached only
     // at commit, to the fiber identity the commit blessed.
     attachPing(root, thenable, lanes);
-    root.pendingSuspenseRetries.push({ boundary, thenable, lanes });
     const retryReads: QueuedHook[] = [];
-    for (const owner of root.commitIndex.slice(
-      boundary.commitIndexCheckpoint,
+    for (const owner of root.attempt.commitIndex.slice(
+      boundary.renderCheckpoint?.work,
     )) {
       if (owner.retryQueueReads !== undefined)
         retryReads.push(...owner.retryQueueReads);
@@ -5198,13 +5161,13 @@ export function createRenderer<Container, Instance, TextInstance>(
           retryReads.push(hook);
       }
     }
-    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
+    rollbackBoundaryCommitWork(root, boundary);
+    root.attempt.recordRetry({ boundary, thenable, lanes });
     // The boundary's own deletions (e.g. the committed fallback recorded by
     // the reveal path) belong to the boundary, not its discarded subtree;
     // requeue them. Paths that discard them null boundary.deletions, which
     // leaves this entry inert.
-    if (boundary.deletions !== null)
-      recordCommitWork(root.commitIndex, boundary);
+    if (boundary.deletions !== null) root.attempt.record(boundary);
 
     const dehydrated = fiberSuspenseState(boundary.alternate);
     if (
@@ -5237,7 +5200,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       boundary.boundaryState = { kind: "fallback", primaryChild: null };
       boundary.deletions = null;
       boundary.retryQueueReads = retryReads;
-      recordCommitWork(root.commitIndex, boundary);
+      root.attempt.record(boundary);
       hasHiddenBoundaries = true;
       const primary = suspensePrimaryWorkInProgress(
         boundary,
@@ -5288,12 +5251,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     source: F,
   ): F | null {
     const root = rootOf(boundary);
-    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
-    recordCommitWork(root.commitIndex, boundary);
+    rollbackBoundaryCommitWork(root, boundary);
+    root.attempt.record(boundary);
     const state = createErrorBoundaryState(error, source);
     boundary.boundaryState = state;
     reconcileCurrentChildren(boundary, errorBoundaryFallback(boundary, state));
     return boundary.child ?? completeUnit(boundary);
+  }
+
+  function rollbackBoundaryCommitWork(root: R, boundary: F): void {
+    if (boundary.renderCheckpoint !== undefined)
+      root.attempt.rollback(boundary.renderCheckpoint);
   }
 
   function captureCommittedErrorBoundary(
@@ -5333,7 +5301,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // upward links and root lookup finds nothing.
   function attachCommittedSuspenseRetries(
     root: R,
-    retries: PendingSuspenseRetry<Container, Instance, TextInstance>[],
+    retries: readonly PendingSuspenseRetry<Container, Instance, TextInstance>[],
   ): void {
     for (const { boundary, thenable, lanes } of retries) {
       // A boundary that re-suspends on a still-pending thenable in a later
@@ -5929,7 +5897,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         const effects = (owner.effects ??= []);
         if (!effects.includes(effect)) effects.push(effect);
         const root = rootOf(owner);
-        recordCommitWork(root.commitIndex, owner, EffectFlag);
+        root.attempt.record(owner, EffectFlag);
         markSubtreeFlag(owner, EffectFlag);
         markCommitEffectPhase(root, effect.phase);
         // Re-armed owners that did not re-render are not in the commit index
@@ -5940,7 +5908,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitLiveHookInstances(root: R): void {
-    for (const owner of root.commitIndex) {
+    for (const owner of root.attempt.commitIndex) {
       for (const hook of owner.retryQueueReads ?? []) {
         releaseQueueLanes(hook.queue, hook.readThrough, root.renderLanes);
       }
@@ -6034,23 +6002,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     return true;
   }
 
-  function markInconsistentStores(root: R): boolean {
-    // Hydration intentionally reads the server snapshot. Its normal post-commit
-    // check schedules the first client snapshot without discarding server DOM.
-    if (root.isHydrating) return false;
+  function markInconsistentStores(root: R, attempt = root.attempt): boolean {
     let inconsistent = false;
     const lane = getHighestPriorityLane(root.renderLanes);
-    for (const owner of root.commitIndex) {
+    for (const [owner, reads] of attempt.reads) {
       if (hasHiddenBoundaries && isInsideHiddenBoundary(owner)) continue;
       let changed =
-        owner.dataDependenciesDirty &&
-        !root.dataStore.areDataDependenciesConsistent(owner);
-      if (!changed && (owner.flags & StoreConsistencyFlag) !== 0) {
-        for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
-          if (!isExternalStoreHook(hook)) continue;
-          const state = hook.memoizedState;
+        reads.data !== undefined &&
+        !root.dataStore.areDataDependenciesConsistent(reads.data);
+      if (!changed && reads.stores !== undefined) {
+        for (const read of reads.stores) {
           try {
-            changed = !Object.is(state.getSnapshot(), state.value);
+            changed = !Object.is(read.getSnapshot(), read.value);
           } catch {
             // Retry in render, where the nearest ErrorBoundary can handle it.
             changed = true;
@@ -6070,8 +6033,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitExternalStores(root: R): void {
-    for (const cursor of root.commitIndex) {
-      if ((cursor.flags & StoreConsistencyFlag) === 0) continue;
+    for (const cursor of root.attempt.commitIndex) {
+      if ((cursor.flags & ExternalStoreFlag) === 0) continue;
       // Subscriptions under hidden boundaries are deferred until reveal.
       if (hasHiddenBoundaries && isInsideHiddenBoundary(cursor)) continue;
       for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
@@ -6085,7 +6048,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       if ((cursor.flags & AdoptedFlag) !== 0) return false;
 
-      if ((cursor.flags & StoreConsistencyFlag) !== 0) {
+      if ((cursor.flags & ExternalStoreFlag) !== 0) {
         for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
           if (!isExternalStoreHook(hook)) continue;
           const state = hook.memoizedState;
@@ -6106,7 +6069,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       return (
         !isHiddenBoundary(cursor) &&
-        (cursor.subtreeFlags & StoreConsistencyFlag) !== 0
+        (cursor.subtreeFlags & ExternalStoreFlag) !== 0
       );
     });
   }
@@ -6164,7 +6127,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let executed = 0;
     const runEffects = () => {
-      for (const owner of root.commitIndex) {
+      for (const owner of root.attempt.commitIndex) {
         const effects = owner.effects;
         if (effects === null) continue;
         // Effects under hidden boundaries stay deferred until reveal.

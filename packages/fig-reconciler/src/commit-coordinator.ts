@@ -5,6 +5,11 @@
  */
 /** Describes reconciler commit result. */
 export type ReconcilerCommitResult = false | "committed" | "deferred";
+/** Mutation publication and callback results are distinct from capture release. */
+export type ReconcilerMutationResult<Result> =
+  | { readonly kind: "committed"; readonly value: Result }
+  | { readonly kind: "stale" }
+  | { readonly kind: "failed" };
 /** Describes reconciler work priority. */
 export type ReconcilerWorkPriority =
   | "blocking"
@@ -25,13 +30,15 @@ export interface ReconcilerCommitContext<Container> {
   /**
    * Runs a still-consistent transaction and its post-mutation callback.
    * A deferred transaction may be abandoned if a store changed meanwhile;
-   * then no host mutation runs, the callback is skipped, and undefined is returned. Release any prepared
-   * capture and still call captureFinished so the reconciler can retry.
+   * then no host mutation runs, the callback is skipped, and stale is returned.
+   * Deferred errors are reported through the root and return failed. Synchronous
+   * errors still throw. For every outcome, release any prepared capture and call
+   * captureFinished. A committed callback may itself return undefined.
    */
   runMutation<Result>(
     this: void,
     afterMutation: () => Result,
-  ): Result | undefined;
+  ): ReconcilerMutationResult<Result>;
 }
 
 /** Describes reconciler commit coordinator. */

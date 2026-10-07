@@ -10,6 +10,7 @@ import {
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreController,
   type FigDataStoreFactory,
@@ -114,7 +115,6 @@ interface LoadOptions<Lane> {
 // retained it (retention window elapsed, or last subscriber released).
 type AbortReason = "superseded" | "store-disposed" | "evicted";
 
-const UnreadDataValue = Symbol("unread-data-value");
 const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 const DataStoreControllerSymbol = Symbol.for("fig.data-store-controller");
@@ -276,10 +276,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
-  private readonly pendingOwnerReads = new WeakMap<
-    object,
-    Map<string, unknown>
-  >();
   private readonly partitionKey: string;
   private readonly preloadRetentionMs: number;
   private disposed = false;
@@ -295,24 +291,25 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
 
-  areDataDependenciesConsistent(owner: object): boolean {
-    const values = this.pendingOwnerReads.get(owner);
-    if (values === undefined) return true;
-    for (const [key, value] of values) {
-      if (value === UnreadDataValue) continue;
+  areDataDependenciesConsistent(reads: FigDataReads): boolean {
+    for (const [key, snapshot] of reads) {
+      if (snapshot === undefined) continue;
       const entry = this.entries.get(key);
       if (
         entry === undefined ||
         !entryHasValue(entry) ||
-        !Object.is(value, entry.value)
+        !Object.is(snapshot.value, entry.value)
       )
         return false;
     }
     return true;
   }
 
-  commitDataDependencies(owner: Owner, previousOwner: object | null): void {
-    const reads = this.pendingOwnerReads.get(owner);
+  commitDataDependencies(
+    owner: Owner,
+    previousOwner: object | null,
+    reads?: FigDataReads,
+  ): void {
     // Committed subscriptions retain keys, never the speculative values.
     const nextKeys = reads === undefined ? null : new Set(reads.keys());
     const ownerKeys = this.ownerKeys.get(owner) ?? null;
@@ -320,7 +317,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       previousOwner === null
         ? null
         : (this.ownerKeys.get(previousOwner) ?? null);
-    this.pendingOwnerReads.delete(owner);
+    reads?.clear();
 
     if (
       (nextKeys === null || nextKeys.size === 0) &&
@@ -379,20 +376,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  resetDataDependencies(owner: object): void {
-    // Reads accumulate into pendingOwnerReads as a render runs. A render attempt
-    // can be abandoned before commit (suspense retry, concurrent interruption,
-    // the strict shadow pass), and the work-in-progress fiber object is reused
-    // across attempts, so the keys must be cleared at the start of each render
-    // or stale dependencies from a discarded attempt would be committed.
-    this.pendingOwnerReads.delete(owner);
-  }
-
   deleteDataOwner(
     owner: object,
     retainedKeys: ReadonlySet<string> | null = null,
   ): void {
-    this.pendingOwnerReads.delete(owner);
     const keys = this.ownerKeys.get(owner);
     if (keys === undefined) return;
 
@@ -637,22 +624,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner?: Owner,
+    reads?: FigDataReads,
   ): TValue {
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    let reads: Map<string, unknown> | undefined;
-    if (owner !== undefined) {
-      reads = this.pendingOwnerReads.get(owner);
-      if (reads === undefined) {
-        reads = new Map();
-        this.pendingOwnerReads.set(owner, reads);
-      }
-      // A read that throws still establishes a dependency, but has no snapshot.
-      if (!reads.has(entry.storeKey))
-        reads.set(entry.storeKey, UnreadDataValue);
-    }
+    // A read that throws still establishes a dependency, but has no snapshot.
+    if (reads !== undefined && !reads.has(entry.storeKey))
+      reads.set(entry.storeKey, undefined);
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
@@ -664,8 +643,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     const value = this.readCurrentValue<TValue>(entry);
     // Retain the first successful read, even if a later read changes or throws.
-    if (reads?.get(entry.storeKey) === UnreadDataValue)
-      reads.set(entry.storeKey, value);
+    if (reads !== undefined && reads.get(entry.storeKey) === undefined)
+      reads.set(entry.storeKey, { value });
     return value;
   }
 

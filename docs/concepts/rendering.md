@@ -87,7 +87,7 @@ Fig records fiber-local commit work in a sparse per-root index during render. Ef
 The index is an optimization, not a second source of truth:
 
 - each fiber appears at most once;
-- a Suspense or error capture truncates entries created by its discarded subtree;
+- a Suspense or error capture rolls back one attempt checkpoint, releasing discarded reads and boundary retries alongside indexed work;
 - Suspense re-indexes preserved hook owners when moving the primary tree into hidden state, so stable-event visibility publishes before before-layout effects;
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.
@@ -98,7 +98,7 @@ View transitions assign indexed mutations to the nearest transition boundary, to
 
 ## External Store Consistency
 
-Before committing concurrent work, Fig rechecks the external-store snapshots and data-resource values read by visible components in the sparse commit index. A mismatch or snapshot error discards the speculative tree and retries synchronously before host mutations or effects publish it. This also applies when `flushSync` finishes work that previously yielded, or when a finished tree resumes after being parked by a commit coordinator. A coordinator that delays the mutation transaction revalidates once more at mutation time. Stale transactions release their prepared capture without publishing hooks, effects, host mutations, or capture callbacks; fresh work is then scheduled. Fresh synchronous renders do not need the additional yield-consistency pass. Hydration keeps its server snapshot contract and reconciles the client snapshot after hydration commits.
+Before committing concurrent work, Fig rechecks the external-store snapshots and data-resource values recorded by visible components in the render attempt. A mismatch or snapshot error discards the speculative tree and retries synchronously before host mutations or effects publish it. This also applies when `flushSync` finishes work that previously yielded, or when a finished tree resumes after being parked by a commit coordinator. A coordinator that delays the mutation transaction revalidates once more at mutation time. Stale transactions release their prepared capture without publishing hooks, effects, host mutations, or capture callbacks; fresh work is then scheduled. Fresh synchronous renders do not need the additional yield-consistency pass. Only client external-store reads register consistency observations with the render attempt. Server-snapshot reads register subscription work without a precommit client-snapshot check, preserving the hydration contract even after a selective hydration cursor clears. Their subscriptions reconcile the client snapshot after hydration commits. Client snapshot reads in the same transaction still undergo consistency validation.
 
 Subscription teardown clears ownership before invoking user cleanup, so reentrant notifications and throwing cleanups cannot reuse a retired subscription. Subscription-time snapshot errors schedule the consuming component instead of escaping the store notification callback, allowing its ErrorBoundary to handle the error during render. This follows React's [precommit consistency validation](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberWorkLoop.js) and [snapshot-change detection](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberHooks.js).
 

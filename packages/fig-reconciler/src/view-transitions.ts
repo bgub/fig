@@ -237,7 +237,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     collection: ViewTransitionCollection<Instance>,
   ): void {
     let collected = 0;
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       if (__DEV__) collected += 1;
       for (const deletion of cursor.deletions) {
@@ -297,7 +297,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   ): Set<PlannerFiber> | null {
     let changed: Set<PlannerFiber> | null = null;
 
-    for (const entry of root.commitIndex) {
+    for (const entry of root.attempt.commitIndex) {
       if ((entry.flags & HostUpdateMask) === 0) continue;
       let sawPortal = false;
       let boundary: PlannerFiber | null = null;
@@ -853,8 +853,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const finishedWork = context.finishedWork as PlannerFiber;
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
-      let didRunMutation = false;
-      let abandoned = false;
+      let mutation: "pending" | "committed" | "stale" | "failed" = "pending";
       let didFinish = false;
       let controller: AbortController | null = null;
 
@@ -863,12 +862,11 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
         plan.options,
         () => applyOldViewTransitionSurfaces(plan),
         () => {
-          didRunMutation = true;
           const result = context.runMutation(() =>
             resolveViewTransitionPlan(plan),
           );
-          if (result !== undefined) return result;
-          abandoned = true;
+          mutation = result.kind;
+          if (result.kind === "committed") return result.value;
           return {
             canceledNames: [
               ...new Set([
@@ -885,9 +883,14 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           } finally {
             // The host also cleans up prepared names when its native commit
             // fails before mutation so the reconciler can fall back normally.
-            if (didRunMutation) context.captureFinished();
+            if (mutation !== "pending") context.captureFinished();
           }
-          if (active && !abandoned && !didFinish && controller === null) {
+          if (
+            active &&
+            mutation === "committed" &&
+            !didFinish &&
+            controller === null
+          ) {
             controller = new AbortController();
             dispatchViewTransitionCallbacks(plan, controller.signal);
           }

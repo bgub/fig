@@ -1,3 +1,4 @@
+import type { FigDataReads } from "./data.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
   createDataStore,
@@ -25,25 +26,26 @@ const never = new Promise<never>(() => undefined);
 describe("@bgub/fig", () => {
   it("validates rendered values without retaining discarded or committed reads", () => {
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const resource = dataResource<[], string>({ key: () => ["consistency"] });
     const store = createRendererDataStore<object, null>({
       getLane: () => null,
       schedule: () => undefined,
     });
     store.hydrate([{ key: ["consistency"], value: "first" }]);
-    expect(store.readData(resource, [], owner)).toBe("first");
+    expect(store.readData(resource, [], ownerReads)).toBe("first");
     store.hydrate([{ key: ["consistency"], value: "first" }]);
-    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
     store.hydrate([{ key: ["consistency"], value: "second" }]);
-    expect(store.readData(resource, [], owner)).toBe("second");
-    expect(store.areDataDependenciesConsistent(owner)).toBe(false);
-    store.resetDataDependencies(owner);
-    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
-    expect(store.readData(resource, [], owner)).toBe("second");
-    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(resource, [], ownerReads)).toBe("second");
+    expect(store.areDataDependenciesConsistent(ownerReads)).toBe(false);
+    ownerReads.clear();
+    expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
+    expect(store.readData(resource, [], ownerReads)).toBe("second");
+    expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
+    store.commitDataDependencies(owner, null, ownerReads);
     store.hydrate([{ key: ["consistency"], value: "third" }]);
-    expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+    expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
     store.dispose();
   });
 
@@ -51,6 +53,7 @@ describe("@bgub/fig", () => {
     "subscribes to %s reads without treating them as value snapshots",
     (status) => {
       const owner = {};
+      const ownerReads: FigDataReads = new Map();
       const resource = dataResource<[], string | undefined>({
         key: () => ["consistency"],
         ...(status === "pending" ? { load: () => never } : {}),
@@ -62,24 +65,24 @@ describe("@bgub/fig", () => {
       try {
         let thrown: unknown;
         try {
-          store.readData(resource, [], owner);
+          store.readData(resource, [], ownerReads);
         } catch (error) {
           thrown = error;
         }
         expect(thrown).toBeDefined();
-        expect(store.areDataDependenciesConsistent(owner)).toBe(true);
-        store.commitDataDependencies(owner, null);
+        expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
+        store.commitDataDependencies(owner, null, ownerReads);
         expect(store.inspectDataDependencyCanonicalKeys(owner)).toEqual([
           '["consistency"]',
         ]);
 
         store.hydrate([{ key: ["consistency"], value: undefined }]);
-        expect(store.readData(resource, [], owner)).toBeUndefined();
+        expect(store.readData(resource, [], ownerReads)).toBeUndefined();
         store.hydrate([{ key: ["consistency"], value: "next" }]);
-        expect(store.readData(resource, [], owner)).toBe("next");
-        expect(store.areDataDependenciesConsistent(owner)).toBe(false);
-        store.commitDataDependencies(owner, null);
-        expect(store.areDataDependenciesConsistent(owner)).toBe(true);
+        expect(store.readData(resource, [], ownerReads)).toBe("next");
+        expect(store.areDataDependenciesConsistent(ownerReads)).toBe(false);
+        store.commitDataDependencies(owner, null, ownerReads);
+        expect(store.areDataDependenciesConsistent(ownerReads)).toBe(true);
       } finally {
         store.dispose();
       }
@@ -162,7 +165,7 @@ describe("@bgub/fig", () => {
     vi.stubGlobal("process", undefined);
 
     try {
-      const owner = {};
+      const ownerReads: FigDataReads = new Map();
       const resource = dataResource({
         key: (id: string) => ["processless", id],
         load: (id: string) => `value-${id}`,
@@ -172,7 +175,7 @@ describe("@bgub/fig", () => {
         schedule: () => undefined,
       });
 
-      expect(store.readData(resource, ["one"], owner)).toBe("value-one");
+      expect(store.readData(resource, ["one"], ownerReads)).toBe("value-one");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -181,6 +184,7 @@ describe("@bgub/fig", () => {
   it("evicts inactive fulfilled entries after their retention window", async () => {
     const evicted: string[] = [];
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const labelResource = dataResource({
       key: (id: string) => ["label", id],
       load: () => "ready",
@@ -192,8 +196,8 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    expect(store.readData(labelResource, ["one"], owner)).toBe("ready");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(labelResource, ["one"], ownerReads)).toBe("ready");
+    store.commitDataDependencies(owner, null, ownerReads);
     store.deleteDataOwner(owner);
     await waitForNextMacrotask();
 
@@ -203,6 +207,7 @@ describe("@bgub/fig", () => {
   it("drops dependencies from abandoned render attempts on reset", () => {
     const scheduled: object[] = [];
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const resource = dataResource<[string], string>({
       key: (id: string) => ["reset", id],
       load: (id: string) => id,
@@ -214,10 +219,10 @@ describe("@bgub/fig", () => {
 
     // First render attempt reads "a", then is abandoned before commit. The
     // work-in-progress owner is reused, so the next attempt starts with a reset.
-    expect(store.readData(resource, ["a"], owner)).toBe("a");
-    store.resetDataDependencies(owner);
-    expect(store.readData(resource, ["b"], owner)).toBe("b");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(resource, ["a"], ownerReads)).toBe("a");
+    ownerReads.clear();
+    expect(store.readData(resource, ["b"], ownerReads)).toBe("b");
+    store.commitDataDependencies(owner, null, ownerReads);
 
     const byKey = new Map(
       store.inspectDataEntries().map((entry) => [entry.canonicalKey, entry]),
@@ -249,7 +254,9 @@ describe("@bgub/fig", () => {
 
     try {
       const previousOwner = {};
+      const previousOwnerReads: FigDataReads = new Map();
       const owner = {};
+      const ownerReads: FigDataReads = new Map();
       const resource = dataResource({
         key: (id: string) => ["retained", id],
         load: (id: string) => id,
@@ -259,13 +266,13 @@ describe("@bgub/fig", () => {
         schedule: () => undefined,
       });
 
-      expect(store.readData(resource, ["one"], previousOwner)).toBe("one");
-      store.commitDataDependencies(previousOwner, null);
+      expect(store.readData(resource, ["one"], previousOwnerReads)).toBe("one");
+      store.commitDataDependencies(previousOwner, null, previousOwnerReads);
       const timerCount = timers.length;
       const clearedTimerCount = clearedTimers;
 
-      expect(store.readData(resource, ["one"], owner)).toBe("one");
-      store.commitDataDependencies(owner, previousOwner);
+      expect(store.readData(resource, ["one"], ownerReads)).toBe("one");
+      store.commitDataDependencies(owner, previousOwner, ownerReads);
 
       expect(timers).toHaveLength(timerCount);
       expect(clearedTimers).toBe(clearedTimerCount);
@@ -371,7 +378,9 @@ describe("@bgub/fig", () => {
 
   it("invalidates observed keys by prefix", () => {
     const userOwner = {};
+    const userOwnerReads: FigDataReads = new Map();
     const postOwner = {};
+    const postOwnerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const userResource = dataResource<[string], string>({
       key: (id: string) => ["entity", "user", id],
@@ -386,10 +395,14 @@ describe("@bgub/fig", () => {
       schedule: (subscriber) => scheduled.push(subscriber),
     });
 
-    expect(store.readData(userResource, ["one"], userOwner)).toBe("user-one");
-    expect(store.readData(postResource, ["one"], postOwner)).toBe("post-one");
-    store.commitDataDependencies(userOwner, null);
-    store.commitDataDependencies(postOwner, null);
+    expect(store.readData(userResource, ["one"], userOwnerReads)).toBe(
+      "user-one",
+    );
+    expect(store.readData(postResource, ["one"], postOwnerReads)).toBe(
+      "post-one",
+    );
+    store.commitDataDependencies(userOwner, null, userOwnerReads);
+    store.commitDataDependencies(postOwner, null, postOwnerReads);
 
     store.run(() => invalidateDataPrefix(["entity", "user"]));
 
@@ -403,8 +416,11 @@ describe("@bgub/fig", () => {
 
   it("matches invalidation prefixes structurally", () => {
     const exactOwner = {};
+    const exactOwnerReads: FigDataReads = new Map();
     const delimiterOwner = {};
+    const delimiterOwnerReads: FigDataReads = new Map();
     const namespaceOwner = {};
+    const namespaceOwnerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const resource = dataResource<[string], string>({
       key: (key: string) => ["prefix", key],
@@ -425,20 +441,20 @@ describe("@bgub/fig", () => {
       schedule: (subscriber) => scheduled.push(subscriber),
     });
 
-    expect(store.readData(resource, ["user"], exactOwner)).toBe("user");
-    expect(store.readData(resource, ["user|settings"], delimiterOwner)).toBe(
-      "user|settings",
-    );
+    expect(store.readData(resource, ["user"], exactOwnerReads)).toBe("user");
+    expect(
+      store.readData(resource, ["user|settings"], delimiterOwnerReads),
+    ).toBe("user|settings");
     expect(
       store.readData(
         nestedResource,
         [{ label: "profile", scope: ["public"] }],
-        namespaceOwner,
+        namespaceOwnerReads,
       ),
     ).toBe("nested");
-    store.commitDataDependencies(exactOwner, null);
-    store.commitDataDependencies(delimiterOwner, null);
-    store.commitDataDependencies(namespaceOwner, null);
+    store.commitDataDependencies(exactOwner, null, exactOwnerReads);
+    store.commitDataDependencies(delimiterOwner, null, delimiterOwnerReads);
+    store.commitDataDependencies(namespaceOwner, null, namespaceOwnerReads);
 
     store.invalidateDataPrefix(["prefix", "user"]);
     expect(scheduled).toEqual([exactOwner]);
@@ -453,6 +469,7 @@ describe("@bgub/fig", () => {
 
   it("invalidates an exact structural key", () => {
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const resource = dataResource<[{ a: number; b: number }], string>({
       key: (input) => ["exact-key", input],
@@ -463,8 +480,10 @@ describe("@bgub/fig", () => {
       schedule: (subscriber) => scheduled.push(subscriber),
     });
 
-    expect(store.readData(resource, [{ a: 1, b: 2 }], owner)).toBe("value");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(resource, [{ a: 1, b: 2 }], ownerReads)).toBe(
+      "value",
+    );
+    store.commitDataDependencies(owner, null, ownerReads);
 
     store.run(() => invalidateDataKey(["exact-key", { b: 2, a: 1 }]));
 
@@ -479,6 +498,7 @@ describe("@bgub/fig", () => {
 
   it("schedules hydrated subscribers on the current lane", async () => {
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const scheduled: Array<[object, string]> = [];
     let lane = "initial";
     const resource = dataResource<[string], string>({
@@ -491,8 +511,8 @@ describe("@bgub/fig", () => {
         scheduled.push([subscriber, scheduledLane]),
     });
 
-    expect(store.readData(resource, ["one"], owner)).toBe("loaded-one");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(resource, ["one"], ownerReads)).toBe("loaded-one");
+    store.commitDataDependencies(owner, null, ownerReads);
 
     lane = "refresh";
     await store.refreshData(resource, "one");
@@ -530,6 +550,7 @@ describe("@bgub/fig", () => {
     const refreshes = [firstRefresh, secondRefresh];
     let loads = 0;
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const valueResource = dataResource({
       key: (id: string) => ["superseded-refresh", id],
       load: () => {
@@ -546,8 +567,8 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("initial");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("initial");
+    store.commitDataDependencies(owner, null, ownerReads);
 
     const first = store.refreshData(valueResource, "one");
     const second = store.refreshData(valueResource, "one");
@@ -570,6 +591,7 @@ describe("@bgub/fig", () => {
     let loads = 0;
     let failNext = false;
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const valueResource = dataResource({
       key: (id: string) => ["refresh-fail", id],
       load: () => {
@@ -583,26 +605,26 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("value");
+    store.commitDataDependencies(owner, null, ownerReads);
     expect(loads).toBe(1);
 
     // A failing background refresh keeps the stale value but must not retry on
     // every subsequent read.
     failNext = true;
     store.invalidateData(valueResource, "one");
-    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("value");
     await waitForNextMacrotask();
     expect(loads).toBe(2);
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
-    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("value");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("value");
     expect(loads).toBe(2);
 
     // An explicit invalidation is a fresh intent and re-enables auto-refresh.
     failNext = false;
     store.invalidateData(valueResource, "one");
-    expect(store.readData(valueResource, ["one"], owner)).toBe("value");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("value");
     await waitForNextMacrotask();
     expect(loads).toBe(3);
   });
@@ -612,6 +634,7 @@ describe("@bgub/fig", () => {
     const second = deferred<string>();
     const loads = [first, second];
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const valueResource = dataResource({
       key: (id: string) => ["invalidate-pending", id],
@@ -626,8 +649,8 @@ describe("@bgub/fig", () => {
       schedule: (subscriber) => scheduled.push(subscriber),
     });
 
-    expect(() => store.readData(valueResource, ["one"], owner)).toThrow();
-    store.commitDataDependencies(owner, null);
+    expect(() => store.readData(valueResource, ["one"], ownerReads)).toThrow();
+    store.commitDataDependencies(owner, null, ownerReads);
 
     store.invalidateData(valueResource, "one");
     expect(scheduled).toEqual([owner]);
@@ -635,7 +658,7 @@ describe("@bgub/fig", () => {
     first.resolve("stale");
     await waitForNextMacrotask();
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("stale");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("stale");
     expect(store.inspectDataEntries()).toMatchObject([
       {
         stale: true,
@@ -647,7 +670,7 @@ describe("@bgub/fig", () => {
     second.resolve("fresh");
     await waitForNextMacrotask();
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("fresh");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("fresh");
     expect(store.inspectDataEntries()).toMatchObject([
       {
         stale: false,
@@ -660,6 +683,7 @@ describe("@bgub/fig", () => {
   it("aborts an in-flight load when its last subscriber is released", () => {
     const signals: AbortSignal[] = [];
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const pendingResource = dataResource({
       key: (id: string) => ["release-abort", id],
       load: (_id: string, { signal }) => {
@@ -672,8 +696,10 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    expect(() => store.readData(pendingResource, ["one"], owner)).toThrow();
-    store.commitDataDependencies(owner, null);
+    expect(() =>
+      store.readData(pendingResource, ["one"], ownerReads),
+    ).toThrow();
+    store.commitDataDependencies(owner, null, ownerReads);
     expect(signals[0]?.aborted).toBe(false);
 
     store.releaseDataOwner(owner);
@@ -684,6 +710,7 @@ describe("@bgub/fig", () => {
   it("keeps a refreshing entry's value when its last subscriber is released", () => {
     let loads = 0;
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const valueResource = dataResource({
       key: (id: string) => ["refreshing-release", id],
       load: () => {
@@ -696,12 +723,12 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    expect(store.readData(valueResource, ["one"], owner)).toBe("first");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("first");
+    store.commitDataDependencies(owner, null, ownerReads);
 
     // Start a background refresh, leaving the entry value-bearing and in flight.
     store.invalidateData(valueResource, "one");
-    expect(store.readData(valueResource, ["one"], owner)).toBe("first");
+    expect(store.readData(valueResource, ["one"], ownerReads)).toBe("first");
     expect(loads).toBe(2);
 
     // Releasing the last subscriber must not evict a value-bearing entry: only
@@ -800,6 +827,7 @@ describe("@bgub/fig", () => {
   it("rethrows a cached rejection until invalidation resets it to pending", async () => {
     let attempts = 0;
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const flakyResource = dataResource({
       key: (id: string) => ["flaky", id],
@@ -816,15 +844,15 @@ describe("@bgub/fig", () => {
     });
 
     // First read suspends on the initial load, which rejects.
-    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
-    store.commitDataDependencies(owner, null);
+    expect(() => store.readData(flakyResource, ["one"], ownerReads)).toThrow();
+    store.commitDataDependencies(owner, null, ownerReads);
     await waitForNextMacrotask();
 
     // The rejection is cached: every read rethrows without a new load.
-    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow(
+    expect(() => store.readData(flakyResource, ["one"], ownerReads)).toThrow(
       "load failed",
     );
-    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow(
+    expect(() => store.readData(flakyResource, ["one"], ownerReads)).toThrow(
       "load failed",
     );
     expect(attempts).toBe(1);
@@ -840,16 +868,20 @@ describe("@bgub/fig", () => {
         .find((entry) => entry.canonicalKey === '["flaky","one"]')?.status,
     ).toBe("pending");
 
-    expect(() => store.readData(flakyResource, ["one"], owner)).toThrow();
+    expect(() => store.readData(flakyResource, ["one"], ownerReads)).toThrow();
     await waitForNextMacrotask();
 
-    expect(store.readData(flakyResource, ["one"], owner)).toBe("recovered");
+    expect(store.readData(flakyResource, ["one"], ownerReads)).toBe(
+      "recovered",
+    );
     expect(attempts).toBe(2);
   });
 
   it("invalidates every key attributed to a data error", async () => {
     const firstOwner = {};
+    const firstOwnerReads: FigDataReads = new Map();
     const secondOwner = {};
+    const secondOwnerReads: FigDataReads = new Map();
     const scheduled: object[] = [];
     const sharedError = new Error("shared failure");
     const attempts = new Map<string, number>();
@@ -868,18 +900,22 @@ describe("@bgub/fig", () => {
       schedule: (subscriber) => scheduled.push(subscriber),
     });
 
-    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow();
-    store.commitDataDependencies(firstOwner, null);
-    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
-    store.commitDataDependencies(secondOwner, null);
+    expect(() =>
+      store.readData(flakyResource, ["one"], firstOwnerReads),
+    ).toThrow();
+    store.commitDataDependencies(firstOwner, null, firstOwnerReads);
+    expect(() =>
+      store.readData(flakyResource, ["two"], secondOwnerReads),
+    ).toThrow();
+    store.commitDataDependencies(secondOwner, null, secondOwnerReads);
     await waitForNextMacrotask();
 
-    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow(
-      sharedError,
-    );
-    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow(
-      sharedError,
-    );
+    expect(() =>
+      store.readData(flakyResource, ["one"], firstOwnerReads),
+    ).toThrow(sharedError);
+    expect(() =>
+      store.readData(flakyResource, ["two"], secondOwnerReads),
+    ).toThrow(sharedError);
 
     scheduled.length = 0;
     expect(store.run(() => invalidateDataError(sharedError))).toBe(true);
@@ -891,14 +927,18 @@ describe("@bgub/fig", () => {
     expect(byKey.get('["flaky-error","one"]')?.status).toBe("pending");
     expect(byKey.get('["flaky-error","two"]')?.status).toBe("pending");
 
-    expect(() => store.readData(flakyResource, ["one"], firstOwner)).toThrow();
-    expect(() => store.readData(flakyResource, ["two"], secondOwner)).toThrow();
+    expect(() =>
+      store.readData(flakyResource, ["one"], firstOwnerReads),
+    ).toThrow();
+    expect(() =>
+      store.readData(flakyResource, ["two"], secondOwnerReads),
+    ).toThrow();
     await waitForNextMacrotask();
 
-    expect(store.readData(flakyResource, ["one"], firstOwner)).toBe(
+    expect(store.readData(flakyResource, ["one"], firstOwnerReads)).toBe(
       "recovered-one",
     );
-    expect(store.readData(flakyResource, ["two"], secondOwner)).toBe(
+    expect(store.readData(flakyResource, ["two"], secondOwnerReads)).toBe(
       "recovered-two",
     );
   });
@@ -1020,6 +1060,7 @@ describe("generation-lifetime loader signals", () => {
   it("aborts the fulfilled generation's signal when the entry evicts", async () => {
     const signals: AbortSignal[] = [];
     const owner = {};
+    const ownerReads: FigDataReads = new Map();
     const resource = dataResource({
       key: (id: string) => ["gen-evict", id],
       load: (_id: string, { signal }) => {
@@ -1033,8 +1074,8 @@ describe("generation-lifetime loader signals", () => {
       schedule: () => undefined,
     });
 
-    expect(store.readData(resource, ["one"], owner)).toBe("loaded");
-    store.commitDataDependencies(owner, null);
+    expect(store.readData(resource, ["one"], ownerReads)).toBe("loaded");
+    store.commitDataDependencies(owner, null, ownerReads);
     store.deleteDataOwner(owner);
     await waitForNextMacrotask();
 
@@ -1219,7 +1260,7 @@ describe("load-context error attribution capability", () => {
     // instead of returning the broken value.
     let thrown: unknown;
     try {
-      store.readData(resource, [], {});
+      store.readData(resource, []);
     } catch (error) {
       thrown = error;
     }
@@ -1227,7 +1268,7 @@ describe("load-context error attribution capability", () => {
     expect(thrown).toBeInstanceOf(Promise);
     gate.resolve("fresh");
     await waitForNextMacrotask();
-    expect(store.readData(resource, [], {})).toBe("fresh");
+    expect(store.readData(resource, [])).toBe("fresh");
   });
 
   it("attributes through a superseding refresh's window", async () => {
@@ -1262,14 +1303,14 @@ describe("load-context error attribution capability", () => {
     // The broken value is retired; the in-flight refresh delivers recovery.
     let thrown: unknown;
     try {
-      store.readData(resource, [], {});
+      store.readData(resource, []);
     } catch (error) {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(Promise);
     gate.resolve("v2");
     await refresh;
-    expect(store.readData(resource, [], {})).toBe("v2");
+    expect(store.readData(resource, [])).toBe("v2");
   });
 
   it("rejects cleanly when the refresh fails after the broken value was retired", async () => {
@@ -1309,7 +1350,7 @@ describe("load-context error attribution capability", () => {
 
     let thrown: unknown;
     try {
-      store.readData(resource, [], {});
+      store.readData(resource, []);
     } catch (error) {
       thrown = error;
     }
@@ -1344,7 +1385,7 @@ describe("load-context error attribution capability", () => {
     // The failed generation never published; invalidating its hole error
     // marks the entry stale but must not retire the live previous value.
     expect(store.invalidateDataError(refreshHole)).toBe(true);
-    expect(store.readData(resource, [], {})).toBe("v1");
+    expect(store.readData(resource, [])).toBe("v1");
     expect(loads).toBe(3);
   });
 
@@ -1373,7 +1414,7 @@ describe("load-context error attribution capability", () => {
     // The error still names the key, but the hydrated value is not the
     // broken one: invalidating marks it stale without retiring it.
     expect(store.invalidateDataError(holeError)).toBe(true);
-    expect(store.readData(resource, [], {})).toBe("pushed");
+    expect(store.readData(resource, [])).toBe("pushed");
   });
 });
 

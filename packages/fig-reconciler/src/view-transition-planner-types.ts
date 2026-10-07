@@ -26,7 +26,7 @@ export interface ViewTransitionPlannerRoot<Container> {
   renderLanes: Lanes;
   clearContainerBeforeCommit: boolean;
   needsCommitDeletions: boolean;
-  commitIndex: ViewTransitionPlannerFiber[];
+  attempt: { readonly commitIndex: readonly ViewTransitionPlannerFiber[] };
 }
 
 export interface ViewTransitionPlannerState {

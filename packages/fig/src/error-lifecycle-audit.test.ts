@@ -22,10 +22,10 @@ it("does not retry a failed stale refresh whose rejection reason is undefined", 
       error: undefined,
       staleValue: "stale",
     });
-    expect(store.readData(resource, [], {})).toBe("stale");
+    expect(store.readData(resource, [])).toBe("stale");
     expect(calls).toBe(1);
     store.invalidateData(resource);
-    expect(store.readData(resource, [], {})).toBe("stale");
+    expect(store.readData(resource, [])).toBe("stale");
     expect(calls).toBe(2);
   } finally {
     store.dispose();

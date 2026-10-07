@@ -21,6 +21,7 @@ import {
 import { createRenderer } from "../../fig-reconciler/src/index.ts";
 import { createViewTransitionCommitCoordinator } from "../../fig-reconciler/src/view-transitions.ts";
 import { requestPaint } from "../../fig-reconciler/src/scheduler.ts";
+import type { ReconcilerCommitContext } from "../../fig-reconciler/src/commit-coordinator.ts";
 
 installFakeDocument();
 const roots: FigRoot[] = [];
@@ -237,6 +238,79 @@ function createAuditRenderer() {
     },
   });
 }
+
+it("keeps late capture callbacks from resetting a newer commit", () => {
+  const renderer = createAuditRenderer();
+  const container = new FakeElement("root");
+  const errors: unknown[] = [];
+  const root = renderer.createRoot(container, {
+    onUncaughtError: (error) => errors.push(error),
+  });
+  const capture: { current?: ReconcilerCommitContext<FakeElement> } = {};
+  let defer = true;
+  renderer.installCommitCoordinator({
+    name: "candidate-identity",
+    commit(context) {
+      if (!defer) return false;
+      capture.current = context;
+      return "deferred";
+    },
+  });
+  try {
+    renderer.flushSync(() => root.render(createElement("span", null, "first")));
+    const first = capture.current;
+    expect(first?.runMutation(() => undefined)).toEqual({
+      kind: "committed",
+      value: undefined,
+    });
+    first?.captureFinished();
+    defer = false;
+    renderer.flushSync(() =>
+      root.render(createElement("span", null, "second")),
+    );
+    first?.captureFinished();
+    expect(() => first?.runMutation(() => undefined)).toThrow("only once");
+    expect(container.textContent).toBe("second");
+    expect(errors).toEqual([]);
+  } finally {
+    defer = false;
+    renderer.flushSync(() => root.unmount());
+  }
+});
+
+it("returns an explicit failure after reporting a deferred mutation error", () => {
+  const renderer = createAuditRenderer();
+  const container = new FakeElement("root");
+  const errors: unknown[] = [];
+  const root = renderer.createRoot(container, {
+    onUncaughtError: (error) => errors.push(error),
+  });
+  const capture: { current?: ReconcilerCommitContext<FakeElement> } = {};
+  let defer = true;
+  renderer.installCommitCoordinator({
+    name: "candidate-failure",
+    commit(context) {
+      if (!defer) return false;
+      capture.current = context;
+      return "deferred";
+    },
+  });
+  try {
+    renderer.flushSync(() => root.render(createElement("span", null, "first")));
+    const failure = new Error("capture failed");
+    expect(
+      capture.current?.runMutation(() => {
+        throw failure;
+      }),
+    ).toEqual({ kind: "failed" });
+    expect(errors).toEqual([failure]);
+    expect(container.textContent).toBe("");
+    capture.current?.captureFinished();
+  } finally {
+    defer = false;
+    renderer.flushSync(() => root.unmount());
+  }
+});
 
 it("does not expose stale store snapshots when a deferred mutation finally runs", () => {
   const renderer = createAuditRenderer();
