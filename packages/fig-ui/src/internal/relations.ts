@@ -1,6 +1,7 @@
 import { type Composite, sameValue } from "./composite.ts";
 import { assertPanelOwner, assertUniqueValues } from "./diagnostics.ts";
-import { createPartCollection, setIdReference } from "./parts.ts";
+import { setIdReference } from "./parts.ts";
+import { createPartCollection } from "./registration.ts";
 
 /**
  * Pairs composite items with the panels they control.

@@ -9,7 +9,7 @@ import {
 import type { ChangeDetails } from "../internal/changes.ts";
 import { createChangeDetails } from "../internal/changes.ts";
 import { assertAccessibleName } from "../internal/diagnostics.ts";
-import { createPartSlot } from "../internal/parts.ts";
+import { createPartSlot } from "../internal/registration.ts";
 import type {
   OpenChangeDetails,
   OpenChangeHandler,
@@ -144,9 +144,7 @@ export function useMenu<Value = unknown>(
     const menu = registry.containerNode();
     const triggerNode = trigger.node();
     if (menu !== null) {
-      if (triggerNode !== null && registry.hasAutomaticLabel(menu)) {
-        menu.setAttribute("aria-labelledby", triggerNode.id);
-      }
+      registry.syncLabel(menu, triggerNode?.id);
       assertAccessibleName(menu, "menu");
     }
     if (popover.open === tracker.open) return;

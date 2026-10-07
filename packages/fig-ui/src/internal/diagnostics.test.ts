@@ -15,7 +15,11 @@ import {
 
 describe("Fig UI development diagnostics", () => {
   it("rejects a part attached to the wrong host", () => {
-    const context = { props: {}, type: "div" } as MixinContext;
+    const context: MixinContext = {
+      owns: () => false,
+      props: {},
+      type: "div",
+    } as MixinContext;
 
     expect(() => expectHost(context, "dialog", "dialog")).toThrow(
       "Fig UI dialog must be applied to <dialog>, not <div>.",
@@ -23,10 +27,11 @@ describe("Fig UI development diagnostics", () => {
   });
 
   it("requires one root-owned popover id", () => {
-    const context = {
+    const context: MixinContext = {
+      owns: () => false,
       props: { id: "host-id" },
       type: "div",
-    } as MixinContext;
+    };
 
     expect(() => expectPopupId(context, "root-id")).toThrow(
       'Pass id: "host-id" to the widget root',

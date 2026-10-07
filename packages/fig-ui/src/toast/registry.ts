@@ -4,7 +4,7 @@ import {
   assertSinglePart,
   assertUniqueValues,
 } from "../internal/diagnostics.ts";
-import { createPartCollection } from "../internal/parts.ts";
+import { createPartCollection } from "../internal/registration.ts";
 
 export interface ToastRegistration {
   readonly duration: number | null;
@@ -12,7 +12,11 @@ export interface ToastRegistration {
   readonly value: unknown;
 }
 
-interface TimerRegistration extends ToastRegistration {
+interface TimerRegistration {
+  duration: number | null;
+  value: unknown;
+  readonly node: HTMLElement;
+  readonly signal: AbortSignal;
   remaining: number;
   started: number;
   timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,16 +30,13 @@ export function createToastRegistry(
   onTimeout: (registration: ToastRegistration) => void,
 ) {
   const toasts = new Map<HTMLElement, TimerRegistration>();
-  // Binds abort before reattaching on a render. Keep a removed host's timer
-  // through that commit so rebinding it does not restart its lifetime.
-  const pendingRemoval = new WeakMap<HTMLElement, TimerRegistration>();
   const paused = new Set<PauseReason>();
   let hoveredRegion: HTMLElement | undefined;
   const regions = createPartCollection<Document>(registrationChanged);
 
   function bindRegion(node: HTMLElement, signal: AbortSignal): void {
     const ownerDocument = node.ownerDocument;
-    regions.bind(node, signal, ownerDocument);
+    if (!regions.bind(node, signal, ownerDocument)) return;
     const syncVisibility = () =>
       setPaused(
         "document",
@@ -46,19 +47,17 @@ export function createToastRegistry(
     });
     syncVisibility();
     onAbort(signal, () => {
-      queueMicrotask(() => {
-        syncVisibility();
-        const mounted = regions.items();
-        if (!mounted.some((entry) => entry.node === node)) {
-          setPointerPaused(node, false);
-          setPaused(
-            "focus",
-            mounted.some((entry) =>
-              entry.node.contains(entry.node.ownerDocument.activeElement),
-            ),
-          );
-        }
-      });
+      syncVisibility();
+      const mounted = regions.items();
+      if (!mounted.some((entry) => entry.node === node)) {
+        setPointerPaused(node, false);
+        setPaused(
+          "focus",
+          mounted.some((entry) =>
+            entry.node.contains(entry.node.ownerDocument.activeElement),
+          ),
+        );
+      }
     });
   }
 
@@ -67,42 +66,38 @@ export function createToastRegistry(
     signal: AbortSignal,
     config: { readonly duration: number | null; readonly value: unknown },
   ): void {
-    const previous = toasts.get(node) ?? pendingRemoval.get(node);
-    pendingRemoval.delete(node);
+    const previous = toasts.get(node);
     const preserve =
-      previous !== undefined &&
+      previous?.signal === signal &&
       previous.duration === config.duration &&
       sameValue(previous.value, config.value);
-    if (!preserve) clear(previous);
-    const registration: TimerRegistration = preserve
-      ? {
-          ...config,
-          node,
-          remaining: previous.remaining,
-          started: previous.started,
-          timer: previous.timer,
-        }
+    if (preserve) return;
+    clear(previous);
+    const sameLifetime = previous?.signal === signal;
+    const registration: TimerRegistration = sameLifetime
+      ? previous
       : {
           ...config,
           node,
-          remaining: config.duration ?? 0,
+          signal,
+          remaining: 0,
           started: 0,
           timer: undefined,
         };
+    registration.duration = config.duration;
+    registration.value = config.value;
+    registration.remaining = config.duration ?? 0;
+    registration.timer = undefined;
     toasts.set(node, registration);
-    if (!preserve && paused.size === 0) start(registration);
+    if (paused.size === 0) start(registration);
     registrationChanged();
-    onAbort(signal, () => {
-      if (toasts.get(node) !== registration) return;
-      toasts.delete(node);
-      pendingRemoval.set(node, registration);
-      queueMicrotask(() => {
-        if (pendingRemoval.get(node) !== registration) return;
-        pendingRemoval.delete(node);
+    if (!sameLifetime)
+      onAbort(signal, () => {
+        if (toasts.get(node) !== registration) return;
+        toasts.delete(node);
         clear(registration);
+        registrationChanged();
       });
-      registrationChanged();
-    });
   }
 
   function setPointerPaused(node: HTMLElement, pause: boolean): void {

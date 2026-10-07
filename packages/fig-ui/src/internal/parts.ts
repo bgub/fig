@@ -1,59 +1,19 @@
 import type { MixinContext } from "@bgub/fig";
-import { type Bind, composeBind } from "@bgub/fig-dom";
-import { type Composite, type CompositeItem, onAbort } from "./composite.ts";
-
-export interface PartRegistration<Value> {
-  readonly node: HTMLElement;
-  readonly value: Value;
-}
+import { type Bind, composeBind, hostBinding } from "@bgub/fig-dom";
+import { type Composite, type CompositeItem } from "./composite.ts";
 
 /** Composes a widget's element binding after any the caller authored. */
 export function bindPart(
   context: MixinContext,
+  owner: object,
   bind: (node: HTMLElement, signal: AbortSignal) => void,
 ): Bind {
-  return composeBind(context.props.bind, (node, signal) => {
-    if (node instanceof HTMLElement) bind(node, signal);
-  });
-}
-
-/**
- * Tracks one named element of a widget. A replacement binding commits before
- * the superseded signal aborts, so only the current element may clear the slot.
- */
-export function createPartSlot(registrationChanged: () => void) {
-  let current: { readonly node: HTMLElement } | null = null;
-
-  function bind(node: HTMLElement, signal: AbortSignal): void {
-    const registration = { node };
-    current = registration;
-    registrationChanged();
-    onAbort(signal, () => {
-      if (current !== registration) return;
-      current = null;
-      registrationChanged();
-    });
-  }
-
-  return { bind, node: () => current?.node ?? null };
-}
-
-/** Tracks every mounted host for a repeatable or cardinality-checked part. */
-export function createPartCollection<Value>(registrationChanged: () => void) {
-  const registrations = new Map<HTMLElement, PartRegistration<Value>>();
-
-  function bind(node: HTMLElement, signal: AbortSignal, value: Value): void {
-    const registration = { node, value };
-    registrations.set(node, registration);
-    registrationChanged();
-    onAbort(signal, () => {
-      if (registrations.get(node) !== registration) return;
-      registrations.delete(node);
-      registrationChanged();
-    });
-  }
-
-  return { bind, items: () => [...registrations.values()] };
+  return composeBind(
+    context.props.bind,
+    hostBinding(context, owner, (node, signal) => {
+      if (node instanceof HTMLElement) bind(node, signal);
+    }),
+  );
 }
 
 /**
@@ -89,10 +49,7 @@ export function triggerProps(
   return {
     "aria-disabled": options.disabled ? "true" : undefined,
     "data-disabled": options.disabled ? "" : undefined,
-    disabled:
-      context.type === "button" && options.disabled
-        ? undefined
-        : context.props.disabled,
+    disabled: context.props.disabled,
     id: context.props.id ?? options.id,
     type:
       context.type === "button" ? (context.props.type ?? "button") : undefined,

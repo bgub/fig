@@ -9,16 +9,13 @@ import {
   useStableEvent,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import {
-  createAnchoredPopup,
-  toggledOpen,
-} from "../internal/anchored-popup.ts";
+import { createAnchoredPopup } from "../internal/anchored-popup.ts";
 import { expectPopupId } from "../internal/diagnostics.ts";
 import type {
   OpenChangeDetails,
   OpenChangeHandler,
 } from "../internal/open-state.ts";
-import { useOpenState } from "../internal/open-state.ts";
+import { usePopupState } from "../internal/popup-state.ts";
 import { bindPart } from "../internal/parts.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
@@ -52,6 +49,7 @@ interface TooltipState {
   readonly bindPopup: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindTrigger: (node: HTMLElement, signal: AbortSignal) => void;
   readonly disabled: boolean;
+  readonly nativeToggle: (event: Event) => void;
   readonly open: boolean;
   readonly requestOpen: (
     open: boolean,
@@ -73,7 +71,7 @@ const tooltipTriggerMixin = /* @__PURE__ */ createMixin(
       context.props["aria-describedby"],
       state.tooltipId,
     ),
-    bind: bindPart(context, state.bindTrigger),
+    bind: bindPart(context, state.bindTrigger, state.bindTrigger),
     "data-open": state.open ? "" : undefined,
     mix: [
       on("focusin", (event) => {
@@ -122,24 +120,15 @@ const tooltipMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: TooltipState) => {
     expectPopupId(context, state.tooltipId, "tooltip");
     return {
-      bind: bindPart(context, state.bindPopup),
+      bind: bindPart(context, state.bindTrigger, state.bindPopup),
       "data-open": state.open ? "" : undefined,
       id: state.tooltipId,
       mix: [
         on("beforetoggle", (event) => {
-          if (event.defaultPrevented) return;
-          const next = toggledOpen(event);
-          if (
-            next !== undefined &&
-            !state.requestOpen(next, event, undefined)
-          ) {
-            event.preventDefault();
-          }
+          state.nativeToggle(event);
         }),
         on("toggle", (event) => {
-          const next = toggledOpen(event);
-          if (next === undefined) return;
-          state.requestOpen(next, event, undefined);
+          state.nativeToggle(event);
         }),
         on("pointerenter", (event) => {
           if (event.currentTarget instanceof Element) {
@@ -166,7 +155,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
     () => createAnchoredPopup(requestReconcile, "tooltip"),
     [],
   );
-  const { getOpen, open, requestOpen, setOpen } = useOpenState({
+  const { getOpen, open, requestOpen, setOpen, nativeToggle } = usePopupState({
     ...options,
     requestReconcile,
   });
@@ -226,6 +215,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
     disabled,
     open,
     requestOpen,
+    nativeToggle,
     schedule: (next, event, trigger, wait) => {
       const anchor = registry.anchor();
       // Ignore hover before invoking the stable event, which aborts any

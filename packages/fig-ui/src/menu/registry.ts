@@ -1,4 +1,6 @@
-import { createComposite, onAbort } from "../internal/composite.ts";
+import type { PartReference } from "../internal/part-reference.ts";
+import { createPartCollection } from "../internal/registration.ts";
+import { createComposite } from "../internal/composite.ts";
 
 export type MenuItemKind = "checkbox" | "item" | "radio" | "submenu";
 
@@ -23,8 +25,8 @@ export function createMenuRegistry() {
     item: '[role^="menuitem"]',
     name: "menu",
   });
-  const automaticLabels = new WeakSet<HTMLElement>();
-  const registrations = new Map<HTMLElement, MenuItemRegistration>();
+  const labels = new WeakMap<HTMLElement, PartReference>();
+  const registrations = createPartCollection<MenuItemRegistration>();
 
   function bindMenuItem(
     node: HTMLElement,
@@ -32,11 +34,8 @@ export function createMenuRegistry() {
     config: MenuItemConfig,
   ): void {
     const registration = { ...config, node };
-    registrations.set(node, registration);
+    registrations.bind(node, signal, registration);
     composite.bindItem(node, signal, config.value, config.disabled);
-    onAbort(signal, () => {
-      if (registrations.get(node) === registration) registrations.delete(node);
-    });
   }
 
   function menuItemAt(target: EventTarget | null) {
@@ -47,10 +46,9 @@ export function createMenuRegistry() {
   function bindMenu(
     node: HTMLElement,
     signal: AbortSignal,
-    automaticLabel: boolean,
+    label: PartReference,
   ): void {
-    if (automaticLabel) automaticLabels.add(node);
-    else automaticLabels.delete(node);
+    labels.set(node, label);
     composite.bindContainer(node, signal);
   }
 
@@ -59,6 +57,7 @@ export function createMenuRegistry() {
     bindMenu,
     bindMenuItem,
     menuItemAt,
-    hasAutomaticLabel: (node: HTMLElement) => automaticLabels.has(node),
+    syncLabel: (node: HTMLElement, id: string | undefined) =>
+      labels.get(node)?.sync(node, id),
   };
 }

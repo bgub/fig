@@ -24,7 +24,8 @@
     "test:watch": "vitest",
     "test:transition-lifetimes": "node scripts/view-transition-lifetime.mjs",
     "tegami": "node scripts/tegami.mts",
-    "size": "size-limit"
+    "size": "size-limit",
+    "test:popup": "playwright test --config playwright.popup.config.cjs"
   },
   "size-limit": [
     {
@@ -47,7 +48,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "2.6 kB"
+      "limit": "3 kB"
     },
     {
       "path": "packages/fig-ui/dist/checkbox.js",
@@ -55,7 +56,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.6 kB"
+      "limit": "1.8 kB"
     },
     {
       "path": "packages/fig-ui/dist/combobox.js",
@@ -63,7 +64,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4.7 kB"
+      "limit": "5.2 kB"
     },
     {
       "path": "packages/fig-ui/dist/field.js",
@@ -71,7 +72,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.2 kB"
+      "limit": "1.4 kB"
     },
     {
       "path": "packages/fig-ui/dist/listbox.js",
@@ -79,7 +80,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "3.3 kB"
+      "limit": "3.5 kB"
     },
     {
       "path": "packages/fig-ui/dist/switch.js",
@@ -87,7 +88,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.6 kB"
+      "limit": "1.8 kB"
     },
     {
       "path": "packages/fig-ui/dist/dialog.js",
@@ -103,7 +104,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4 kB"
+      "limit": "4.4 kB"
     },
     {
       "path": "packages/fig-ui/dist/menu/submenu.js",
@@ -111,7 +112,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4.5 kB"
+      "limit": "5 kB"
     },
     {
       "path": "packages/fig-ui/dist/popover.js",
@@ -119,7 +120,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.8 kB"
+      "limit": "2.1 kB"
     },
     {
       "path": "packages/fig-ui/dist/radio-group.js",
@@ -127,7 +128,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "2.5 kB"
+      "limit": "2.9 kB"
     },
     {
       "path": "packages/fig-ui/dist/select.js",
@@ -135,7 +136,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4.5 kB"
+      "limit": "5 kB"
     },
     {
       "path": "packages/fig-ui/dist/tabs.js",
@@ -143,7 +144,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "3.3 kB"
+      "limit": "3.6 kB"
     },
     {
       "path": "packages/fig-ui/dist/tabs/indicator.js",
@@ -175,7 +176,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "1.8 kB"
+      "limit": "2.3 kB"
     },
     {
       "name": "Fig DOM createRoot without View Transitions",

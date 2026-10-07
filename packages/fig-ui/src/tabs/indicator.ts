@@ -6,7 +6,8 @@ import {
   useBeforePaint,
   useMemo,
 } from "@bgub/fig";
-import { bindPart, createPartSlot } from "../internal/parts.ts";
+import { bindPart } from "../internal/parts.ts";
+import { createPartSlot } from "../internal/registration.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
 export interface TabsIndicatorParts {
@@ -23,13 +24,13 @@ type TabsIndicatorRegistry = ReturnType<typeof createTabsIndicatorRegistry>;
 
 const indicatorListMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, registry: TabsIndicatorRegistry) => ({
-    bind: bindPart(context, registry.bindList),
+    bind: bindPart(context, registry, registry.bindList),
   }),
 );
 
 const indicatorMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, registry: TabsIndicatorRegistry) => ({
-    bind: bindPart(context, registry.bindIndicator),
+    bind: bindPart(context, registry, registry.bindIndicator),
     hidden: true,
     role: "presentation",
   }),
@@ -69,7 +70,7 @@ function createTabsIndicatorRegistry(registrationChanged: () => void) {
   let observed: HTMLElement[] = [];
 
   function bindIndicator(node: HTMLElement, signal: AbortSignal): void {
-    indicator.bind(node, signal);
+    if (!indicator.bind(node, signal)) return;
     signal.addEventListener(
       "abort",
       () => {

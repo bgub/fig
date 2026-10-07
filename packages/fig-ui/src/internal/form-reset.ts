@@ -1,19 +1,21 @@
-import { onAbort } from "./composite.ts";
-
-/**
- * Listens once per owning form even when a widget binds several native inputs.
- * Reset state is applied in a microtask, after the cancelable native reset
- * event has either completed or been refused.
- */
+/** Listens once per form, following committed host/form ownership. */
 export function createFormReset(onReset: () => void) {
   const forms = new Map<
     HTMLFormElement,
-    { readonly controller: AbortController; count: number }
+    { controller: AbortController; count: number }
+  >();
+  const inputs = new Map<
+    HTMLElement,
+    { form: HTMLFormElement; signal: AbortSignal; release: () => void }
   >();
 
   function bind(node: HTMLElement, signal: AbortSignal): void {
-    if (!(node instanceof HTMLInputElement) || node.form === null) return;
-    const form = node.form;
+    const previous = inputs.get(node);
+    const nextForm = node instanceof HTMLInputElement ? node.form : null;
+    if (previous?.signal === signal && previous.form === nextForm) return;
+    previous?.release();
+    if (nextForm === null) return;
+    const form = nextForm;
     let registration = forms.get(form);
     if (registration === undefined) {
       const controller = new AbortController();
@@ -22,26 +24,28 @@ export function createFormReset(onReset: () => void) {
       form.addEventListener(
         "reset",
         (event) => {
+          // The platform resets native values after dispatch. Cancellation is
+          // final only then; this delay is about the reset event, not rebinding.
           queueMicrotask(() => {
-            // Rebinding replaces the listener's controller, but a pending
-            // reset still belongs to the widget while it has inputs here.
             if (forms.has(form) && !event.defaultPrevented) onReset();
           });
         },
         { signal: controller.signal },
       );
     }
-    registration.count += 1;
-
-    onAbort(signal, () => {
+    registration.count++;
+    const entry = { form, signal, release };
+    inputs.set(node, entry);
+    function release(): void {
+      if (inputs.get(node) !== entry) return;
+      inputs.delete(node);
+      signal.removeEventListener("abort", release);
       const current = forms.get(form);
-      if (current === undefined) return;
-      current.count -= 1;
-      if (current.count > 0) return;
+      if (current === undefined || --current.count > 0) return;
       current.controller.abort();
       forms.delete(form);
-    });
+    }
+    signal.addEventListener("abort", release, { once: true });
   }
-
   return { bind };
 }

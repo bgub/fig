@@ -61,3 +61,22 @@ The callback returns nothing. Its signal aborts when the callback identity chang
 In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, so use `useBeforePaint` when you need layout measurement.
 
 `on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.
+
+### Committed Host Behavior
+
+A mixin that registers a host uses `hostBinding(context, owner, update)` from `@bgub/fig-dom`. The owner is a stable object belonging to the widget instance; the mixin's structural slot identifies the behavior on that host.
+
+```tsx
+const registeredPart = createMixin((context, registry, value) => ({
+  bind: composeBind(
+    context.props.bind,
+    hostBinding(context, registry, (node, signal) => {
+      registry.bind(node, signal, value);
+    }),
+  ),
+}));
+```
+
+The update callback runs for each committed host update. Its signal stays live when only configuration changes. The signal aborts synchronously when the host, owner, or mixin slot is removed or replaced, and when Activity hides the host. Revealing an Activity attaches the latest committed configuration with a fresh signal. Suspended renders never publish configuration. A callback that installs long-lived work must key that work by the signal, installing cleanup once per lifetime while updating its configuration on subsequent calls.
+
+`composeBind` returns a binding description, not a callable function. It preserves independent bindings instead of wrapping them in one callback. Raw callbacks retain their own identity-based lifetimes; array grouping and adding a host behavior do not restart them. Falsy callback entries retain their positions. Each binding gets its own signal and its own development run–abort–run check. Independent behaviors must not depend on sharing a signal or on a grouped strict-mode invocation order. Use `BindCallback` for a callable callback and `Bind` for the full prop type (callback, host binding, or composition).

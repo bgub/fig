@@ -1,5 +1,5 @@
 import { assertSinglePart } from "./diagnostics.ts";
-import { createPartCollection } from "./parts.ts";
+import { createPartCollection } from "./registration.ts";
 
 /** Native top-layer synchronization shared by anchored popup widgets. */
 export function createAnchoredPopup(

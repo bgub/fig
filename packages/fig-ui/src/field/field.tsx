@@ -13,12 +13,13 @@ import {
   assertUniqueIds,
   expectHost,
 } from "../internal/diagnostics.ts";
-import { usePartIds } from "../internal/ids.ts";
 import {
-  bindPart,
-  createPartCollection,
-  setIdReference,
-} from "../internal/parts.ts";
+  createPartReference,
+  type PartReference,
+} from "../internal/part-reference.ts";
+import { usePartIds } from "../internal/ids.ts";
+import { bindPart, setIdReference } from "../internal/parts.ts";
+import { createPartCollection } from "../internal/registration.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
 export interface FieldOptions {
@@ -59,11 +60,11 @@ type FieldPart =
   | {
       readonly kind: "control";
       readonly describedBy: string | undefined;
-      readonly autoLabel: boolean;
+      readonly label: PartReference;
     }
   | { readonly kind: "description" }
   | { readonly kind: "error" }
-  | { readonly kind: "label"; readonly autoFor: boolean };
+  | { readonly kind: "label"; readonly control: PartReference };
 
 interface FieldMessageOwnState {
   readonly id: string;
@@ -75,17 +76,17 @@ const defaultError = Symbol("fig-ui.field.error");
 const fieldLabelMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState) => {
     expectHost(context, "field label", "label");
-    const autoFor = context.props.for == null;
+    const control = createPartReference(context, "for", state.controlId);
     return {
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.bind, (node, signal) =>
         state.bind(node, signal, {
           kind: "label",
-          autoFor: autoFor && context.props.for === state.controlId,
+          control,
         }),
       ),
       // A wrapping label needs no `for`, but pointing at the control also works
       // when the two are siblings, which is the arrangement that needs help.
-      for: context.props.for ?? state.controlId,
+      ...control.props,
       id: context.props.id ?? state.labelId,
     };
   },
@@ -93,21 +94,18 @@ const fieldLabelMixin = /* @__PURE__ */ createMixin(
 
 const fieldControlMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState) => {
-    const autoLabel =
-      context.props["aria-labelledby"] == null &&
-      context.props["aria-label"] === undefined;
+    const label = createPartReference(
+      context,
+      "aria-labelledby",
+      state.labelId,
+    );
     return {
-      "aria-labelledby":
-        context.props["aria-labelledby"] ??
-        (context.props["aria-label"] === undefined ? state.labelId : undefined),
+      ...label.props,
       "aria-invalid": state.invalid ? "true" : undefined,
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.bind, (node, signal) =>
         state.bind(node, signal, {
           describedBy: context.props["aria-describedby"],
-          autoLabel:
-            autoLabel &&
-            context.props["aria-labelledby"] === state.labelId &&
-            context.props["aria-label"] === undefined,
+          label,
           kind: "control",
         }),
       ),
@@ -120,7 +118,7 @@ const fieldControlMixin = /* @__PURE__ */ createMixin(
 
 const fieldDescriptionMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState, own: FieldMessageOwnState) => ({
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.bind, (node, signal) =>
       state.bind(node, signal, { kind: "description" }),
     ),
     id: context.props.id ?? own.id,
@@ -129,7 +127,7 @@ const fieldDescriptionMixin = /* @__PURE__ */ createMixin(
 
 const fieldErrorMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState, own: FieldMessageOwnState) => ({
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.bind, (node, signal) =>
       state.bind(node, signal, { kind: "error" }),
     ),
     id: context.props.id ?? own.id,
@@ -167,12 +165,10 @@ export function useField(options: FieldOptions = {}): FieldParts {
     if (control === undefined) return;
     const node = control.node;
     const label = labels.at(-1);
-    if (label?.value.kind === "label" && label.value.autoFor) {
-      label.node.setAttribute("for", node.id);
-    }
-    if (control.value.kind === "control" && control.value.autoLabel) {
-      setIdReference(node, "aria-labelledby", label?.node.id);
-    }
+    if (label?.value.kind === "label")
+      label.value.control.sync(label.node, node.id);
+    if (control.value.kind === "control")
+      control.value.label.sync(node, label?.node.id);
     assertControlLabel(node);
     const descriptions = registrations
       .filter((part) => part.value.kind === "description")

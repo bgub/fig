@@ -10,6 +10,7 @@ import {
   useDialog,
 } from "./dialog.tsx";
 
+import { createPartReference } from "../internal/part-reference.ts";
 import { createDialogRegistry } from "./registry.ts";
 
 const roots: FigRoot[] = [];
@@ -30,8 +31,14 @@ describe("Dialog", () => {
     document.body.append(node);
     const controller = new AbortController();
     registry.bindDialog(node, controller.signal, {
-      title: true,
-      description: true,
+      title: createPartReference(
+        { type: "dialog", props: {}, owns: () => true },
+        "aria-labelledby",
+      ),
+      description: createPartReference(
+        { type: "dialog", props: {}, owns: () => true },
+        "aria-describedby",
+      ),
     });
     expect(() => registry.sync(false)).not.toThrow();
     expect(() => registry.sync(true)).toThrow("requires an accessible name");

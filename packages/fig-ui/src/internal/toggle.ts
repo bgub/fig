@@ -5,13 +5,14 @@ import {
   useBeforePaint,
   useMemo,
   useStableEvent,
-  useState,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { type ChangeDetails, createChangeDetails } from "./changes.ts";
+import { useControllableValue } from "./controllable-value.ts";
 import { assertSinglePart, expectHost } from "./diagnostics.ts";
 import { createFormReset } from "./form-reset.ts";
-import { bindPart, createPartCollection } from "./parts.ts";
+import { bindPart } from "./parts.ts";
+import { createPartCollection } from "./registration.ts";
 import { useRegistrationReconcile } from "./reconcile.ts";
 
 export type CheckedChangeDetails = ChangeDetails;
@@ -47,6 +48,7 @@ export interface ToggleControlParts {
 }
 
 interface ToggleState {
+  readonly owner: object;
   readonly checked: boolean;
   readonly disabled: boolean;
   readonly indeterminate: boolean;
@@ -67,7 +69,7 @@ const toggleMixin = /* @__PURE__ */ createMixin(
       "input",
     );
     return {
-      bind: bindPart(context, state.noteInput),
+      bind: bindPart(context, state.owner, state.noteInput),
       checked: state.checked,
       "data-checked": state.checked ? "" : undefined,
       "data-disabled":
@@ -115,31 +117,19 @@ export function useToggleControl(
     readOnly = false,
     required = false,
   } = options;
-  const controlled = options.checked !== undefined;
-  const initialChecked = useMemo(() => options.defaultChecked === true, []);
-  const [uncontrolled, setUncontrolled] = useState(initialChecked);
-  const checked = controlled ? options.checked === true : uncontrolled;
   const requestReconcile = useRegistrationReconcile();
+  const stateValue = useControllableValue({
+    value: options.checked,
+    defaultValue: options.defaultChecked === true,
+    onChange: options.onCheckedChange,
+    reconcile: requestReconcile,
+  });
+  const checked = stateValue.value;
   const input = useMemo(
     () => createPartCollection<undefined>(requestReconcile),
     [],
   );
-  const tracker = useMemo(() => ({ checked }), []);
-  tracker.checked = checked;
-
-  const reset = useStableEvent(() => {
-    const next = controlled ? options.checked === true : initialChecked;
-    tracker.checked = next;
-    if (controlled) requestReconcile();
-    else setUncontrolled(next);
-  });
-  const formReset = useMemo(() => createFormReset(reset), []);
-
-  const emitCheckedChange = useStableEvent(
-    (next: boolean, details: CheckedChangeDetails, signal: AbortSignal) => {
-      options.onCheckedChange?.(next, details, signal);
-    },
-  );
+  const formReset = useMemo(() => createFormReset(stateValue.reset), []);
 
   const toggle = useStableEvent(
     (next: boolean, event: Event, node: Element) => {
@@ -152,29 +142,12 @@ export function useToggleControl(
         requestReconcile();
         return;
       }
-      if (next === tracker.checked) return;
-      const details = createChangeDetails(event, node);
-      emitCheckedChange(next, details);
-      if (details.isCanceled) {
-        requestReconcile();
-        return;
-      }
-      if (!controlled) tracker.checked = next;
-      // The box is already ticked. When that did not become state, reconcile
-      // so the committed props re-assert.
-      if (controlled) requestReconcile();
-      else setUncontrolled(next);
+      stateValue.request(() => next, createChangeDetails(event, node));
     },
   );
 
   const setChecked = useStableEvent((next: boolean) => {
-    if (next === tracker.checked) return;
-    const details = createChangeDetails(null);
-    emitCheckedChange(next, details);
-    if (details.isCanceled) return;
-    if (!controlled) tracker.checked = next;
-    if (controlled) requestReconcile();
-    else setUncontrolled(next);
+    stateValue.request(() => next, createChangeDetails(null));
   });
 
   useBeforePaint(() => {
@@ -185,6 +158,7 @@ export function useToggleControl(
   });
 
   const state: ToggleState = {
+    owner: input,
     checked,
     disabled,
     indeterminate,

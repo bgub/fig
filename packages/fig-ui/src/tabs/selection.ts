@@ -4,6 +4,7 @@ import {
   createChangeDetails,
 } from "../internal/changes.ts";
 import { type CompositeItem, sameValue } from "../internal/composite.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { createTabsRegistry } from "./registry.ts";
 
@@ -28,12 +29,6 @@ export interface TabsSelectionOptions<Value> {
   readonly value: Value | null;
 }
 
-interface SelectionState {
-  /** The value holding the roving tab stop. */
-  readonly highlighted: unknown;
-  readonly value: unknown;
-}
-
 interface SelectionTracker {
   /** An explicitly requested default stays selected even while disabled. */
   exempt: unknown;
@@ -48,11 +43,18 @@ const none = Symbol("fig-ui.tabs.none");
  */
 export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
   const { controlled } = options;
-  const [state, setState] = useState<SelectionState>(() => ({
-    highlighted: options.value === null ? none : options.value,
-    value: options.value,
-  }));
-  const value = (controlled ? options.value : state.value) as Value | null;
+  const registrationChanged = useRegistrationReconcile();
+  const selection = useControllableValue<Value | null>({
+    value: controlled ? options.value : undefined,
+    defaultValue: options.value,
+    onChange: options.onValueChange,
+    equal: sameValue,
+    reconcile: registrationChanged,
+  });
+  const { value } = selection;
+  const [highlighted, setHighlightedState] = useState<unknown>(() =>
+    options.value === null ? none : options.value,
+  );
   const tracker = useMemo<SelectionTracker>(
     () => ({
       exempt: controlled || options.implicitDefault ? none : options.value,
@@ -61,30 +63,23 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
     [],
   );
   const autoSelect = !controlled && options.implicitDefault;
-  const registrationChanged = useRegistrationReconcile();
   const registry = useMemo(() => createTabsRegistry(registrationChanged), []);
 
   const setHighlighted = useStableEvent((highlighted: unknown) => {
-    setState((current) =>
-      sameValue(current.highlighted, highlighted)
-        ? current
-        : { ...current, highlighted },
-    );
+    setHighlightedState(() => highlighted);
   });
-
-  const emitChange = useStableEvent(
-    (next: unknown, details: TabsValueChangeDetails, signal: AbortSignal) => {
-      options.onValueChange?.(next as Value | null, details, signal);
-    },
-  );
 
   const select = useStableEvent(
     (next: unknown, event: Event, trigger: Element) => {
-      if (sameValue(next, value)) return;
-      const details = createChangeDetails(event, trigger);
-      emitChange(next, details);
-      if (details.isCanceled || controlled) return;
-      setState({ highlighted: next, value: next });
+      if (
+        selection.request(
+          () => next as Value | null,
+          createChangeDetails(event, trigger),
+        ) &&
+        !controlled
+      ) {
+        setHighlighted(next);
+      }
     },
   );
 
@@ -109,28 +104,26 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
       const target =
         repair.value === null ? tabs[0] : registry.item(repair.value);
       tracker.value = repair.value;
-      setState((current) => ({
-        highlighted: target === undefined ? current.highlighted : target.value,
-        value: repair.value,
-      }));
-      emitChange(repair.value, createChangeDetails(null));
+      if (target !== undefined) setHighlighted(target.value);
+      selection.restore(
+        repair.value as Value | null,
+        createChangeDetails(null),
+      );
       return;
     }
     tracker.value = value;
 
-    const highlighted = nextHighlight(
+    const next = nextHighlight(
       tabs,
       value,
-      state.highlighted,
+      highlighted,
       changed && !registry.containsFocus(),
     );
-    if (!sameValue(highlighted, state.highlighted)) {
-      setState((current) => ({ ...current, highlighted }));
-    }
+    if (!sameValue(next, highlighted)) setHighlighted(next);
   });
 
   return {
-    highlightedValue: state.highlighted,
+    highlightedValue: highlighted,
     registry,
     resetHighlight,
     select,

@@ -1,11 +1,9 @@
 import {
   type FigNode,
   type MixinDescriptor,
-  useBeforeLayout,
   useBeforePaint,
   useMemo,
   useStableEvent,
-  useState,
 } from "@bgub/fig";
 import {
   type ChangeDetails,
@@ -16,6 +14,7 @@ import {
   type Orientation,
   sameValue,
 } from "../internal/composite.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { usePartIds } from "../internal/ids.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { createRelations } from "../internal/relations.ts";
@@ -81,18 +80,14 @@ export function useAccordion<Value = unknown>(
     multiple = false,
     orientation = "vertical",
   } = options;
-  const controlledValue = options.value;
-  const controlled = controlledValue !== undefined;
-  const [uncontrolled, setUncontrolled] = useState<{
-    readonly value: readonly Value[];
-  }>(() => ({ value: options.defaultValue ?? [] }));
-  const values = controlledValue ?? uncontrolled.value;
-  const tracker = useMemo(() => ({ values }), []);
-  useBeforeLayout(() => {
-    // A suspended render must not publish values to the active event handler.
-    tracker.values = values;
-  });
   const registrationChanged = useRegistrationReconcile();
+  const selection = useControllableValue<readonly Value[]>({
+    value: options.value,
+    defaultValue: options.defaultValue ?? [],
+    onChange: options.onValueChange,
+    reconcile: registrationChanged,
+  });
+  const values = selection.value;
   const registry = useMemo(
     () =>
       createComposite({
@@ -111,32 +106,20 @@ export function useAccordion<Value = unknown>(
     relations.sync();
   });
 
-  const emitChange = useStableEvent(
-    (
-      next: readonly unknown[],
-      details: AccordionValueChangeDetails,
-      signal: AbortSignal,
-    ) => {
-      options.onValueChange?.(next as readonly Value[], details, signal);
-    },
-  );
-
   const toggle = useStableEvent(
     (value: unknown, event: Event, trigger: Element) => {
-      // Consecutive activations can arrive before the previous state commits.
-      const current = controlled ? values : tracker.values;
-      const open = current.some((entry) => sameValue(entry, value));
-      if (open && !collapsible && !multiple) return;
-      const next = open
-        ? current.filter((entry) => !sameValue(entry, value))
-        : multiple
-          ? [...current, value as Value]
-          : [value as Value];
-      const details = createChangeDetails(event, trigger);
-      emitChange(next, details);
-      if (details.isCanceled || controlled) return;
-      tracker.values = next;
-      setUncontrolled({ value: next });
+      selection.request(
+        (current) => {
+          const open = current.some((entry) => sameValue(entry, value));
+          if (open && !collapsible && !multiple) return current;
+          return open
+            ? current.filter((entry) => !sameValue(entry, value))
+            : multiple
+              ? [...current, value as Value]
+              : [value as Value];
+        },
+        createChangeDetails(event, trigger),
+      );
     },
   );
 

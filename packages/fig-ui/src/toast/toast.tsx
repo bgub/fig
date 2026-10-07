@@ -80,7 +80,7 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
     "aria-label": context.props["aria-label"] ?? state.label,
     "aria-live": state.priority,
     "aria-relevant": "additions text",
-    bind: bindPart(context, state.registry.bindRegion),
+    bind: bindPart(context, state.registry, state.registry.bindRegion),
     "data-priority": state.priority,
     mix: [
       on("focusin", () => state.registry.setPaused("focus", true)),
@@ -112,7 +112,7 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
 const toastMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: ToastRegionState, own: ToastState) => ({
     "aria-atomic": "true",
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindToast(node, signal, {
         duration: own.duration,
         value: own.value,

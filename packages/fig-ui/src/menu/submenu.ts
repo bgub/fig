@@ -46,7 +46,7 @@ interface SubmenuState {
 
 const submenuTriggerBehavior = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: SubmenuState) => ({
-    bind: bindPart(context, () => {
+    bind: bindPart(context, state.hover, () => {
       if (state.disabled) state.hover(undefined, false);
     }),
     "aria-disabled": state.disabled ? "true" : undefined,

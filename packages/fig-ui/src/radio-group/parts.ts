@@ -26,7 +26,7 @@ export const radioGroupMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: RadioGroupPartState) => ({
     "aria-orientation": state.orientation,
     "aria-readonly": state.readOnly ? "true" : undefined,
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindContainer(node, signal),
     ),
     "data-disabled": state.disabled ? "" : undefined,
@@ -60,7 +60,7 @@ export const radioMixin = /* @__PURE__ */ createMixin(
     expectHost(context, "radio", "input");
     const disabled = own.disabled || context.props.disabled === true;
     return {
-      bind: bindPart(context, (node, signal) => {
+      bind: bindPart(context, state.registry, (node, signal) => {
         state.registry.bindItem(node, signal, own.value, disabled);
         state.bindFormReset(node, signal);
       }),

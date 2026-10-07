@@ -62,3 +62,7 @@ Returned props compose shallowly. To extend `style`, `bind`, or another structur
 ```
 
 Its native event and `AbortSignal` behavior belong to the [event contract](./events.md). Future built-ins should come from real behavior-composition needs, not from filling out a catalog.
+
+A mixin that registers host configuration should return a [`hostBinding`](./events.md#committed-host-behavior), composed with the current `bind` prop. Its stable owner and mixin slot define a lifetime independently of its update closure. This lets a configuration update preserve observers, timers, and registration cleanup without inferring whether an aborted callback means a rerender or an actual removal.
+
+`context.owns(name)` reports whether that mixin is still the last writer of a composed prop. Read it in committed host work, after composition finishes. Each returned prop transfers ownership, including explicit `undefined` and writes of the same value. Nested returned mixins own their own writes; unrelated writes leave earlier ownership intact. This is property provenance, not a value-equality check: generated DOM relationships can yield to later authored props without mistaking an identical string for their own default.

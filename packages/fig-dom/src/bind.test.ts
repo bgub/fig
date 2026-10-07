@@ -93,18 +93,30 @@ describe("@bgub/fig-dom bind", () => {
 
     expect(calls).toEqual([
       "first",
-      "second",
-      "third",
       "first",
       "second",
+      "second",
+      "third",
       "third",
     ]);
-    expect(signals.slice(0, 3).every((signal) => signal.aborted)).toBe(true);
-    expect(signals.slice(3).every((signal) => !signal.aborted)).toBe(true);
+    expect(
+      signals
+        .filter((_, index) => index % 2 === 0)
+        .every((signal) => signal.aborted),
+    ).toBe(true);
+    expect(
+      signals
+        .filter((_, index) => index % 2 === 1)
+        .every((signal) => !signal.aborted),
+    ).toBe(true);
 
     flushSync(() => root.render(createElement("button", null)));
 
-    expect(signals.slice(3).every((signal) => signal.aborted)).toBe(true);
+    expect(
+      signals
+        .filter((_, index) => index % 2 === 1)
+        .every((signal) => signal.aborted),
+    ).toBe(true);
   });
 
   it("aborts bind signals when bound nodes are removed", () => {

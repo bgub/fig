@@ -1,3 +1,4 @@
+import { createPartReference } from "../internal/part-reference.ts";
 import {
   createMixin,
   type MixinContext,
@@ -29,7 +30,7 @@ export interface MenuPartState {
 const menuTriggerBehavior = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: MenuPartState, own: MenuTriggerOwnState) => ({
     "aria-haspopup": "menu",
-    bind: bindPart(context, state.noteTrigger),
+    bind: bindPart(context, state.registry, state.noteTrigger),
     id: context.props.id ?? state.triggerId,
     // Click already opens through popovertarget; these are the keys the
     // pattern adds, and each one says where focus should land.
@@ -56,23 +57,15 @@ const menuTriggerBehavior = /* @__PURE__ */ createMixin(
 
 const menuBehavior = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: MenuPartState) => {
-    const automaticLabel =
-      context.props["aria-labelledby"] == null &&
-      context.props["aria-label"] === undefined;
+    const label = createPartReference(
+      context,
+      "aria-labelledby",
+      state.triggerId,
+    );
     return {
-      "aria-labelledby":
-        context.props["aria-labelledby"] ??
-        (context.props["aria-label"] === undefined
-          ? state.triggerId
-          : undefined),
-      bind: bindPart(context, (node, signal) =>
-        state.registry.bindMenu(
-          node,
-          signal,
-          automaticLabel &&
-            context.props["aria-labelledby"] === state.triggerId &&
-            context.props["aria-label"] === undefined,
-        ),
+      ...label.props,
+      bind: bindPart(context, state.registry, (node, signal) =>
+        state.registry.bindMenu(node, signal, label),
       ),
       mix: on("keydown", (event) => {
         if (
@@ -170,7 +163,7 @@ export const menuItemMixin = /* @__PURE__ */ createMixin(
             ? "true"
             : "false"
           : undefined,
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindMenuItem(node, signal, { ...own, disabled }),
       ),
       "data-checked": own.checked ? "" : undefined,

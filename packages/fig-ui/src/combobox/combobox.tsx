@@ -1,4 +1,8 @@
 import {
+  createPartReference,
+  type PartReference,
+} from "../internal/part-reference.ts";
+import {
   createMixin,
   type FigNode,
   type MixinContext,
@@ -10,14 +14,15 @@ import {
   useState,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
-import {
-  createAnchoredPopup,
-  toggledOpen,
-} from "../internal/anchored-popup.ts";
+import { createAnchoredPopup } from "../internal/anchored-popup.ts";
 import {
   type ChangeDetails,
   createChangeDetails,
 } from "../internal/changes.ts";
+import {
+  requestChanges,
+  useControllableValue,
+} from "../internal/controllable-value.ts";
 import { sameValue } from "../internal/composite.ts";
 import {
   assertControlLabel,
@@ -31,7 +36,7 @@ import type {
   OpenChangeDetails,
   OpenChangeHandler,
 } from "../internal/open-state.ts";
-import { useOpenState } from "../internal/open-state.ts";
+import { usePopupState } from "../internal/popup-state.ts";
 import { bindPart, setIdReference } from "../internal/parts.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
@@ -97,7 +102,7 @@ type ComboboxRegistry = ReturnType<typeof createListbox>;
 
 interface ComboboxState {
   readonly inline: boolean;
-  readonly automaticLabels: WeakSet<HTMLElement>;
+  readonly labels: WeakMap<HTMLElement, PartReference>;
   readonly bindHiddenInput: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindInput: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindPopup: (node: HTMLElement, signal: AbortSignal) => void;
@@ -109,6 +114,7 @@ interface ComboboxState {
   readonly inputValue: string;
   readonly name: string | undefined;
   readonly open: boolean;
+  readonly nativeToggle: (event: Event) => void;
   readonly popupId: string;
   readonly readOnly: boolean;
   readonly registry: ComboboxRegistry;
@@ -145,7 +151,7 @@ const comboboxInputMixin = /* @__PURE__ */ createMixin(
       "aria-expanded": state.open ? "true" : "false",
       "aria-haspopup": "listbox",
       "aria-readonly": readOnly ? "true" : undefined,
-      bind: bindPart(context, state.bindInput),
+      bind: bindPart(context, state.registry, state.bindInput),
       "data-open": state.open ? "" : undefined,
       "data-readonly": readOnly ? "" : undefined,
       disabled: disabled ? true : undefined,
@@ -218,18 +224,15 @@ const comboboxInputMixin = /* @__PURE__ */ createMixin(
 const comboboxPopupMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: ComboboxState) => {
     expectPopupId(context, state.popupId, "combobox popup");
-    const automaticLabel =
-      context.props["aria-labelledby"] == null &&
-      context.props["aria-label"] === undefined;
+    const label = createPartReference(context, "aria-labelledby");
     return {
-      bind: bindPart(context, (node, signal) => {
-        if (
-          automaticLabel &&
-          context.props["aria-labelledby"] == null &&
-          context.props["aria-label"] === undefined
-        )
-          state.automaticLabels.add(node);
-        else state.automaticLabels.delete(node);
+      ...label.props,
+      bind: bindPart(context, state.registry, (node, signal) => {
+        state.labels.set(node, label);
+        // Clear a previously inherited literal name when the caller switches
+        // to a reference. Authored literal names remain the caller's property.
+        if (context.props["aria-label"] === undefined)
+          node.removeAttribute("aria-label");
         state.bindPopup(node, signal);
         state.registry.bindContainer(node, signal);
       }),
@@ -238,20 +241,10 @@ const comboboxPopupMixin = /* @__PURE__ */ createMixin(
       hidden: state.inline ? !state.open : undefined,
       mix: [
         on("beforetoggle", (event) => {
-          if (state.inline || event.defaultPrevented) return;
-          const next = toggledOpen(event);
-          if (
-            next !== undefined &&
-            !state.requestOpen(next, event, undefined)
-          ) {
-            event.preventDefault();
-          }
+          if (!state.inline) state.nativeToggle(event);
         }),
         on("toggle", (event) => {
-          if (state.inline) return;
-          const next = toggledOpen(event);
-          if (next === undefined) return;
-          state.requestOpen(next, event, undefined);
+          if (!state.inline) state.nativeToggle(event);
         }),
         on("pointerdown", (event) => {
           if (state.registry.optionAt(event.target) !== undefined) {
@@ -285,7 +278,7 @@ const comboboxOptionMixin = /* @__PURE__ */ createMixin(
     return {
       "aria-disabled": disabled ? "true" : undefined,
       "aria-selected": own.selected ? "true" : "false",
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindOption(node, signal, {
           disabled,
           textValue: own.textValue,
@@ -312,7 +305,7 @@ const comboboxHiddenInputMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: ComboboxState) => {
     expectHost(context, "combobox hidden input", "input");
     return {
-      bind: bindPart(context, state.bindHiddenInput),
+      bind: bindPart(context, state.registry, state.bindHiddenInput),
       disabled: state.disabled ? true : undefined,
       name: context.props.name ?? state.name,
       type: "hidden",
@@ -326,24 +319,25 @@ export function useCombobox<Value = unknown>(
   options: ComboboxOptions<Value> = {},
 ): ComboboxParts<Value> {
   const { disabled = false, readOnly = false } = options;
-  const controlledValue = options.value !== undefined;
-  const controlledInput = options.inputValue !== undefined;
-  const initialValue = useMemo(() => options.defaultValue ?? null, []);
-  const initialInputValue = useMemo(() => options.defaultInputValue ?? "", []);
-  const [uncontrolledValue, setUncontrolledValue] = useState<{
-    readonly value: Value | null;
-  }>(() => ({ value: initialValue }));
-  const [uncontrolledInput, setUncontrolledInput] = useState(initialInputValue);
-  const value = controlledValue
-    ? (options.value ?? null)
-    : uncontrolledValue.value;
-  const inputValue = controlledInput
-    ? (options.inputValue ?? "")
-    : uncontrolledInput;
+  const requestReconcile = useRegistrationReconcile();
+  const selectedValue = useControllableValue<Value | null>({
+    value: options.value,
+    defaultValue: options.defaultValue ?? null,
+    onChange: options.onValueChange,
+    equal: sameValue,
+    reconcile: requestReconcile,
+  });
+  const query = useControllableValue({
+    value: options.inputValue,
+    defaultValue: options.defaultInputValue ?? "",
+    onChange: options.onInputValueChange,
+    reconcile: requestReconcile,
+  });
+  const value = selectedValue.value;
+  const inputValue = query.value;
   const [highlighted, setHighlightedState] = useState<{
     readonly value: unknown;
   }>(() => ({ value }));
-  const requestReconcile = useRegistrationReconcile();
   const registry = useMemo(
     () => createListbox("combobox", requestReconcile),
     [],
@@ -352,7 +346,7 @@ export function useCombobox<Value = unknown>(
     () => createAnchoredPopup(requestReconcile, "combobox"),
     [],
   );
-  const { getOpen, open, requestOpen, setOpen } = useOpenState({
+  const { getOpen, open, requestOpen, setOpen, nativeToggle } = usePopupState({
     ...options,
     requestReconcile,
   });
@@ -360,28 +354,13 @@ export function useCombobox<Value = unknown>(
   const popupId = options.id ?? `${id}-popup`;
   const anchorName = `--fig-combobox-${id.replaceAll(/[^\w-]/g, "-")}`;
   const idFor = usePartIds();
-  const automaticLabels = useMemo(() => new WeakSet<HTMLElement>(), []);
+  const labels = useMemo(() => new WeakMap<HTMLElement, PartReference>(), []);
   const trackers = useMemo(
     () => ({
-      inputValue,
-      value,
       anchored: false,
       scrollTo: undefined as { value: unknown } | undefined,
     }),
     [],
-  );
-  trackers.inputValue = inputValue;
-  trackers.value = value;
-
-  const emitInputValueChange = useStableEvent(
-    (next: string, details: ChangeDetails, signal: AbortSignal) => {
-      options.onInputValueChange?.(next, details, signal);
-    },
-  );
-  const emitValueChange = useStableEvent(
-    (next: Value | null, details: ChangeDetails, signal: AbortSignal) => {
-      options.onValueChange?.(next, details, signal);
-    },
   );
   const setHighlighted = useStableEvent((next: unknown, scroll: boolean) => {
     trackers.scrollTo = scroll ? { value: next } : undefined;
@@ -397,24 +376,17 @@ export function useCombobox<Value = unknown>(
         readOnly ||
         inputUnavailable(node)
       ) {
-        node.value = trackers.inputValue;
+        node.value = query.current();
         requestReconcile();
         return;
       }
-      if (next === trackers.inputValue) return;
-      const details = createChangeDetails(event, node);
-      emitInputValueChange(next, details);
-      if (trackers.value !== null) emitValueChange(null, details);
-      if (details.isCanceled) {
-        requestReconcile();
-        return;
-      }
-      if (!controlledInput) trackers.inputValue = next;
-      if (!controlledValue) trackers.value = null;
-      if (controlledInput) requestReconcile();
-      else setUncontrolledInput(next);
-      if (controlledValue) requestReconcile();
-      else setUncontrolledValue({ value: null });
+      if (next === query.current()) return;
+      const accepted = requestChanges(
+        createChangeDetails(event, node),
+        query.propose(() => next),
+        selectedValue.propose(() => null),
+      );
+      if (!accepted) return;
       requestOpen(true, event, node);
     },
   );
@@ -428,32 +400,17 @@ export function useCombobox<Value = unknown>(
       return;
     const nextValue = option.value as Value;
     const nextInput = option.textValue ?? option.node.textContent?.trim() ?? "";
-    const details = createChangeDetails(event, option.node);
-    if (!sameValue(trackers.value, nextValue)) {
-      emitValueChange(nextValue, details);
-    }
-    if (nextInput !== trackers.inputValue) {
-      emitInputValueChange(nextInput, details);
-    }
-    if (details.isCanceled) {
-      requestReconcile();
-      return;
-    }
-    if (!controlledValue) trackers.value = nextValue;
-    if (!controlledInput) trackers.inputValue = nextInput;
-    if (controlledValue || controlledInput) requestReconcile();
-    if (!controlledValue) setUncontrolledValue({ value: nextValue });
-    if (!controlledInput) setUncontrolledInput(nextInput);
+    const accepted = requestChanges(
+      createChangeDetails(event, option.node),
+      selectedValue.propose(() => nextValue),
+      query.propose(() => nextInput),
+    );
+    if (!accepted) return;
     setOpen(false);
   });
   const reset = useStableEvent(() => {
-    trackers.value = controlledValue ? (options.value ?? null) : initialValue;
-    trackers.inputValue = controlledInput
-      ? (options.inputValue ?? "")
-      : initialInputValue;
-    if (controlledValue || controlledInput) requestReconcile();
-    if (!controlledValue) setUncontrolledValue({ value: initialValue });
-    if (!controlledInput) setUncontrolledInput(initialInputValue);
+    selectedValue.reset();
+    query.reset();
   });
   const formReset = useMemo(() => createFormReset(reset), []);
 
@@ -506,7 +463,7 @@ export function useCombobox<Value = unknown>(
     if (input !== undefined) {
       assertControlLabel(input);
       const popupNode = registry.containerNode();
-      if (popupNode !== null && automaticLabels.has(popupNode)) {
+      if (popupNode !== null) {
         const labelledBy = input.getAttribute("aria-labelledby") ?? undefined;
         const label =
           input.getAttribute("aria-label") ??
@@ -518,8 +475,13 @@ export function useCombobox<Value = unknown>(
             : undefined);
         // Referencing a textbox itself can name the listbox after its current
         // value. Reuse its label sources instead of referencing the control.
-        setIdReference(popupNode, "aria-labelledby", labelledBy);
-        setIdReference(popupNode, "aria-label", labelledBy ? undefined : label);
+        if (labels.get(popupNode)?.sync(popupNode, labelledBy)) {
+          setIdReference(
+            popupNode,
+            "aria-label",
+            labelledBy ? undefined : label,
+          );
+        }
       }
       const optionId =
         open && highlighted.value !== null
@@ -532,7 +494,7 @@ export function useCombobox<Value = unknown>(
   const getFormValue = options.getFormValue ?? String;
   const state: ComboboxState = {
     inline: options.inline === true,
-    automaticLabels,
+    labels,
     bindHiddenInput: formReset.bind,
     bindInput: (node, signal) => {
       popup.bindAnchor(node, signal);
@@ -551,6 +513,7 @@ export function useCombobox<Value = unknown>(
     readOnly,
     registry,
     requestOpen,
+    nativeToggle,
     select,
     setHighlighted,
     setOpen,

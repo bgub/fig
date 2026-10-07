@@ -1,4 +1,8 @@
 import {
+  createPartReference,
+  type PartReference,
+} from "../internal/part-reference.ts";
+import {
   createMixin,
   type FigNode,
   type MixinContext,
@@ -14,17 +18,14 @@ import {
   type ChangeDetails,
   createChangeDetails,
 } from "../internal/changes.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { sameValue } from "../internal/composite.ts";
 import { expectHost } from "../internal/diagnostics.ts";
 import { createFormReset } from "../internal/form-reset.ts";
 import { usePartIds } from "../internal/ids.ts";
 import { createListbox, type ListboxOption } from "../internal/listbox.ts";
-import {
-  bindPart,
-  createPartSlot,
-  setIdReference,
-  triggerProps,
-} from "../internal/parts.ts";
+import { bindPart, setIdReference, triggerProps } from "../internal/parts.ts";
+import { createPartSlot } from "../internal/registration.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import type {
   PopoverOpenChangeDetails,
@@ -81,7 +82,7 @@ export interface SelectProps<Value = unknown> extends SelectOptions<Value> {
 type SelectRegistry = ReturnType<typeof createListbox>;
 
 interface SelectState {
-  readonly automaticLabels: WeakSet<HTMLElement>;
+  readonly labels: WeakMap<HTMLElement, PartReference>;
   readonly bindHiddenInput: (node: HTMLElement, signal: AbortSignal) => void;
   readonly bindTrigger: (node: HTMLElement, signal: AbortSignal) => void;
   readonly disabled: boolean;
@@ -119,7 +120,7 @@ const selectTriggerBehavior = /* @__PURE__ */ createMixin(
       "aria-readonly": state.readOnly ? "true" : undefined,
       "data-readonly": state.readOnly ? "" : undefined,
       disabled: disabled ? true : undefined,
-      bind: bindPart(context, state.bindTrigger),
+      bind: bindPart(context, state.registry, state.bindTrigger),
       mix: on("keydown", (event) => {
         if (event.defaultPrevented) return;
         if (
@@ -171,22 +172,15 @@ const selectTriggerMixin = /* @__PURE__ */ createMixin(
 
 const selectPopupBehavior = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: SelectState) => {
-    const automaticLabel =
-      context.props["aria-labelledby"] == null &&
-      context.props["aria-label"] === undefined;
+    const label = createPartReference(
+      context,
+      "aria-labelledby",
+      state.triggerId,
+    );
     return {
-      "aria-labelledby":
-        context.props["aria-labelledby"] ??
-        (context.props["aria-label"] === undefined
-          ? state.triggerId
-          : undefined),
-      bind: bindPart(context, (node, signal) => {
-        if (
-          automaticLabel &&
-          context.props["aria-labelledby"] === state.triggerId
-        )
-          state.automaticLabels.add(node);
-        else state.automaticLabels.delete(node);
+      ...label.props,
+      bind: bindPart(context, state.registry, (node, signal) => {
+        state.labels.set(node, label);
         state.registry.bindContainer(node, signal);
       }),
       mix: [
@@ -229,7 +223,7 @@ const selectOptionMixin = /* @__PURE__ */ createMixin(
     return {
       "aria-disabled": disabled ? "true" : undefined,
       "aria-selected": own.selected ? "true" : "false",
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindOption(node, signal, {
           disabled,
           textValue: own.textValue,
@@ -260,7 +254,7 @@ const selectHiddenInputMixin = /* @__PURE__ */ createMixin(
       name: context.props.name ?? state.name,
       type: "hidden",
       value: context.props.value ?? state.formValue,
-      bind: bindPart(context, state.bindHiddenInput),
+      bind: bindPart(context, state.registry, state.bindHiddenInput),
     };
   },
 );
@@ -270,18 +264,20 @@ export function useSelect<Value = unknown>(
   options: SelectOptions<Value> = {},
 ): SelectParts<Value> {
   const { disabled = false, readOnly = false } = options;
-  const controlledValue = options.value;
-  const controlled = controlledValue !== undefined;
+  const controlled = options.value !== undefined;
   const explicitDefault = options.defaultValue !== undefined;
-  const [uncontrolled, setUncontrolled] = useState<{
-    readonly value: Value | null;
-  }>(() => ({ value: options.defaultValue ?? null }));
-  const value =
-    controlledValue === undefined ? uncontrolled.value : controlledValue;
+  const registrationChanged = useRegistrationReconcile();
+  const selection = useControllableValue<Value | null>({
+    value: options.value,
+    defaultValue: options.defaultValue ?? null,
+    onChange: options.onValueChange,
+    equal: sameValue,
+    reconcile: registrationChanged,
+  });
+  const value = selection.value;
   const [highlighted, setHighlightedState] = useState<{
     readonly value: unknown;
   }>(() => ({ value }));
-  const registrationChanged = useRegistrationReconcile();
   const registry = useMemo(
     () => createListbox("select", registrationChanged),
     [],
@@ -292,19 +288,9 @@ export function useSelect<Value = unknown>(
     onOpenChange: options.onOpenChange,
     open: options.open,
   });
-  const automaticLabels = useMemo(() => new WeakSet<HTMLElement>(), []);
+  const labels = useMemo(() => new WeakMap<HTMLElement, PartReference>(), []);
   const trigger = useMemo(() => createPartSlot(registrationChanged), []);
-  const initialValue = useMemo(() => options.defaultValue ?? null, []);
-  const reset = useStableEvent(() => {
-    if (controlled) registrationChanged();
-    else setUncontrolled({ value: initialValue });
-  });
-  const formReset = useMemo(() => createFormReset(reset), []);
-  const emitChange = useStableEvent(
-    (next: unknown, details: SelectValueChangeDetails, signal: AbortSignal) => {
-      options.onValueChange?.(next as Value | null, details, signal);
-    },
-  );
+  const formReset = useMemo(() => createFormReset(selection.reset), []);
   const select = useStableEvent((option: ListboxOption, event: Event) => {
     if (
       disabled ||
@@ -313,14 +299,13 @@ export function useSelect<Value = unknown>(
       trigger.node()?.matches(":disabled")
     )
       return;
-    if (sameValue(option.value, value)) {
-      popover.setOpen(false);
+    if (
+      !selection.request(
+        () => option.value as Value,
+        createChangeDetails(event, option.node),
+      )
+    )
       return;
-    }
-    const details = createChangeDetails(event, option.node);
-    emitChange(option.value, details);
-    if (details.isCanceled) return;
-    if (!controlled) setUncontrolled({ value: option.value as Value });
     popover.setOpen(false);
   });
   const setHighlighted = useStableEvent((next: unknown) => {
@@ -341,9 +326,7 @@ export function useSelect<Value = unknown>(
         const next = fallback === undefined ? null : fallback.value;
         if (!sameValue(next, value)) {
           const details = createChangeDetails(null);
-          emitChange(next, details);
-          if (!details.isCanceled) {
-            setUncontrolled({ value: next as Value | null });
+          if (selection.request(() => next as Value | null, details)) {
             setHighlighted(next);
           }
         }
@@ -361,9 +344,7 @@ export function useSelect<Value = unknown>(
     const triggerNode = trigger.node();
     const popupNode = registry.containerNode();
     if (triggerNode !== null && popupNode !== null) {
-      if (automaticLabels.has(popupNode)) {
-        setIdReference(popupNode, "aria-labelledby", triggerNode.id);
-      }
+      labels.get(popupNode)?.sync(popupNode, triggerNode.id);
       const optionId =
         popover.open && highlighted.value !== null
           ? (registry.option(highlighted.value)?.node.id ??
@@ -378,7 +359,7 @@ export function useSelect<Value = unknown>(
   const idFor = usePartIds();
   const getFormValue = options.getFormValue ?? String;
   const state: SelectState = {
-    automaticLabels,
+    labels,
     bindHiddenInput: formReset.bind,
     bindTrigger: trigger.bind,
     disabled,

@@ -1,3 +1,4 @@
+import { createPartCollection, createPartSlot } from "./registration.ts";
 import { assertUniqueValues } from "./diagnostics.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
@@ -51,30 +52,23 @@ export type Composite = ReturnType<typeof createComposite>;
  *
  * The live DOM is the source of truth for order and membership, so the
  * composite only remembers what the DOM cannot express: which value and
- * disabled state each host carries. Every binding is identified by object
- * identity, because a replacement binding for the same node commits before the
- * superseded signal aborts.
+ * disabled state each host carries. A host signal identifies a registration lifetime; updates
+ * replace its metadata, and an old signal cannot retire a newer registration.
  */
 export function createComposite(options: CompositeOptions) {
   const { container: containerSelector, item: itemSelector } = options;
-  let container: { readonly node: HTMLElement } | null = null;
+  const container = createPartSlot(() => options.registrationChanged?.());
   let pointerDown = false;
   let typeahead = "";
   let typeaheadTimer: ReturnType<typeof setTimeout> | undefined;
-  const registrations = new WeakMap<HTMLElement, CompositeItem>();
+  const registrations = createPartCollection<CompositeItem>(() =>
+    options.registrationChanged?.(),
+  );
 
-  function bindContainer(node: HTMLElement, signal: AbortSignal): void {
-    const binding = { node };
-    container = binding;
-    // Eager duplicate validation is development-only. Scanning every mounted
-    // item for each registration would make production binding quadratic.
+  function bindContainer(node: HTMLElement, signal: AbortSignal): boolean {
+    const attached = container.bind(node, signal);
     if (__DEV__) items();
-    options.registrationChanged?.();
-    onAbort(signal, () => {
-      if (container !== binding) return;
-      container = null;
-      options.registrationChanged?.();
-    });
+    return attached;
   }
 
   function bindItem(
@@ -84,28 +78,20 @@ export function createComposite(options: CompositeOptions) {
     disabled: boolean,
   ): void {
     const registration = { disabled, node, value };
-    registrations.set(node, registration);
-    // Eager duplicate validation is development-only. Scanning every mounted
-    // item for each registration would make production binding quadratic.
+    registrations.bind(node, signal, registration);
     if (__DEV__) items();
-    options.registrationChanged?.();
-    onAbort(signal, () => {
-      if (registrations.get(node) !== registration) return;
-      registrations.delete(node);
-      options.registrationChanged?.();
-    });
   }
 
   function containerNode(): HTMLElement | null {
-    return container?.node ?? null;
+    return container.node();
   }
 
   /** Every mounted item this container owns, in DOM order. */
   function items(): readonly CompositeItem[] {
-    const owner = container;
+    const owner = container.node();
     if (owner === null) return [];
     const ordered: CompositeItem[] = [];
-    for (const node of owner.node.querySelectorAll<HTMLElement>(itemSelector)) {
+    for (const node of owner.querySelectorAll<HTMLElement>(itemSelector)) {
       const registration = registrations.get(node);
       if (registration !== undefined && owns(node)) ordered.push(registration);
     }
@@ -127,13 +113,14 @@ export function createComposite(options: CompositeOptions) {
 
   function owns(node: HTMLElement): boolean {
     return (
-      container !== null && node.closest(containerSelector) === container.node
+      container.node() !== null &&
+      node.closest(containerSelector) === container.node()
     );
   }
 
   function containsFocus(): boolean {
-    if (container === null) return false;
-    return container.node.contains(container.node.ownerDocument.activeElement);
+    const node = container.node();
+    return node !== null && node.contains(node.ownerDocument.activeElement);
   }
 
   /** True while a pointer press that may also move focus is still down. */
@@ -236,10 +223,11 @@ export function createComposite(options: CompositeOptions) {
   }
 
   function isRightToLeft(): boolean {
-    if (container === null) return false;
-    const declared = container.node.closest("[dir]")?.getAttribute("dir");
+    const node = container.node();
+    if (node === null) return false;
+    const declared = node.closest("[dir]")?.getAttribute("dir");
     if (declared === "rtl" || declared === "ltr") return declared === "rtl";
-    return getComputedStyle(container.node).direction === "rtl";
+    return getComputedStyle(node).direction === "rtl";
   }
 
   return {

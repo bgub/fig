@@ -2,7 +2,8 @@ import {
   assertAccessibleName,
   assertSinglePart,
 } from "../internal/diagnostics.ts";
-import { createPartCollection, setIdReference } from "../internal/parts.ts";
+import type { PartReference } from "../internal/part-reference.ts";
+import { createPartCollection } from "../internal/registration.ts";
 
 export type DialogRegistry = ReturnType<typeof createDialogRegistry>;
 
@@ -22,13 +23,16 @@ export function createDialogRegistry(registrationChanged: () => void) {
 
   const references = new WeakMap<
     HTMLElement,
-    { readonly title: boolean; readonly description: boolean }
+    { readonly title: PartReference; readonly description: PartReference }
   >();
 
   function bindDialog(
     node: HTMLElement,
     signal: AbortSignal,
-    automatic: { readonly title: boolean; readonly description: boolean },
+    automatic: {
+      readonly title: PartReference;
+      readonly description: PartReference;
+    },
   ): void {
     if (!(node instanceof HTMLDialogElement)) return;
     references.set(node, automatic);
@@ -46,12 +50,8 @@ export function createDialogRegistry(registrationChanged: () => void) {
     if (current === null) return;
     if (!open) backdropPress = undefined;
     const automatic = references.get(current);
-    if (automatic?.title) {
-      setIdReference(current, "aria-labelledby", part("title")?.id);
-    }
-    if (automatic?.description) {
-      setIdReference(current, "aria-describedby", part("description")?.id);
-    }
+    automatic?.title.sync(current, part("title")?.id);
+    automatic?.description.sync(current, part("description")?.id);
     // Closed shells may defer their title and content until opened.
     if (open) assertAccessibleName(current, "dialog");
     if (open && !current.open) current.showModal();

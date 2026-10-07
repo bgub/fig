@@ -1,3 +1,4 @@
+import { createPartCollection } from "./registration.ts";
 import { createComposite, sameValue } from "./composite.ts";
 
 export interface ListboxOptionConfig {
@@ -18,23 +19,18 @@ export function createListbox(name: string, registrationChanged: () => void) {
     name,
     registrationChanged,
   });
-  const registrations = new Map<HTMLElement, ListboxOption>();
+  const registrations = createPartCollection<ListboxOption>();
   let search = "";
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   function bindContainer(node: HTMLElement, signal: AbortSignal): void {
-    composite.bindContainer(node, signal);
+    if (!composite.bindContainer(node, signal)) return;
     signal.addEventListener(
       "abort",
       () => {
-        // A render rebinds this same host synchronously. Only a real removal
-        // or replacement ends the current typeahead session.
-        queueMicrotask(() => {
-          if (composite.containerNode() === node) return;
-          if (searchTimer !== undefined) clearTimeout(searchTimer);
-          searchTimer = undefined;
-          search = "";
-        });
+        if (searchTimer !== undefined) clearTimeout(searchTimer);
+        searchTimer = undefined;
+        search = "";
       },
       { once: true },
     );
@@ -46,15 +42,8 @@ export function createListbox(name: string, registrationChanged: () => void) {
     config: ListboxOptionConfig,
   ): void {
     const option = { ...config, node };
-    registrations.set(node, option);
+    registrations.bind(node, signal, option);
     composite.bindItem(node, signal, config.value, config.disabled);
-    signal.addEventListener(
-      "abort",
-      () => {
-        if (registrations.get(node) === option) registrations.delete(node);
-      },
-      { once: true },
-    );
   }
 
   function options(): readonly ListboxOption[] {
