@@ -166,7 +166,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
     () => createAnchoredPopup(requestReconcile, "tooltip"),
     [],
   );
-  const { open, requestOpen, setOpen } = useOpenState({
+  const { getOpen, open, requestOpen, setOpen } = useOpenState({
     ...options,
     requestReconcile,
   });
@@ -217,7 +217,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
       clearTimeout(timer.value);
       timer.value = undefined;
     }
-    registry.sync(open, anchorName);
+    registry.sync(getOpen(), anchorName);
   });
 
   const state: TooltipState = {

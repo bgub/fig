@@ -1,4 +1,4 @@
-import { useMemo, useStableEvent, useState } from "@bgub/fig";
+import { useBeforeLayout, useMemo, useStableEvent, useState } from "@bgub/fig";
 import { type ChangeDetails, createChangeDetails } from "./changes.ts";
 
 export type OpenChangeDetails = ChangeDetails;
@@ -22,8 +22,8 @@ export interface OpenStateOptions {
  *
  * A `<dialog>` closes on Escape and a popover light-dismisses, so the element
  * reports what happened rather than waiting to be told. Two things follow.
- * Intent settles synchronously, because the element emits its before and after
- * events in one tick and a single dismissal must report once. And when a
+ * Intent settles synchronously, so the element's before and after events for
+ * a single dismissal report once even when delivered in different tasks. When a
  * change did not become state — a controlled owner that kept `open`, or a
  * handler that refused — the widget reconciles, so the next pass restores the
  * owner's intent over whatever the element did.
@@ -34,8 +34,22 @@ export function useOpenState(options: OpenStateOptions) {
     options.defaultOpen === true,
   );
   const open = controlled ? options.open === true : uncontrolled;
-  const tracker = useMemo(() => ({ open }), []);
-  tracker.open = open;
+  const tracker = useMemo<{
+    controlled: boolean;
+    requestedOpen: boolean;
+    nativeOpen: boolean | undefined;
+  }>(() => ({ controlled, requestedOpen: open, nativeOpen: undefined }), []);
+  useBeforeLayout(() => {
+    // Uncontrolled requests may still be queued in a lower-priority lane.
+    // An unrelated commit must not erase their intent before native dismissal
+    // can supersede them. Only a committed owner prop (or a mode change)
+    // replaces that intent; suspended renders must not publish owner props.
+    if (controlled || tracker.controlled !== controlled) {
+      tracker.requestedOpen = open;
+    }
+    if (open === tracker.requestedOpen) tracker.nativeOpen = undefined;
+    tracker.controlled = controlled;
+  });
 
   const emitOpenChange = useStableEvent(
     (next: boolean, details: OpenChangeDetails, signal: AbortSignal) => {
@@ -46,30 +60,39 @@ export function useOpenState(options: OpenStateOptions) {
   /** Reports a change the element proposed. Returns whether it was accepted. */
   const requestOpen = useStableEvent(
     (next: boolean, event: Event, trigger: Element | undefined) => {
-      if (next === tracker.open) return true;
-      const details = createChangeDetails(event, trigger);
-      emitOpenChange(next, details);
-      if (details.isCanceled) {
-        options.requestReconcile();
-        return false;
+      if (next !== tracker.requestedOpen) {
+        const details = createChangeDetails(event, trigger);
+        emitOpenChange(next, details);
+        if (details.isCanceled) {
+          options.requestReconcile();
+          return false;
+        }
+        tracker.requestedOpen = next;
+        if (controlled) options.requestReconcile();
+        else setUncontrolled(next);
       }
-      tracker.open = next;
-      if (controlled) options.requestReconcile();
-      else setUncontrolled(next);
+      // Clicks and input events request state; only native popup transitions
+      // can change visibility ahead of that state's commit.
+      if (event.type === "beforetoggle" || event.type === "toggle")
+        tracker.nativeOpen = next;
       return true;
     },
   );
 
   /** Opens or closes without an activation event. */
   const setOpen = useStableEvent((next: boolean) => {
-    if (next === tracker.open) return;
+    if (next === tracker.requestedOpen) return;
     const details = createChangeDetails(null);
     emitOpenChange(next, details);
     if (details.isCanceled) return;
-    tracker.open = next;
+    tracker.requestedOpen = next;
     if (controlled) options.requestReconcile();
     else setUncontrolled(next);
   });
 
-  return { open, requestOpen, setOpen };
+  // Opening another auto popover can synchronously dismiss this one during
+  // before-paint work. Honor native changes until their state commits, while
+  // imperative requests cannot reveal suspended content before it commits.
+  const getOpen = () => tracker.nativeOpen ?? open;
+  return { getOpen, open, requestOpen, setOpen };
 }

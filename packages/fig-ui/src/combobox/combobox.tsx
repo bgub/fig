@@ -352,7 +352,7 @@ export function useCombobox<Value = unknown>(
     () => createAnchoredPopup(requestReconcile, "combobox"),
     [],
   );
-  const { open, requestOpen, setOpen } = useOpenState({
+  const { getOpen, open, requestOpen, setOpen } = useOpenState({
     ...options,
     requestReconcile,
   });
@@ -465,7 +465,7 @@ export function useCombobox<Value = unknown>(
         trackers.anchored = false;
       }
     } else {
-      popup.sync(open, anchorName);
+      popup.sync(getOpen(), anchorName);
       trackers.anchored = true;
     }
     // Read live DOM order once per reconciliation rather than scanning it for

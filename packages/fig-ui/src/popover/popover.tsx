@@ -52,7 +52,7 @@ export function usePopover(options: PopoverOptions = {}): PopoverParts {
     () => createAnchoredPopup(requestReconcile, "popover"),
     [],
   );
-  const { open, requestOpen, setOpen } = useOpenState({
+  const { getOpen, open, requestOpen, setOpen } = useOpenState({
     ...options,
     requestReconcile,
   });
@@ -62,7 +62,7 @@ export function usePopover(options: PopoverOptions = {}): PopoverParts {
   const popoverId = options.id ?? `${id}-popover`;
 
   useBeforePaint(() => {
-    registry.sync(open, anchorName);
+    registry.sync(getOpen(), anchorName);
   });
 
   const state = { open, popoverId, registry, requestOpen };
