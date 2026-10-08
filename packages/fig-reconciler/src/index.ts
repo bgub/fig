@@ -5307,8 +5307,24 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function rollbackBoundaryCommitWork(root: R, boundary: F): void {
-    if (boundary.renderCheckpoint !== undefined)
-      root.attempt.rollback(boundary.renderCheckpoint);
+    const checkpoint = boundary.renderCheckpoint;
+    if (checkpoint === undefined) return;
+    for (const owner of root.attempt.commitIndex.slice(checkpoint.work)) {
+      if (fiberErrorBoundaryState(owner)?.didReport !== false) continue;
+      // A caught render error belongs to the abandoned attempt, not to the
+      // partial tree Suspense may reuse. Retry its primary from scratch.
+      owner.boundaryState = null;
+      owner.child = null;
+      // Stable ancestors must descend to that primary on any retry lane.
+      for (
+        let frame: F | null = owner;
+        frame !== null && frame !== boundary;
+        frame = frame.return
+      ) {
+        frame.memoizedProps = null;
+      }
+    }
+    root.attempt.rollback(checkpoint);
   }
 
   function captureCommittedErrorBoundary(

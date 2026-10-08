@@ -87,7 +87,7 @@ Fig records fiber-local commit work in a sparse per-root index during render. Ef
 The index is an optimization, not a second source of truth:
 
 - each fiber appears at most once;
-- a Suspense or error capture rolls back one attempt checkpoint, releasing discarded reads and boundary retries alongside indexed work;
+- a Suspense or error capture rolls back one attempt checkpoint, releasing discarded reads and boundary retries alongside indexed work; speculative caught errors and their fallbacks are discarded too, and their ancestor path is invalidated so a retry cannot adopt the abandoned failure;
 - Suspense re-indexes preserved hook owners when moving the primary tree into hidden state, so stable-event visibility publishes before before-layout effects;
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.

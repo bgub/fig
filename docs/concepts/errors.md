@@ -6,7 +6,9 @@ Fig separates errors into three paths: errors a component can recover from, erro
 
 ## ErrorBoundary
 
-`ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors, then keeps showing its fallback until the boundary remounts or its key changes.
+`ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors. Once its fallback commits, it stays active until the boundary remounts or its key changes.
+
+A caught render error belongs to its render attempt until commit. If Suspense or an enclosing error boundary abandons that attempt, it discards the speculative error and its fallback. A retry renders the failed primary again, including beneath stable wrappers: recovered content can reveal without an error report, and a new failure reports the current error once its fallback commits. Removing the suspended subtree before reveal reports no abandoned errors. Already committed error fallbacks remain sticky across suspension.
 
 The fallback may be a node or a function receiving `(error, info)`. `onError(error, info)` is available for reporting. `ErrorInfo` contains a component stack and, for data errors, the affected `dataResourceKeys`.
 
