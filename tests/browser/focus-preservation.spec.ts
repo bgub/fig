@@ -74,6 +74,9 @@ for (const fallback of [false, true]) {
           );
           const editor = page.locator("#editor");
           const original = await editor.elementHandle();
+          // Start onscreen so a delayed initial focus scroll cannot be mistaken
+          // for scrolling caused by the later reorder (notably in WebKit).
+          await editor.scrollIntoViewIfNeeded();
           await editor.focus();
           const scrollBefore = await page.evaluate(
             async ({ kind, direction }) => {
@@ -550,3 +553,233 @@ for (const change of ["shorten", "replace"] as const) {
       expect([result.anchor, result.focus]).toEqual([5, 2]);
   });
 }
+
+for (const fallback of [false, true]) {
+  for (const direction of ["forward", "backward"] as const) {
+    for (const { change, keys, expected } of [
+      {
+        change: "insert",
+        keys: ["NEW", "AA", "BB", "CC"],
+        expected: "NEWAAXCC",
+      },
+      { change: "delete", keys: ["BB", "CC"], expected: "XCC" },
+      { change: "move earlier", keys: ["BB", "AA", "CC"], expected: "XAACC" },
+      { change: "move later", keys: ["AA", "CC", "BB"], expected: "AACCX" },
+    ]) {
+      test(`child boundaries retain ${direction} selected text after ${change} (${fallback ? "fallback" : "native"})`, async ({
+        page,
+      }) => {
+        if (!fallback) await requireAtomicMoves(page);
+        await page.evaluate(
+          ({ fallback, direction, keys }) => {
+            window.focusFixture.mountChildren(fallback);
+            const editor = document.getElementById("editor")!;
+            editor.focus();
+            document
+              .getSelection()!
+              .setBaseAndExtent(
+                editor,
+                direction === "forward" ? 1 : 2,
+                editor,
+                direction === "forward" ? 2 : 1,
+              );
+            window.focusFixture.updateChildren(keys);
+          },
+          { fallback, direction, keys },
+        );
+        expect(
+          await page.evaluate(() => document.getSelection()!.direction),
+        ).toBe(direction);
+        await page.keyboard.insertText("X");
+        await expect(page.locator("#editor")).toHaveText(expected);
+      });
+    }
+  }
+}
+
+for (const { position, offset, keys, expected } of [
+  {
+    position: "start",
+    offset: 0,
+    keys: ["NEW", "AA", "BB", "CC"],
+    expected: "NEWXAABBCC",
+  },
+  {
+    position: "middle",
+    offset: 1,
+    keys: ["NEW", "AA", "BB", "CC"],
+    expected: "NEWAAXBBCC",
+  },
+  {
+    position: "end",
+    offset: 3,
+    keys: ["AA", "BB", "CC", "NEW"],
+    expected: "AABBCCXNEW",
+  },
+]) {
+  test(`child boundaries keep a collapsed ${position} caret beside its original child`, async ({
+    page,
+  }) => {
+    await page.evaluate(
+      ({ offset, keys }) => {
+        window.focusFixture.mountChildren(true);
+        const editor = document.getElementById("editor")!;
+        editor.focus();
+        document.getSelection()!.collapse(editor, offset);
+        window.focusFixture.updateChildren(keys);
+      },
+      { offset, keys },
+    );
+    expect(
+      await page.evaluate(() => document.getSelection()!.isCollapsed),
+    ).toBe(true);
+    await page.keyboard.insertText("X");
+    await expect(page.locator("#editor")).toHaveText(expected);
+  });
+}
+
+for (const { change, start, end, keys } of [
+  { change: "removed boundary child", start: 1, end: 2, keys: ["AA", "CC"] },
+  {
+    change: "replaced boundary child",
+    start: 1,
+    end: 2,
+    keys: ["AA", "REPLACEMENT", "CC"],
+  },
+  {
+    change: "reversed boundary children",
+    start: 0,
+    end: 2,
+    keys: ["BB", "AA", "CC"],
+  },
+]) {
+  test(`child boundaries skip restoration for ${change}`, async ({ page }) => {
+    const result = await page.evaluate(
+      ({ start, end, keys }) => {
+        window.focusFixture.mountChildren(true);
+        const editor = document.getElementById("editor")!;
+        editor.focus();
+        const selection = document.getSelection()!;
+        selection.setBaseAndExtent(editor, start, editor, end);
+        let restores = 0;
+        const select = selection.setBaseAndExtent.bind(selection);
+        selection.setBaseAndExtent = (...args) => {
+          restores++;
+          select(...args);
+        };
+        window.focusFixture.updateChildren(keys);
+        return { restores, connected: selection.anchorNode?.isConnected };
+      },
+      { start, end, keys },
+    );
+    expect(result).toEqual({ restores: 0, connected: true });
+  });
+}
+
+for (const once of [true, false]) {
+  test(`restoration uses one selection repair and one focus attempt with a ${once ? "one-shot" : "persistent"} focus redirect`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate((once) => {
+      window.focusFixture.mount("contenteditable", true, true);
+      const editor = document.getElementById("editor")!;
+      editor.focus();
+      const selection = document.getSelection()!;
+      selection.setBaseAndExtent(editor.firstChild!, 2, editor.firstChild!, 8);
+      let callbacks = 0;
+      let focusCalls = 0;
+      let selectionCalls = 0;
+      editor.addEventListener(
+        "focus",
+        () => {
+          callbacks++;
+          document.getElementById("other")!.focus();
+        },
+        { once },
+      );
+      const focus = editor.focus.bind(editor);
+      editor.focus = (options) => {
+        focusCalls++;
+        focus(options);
+      };
+      const select = selection.setBaseAndExtent.bind(selection);
+      selection.setBaseAndExtent = (...args) => {
+        selectionCalls++;
+        select(...args);
+      };
+      window.focusFixture.reverse();
+      return {
+        callbacks,
+        focusCalls,
+        selectionCalls,
+        active: document.activeElement?.id,
+      };
+    }, once);
+    expect(result).toEqual({
+      callbacks: once ? 1 : 2,
+      focusCalls: 1,
+      selectionCalls: 1,
+      active: once ? "editor" : "other",
+    });
+  });
+}
+
+test("child boundaries preserve a mixed element/text range", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.focusFixture.mountChildren(true);
+    const editor = document.getElementById("editor")!;
+    editor.focus();
+    document
+      .getSelection()!
+      .setBaseAndExtent(editor, 1, editor.childNodes[1].firstChild!, 1);
+    window.focusFixture.updateChildren(["NEW", "AA", "BB", "CC"]);
+  });
+  await page.keyboard.insertText("X");
+  await expect(page.locator("#editor")).toHaveText("NEWAAXBCC");
+});
+
+test("child boundaries retain an empty editor's caret at its start", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.focusFixture.mountChildren(true);
+    window.focusFixture.updateChildren([]);
+    const editor = document.getElementById("editor")!;
+    editor.focus();
+    document.getSelection()!.collapse(editor, 0);
+    window.focusFixture.updateChildren(["NEW"]);
+  });
+  await page.keyboard.insertText("X");
+  await expect(page.locator("#editor")).toHaveText("XNEW");
+});
+
+test("unchanged child boundaries avoid selection repair and visibility checks", async ({
+  page,
+}) => {
+  const result = await page.evaluate(() => {
+    window.focusFixture.mountChildren(true);
+    const editor = document.getElementById("editor")!;
+    editor.focus();
+    const selection = document.getSelection()!;
+    selection.setBaseAndExtent(editor, 1, editor, 2);
+    let restores = 0;
+    let checks = 0;
+    const select = selection.setBaseAndExtent.bind(selection);
+    selection.setBaseAndExtent = (...args) => {
+      restores++;
+      select(...args);
+    };
+    const check = editor.checkVisibility.bind(editor);
+    editor.checkVisibility = (options) => {
+      checks++;
+      return check(options);
+    };
+    window.focusFixture.updateChildren(["AA", "BB", "CC"]);
+    return { restores, checks };
+  });
+  expect(result).toEqual({ restores: 0, checks: 0 });
+  await page.keyboard.insertText("X");
+  await expect(page.locator("#editor")).toHaveText("AAXCC");
+});

@@ -53,12 +53,12 @@ The first hydration root drains the document queue and removes the temporary cap
 DOM access uses a normal prop:
 
 ```tsx
-<input bind={(node, signal) => node.focus()} />
+<input bind={(node, signal) => observeInput(node, signal)} />
 ```
 
 The callback returns nothing. Its signal aborts when the callback identity changes or the node unmounts; moving the node does not re-run it. `composeBind` combines several binds and accepts falsy entries.
 
-In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, before commit-level focus/selection restoration. Use `useBeforePaint` for layout measurement and final focus or selection policy; a focus choice made by a bind during mutation can be overwritten by restoration.
+In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, before commit-level focus/selection restoration. Use `useBeforePaint` for layout measurement and final focus or selection policy; a focus choice made by a bind during mutation can be overwritten by restoration. To migrate a focus-sensitive bind, keep its node registration in `bind` and move the focus operation into `useBeforePaint`. Native listeners also run during restoration: a listener fired by selection repair can have its focus choice overwritten by the subsequent explicit focus attempt.
 
 `on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.
 

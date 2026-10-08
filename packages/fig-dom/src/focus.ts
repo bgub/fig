@@ -32,8 +32,9 @@ export function preserveFocus(container: Container, mutate: () => void): void {
   } finally {
     if (focused.isConnected && focused.ownerDocument === document) {
       selection?.();
-      // Selection restoration can focus an outer editing host. Restore the
-      // actual focused descendant afterward, without chasing callback choices.
+      // Selection repair can focus an outer editing host or fire a listener
+      // that redirects focus. Make at most one explicit focus attempt afterward;
+      // final component policy belongs to useBeforePaint.
       if (root.activeElement !== focused && isVisible(focused))
         focused.focus?.({ preventScroll: true });
     }
@@ -74,29 +75,59 @@ function captureSelection(
     !element.contains(range.endContainer)
   )
     return null;
-  // Copy boundaries; a live Range follows removals and loses the old position.
+  // Text offsets belong to their text node; child offsets belong to the selected
+  // child, not its old index. A live Range alone loses those identities on moves.
   const { startContainer, startOffset, endContainer, endOffset } = range;
+  const collapsed = range.collapsed;
+  const resolveStart = captureBoundary(startContainer, startOffset, false);
+  const resolveEnd = collapsed
+    ? resolveStart
+    : captureBoundary(endContainer, endOffset, true);
   const backward = isBackward(selection, range);
   return () => {
-    if (!element.contains(startContainer) || !element.contains(endContainer))
-      return;
-    const start = selectionOffset(startContainer, startOffset);
-    const end = selectionOffset(endContainer, endOffset);
-    const current = selectionRange(selection, root);
+    const start = resolveStart();
+    const end = collapsed ? start : resolveEnd();
     if (
-      current?.startContainer === startContainer &&
-      current.startOffset === start &&
-      current.endContainer === endContainer &&
-      current.endOffset === end &&
+      !start ||
+      !end ||
+      !element.contains(start.node) ||
+      !element.contains(end.node)
+    )
+      return;
+    const current = selectionRange(selection, root);
+    // Reassert remapped boundaries even when the live Range agrees: browsers
+    // can adjust the Range while retaining a stale selection for typing.
+    if (
+      start.node === startContainer &&
+      start.offset === startOffset &&
+      end.node === endContainer &&
+      end.offset === endOffset &&
+      current?.startContainer === start.node &&
+      current.startOffset === start.offset &&
+      current.endContainer === end.node &&
+      current.endOffset === end.offset &&
       isBackward(selection, current) === backward
+    )
+      return;
+    // setEnd collapses an inverted range. Do not turn reordered boundary
+    // children into a new selection; shortened text may legitimately collapse.
+    const ordered = element.ownerDocument.createRange();
+    ordered.setStart(start.node, start.offset);
+    ordered.setEnd(end.node, end.offset);
+    if (
+      ordered.startContainer !== start.node ||
+      ordered.startOffset !== start.offset ||
+      (!collapsed &&
+        ordered.collapsed &&
+        (startContainer.nodeType !== 3 || endContainer.nodeType !== 3))
     )
       return;
     if (!isVisible(element)) return;
     selection.setBaseAndExtent(
-      backward ? endContainer : startContainer,
-      backward ? end : start,
-      backward ? startContainer : endContainer,
-      backward ? start : end,
+      backward ? end.node : start.node,
+      backward ? end.offset : start.offset,
+      backward ? start.node : end.node,
+      backward ? start.offset : end.offset,
     );
   };
 }
@@ -123,12 +154,33 @@ function isBackward(selection: Selection, range: AbstractRange): boolean {
   );
 }
 
-function selectionOffset(node: Node, offset: number): number {
-  const length =
-    node.nodeType === 3
-      ? (node.nodeValue?.length ?? 0)
-      : node.childNodes.length;
-  return Math.min(offset, length);
+function captureBoundary(
+  node: Node,
+  offset: number,
+  end: boolean,
+): () => { node: Node; offset: number } | null {
+  if (node.nodeType === 3)
+    return () => ({
+      node,
+      offset: Math.min(offset, node.nodeValue?.length ?? 0),
+    });
+  // Range starts and carets stick before the next child, or after the last one
+  // at the end. Range ends stick after the previous child, or before the first.
+  const after = offset > 0 && (end || offset === node.childNodes.length);
+  const child = node.childNodes[offset - (after ? 1 : 0)];
+  if (!child) return () => ({ node, offset: 0 });
+  return () => {
+    const parent = child.parentNode;
+    if (!parent) return null;
+    let index = after ? 1 : 0;
+    for (
+      let sibling = child.previousSibling;
+      sibling;
+      sibling = sibling.previousSibling
+    )
+      index++;
+    return { node: parent, offset: index };
+  };
 }
 
 function isVisible(element: Element): boolean {

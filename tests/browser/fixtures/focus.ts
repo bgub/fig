@@ -23,6 +23,8 @@ declare global {
       reorder(keys: string[]): void;
       remove(): void;
       hide(): void;
+      mountChildren(fallback: boolean): void;
+      updateChildren(keys: string[]): void;
     };
   }
 }
@@ -126,4 +128,23 @@ window.focusFixture = {
   reorder() {},
   remove() {},
   hide() {},
+  mountChildren(fallback) {
+    const root = createRoot(document.getElementById("root")!);
+    window.focusFixture.updateChildren = (keys) =>
+      flushSync(() =>
+        root.render(
+          createElement(
+            "div",
+            { id: "editor", contenteditable: "true" },
+            keys.map((key) => createElement("span", { key }, key)),
+          ),
+        ),
+      );
+    window.focusFixture.updateChildren(["AA", "BB", "CC"]);
+    if (fallback)
+      Object.defineProperty(document.getElementById("editor"), "moveBefore", {
+        value: undefined,
+      });
+  },
+  updateChildren() {},
 };
