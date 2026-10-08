@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
+import { createMixin, type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
@@ -318,3 +318,32 @@ it.each(["checkbox", "switch"])(
     expect(inputOf(container).checked).toBe(false);
   },
 );
+
+it("moves reset handling to a form supplied by a later mixin", async () => {
+  const formOwner = createMixin((_context, form: string) => ({ form }));
+  let move = () => {};
+  let check = () => {};
+  function App(): FigNode {
+    const [form, setForm] = useState("first");
+    const checkbox = useCheckbox();
+    move = () => setForm("second");
+    check = () => checkbox.setChecked(true);
+    return (
+      <>
+        <form id="first" />
+        <form id="second" />
+        <input data-input="" mix={[checkbox.control(), formOwner(form)]} />
+        <output>{String(checkbox.checked)}</output>
+      </>
+    );
+  }
+  const container = await render(<App />);
+  await act(check);
+  await act(move);
+  expect(inputOf(container).form?.id).toBe("second");
+  await act(() => container.querySelector<HTMLFormElement>("#first")!.reset());
+  expect(container.querySelector("output")!.textContent).toBe("true");
+  await act(() => container.querySelector<HTMLFormElement>("#second")!.reset());
+  expect(container.querySelector("output")!.textContent).toBe("false");
+  expect(inputOf(container).checked).toBe(false);
+});

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
-import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
+import { type FigNode, useState } from "@bgub/fig";
+import { createRoot, type FigRoot, flushSync, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import { useCombobox } from "./combobox.tsx";
@@ -554,3 +554,42 @@ it("does not re-emit accepted uncontrolled selection in the same batch", async (
   expect(inputs).toEqual(["Apple"]);
   expect(requiredInput(container).value).toBe("Apple");
 });
+
+it.each(["accepted", "superseded"] as const)(
+  "handles a controlled selection synchronously %s by its owner",
+  async (result) => {
+    const changes: string[] = [];
+    function App(): FigNode {
+      const [value, setValue] = useState<string | null>(null);
+      const combo = useCombobox({
+        value,
+        defaultOpen: true,
+        onValueChange: (next) =>
+          flushSync(() => setValue(result === "accepted" ? next : "banana")),
+        onInputValueChange: (next) => {
+          changes.push(next);
+        },
+      });
+      return (
+        <>
+          <input aria-label="Fruit" data-input="" mix={combo.input()} />
+          <div mix={combo.popup()}>
+            <div mix={combo.option("apple")}>Apple</div>
+            <div mix={combo.option("banana")}>Banana</div>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<App />);
+    await act(() => options(container)[0].click());
+    const accepted = result === "accepted";
+    expect(changes).toEqual(accepted ? ["Apple"] : []);
+    expect(requiredInput(container).value).toBe(accepted ? "Apple" : "");
+    expect(requiredInput(container).getAttribute("aria-expanded")).toBe(
+      accepted ? "false" : "true",
+    );
+    expect(
+      options(container)[accepted ? 0 : 1].getAttribute("aria-selected"),
+    ).toBe("true");
+  },
+);

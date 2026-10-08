@@ -77,7 +77,7 @@ const registeredPart = createMixin((context, registry, value) => ({
 }));
 ```
 
-The update callback runs for each committed host update. Its signal stays live when only configuration changes. The signal aborts synchronously when the host, owner, or mixin slot is removed or replaced, and when Activity hides the host. Revealing an Activity attaches the latest committed configuration with a fresh signal. Suspended renders never publish configuration. A callback that installs long-lived work must key that work by the signal, installing cleanup once per lifetime while updating its configuration on subsequent calls.
+The update callback runs for each committed host update, after that host’s attributes and form properties have been applied. Callback bindings follow the same ordering; their observation of host configuration does not depend on prop or mixin order. Its signal stays live when only configuration changes. The signal aborts synchronously when the host, owner, or mixin slot is removed or replaced, and when Activity hides the host. Revealing an Activity attaches the latest committed configuration with a fresh signal. Suspended renders never publish configuration. A callback that installs long-lived work must key that work by the signal, installing cleanup once per lifetime while updating its configuration on subsequent calls.
 
 `Bind` remains a callable `(node, signal) => undefined` callback; `BindCallback` is an alias. `composeBind(...callbacks)` still returns one callable `Bind`: it invokes its callbacks in order with the same signal, and the entire group follows that wrapper’s identity-based lifetime and development run–abort–run check. It accepts callbacks and falsy entries, not host-binding descriptions.
 

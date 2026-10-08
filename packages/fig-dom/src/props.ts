@@ -55,7 +55,6 @@ export function updateElement(
     if (name === "mix") continue;
 
     if (name === "bind") {
-      if (previous !== next) updateBind(element, next);
       continue;
     }
 
@@ -103,6 +102,11 @@ export function updateElement(
   // select's stored value matches; skip the ancestor walk for everything
   // else.
   if (type === "option" || type === "optgroup") updateParentSelect(element);
+
+  // Bindings read host configuration such as form ownership. Publish it only
+  // after all props are applied, regardless of their authored/mixin order.
+  if (previousProps.bind !== nextProps.bind)
+    updateBind(element, nextProps.bind);
 }
 
 // Dev-only, deduped by key: silently dropping a prop the author clearly

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { type FigNode, useState } from "@bgub/fig";
-import { createRoot, type FigRoot } from "@bgub/fig-dom";
+import { createRoot, type FigRoot, flushSync } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import { type SelectValueChangeHandler, useSelect } from "./select.tsx";
@@ -257,4 +257,32 @@ it("does not select through an open popup whose native trigger is disabled", asy
   await click(options(container)[1]);
   expect(changes).toEqual([]);
   expect(options(container)[0].getAttribute("aria-selected")).toBe("true");
+});
+
+it("closes after a controlled owner synchronously accepts selection", async () => {
+  function App(): FigNode {
+    const [value, setValue] = useState<string | null>("apple");
+    const select = useSelect({
+      value,
+      defaultOpen: true,
+      onValueChange: (next) => flushSync(() => setValue(next)),
+    });
+    return (
+      <>
+        <button data-trigger="" mix={select.trigger()}>
+          Fruit
+        </button>
+        <div mix={select.popup()}>
+          <div mix={select.option("apple")}>Apple</div>
+          <div mix={select.option("banana")}>Banana</div>
+        </div>
+      </>
+    );
+  }
+  const container = await render(<App />);
+  await click(options(container)[1]);
+  expect(options(container)[1].getAttribute("aria-selected")).toBe("true");
+  expect(
+    required(container, "[data-trigger]").getAttribute("aria-expanded"),
+  ).toBe("false");
 });

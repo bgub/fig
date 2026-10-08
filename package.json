@@ -144,7 +144,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "3.6 kB"
+      "limit": "3.7 kB"
     },
     {
       "path": "packages/fig-ui/dist/tabs/indicator.js",

@@ -2,13 +2,13 @@
 // @vitest-environment happy-dom
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 import { createComposite } from "./composite.ts";
 
 it("registers production items without full-list scans and reads current DOM order on demand", () => {
-  // A separate Node module graph exercises the compile-time production branch;
-  // the normal Vitest configuration replaces __FIG_DEV__ with true.
+  // Compile a separate production module graph; the normal Vitest config
+  // replaces __FIG_DEV__ with true. Bundling also supports Node versions
+  // without native TypeScript loading.
   const result = execFileSync(
     process.execPath,
     [
@@ -16,8 +16,17 @@ it("registers production items without full-list scans and reads current DOM ord
       "-e",
       `
     import { Window } from "happy-dom";
-    globalThis.__FIG_DEV__ = false;
-    const { createComposite } = await import(${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, "composite.ts")).href)});
+    import { build } from "vite";
+    const [bundle] = await build({
+      configFile: false,
+      logLevel: "silent",
+      define: { __FIG_DEV__: "false" },
+      build: {
+        write: false,
+        lib: { entry: ${JSON.stringify(resolve(import.meta.dirname, "composite.ts"))}, formats: ["es"] },
+      },
+    });
+    const { createComposite } = await import("data:text/javascript;base64," + Buffer.from(bundle.output[0].code).toString("base64"));
     const { document } = new Window();
     const owner = document.createElement("div");
     owner.setAttribute("role", "listbox");

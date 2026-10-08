@@ -56,6 +56,7 @@ export function useControllableValue<Value>(options: ValueOptions<Value>) {
     let rendered = value;
     let pending = value;
     let sequence = 0;
+    let proposal: { revision: number; value: Value } | undefined;
 
     const current = () => (controlled ? rendered : pending);
     function accept(next: Value): void {
@@ -71,12 +72,14 @@ export function useControllableValue<Value>(options: ValueOptions<Value>) {
       const previous = current();
       const next = update(previous);
       const changed = !(committed.equal ?? Object.is)(previous, next);
+      proposal = { revision, value: next };
       return {
         isCurrent: () => revision === sequence,
         notify: (details) => {
           if (changed) notify(next, details);
         },
         settle: (accepted, details) => {
+          if (proposal?.revision === revision) proposal = undefined;
           if (revision !== sequence) return;
           if (accepted) {
             if (changed) accept(next);
@@ -90,6 +93,7 @@ export function useControllableValue<Value>(options: ValueOptions<Value>) {
     }
     function restore(next: Value, details: ChangeDetails | null): void {
       sequence++;
+      proposal = undefined;
       accept(next);
       // Automatic repairs notify after acceptance and cannot be canceled.
       if (details !== null) notify(next, details);
@@ -103,9 +107,16 @@ export function useControllableValue<Value>(options: ValueOptions<Value>) {
       restore,
       commit(next: ValueOptions<Value>, nextRendered: Value): void {
         const nextControlled = next.value !== undefined;
+        // A synchronous owner commit can acknowledge this proposal while its
+        // notification is still running. Only a different value supersedes it.
+        const acknowledged =
+          proposal?.revision === sequence &&
+          (next.equal ?? Object.is)(proposal.value, nextRendered);
         if (
           controlled !== nextControlled ||
-          (nextControlled && !Object.is(committed.value, next.value))
+          (nextControlled &&
+            !Object.is(committed.value, next.value) &&
+            !acknowledged)
         )
           sequence++;
         if (nextControlled || controlled !== nextControlled)

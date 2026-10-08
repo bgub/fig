@@ -263,3 +263,43 @@ it("adding a composed host behavior does not replace an authored callback's life
   expect(signals).toHaveLength(count);
   expect(live.aborted).toBe(false);
 });
+
+it.each(["callback", "host"] as const)(
+  "publishes final host props before updating a %s binding",
+  async (kind) => {
+    const owner = {};
+    const observed: Array<{ id: string; form: string | null; value: string }> =
+      [];
+    const configure = createMixin((_context, id: string) => ({
+      id,
+      form: id,
+      value: id,
+    }));
+    const view = (id: string) => {
+      const update = (node: Element): undefined => {
+        if (node instanceof HTMLInputElement)
+          observed.push({
+            id: node.id,
+            form: node.form?.id ?? null,
+            value: node.value,
+          });
+      };
+      return (
+        <>
+          <form id="first" />
+          <form id="second" />
+          <input
+            bind={kind === "callback" ? update : undefined}
+            mix={[kind === "host" && behavior(owner, update), configure(id)]}
+          />
+        </>
+      );
+    };
+    const { root } = await render(view("first"));
+    observed.length = 0;
+    await act(() => root.render(view("second")));
+    expect(observed).toEqual([
+      { id: "second", form: "second", value: "second" },
+    ]);
+  },
+);
