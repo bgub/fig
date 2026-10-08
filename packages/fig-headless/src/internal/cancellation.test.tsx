@@ -77,6 +77,7 @@ it.each(["ArrowRight", "Tab"])(
             Actions
           </button>
           <div mix={parent.menu()}>
+            <button mix={parent.item("other")}>Other</button>
             <button
               data-child=""
               mix={[

@@ -36,18 +36,18 @@ function Home(): FigNode {
       <h1 class="text-3xl font-semibold tracking-tight">
         Welcome to Fig TanStack Start
       </h1>
-      <p class="text-slate-700">
+      <p class="text-demo-fg">
         Fig on TanStack orchestration: typed routes, nested layouts, route
         loaders, Payload server trees, and data that streams in over Suspense.
       </p>
       <p>
-        <Link class="font-medium text-teal-700" to="/data">
+        <Link class="font-medium text-demo-link" to="/data">
           Explore data resources →
         </Link>
       </p>
       <p>
         <Link
-          class="inline-block font-medium text-teal-700"
+          class="inline-block font-medium text-demo-link"
           to="/view-transitions"
           viewTransition
         >
@@ -66,7 +66,7 @@ function Home(): FigNode {
       </p>
       <section class="space-y-3 pt-4">
         <h2 class="text-2xl font-semibold tracking-tight">Components</h2>
-        <p class="text-slate-700">
+        <p class="text-demo-fg">
           Headless widget state with behavior attached directly to the host
           elements through mixins.
         </p>
@@ -106,25 +106,25 @@ function TabsExample(): FigNode {
     <div class="relative" data-tabs-demo-root="">
       <div
         aria-label="Tabs component example"
-        class="relative flex gap-1 rounded-t-lg border border-slate-300 bg-white p-1"
+        class="relative flex gap-1 rounded-t-lg border border-demo-border bg-demo-card p-1"
         mix={[tabs.list({ activateOnFocus: true }), indicator.list()]}
       >
         <button
-          class="rounded px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+          class="rounded px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
           data-tabs-demo-tab=""
           mix={tabs.tab("composition")}
         >
           Composition
         </button>
         <button
-          class="rounded px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+          class="rounded px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
           data-tabs-demo-tab=""
           mix={tabs.tab("keyboard")}
         >
           Keyboard
         </button>
         <span
-          class="absolute bottom-0 h-0.5 bg-teal-700 transition-[left,width] duration-200"
+          class="absolute bottom-0 h-0.5 bg-demo-selected transition-[left,width] duration-200"
           data-tabs-demo-indicator=""
           mix={indicator.indicator()}
           style={{
@@ -137,9 +137,9 @@ function TabsExample(): FigNode {
               incoming panel and interpolates the frame's height. The tab list
               stays outside it, so it keeps receiving pointer input while the
               animation runs. */}
-      <ViewTransition name="tabs-demo-panel">
+      <ViewTransition name="tabs-demo-panel" enter="none" exit="none">
         <div
-          class="rounded-b-lg border border-t-0 border-slate-300 bg-white"
+          class="rounded-b-lg border border-t-0 border-demo-border bg-demo-card"
           data-tabs-demo-frame=""
         >
           {tabs.value === "composition" ? (
@@ -149,7 +149,7 @@ function TabsExample(): FigNode {
             >
               <div class="space-y-2 p-5">
                 <h3 class="font-semibold">Application-owned markup</h3>
-                <p class="text-slate-700">
+                <p class="text-demo-fg">
                   The root owns selection while list, tab, and panel mixins
                   attach semantics to these ordinary elements.
                 </p>
@@ -163,21 +163,21 @@ function TabsExample(): FigNode {
             >
               <div class="space-y-2 p-5">
                 <h3 class="font-semibold">Native keyboard behavior</h3>
-                <p class="text-slate-700">
+                <p class="text-demo-fg">
                   Use Left Arrow, Right Arrow, Home, and End to move focus and
                   activate a tab.
                 </p>
                 <div class="flex flex-wrap gap-2 pt-1" aria-hidden="true">
-                  <kbd class="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium">
+                  <kbd class="rounded border border-demo-border bg-demo-hover px-2 py-1 text-xs font-medium">
                     ←
                   </kbd>
-                  <kbd class="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium">
+                  <kbd class="rounded border border-demo-border bg-demo-hover px-2 py-1 text-xs font-medium">
                     →
                   </kbd>
-                  <kbd class="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium">
+                  <kbd class="rounded border border-demo-border bg-demo-hover px-2 py-1 text-xs font-medium">
                     Home
                   </kbd>
-                  <kbd class="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium">
+                  <kbd class="rounded border border-demo-border bg-demo-hover px-2 py-1 text-xs font-medium">
                     End
                   </kbd>
                 </div>
@@ -226,7 +226,7 @@ function AccordionExample(): FigNode {
 
   return (
     <div
-      class="overflow-hidden rounded-lg border border-slate-300 bg-white"
+      class="overflow-hidden rounded-lg border border-demo-border bg-demo-card"
       data-accordion-demo-root=""
       mix={accordion.root()}
     >
@@ -240,10 +240,10 @@ function AccordionExample(): FigNode {
           ],
         ] as const
       ).map(([value, question, answer]) => (
-        <div class="border-b border-slate-300 last:border-b-0">
+        <div class="border-b border-demo-border last:border-b-0">
           <h3>
             <button
-              class="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-600"
+              class="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-demo-link"
               data-accordion-demo-trigger={value}
               mix={accordion.trigger(value)}
             >
@@ -253,11 +253,15 @@ function AccordionExample(): FigNode {
               </span>
             </button>
           </h3>
-          <ViewTransition name={`accordion-demo-${value}`}>
+          <ViewTransition
+            name={`accordion-demo-${value}`}
+            enter="none"
+            exit="none"
+          >
             <div data-accordion-demo-frame={value}>
               {accordion.isOpen(value) ? (
                 <section
-                  class="px-4 pb-4 text-slate-700"
+                  class="px-4 pb-4 text-demo-fg"
                   data-accordion-demo-panel={value}
                   mix={accordion.panel(value)}
                 >
@@ -289,7 +293,7 @@ function RadioGroupExample(): FigNode {
       {(["standard", "express", "overnight"] as const).map((value) => (
         <label
           data-radio-demo-label={value}
-          class="cursor-pointer rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium has-[:checked]:border-teal-700 has-[:checked]:bg-teal-700 has-[:checked]:text-white has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-teal-600"
+          class="cursor-pointer rounded-full border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium has-[:checked]:border-demo-link has-[:checked]:bg-demo-selected has-[:checked]:text-demo-selected-fg has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-demo-link"
         >
           <input
             class="sr-only"
@@ -312,14 +316,14 @@ function DialogExample(): FigNode {
   return (
     <div>
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-dialog-demo-trigger=""
         mix={dialog.trigger()}
       >
         Delete file
       </button>
       <dialog
-        class="w-80 max-w-[90vw] rounded-lg border border-slate-300 bg-white p-5 text-slate-950"
+        class="w-80 max-w-[90vw] rounded-lg border border-demo-border bg-demo-card p-5 text-demo-fg"
         data-dialog-demo=""
         mix={dialog.dialog()}
       >
@@ -330,20 +334,20 @@ function DialogExample(): FigNode {
         >
           Delete this file?
         </h3>
-        <p class="pt-2 text-sm text-slate-700" mix={dialog.description()}>
+        <p class="pt-2 text-sm text-demo-fg" mix={dialog.description()}>
           The platform owns the top layer, focus, and Escape. The widget owns
           open state and labelling.
         </p>
         <div class="flex justify-end gap-2 pt-4">
           <button
-            class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium"
+            class="rounded-md border border-demo-border px-3 py-1.5 text-sm font-medium"
             data-dialog-demo-dismiss=""
             mix={dialog.dismiss()}
           >
             Cancel
           </button>
           <button
-            class="rounded-md bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+            class="rounded-md bg-demo-selected px-3 py-1.5 text-sm font-medium text-demo-selected-fg"
             data-dialog-demo-confirm=""
             mix={dialog.dismiss()}
           >
@@ -361,14 +365,14 @@ function PopoverExample(): FigNode {
   return (
     <div>
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-popover-demo-trigger=""
         mix={popover.trigger()}
       >
         Filters
       </button>
       <div
-        class="w-56 rounded-lg border border-slate-300 bg-white p-3 text-sm text-slate-700 shadow-lg"
+        class="w-56 rounded-lg border border-demo-border bg-demo-card p-3 text-sm text-demo-fg shadow-lg"
         data-popover-demo=""
         mix={popover.popover()}
       >
@@ -385,7 +389,7 @@ function TooltipExample(): FigNode {
   return (
     <div>
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-tooltip-demo-trigger=""
         mix={tooltip.trigger()}
       >
@@ -414,13 +418,13 @@ function ListboxExample(): FigNode {
     <div class="flex items-start gap-3">
       <div
         aria-label="Favorite fruit"
-        class="w-48 rounded-lg border border-slate-300 bg-white p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="w-48 rounded-lg border border-demo-border bg-demo-card p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-listbox-demo=""
         mix={listbox.root()}
       >
         {demoFruits.map((fruit) => (
           <div
-            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-slate-100 data-[selected]:font-semibold data-[selected]:text-teal-800"
+            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-demo-hover data-[selected]:font-semibold data-[selected]:text-demo-link"
             data-listbox-demo-option={fruit}
             mix={listbox.option(fruit)}
           >
@@ -428,7 +432,7 @@ function ListboxExample(): FigNode {
           </div>
         ))}
       </div>
-      <span class="pt-2 text-sm text-slate-500" data-listbox-demo-value="">
+      <span class="pt-2 text-sm text-demo-muted" data-listbox-demo-value="">
         {listbox.values.join(", ") || "none"}
       </span>
     </div>
@@ -443,20 +447,20 @@ function SelectExample(): FigNode {
   return (
     <div>
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-select-demo-trigger=""
         mix={select.trigger()}
       >
         {select.value}
       </button>
       <div
-        class="w-40 rounded-lg border border-slate-300 bg-white p-1 shadow-lg"
+        class="w-40 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-select-demo=""
         mix={select.popup()}
       >
         {demoFruits.map((fruit) => (
           <div
-            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-slate-100"
+            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-demo-hover"
             data-select-demo-option={fruit}
             mix={select.option(fruit)}
           >
@@ -478,19 +482,19 @@ function ComboboxExample(): FigNode {
     <div>
       <input
         aria-label="Find a fruit"
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm placeholder:text-demo-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-combobox-demo-input=""
         mix={combobox.input()}
         placeholder="Find a fruit"
       />
       <div
-        class="w-48 rounded-lg border border-slate-300 bg-white p-1 shadow-lg"
+        class="w-48 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-combobox-demo=""
         mix={combobox.popup()}
       >
         {matches.map((fruit) => (
           <div
-            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-slate-100"
+            class="rounded px-3 py-1.5 text-sm data-[highlighted]:bg-demo-hover"
             data-combobox-demo-option={fruit}
             mix={combobox.option(fruit)}
           >
@@ -519,19 +523,19 @@ function MenuExample(): FigNode {
     onSelect: (value) => setChosen(value),
   });
   const itemClass =
-    "block w-full rounded px-3 py-1.5 text-left text-sm hover:bg-slate-100 focus:bg-slate-100 focus:outline-none";
+    "block w-full rounded px-3 py-1.5 text-left text-sm hover:bg-demo-hover focus:outline-2 focus:-outline-offset-2 focus:outline-demo-link";
 
   return (
     <div class="flex items-center gap-3">
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-menu-demo-trigger=""
         mix={menu.trigger()}
       >
         Actions
       </button>
       <div
-        class="w-44 rounded-lg border border-slate-300 bg-white p-1 shadow-lg"
+        class="w-44 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-menu-demo=""
         mix={menu.menu()}
       >
@@ -573,7 +577,7 @@ function MenuExample(): FigNode {
           Share…
         </button>
         <div
-          class="w-36 rounded-lg border border-slate-300 bg-white p-1 shadow-lg"
+          class="w-36 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
           data-menu-demo-submenu=""
           mix={share.menu()}
         >
@@ -600,7 +604,7 @@ function MenuExample(): FigNode {
           remove
         </button>
       </div>
-      <span class="text-sm text-slate-500" data-menu-demo-chosen="">
+      <span class="text-sm text-demo-muted" data-menu-demo-chosen="">
         {chosen}
       </span>
     </div>
@@ -611,13 +615,13 @@ function ToolbarExample(): FigNode {
   const [lastCommand, setLastCommand] = useState("none");
   const toolbar = useToolbar<string>();
   const buttonClass =
-    "rounded px-3 py-1.5 text-sm font-medium enabled:hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600";
+    "rounded px-3 py-1.5 text-sm font-medium enabled:hover:bg-demo-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link";
 
   return (
     <div class="flex items-center gap-3">
       <div
         aria-label="Formatting"
-        class="flex gap-1 rounded-lg border border-slate-300 bg-white p-1"
+        class="flex gap-1 rounded-lg border border-demo-border bg-demo-card p-1"
         data-toolbar-demo=""
         mix={toolbar.root()}
       >
@@ -649,7 +653,7 @@ function ToolbarExample(): FigNode {
           Link
         </button>
       </div>
-      <span class="text-sm text-slate-500" data-toolbar-demo-value="">
+      <span class="text-sm text-demo-muted" data-toolbar-demo-value="">
         {lastCommand}
       </span>
     </div>
@@ -674,7 +678,7 @@ function ToastRegionExample(): FigNode {
   return (
     <div class="space-y-2">
       <button
-        class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-toast-demo-add=""
         mix={on("click", () => {
           setToasts((items) => [
@@ -690,13 +694,13 @@ function ToastRegionExample(): FigNode {
       <div class="space-y-2" data-toast-demo-region="" mix={region.region()}>
         {toasts.map((toast) => (
           <div
-            class="flex items-center justify-between gap-4 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+            class="flex items-center justify-between gap-4 rounded-lg border border-demo-border bg-demo-card px-3 py-2 text-sm shadow-sm"
             data-toast-demo={toast.id}
             mix={region.toast(toast.id, { duration: null })}
           >
             {toast.message}
             <button
-              class="font-medium text-teal-700"
+              class="font-medium text-demo-link"
               data-toast-demo-dismiss={toast.id}
               mix={region.dismiss(toast.id)}
             >
@@ -727,7 +731,7 @@ function FormExample(): FigNode {
 
   return (
     <form
-      class="space-y-3 rounded-lg border border-slate-300 bg-white p-4"
+      class="space-y-3 rounded-lg border border-demo-border bg-demo-card p-4"
       data-form-demo=""
       mix={on("submit", (event) => {
         event.preventDefault();
@@ -752,14 +756,14 @@ function FormExample(): FigNode {
           Email
         </label>
         <input
-          class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          class="w-full rounded-md border border-demo-border px-2 py-1.5 text-sm"
           data-form-demo-email=""
           name="email"
           type="email"
           mix={email.control()}
         />
         <p
-          class="text-xs text-slate-500"
+          class="text-xs text-demo-muted"
           data-form-demo-hint=""
           mix={email.description()}
         >
@@ -779,20 +783,20 @@ function FormExample(): FigNode {
         Pro plan (read only)
       </label>
       <button
-        class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium"
+        class="rounded-md border border-demo-border px-3 py-1.5 text-sm font-medium"
         data-form-demo-reset=""
         type="reset"
       >
         Reset
       </button>
       <button
-        class="rounded-md bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+        class="rounded-md bg-demo-selected px-3 py-1.5 text-sm font-medium text-demo-selected-fg"
         data-form-demo-submit=""
         type="submit"
       >
         Submit
       </button>
-      <p class="text-xs text-slate-500" data-form-demo-result="">
+      <p class="text-xs text-demo-muted" data-form-demo-result="">
         {submitted}
       </p>
     </form>

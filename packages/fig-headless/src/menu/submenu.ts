@@ -41,6 +41,8 @@ interface SubmenuState {
   readonly disabled: boolean;
   readonly hover: (open: boolean | undefined, focus: MenuFocusTarget) => void;
   readonly open: boolean;
+  readonly parentOpen: boolean;
+  readonly popup: () => HTMLElement | null;
   readonly setOpen: (open: boolean, focus?: MenuFocusTarget) => void;
 }
 
@@ -52,6 +54,27 @@ const submenuTriggerBehavior = /* @__PURE__ */ createMixin(
     "aria-disabled": state.disabled ? "true" : undefined,
     "data-disabled": state.disabled ? "" : undefined,
     mix: [
+      on("focusin", (event) => {
+        state.hover(undefined, false);
+        if (state.disabled || !state.parentOpen || state.open) return;
+        // Returning from the child (Escape or the closing arrow) must not
+        // undo the dismissal that restored focus to this trigger.
+        if (
+          event.relatedTarget instanceof Node &&
+          state.popup()?.contains(event.relatedTarget)
+        )
+          return;
+        state.setOpen(true, false);
+      }),
+      on("focusout", (event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          state.popup()?.contains(event.relatedTarget)
+        )
+          return;
+        state.hover(undefined, false);
+        state.setOpen(false, false);
+      }),
       on("keydown", (event) => {
         state.hover(undefined, false);
         if (
@@ -116,6 +139,13 @@ const submenuTriggerMixin = /* @__PURE__ */ createMixin(
     const disabled = state.disabled || context.props.disabled === true;
     return [
       parent.submenuTrigger(value, disabled),
+      on("click", (event) => {
+        if (event.defaultPrevented || event.button !== 0) return;
+        // Focus may already have opened the child before the click arrives.
+        // Activation enters it instead of toggling it closed again.
+        event.preventDefault();
+        if (!disabled) state.setOpen(true, "first");
+      }),
       child.trigger(false, disabled),
       submenuTriggerBehavior({ ...state, disabled }),
     ];
@@ -194,6 +224,8 @@ export function useMenuSubmenu<ParentValue, Value = unknown>(
     disabled,
     hover,
     open: menu.open,
+    parentOpen: parent.open,
+    popup: () => controller.popup(),
     setOpen: (open: boolean, focus?: MenuFocusTarget) =>
       controller.setOpen(open, focus),
   };
