@@ -2422,15 +2422,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     const currentPrimary = suspensePrimaryFiber(node.alternate);
-    if (currentPrimary !== null) {
-      // Reveal of a re-suspended boundary: the committed primary was kept hidden
-      // and its lanes were cleared (so blocked offscreen work could not busy-loop
-      // the scheduler while suspended). Updates dispatched during the fallback
-      // were parked in their hook queues. Mark the kept-hidden subtree with the
-      // current render lanes so it re-renders instead of bailing out and adopting
-      // the frozen clone — that re-render is what applies the parked updates.
-      markSubtreeLanes(currentPrimary.child, root.renderLanes);
-    }
+    // Re-render the retained primary before reveal. A committed hidden primary
+    // has parked hook updates to apply; an uncommitted primary has discarded
+    // read observations and subscription work to rebuild. Both retain their
+    // hook retry state, but neither can safely adopt completed child output.
+    markSubtreeLanes(
+      currentPrimary === null
+        ? previousSuspenseState.primaryChild
+        : currentPrimary.child,
+      root.renderLanes,
+    );
     beginSuspensePrimary(
       node,
       currentPrimary,
