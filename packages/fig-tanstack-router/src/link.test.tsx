@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { createElement, createMixin, type FigNode, useState } from "@bgub/fig";
-import { type Bind, composeBind, createRoot, hostBinding } from "@bgub/fig-dom";
+import {
+  type Binding,
+  composeBind,
+  createRoot,
+  hostBinding,
+} from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -42,14 +47,14 @@ describe("Link", () => {
       activeSignals.push(signal);
       return undefined;
     });
-    let activeBinding: Bind<HTMLAnchorElement> | undefined;
+    let activeBinding: Binding<HTMLAnchorElement> | undefined;
     const owner = {};
     const behavior = createMixin((context) => {
       activeBinding = hostBinding(context, owner, active);
       return { bind: activeBinding };
     });
     createElement("a", { mix: behavior() });
-    const baseBinding = composeBind(base);
+    const baseBinding: Binding<HTMLAnchorElement> = [[base], false];
     const inactiveBinding = composeBind(inactive);
     const rootRoute = createRootRoute({
       component: () => (

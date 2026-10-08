@@ -172,10 +172,12 @@ export function useField(options: FieldOptions = {}): FieldParts {
     assertControlLabel(node);
     const descriptions = registrations
       .filter((part) => part.value.kind === "description")
-      .map((part) => part.node);
+      .map((part) => part.node)
+      .sort(compareMessageOrder);
     const errors = registrations
       .filter((part) => part.value.kind === "error")
-      .map((part) => part.node);
+      .map((part) => part.node)
+      .sort(compareMessageOrder);
     assertUniqueIds([...descriptions, ...errors], "field messages");
     const authored =
       control.value.kind === "control"
@@ -206,6 +208,16 @@ export function useField(options: FieldOptions = {}): FieldParts {
       fieldErrorMixin(state, { id: idFor(key, "error") }),
     label: () => fieldLabelMixin(state),
   };
+}
+
+// Stable registrations outlive keyed moves. Read order after DOM placement;
+// unrelated trees have no DOM order, so retain their registration order.
+function compareMessageOrder(first: HTMLElement, second: HTMLElement): number {
+  const position = first.compareDocumentPosition(second);
+  if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0;
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+  return 0;
 }
 
 function uniqueReferences(references: readonly string[]): string[] {

@@ -7,10 +7,13 @@ declare const __FIG_DEV__: boolean | undefined;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
 /** A callback owns work until its binding signal aborts. */
-export type BindCallback<T extends Element = Element> = (
+export type Bind<T extends Element = Element> = (
   node: T,
   signal: AbortSignal,
 ) => undefined;
+
+/** Explicit callback spelling for APIs that also accept binding descriptions. */
+export type BindCallback<T extends Element = Element> = Bind<T>;
 
 /** A committed host behavior with identity independent of its configuration. */
 export interface HostBinding<T extends Element = Element> {
@@ -19,10 +22,11 @@ export interface HostBinding<T extends Element = Element> {
   readonly update: BindCallback<T>;
 }
 
-export type Bind<T extends Element = Element> =
-  | BindCallback<T>
+/** Host prop value; arrays preserve each member's independent lifetime. */
+export type Binding<T extends Element = Element> =
+  | Bind<T>
   | HostBinding<T>
-  | readonly (Bind<T> | false | null | undefined)[];
+  | readonly (Binding<T> | false | null | undefined)[];
 
 /**
  * Declare a behavior inside a mixin. Its callback runs on each committed
@@ -47,11 +51,16 @@ interface BindSlot {
 const bindSlots = new WeakMap<Element, Map<string, BindSlot>>();
 const suspendedBindElements = new WeakSet<Element>();
 
-/** Compose independent bindings without erasing their identities. */
+/** Compose callbacks into one callable binding with a shared lifetime. */
 export function composeBind<T extends Element = Element>(
   ...binds: Array<Bind<T> | false | null | undefined>
 ): Bind<T> {
-  return binds;
+  const callbacks = binds.filter(
+    (bind): bind is Bind<T> => typeof bind === "function",
+  );
+  return (node, signal) => {
+    for (const bind of callbacks) bind(node, signal);
+  };
 }
 
 export function updateBind(element: Element, value: unknown): void {
@@ -97,7 +106,6 @@ export function updateBind(element: Element, value: unknown): void {
       removeBindSlot(slot);
   }
   const slots = new Map<string, BindSlot>();
-  bindSlots.set(element, slots);
   for (const [key, next] of descriptors) {
     const old = previous.get(key);
     const slot =
@@ -111,6 +119,11 @@ export function updateBind(element: Element, value: unknown): void {
           };
     slot.callback = next.callback;
     slots.set(key, slot);
+  }
+  // Publish every retained lifetime before user code can throw and trigger
+  // teardown, including siblings whose update has not run yet.
+  bindSlots.set(element, slots);
+  for (const slot of slots.values()) {
     if (slot.controller === null) attachBindSlot(element, slot);
     else if (slot.owner !== undefined)
       slot.callback(element, slot.controller.signal);

@@ -9,6 +9,32 @@ installFakeDocument();
 // run, abort, run again with a fresh signal. Callback changes and removals
 // stay single.
 describe("@bgub/fig-dom bind", () => {
+  it("returns a callable Bind that forwards the caller's node and signal", () => {
+    const node = new FakeElement("input") as unknown as HTMLInputElement;
+    const controller = new AbortController();
+    const calls: Array<[string, HTMLInputElement, AbortSignal]> = [];
+    const first: Bind<HTMLInputElement> = (node, signal) => {
+      calls.push(["first", node, signal]);
+    };
+    const second: Bind<HTMLInputElement> = (node, signal) => {
+      calls.push(["second", node, signal]);
+    };
+    const composed: Bind<HTMLInputElement> = composeBind(
+      first,
+      false,
+      null,
+      undefined,
+      composeBind(second),
+    );
+
+    expect(composed(node, controller.signal)).toBeUndefined();
+    expect(calls).toEqual([
+      ["first", node, controller.signal],
+      ["second", node, controller.signal],
+    ]);
+    expect(composeBind()(node, controller.signal)).toBeUndefined();
+  });
+
   it("binds host nodes through normal component props", () => {
     const calls: string[] = [];
     const signals: AbortSignal[] = [];
@@ -88,6 +114,43 @@ describe("@bgub/fig-dom bind", () => {
       signals.push(signal);
     };
     const composed = composeBind(first, second, null, third);
+
+    flushSync(() => root.render(createElement("button", { bind: composed })));
+
+    expect(calls).toEqual([
+      "first",
+      "second",
+      "third",
+      "first",
+      "second",
+      "third",
+    ]);
+    expect(signals.slice(0, 3).every((signal) => signal.aborted)).toBe(true);
+    expect(signals.slice(3).every((signal) => !signal.aborted)).toBe(true);
+
+    flushSync(() => root.render(createElement("button", null)));
+
+    expect(signals.slice(3).every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("gives binding array members independent lifetimes", () => {
+    const calls: string[] = [];
+    const signals: AbortSignal[] = [];
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    const first: Bind = (_node, signal) => {
+      calls.push("first");
+      signals.push(signal);
+    };
+    const second: Bind = (_node, signal) => {
+      calls.push("second");
+      signals.push(signal);
+    };
+    const third: Bind = (_node, signal) => {
+      calls.push("third");
+      signals.push(signal);
+    };
+    const composed = [first, second, null, third];
 
     flushSync(() => root.render(createElement("button", { bind: composed })));
 

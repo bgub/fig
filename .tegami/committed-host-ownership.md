@@ -1,7 +1,7 @@
 ---
 packages:
   "@bgub/fig": minor
-  "@bgub/fig-dom": major
+  "@bgub/fig-dom": minor
 ---
 
 ## Preserve host behavior lifetimes across configuration updates
@@ -13,10 +13,11 @@ Add `hostBinding(context, owner, update)` for mixins that register committed DOM
 configuration. Updates keep their lifetime signal; removal, owner replacement,
 and Activity hiding abort it synchronously.
 
-`composeBind` now returns a binding description instead of a callable callback.
-Each composed binding has an independent signal and development strict check.
-Use `BindCallback` when a callable function is required and `Bind` for the full
-binding prop. Existing callback props keep their identity-based lifetime.
+The host `bind` prop additionally accepts host-binding descriptions and nested
+binding arrays through the new `Binding` type. Array members have independent
+signals and development strict checks. `Bind` remains callable, and
+`composeBind` preserves its callable result and shared lifetime semantics.
+`BindCallback` is an alias for `Bind`.
 
 Headless widgets adopt shared committed value, registration, and reference owners.
 Controlled props cannot leak from suspended renders, accepted uncontrolled

@@ -20,7 +20,7 @@ import { type Container, registerRoot, unregisterRoot } from "./events.ts";
 import { domRenderer } from "./renderer.ts";
 
 export { insertAssetResources } from "./asset-resources.ts";
-export type { Bind, BindCallback, HostBinding } from "./bind.ts";
+export type { Bind, BindCallback, Binding, HostBinding } from "./bind.ts";
 export { composeBind, hostBinding };
 export { type EventCallback, type EventOptions, on };
 export type {

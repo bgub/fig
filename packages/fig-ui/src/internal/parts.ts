@@ -1,5 +1,5 @@
 import type { MixinContext } from "@bgub/fig";
-import { type Bind, composeBind, hostBinding } from "@bgub/fig-dom";
+import { type Binding, hostBinding } from "@bgub/fig-dom";
 import { type Composite, type CompositeItem } from "./composite.ts";
 
 /** Composes a widget's element binding after any the caller authored. */
@@ -7,13 +7,13 @@ export function bindPart(
   context: MixinContext,
   owner: object,
   bind: (node: HTMLElement, signal: AbortSignal) => void,
-): Bind {
-  return composeBind(
+): Binding {
+  return [
     context.props.bind,
     hostBinding(context, owner, (node, signal) => {
       if (node instanceof HTMLElement) bind(node, signal);
     }),
-  );
+  ];
 }
 
 /**

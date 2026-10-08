@@ -10,7 +10,7 @@ import {
   useState,
 } from "@bgub/fig";
 import { afterEach, expect, it } from "vitest";
-import { composeBind, createRoot, type FigRoot, hostBinding } from "./index.ts";
+import { createRoot, type FigRoot, flushSync, hostBinding } from "./index.ts";
 import { act } from "./act.ts";
 
 const roots: FigRoot[] = [];
@@ -24,9 +24,45 @@ const behavior = createMixin(
     owner: object,
     update: (node: Element, signal: AbortSignal) => undefined,
   ) => ({
-    bind: composeBind(context.props.bind, hostBinding(context, owner, update)),
+    bind: [context.props.bind, hostBinding(context, owner, update)],
   }),
 );
+
+it.each(["callback", "host"] as const)(
+  "aborts retained siblings when a %s binding throws during an update",
+  (kind) => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container, { onUncaughtError() {} });
+    roots.push(root);
+    const owner = {};
+    const signals: AbortSignal[] = [];
+    const sibling = (_: Element, signal: AbortSignal): undefined => {
+      signals.push(signal);
+    };
+    const view = (fail: boolean) => {
+      const first = (_: Element, signal: AbortSignal): undefined => {
+        signals.push(signal);
+        if (fail) throw new Error("binding failed");
+      };
+      return kind === "callback" ? (
+        <button bind={[first, sibling]} />
+      ) : (
+        <button mix={[behavior(owner, first), behavior(owner, sibling)]} />
+      );
+    };
+    flushSync(() => root.render(view(false)));
+    const retained = signals.at(-1)!;
+    expect(retained.aborted).toBe(false);
+    expect(() => flushSync(() => root.render(view(true)))).toThrow(
+      "binding failed",
+    );
+    expect(container.childNodes.length).toBe(0);
+    expect(retained.aborted).toBe(true);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  },
+);
+
 async function render(node: FigNode) {
   const host = document.createElement("div");
   document.body.append(host);

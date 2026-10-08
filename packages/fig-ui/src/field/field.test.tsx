@@ -20,6 +20,47 @@ afterEach(async () => {
 });
 
 describe("Field", () => {
+  it("orders keyed messages by committed DOM order while preserving reference groups", async () => {
+    let reverse = () => {};
+    function Example(): FigNode {
+      const [reversed, setReversed] = useState(false);
+      reverse = () => setReversed(true);
+      const field = useField({ invalid: true });
+      const keys = reversed ? ["b", "a"] : ["a", "b"];
+      return (
+        <div>
+          <label mix={field.label()}>Name</label>
+          <span id="external">Help</span>
+          <input aria-describedby="external" mix={field.control()} />
+          {keys.map((key) => (
+            <div key={key}>
+              <p id={`error-${key}`} mix={field.error(key)}>
+                Error
+              </p>
+              <p id={`description-${key}`} mix={field.description(key)}>
+                Description
+              </p>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    const container = await render(<Example />);
+    const input = required(container, "input");
+    const firstDescription = required(container, "#description-a");
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "external description-a description-b error-a error-b",
+    );
+    await act(reverse);
+    expect([...container.querySelectorAll("p")].map((node) => node.id)).toEqual(
+      ["error-b", "description-b", "error-a", "description-a"],
+    );
+    expect(required(container, "#description-a")).toBe(firstDescription);
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "external description-b description-a error-b error-a",
+    );
+  });
+
   it("ties a label and description to the control", async () => {
     const container = await render(<Example />);
     const label = required(container, "label");
