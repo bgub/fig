@@ -51,7 +51,7 @@ useReactive((signal) => {
 
 Effects must return `undefined`, so returning a React-style cleanup is a type error. There is no separate mount-only hook; use `useReactive(fn, [])`. Dependency arrays remain explicit because Fig does not require a compiler.
 
-During a View Transition capture, before-paint effects run inside the mutation transaction. State updates they schedule wait until browser readiness releases the capture, preserving the animation; these follow-up updates may not be included in the captured snapshot. Explicit `flushSync` outside commit instead interrupts preparation to guarantee synchronous completion.
+During a View Transition capture, before-paint effects run inside the mutation transaction. State updates they schedule wait until browser readiness releases the capture, preserving the animation; these follow-up updates may not be included in the captured snapshot. The animation can display the intermediate layout even after the live DOM is repaired; see [before-paint repairs and captured pixels](./view-transitions.md#before-paint-repairs-and-captured-pixels) for measurement guidance. Explicit `flushSync` outside commit instead interrupts preparation to guarantee synchronous completion.
 
 If another render starts before pending reactive effects run, Fig flushes those effects first. Effects also run with the ambient data store installed, so data APIs work during their synchronous body.
 
