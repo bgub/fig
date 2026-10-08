@@ -80,7 +80,7 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
     "aria-label": context.props["aria-label"] ?? state.label,
     "aria-live": state.priority,
     "aria-relevant": "additions text",
-    bind: bindPart(context, state.registry.bindRegion),
+    bind: bindPart(context, state.registry, state.registry.bindRegion),
     "data-priority": state.priority,
     mix: [
       on("focusin", () => state.registry.setPaused("focus", true)),
@@ -96,8 +96,14 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
         }
         state.registry.setPaused("focus", false);
       }),
-      on("pointerenter", () => state.registry.setPaused("pointer", true)),
-      on("pointerleave", () => state.registry.setPaused("pointer", false)),
+      on("pointerenter", (event) => {
+        if (event.currentTarget instanceof HTMLElement)
+          state.registry.setPointerPaused(event.currentTarget, true);
+      }),
+      on("pointerleave", (event) => {
+        if (event.currentTarget instanceof HTMLElement)
+          state.registry.setPointerPaused(event.currentTarget, false);
+      }),
     ],
     role: "region",
   }),
@@ -106,7 +112,7 @@ const toastRegionMixin = /* @__PURE__ */ createMixin(
 const toastMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: ToastRegionState, own: ToastState) => ({
     "aria-atomic": "true",
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindToast(node, signal, {
         duration: own.duration,
         value: own.value,
@@ -121,6 +127,7 @@ const toastDismissMixin = /* @__PURE__ */ createMixin(
     return {
       ...triggerProps(context, { disabled: false }),
       mix: on("click", (event) => {
+        if (event.defaultPrevented) return;
         if (event.currentTarget instanceof Element) {
           state.dismiss(value, "dismiss", event, event.currentTarget);
         }

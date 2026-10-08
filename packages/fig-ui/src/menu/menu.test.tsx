@@ -57,6 +57,62 @@ describe("Menu", () => {
     ).toBe("actions-trigger");
   });
 
+  it("follows a changed custom trigger id", async () => {
+    let rename = () => {};
+    function RenamedMenu(): FigNode {
+      const menu = useMenu();
+      const [id, setId] = useState("before");
+      rename = () => setId("after");
+      return (
+        <>
+          <button id={id} mix={menu.trigger()}>
+            Actions
+          </button>
+          <div mix={menu.menu()}>
+            <button mix={menu.item("edit")}>Edit</button>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<RenamedMenu />);
+    await act(rename);
+    expect(
+      requiredElement(container, '[role="menu"]').getAttribute(
+        "aria-labelledby",
+      ),
+    ).toBe("after");
+  });
+
+  it("preserves an authored label while switching back to automatic labelling", async () => {
+    let advance = () => {};
+    function ChangingLabel(): FigNode {
+      const widget = useMenu();
+      const [step, setStep] = useState(0);
+      advance = () => setStep(step + 1);
+      return (
+        <>
+          <span id="external">External name</span>
+          <button id={`trigger-${step}`} mix={widget.trigger()}>
+            Actions
+          </button>
+          <div
+            aria-labelledby={step === 1 ? "external" : undefined}
+            mix={widget.menu()}
+          >
+            <button mix={widget.item("edit")}>Edit</button>
+          </div>
+        </>
+      );
+    }
+    const container = await render(<ChangingLabel />);
+    const popup = requiredElement(container, '[role="menu"]');
+    expect(popup.getAttribute("aria-labelledby")).toBe("trigger-0");
+    await act(advance);
+    expect(popup.getAttribute("aria-labelledby")).toBe("external");
+    await act(advance);
+    expect(popup.getAttribute("aria-labelledby")).toBe("trigger-2");
+  });
+
   it("moves focus to the first item when opened downward", async () => {
     const container = await renderMenu({});
     const trigger = requiredElement(container, "[data-trigger]");
@@ -103,6 +159,57 @@ describe("Menu", () => {
     await keydown(rename, "d");
 
     expect(document.activeElement).toBe(duplicate);
+  });
+
+  it.each(["altKey", "ctrlKey", "metaKey"])(
+    "does not typeahead for %s shortcuts",
+    async (modifier) => {
+      const container = await openMenu(await renderMenu({}));
+      const [rename] = items(container);
+      await act(() =>
+        rename.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            key: "d",
+            [modifier]: true,
+          }),
+        ),
+      );
+      expect(document.activeElement).toBe(rename);
+    },
+  );
+
+  it("still accepts uppercase typeahead with Shift", async () => {
+    const container = await openMenu(await renderMenu({}));
+    const [rename, duplicate] = items(container);
+    await act(() =>
+      rename.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "D",
+          shiftKey: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(duplicate);
+  });
+
+  it("does not move focus during text composition", async () => {
+    const container = await openMenu(await renderMenu({}));
+    const [rename] = items(container);
+    await act(() =>
+      rename.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "d",
+          isComposing: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(rename);
   });
 
   it("steps through items sharing a first letter when it repeats", async () => {
@@ -367,3 +474,85 @@ async function keydown(
   await act(() => element.dispatchEvent(event));
   return event;
 }
+
+it("ignores IME confirmation on a closed menu trigger", async () => {
+  const container = await renderMenu({});
+  const trigger = requiredElement(container, "[data-trigger]");
+  await act(() =>
+    trigger.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("ignores IME confirmation instead of activating the focused action", async () => {
+  const selected: string[] = [];
+  const container = await openMenu(
+    await renderMenu({ onSelect: (value) => selected.push(value) }),
+  );
+  await act(() =>
+    items(container)[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(selected).toEqual([]);
+  expect(
+    requiredElement(container, "[data-trigger]").getAttribute("aria-expanded"),
+  ).toBe("true");
+});
+
+it("keeps an initially empty menu keyboard reachable as items arrive", async () => {
+  let load = () => {};
+  function Loading(): FigNode {
+    const [loaded, setLoaded] = useState(false);
+    load = () => setLoaded(true);
+    const menu = useMenu();
+    return (
+      <>
+        <button data-trigger="" mix={menu.trigger()}>
+          Actions
+        </button>
+        <div data-menu="" mix={menu.menu()}>
+          {loaded ? <button mix={menu.item("copy")}>Copy</button> : "Loading"}
+        </div>
+      </>
+    );
+  }
+  const host = await render(<Loading />);
+  await keydown(requiredElement(host, "[data-trigger]"), "ArrowDown");
+  const popup = requiredElement(host, "[data-menu]");
+  expect(document.activeElement).toBe(popup);
+  await act(load);
+  expect(document.activeElement).toBe(popup);
+  await keydown(popup, "ArrowDown");
+  expect(document.activeElement).toBe(items(host)[0]);
+});
+
+it("ignores legacy IME confirmation without isComposing", async () => {
+  const selected: string[] = [];
+  const host = await openMenu(
+    await renderMenu({ onSelect: (value) => selected.push(value) }),
+  );
+  await act(() =>
+    items(host)[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        keyCode: 229,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(selected).toEqual([]);
+});

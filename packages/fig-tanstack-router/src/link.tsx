@@ -9,7 +9,7 @@ import {
   useState,
 } from "@bgub/fig";
 import { markClientOnlyHostProps } from "@bgub/fig/internal";
-import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
+import { type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   deepEqual,
   exactPathTest,
@@ -180,7 +180,7 @@ function ClientLink<
       "data-transitioning": isTransitioning ? "transitioning" : undefined,
       bind:
         preload === "viewport"
-          ? composeBind(anchorProps.bind, viewportBind)
+          ? [anchorProps.bind, viewportBind]
           : anchorProps.bind,
       mix: [
         mix,
@@ -446,11 +446,8 @@ function combineLinkBinds(
   first: LinkStateProps["bind"],
   second: LinkStateProps["bind"],
 ): LinkStateProps["bind"] {
-  const firstBind = typeof first === "function" ? first : undefined;
-  const secondBind = typeof second === "function" ? second : undefined;
-  return firstBind && secondBind
-    ? composeBind(firstBind, secondBind)
-    : (firstBind ?? secondBind);
+  if (first) return second ? [first, second] : first;
+  return second;
 }
 
 function linkPathIsActive(

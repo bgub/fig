@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { type FigNode, useState } from "@bgub/fig";
-import { createRoot, type FigRoot } from "@bgub/fig-dom";
+import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -337,3 +337,51 @@ async function check(radio: HTMLInputElement): Promise<void> {
     radio.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
+
+it("restores radio selection when an earlier handler vetoes the change", async () => {
+  const changes: Array<string | null> = [];
+  function App(): FigNode {
+    const group = useRadioGroup({
+      defaultValue: "small",
+      onValueChange: (value) => changes.push(value),
+    });
+    return (
+      <div
+        aria-label="Size"
+        mix={[on("change", (event) => event.preventDefault()), group.root()]}
+      >
+        <input mix={group.radio("small")} />
+        <input mix={group.radio("large")} />
+      </div>
+    );
+  }
+  const container = await render(<App />);
+  await act(() => {
+    const large = radios(container)[1]!;
+    large.checked = true;
+    large.dispatchEvent(
+      new Event("change", { bubbles: true, cancelable: true }),
+    );
+  });
+  expect(changes).toEqual([]);
+  expect(radios(container).map((radio) => radio.checked)).toEqual([
+    true,
+    false,
+  ]);
+});
+
+it("refuses change reports from a natively disabled radio", async () => {
+  const changes: Array<string | null> = [];
+  const container = await renderGroup({
+    defaultValue: "small",
+    disabledValue: "large",
+    onValueChange: (value) => changes.push(value),
+  });
+  await check(radios(container)[2]!);
+  expect(changes).toEqual([]);
+  expect(radios(container).map((radio) => radio.checked)).toEqual([
+    true,
+    false,
+    false,
+  ]);
+});

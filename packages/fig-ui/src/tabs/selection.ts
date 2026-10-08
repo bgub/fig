@@ -3,7 +3,12 @@ import {
   type ChangeDetails,
   createChangeDetails,
 } from "../internal/changes.ts";
-import { type CompositeItem, sameValue } from "../internal/composite.ts";
+import {
+  type CompositeItem,
+  isNativeEnabled,
+  sameValue,
+} from "../internal/composite.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { createTabsRegistry } from "./registry.ts";
 
@@ -28,12 +33,6 @@ export interface TabsSelectionOptions<Value> {
   readonly value: Value | null;
 }
 
-interface SelectionState {
-  /** The value holding the roving tab stop. */
-  readonly highlighted: unknown;
-  readonly value: unknown;
-}
-
 interface SelectionTracker {
   /** An explicitly requested default stays selected even while disabled. */
   exempt: unknown;
@@ -48,11 +47,18 @@ const none = Symbol("fig-ui.tabs.none");
  */
 export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
   const { controlled } = options;
-  const [state, setState] = useState<SelectionState>(() => ({
-    highlighted: options.value === null ? none : options.value,
-    value: options.value,
-  }));
-  const value = (controlled ? options.value : state.value) as Value | null;
+  const registrationChanged = useRegistrationReconcile();
+  const selection = useControllableValue<Value | null>({
+    value: controlled ? options.value : undefined,
+    defaultValue: options.value,
+    onChange: options.onValueChange,
+    equal: sameValue,
+    reconcile: registrationChanged,
+  });
+  const { value } = selection;
+  const [highlighted, setHighlightedState] = useState<unknown>(() =>
+    options.value === null ? none : options.value,
+  );
   const tracker = useMemo<SelectionTracker>(
     () => ({
       exempt: controlled || options.implicitDefault ? none : options.value,
@@ -61,42 +67,40 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
     [],
   );
   const autoSelect = !controlled && options.implicitDefault;
-  const registrationChanged = useRegistrationReconcile();
   const registry = useMemo(() => createTabsRegistry(registrationChanged), []);
 
   const setHighlighted = useStableEvent((highlighted: unknown) => {
-    setState((current) =>
-      sameValue(current.highlighted, highlighted)
-        ? current
-        : { ...current, highlighted },
-    );
+    setHighlightedState(() => highlighted);
   });
-
-  const emitChange = useStableEvent(
-    (next: unknown, details: TabsValueChangeDetails, signal: AbortSignal) => {
-      options.onValueChange?.(next as Value | null, details, signal);
-    },
-  );
 
   const select = useStableEvent(
     (next: unknown, event: Event, trigger: Element) => {
-      if (sameValue(next, value)) return;
-      const details = createChangeDetails(event, trigger);
-      emitChange(next, details);
-      if (details.isCanceled || controlled) return;
-      setState({ highlighted: next, value: next });
+      if (
+        selection.request(
+          () => next as Value | null,
+          createChangeDetails(event, trigger),
+        ) &&
+        !controlled
+      ) {
+        setHighlighted(next);
+      }
     },
   );
 
   const resetHighlight = useStableEvent(() => {
-    const selected = value === null ? undefined : registry.item(value);
-    const next = selected ?? registry.items()[0];
+    const tabs = registry.items().filter(isNativeEnabled);
+    const selected =
+      value === null
+        ? undefined
+        : tabs.find((tab) => sameValue(tab.value, value));
+    const next = selected ?? tabs[0];
     if (next !== undefined) setHighlighted(next.value);
   });
 
   useBeforePaint(() => {
     registry.sync();
     const tabs = registry.items();
+    const focusable = tabs.filter(isNativeEnabled);
     const previous = tracker.value;
     const changed = !sameValue(previous, value);
 
@@ -107,30 +111,29 @@ export function useTabsSelection<Value>(options: TabsSelectionOptions<Value>) {
       // A repair committed in an earlier pass may not have rendered yet.
       if (sameValue(repair.value, previous)) return;
       const target =
-        repair.value === null ? tabs[0] : registry.item(repair.value);
+        focusable.find((tab) => sameValue(tab.value, repair.value)) ??
+        focusable[0];
       tracker.value = repair.value;
-      setState((current) => ({
-        highlighted: target === undefined ? current.highlighted : target.value,
-        value: repair.value,
-      }));
-      emitChange(repair.value, createChangeDetails(null));
+      if (target !== undefined) setHighlighted(target.value);
+      selection.restore(
+        repair.value as Value | null,
+        createChangeDetails(null),
+      );
       return;
     }
     tracker.value = value;
 
-    const highlighted = nextHighlight(
-      tabs,
+    const next = nextHighlight(
+      focusable,
       value,
-      state.highlighted,
+      highlighted,
       changed && !registry.containsFocus(),
     );
-    if (!sameValue(highlighted, state.highlighted)) {
-      setState((current) => ({ ...current, highlighted }));
-    }
+    if (!sameValue(next, highlighted)) setHighlighted(next);
   });
 
   return {
-    highlightedValue: state.highlighted,
+    highlightedValue: highlighted,
     registry,
     resetHighlight,
     select,
@@ -158,7 +161,8 @@ function planRepair(
     value === null
       ? undefined
       : tabs.find((tab) => sameValue(tab.value, value));
-  const disabled = selected?.disabled === true;
+  const disabled =
+    selected !== undefined && (selected.disabled || !isNativeEnabled(selected));
   const missing = selected === undefined && value !== null;
   // A root that was never told what to select picks the first enabled tab.
   const unselected = value === null && autoSelect;
@@ -169,7 +173,7 @@ function planRepair(
   }
   if (!disabled && !missing && !unselected) return null;
 
-  const enabled = tabs.find((tab) => !tab.disabled);
+  const enabled = tabs.find((tab) => !tab.disabled && isNativeEnabled(tab));
   // `undefined` is a usable tab value, so never collapse it with `??`.
   const fallback = enabled === undefined ? null : enabled.value;
   return sameValue(value, fallback) ? null : { value: fallback };

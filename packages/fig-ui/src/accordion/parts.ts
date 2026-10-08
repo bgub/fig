@@ -34,7 +34,7 @@ interface AccordionPanelOwnState {
 // a roving tab stop.
 export const accordionMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: AccordionPartState) => ({
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindContainer(node, signal),
     ),
     "data-disabled": state.disabled ? "" : undefined,
@@ -73,7 +73,7 @@ export const accordionTriggerMixin = /* @__PURE__ */ createMixin(
       ...triggerProps(context, { disabled, id: own.triggerId }),
       "aria-controls": own.panelId,
       "aria-expanded": own.open ? "true" : "false",
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindItem(node, signal, own.value, disabled),
       ),
       "data-fig-accordion-trigger": "",
@@ -89,7 +89,7 @@ export const accordionPanelMixin = /* @__PURE__ */ createMixin(
     own: AccordionPanelOwnState,
   ) => ({
     "aria-labelledby": own.triggerId,
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.relations.bindPanel(node, signal, own.value),
     ),
     "data-open": own.open ? "" : undefined,

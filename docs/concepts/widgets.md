@@ -37,9 +37,21 @@ Every widget also ships the hook as a component taking a render callback, for a 
 
 The two are the same widget — the component is the hook plus `props.children(parts)`. Choose by what should re-render: the hook re-renders the component that calls it, so a widget sharing a component with unrelated markup re-renders that markup on every selection, while the component form confines the update to the callback's output.
 
+All controlled values and uncontrolled selections share one internal value owner. Render computes a snapshot; only commit publishes controlled props to active handlers. Accepted uncontrolled requests update pending intent immediately, so requests compose before a render and across suspended lanes and unrelated urgent commits. Notifications run once in the request path, never inside a state updater that rendering may replay. Cancellation leaves pending intent unchanged. Reentrant requests supersede older proposals. Combobox selection and query updates are proposed together: every callback observes the previous state, and rejection or supersession prevents the remaining proposal from being applied. Form resets restore the initial default without notification; Tabs' automatic repairs remain non-cancelable and notify after accepting the repaired value.
+
+A controlled owner may synchronously accept a requested value with `flushSync` inside its change callback. Committing the proposed value acknowledges that request, so compound notifications and subsequent popup dismissal continue. A different committed value, a mode switch, or a newer request supersedes the active request instead.
+
 Controlled roots treat `setOpen()` and `setChecked()` as requests. Every request that differs from the rendered prop invokes the change callback; if the owner keeps its prop unchanged, the widget reconciles back to that prop without leaving an optimistic value that suppresses a later retry. User-agent changes follow the same rule: a refused or canceled native toggle is restored before paint.
 
+A separate native popup adapter owns requested visibility and observed platform transitions; generic value ownership contains no popover-specific state. Opening one native auto popover can dismiss another during before-paint synchronization. Popup widgets honor accepted native transitions until their state commits, rather than reopening a dismissed peer from a stale render snapshot. Pending uncontrolled requests survive unrelated commits so native dismissal can supersede them; imperative opens still wait for their render to commit. Replacement popup hosts reconcile their native visibility, and controlled owners reassert committed props on the following reconciliation. Suspended renders cannot publish controlled open state to active handlers.
+
+Native `disabled` authored on any trigger, including a submenu trigger, remains effective. Field, Checkbox, Switch, Radio, and Combobox control mixins preserve native `disabled` and `required` constraints supplied by the host or an earlier mixin; a false widget option does not erase an existing constraint. Removing all sources of a constraint on a later render clears it. Composite items that deliberately remain focusable while disabled continue to use their widget-specific ARIA behavior.
+
+DOM focus movement and typeahead skip hosts matching native `:disabled`, including inherited fieldset disability, while ARIA-disabled items remain reachable where the widget pattern permits them. Menu entry chooses the first or last native-enabled item, falling back to the menu container when none exists. Tabs keep their roving tab stop on a native-enabled host even when the owner explicitly selects a native-disabled tab; selection and focus remain independent.
+
 Part descriptors remain ordinary Fig mixins. They run whenever their intrinsic element is created, compose in authored `mix` order, and cannot call hooks, read context, or restructure children. A widget must resolve component state before constructing a descriptor rather than making the descriptor discover that state itself.
+
+Automatically managed label and description references follow the committed part IDs on every update, including caller-supplied IDs that change. Explicitly authored references retain ownership; mixins capture that choice before adding defaults, and binding callbacks use `context.owns()` to honor overrides in the final composed host props. Removing a referenced part clears its automatic reference. A shared reference owner applies these rules to Field, Dialog, Menu, Select, and Combobox; a later `aria-label` removes a generated `aria-labelledby` so the generated reference does not override the authored name. Explicit references are preserved even when their text equals the generated default.
 
 Each widget owns a dedicated source entry with direct named exports for its hook and component, with no root barrel, namespace object, or module side effects. The private workspace package mirrors those entries so repository tests and demos exercise the same boundaries applications copy.
 
@@ -49,13 +61,19 @@ Presentation stays outside the accessibility primitives. Tabs indicator measurem
 
 Widgets whose items live in one container share an internal composite: registration by object identity, ordering and membership read from the live DOM, ownership checks that survive nesting, pointer tracking, and arrow, Home, and End movement. Each widget supplies the container and item selectors and the movement rules its pattern calls for.
 
+Widget click activation and keyboard handlers (including menu triggers and submenu opening/Tab dismissal) honor `defaultPrevented` when they begin, allowing an earlier caller handler to cancel the widget action while preserving event propagation. Pointer movement from touch contact does not change Listbox, Select, or Combobox highlighting.
+
+Composite keyboard movement ignores an event whose default was already prevented, so an embedded widget can consume its own navigation keys without moving focus in its parent.
+
 Those rules are where the patterns genuinely differ, and the primitive makes the differences explicit rather than uniform:
 
 - tabs land on disabled tabs, because a disabled tab's label and state should stay discoverable, while radios pass over them, because arrow movement also selects;
 - radios accept either axis the way a native group does, tabs and accordions accept one; and
 - radios have no edge keys, because Home and End would change the value.
 
-Registration reports back to the root on every bind and unbind. A descendant component may own part of the markup, so without that report a root would never reconcile against the committed DOM, and a selected item that unmounted from a descendant's own state would strand both the selection and the roving tab stop.
+Parts use committed host bindings keyed by the widget owner and mixin slot. Configuration updates preserve the host signal and update registration metadata; cleanup is installed once per lifetime and runs synchronously on actual removal. Typeahead and toast timers therefore need no microtask to guess whether a host will be rebound. Registration tracks lifetime identity, not just host identity: aborting an older binding cannot clear a newer binding to the same element. Queued form resets survive synchronous listener replacement while the widget still has inputs in that form; unmounting the last input cancels pending reset work.
+
+Registration reports back to the root on every committed configuration update, attach, and detach, even when registration metadata is equal: host props such as `id` and `form` may have changed. A descendant component may own part of the markup, so without that report a root would never reconcile against the committed DOM, and a selected item that unmounted from a descendant's own state would strand both the selection and the roving tab stop.
 
 ## Tabs
 
@@ -93,7 +111,7 @@ The list owns every tab interaction. Tabs are plain hosts carrying attributes, s
 
 Manual activation is the default. Arrow, Home, and End keys move the roving tab stop without changing selection; Enter or Space activates it. `activateOnFocus` makes focus select enabled tabs. Horizontal lists follow LTR or RTL Left/Right movement, vertical lists use Up/Down, looping defaults on, and modified key chords retain their native behavior.
 
-Focus and selection are independent. A controlled selection change moves the roving tab stop when focus is outside the list, but never steals it while a user is navigating inside. When focus leaves a manually activated list, its roving tab stop returns to the selected tab. Disabled tabs remain focusable from the composite keyboard sequence and expose `aria-disabled`; they never activate and native buttons deliberately do not receive `disabled`.
+Focus and selection are independent. A controlled selection change moves the roving tab stop when focus is outside the list, but never steals it while a user is navigating inside. When focus leaves a manually activated list, its roving tab stop returns to the selected tab. Disabled tabs remain focusable from the composite keyboard sequence and expose `aria-disabled`; they never activate and widget disability does not add native `disabled`, while caller-authored native constraints remain effective.
 
 ### Panel Transitions And Indicator Behavior
 
@@ -164,7 +182,7 @@ Keep the list and tabs outside named transition surfaces. Browsers remove captur
 
 Naming individual panels also works, but a boundary that only contains other boundaries has no change of its own to animate: a `ViewTransition` wrapped around a frame whose panels are each named is not captured, and the frame height snaps.
 
-`useTabsIndicator()` from `~/ui/tabs/indicator.ts` returns `list()` and `indicator()` descriptors. The former composes with the core `tabs.list()` descriptor; the latter observes the list and tabs only while its host is mounted. It accounts for transforms and scrolling and writes active-tab top, right, bottom, left, width, and height CSS variables. Its host stays `hidden` until a measurement resolves a box, and Fig binds DOM behavior before paint during hydration, so a server-rendered indicator appears in place on the first painted frame after hydration rather than in the wrong place before it. Selection itself is server-rendered through `aria-selected` and `data-active`, so a design that must show the selected tab without client JavaScript should not depend on the indicator alone.
+`useTabsIndicator()` from `~/ui/tabs/indicator.ts` returns `list()` and `indicator()` descriptors. The former composes with the core `tabs.list()` descriptor; the latter observes the list and tabs only while its host is mounted. It accounts for transforms and scrolling, includes scrollbar gutters when calculating scale, and writes active-tab top, right, bottom, left, width, and height CSS variables. Its host stays `hidden` until a measurement resolves a box, and Fig binds DOM behavior before paint during hydration, so a server-rendered indicator appears in place on the first painted frame after hydration rather than in the wrong place before it. Selection itself is server-rendered through `aria-selected` and `data-active`, so a design that must show the selected tab without client JavaScript should not depend on the indicator alone.
 
 ## Radio Group
 
@@ -208,6 +226,8 @@ const accordion = useAccordion({ defaultValue: ["shipping"] });
 </div>;
 ```
 
+Uncontrolled accordion toggles compose against the latest accepted change even when multiple activations arrive before a render. Canceled and controlled requests do not optimistically update that set.
+
 Open panels are a set: `value` and `defaultValue` are arrays in every mode, so a caller reads one shape whether or not `multiple` is on. A single-open root collapses the open panel by default; `collapsible: false` keeps the last one open. Headers wrap in the caller's own heading element, expose `aria-expanded` and `aria-controls`, and each region is labelled by the header that controls it.
 
 Headers stay in the tab order, which is what the pattern calls for, so the accordion uses only the movement half of the composite. Arrow, Home, and End movement is the optional part of the pattern and does not wrap; it lands on disabled headers so a locked section stays discoverable. Enter and Space reach a native button as an ordinary click.
@@ -231,9 +251,11 @@ const dialog = useDialog();
 </>;
 ```
 
-The platform owns the hard parts. `showModal()` provides the top layer, focus containment, focus restoration to the trigger, the inert background, the `::backdrop` pseudo-element, and Escape, so the widget contributes no focus trap and no `aria-hidden` sweep over sibling DOM. It owns open state, labelling, and dismissal policy: `closeOnEscape` and `closeOnBackdrop` both default to `true`, and a backdrop click is distinguished from a click on the dialog's own padding by testing the point against the element's box.
+The platform owns the hard parts. `showModal()` provides the top layer, focus containment, focus restoration to the trigger, the inert background, the `::backdrop` pseudo-element, and Escape, so the widget contributes no focus trap and no `aria-hidden` sweep over sibling DOM. It owns open state, labelling, and dismissal policy: `closeOnEscape` and `closeOnBackdrop` both default to `true`, and a backdrop click is distinguished from a click on the dialog's own padding by testing the point against the element's box. A press that begins inside the dialog cannot become a backdrop dismissal when released outside, so dragging text or controls across the edge leaves it open.
 
-State follows the element rather than the other way around. Escape arrives as a cancelable `cancel` event, so a handler calling `details.cancel()` keeps the dialog open; a form submitted with `method="dialog"` closes it directly and the root reports that as an ordinary change. When the element moved but state did not — a controlled owner that kept `open`, or a handler that refused — the root reconciles and restores modality on the next pass.
+A closed dialog shell may defer rendering its title, description, and content until `open` is true. Naming diagnostics run before opening; generated relationships are removed when lazy parts unmount and restored when they remount. Explicit caller labels remain caller-owned.
+
+State follows the element rather than the other way around. Escape arrives as a cancelable `cancel` event, so an earlier native handler calling `preventDefault()` or a change handler calling `details.cancel()` keeps the dialog open; a form submitted with `method="dialog"` closes it directly and the root reports that as an ordinary change. When the element moved but state did not — a controlled owner that kept `open`, or a handler that refused — the root reconciles and restores modality on the next pass.
 
 One reset to watch for: the user agent centres a modal dialog with `margin: auto`, so a stylesheet that zeroes every margin — Tailwind's preflight, for one — leaves the dialog in the corner. Restoring `margin: auto` on the element is the fix, and it is worth an assertion, since nothing about the markup looks wrong.
 
@@ -259,15 +281,17 @@ const popover = usePopover({ id: "filters-popover" });
 }
 ```
 
-Two platform features do the work. The popover attribute owns the top layer, light dismiss, and Escape, so the widget adds no outside-click listener; CSS anchor positioning owns placement, so the widget measures nothing and installs no scroll or resize listener. It only names the pair: a generated `anchor-name` goes on the trigger and the matching `position-anchor` on the popover, both as inline styles, leaving the caller free to write `position-area` and `position-try-fallbacks` in ordinary CSS.
+Two platform features do the work. The popover attribute owns the top layer, light dismiss, and Escape, so the widget adds no outside-click listener; CSS anchor positioning owns placement, so the widget measures nothing and installs no scroll or resize listener. It connects the native popover source to its trigger so separately mounted child popups preserve their native parent relationship. It also names the pair: a generated `anchor-name` goes on the trigger and the matching `position-anchor` on the popover, both as inline styles, leaving the caller free to write `position-area` and `position-try-fallbacks` in ordinary CSS.
 
-The trigger also carries `popovertarget` in server HTML, so it opens and closes before hydration. A custom id belongs on the root option rather than the host: one root-owned value drives the popover's `id`, the trigger's `aria-controls`, and `popovertarget`. State follows the element afterwards: `beforetoggle` is cancelable, so a handler refusing a change stops a light dismissal as readily as a click, and `toggle` reports what actually happened.
+The trigger also carries `popovertarget` in server HTML, so it opens and closes before hydration. A custom id belongs on the root option rather than the host: one root-owned value drives the popover's `id`, the trigger's `aria-controls`, and `popovertarget`. State follows the element afterwards: opening `beforetoggle` events are cancelable, and Popover, Combobox, and Tooltip do not adopt an opening already prevented by an earlier native handler. Closing `beforetoggle` events are not cancelable; refused closes are restored through reconciliation. `toggle` reports what actually happened.
 
 Two caveats worth stating plainly. Anchor positioning has not shipped everywhere — Firefox is still missing it at the time of writing — so a popover in a browser without it lands wherever the caller's fallback CSS puts it, and a `@supports not (anchor-name: --a)` block should place it somewhere sensible. And where the popover API itself is missing, the widget falls back to toggling `hidden`: the markup still shows and hides, without the top layer or light dismiss.
 
+Native anchored popups reconcile against the current element’s `:popover-open` state, so replacing a popup host while its widget remains open shows the replacement as well.
+
 ## Tooltip
 
-`useTooltip(options)` and `Tooltip` coordinate one non-interactive description through `trigger()` and `tooltip()`. Keyboard focus opens immediately, mouse hover uses `delay` (500ms by default), pointer exit uses `closeDelay`, and Escape closes. Touch does not synthesize hover behavior.
+`useTooltip(options)` and `Tooltip` coordinate one non-interactive description through `trigger()` and `tooltip()`. Keyboard focus opens immediately, mouse hover uses `delay` (500ms by default), pointer exit uses `closeDelay`, and Escape closes unless an earlier handler canceled the key event. Pointer entry and exit do not override keyboard focus on the trigger. Disabling a tooltip cancels pending opening timers while preserving a pending close and its original deadline. Delayed opening belongs to the trigger host that started it: removing or replacing that host invalidates the opening, while rerendering the same host preserves it. A pending close still completes after trigger removal. Touch does not synthesize hover behavior.
 
 ```tsx
 const tooltip = useTooltip({ id: "save-help" });
@@ -295,7 +319,7 @@ const listbox = useListbox({ defaultValue: ["apple"] });
 
 Selection is array-shaped in both modes: a single-select listbox accepts zero or one value, while `multiple: true` accepts any number. A defined `value` is controlled and `defaultValue` initializes uncontrolled state. Selecting an option reports the next array through `onValueChange(values, details, signal)`; cancellation leaves uncontrolled state unchanged and asks a controlled root to reconcile to its rendered value.
 
-DOM focus stays on the root and options are active descendants. Arrow keys wrap through enabled options, Home and End reach the edges, and typeahead uses either `textValue` or the host's text content. In single-select mode those movements also select; in multiple mode they only move the highlight, while Enter or Space toggles the highlighted option. Pointer selection follows the same rules. `readOnly` preserves navigation while preventing selection, and `disabled` removes the root from sequential focus.
+DOM focus stays on the root and options are active descendants. Arrow keys wrap through enabled options, Home and End reach the edges, and typeahead uses either `textValue` or the host's text content. Rerendering the same listbox preserves the current typing session. In single-select mode those movements also select; in multiple mode they only move the highlight, while Enter or Space toggles the highlighted option. Pointer selection follows the same rules. `readOnly` preserves navigation while preventing selection, and `disabled` removes the root from sequential focus.
 
 The application owns option structure, scrolling, grouping, virtualization, and data lifetime. Selection is therefore not pruned merely because an option is currently unmounted; an offscreen virtualized value remains selected until the application changes it. Every active descendant, however, is always a mounted enabled option. Listbox does not submit a form value—an application that needs one can serialize `listbox.values` into its own native input.
 
@@ -316,7 +340,7 @@ const select = useSelect({ defaultValue: "apple", name: "fruit" });
 </>;
 ```
 
-The trigger keeps DOM focus and exposes a listbox active descendant. Arrow, Home, and End movement wraps and skips disabled options; Enter and Space accept the highlighted option; typeahead works both open and closed. With no explicit default, an uncontrolled select adopts the first enabled mounted option before paint and repairs a removed selection. `readOnly` permits inspection without selection. The hidden input serializes through `getFormValue` and restores the initial uncontrolled selection on form reset. It intentionally does not emulate native constraint validation; applications needing `required` should use native `<select>`.
+The trigger keeps DOM focus and exposes a listbox active descendant. An explicit popup `aria-label` or `aria-labelledby` overrides its automatic trigger-derived name. Arrow, Home, and End movement wraps and skips disabled options; Enter and Space accept the highlighted option; typeahead works both open and closed and retains its search across selection rerenders. With no explicit default, an uncontrolled select adopts the first enabled mounted option before paint and repairs a removed selection. If remaining options are all disabled, a removed selection becomes `null`. `readOnly` permits inspection without selection. The hidden input serializes through `getFormValue` and restores the initial uncontrolled selection on form reset. It intentionally does not emulate native constraint validation; applications needing `required` should use native `<select>`.
 
 ## Combobox
 
@@ -339,7 +363,7 @@ const matches = fruits.filter((fruit) =>
 </>;
 ```
 
-Typing reports `onInputValueChange`, clears any selected identity, and opens the popup. Arrow keys highlight enabled options without moving DOM focus; Enter selects one, writes its `textValue` or text content to uncontrolled input state, and closes. Pointer selection prevents the popup from stealing input focus. The optional hidden input submits the selected identity through `getFormValue`; uncommitted text has no submitted selected value. Native form reset restores both initial states. `readOnly` preserves inspection but refuses edits and selection.
+Typing reports `onInputValueChange`, clears any selected identity, and opens the popup. Arrow keys highlight enabled options without moving DOM focus; Enter selects one, writes its `textValue` or text content to uncontrolled input state, and closes. Pointer selection prevents the popup from stealing input focus. The optional hidden input submits the selected identity through `getFormValue`; uncommitted text has no submitted selected value. Native form reset restores both initial states, including when only the visible input is mounted. The popup inherits the input’s label sources unless explicitly named; it must not derive its name from the input’s current typed value. `readOnly` preserves inspection but refuses edits and selection.
 
 ## Menu
 
@@ -359,9 +383,9 @@ const menu = useMenu({ onSelect: (value) => run(value) });
 
 This is the first widget assembled from another. `menu()` and `trigger()` layer menu semantics over the popover's own parts by returning both descriptors, which compose exactly as two authored mixins would, so the popover keeps supplying the top layer, light dismiss, Escape, and anchor positioning while the menu adds roles, keys, and focus.
 
-Focus is what the menu genuinely owns. `showPopover()` deliberately leaves focus where it was, unlike `showModal()`, so the menu moves it to the first item when opened with Enter or ArrowDown, to the last with ArrowUp, and returns it to the trigger when the menu closes with focus still inside. Items are never tab stops: focus moves between them directly, and Tab closes the whole menu tree rather than walking it.
+Focus is what the menu genuinely owns. `showPopover()` deliberately leaves focus where it was, unlike `showModal()`, so the menu moves it to the first item when opened with Enter or ArrowDown, to the last with ArrowUp, and returns it to the trigger when the menu closes with focus still inside. Initially open menus also focus their first item. Empty menus focus their container; when asynchronous items arrive, navigation can enter the list without reopening it. IME composition keys, including the legacy key code 229 used by some browsers, do not open or activate menus. Items are never tab stops: focus moves between them directly, and Tab closes the whole menu tree rather than walking it.
 
-Arrow keys move and wrap, Home and End jump, and anything else is offered to typeahead: successive keystrokes extend the search until a pause resets it, while a repeated single character steps through the items starting with it. Disabled items stay focusable so a locked action is still discoverable, and they refuse activation.
+Arrow keys move and wrap, Home and End jump, and printable keys without Alt, Control, or Meta are offered to typeahead (outside IME composition): successive keystrokes extend the search until a pause resets it, while a repeated single character steps through the items starting with it. Typeahead only handles items owned by that menu, so a nested menu cannot move focus into its ancestor. Disabled items stay focusable so a locked action is still discoverable, and they refuse activation.
 
 Choosing an item reports through `onSelect` before the menu closes, and a handler calling `details.cancel()` keeps it open — useful for an item that toggles.
 
@@ -384,7 +408,7 @@ const share = useMenuSubmenu(actions, "share", { delay: 100 });
 </div>;
 ```
 
-The inline-end arrow opens and focuses the first child; the inline-start arrow closes and returns focus to the parent item, with both directions reversed in RTL. Mouse entry and exit use the configurable delay and open without stealing focus. An accepted child action closes its submenu and every parent menu, while canceled selections and checked items that opt out of closing leave the tree open. A disabled submenu trigger remains focusable but cannot open.
+The inline-end arrow opens and focuses the first child, including when hover has already opened the submenu; the inline-start arrow closes only the innermost submenu and returns focus to its parent item, with direction taken from the trigger’s computed CSS, including overrides inside an RTL ancestor. Mouse entry and exit use the configurable delay and open without stealing focus. Pending hover work is canceled when keyboard input takes over, the parent closes, or the trigger becomes disabled. Enter also moves focus into an already open submenu. An accepted child action closes its submenu and every parent menu, while canceled selections and checked items that opt out of closing leave the tree open. A disabled submenu trigger remains focusable unless its native host is disabled, and cannot open through hover, directional keys, or Enter. Authored host constraints are preserved. Selecting from a sibling-mounted submenu returns focus to the root trigger unless the action already moved focus elsewhere.
 
 ## Toolbar
 
@@ -493,3 +517,25 @@ The semantic DOM and interaction tests are necessary but cannot establish what a
 | Chrome + TalkBack on Android | Touch exploration, activation, modal containment, and dismissal | Not yet manually recorded | Required before each stable minor |
 
 Automated checks assert roles, relationships, state, keyboard movement, native form behavior, and focus. Manual runs record the browser, operating-system and assistive-technology versions plus any exceptions in this section before a stable release.
+
+### Input and lifetime invariants
+
+Controlled Accordion, Listbox, Combobox, Checkbox, and Switch derive each request from the last committed prop. Accordion ignores values from suspended renders; only accepted uncontrolled toggles accumulate before commit. Repeated requests in one batch remain observable when the owner has not accepted them; multi-selection does not accumulate refused values. Uncontrolled widgets continue to accumulate accepted changes immediately. Native controls respect earlier canceled change events and live disability, including dispatched integration events. A disabled Select trigger cannot be bypassed by selecting from its already-open popup. Nested Listbox key events belong to the nearest Listbox, even when that inner Listbox is disabled.
+
+Listbox, Select, and Combobox ignore keyboard events during IME composition. Their native button options default to `type="button"` and stay outside sequential focus (`tabindex="-1"`); keyboard focus remains on the controlling root, trigger, or input.
+
+Toast lifetimes and focus/pointer pauses survive rebinding the same DOM hosts during a render. Actual removal cancels the timer; a replacement host starts its own lifetime. Replacing the region clears hover and focus pauses owned by the removed region, while preserving pauses established on the new region.
+
+The optional tabs indicator measures border boxes, including padding and borders, when calculating its CSS properties. Resize notifications update measurements without replacing unchanged observer subscriptions.
+
+## Inline Combobox
+
+`useCombobox({ inline: true })` keeps the listbox in document flow instead of using the native top layer. Open state still controls visibility: use `open: true` for an always-visible list. Closed inline lists are hidden in server HTML as well as after hydration. Changing between inline and popup layout clears the previous layout's visibility and anchor positioning. Inline lists leave Escape available to an enclosing Dialog or Popover; popup mode consumes Escape to close its list. Keyboard navigation, active descendants, labels, controlled values, cancellation, and form resets use the same Combobox behavior in both modes. Keyboard navigation scrolls the highlighted option into view after the list opens, while DOM focus stays on the input. Pointer highlighting does not initiate scrolling.
+
+Authored native `readonly` and inherited fieldset disability block edits and selection through an open list. A read-only input consumes Enter on an active option without selecting it or accidentally submitting its form. Earlier handlers can cancel input events and preserve the current query.
+
+## Reference behavior and performance
+
+Dialog drag dismissal follows [Base UI’s inside-press protection](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/floating-ui-react/hooks/useDismiss.ts). Initial menu focus and focus return across sibling popups were checked against [MenuPopup](https://github.com/mui/base-ui/blob/33a72a48394096c4c91c5dc8cd5c0888701edb3b/packages/react/src/menu/popup/MenuPopup.tsx) and FloatingFocusManager; native host constraints were checked against MenuSubmenuTrigger and ComboboxInput.
+
+Composite registration performs eager uniqueness scans only in development. Production registration does not repeatedly query the full list for each bound item. Explicit navigation and reconciliation still inspect live DOM order. Combobox scrolls highlighted options only for keyboard navigation and shares one ordered option snapshot during before-paint reconciliation.

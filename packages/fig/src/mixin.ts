@@ -11,6 +11,8 @@ export interface MixinContext {
   readonly type: string;
   /** Props composed by the host and every preceding mixin. */
   readonly props: Readonly<Props>;
+  /** Whether this mixin is the last writer of a composed prop. Read at commit. */
+  readonly owns: (prop: string) => boolean;
 }
 
 /** Describes empty mixin value. */
@@ -82,6 +84,7 @@ export function resolveHostMix<P extends Props>(type: string, input: P): P {
   const mix = props.mix;
   delete props.mix;
   let resolvedMixins = 0;
+  let owners: Map<string, string> | undefined;
 
   function resolve(value: unknown, slot: string): void {
     if (emptyMixinValue(value)) return;
@@ -108,6 +111,7 @@ export function resolveHostMix<P extends Props>(type: string, input: P): P {
       [FigMixinSlotSymbol]: slot,
       props,
       type,
+      owns: (prop) => owners?.get(prop) === slot,
     };
     const result = value.type(context, ...value.args);
     if (emptyMixinValue(result)) return;
@@ -135,6 +139,8 @@ export function resolveHostMix<P extends Props>(type: string, input: P): P {
 
     const { mix: nestedMix, ...patch } = returnedProps;
     Object.assign(props, patch);
+    owners ??= new Map();
+    for (const name of Object.keys(patch)) owners.set(name, slot);
     resolve(nestedMix, `${slot}.mix`);
   }
 

@@ -13,12 +13,13 @@ import {
   assertUniqueIds,
   expectHost,
 } from "../internal/diagnostics.ts";
-import { usePartIds } from "../internal/ids.ts";
 import {
-  bindPart,
-  createPartCollection,
-  setIdReference,
-} from "../internal/parts.ts";
+  createPartReference,
+  type PartReference,
+} from "../internal/part-reference.ts";
+import { usePartIds } from "../internal/ids.ts";
+import { bindPart, setIdReference } from "../internal/parts.ts";
+import { createPartCollection } from "../internal/registration.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
 export interface FieldOptions {
@@ -56,10 +57,14 @@ interface FieldState {
 }
 
 type FieldPart =
-  | { readonly kind: "control"; readonly describedBy: string | undefined }
+  | {
+      readonly kind: "control";
+      readonly describedBy: string | undefined;
+      readonly label: PartReference;
+    }
   | { readonly kind: "description" }
   | { readonly kind: "error" }
-  | { readonly kind: "label" };
+  | { readonly kind: "label"; readonly control: PartReference };
 
 interface FieldMessageOwnState {
   readonly id: string;
@@ -71,39 +76,49 @@ const defaultError = Symbol("fig-ui.field.error");
 const fieldLabelMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState) => {
     expectHost(context, "field label", "label");
+    const control = createPartReference(context, "for", state.controlId);
     return {
-      bind: bindPart(context, (node, signal) =>
-        state.bind(node, signal, { kind: "label" }),
+      bind: bindPart(context, state.bind, (node, signal) =>
+        state.bind(node, signal, {
+          kind: "label",
+          control,
+        }),
       ),
       // A wrapping label needs no `for`, but pointing at the control also works
       // when the two are siblings, which is the arrangement that needs help.
-      for: context.props.for ?? state.controlId,
+      ...control.props,
       id: context.props.id ?? state.labelId,
     };
   },
 );
 
 const fieldControlMixin = /* @__PURE__ */ createMixin(
-  (context: MixinContext, state: FieldState) => ({
-    "aria-labelledby":
-      context.props["aria-labelledby"] ??
-      (context.props["aria-label"] === undefined ? state.labelId : undefined),
-    "aria-invalid": state.invalid ? "true" : undefined,
-    bind: bindPart(context, (node, signal) =>
-      state.bind(node, signal, {
-        describedBy: context.props["aria-describedby"],
-        kind: "control",
-      }),
-    ),
-    disabled: state.disabled ? true : undefined,
-    id: context.props.id ?? state.controlId,
-    required: state.required ? true : undefined,
-  }),
+  (context: MixinContext, state: FieldState) => {
+    const label = createPartReference(
+      context,
+      "aria-labelledby",
+      state.labelId,
+    );
+    return {
+      ...label.props,
+      "aria-invalid": state.invalid ? "true" : undefined,
+      bind: bindPart(context, state.bind, (node, signal) =>
+        state.bind(node, signal, {
+          describedBy: context.props["aria-describedby"],
+          label,
+          kind: "control",
+        }),
+      ),
+      disabled: state.disabled ? true : context.props.disabled,
+      id: context.props.id ?? state.controlId,
+      required: state.required ? true : context.props.required,
+    };
+  },
 );
 
 const fieldDescriptionMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState, own: FieldMessageOwnState) => ({
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.bind, (node, signal) =>
       state.bind(node, signal, { kind: "description" }),
     ),
     id: context.props.id ?? own.id,
@@ -112,7 +127,7 @@ const fieldDescriptionMixin = /* @__PURE__ */ createMixin(
 
 const fieldErrorMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState, own: FieldMessageOwnState) => ({
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.bind, (node, signal) =>
       state.bind(node, signal, { kind: "error" }),
     ),
     id: context.props.id ?? own.id,
@@ -149,24 +164,20 @@ export function useField(options: FieldOptions = {}): FieldParts {
     const control = controls.at(-1);
     if (control === undefined) return;
     const node = control.node;
-    const labelNode = labels.at(-1)?.node;
-    if (labelNode !== undefined) {
-      if (labelNode.getAttribute("for") === controlId) {
-        labelNode.setAttribute("for", node.id);
-      }
-      if (node.getAttribute("aria-labelledby") === labelId) {
-        setIdReference(node, "aria-labelledby", labelNode.id);
-      }
-    } else if (node.getAttribute("aria-labelledby") === labelId) {
-      setIdReference(node, "aria-labelledby", undefined);
-    }
+    const label = labels.at(-1);
+    if (label?.value.kind === "label")
+      label.value.control.sync(label.node, node.id);
+    if (control.value.kind === "control")
+      control.value.label.sync(node, label?.node.id);
     assertControlLabel(node);
     const descriptions = registrations
       .filter((part) => part.value.kind === "description")
-      .map((part) => part.node);
+      .map((part) => part.node)
+      .sort(compareMessageOrder);
     const errors = registrations
       .filter((part) => part.value.kind === "error")
-      .map((part) => part.node);
+      .map((part) => part.node)
+      .sort(compareMessageOrder);
     assertUniqueIds([...descriptions, ...errors], "field messages");
     const authored =
       control.value.kind === "control"
@@ -197,6 +208,16 @@ export function useField(options: FieldOptions = {}): FieldParts {
       fieldErrorMixin(state, { id: idFor(key, "error") }),
     label: () => fieldLabelMixin(state),
   };
+}
+
+// Stable registrations outlive keyed moves. Read order after DOM placement;
+// unrelated trees have no DOM order, so retain their registration order.
+function compareMessageOrder(first: HTMLElement, second: HTMLElement): number {
+  const position = first.compareDocumentPosition(second);
+  if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0;
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+  return 0;
 }
 
 function uniqueReferences(references: readonly string[]): string[] {

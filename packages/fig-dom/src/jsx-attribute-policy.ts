@@ -1,5 +1,5 @@
 import type { FigNode, Key, MixinDescriptor, MixinInput } from "@bgub/fig";
-import type { Bind } from "./bind.ts";
+import type { Binding } from "./bind.ts";
 import type {
   HtmlAttributeNameByTag,
   HtmlGlobalAttributeName,
@@ -20,7 +20,7 @@ type AttributeValue = string | number | true | EmptyPropValue;
 export type HostStyle = Readonly<Record<string, string | EmptyPropValue>>;
 
 interface FigHostProps<E extends Element> {
-  bind?: Bind<E> | EmptyPropValue;
+  bind?: Binding<E> | EmptyPropValue;
   children?: FigNode;
   key?: Key | null;
   mix?: MixinInput;
@@ -136,5 +136,5 @@ export interface OpenHostProps<E extends Element>
     | MixinDescriptor
     | ReadonlyArray<MixinInput>
     | 0n
-    | Bind<E>;
+    | Binding<E>;
 }

@@ -9,10 +9,11 @@ import type {
   OpenChangeDetails,
   OpenChangeHandler,
 } from "../internal/open-state.ts";
-import { useOpenState } from "../internal/open-state.ts";
+import { usePopupState } from "../internal/popup-state.ts";
+import { createAnchoredPopup } from "../internal/anchored-popup.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 import { popoverMixin, popoverTriggerMixin } from "./parts.ts";
-import { createPopoverRegistry } from "./registry.ts";
+import { registerPopoverSource } from "./registry.ts";
 
 export type PopoverOpenChangeDetails = OpenChangeDetails;
 
@@ -47,8 +48,11 @@ export interface PopoverProps extends PopoverOptions {
  */
 export function usePopover(options: PopoverOptions = {}): PopoverParts {
   const requestReconcile = useRegistrationReconcile();
-  const registry = useMemo(() => createPopoverRegistry(requestReconcile), []);
-  const { open, requestOpen, setOpen } = useOpenState({
+  const registry = useMemo(
+    () => createAnchoredPopup(requestReconcile, "popover"),
+    [],
+  );
+  const { getOpen, open, requestOpen, setOpen, nativeToggle } = usePopupState({
     ...options,
     requestReconcile,
   });
@@ -58,17 +62,19 @@ export function usePopover(options: PopoverOptions = {}): PopoverParts {
   const popoverId = options.id ?? `${id}-popover`;
 
   useBeforePaint(() => {
-    registry.sync(open, anchorName);
+    registry.sync(getOpen(), anchorName);
   });
 
-  const state = { open, popoverId, registry, requestOpen };
+  const state = { open, popoverId, registry, requestOpen, nativeToggle };
 
-  return {
+  const parts: PopoverParts = {
     open,
     popover: () => popoverMixin(state),
     setOpen,
     trigger: () => popoverTriggerMixin(state),
   };
+  registerPopoverSource(parts, registry.bindSource);
+  return parts;
 }
 
 /**

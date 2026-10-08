@@ -56,7 +56,7 @@ interface ToolbarItemState {
 const toolbarRootMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: ToolbarState) => ({
     "aria-orientation": state.orientation,
-    bind: bindPart(context, state.registry.bindContainer),
+    bind: bindPart(context, state.registry, state.registry.bindContainer),
     "data-orientation": state.orientation,
     mix: [
       on("click", (event) => {
@@ -89,7 +89,7 @@ const toolbarItemMixin = /* @__PURE__ */ createMixin(
     const disabled = own.disabled || context.props.disabled === true;
     return {
       "aria-disabled": disabled ? "true" : undefined,
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindItem(node, signal, own.value, disabled),
       ),
       "data-disabled": disabled ? "" : undefined,

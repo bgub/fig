@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
-import { createRoot, type FigRoot } from "@bgub/fig-dom";
+import {
+  type FigNode,
+  readPromise,
+  Suspense,
+  transition,
+  useState,
+} from "@bgub/fig";
+import { createRoot, type FigRoot, flushSync } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -21,6 +27,106 @@ afterEach(async () => {
 });
 
 describe("Popover", () => {
+  it("does not show a suspended open request during an unrelated urgent commit", async () => {
+    const pending = new Promise<void>(() => {});
+    let open = () => {};
+    let urgent = () => {};
+    function Example(): FigNode {
+      const [count, setCount] = useState(0);
+      const popover = usePopover();
+      open = () => transition(() => popover.setOpen(true));
+      urgent = () => flushSync(() => setCount((value) => value + 1));
+      if (popover.open) readPromise(pending);
+      return (
+        <>
+          <button data-trigger="" mix={popover.trigger()}>
+            {count}
+          </button>
+          <div data-popover="" mix={popover.popover()} />
+        </>
+      );
+    }
+    const container = await render(
+      <Suspense fallback="Loading">
+        <Example />
+      </Suspense>,
+    );
+    await act(open);
+    await act(urgent);
+    expect(requiredElement(container, "[data-trigger]").textContent).toBe("1");
+    expect(
+      requiredElement(container, "[data-trigger]").getAttribute(
+        "aria-expanded",
+      ),
+    ).toBe("false");
+    expect(requiredElement(container, "[data-popover]").hidden).toBe(true);
+  });
+
+  it("does not publish controlled open state from a suspended render", async () => {
+    const pending = new Promise<void>(() => {});
+    const changes: boolean[] = [];
+    let update = () => {};
+    function Suspending({ open }: { open: boolean }): FigNode {
+      const popover = usePopover({
+        open,
+        onOpenChange: (next) => changes.push(next),
+      });
+      if (open) readPromise(pending);
+      return (
+        <>
+          <button data-trigger="" mix={popover.trigger()}>
+            Open
+          </button>
+          <div mix={popover.popover()} />
+        </>
+      );
+    }
+    function App(): FigNode {
+      const [open, setOpen] = useState(false);
+      update = () => transition(() => setOpen(true));
+      return (
+        <Suspense fallback="Loading">
+          <Suspending open={open} />
+        </Suspense>
+      );
+    }
+    const container = await render(<App />);
+    await act(update);
+    const trigger = requiredElement(container, "[data-trigger]");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await click(trigger);
+    expect(changes).toEqual([true]);
+  });
+
+  it.each([false, true])(
+    "restores internal state when control is released (defaultOpen: %s)",
+    async (defaultOpen) => {
+      function SwitchControl({ controlled }: { controlled: boolean }): FigNode {
+        const popover = usePopover({
+          defaultOpen,
+          open: controlled ? !defaultOpen : undefined,
+        });
+        return (
+          <>
+            <button data-trigger="" mix={popover.trigger()}>
+              Open
+            </button>
+            <div data-popover="" mix={popover.popover()} />
+          </>
+        );
+      }
+      const container = await render(<SwitchControl controlled />);
+      const popup = requiredElement(container, "[data-popover]");
+      expect(popup.hidden).toBe(defaultOpen);
+      await act(() =>
+        roots.at(-1)?.render(<SwitchControl controlled={false} />),
+      );
+      expect(popup.hidden).toBe(!defaultOpen);
+      await click(requiredElement(container, "[data-trigger]"));
+      expect(popup.hidden).toBe(defaultOpen);
+    },
+  );
+
   it("wires the trigger to the popover and publishes one anchor name", async () => {
     const container = await render(<Example />);
     const trigger = requiredElement(container, "[data-trigger]");

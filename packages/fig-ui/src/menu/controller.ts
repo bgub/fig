@@ -3,10 +3,12 @@ import type { MixinDescriptor } from "@bgub/fig";
 export type MenuFocusTarget = "first" | "last" | false;
 
 export interface MenuController {
-  closeTree(): void;
+  closeTree(focusOrigin?: Element): void;
+  bindTrigger(node: HTMLElement, signal: AbortSignal): void;
+  popup(): HTMLElement | null;
   setOpen(open: boolean, focus?: MenuFocusTarget): void;
   submenuTrigger(value: unknown, disabled: boolean): MixinDescriptor;
-  trigger(openWithArrows: boolean): MixinDescriptor;
+  trigger(openWithArrows: boolean, disabled?: boolean): MixinDescriptor;
 }
 
 const controllers = new WeakMap<object, MenuController>();

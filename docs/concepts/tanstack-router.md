@@ -120,4 +120,6 @@ For non-blocking work, loaders call `context.data.preloadData` and return. Navig
 
 Disabled links omit `href` and set `aria-disabled`. Active and inactive props merge with the base anchor; `class`, `style`, `mix`, and `bind` compose rather than replace. Render-function children receive `isActive` and per-navigation `isTransitioning`.
 
+Binding composition accepts the full Fig DOM `Binding` representation: callbacks (including callable `composeBind()` groups), host bindings, and nested binding arrays. Switching active state retires the old state-specific binding while preserving unchanged base binding lifetimes.
+
 Intent, render, and viewport preloading delegate to Router Core. Unsupported proximity preloading is rejected rather than silently ignored.

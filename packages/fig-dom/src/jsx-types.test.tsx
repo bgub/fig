@@ -1,6 +1,12 @@
 import { createMixin, type FigNode } from "@bgub/fig";
 import { describe, expect, it } from "vitest";
-import { type Bind, on } from "./index.ts";
+import {
+  type Bind,
+  type Binding,
+  composeBind,
+  hostBinding,
+  on,
+} from "./index.ts";
 
 // Type-level tests for the stage-1 JSX host-prop types: oxlint enforces
 // every @ts-expect-error below (an unused one is itself an error), so this
@@ -19,7 +25,27 @@ function typeChecks(): FigNode[] {
   }));
   void invalidBind;
 
+  const raw: Bind<HTMLInputElement> = (node, signal) => {
+    void node.value;
+    void signal.aborted;
+  };
+  const composed: Bind<HTMLInputElement> = composeBind(raw, false);
+  const callBind = (node: HTMLInputElement, signal: AbortSignal) =>
+    composed(node, signal);
+  const bindings: Binding<HTMLInputElement> = [raw, [composed, null]];
+  const registered = createMixin((context) => ({
+    bind: [context.props.bind, hostBinding(context, {}, raw)],
+  }));
+  // @ts-expect-error independent binding arrays are not callable Bind values.
+  const invalidCallback: Bind<HTMLInputElement> = bindings;
+  void invalidCallback;
+
   return [
+    expectNode(<input bind={callBind} />),
+    expectNode(<input bind={bindings} mix={registered()} />),
+    expectNode(
+      <input bind={[(node) => void (node satisfies HTMLInputElement)]} />,
+    ),
     // Fig props typecheck, and bind infers the per-tag element type.
     expectNode(
       <input

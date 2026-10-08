@@ -1,3 +1,4 @@
+import { useControllableValue } from "../internal/controllable-value.ts";
 import {
   type FigNode,
   type MixinDescriptor,
@@ -5,7 +6,6 @@ import {
   useId,
   useMemo,
   useStableEvent,
-  useState,
 } from "@bgub/fig";
 import {
   type ChangeDetails,
@@ -83,19 +83,15 @@ export function useRadioGroup<Value = unknown>(
     readOnly = false,
     required = false,
   } = options;
-  const controlledValue = options.value;
-  const controlled = controlledValue !== undefined;
-  // Boxed because a value may itself be a function, which useState would
-  // otherwise call as an initializer.
-  const initialValue = useMemo(
-    () => (options.defaultValue === undefined ? null : options.defaultValue),
-    [],
-  );
-  const [uncontrolled, setUncontrolled] = useState<{
-    readonly value: Value | null;
-  }>(() => ({ value: initialValue }));
-  const value =
-    controlledValue === undefined ? uncontrolled.value : controlledValue;
+  const requestReconcile = useRegistrationReconcile();
+  const selection = useControllableValue<Value | null>({
+    value: options.value,
+    defaultValue: options.defaultValue ?? null,
+    onChange: options.onValueChange,
+    equal: sameValue,
+    reconcile: requestReconcile,
+  });
+  const value = selection.value;
   // Registration only: nothing renders from it, so there is nothing to
   // reconcile when a descendant mounts a radio.
   const registry = useMemo(
@@ -112,44 +108,22 @@ export function useRadioGroup<Value = unknown>(
     if (container !== null) assertAccessibleName(container, "radio group");
   });
 
-  const emitChange = useStableEvent(
-    (
-      next: unknown,
-      details: RadioGroupValueChangeDetails,
-      signal: AbortSignal,
-    ) => {
-      options.onValueChange?.(next as Value | null, details, signal);
-    },
-  );
-
-  const requestReconcile = useRegistrationReconcile();
-  const reset = useStableEvent(() => {
-    if (controlled) requestReconcile();
-    else setUncontrolled({ value: initialValue });
-  });
-  const formReset = useMemo(() => createFormReset(reset), []);
+  const formReset = useMemo(() => createFormReset(selection.reset), []);
   const select = useStableEvent(
     (next: unknown, event: Event, trigger: Element) => {
-      // Native changes may arrive faster than uncontrolled state commits. A
-      // later selection can therefore equal the stale rendered value while an
-      // older update is still queued; it must supersede that update rather
-      // than being dropped.
-      if (controlled && sameValue(next, value)) return;
-      if (readOnly) {
+      if (
+        event.defaultPrevented ||
+        disabled ||
+        trigger.matches(":disabled") ||
+        readOnly
+      ) {
         requestReconcile();
         return;
       }
-      const details = createChangeDetails(event, trigger);
-      emitChange(next, details);
-      if (details.isCanceled) {
-        requestReconcile();
-        return;
-      }
-      // The browser already moved the checked radio. When that did not turn
-      // into a state change — a controlled owner that kept its value, or a
-      // handler that refused — reconcile so the committed props re-assert.
-      if (controlled) requestReconcile();
-      else setUncontrolled({ value: next as Value });
+      selection.request(
+        () => next as Value,
+        createChangeDetails(event, trigger),
+      );
     },
   );
 

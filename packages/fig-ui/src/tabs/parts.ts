@@ -40,7 +40,7 @@ export const listMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: TabsPartState, own: TabsListOwnState) => ({
     ...partProps(state),
     "aria-orientation": state.orientation,
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindContainer(node, signal),
     ),
     mix: [
@@ -109,7 +109,7 @@ export const tabMixin = /* @__PURE__ */ createMixin(
       "aria-controls": own.panelId,
       "aria-selected": own.selected ? "true" : "false",
       "data-active": own.selected ? "" : undefined,
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindItem(node, signal, own.value, disabled),
       ),
       role: "tab",
@@ -123,7 +123,7 @@ export const panelMixin = /* @__PURE__ */ createMixin(
     ...partProps(state),
     "aria-labelledby": own.tabId,
     "data-hidden": own.active ? undefined : "",
-    bind: bindPart(context, (node, signal) =>
+    bind: bindPart(context, state.registry, (node, signal) =>
       state.registry.bindPanel(node, signal, own.value),
     ),
     hidden: own.active ? undefined : true,

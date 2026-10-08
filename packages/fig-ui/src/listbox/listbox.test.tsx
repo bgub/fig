@@ -16,6 +16,48 @@ afterEach(async () => {
 });
 
 describe("Listbox", () => {
+  it("ignores typeahead keystrokes during IME composition", async () => {
+    const container = await render(<Example defaultValue={["apple"]} />);
+    const trigger = required(container, "[data-root]");
+    await act(() =>
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(options(container)[0].getAttribute("aria-selected")).toBe("true");
+    expect(options(container)[1].getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("keeps a multi-character typeahead search across selection renders", async () => {
+    const container = await render(<Example />);
+    const trigger = required(container, "[data-root]");
+    await keydown(trigger, "b");
+    await keydown(trigger, "l");
+    expect(
+      options(container)
+        .find((option) => option.getAttribute("aria-selected") === "true")
+        ?.textContent?.toLowerCase(),
+    ).toBe("blueberry");
+  });
+
+  it("does not turn native button options into form submit controls", async () => {
+    function Buttons(): FigNode {
+      const listbox = useListbox();
+      return (
+        <div aria-label="Fruit" mix={listbox.root()}>
+          <button mix={listbox.option("apple")}>Apple</button>
+        </div>
+      );
+    }
+    const container = await render(<Buttons />);
+    expect((options(container)[0] as HTMLButtonElement).type).toBe("button");
+  });
+
   it("owns active-descendant navigation and single selection", async () => {
     const changes: string[][] = [];
     const container = await render(
@@ -172,3 +214,68 @@ async function keydown(element: HTMLElement, key: string): Promise<void> {
     ),
   );
 }
+
+it("bases batched controlled multi-selection requests on the rendered value", async () => {
+  const changes: string[][] = [];
+  const container = await render(
+    <Example
+      multiple
+      value={[]}
+      onValueChange={(values) => changes.push([...values])}
+    />,
+  );
+  const [apple, banana] = options(container);
+  await act(() => {
+    apple.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }),
+    );
+    banana.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }),
+    );
+  });
+  expect(changes).toEqual([["apple"], ["banana"]]);
+  expect(
+    options(container).every(
+      (option) => option.getAttribute("aria-selected") === "false",
+    ),
+  ).toBe(true);
+});
+
+it("does not let a disabled nested listbox navigate its parent", async () => {
+  const changes: string[][] = [];
+  function Nested(): FigNode {
+    const outer = useListbox<string>({
+      onValueChange: (values) => changes.push([...values]),
+    });
+    const inner = useListbox({ disabled: true });
+    return (
+      <div aria-label="Outer" mix={outer.root()}>
+        <div mix={outer.option("apple")}>
+          Apple
+          <div aria-label="Inner" data-inner="" mix={inner.root()}>
+            <div mix={inner.option("child")}>Child</div>
+          </div>
+        </div>
+        <div mix={outer.option("banana")}>Banana</div>
+      </div>
+    );
+  }
+  const container = await render(<Nested />);
+  await keydown(required(container, "[data-inner]"), "ArrowDown");
+  expect(changes).toEqual([]);
+});
+
+it("still accumulates accepted batched uncontrolled multi-selection", async () => {
+  const changes: string[][] = [];
+  const container = await render(
+    <Example multiple onValueChange={(values) => changes.push([...values])} />,
+  );
+  const [apple, banana] = options(container);
+  await act(() => {
+    apple.click();
+    banana.click();
+  });
+  expect(changes).toEqual([["apple"], ["apple", "banana"]]);
+  expect(apple.getAttribute("aria-selected")).toBe("true");
+  expect(banana.getAttribute("aria-selected")).toBe("true");
+});

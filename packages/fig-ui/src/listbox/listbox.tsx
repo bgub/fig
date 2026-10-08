@@ -13,6 +13,7 @@ import {
   type ChangeDetails,
   createChangeDetails,
 } from "../internal/changes.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { sameValue } from "../internal/composite.ts";
 import {
   assertAccessibleName,
@@ -89,11 +90,12 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
     "aria-disabled": state.disabled ? "true" : undefined,
     "aria-multiselectable": state.multiple ? "true" : undefined,
     "aria-readonly": state.readOnly ? "true" : undefined,
-    bind: bindPart(context, state.registry.bindContainer),
+    bind: bindPart(context, state.registry, state.registry.bindContainer),
     "data-disabled": state.disabled ? "" : undefined,
     "data-readonly": state.readOnly ? "" : undefined,
     mix: [
       on("click", (event) => {
+        if (event.defaultPrevented) return;
         const option = state.registry.optionAt(event.target);
         if (option === undefined) return;
         if (state.disabled || option.disabled) {
@@ -112,6 +114,7 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
         }
       }),
       on("pointermove", (event) => {
+        if (event.pointerType === "touch") return;
         if (state.disabled) return;
         const option = state.registry.optionAt(event.target);
         if (option !== undefined && !option.disabled) {
@@ -119,8 +122,15 @@ const listboxRootMixin = /* @__PURE__ */ createMixin(
         }
       }),
       on("keydown", (event) => {
+        if (event.defaultPrevented) return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[role="listbox"]') !== event.currentTarget
+        )
+          return;
         if (
           state.disabled ||
+          event.isComposing ||
           event.altKey ||
           event.ctrlKey ||
           event.metaKey ||
@@ -160,7 +170,7 @@ const listboxOptionMixin = /* @__PURE__ */ createMixin(
     return {
       "aria-disabled": disabled ? "true" : undefined,
       "aria-selected": own.selected ? "true" : "false",
-      bind: bindPart(context, (node, signal) =>
+      bind: bindPart(context, state.registry, (node, signal) =>
         state.registry.bindOption(node, signal, {
           disabled,
           textValue: own.textValue,
@@ -174,6 +184,10 @@ const listboxOptionMixin = /* @__PURE__ */ createMixin(
       "data-selected": own.selected ? "" : undefined,
       id: context.props.id ?? state.idFor(own.value, "option"),
       role: "option",
+      type:
+        context.type === "button"
+          ? (context.props.type ?? "button")
+          : undefined,
       tabindex: -1,
     };
   },
@@ -184,59 +198,40 @@ export function useListbox<Value = unknown>(
   options: ListboxOptions<Value> = {},
 ): ListboxParts<Value> {
   const { disabled = false, multiple = false, readOnly = false } = options;
-  const controlled = options.value !== undefined;
-  const initialValue = useMemo(() => options.defaultValue ?? [], []);
-  const [uncontrolled, setUncontrolled] =
-    useState<readonly Value[]>(initialValue);
-  const values = controlled ? (options.value ?? []) : uncontrolled;
+  const requestReconcile = useRegistrationReconcile();
+  const selection = useControllableValue<readonly Value[]>({
+    value: options.value,
+    defaultValue: options.defaultValue ?? [],
+    onChange: options.onValueChange,
+    equal: sameValues,
+    reconcile: requestReconcile,
+  });
+  const values = selection.value;
   if (!multiple) assertSingleSelection(values, "single-select listbox");
 
   const [highlighted, setHighlightedState] = useState<{
     readonly value: unknown;
   }>(() => ({ value: values[0] ?? null }));
-  const requestReconcile = useRegistrationReconcile();
   const registry = useMemo(
     () => createListboxRegistry("listbox", requestReconcile),
     [],
   );
   const idFor = usePartIds();
-  const tracker = useMemo(() => ({ values }), []);
-  tracker.values = values;
-
-  const emitChange = useStableEvent(
-    (
-      next: readonly Value[],
-      details: ListboxValueChangeDetails,
-      signal: AbortSignal,
-    ) => {
-      options.onValueChange?.(next, details, signal);
-    },
-  );
-  const change = useStableEvent(
-    (next: readonly Value[], event: Event, trigger: Element) => {
-      if (sameValues(next, tracker.values)) return;
-      const details = createChangeDetails(event, trigger);
-      emitChange(next, details);
-      if (details.isCanceled) {
-        if (controlled) requestReconcile();
-        return;
-      }
-      tracker.values = next;
-      if (controlled) requestReconcile();
-      else setUncontrolled(next);
-    },
-  );
   const select = useStableEvent((option: ListboxOption, event: Event) => {
     if (disabled || readOnly || option.disabled) return;
-    const selected = tracker.values.some((value) =>
-      sameValue(value, option.value),
+    selection.request(
+      (current) => {
+        const selected = current.some((value) =>
+          sameValue(value, option.value),
+        );
+        return multiple
+          ? selected
+            ? current.filter((value) => !sameValue(value, option.value))
+            : [...current, option.value as Value]
+          : [option.value as Value];
+      },
+      createChangeDetails(event, option.node),
     );
-    const next = multiple
-      ? selected
-        ? tracker.values.filter((value) => !sameValue(value, option.value))
-        : [...tracker.values, option.value as Value]
-      : [option.value as Value];
-    change(next, event, option.node);
   });
   const setHighlighted = useStableEvent((next: unknown) => {
     if (!sameValue(highlighted.value, next)) {

@@ -11,7 +11,8 @@ A callback that outlives its call site receives a signal. The signal aborts when
 | Callback | Signal aborts on |
 | --- | --- |
 | `useReactive`, `useBeforePaint`, `useBeforeLayout` | dependency change, unmount, Activity hide |
-| `bind` | identity change, unmount, Activity hide |
+| raw `bind` callback | callback identity change, unmount, Activity hide |
+| `hostBinding` | owner/slot replacement or removal, unmount, Activity hide |
 | `on()` handlers | re-entry, listener removal |
 | `useStableEvent` handlers | re-entry, unmount, Activity hide |
 | `useTransition` callbacks | callback settlement, superseding run, unmount, Activity hide |

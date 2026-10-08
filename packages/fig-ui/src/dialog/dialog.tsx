@@ -64,10 +64,7 @@ export function useDialog(options: DialogOptions = {}): DialogParts {
   const titleId = `${id}-title`;
   const descriptionId = `${id}-description`;
   const requestReconcile = useRegistrationReconcile();
-  const registry = useMemo(
-    () => createDialogRegistry(requestReconcile, { descriptionId, titleId }),
-    [],
-  );
+  const registry = useMemo(() => createDialogRegistry(requestReconcile), []);
   const { open, requestOpen, setOpen } = useOpenState({
     ...options,
     requestReconcile,

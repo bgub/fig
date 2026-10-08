@@ -3,6 +3,7 @@ import type { FigNode } from "@bgub/fig";
 import { createRoot, type FigRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
+import { useCombobox } from "../combobox/combobox.tsx";
 import { useToolbar } from "./toolbar.tsx";
 
 const roots: FigRoot[] = [];
@@ -34,6 +35,32 @@ describe("Toolbar", () => {
 
     await keydown(link, "Home");
     expect(document.activeElement).toBe(bold);
+  });
+
+  it("lets a nested combobox own its arrow keys", async () => {
+    function Nested(): FigNode {
+      const toolbar = useToolbar({ orientation: "vertical" });
+      const combo = useCombobox();
+      return (
+        <div aria-label="Tools" mix={toolbar.root()}>
+          <input
+            aria-label="Search"
+            mix={[toolbar.item("search"), combo.input()]}
+          />
+          <button mix={toolbar.item("next")}>Next</button>
+          <div mix={combo.popup()}>
+            <div mix={combo.option("a")}>Alpha</div>
+            <div mix={combo.option("b")}>Beta</div>
+          </div>
+        </div>
+      );
+    }
+    const container = await render(<Nested />);
+    const input = required(container, "input");
+    input.focus();
+    await keydown(input, "ArrowDown");
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("uses vertical arrows and can stop at the edge", async () => {
