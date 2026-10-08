@@ -549,15 +549,27 @@ mounted descriptions followed by active errors. Pass stable keys to
 `description(key)` and `error(key)` when rendering repeated messages; errors
 are referenced only while `invalid` is true.
 
-## Inline lists and deferred dialog content
+## Inline lists, commands, context menus, and sliders
 
 - `useCombobox({ inline: true })` renders a list in document flow; `open: true`
   keeps it visible. Escape remains available to an enclosing dialog.
+- `useCommand({ items, onAction })` in `command/command.tsx` provides a searchable
+  action list with explicit `{ value, label, keywords?, group?, disabled? }`
+  items. Render its filtered `items` through `input()`, `list()`, and `item(item)`;
+  `group(label)` and `emptyMessage()` add grouping and empty-result semantics.
+- `useContextMenu()` in `menu/context-menu.tsx` provides Menu parts whose
+  `trigger()` opens on right-click, ContextMenu, or Shift+F10. The optional module
+  handles pointer placement, keyboard placement, viewport constraints, and RTL.
+- `useSlider({ defaultValue: 0.5, min: 0, max: 1, step: 0.1 })` in
+  `slider/slider.tsx` exposes a native range `control()`. Values are single
+  numbers; `onValueChange` requests updates and `onValueCommit` reports native
+  commit events. Label the input with a native label or ARIA.
 - A Dialog can render its content conditionally on `dialog.open`; its title must
   be present when it opens. Closed shells can defer mounting their contents.
 
-See the [widget contracts](../../docs/concepts/widgets.md) for behavior and
-composition details.
+Each hook also has the corresponding render-callback component. See the
+[widget contracts](../../docs/concepts/widgets.md) for complete behavior,
+composition examples, and reference comparisons.
 
 ## Development diagnostics
 

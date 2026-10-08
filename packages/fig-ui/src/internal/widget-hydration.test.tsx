@@ -7,6 +7,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useAccordion } from "../accordion/accordion.tsx";
 import { useCheckbox } from "../checkbox/checkbox.tsx";
 import { useCombobox } from "../combobox/combobox.tsx";
+import { useCommand } from "../command/command.tsx";
+import { useSlider } from "../slider/slider.tsx";
+import { useContextMenu } from "../menu/context-menu.tsx";
 import { useDialog } from "../dialog/dialog.tsx";
 import { useField } from "../field/field.tsx";
 import { useListbox } from "../listbox/listbox.tsx";
@@ -79,6 +82,50 @@ const examples: [string, () => FigNode][] = [
           </div>
         </>
       );
+    },
+  ],
+  [
+    "command",
+    () => {
+      const w = useCommand({
+        items: [{ value: "copy", label: "Copy", group: "Edit" }],
+      });
+      return (
+        <>
+          <input aria-label="Commands" mix={w.input()} />
+          <div mix={w.list()}>
+            <div mix={w.group("Edit")}>
+              {w.items.map((item) => (
+                <button key={item.value} mix={w.item(item)}>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p mix={w.emptyMessage()}>No commands</p>
+        </>
+      );
+    },
+  ],
+  [
+    "context menu",
+    () => {
+      const w = useContextMenu();
+      return (
+        <>
+          <button mix={w.trigger()}>Actions</button>
+          <div mix={w.menu()}>
+            <button mix={w.item("copy")}>Copy</button>
+          </div>
+        </>
+      );
+    },
+  ],
+  [
+    "slider",
+    () => {
+      const w = useSlider({ defaultValue: 0.3, min: 0, max: 1, step: 0.1 });
+      return <input aria-label="Volume" mix={w.control()} />;
     },
   ],
   [
