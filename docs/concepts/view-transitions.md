@@ -172,6 +172,12 @@ Deep branches that suspend more than once may still collide. The browser skips t
 
 The inline Suspense operations `s`, `c`, and `ac` collect old and new annotated surfaces and perform their existing DOM move inside a native transition. They share the same mutex as client commits. Browsers without the API use the normal reveal path.
 
+## Native Lifecycle Checks
+
+Run `pnpm test:transition-lifetimes` with Playwright's Chromium and WebKit browsers installed. The probes cover normal and skipped pseudo-animation cleanup, plus `flushSync` and event-target hydration before mutation and before readiness. They check immediate DOM state, exactly-once event delivery, restored author names, rejected readiness, and inert late callbacks against native browser transitions.
+
+The probes do not enumerate document animations and do not cover the historical iOS Safari animation-enumeration crash.
+
 ## Known Gaps
 
 - A boundary shifted only by an inserted sibling may not be collected unless its parent also has work.
