@@ -39,6 +39,7 @@ import type {
 import { createRenderer, type HostConfig } from "./index.ts";
 import { requestPaint } from "./scheduler.ts";
 import { waitForHostTurns } from "./test-utils.ts";
+import { createViewTransitionCommitCoordinator } from "./view-transitions.ts";
 
 class TestText {
   parentNode: TestElement | null = null;
@@ -318,6 +319,70 @@ describe("reconciler", () => {
 
     expect(warning).not.toHaveBeenCalled();
   });
+
+  it.each(["before-ready", "during-restore", "during-callback"] as const)(
+    "ends the View Transition callback lifetime when finished %s",
+    async (timing) => {
+      const renderer = createRenderer(host);
+      const container = new TestElement("root");
+      const signals: AbortSignal[] = [];
+      const aborted = vi.fn();
+      let finishTransition: (() => void) | undefined;
+      const restore = vi.fn(() => {
+        if (timing === "during-restore") finishTransition?.();
+      });
+      renderer.installCommitCoordinator(
+        createViewTransitionCommitCoordinator<TestElement, TestElement>({
+          apply() {},
+          restore,
+          commit(_container, _options, prepare, mutate, ready, finished) {
+            finishTransition = finished;
+            prepare();
+            mutate();
+            if (timing === "before-ready") finished();
+            ready(true);
+            ready(true);
+            finished();
+            finished();
+            return "committed";
+          },
+        }),
+      );
+      const root = renderer.createRoot(container);
+      try {
+        transition(() =>
+          root.render(
+            createElement(
+              ViewTransition,
+              {
+                name: "card",
+                onTransition(_event, signal) {
+                  signals.push(signal);
+                  expect(signal.aborted).toBe(false);
+                  signal.addEventListener("abort", aborted);
+                  if (timing === "during-callback") finishTransition?.();
+                },
+              },
+              createElement("span", null, "Animated"),
+            ),
+          ),
+        );
+        await waitForHostTurns();
+        expect(container.textContent).toBe("Animated");
+        expect(restore).toHaveBeenCalledOnce();
+        if (timing === "during-callback") {
+          expect(signals).toHaveLength(1);
+          expect(signals[0].aborted).toBe(true);
+          expect(aborted).toHaveBeenCalledOnce();
+        } else {
+          expect(signals).toHaveLength(0);
+          expect(aborted).not.toHaveBeenCalled();
+        }
+      } finally {
+        root.unmount();
+      }
+    },
+  );
 
   it("lets a commit coordinator finish a deferred transaction", () => {
     const renderer = createRenderer(host);

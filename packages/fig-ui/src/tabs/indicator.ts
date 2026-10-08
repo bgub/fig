@@ -88,17 +88,25 @@ function createTabsIndicatorRegistry(registrationChanged: () => void) {
       observer = null;
       return;
     }
-    const tabs = ownedTabs(listNode);
-    const active = tabs.find(
+    updatePosition();
+
+    if (typeof ResizeObserver === "undefined") return;
+    // Resize delivery must only measure; re-observing would schedule another
+    // initial notification even when none of the observed sizes changed.
+    observer ??= new ResizeObserver(updatePosition);
+    observer.disconnect();
+    if (listNode !== null) observer.observe(listNode);
+    for (const tab of ownedTabs(listNode)) observer.observe(tab);
+  }
+
+  function updatePosition(): void {
+    const indicatorNode = indicator.node();
+    if (indicatorNode === null) return;
+    const listNode = list.node();
+    const active = ownedTabs(listNode).find(
       (tab) => tab.getAttribute("aria-selected") === "true",
     );
     positionTabsIndicator(indicatorNode, listNode, active ?? null);
-
-    if (typeof ResizeObserver === "undefined") return;
-    observer ??= new ResizeObserver(sync);
-    observer.disconnect();
-    if (listNode !== null) observer.observe(listNode);
-    for (const tab of tabs) observer.observe(tab);
   }
 
   return {

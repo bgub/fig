@@ -22,6 +22,7 @@
     "test:hmr": "FIG_DEV_SOURCE= turbo run build --filter=@bgub/fig-demo-tanstack-start... && pnpm --filter @bgub/fig-demo-tanstack-start probe:hmr",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
+    "test:transition-lifetimes": "node scripts/view-transition-lifetime.mjs",
     "tegami": "node scripts/tegami.mts",
     "size": "size-limit"
   },
@@ -38,7 +39,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "35.7 kB"
+      "limit": "35.8 kB"
     },
     {
       "path": "packages/fig-ui/dist/accordion.js",

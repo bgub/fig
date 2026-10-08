@@ -113,6 +113,7 @@ export interface ViewTransitionHostConfig<Container, Instance> {
     instance: Instance,
     name: string,
     snapshots: ViewTransitionSurfaceSnapshots,
+    signal: AbortSignal,
   ): PublicViewTransitionSurface;
   suspend?(
     this: void,
@@ -831,7 +832,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           new: newNames.has(surface.name),
         };
         return (
-          host.createSurface?.(surface.instance, surface.name, snapshots) ?? {
+          host.createSurface?.(
+            surface.instance,
+            surface.name,
+            snapshots,
+            signal,
+          ) ?? {
             name: surface.name,
           }
         );
@@ -862,9 +868,8 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
       let mutation: "pending" | "committed" | "stale" | "failed" = "pending";
-      let didFinish = false;
       let didRestore = false;
-      let controller: AbortController | null = null;
+      const controller = new AbortController();
 
       return host.commit(
         context.container,
@@ -878,12 +883,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           if (result.kind === "committed") return result.value;
           return {
             cancelTransition: true,
-            canceledNames: [
-              ...new Set([
-                ...plan.oldSurfaces.map((surface) => surface.name),
-                ...plan.newSurfaces.map((surface) => surface.name),
-              ]),
-            ],
+            canceledNames: [],
             cancelRootSnapshot: true,
           };
         },
@@ -900,17 +900,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           if (
             active &&
             mutation === "committed" &&
-            !didFinish &&
-            controller === null
+            !controller.signal.aborted
           ) {
-            controller = new AbortController();
             dispatchViewTransitionCallbacks(plan, controller.signal);
           }
         },
-        () => {
-          didFinish = true;
-          controller?.abort();
-        },
+        () => controller.abort(),
       );
     },
   };

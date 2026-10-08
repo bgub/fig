@@ -540,17 +540,21 @@ it.each([false, true])(
         value = "new";
         for (const listener of listeners) listener();
       }
+      // Store notifications remain queued until capture release.
+      expect(container.textContent).toBe("first:old");
       defer = false;
       finish();
       expect(results).toEqual([
         {
-          canceledNames: snapshotChanged ? ["card"] : [],
+          canceledNames: [],
           cancelRootSnapshot: true,
           ...(snapshotChanged ? { cancelTransition: true } : {}),
         },
       ]);
       expect(container.textContent).toBe(
-        snapshotChanged ? "first:old" : "second:old",
+        // Release flushes the queued store update with committed root props;
+        // the rejected transition props are replayed separately below.
+        snapshotChanged ? "first:new" : "second:old",
       );
       expect(restoredStyles).toEqual([
         snapshotChanged ? firstStyle : secondStyle,

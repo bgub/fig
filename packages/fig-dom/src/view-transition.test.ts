@@ -101,6 +101,7 @@ describe("ViewTransition", () => {
     const signals: AbortSignal[] = [];
     const nativeInputs: MockViewTransitionInput[] = [];
     const animations: KeyframeAnimationOptions[] = [];
+    const canceledAnimations: string[] = [];
     const ownerDocument = document as unknown as MockViewTransitionDocument;
     const previousStart = ownerDocument.startViewTransition;
     const rootElement = document.documentElement;
@@ -111,7 +112,13 @@ describe("ViewTransition", () => {
 
     rootElement.animate = ((_keyframes, options) => {
       animations.push(options as KeyframeAnimationOptions);
-      return {} as Animation;
+      return {
+        cancel: () => {
+          canceledAnimations.push(
+            (options as KeyframeAnimationOptions).pseudoElement ?? "",
+          );
+        },
+      } as Animation;
     }) as typeof rootElement.animate;
     ownerDocument.startViewTransition = ((input: MockViewTransitionInput) => {
       nativeInputs.push(input);
@@ -193,6 +200,10 @@ describe("ViewTransition", () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(signals[0].aborted).toBe(true);
+      expect(canceledAnimations).toContain("::view-transition-new(card)");
+      expect(() => pseudos.new?.animate({ opacity: [0, 1] }, 120)).toThrow(
+        "no longer active",
+      );
 
       await act(() =>
         startTransition?.(() => setLabel?.("Third"), { types: ["refresh"] }),
@@ -806,6 +817,7 @@ describe("ViewTransition", () => {
       options: { pseudoElement?: string },
     ) => {
       pseudoAnimations.push(options.pseudoElement ?? "");
+      return { cancel() {} } as Animation;
     }) as typeof documentElement.animate;
 
     const namedSurfaces = (): string[] =>
@@ -1292,6 +1304,7 @@ describe("ViewTransition", () => {
       options: { pseudoElement?: string },
     ) => {
       pseudoAnimations.push(options.pseudoElement ?? "");
+      return { cancel() {} } as Animation;
     }) as typeof documentElement.animate;
 
     ownerDocument.startViewTransition = (update) => {
