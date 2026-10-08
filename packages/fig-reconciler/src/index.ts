@@ -3852,7 +3852,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // A coordinator may defer this transaction. Publish hook instances and
         // run before-layout effects only when its host mutation actually begins.
         commitLiveHookInstances(root);
-        if (hasHiddenBoundaries) prepareHiddenBoundaryWork(finishedWork.child);
+        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
         if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
         if (root.needsCommitDeletions) {
           // Retire every deleted owner before any effect, unsubscribe, or data
@@ -5307,8 +5307,24 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function rollbackBoundaryCommitWork(root: R, boundary: F): void {
-    if (boundary.renderCheckpoint !== undefined)
-      root.attempt.rollback(boundary.renderCheckpoint);
+    const checkpoint = boundary.renderCheckpoint;
+    if (checkpoint === undefined) return;
+    for (const owner of root.attempt.commitIndex.slice(checkpoint.work)) {
+      if (fiberErrorBoundaryState(owner)?.didReport !== false) continue;
+      // A caught render error belongs to the abandoned attempt, not to the
+      // partial tree Suspense may reuse. Retry its primary from scratch.
+      owner.boundaryState = null;
+      owner.child = null;
+      // Stable ancestors must descend to that primary on any retry lane.
+      for (
+        let frame: F | null = owner;
+        frame !== null && frame !== boundary;
+        frame = frame.return
+      ) {
+        frame.memoizedProps = null;
+      }
+    }
+    root.attempt.rollback(checkpoint);
   }
 
   function captureCommittedErrorBoundary(
@@ -5890,7 +5906,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function prepareHiddenBoundaryWork(node: F | null): void {
+  function prepareHiddenBoundaryHooks(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
       const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
@@ -5910,27 +5926,22 @@ export function createRenderer<Container, Instance, TextInstance>(
           walkFiberForest(cursor.child, deactivateFiberHooks);
           continue;
         }
-        prepareRevealedSubtree(cursor.child);
+        armDeferredEffects(cursor.child);
       }
 
-      if (subtreeVisibility) prepareHiddenBoundaryWork(cursor.child);
+      if (subtreeVisibility) prepareHiddenBoundaryHooks(cursor.child);
     }
   }
 
-  // Restore commit work retained in a revealed subtree, including owners
-  // skipped by render bailouts. Regular commit phases publish it in order.
-  function prepareRevealedSubtree(node: F): void {
+  // Re-arms effects that were deferred or aborted while hidden so the
+  // regular commit phases run them in order during the reveal commit.
+  function armDeferredEffects(node: F): void {
     // Revealing an inner boundary does not make it visible when an outer
     // boundary remains hidden. Likewise, do not revive a hidden descendant
     // while reconnecting the visible portion of a revealed subtree.
     if (isInsideHiddenBoundary(node)) return;
     walkFiberForest(node, (owner) => {
       if (isHiddenBoundary(owner)) return false;
-      // A captured primary can retain an unreported error after its attempt
-      // was rolled back. Re-index it only when that subtree actually reveals.
-      if (fiberErrorBoundaryState(owner)?.didReport === false) {
-        rootOf(owner).attempt.record(owner);
-      }
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
         if (hook.kind === StableEventHook) {
           const state = hook.memoizedState as StableEventState;
