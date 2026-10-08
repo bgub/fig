@@ -39,10 +39,13 @@ interface DocumentResourceMeta {
 interface DocumentResources {
   readonly entries: Map<string, DocumentResourceEntry>;
   readonly head: Element;
+  discovered: Map<string, Element> | null;
+  observer: MutationObserver | null;
 }
 
 const registries = new WeakMap<Element, DocumentResources>();
 const resourceMeta = new WeakMap<Element, DocumentResourceMeta>();
+const headInsertions = new WeakSet<Node>();
 
 export function commitAssetResources(
   previous: FigAssetResourceList | null,
@@ -68,9 +71,8 @@ export function commitAssetResources(
   }
 }
 
-// Render-phase construction only. Acquisition waits for commit because a
-// render can be discarded. Persistent assets reserve a zero-count entry to
-// dedupe sibling work; metadata stays detached so it cannot mutate a winner.
+// Render only creates a detached candidate. Shared identities and their
+// definitions are selected at commit, after retries have settled on props.
 export function adoptDocumentResource(
   type: string,
   props: Props,
@@ -79,32 +81,7 @@ export function adoptDocumentResource(
   const resource = assetResourceFromHostProps(type, props);
   if (registry === null || resource === null) return null;
 
-  const key = assetResourceKey(resource);
-  if (isMetadataResource(resource)) {
-    const element = document.createElement(type);
-    resourceMeta.set(element, { key, kind: resource.kind });
-    return element;
-  }
-
-  const entry = registry.entries.get(key);
-  if (entry?.kind === "metadata") {
-    throw new Error("Expected a persistent resource entry.");
-  }
-  const element =
-    entry?.element ??
-    findDocumentResource(registry, key) ??
-    document.createElement(type);
-
-  if (entry === undefined) {
-    registry.entries.set(key, {
-      count: 0,
-      element,
-      kind: "persistent",
-      ready: null,
-    });
-    resourceMeta.set(element, { key, kind: resource.kind });
-  }
-  return element;
+  return document.createElement(type);
 }
 
 export function acquireDocumentResource(
@@ -116,42 +93,37 @@ export function acquireDocumentResource(
   if (registry === null) return element;
 
   const hostResource = assetResourceFromHostProps(elementName(element), props);
-  if (hostResource !== null && isMetadataResource(hostResource)) {
+  if (hostResource === null) {
+    rejectHoistedDeclassification(element, {});
+    return element;
+  }
+  if (isMetadataResource(hostResource)) {
     return acquireMetadataClaim(registry, hostResource, props, owner, element);
   }
 
-  return acquirePersistentResource(registry, element);
+  const key = assetResourceKey(hostResource);
+  const existing =
+    registry.entries.get(key)?.element ?? findDocumentResource(registry, key);
+  const resolved = existing ?? element;
+  // An existing delivery asset keeps its first live definition, including
+  // assets inserted by a payload or another owner while this render suspended.
+  if (existing === null) updateElement(element, {}, props, { initial: true });
+  return acquirePersistentResource(registry, resolved, key, hostResource.kind);
 }
 
 function acquirePersistentResource(
   registry: DocumentResources,
   element: Element,
+  key: string,
+  kind: FigAssetResource["kind"],
 ): Element {
-  // Deletions commit before placements, so a sibling's release in the same
-  // commit may have dropped the element from the registry; re-derive its
-  // identity from its attributes and revive it.
-  let meta = resourceMeta.get(element);
-  if (meta === undefined) {
-    const resource = resourceFromElement(element);
-    if (resource === null) return element;
-    meta = { key: assetResourceKey(resource), kind: resource.kind };
-    resourceMeta.set(element, meta);
-  }
-
-  const entry = registry.entries.get(meta.key);
+  const entry = registry.entries.get(key);
   if (entry?.kind === "metadata") {
     throw new Error("Expected a persistent resource entry.");
   }
-
-  // A payload insertion may have claimed the key while this render was
-  // suspended. Its live element is authoritative.
-  if (entry !== undefined && entry.element !== element) {
-    entry.count += 1;
-    return attachDocumentResource(registry, entry.element);
-  }
-
   if (entry === undefined) {
-    registry.entries.set(meta.key, {
+    resourceMeta.set(element, { key, kind });
+    registry.entries.set(key, {
       count: 1,
       element,
       kind: "persistent",
@@ -160,7 +132,7 @@ function acquirePersistentResource(
   } else {
     entry.count += 1;
   }
-  return attachDocumentResource(registry, element);
+  return attachDocumentResource(registry, entry?.element ?? element);
 }
 
 export function releaseDocumentResource(
@@ -221,15 +193,7 @@ export function updateHoistedResource(
   // Hoisted placement is static fiber state. Never let props that stop
   // classifying mutate either a shared delivery asset or a metadata claim.
   if (resource === null) {
-    if (__DEV__) {
-      const previous = assetResourceFromHostProps(type, previousProps);
-      const identity =
-        meta?.key ?? (previous === null ? null : assetResourceKey(previous));
-      const label = identity === null ? "" : ` (asset "${identity}")`;
-      throw new Error(
-        `A hoisted <${type}>${label} cannot update into an ordinary in-tree element. Keep its asset classification stable or replace it with a different Fig element key.`,
-      );
-    }
+    rejectHoistedDeclassification(element, previousProps);
     return element;
   }
 
@@ -253,20 +217,7 @@ export function updateHoistedResource(
     }
 
     releaseDocumentResource(element, owner);
-    const candidate = document.createElement(type);
-    updateElement(candidate, {}, nextProps);
-    if (resource.kind === "title") candidate.textContent = resource.value;
-    resourceMeta.set(candidate, {
-      key: assetResourceKey(resource),
-      kind: resource.kind,
-    });
-    return acquireMetadataClaim(
-      registry,
-      resource,
-      nextProps,
-      owner,
-      candidate,
-    );
+    return acquireMetadataClaim(registry, resource, nextProps, owner);
   }
 
   if (meta === undefined || key === meta.key) {
@@ -276,21 +227,25 @@ export function updateHoistedResource(
 
   releaseDocumentResource(element, owner);
 
-  const nextEntry = registry.entries.get(key);
-  const claimed =
-    nextEntry?.kind === "persistent" && nextEntry.count > 0
-      ? nextEntry.element
-      : undefined;
   const next = adoptDocumentResource(type, nextProps) ?? element;
-  if (next === element) {
-    updateElement(element, previousProps, nextProps);
-    return element;
-  }
-
-  // A shared committed element is key-authoritative; only style a fresh or
-  // otherwise unclaimed element.
-  if (claimed !== next) updateElement(next, {}, nextProps);
   return acquireDocumentResource(next, nextProps, owner);
+}
+
+function rejectHoistedDeclassification(
+  element: Element,
+  previousProps: Props,
+): void {
+  if (__DEV__) {
+    const type = elementName(element);
+    const previous = assetResourceFromHostProps(type, previousProps);
+    const identity =
+      resourceMeta.get(element)?.key ??
+      (previous === null ? null : assetResourceKey(previous));
+    const label = identity === null ? "" : ` (asset "${identity}")`;
+    throw new Error(
+      `A hoisted <${type}>${label} cannot update into an ordinary in-tree element. Keep its asset classification stable or replace it with a different Fig element key.`,
+    );
+  }
 }
 
 /**
@@ -311,11 +266,8 @@ export function insertAssetResources(
 
     const asset = asInsertableResource(resource);
     const key = assetResourceKey(asset);
-    // A registry entry only counts as present while its element is attached:
-    // a discarded render can leave a detached zero-count element built from
-    // host props that need not match this descriptor (media, explicit-key
-    // href), so a stale entry is discarded and replaced by a fresh element
-    // created from the descriptor below.
+    // A registry entry only counts as present while its element is attached.
+    // If external code detached it, create a replacement from this descriptor.
     const tracked = registry.entries.get(key)?.element;
     const existing =
       (tracked?.parentNode === registry.head ? tracked : null) ??
@@ -375,7 +327,24 @@ function currentDocumentResources(): DocumentResources | null {
 
   let registry = registries.get(document.head);
   if (registry === undefined) {
-    registry = { entries: new Map(), head: document.head };
+    const created: DocumentResources = {
+      entries: new Map(),
+      head: document.head,
+      discovered: null,
+      observer: null,
+    };
+    const Observer = document.defaultView?.MutationObserver;
+    if (Observer !== undefined) {
+      created.observer = new Observer((records) =>
+        invalidateDiscovered(created, records),
+      );
+      created.observer.observe(created.head, {
+        childList: true,
+        attributes: true,
+        subtree: true,
+      });
+    }
+    registry = created;
     registries.set(document.head, registry);
   }
   return registry;
@@ -415,27 +384,12 @@ function acquireDeclaredResource(
   }
 
   const key = assetResourceKey(resource);
-  const entry = registry.entries.get(key);
-  if (entry?.kind === "metadata") {
-    throw new Error("Expected a persistent resource entry.");
-  }
-  const tracked = entry?.element;
   const element =
-    tracked ??
+    registry.entries.get(key)?.element ??
     findDocumentResource(registry, key) ??
     createDeliveryResourceElement(resource);
 
-  if (tracked === undefined) {
-    registry.entries.set(key, {
-      count: 0,
-      element,
-      kind: "persistent",
-      ready: null,
-    });
-    resourceMeta.set(element, { key, kind: resource.kind });
-  }
-
-  acquirePersistentResource(registry, element);
+  acquirePersistentResource(registry, element, key, resource.kind);
 }
 
 function updateDeclaredMetadata(
@@ -556,6 +510,7 @@ function insertDocumentResource(
   registry: DocumentResources,
   element: Element,
 ): void {
+  headInsertions.add(element);
   const precedence = stylesheetPrecedence(element);
   if (precedence === null) {
     registry.head.appendChild(element);
@@ -584,17 +539,45 @@ function findDocumentResource(
   registry: DocumentResources,
   key: string,
 ): Element | null {
-  for (
-    let child = registry.head.firstChild;
-    child !== null;
-    child = child.nextSibling
-  ) {
-    if (isElementNode(child)) {
-      const resource = resourceFromElement(child);
-      if (resource !== null && assetResourceKey(resource) === key) return child;
+  // Drain same-turn external edits before using the index. Fig's own
+  // insertions are already keyed in the live registry and need no rescan.
+  if (registry.observer === null) registry.discovered = null;
+  else invalidateDiscovered(registry, registry.observer.takeRecords());
+
+  if (registry.discovered === null) {
+    const discovered = new Map<string, Element>();
+    for (
+      let child = registry.head.firstChild;
+      child !== null;
+      child = child.nextSibling
+    ) {
+      if (isElementNode(child)) {
+        const resource = resourceFromElement(child);
+        if (resource !== null) {
+          const foundKey = assetResourceKey(resource);
+          if (!discovered.has(foundKey)) discovered.set(foundKey, child);
+        }
+      }
+    }
+    registry.discovered = discovered;
+  }
+  return registry.discovered.get(key) ?? null;
+}
+
+function invalidateDiscovered(
+  registry: DocumentResources,
+  records: MutationRecord[],
+): void {
+  for (const record of records) {
+    if (record.type === "attributes" || record.removedNodes.length !== 0) {
+      registry.discovered = null;
+    }
+    // Drain every record, even after invalidation, so a later external
+    // reinsertion cannot inherit the marker from an earlier Fig insertion.
+    for (const node of record.addedNodes) {
+      if (!headInsertions.delete(node)) registry.discovered = null;
     }
   }
-  return null;
 }
 
 function registryReferencesElement(

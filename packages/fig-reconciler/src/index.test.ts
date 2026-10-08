@@ -1551,11 +1551,14 @@ describe("reconciler", () => {
 
   it("lets the hoisted host own canonical text and preserves its owner", () => {
     const owners: object[] = [];
+    const shared = new TestElement("asset");
+    let genericInitializations = 0;
     let genericTextWrites = 0;
     let hoistedUpdates = 0;
     const { createRoot, flushSync } = createRenderer({
       ...host,
       finalizeInitialInstance(instance, props) {
+        genericInitializations += 1;
         instance.textContent = String(props.children ?? "");
       },
       setTextContent(instance, text) {
@@ -1563,10 +1566,11 @@ describe("reconciler", () => {
         instance.textContent = text;
       },
       resolveHoistedInstance(type) {
-        return type === "asset" ? new TestElement(type) : null;
+        return type === "asset" ? shared : null;
       },
-      commitHoistedInstance(instance, _props, owner) {
+      commitHoistedInstance(instance, props, owner) {
         owners.push(owner);
+        instance.textContent = String(props.children ?? "");
         return instance;
       },
       updateHoistedInstance(instance, _previousProps, nextProps, owner) {
@@ -1583,13 +1587,14 @@ describe("reconciler", () => {
     const root = createRoot(container);
 
     flushSync(() => root.render(createElement("asset", null, "One")));
+    expect(shared.textContent).toBe("One");
     flushSync(() => root.render(createElement("asset", null, "Two")));
     flushSync(() => root.render(null));
 
     expect(hoistedUpdates).toBe(1);
-    // Initial detached construction uses the generic seam; the committed
-    // shared instance's update is entirely host-owned.
-    expect(genericTextWrites).toBe(1);
+    expect(shared.textContent).toBe("Two");
+    expect(genericInitializations).toBe(0);
+    expect(genericTextWrites).toBe(0);
     expect(owners).toHaveLength(3);
     expect(owners[1]).toBe(owners[0]);
     expect(owners[2]).toBe(owners[0]);

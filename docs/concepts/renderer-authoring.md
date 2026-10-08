@@ -29,6 +29,8 @@ Later updates may replace the shared instance through `updateHoistedInstance`, b
 
 Each hoisted host and `Assets` fiber receives an owner token that stays stable across updates and moves. Acquire, update, release, and `commitAssetResources(previous, next, owner)` use it to support metadata claims as well as simple reference counts.
 
+`commitHoistedInstance(instance, props, owner)` owns first acquisition and initialization, including text. The generic `finalizeInitialInstance`, `setTextContent`, and child-assembly hooks do not initialize hoisted instances, because a resolved instance may already be shared and live. Acquisition must use its current `props` to select the asset identity: initial Suspense retries retain the fiber but can change the requested asset before its first commit. It may return a different instance; the reconciler adopts it on both fiber generations. A renderer should preserve an existing shared asset's definition when acquiring another owner.
+
 The hoisted update hook owns the complete update, including text. If it returns a different shared instance, the reconciler adopts that instance on both fiber generations and does not apply a second generic text update.
 
 ## Hydration Capabilities

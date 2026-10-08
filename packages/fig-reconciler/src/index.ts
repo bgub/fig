@@ -315,9 +315,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     props: Props,
     parent: Parent<Container, Instance>,
   ): Instance | null;
-  // May return a different instance when the fiber's identity already
-  // resolves to a live shared instance (e.g. one inserted while this render
-  // was suspended); the fiber adopts the returned instance.
+  // Owns initial props, text, and acquisition. Generic host initialization
+  // never touches a hoisted instance because it may already be shared.
+  // Resolve using these latest props: retries can change asset identity
+  // before first commit. May return a different instance, which the fiber adopts.
   commitHoistedInstance?(
     instance: Instance,
     props: Props,
@@ -3549,13 +3550,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (isNewHostInstance(node)) {
       host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
       if (!setInitialHostTextContent(node)) {
-        // A reused instance (re-assembled on Suspense reveal) may still hold
-        // stale children from before the fallback; clear before re-appending.
-        // Gated on a reused node (alternate) with child fibers, so fresh mounts
-        // and content set via props (innerHTML/textarea) are left untouched.
-        if (node.alternate !== null && node.child !== null) {
-          host.setTextContent?.(node.stateNode as Instance, "");
-        }
         appendAllHostChildren(node.stateNode as Instance, node.child);
       }
       if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;
@@ -3582,16 +3576,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isNewHostInstance(node: F): boolean {
-    // A host instance needs initial assembly until it has actually committed —
-    // tracked by committedProps, not by alternate. A reused fiber from a
-    // never-committed render (e.g. a Suspense primary subtree captured when a
-    // child suspended, then revealed) has an alternate but null committedProps:
-    // its host children were never appended into it, so it must assemble like a
-    // fresh instance or its non-suspending descendants are dropped on reveal.
+    // Retried ordinary mounts have fresh instances even with an alternate.
+    // Hydrated, singleton, and hoisted instances can already be live; their
+    // host-owned commit paths handle initialization instead of render assembly.
     return (
       node.tag === HostTag &&
       node.committedProps === null &&
-      (node.flags & (HydrationFlag | SingletonStaticFlag)) === 0
+      (node.flags &
+        (HydrationFlag | SingletonStaticFlag | HoistedStaticFlag)) ===
+        0
     );
   }
 
@@ -4300,18 +4293,22 @@ export function createRenderer<Container, Instance, TextInstance>(
       const current: F = placed;
       const next: F | null = current.sibling;
       const placedHidden = hidden || isHiddenBoundary(current);
+      // Hoisted acquisition owns its contents, including canonical text.
+      // Its render-time children must not place into the shared instance.
+      const hostOwnsChildren =
+        isPreassembledHostSubtree(current) || isHoistedFiber(current);
       // Hide (suspending binds) BEFORE inserting so attach paths in the
       // host's insertBefore never run binds on hidden content; hide again
       // after, since a placement update may rewrite the inline style.
       // Preassembled subtrees also pre-hide nested hidden boundaries'
       // content, which never gets a placement of its own.
       if (placedHidden) hidePlacedNode(current);
-      if (hasHiddenBoundaries && isPreassembledHostSubtree(current)) {
+      if (hasHiddenBoundaries && hostOwnsChildren) {
         hideNestedBoundaryContent(current.child);
       }
       commitHostMutation(current, () => commitPlacement(current, before));
       if (placedHidden) hidePlacedNode(current);
-      if (!isPreassembledHostSubtree(current)) {
+      if (!hostOwnsChildren) {
         commitMutationEffects(current.child, placedHidden);
       } else {
         commitPortalsInPreassembledSubtree(current.child, placedHidden);
