@@ -8,6 +8,8 @@ Fig separates errors into three paths: errors a component can recover from, erro
 
 `ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors, then keeps showing its fallback until the boundary remounts or its key changes.
 
+If Suspense retains a caught render error while showing its own fallback, reporting waits for that retained subtree to reveal, including when render bailouts reuse it. The error is reported once after its error fallback commits. Removing the suspended subtree before reveal discards its unreported errors.
+
 The fallback may be a node or a function receiving `(error, info)`. `onError(error, info)` is available for reporting. `ErrorInfo` contains a component stack and, for data errors, the affected `dataResourceKeys`.
 
 An `ErrorBoundary` does not catch:
