@@ -22,13 +22,14 @@
     "test:hmr": "FIG_DEV_SOURCE= turbo run build --filter=@bgub/fig-demo-tanstack-start... && pnpm --filter @bgub/fig-demo-tanstack-start probe:hmr",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
+    "test:transition-lifetimes": "node scripts/view-transition-lifetime.mjs",
     "tegami": "node scripts/tegami.mts",
     "size": "size-limit"
   },
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "5.3 kB"
+      "limit": "5.4 kB"
     },
     {
       "name": "fig core without data",
@@ -38,7 +39,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "34.8 kB"
+      "limit": "35.8 kB"
     },
     {
       "path": "packages/fig-ui/dist/accordion.js",
@@ -179,21 +180,21 @@
     {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
-      "limit": "27.1 kB"
+      "limit": "28 kB"
     },
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "30.3 kB"
+      "limit": "31.4 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "38 kB"
+      "limit": "39.1 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "18.1 kB"
+      "limit": "19 kB"
     },
     {
       "name": "Fig TanStack Router Start surface",

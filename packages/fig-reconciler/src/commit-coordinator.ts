@@ -4,7 +4,13 @@
  * @module
  */
 /** Describes reconciler commit result. */
-export type ReconcilerCommitResult = false | "committed" | "deferred";
+export type ReconcilerCommitResult =
+  | false
+  | "committed"
+  | {
+      /** Finish mutation and release capture synchronously, without animation. */
+      interrupt(this: void): void;
+    };
 /** Mutation publication and callback results are distinct from capture release. */
 export type ReconcilerMutationResult<Result> =
   | { readonly kind: "committed"; readonly value: Result }

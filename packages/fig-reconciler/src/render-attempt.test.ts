@@ -107,7 +107,7 @@ it("revalidates deferred candidates without publishing or releasing capture earl
   const publish = vi.fn();
   const after = vi.fn();
   const candidate = attempt.finish(() => snapshot === "old", publish);
-  candidate.defer();
+  candidate.defer(() => undefined);
   snapshot = "new";
   expect(candidate.runMutation(after)).toEqual({ kind: "stale" });
   expect(publish).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ it("distinguishes a committed undefined result from a skipped mutation", () => {
   expect(() => candidate.runMutation(() => undefined)).toThrow("only once");
   // Hosts may complete synchronously, then report deferred capture ownership.
   candidate.releaseCapture();
-  candidate.defer();
+  candidate.defer(() => undefined);
   expect(candidate.captureReleased).toBe(true);
 });
 
@@ -166,7 +166,7 @@ it("prevents a late host callback from publishing an abandoned attempt", () => {
   const first = new RenderAttempt();
   const stalePublish = vi.fn();
   const stale = first.finish(() => true, stalePublish);
-  stale.defer();
+  stale.defer(() => undefined);
   first.dispose();
   const second = new RenderAttempt();
   const freshPublish = vi.fn();

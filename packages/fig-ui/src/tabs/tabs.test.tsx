@@ -722,7 +722,7 @@ describe("Tabs", () => {
     ).toEqual(["Security panel"]);
   });
 
-  it("interrupts an active Fig view transition with the latest selection", async () => {
+  it("preserves capture through highlight repairs and interrupts the previous animation", async () => {
     const container = await render(<TransitionTabs />);
     const ownerDocument = document as unknown as TransitionDocument;
     const previousStart = ownerDocument.startViewTransition;
@@ -759,6 +759,8 @@ describe("Tabs", () => {
       await click(security);
       await click(billing);
 
+      // Highlight repairs wait for readiness. Only the second selection skips
+      // the first animation; neither capture cancels its own animation.
       expect(skipped).toBe(1);
       expect(types).toEqual([["tabs-change"], ["tabs-change"]]);
       expect(updates).toEqual(["Security panel", "Billing panel"]);
@@ -815,13 +817,13 @@ describe("Tabs", () => {
         observers.push(this);
       }
 
-      disconnect(): void {
+      disconnect = vi.fn(() => {
         this.observed.clear();
-      }
+      });
 
-      observe(node: Element): void {
+      observe = vi.fn((node: Element) => {
         this.observed.add(node);
-      }
+      });
 
       unobserve(node: Element): void {
         this.observed.delete(node);
@@ -845,7 +847,14 @@ describe("Tabs", () => {
       scrollWidth: { configurable: true, value: 240 },
     });
 
-    observers.at(-1)?.trigger();
+    const observer = observers.at(-1)!;
+    observer.observe.mockClear();
+    observer.disconnect.mockClear();
+    observer.trigger();
+    // Re-observing in a resize callback schedules fresh initial notifications,
+    // even when the geometry is unchanged, causing a native delivery loop.
+    expect(observer.observe).not.toHaveBeenCalled();
+    expect(observer.disconnect).not.toHaveBeenCalled();
     expect(indicator.hidden).toBe(false);
     expect(indicator.style.getPropertyValue("--active-tab-left")).toBe("0px");
     expect(indicator.style.getPropertyValue("--active-tab-width")).toBe(
@@ -854,7 +863,16 @@ describe("Tabs", () => {
 
     await click(security);
     expect(indicator.style.getPropertyValue("--active-tab-left")).toBe("100px");
-    expect(observers.at(-1)?.observed.has(security)).toBe(true);
+    const currentObserver = observers.at(-1)!;
+    expect(currentObserver.observed.has(security)).toBe(true);
+
+    mockRect(security, 110, 0, 130, 40);
+    security.style.width = "130px";
+    currentObserver.trigger();
+    expect(indicator.style.getPropertyValue("--active-tab-left")).toBe("110px");
+    expect(indicator.style.getPropertyValue("--active-tab-width")).toBe(
+      "130px",
+    );
   });
 
   it("keeps replacement DOM bindings when superseded signals abort", () => {

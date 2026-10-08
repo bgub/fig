@@ -195,6 +195,9 @@ import {
   shouldYieldToHost,
 } from "./scheduler.ts";
 
+// Only forced work may interrupt a pending capture; sync work cannot yield.
+type WorkMode = "concurrent" | "sync" | "forced";
+
 /** Describes event priority. */
 export type EventPriority = "default" | "continuous" | "discrete";
 
@@ -1163,7 +1166,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // discrete interaction pulls the whole initial hydration forward
     // synchronously, exactly like it does for a dehydrated boundary.
     if (rootShellPendingHydration(root)) {
-      if (isSyncLane(lane)) performRoot(root, true);
+      if (isSyncLane(lane)) performRoot(root, "forced");
       if (rootShellPendingHydration(root)) return "blocked";
     }
     if (root.dehydratedSuspenseCount === 0) return "none";
@@ -1172,7 +1175,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (boundary === null) return "none";
 
     scheduleFiber(boundary, lane);
-    if (isSyncLane(lane)) performRoot(root, true);
+    if (isSyncLane(lane)) performRoot(root, "forced");
     return dehydratedBoundaryForTarget(root, target) === null
       ? "hydrated"
       : "blocked";
@@ -1219,11 +1222,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       return runWithPriority(SyncLane, callback);
     } finally {
-      flushSyncWork();
+      flushSyncWork("forced");
     }
   }
 
-  function flushSyncWork(): void {
+  function flushSyncWork(mode: "sync" | "forced"): void {
     if (commitDepth > 0) {
       needsPostCommitSyncFlush = true;
       return;
@@ -1236,11 +1239,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     flushingSyncWork = true;
     try {
       for (const root of pendingRoots) {
+        if (root.pendingCapture && mode !== "forced") continue;
         if (root.pendingLanes !== NoLanes) {
           root.callback?.cancel();
           root.callback = null;
           root.callbackPriority = NoLane;
-          performRoot(root, true);
+          performRoot(root, mode);
         } else {
           pendingRoots.delete(root);
         }
@@ -1267,7 +1271,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           throw new Error("Maximum update depth exceeded.");
         }
         needsPostCommitSyncFlush = false;
-        flushSyncWork();
+        flushSyncWork("sync");
       } while (needsPostCommitSyncFlush);
     } finally {
       nestedPostCommitSyncFlushes = 0;
@@ -1326,6 +1330,8 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
+    // Scheduled sync work waits for capture readiness. Only a caller that
+    // explicitly requires completion before returning may interrupt capture.
     if (root.pendingCapture) return;
 
     markStarvedLanesAsExpired(root, now());
@@ -1345,14 +1351,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callback = scheduleCallback(
       getLaneSchedulerPriority(priorityLane),
       () => {
-        performRoot(root, isSyncLane(priorityLane));
+        performRoot(root, isSyncLane(priorityLane) ? "sync" : "concurrent");
       },
     );
   }
 
-  function performRoot(root: R, forceSync: boolean): void {
+  function performRoot(root: R, mode: WorkMode): void {
     try {
-      performRootWork(root, forceSync);
+      performRootWork(root, mode);
     } catch (error) {
       if (error === PreservedSuspense) {
         root.suspendedLanes &= ~root.coalescedReadyLanes;
@@ -1406,7 +1412,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     markHydrationRecovery(root, "root");
     resetRootWork(root);
     forceClientRender(root);
-    performRoot(root, true);
+    performRoot(root, "sync");
   }
 
   function recoverFromSuspenseHydrationMismatch(root: R, boundary: F): void {
@@ -1418,7 +1424,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (state?.kind !== "dehydrated") {
       markHydrationRecovery(root, "root");
       forceClientRender(root);
-      performRoot(root, true);
+      performRoot(root, "sync");
       return;
     }
 
@@ -1431,7 +1437,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       markHydrationRecovery(root, "root");
       state.boundary.forceClientRender = true;
       forceClientRender(root);
-      performRoot(root, true);
+      performRoot(root, "sync");
       return;
     }
 
@@ -1439,7 +1445,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     state.boundary.forceClientRender = true;
     deactivateHydration(root);
     scheduleFiber(current, SelectiveHydrationLane);
-    performRoot(root, true);
+    performRoot(root, "sync");
   }
 
   function markHydrationRecovery(
@@ -1469,8 +1475,18 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationInitialElement = NoHydrationInitialElement;
   }
 
-  function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingCapture) return;
+  function performRootWork(root: R, mode: WorkMode): void {
+    const interruptedCapture = root.pendingCapture !== null;
+    if (root.pendingCapture) {
+      if (mode !== "forced") return;
+      // Keep commit-phase updates queued until restoration releases ownership.
+      commitDepth += 1;
+      try {
+        root.pendingCapture.interruptCapture();
+      } finally {
+        commitDepth -= 1;
+      }
+    }
     // flushSync may finish work that already yielded. Finishing synchronously
     // does not undo an external-store mutation between its earlier chunks.
     const resumedConcurrentWork =
@@ -1493,7 +1509,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       const candidate = getNextLanes(root, NoLanes, readyLanes);
       if (candidate === NoLanes && root.finishedWork !== null) {
         if (retryInconsistentStores(root)) return;
-        if (commitRoot(root, root.finishedWork)) return;
+        if (commitRoot(root, root.finishedWork, !interruptedCapture)) return;
         finishRootWork(root);
         flushPostCommitSyncWork();
         return;
@@ -1543,7 +1559,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     while (
       root.wip !== null &&
-      (forceSync ||
+      (mode !== "concurrent" ||
         isSyncLane(getHighestPriorityLane(root.renderLanes)) ||
         !shouldYieldToHost())
     ) {
@@ -1558,13 +1574,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (
-      (!forceSync || resumedConcurrentWork) &&
+      (mode === "concurrent" || resumedConcurrentWork) &&
       !isSyncLane(getHighestPriorityLane(root.renderLanes)) &&
       retryInconsistentStores(root)
     )
       return;
 
-    if (root.finishedWork !== null && commitRoot(root, root.finishedWork)) {
+    if (
+      root.finishedWork !== null &&
+      commitRoot(root, root.finishedWork, !interruptedCapture)
+    ) {
       return;
     }
     finishRootWork(root);
@@ -3838,8 +3857,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
-  function commitRoot(root: R, finishedWork: F): boolean {
+  function commitRoot(root: R, finishedWork: F, coordinate = true): boolean {
     if (
+      coordinate &&
       !root.pendingCapture &&
       commitCoordinator?.suspend?.(root, () => scheduleRoot(root)) === true
     ) {
@@ -3965,9 +3985,14 @@ export function createRenderer<Container, Instance, TextInstance>(
           resetRootWork(root);
           scheduleRoot(root);
         } else finishRootWork(root);
+        // Another root may have consumed the global post-commit flush request
+        // while this capture was still owned. Flush its queued sync work now.
+        if (isSyncLane(getHighestPriorityLane(root.pendingLanes))) {
+          needsPostCommitSyncFlush = true;
+        }
         flushPostCommitSyncWork();
       };
-      if (commitCoordinator !== null) {
+      if (coordinate && commitCoordinator !== null) {
         const context: ReconcilerCommitContext<Container> = {
           container: root.container,
           finishedWork,
@@ -4006,7 +4031,16 @@ export function createRenderer<Container, Instance, TextInstance>(
             }
           },
         };
-        switch (commitCoordinator.commit(context)) {
+        const result = commitCoordinator.commit(context);
+        if (typeof result === "object") {
+          candidate.defer(result.interrupt);
+          root.pendingCapture = candidate;
+          root.callback = null;
+          root.callbackPriority = NoLane;
+          if (candidate.captureReleased) finishDeferredCommit();
+          return true;
+        }
+        switch (result) {
           case false:
             if (candidate.outcome !== "pending") {
               throw new Error(
@@ -4021,13 +4055,6 @@ export function createRenderer<Container, Instance, TextInstance>(
               );
             }
             return false;
-          case "deferred":
-            candidate.defer();
-            root.pendingCapture = candidate;
-            root.callback = null;
-            root.callbackPriority = NoLane;
-            if (candidate.captureReleased) finishDeferredCommit();
-            return true;
         }
       }
       candidate.runMutation(() => undefined);
@@ -6059,7 +6086,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   function retryInconsistentStores(root: R): boolean {
     if (!markInconsistentStores(root)) return false;
     resetRootWork(root);
-    performRootWork(root, true);
+    performRootWork(root, "sync");
     return true;
   }
 

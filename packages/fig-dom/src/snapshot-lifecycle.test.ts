@@ -35,7 +35,13 @@ domRenderer.installCommitCoordinator(
         ready(true);
         finished();
       });
-      return "deferred";
+      return {
+        interrupt() {
+          mutate();
+          ready(false);
+          finished();
+        },
+      };
     },
   }),
 );
