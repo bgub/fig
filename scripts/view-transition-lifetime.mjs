@@ -5,40 +5,35 @@ import { figSourceAliases } from "./lib/fig-source-aliases.ts";
 
 // Bundle the real DOM surface implementation; no animation enumeration is used
 // in this probe because that is a separate historical Safari crash surface.
-const bundles = await build({
-  config: false,
-  entry: "packages/fig-dom/src/view-transition-pseudos.ts",
-  format: "iife",
-  globalName: "figPseudos",
-  platform: "browser",
-  write: false,
-  dts: false,
-  logLevel: "silent",
-});
-const source = bundles
-  .flatMap((bundle) => bundle.chunks)
-  .filter((chunk) => chunk.type === "chunk")
-  .map((chunk) => chunk.code)
-  .join("\n");
+const source = await bundleBrowserEntry(
+  "packages/fig-dom/src/view-transition-pseudos.ts",
+  "figPseudos",
+);
+const captureSource = await bundleBrowserEntry(
+  "scripts/fixtures/view-transition-capture.ts",
+  "figCapture",
+);
 
-const captureBundles = await build({
-  config: false,
-  entry: "scripts/fixtures/view-transition-capture.ts",
-  alias: figSourceAliases(),
-  define: { __FIG_DEV__: "true" },
-  deps: { alwaysBundle: [/^@bgub\/fig/] },
-  format: "iife",
-  globalName: "figCapture",
-  platform: "browser",
-  write: false,
-  dts: false,
-  logLevel: "silent",
-});
-const captureSource = captureBundles
-  .flatMap((bundle) => bundle.chunks)
-  .filter((chunk) => chunk.type === "chunk")
-  .map((chunk) => chunk.code)
-  .join("\n");
+async function bundleBrowserEntry(entry, globalName) {
+  const bundles = await build({
+    config: false,
+    entry,
+    globalName,
+    alias: figSourceAliases(),
+    define: { __FIG_DEV__: "true" },
+    deps: { alwaysBundle: [/^@bgub\/fig/] },
+    format: "iife",
+    platform: "browser",
+    write: false,
+    dts: false,
+    logLevel: "silent",
+  });
+  return bundles
+    .flatMap((bundle) => bundle.chunks)
+    .filter((chunk) => chunk.type === "chunk")
+    .map((chunk) => chunk.code)
+    .join("\n");
+}
 
 for (const [name, browserType] of Object.entries({ chromium, webkit })) {
   const browser = await browserType.launch();

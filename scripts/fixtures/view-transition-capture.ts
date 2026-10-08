@@ -88,7 +88,6 @@ export async function probeCaptureInterruption(
       },
     }),
   );
-  let native: ViewTransition | undefined;
   try {
     document.startViewTransition = (input) => {
       starts += 1;
@@ -109,11 +108,11 @@ export async function probeCaptureInterruption(
             dehydrated: container.innerHTML.includes(SUSPENSE_COMPLETED_MARKER),
           };
           void Promise.all([
-            native!.ready.then(
+            native.ready.then(
               () => false,
               () => true,
             ),
-            native!.finished,
+            native.finished,
           ]).then(
             ([readyRejected]) =>
               completed.resolve({ ...immediate, readyRejected }),
@@ -123,7 +122,7 @@ export async function probeCaptureInterruption(
           completed.reject(error);
         }
       };
-      native = start({
+      const native = start({
         ...(typeof input === "object" ? input : {}),
         update() {
           mutations += 1;
