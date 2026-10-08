@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { build } from "vite";
-import { figSourceResolveAliases } from "../../../scripts/lib/fig-source-aliases.ts";
+import { figSourceResolveAliases } from "../../scripts/lib/fig-source-aliases.ts";
 import { collectBrowserErrors } from "./browser-errors.ts";
 
 let fixture: string;

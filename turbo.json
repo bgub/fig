@@ -4,7 +4,16 @@
     "build": {
       "dependsOn": ["^build"],
       "env": ["FIG_DEV_SOURCE", "NODE_ENV"],
-      "outputs": ["dist/**", "dist-development/**"]
+      "outputs": ["dist/**", "dist-development/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsdown.config.ts",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/tsconfig.build.json",
+        "$TURBO_ROOT$/scripts/lib/**",
+        "$TURBO_ROOT$/scripts/strip-declaration-map-comments.mjs",
+        "$TURBO_ROOT$/scripts/assert-dev-bundle.mjs"
+      ]
     },
     "dev": {
       "dependsOn": ["build"],
@@ -36,9 +45,34 @@
     "//#quality:fix": {
       "dependsOn": ["//#lint:fix", "//#format:fix"]
     },
-    "//#lint": {},
+    "//#lint": {
+      "dependsOn": [
+        "@bgub/fig#build",
+        "@bgub/fig-devtools#build",
+        "@bgub/fig-dom#build",
+        "@bgub/fig-headless#build",
+        "@bgub/fig-reconciler#build",
+        "@bgub/fig-refresh#build",
+        "@bgub/fig-server#build",
+        "@bgub/fig-tanstack-router#build",
+        "@bgub/fig-tanstack-start#build",
+        "@bgub/fig-vite#build"
+      ]
+    },
     "//#lint:fix": {
-      "cache": false
+      "cache": false,
+      "dependsOn": [
+        "@bgub/fig#build",
+        "@bgub/fig-devtools#build",
+        "@bgub/fig-dom#build",
+        "@bgub/fig-headless#build",
+        "@bgub/fig-reconciler#build",
+        "@bgub/fig-refresh#build",
+        "@bgub/fig-server#build",
+        "@bgub/fig-tanstack-router#build",
+        "@bgub/fig-tanstack-start#build",
+        "@bgub/fig-vite#build"
+      ]
     },
     "//#format": {},
     "//#format:fix": {

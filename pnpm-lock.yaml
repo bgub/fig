@@ -6,6 +6,12 @@ settings:
 
 catalogs:
   default:
+    '@babel/core':
+      specifier: ^8.0.1
+      version: 8.0.1
+    '@babel/preset-typescript':
+      specifier: ^8.0.1
+      version: 8.0.1
     '@playwright/test':
       specifier: ^1.62.1
       version: 1.62.1
@@ -33,6 +39,12 @@ catalogs:
     postcss:
       specifier: ^8.5.26
       version: 8.5.26
+    react:
+      specifier: 19.2.8
+      version: 19.2.8
+    react-dom:
+      specifier: ^19.2.8
+      version: 19.2.8
     tailwindcss:
       specifier: ^4.3.3
       version: 4.3.3
@@ -66,6 +78,9 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:packages/fig-dom
+      '@bgub/fig-headless':
+        specifier: workspace:*
+        version: link:packages/fig-headless
       '@bgub/fig-server':
         specifier: workspace:*
         version: link:packages/fig-server
@@ -112,7 +127,7 @@ importers:
         specifier: ^16.1.1
         version: 16.1.1(postcss@8.5.26)
       react:
-        specifier: 19.2.8
+        specifier: 'catalog:'
         version: 19.2.8
       react-reconciler:
         specifier: 0.33.0
@@ -157,10 +172,10 @@ importers:
         specifier: workspace:*
         version: link:../../packages/fig-server
       react:
-        specifier: ^19.2.8
+        specifier: 'catalog:'
         version: 19.2.8
       react-dom:
-        specifier: ^19.2.8
+        specifier: 'catalog:'
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@playwright/test':
@@ -272,15 +287,15 @@ importers:
       '@bgub/fig-dom':
         specifier: workspace:*
         version: link:../../packages/fig-dom
+      '@bgub/fig-headless':
+        specifier: workspace:*
+        version: link:../../packages/fig-headless
       '@bgub/fig-tanstack-router':
         specifier: workspace:*
         version: link:../../packages/fig-tanstack-router
       '@bgub/fig-tanstack-start':
         specifier: workspace:*
         version: link:../../packages/fig-tanstack-start
-      '@bgub/fig-headless':
-        specifier: workspace:*
-        version: link:../../packages/fig-headless
       '@tanstack/devtools':
         specifier: 'catalog:'
         version: 0.15.0(csstype@3.2.3)
@@ -347,6 +362,18 @@ importers:
         specifier: workspace:*
         version: link:../fig-server
 
+  packages/fig-headless:
+    devDependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../fig-server
+
   packages/fig-reconciler:
     devDependencies:
       '@bgub/fig':
@@ -387,10 +414,10 @@ importers:
   packages/fig-tanstack-start:
     dependencies:
       '@babel/core':
-        specifier: ^8.0.1
+        specifier: 'catalog:'
         version: 8.0.1
       '@babel/preset-typescript':
-        specifier: ^8.0.1
+        specifier: 'catalog:'
         version: 8.0.1(@babel/core@8.0.1)
       '@bgub/fig-vite':
         specifier: workspace:^
@@ -430,25 +457,13 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
 
-  packages/fig-headless:
-    devDependencies:
-      '@bgub/fig':
-        specifier: workspace:*
-        version: link:../fig
-      '@bgub/fig-dom':
-        specifier: workspace:*
-        version: link:../fig-dom
-      '@bgub/fig-server':
-        specifier: workspace:*
-        version: link:../fig-server
-
   packages/fig-vite:
     dependencies:
       '@babel/core':
-        specifier: ^8.0.1
+        specifier: 'catalog:'
         version: 8.0.1
       '@babel/preset-typescript':
-        specifier: ^8.0.1
+        specifier: 'catalog:'
         version: 8.0.1(@babel/core@8.0.1)
       '@bgub/fig-refresh':
         specifier: workspace:*

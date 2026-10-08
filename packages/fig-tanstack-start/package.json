@@ -65,8 +65,8 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@babel/core": "^8.0.1",
-    "@babel/preset-typescript": "^8.0.1",
+    "@babel/core": "catalog:",
+    "@babel/preset-typescript": "catalog:",
     "@bgub/fig-vite": "workspace:^",
     "@tanstack/router-core": "catalog:",
     "@tanstack/start-client-core": "catalog:",

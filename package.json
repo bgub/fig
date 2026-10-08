@@ -18,14 +18,15 @@
     "test:bench": "node --test benchmarks/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mts",
     "test:dom": "turbo run test --filter=@bgub/fig-dom",
-    "test:e2e": "pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
+    "test:e2e": "pnpm test:browser && pnpm test:hmr && pnpm build:e2e && FIG_E2E_PREBUILT=1 turbo run test:e2e --concurrency=4 --filter=@bgub/fig-demo-ssr --filter=@bgub/fig-demo-client --filter=@bgub/fig-demo-payload --filter=@bgub/fig-demo-tanstack-start",
     "test:hmr": "FIG_DEV_SOURCE= turbo run build --filter=@bgub/fig-demo-tanstack-start... && pnpm --filter @bgub/fig-demo-tanstack-start probe:hmr",
     "test:reconciler": "turbo run test --filter=@bgub/fig-reconciler",
     "test:watch": "vitest",
     "test:transition-lifetimes": "node scripts/view-transition-lifetime.mjs",
     "tegami": "node scripts/tegami.mts",
     "size": "size-limit",
-    "test:popup": "playwright test --config playwright.popup.config.cjs"
+    "test:popup": "pnpm test:browser",
+    "test:browser": "playwright test --config tests/browser/playwright.config.cjs"
   },
   "size-limit": [
     {
@@ -212,6 +213,7 @@
     "@bgub/fig": "workspace:*",
     "@bgub/fig-devtools": "workspace:*",
     "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-headless": "workspace:*",
     "@bgub/fig-server": "workspace:*",
     "@playwright/test": "catalog:",
     "@size-limit/preset-small-lib": "^13.0.3",
@@ -227,7 +229,7 @@
     "portless": "^0.15.5",
     "postcss": "catalog:",
     "postcss-import": "^16.1.1",
-    "react": "19.2.8",
+    "react": "catalog:",
     "react-reconciler": "0.33.0",
     "size-limit": "^13.0.3",
     "svg-element-attributes": "2.2.0",

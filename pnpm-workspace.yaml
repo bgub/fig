@@ -11,6 +11,10 @@ catalogMode: prefer
 cleanupUnusedCatalogs: true
 
 catalog:
+  "@babel/core": ^8.0.1
+  "@babel/preset-typescript": ^8.0.1
+  react: 19.2.8
+  react-dom: ^19.2.8
   "@playwright/test": ^1.62.1
   "@tanstack/devtools": 0.15.0
   "@tanstack/history": 1.162.4

@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { collectBrowserErrors } from "./browser-errors.ts";
+import { collectBrowserErrors } from "../../../tests/browser/browser-errors.ts";
 
 test("hydrates the themed document and persists shell changes", async ({
   context,

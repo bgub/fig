@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@bgub/fig-dom",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["."]
+}

@@ -6,6 +6,12 @@ import {
   workspacePath,
 } from "./scripts/lib/fig-source-aliases.ts";
 
+import {
+  libraries,
+  libraryEntries,
+  developmentLibraryPaths,
+} from "./scripts/lib/library-entries.ts";
+
 const workspaceRoot = workspacePath(".");
 const packagePath =
   relative(workspaceRoot, process.cwd()).replaceAll("\\", "/") || ".";
@@ -14,94 +20,10 @@ const sourceAliases = figSourceAliases();
 const figPackages = /^@bgub\/fig/;
 const reactPackages = /^react/;
 const tanstackPackages = /^@tanstack\//;
-export const libraryEntries: Record<string, string[] | Record<string, string>> =
-  {
-    "packages/fig": [
-      "./src/index.ts",
-      "./src/internal.ts",
-      "./src/jsx-runtime.ts",
-      "./src/payload.ts",
-    ],
-    "packages/fig-devtools": [
-      "./src/index.ts",
-      "./src/server.ts",
-      "./src/client.ts",
-      "./src/tanstack.ts",
-    ],
-    "packages/fig-dom": [
-      "./src/index.ts",
-      "./src/view-transitions.ts",
-      "./src/refresh.ts",
-      "./src/act.ts",
-      "./src/jsx-runtime.ts",
-    ],
-    "packages/fig-reconciler": [
-      "./src/index.ts",
-      "./src/commit-coordinator.ts",
-      "./src/view-transitions.ts",
-      "./src/devtools.ts",
-      "./src/refresh.ts",
-      "./src/act.ts",
-    ],
-    "packages/fig-refresh": ["./src/index.ts"],
-    "packages/fig-vite": ["./src/index.ts"],
-    "packages/fig-server": [
-      "./src/index.ts",
-      "./src/html-entry.ts",
-      "./src/payload.ts",
-    ],
-    "packages/fig-tanstack-router": ["./src/router.tsx"],
-    "packages/fig-headless": {
-      accordion: "./src/accordion/accordion.tsx",
-      checkbox: "./src/checkbox/checkbox.tsx",
-      combobox: "./src/combobox/combobox.tsx",
-      command: "./src/command/command.tsx",
-      dialog: "./src/dialog/dialog.tsx",
-      field: "./src/field/field.tsx",
-      listbox: "./src/listbox/listbox.tsx",
-      menu: "./src/menu/menu.tsx",
-      "menu/context-menu": "./src/menu/context-menu.tsx",
-      "menu/submenu": "./src/menu/submenu.ts",
-      popover: "./src/popover/popover.tsx",
-      "radio-group": "./src/radio-group/radio-group.tsx",
-      select: "./src/select/select.tsx",
-      slider: "./src/slider/slider.tsx",
-      switch: "./src/switch/switch.tsx",
-      tabs: "./src/tabs/tabs.tsx",
-      "tabs/indicator": "./src/tabs/indicator.ts",
-      toast: "./src/toast/toast.tsx",
-      toolbar: "./src/toolbar/toolbar.tsx",
-      tooltip: "./src/tooltip/tooltip.tsx",
-    },
-    "packages/fig-tanstack-start": {
-      data: "./src/data.ts",
-      client: "./src/client.tsx",
-      "default-entry/client": "./src/default-entry/client.ts",
-      "default-entry/server": "./src/default-entry/server.ts",
-      "default-entry/start": "./src/default-entry/start.ts",
-      payload: "./src/payload.ts",
-      server: "./src/server.tsx",
-      "storage-context": "./src/storage-context.ts",
-      "plugin/vite": "./src/plugin/vite.ts",
-    },
-  };
-const browserLibraries = new Set([
-  "packages/fig-devtools",
-  "packages/fig-dom",
-  "packages/fig-headless",
-]);
-// These packages contain development gates. They always emit the artifact that
-// Vite selects while serving; FIG_DEV_SOURCE additionally keeps the primary
-// output development-enabled for non-Vite workspace demos.
-export const developmentLibraryPaths = [
-  "packages/fig",
-  "packages/fig-dom",
-  "packages/fig-reconciler",
-  "packages/fig-server",
-  "packages/fig-tanstack-router",
-  "packages/fig-headless",
-] as const;
-const developmentLibraries = new Set<string>(developmentLibraryPaths);
+const browserLibraries = new Set(
+  Object.keys(libraries).filter((path) => libraries[path]!.browser),
+);
+const developmentLibraries = new Set(developmentLibraryPaths);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };
 const figProductionDefine = { __FIG_DEV__: JSON.stringify(false) };
 // Demos are dev-mode showcases: Fig dev diagnostics and DevTools emission stay

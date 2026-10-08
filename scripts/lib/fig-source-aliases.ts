@@ -1,111 +1,16 @@
 import { fileURLToPath } from "node:url";
 
-const entries = [
-  ["@bgub/fig/jsx-runtime", "packages/fig/src/jsx-runtime.ts"],
-  ["@bgub/fig/jsx-dev-runtime", "packages/fig/src/jsx-runtime.ts"],
-  ["@bgub/fig/internal", "packages/fig/src/internal.ts"],
-  ["@bgub/fig/payload", "packages/fig/src/payload.ts"],
-  ["@bgub/fig-devtools/server", "packages/fig-devtools/src/server.ts"],
-  ["@bgub/fig-devtools/client", "packages/fig-devtools/src/client.ts"],
-  ["@bgub/fig-devtools", "packages/fig-devtools/src/index.ts"],
-  ["@bgub/fig-dom/test-utils", "packages/fig-dom/src/act.ts"],
-  [
-    "@bgub/fig-dom/view-transitions",
-    "packages/fig-dom/src/view-transitions.ts",
-  ],
-  ["@bgub/fig-dom/refresh", "packages/fig-dom/src/refresh.ts"],
-  ["@bgub/fig-dom/jsx-runtime", "packages/fig-dom/src/jsx-runtime.ts"],
-  ["@bgub/fig-dom/jsx-dev-runtime", "packages/fig-dom/src/jsx-runtime.ts"],
-  ["@bgub/fig-dom", "packages/fig-dom/src/index.ts"],
-  ["@bgub/fig-reconciler/devtools", "packages/fig-reconciler/src/devtools.ts"],
-  [
-    "@bgub/fig-reconciler/commit-coordinator",
-    "packages/fig-reconciler/src/commit-coordinator.ts",
-  ],
-  [
-    "@bgub/fig-reconciler/view-transitions",
-    "packages/fig-reconciler/src/view-transitions.ts",
-  ],
-  ["@bgub/fig-reconciler/refresh", "packages/fig-reconciler/src/refresh.ts"],
-  ["@bgub/fig-reconciler/test-utils", "packages/fig-reconciler/src/act.ts"],
-  ["@bgub/fig-reconciler", "packages/fig-reconciler/src/index.ts"],
-  ["@bgub/fig-refresh", "packages/fig-refresh/src/index.ts"],
-  ["@bgub/fig-vite", "packages/fig-vite/src/index.ts"],
-  ["@bgub/fig-server/html", "packages/fig-server/src/html-entry.ts"],
-  ["@bgub/fig-server/payload", "packages/fig-server/src/payload.ts"],
-  ["@bgub/fig-server", "packages/fig-server/src/index.ts"],
-  ["@bgub/fig-tanstack-router", "packages/fig-tanstack-router/src/router.tsx"],
-  [
-    "@bgub/fig-headless/accordion",
-    "packages/fig-headless/src/accordion/accordion.tsx",
-  ],
-  [
-    "@bgub/fig-headless/checkbox",
-    "packages/fig-headless/src/checkbox/checkbox.tsx",
-  ],
-  [
-    "@bgub/fig-headless/combobox",
-    "packages/fig-headless/src/combobox/combobox.tsx",
-  ],
-  [
-    "@bgub/fig-headless/command",
-    "packages/fig-headless/src/command/command.tsx",
-  ],
-  ["@bgub/fig-headless/dialog", "packages/fig-headless/src/dialog/dialog.tsx"],
-  ["@bgub/fig-headless/field", "packages/fig-headless/src/field/field.tsx"],
-  [
-    "@bgub/fig-headless/listbox",
-    "packages/fig-headless/src/listbox/listbox.tsx",
-  ],
-  ["@bgub/fig-headless/menu", "packages/fig-headless/src/menu/menu.tsx"],
-  [
-    "@bgub/fig-headless/menu/context-menu",
-    "packages/fig-headless/src/menu/context-menu.tsx",
-  ],
-  [
-    "@bgub/fig-headless/menu/submenu",
-    "packages/fig-headless/src/menu/submenu.ts",
-  ],
-  [
-    "@bgub/fig-headless/popover",
-    "packages/fig-headless/src/popover/popover.tsx",
-  ],
-  [
-    "@bgub/fig-headless/radio-group",
-    "packages/fig-headless/src/radio-group/radio-group.tsx",
-  ],
-  ["@bgub/fig-headless/select", "packages/fig-headless/src/select/select.tsx"],
-  ["@bgub/fig-headless/slider", "packages/fig-headless/src/slider/slider.tsx"],
-  ["@bgub/fig-headless/switch", "packages/fig-headless/src/switch/switch.tsx"],
-  ["@bgub/fig-headless/tabs", "packages/fig-headless/src/tabs/tabs.tsx"],
-  [
-    "@bgub/fig-headless/tabs/indicator",
-    "packages/fig-headless/src/tabs/indicator.ts",
-  ],
-  ["@bgub/fig-headless/toast", "packages/fig-headless/src/toast/toast.tsx"],
-  [
-    "@bgub/fig-headless/toolbar",
-    "packages/fig-headless/src/toolbar/toolbar.tsx",
-  ],
-  [
-    "@bgub/fig-headless/tooltip",
-    "packages/fig-headless/src/tooltip/tooltip.tsx",
-  ],
-  [
-    "@bgub/fig-tanstack-start/client",
-    "packages/fig-tanstack-start/src/client.tsx",
-  ],
-  [
-    "@bgub/fig-tanstack-start/server",
-    "packages/fig-tanstack-start/src/server.tsx",
-  ],
-  [
-    "@bgub/fig-tanstack-start/payload",
-    "packages/fig-tanstack-start/src/payload.ts",
-  ],
-  ["@bgub/fig-tanstack-start", "packages/fig-tanstack-start/src/data.ts"],
-  ["@bgub/fig", "packages/fig/src/index.ts"],
-] as const;
+import { libraries } from "./library-entries.ts";
+
+const entries = Object.entries(libraries).flatMap(([path, library]) =>
+  Object.entries(library.entries).map(
+    ([subpath, entry]) =>
+      [
+        subpath === "." ? library.name : `${library.name}${subpath.slice(1)}`,
+        `${path}/${entry.source.slice(2)}`,
+      ] as const,
+  ),
+);
 
 export function figSourceAliases(): Record<string, string> {
   return Object.fromEntries(

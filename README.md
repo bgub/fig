@@ -239,8 +239,15 @@ DevTools remains a private workspace preview while its public contract matures.
 ```bash
 pnpm install
 pnpm build
+pnpm check
 pnpm test
 ```
+
+`pnpm check` builds library declarations before running Oxlint (including typechecking) and formatting checks. Cached library builds are reused. `pnpm fix` uses the same build prerequisites.
+
+Framework-level Chromium tests live in [tests/browser/](./tests/browser). Run them with `pnpm test:browser`; `pnpm test:e2e` includes them alongside the demo integration suites.
+
+Library source entry points live in `scripts/lib/library-entries.ts`. Builds and source aliases share this manifest, and `pnpm test:release` checks it against package exports. Repeated dependency versions live in the pnpm catalog; consuming packages still declare their direct dependencies.
 
 Demo apps live in [apps/](./apps).
 

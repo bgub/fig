@@ -40,8 +40,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@babel/core": "^8.0.1",
-    "@babel/preset-typescript": "^8.0.1",
+    "@babel/core": "catalog:",
+    "@babel/preset-typescript": "catalog:",
     "@bgub/fig-refresh": "workspace:*"
   },
   "peerDependencies": {
