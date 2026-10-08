@@ -5199,7 +5199,16 @@ export function createRenderer<Container, Instance, TextInstance>(
         previous = previous?.next ?? null;
       }
     }
+    const nestedRetries = root.attempt.retries.slice(
+      boundary.renderCheckpoint?.retries,
+    );
     rollbackBoundaryCommitWork(root, boundary);
+    // A suspended fallback abandons its inner boundary, but resolving that
+    // boundary's primary must still wake the surviving outer boundary. Keep
+    // its promises without attaching retries to discarded fiber identities.
+    for (const { thenable, lanes } of nestedRetries) {
+      root.attempt.recordRetry({ boundary, thenable, lanes });
+    }
     root.attempt.recordRetry({ boundary, thenable, lanes });
     // The boundary's own deletions (e.g. the committed fallback recorded by
     // the reveal path) belong to the boundary, not its discarded subtree;

@@ -194,7 +194,7 @@
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "19 kB"
+      "limit": "19.1 kB"
     },
     {
       "name": "Fig TanStack Router Start surface",

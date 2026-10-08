@@ -117,6 +117,8 @@ Every suspension installs two kinds of wake-up:
 - A root-level ping is attached during render. If that render is restarted or abandoned, resolving the promise can still revive the suspended lanes.
 - A targeted boundary retry is recorded during render but attached only after commit, when the boundary fiber is known to be current.
 
+If an inner Suspense fallback also suspends, the surviving outer boundary inherits the discarded inner boundary's retry promises. Resolving either the primary content or its fallback can then retry the outer boundary; listeners never target an uncommitted inner fiber. Error-boundary capture still discards retries from its failed subtree.
+
 Fig never trusts a fiber identity captured from unfinished work. A render may restart, reuse a fiber in place, or discard it entirely.
 
 Deletion severs the removed subtree's parent links after cleanup. A late retry or stale setter then fails to find a root and becomes a no-op instead of scheduling phantom work.
