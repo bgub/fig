@@ -1,24 +1,39 @@
 import assert from "node:assert/strict";
 import { chromium, webkit } from "@playwright/test";
 import { build } from "tsdown";
+import { figSourceAliases } from "./lib/fig-source-aliases.ts";
 
 // Bundle the real DOM surface implementation; no animation enumeration is used
 // in this probe because that is a separate historical Safari crash surface.
-const bundles = await build({
-  config: false,
-  entry: "packages/fig-dom/src/view-transition-pseudos.ts",
-  format: "iife",
-  globalName: "figPseudos",
-  platform: "browser",
-  write: false,
-  dts: false,
-  logLevel: "silent",
-});
-const source = bundles
-  .flatMap((bundle) => bundle.chunks)
-  .filter((chunk) => chunk.type === "chunk")
-  .map((chunk) => chunk.code)
-  .join("\n");
+const source = await bundleBrowserEntry(
+  "packages/fig-dom/src/view-transition-pseudos.ts",
+  "figPseudos",
+);
+const captureSource = await bundleBrowserEntry(
+  "scripts/fixtures/view-transition-capture.ts",
+  "figCapture",
+);
+
+async function bundleBrowserEntry(entry, globalName) {
+  const bundles = await build({
+    config: false,
+    entry,
+    globalName,
+    alias: figSourceAliases(),
+    define: { __FIG_DEV__: "true" },
+    deps: { alwaysBundle: [/^@bgub\/fig/] },
+    format: "iife",
+    platform: "browser",
+    write: false,
+    dts: false,
+    logLevel: "silent",
+  });
+  return bundles
+    .flatMap((bundle) => bundle.chunks)
+    .filter((chunk) => chunk.type === "chunk")
+    .map((chunk) => chunk.code)
+    .join("\n");
+}
 
 for (const [name, browserType] of Object.entries({ chromium, webkit })) {
   const browser = await browserType.launch();
@@ -113,6 +128,64 @@ for (const [name, browserType] of Object.entries({ chromium, webkit })) {
         `${name} ${browser.version()} (${mode}): ${JSON.stringify(result)}`,
       );
       await page.close();
+    }
+    for (const mode of ["flush", "hydrate"]) {
+      for (const phase of ["before-update", "before-ready"]) {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.setContent(
+          "<style>section { width: 120px; height: 80px }</style>",
+        );
+        await page.addScriptTag({ content: captureSource });
+        const result = await page.evaluate(
+          async ({ mode, phase }) => {
+            let timer;
+            try {
+              return await Promise.race([
+                window.figCapture.probeCaptureInterruption(mode, phase),
+                new Promise((_, reject) => {
+                  timer = setTimeout(
+                    () => reject(new Error("Capture interruption timed out")),
+                    3000,
+                  );
+                }),
+              ]);
+            } finally {
+              clearTimeout(timer);
+            }
+          },
+          { mode, phase },
+        );
+        const text = mode === "hydrate" ? "next" : "urgent";
+        const clicks = mode === "hydrate" ? 1 : 0;
+        assert.deepEqual(
+          result,
+          {
+            text,
+            authorName: `author-${text}`,
+            clicks,
+            sameButton: true,
+            dehydrated: mode !== "hydrate",
+            readyRejected: true,
+            finalText: text,
+            finalClicks: clicks,
+            starts: 1,
+            skips: 1,
+            callbacks: 0,
+            mutations: 1,
+            errors: [],
+          },
+          `${name}: ${mode} ${phase}`,
+        );
+        assert.deepEqual(
+          errors,
+          [],
+          `${name}: ${mode} ${phase} browser errors`,
+        );
+        console.log(`${name} ${browser.version()} (${mode} ${phase}): passed`);
+        await page.close();
+      }
     }
   } finally {
     await browser.close();

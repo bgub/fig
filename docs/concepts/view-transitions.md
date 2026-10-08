@@ -156,6 +156,12 @@ Stale or failed candidates cancel the entire native animation and release the do
 
 Explicit `flushSync` and `unmount` interrupt that capture instead of waiting for browser readiness. Fig skips the native animation, validates and finishes an unmutated candidate (or discards it if stale), restores author styles, and releases capture before applying the urgent update. `unmount` uses the same path so cleanup finishes before the root's data store is disposed. Mutation that already started finishes coherently; it is never replayed. Interrupted captures suppress transition callbacks, and late browser update, ready, and finished callbacks cannot mutate the tree or restore styles over a newer capture. Native `skipTransition()` failure does not block synchronous completion. Automatically scheduled synchronous work, including before-paint repairs, discrete updates, and external-store notifications, retains its priority but waits for readiness without skipping the animation. Before-paint effects themselves run inside the mutation transaction; their follow-up state updates publish after capture release and may therefore be absent from the captured snapshot. Automatic post-commit flushing cannot interrupt another root's capture. Once readiness releases capture, the ordinary animation serialization policy above applies.
 
+### Before-paint repairs and captured pixels
+
+Browser readiness means the new snapshot has already been captured. A state update queued by `useBeforePaint` can therefore repair the live DOM without repairing the pixels shown by the animation. For example, a newly opened panel may first render at an estimated height and measure its actual height in `useBeforePaint`. If that measurement sets state, the snapshot can retain the estimated height for the animation's duration, then jump to the corrected live layout when the animation ends.
+
+Prefer deriving snapshot-critical layout from render state or CSS. If measurement is necessary, measure before starting the transition when the relevant geometry is available. A direct DOM adjustment made inside the before-paint callback participates in the mutation transaction, but a follow-up state render waits for readiness. When the final layout cannot be prepared in advance and displaying the intermediate snapshot would be misleading, use an ordinary update for that interaction. `flushSync` outside commit can force pending work to complete by canceling capture; it does not repair an already-captured snapshot while preserving its animation.
+
 ## Server Streaming
 
 Server rendering annotates the nearest host surfaces with `data-fig-vt-name` and optional `data-fig-vt-class`.
@@ -165,6 +171,12 @@ A Suspense fallback and its streamed primary content begin from the same name cu
 Deep branches that suspend more than once may still collide. The browser skips that pair without breaking the reveal.
 
 The inline Suspense operations `s`, `c`, and `ac` collect old and new annotated surfaces and perform their existing DOM move inside a native transition. They share the same mutex as client commits. Browsers without the API use the normal reveal path.
+
+## Native Lifecycle Checks
+
+Run `pnpm test:transition-lifetimes` with Playwright's Chromium and WebKit browsers installed. The probes cover normal and skipped pseudo-animation cleanup, plus `flushSync` and event-target hydration before mutation and before readiness. They check immediate DOM state, exactly-once event delivery, restored author names, rejected readiness, and inert late callbacks against native browser transitions.
+
+The probes do not enumerate document animations and do not cover the historical iOS Safari animation-enumeration crash.
 
 ## Known Gaps
 

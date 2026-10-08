@@ -104,6 +104,10 @@ Data-resource subscription commit also compares the recorded values after subscr
 
 Subscription teardown clears ownership before invoking user cleanup, so reentrant notifications and throwing cleanups cannot reuse a retired subscription. Subscription-time snapshot errors schedule the consuming component instead of escaping the store notification callback, allowing its ErrorBoundary to handle the error during render. This follows React's [precommit consistency validation](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberWorkLoop.js) and [snapshot-change detection](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberHooks.js).
 
+## Render Unwinding
+
+The active fiber return chain is the render handler stack. A thrown promise or error walks outward once, restoring provider values as it leaves their scopes and stopping at the nearest eligible Suspense or ErrorBoundary. A boundary does not catch its own render or a throw from its active fallback. Hydration mismatches continue to the root recovery path. Commit-phase errors search the committed ancestry separately because no render scopes are active.
+
 ## Suspense Retries
 
 When a fallback preserves an already committed primary, commit releases the original lane ownership of the updates that primary attempted, including pending prefixes and updates already retained in committed rebase history. This makes the complete attempted state eligible for retry without first revealing stale state. Each read retains the lanes of its attempt; updates that render skipped, or that arrived after its read boundaries, retain their priority. Preserved clones do not count as new reads. Discarding a fallback before commit changes neither incoming queue history nor committed rebase history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
@@ -112,6 +116,8 @@ Every suspension installs two kinds of wake-up:
 
 - A root-level ping is attached during render. If that render is restarted or abandoned, resolving the promise can still revive the suspended lanes.
 - A targeted boundary retry is recorded during render but attached only after commit, when the boundary fiber is known to be current.
+
+If an inner Suspense fallback also suspends, the surviving outer boundary inherits the discarded inner boundary's retry promises. Resolving either the primary content or its fallback can then retry the outer boundary; listeners never target an uncommitted inner fiber. Error-boundary capture still discards retries from its failed subtree.
 
 Fig never trusts a fiber identity captured from unfinished work. A render may restart, reuse a fiber in place, or discard it entirely.
 
