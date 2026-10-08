@@ -5,7 +5,6 @@ import {
   useBeforePaint,
   useMemo,
   useStableEvent,
-  useState,
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import {
@@ -17,8 +16,10 @@ import {
   assertSinglePart,
   expectHost,
 } from "../internal/diagnostics.ts";
+import { useControllableValue } from "../internal/controllable-value.ts";
 import { createFormReset } from "../internal/form-reset.ts";
-import { bindPart, createPartCollection } from "../internal/parts.ts";
+import { bindPart } from "../internal/parts.ts";
+import { createPartCollection } from "../internal/registration.ts";
 import { useRegistrationReconcile } from "../internal/reconcile.ts";
 
 export type SliderValueChangeDetails = ChangeDetails;
@@ -61,6 +62,7 @@ export interface SliderProps extends SliderOptions {
 }
 
 interface SliderState {
+  readonly owner: object;
   readonly value: number;
   readonly min: number;
   readonly max: number;
@@ -92,7 +94,7 @@ const sliderControl = /* @__PURE__ */ createMixin(
     expectHost(context, "slider control", "input");
     const readOnly = state.readOnly || context.props.readonly === true;
     return {
-      bind: bindPart(context, state.bind),
+      bind: bindPart(context, state.owner, state.bind),
       type: "range",
       min: state.min,
       max: state.max,
@@ -148,30 +150,29 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
           options.step > 0
         ? options.step
         : 1;
-  const initialValue = useMemo(() => options.defaultValue, []);
   const controlled = options.value !== undefined;
-  const [uncontrolled, setUncontrolled] = useState(initialValue);
-  const value = sanitize(
-    controlled ? options.value : uncontrolled,
-    min,
-    max,
-    step,
-  );
   const requestReconcile = useRegistrationReconcile();
+  const stateValue = useControllableValue<number | undefined>({
+    value: options.value,
+    defaultValue: options.defaultValue,
+    onChange: (next, details, signal) => {
+      options.onValueChange?.(sanitize(next, min, max, step), details, signal);
+    },
+    equal: (left, right) =>
+      sanitize(left, min, max, step) === sanitize(right, min, max, step),
+    reconcile: requestReconcile,
+  });
+  const value = sanitize(stateValue.value, min, max, step);
+  const currentValue = useStableEvent(() =>
+    sanitize(stateValue.current(), min, max, step),
+  );
   const inputs = useMemo(
     () => createPartCollection<undefined>(requestReconcile),
     [],
   );
   const tracker = useMemo(
-    () => ({ value, pending: undefined as number | undefined }),
+    () => ({ pending: undefined as number | undefined }),
     [],
-  );
-  tracker.value = value;
-
-  const emitChange = useStableEvent(
-    (next: number, details: SliderValueChangeDetails, signal: AbortSignal) => {
-      options.onValueChange?.(next, details, signal);
-    },
   );
   const emitCommit = useStableEvent(
     (next: number, details: SliderValueCommitDetails, signal: AbortSignal) => {
@@ -180,15 +181,7 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
   );
   const requestValue = useStableEvent(
     (next: number, event: Event | null, node?: HTMLInputElement): boolean => {
-      if (next === tracker.value) return true;
-      const details = createChangeDetails(event, node);
-      emitChange(next, details);
-      if (details.isCanceled) return false;
-      if (!controlled) {
-        tracker.value = next;
-        setUncontrolled(next);
-      }
-      return true;
+      return stateValue.request(() => next, createChangeDetails(event, node));
     },
   );
   const input = useStableEvent(
@@ -199,19 +192,19 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
         node.readOnly ||
         options.readOnly
       ) {
-        node.value = String(tracker.value);
+        node.value = String(currentValue());
         if (commit) tracker.pending = undefined;
         return;
       }
       const next = sanitize(node.valueAsNumber, min, max, step);
-      const changed = next !== tracker.value;
+      const changed = next !== currentValue();
       // Native input and change may arrive before the owner rerenders.
       // The input request has already been accepted; committing it is not
       // a second value change.
       const accepted =
         (commit && tracker.pending === next) || requestValue(next, event, node);
       if (accepted && changed) tracker.pending = next;
-      if (!accepted) node.value = String(tracker.value);
+      if (!accepted) node.value = String(currentValue());
       // Reconciliation restores refused controlled input after the owner has
       // had a chance to commit its update, without corrupting a native change
       // event following input in the same batch.
@@ -226,7 +219,7 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
   );
   const reset = useStableEvent(() => {
     tracker.pending = undefined;
-    if (!controlled) setUncontrolled(initialValue);
+    stateValue.reset();
     requestReconcile();
   });
   const formReset = useMemo(() => createFormReset(reset), []);
@@ -237,6 +230,7 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
   });
 
   const state: SliderState = {
+    owner: inputs,
     value,
     min,
     max,
@@ -252,7 +246,7 @@ export function useSlider(options: SliderOptions = {}): SliderParts {
   };
   const setValue = useStableEvent((next: number) => {
     const normalized = sanitize(next, min, max, step);
-    const changed = normalized !== tracker.value;
+    const changed = normalized !== currentValue();
     if (requestValue(normalized, null) && changed) tracker.pending = undefined;
     if (controlled) requestReconcile();
   });

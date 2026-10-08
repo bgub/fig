@@ -11,7 +11,8 @@ import {
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { createChangeDetails } from "../internal/changes.ts";
-import { bindPart, createPartSlot } from "../internal/parts.ts";
+import { bindPart } from "../internal/parts.ts";
+import { createPartSlot } from "../internal/registration.ts";
 import { menuController, registerMenuController } from "./controller.ts";
 import { type MenuOptions, type MenuParts, useMenu } from "./menu.tsx";
 
@@ -33,6 +34,7 @@ interface Point {
 }
 
 interface TriggerState {
+  readonly owner: object;
   readonly bind: (node: HTMLElement, signal: AbortSignal) => void;
   readonly disabled: boolean;
   readonly id: string;
@@ -49,7 +51,7 @@ const contextTriggerMixin = /* @__PURE__ */ createMixin(
       "aria-controls": state.popupId,
       "aria-expanded": state.open ? "true" : "false",
       "aria-haspopup": "menu",
-      bind: bindPart(context, state.bind),
+      bind: bindPart(context, state.owner, state.bind),
       "data-disabled": disabled ? "" : undefined,
       "data-open": state.open ? "" : undefined,
       id: context.props.id ?? state.id,
@@ -154,6 +156,7 @@ export function useContextMenu<Value = unknown>(
     ...menu,
     trigger: (): MixinDescriptor =>
       contextTriggerMixin({
+        owner: tracker.trigger,
         bind,
         disabled: options.disabled === true,
         id: `${id}-trigger`,

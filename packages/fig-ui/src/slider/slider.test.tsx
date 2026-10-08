@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
-import { type FigNode, useState } from "@bgub/fig";
-import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
+import {
+  type FigNode,
+  readPromise,
+  Suspense,
+  transition,
+  useState,
+} from "@bgub/fig";
+import { createRoot, type FigRoot, flushSync, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -501,4 +507,100 @@ it("handles finite extreme bounds without overflowing step arithmetic", async ()
   );
   expect(input.valueAsNumber).toBe(1e308);
   expect(container.querySelector("output")?.textContent).toBe("1e+308");
+});
+
+it("uses committed controlled values while a new value suspends", async () => {
+  const pending = new Promise<void>(() => {});
+  const changes: number[] = [];
+  let suspend = () => {};
+  function Child({ value }: { value: number }) {
+    const s = useSlider({ value, onValueChange: (next) => changes.push(next) });
+    if (value === 80) readPromise(pending);
+    return <input aria-label="Volume" mix={s.control()} />;
+  }
+  function App() {
+    const [value, setValue] = useState(10);
+    suspend = () => transition(() => setValue(80));
+    return (
+      <Suspense fallback="loading">
+        <Child value={value} />
+      </Suspense>
+    );
+  }
+  const { input } = await render(<App />);
+  await act(suspend);
+  expect(input.valueAsNumber).toBe(10);
+  await act(() => {
+    input.value = "80";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(changes).toEqual([80]);
+});
+it.each(["imperative", "input", "change"])(
+  "keeps a newer reentrant request during %s",
+  async (kind) => {
+    let slider: SliderParts;
+    const changes: number[] = [];
+    function App() {
+      slider = useSlider({
+        defaultValue: 10,
+        onValueChange: (next) => {
+          changes.push(next);
+          if (next === 20) slider.setValue(30);
+        },
+      });
+      return <input aria-label="Volume" mix={slider.control()} />;
+    }
+    const { input } = await render(<App />);
+    if (kind === "imperative") await act(() => slider.setValue(20));
+    else await native(input, 20, kind);
+    expect(changes).toEqual([20, 30]);
+    expect(input.valueAsNumber).toBe(30);
+  },
+);
+
+it("preserves synchronous controlled acceptance through the native commit", async () => {
+  const committed: number[] = [];
+  function App() {
+    const [value, setValue] = useState(10);
+    return (
+      <Example
+        value={value}
+        onValueChange={(next) => flushSync(() => setValue(next))}
+        onValueCommit={(next) => committed.push(next)}
+      />
+    );
+  }
+  const { input } = await render(<App />);
+  await act(() => {
+    input.value = "20";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(input.valueAsNumber).toBe(20);
+  expect(committed).toEqual([20]);
+});
+
+it("follows committed form reassociation without resetting on the old form", async () => {
+  let move = () => {};
+  function App() {
+    const [form, setForm] = useState("first");
+    move = () => setForm("second");
+    const slider = useSlider({ defaultValue: 10 });
+    return (
+      <>
+        <form id="first" />
+        <form id="second" />
+        <input aria-label="Volume" form={form} mix={slider.control()} />
+      </>
+    );
+  }
+  const { input, container } = await render(<App />);
+  await native(input, 30);
+  await act(move);
+  expect(container.querySelector("input")).toBe(input);
+  await act(() => container.querySelector<HTMLFormElement>("#first")!.reset());
+  expect(input.valueAsNumber).toBe(30);
+  await act(() => container.querySelector<HTMLFormElement>("#second")!.reset());
+  expect(input.valueAsNumber).toBe(10);
 });
