@@ -1,5 +1,5 @@
 {
-  "name": "@bgub/fig-ui",
+  "name": "@bgub/fig-headless",
   "version": "6.0.0",
   "private": true,
   "description": "Accessible headless widgets for Fig",
@@ -147,7 +147,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/bgub/fig",
-    "directory": "packages/fig-ui"
+    "directory": "packages/fig-headless"
   },
   "bugs": {
     "url": "https://github.com/bgub/fig/issues"

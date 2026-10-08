@@ -51,7 +51,7 @@ export const libraryEntries: Record<string, string[] | Record<string, string>> =
       "./src/payload.ts",
     ],
     "packages/fig-tanstack-router": ["./src/router.tsx"],
-    "packages/fig-ui": {
+    "packages/fig-headless": {
       accordion: "./src/accordion/accordion.tsx",
       checkbox: "./src/checkbox/checkbox.tsx",
       combobox: "./src/combobox/combobox.tsx",
@@ -88,7 +88,7 @@ export const libraryEntries: Record<string, string[] | Record<string, string>> =
 const browserLibraries = new Set([
   "packages/fig-devtools",
   "packages/fig-dom",
-  "packages/fig-ui",
+  "packages/fig-headless",
 ]);
 // These packages contain development gates. They always emit the artifact that
 // Vite selects while serving; FIG_DEV_SOURCE additionally keeps the primary
@@ -99,7 +99,7 @@ export const developmentLibraryPaths = [
   "packages/fig-reconciler",
   "packages/fig-server",
   "packages/fig-tanstack-router",
-  "packages/fig-ui",
+  "packages/fig-headless",
 ] as const;
 const developmentLibraries = new Set<string>(developmentLibraryPaths);
 const figDevDefine = { __FIG_DEV__: JSON.stringify(true) };

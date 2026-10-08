@@ -22,7 +22,7 @@
     "@bgub/fig-dom": "workspace:*",
     "@bgub/fig-tanstack-router": "workspace:*",
     "@bgub/fig-tanstack-start": "workspace:*",
-    "@bgub/fig-ui": "workspace:*",
+    "@bgub/fig-headless": "workspace:*",
     "@tanstack/devtools": "catalog:",
     "@tanstack/history": "catalog:",
     "@tanstack/router-core": "catalog:",

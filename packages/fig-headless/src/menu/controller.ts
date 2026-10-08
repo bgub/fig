@@ -24,7 +24,7 @@ export function registerMenuController(
 export function menuController(parts: object): MenuController {
   const controller = controllers.get(parts);
   if (controller === undefined) {
-    throw new Error("Fig UI submenu parent must come from useMenu().");
+    throw new Error("Fig Headless submenu parent must come from useMenu().");
   }
   return controller;
 }

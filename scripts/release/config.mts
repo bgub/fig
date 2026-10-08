@@ -59,7 +59,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-demo-tanstack-start",
       "@bgub/fig-devtools",
-      "@bgub/fig-ui",
+      "@bgub/fig-headless",
     ],
     npm: {
       client: "pnpm",

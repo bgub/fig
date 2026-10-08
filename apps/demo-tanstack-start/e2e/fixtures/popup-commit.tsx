@@ -1,10 +1,10 @@
 /** @jsxImportSource @bgub/fig-dom */
 import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, flushSync, on } from "@bgub/fig-dom";
-import { useCombobox } from "@bgub/fig-ui/combobox";
-import { useMenu } from "@bgub/fig-ui/menu";
-import { usePopover } from "@bgub/fig-ui/popover";
-import { useTooltip } from "@bgub/fig-ui/tooltip";
+import { useCombobox } from "@bgub/fig-headless/combobox";
+import { useMenu } from "@bgub/fig-headless/menu";
+import { usePopover } from "@bgub/fig-headless/popover";
+import { useTooltip } from "@bgub/fig-headless/tooltip";
 import { CompositeFocusFixture } from "./composite-focus.tsx";
 
 function PopupPeers({ controlled }: { controlled: boolean }): FigNode {

@@ -39,7 +39,7 @@ interface SelectionTracker {
   value: unknown;
 }
 
-const none = Symbol("fig-ui.tabs.none");
+const none = Symbol("fig-headless.tabs.none");
 
 /**
  * Owns tab selection: user activation, the roving tab stop, and the automatic

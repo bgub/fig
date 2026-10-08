@@ -13,7 +13,7 @@ import {
   expectPopupId,
 } from "./diagnostics.ts";
 
-describe("Fig UI development diagnostics", () => {
+describe("Fig Headless development diagnostics", () => {
   it("rejects a part attached to the wrong host", () => {
     const context: MixinContext = {
       owns: () => false,
@@ -22,7 +22,7 @@ describe("Fig UI development diagnostics", () => {
     } as MixinContext;
 
     expect(() => expectHost(context, "dialog", "dialog")).toThrow(
-      "Fig UI dialog must be applied to <dialog>, not <div>.",
+      "Fig Headless dialog must be applied to <dialog>, not <div>.",
     );
   });
 
@@ -37,7 +37,7 @@ describe("Fig UI development diagnostics", () => {
       'Pass id: "host-id" to the widget root',
     );
     expect(() => expectPopupId(context, "")).toThrow(
-      "Fig UI popover id must not be empty",
+      "Fig Headless popover id must not be empty",
     );
   });
 
@@ -55,13 +55,13 @@ describe("Fig UI development diagnostics", () => {
 
     expect(() =>
       assertAccessibleName(document.createElement("div"), "tab list"),
-    ).toThrow("Fig UI tab list requires an accessible name");
+    ).toThrow("Fig Headless tab list requires an accessible name");
   });
 
   it("requires a field label or explicit control name", () => {
     const input = document.createElement("input");
     expect(() => assertControlLabel(input)).toThrow(
-      "Fig UI field control requires an accessible name",
+      "Fig Headless field control requires an accessible name",
     );
 
     input.setAttribute("aria-label", "Email");
@@ -71,9 +71,9 @@ describe("Fig UI development diagnostics", () => {
   it("rejects duplicate values and unowned panels", () => {
     expect(() =>
       assertUniqueValues([{ value: "same" }, { value: "same" }], "tabs item"),
-    ).toThrow("Fig UI tabs item values must be unique");
+    ).toThrow("Fig Headless tabs item values must be unique");
     expect(() => assertPanelOwner(undefined)).toThrow(
-      "Fig UI panel has no matching control",
+      "Fig Headless panel has no matching control",
     );
   });
 
@@ -84,14 +84,14 @@ describe("Fig UI development diagnostics", () => {
     second.id = "message";
 
     expect(() => assertSinglePart([first, second], "field label")).toThrow(
-      "Fig UI field label may be applied to only one mounted host",
+      "Fig Headless field label may be applied to only one mounted host",
     );
     expect(() => assertUniqueIds([first, second], "field messages")).toThrow(
-      "Fig UI field messages must use unique ids",
+      "Fig Headless field messages must use unique ids",
     );
     second.id = "";
     expect(() => assertUniqueIds([second], "field messages")).toThrow(
-      "Fig UI field messages must use non-empty ids",
+      "Fig Headless field messages must use non-empty ids",
     );
   });
 
@@ -99,7 +99,7 @@ describe("Fig UI development diagnostics", () => {
     expect(() =>
       assertSingleSelection(["apple", "banana"], "single-select listbox"),
     ).toThrow(
-      "Fig UI single-select listbox accepts at most one selected value",
+      "Fig Headless single-select listbox accepts at most one selected value",
     );
   });
 });

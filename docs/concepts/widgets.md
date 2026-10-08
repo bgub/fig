@@ -2,7 +2,7 @@
 
 Status: exploring; private copy-first reference implementation
 
-`packages/fig-ui` contains Fig's canonical source for accessible, unstyled DOM widgets: [tabs](#tabs), a [radio group](#radio-group), an [accordion](#accordion), a [dialog](#dialog), a [popover](#popover), a [tooltip](#tooltip), a [listbox](#listbox), a [select](#select), a [combobox](#combobox), a [menu](#menu), a [toolbar](#toolbar), a [toast region](#toast-region), a [checkbox](#checkbox-and-switch), a [switch](#checkbox-and-switch), and a [field](#field). The workspace package is private and unpublished; applications copy the source they need and own the result. A widget divides its interface at the same boundary as Fig: components own state and relationships; host mixins attach the resulting behavior to application-owned elements.
+`packages/fig-headless` contains Fig's canonical source for accessible, unstyled DOM widgets: [tabs](#tabs), a [radio group](#radio-group), an [accordion](#accordion), a [dialog](#dialog), a [popover](#popover), a [tooltip](#tooltip), a [listbox](#listbox), a [select](#select), a [combobox](#combobox), a [menu](#menu), a [toolbar](#toolbar), a [toast region](#toast-region), a [checkbox](#checkbox-and-switch), a [switch](#checkbox-and-switch), and a [field](#field). The workspace package is private and unpublished; applications copy the source they need and own the result. A widget divides its interface at the same boundary as Fig: components own state and relationships; host mixins attach the resulting behavior to application-owned elements.
 
 ## Stateful Roots And Host Parts
 
@@ -504,7 +504,7 @@ These checks describe the supported interface rather than adding fallback semant
 
 ## Accessibility Verification Matrix
 
-The semantic DOM and interaction tests are necessary but cannot establish what assistive technology announces. Fig UI uses this matrix as a release record; an unchecked manual row must not be described as verified in release notes.
+The semantic DOM and interaction tests are necessary but cannot establish what assistive technology announces. Fig Headless uses this matrix as a release record; an unchecked manual row must not be described as verified in release notes.
 
 | Environment | Coverage | Current alpha status | Stable release gate |
 | --- | --- | --- | --- |

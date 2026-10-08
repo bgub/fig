@@ -70,8 +70,8 @@ interface FieldMessageOwnState {
   readonly id: string;
 }
 
-const defaultDescription = Symbol("fig-ui.field.description");
-const defaultError = Symbol("fig-ui.field.error");
+const defaultDescription = Symbol("fig-headless.field.description");
+const defaultError = Symbol("fig-headless.field.error");
 
 const fieldLabelMixin = /* @__PURE__ */ createMixin(
   (context: MixinContext, state: FieldState) => {

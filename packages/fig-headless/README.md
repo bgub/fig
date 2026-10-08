@@ -1,15 +1,15 @@
-# Fig UI
+# Fig Headless
 
 Accessible, unstyled widgets built around Fig host mixins. Widget roots own
 state and coordination; applications keep ownership of the rendered host tree.
 
-Status: experimental and source-distributed. `@bgub/fig-ui` is a private
+Status: experimental and source-distributed. `@bgub/fig-headless` is a private
 workspace package used to test the canonical implementation; it is not
 published to npm or JSR and carries no compatibility promise yet.
 
 ## Copy Into An Application
 
-Copy `packages/fig-ui/src` into an application-owned directory such as
+Copy `packages/fig-headless/src` into an application-owned directory such as
 `src/ui`, preserving its directory structure. Widgets share selected modules
 under `internal`, so copying the whole source tree is the reliable starting
 point; unused widget directories can then be deleted after checking their
@@ -22,7 +22,7 @@ invariants that still apply to the resulting design.
 
 Agents should copy from a pinned Fig commit, retain the relevant tests while
 adapting behavior, and use application-local imports. Do not add a registry
-dependency on `@bgub/fig-ui`.
+dependency on `@bgub/fig-headless`.
 
 ## Tabs
 
@@ -375,7 +375,7 @@ unmounted option does not implicitly erase its selected value.
 
 ## Select
 
-Prefer native `<select>` when its rendering works. The Fig UI select covers
+Prefer native `<select>` when its rendering works. The Fig Headless select covers
 the custom-popup case while leaving every host and label to the application:
 
 ```tsx
@@ -418,7 +418,7 @@ const matches = fruits.filter((fruit) =>
 </>;
 ```
 
-Fig UI owns input/listbox relationships, active-descendant movement,
+Fig Headless owns input/listbox relationships, active-descendant movement,
 selection, controlled state, and form reset. The application owns filtering,
 async loading, option rendering, empty states, and placement CSS.
 

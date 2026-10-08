@@ -205,7 +205,7 @@ describe("TanStack Start Payload compiler", () => {
     const result = await transformPayloadModule(
       `
         import { Suspense } from "@bgub/fig";
-        import { Panel } from "@bgub/fig-ui";
+        import { Panel } from "@bgub/fig-headless";
 
         export function Card() {
           return <Suspense><Panel /></Suspense>;
@@ -216,7 +216,9 @@ describe("TanStack Start Payload compiler", () => {
 
     expect(result?.code).toContain('from "@bgub/fig"');
     expect(result?.code).not.toContain('from "@bgub/fig?fig-payload-module=1"');
-    expect(result?.code).toContain('from "@bgub/fig-ui?fig-payload-module=1"');
+    expect(result?.code).toContain(
+      'from "@bgub/fig-headless?fig-payload-module=1"',
+    );
   });
 
   it("rejects non-imported Isomorphic components", async () => {

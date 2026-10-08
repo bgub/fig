@@ -20,6 +20,6 @@ export function bindPopoverSource(
 ): void {
   const bind = sourceBindings.get(parts);
   if (bind === undefined)
-    throw new Error("Fig UI popover source must belong to usePopover().");
+    throw new Error("Fig Headless popover source must belong to usePopover().");
   bind(node, signal);
 }

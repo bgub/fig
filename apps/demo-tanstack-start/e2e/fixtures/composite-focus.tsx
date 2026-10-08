@@ -1,7 +1,7 @@
 /** @jsxImportSource @bgub/fig-dom */
 import type { FigNode, MixinDescriptor } from "@bgub/fig";
-import { useMenu } from "@bgub/fig-ui/menu";
-import { useTabs } from "@bgub/fig-ui/tabs";
+import { useMenu } from "@bgub/fig-headless/menu";
+import { useTabs } from "@bgub/fig-headless/tabs";
 
 interface FocusFixtureOptions {
   readonly kind: string;
