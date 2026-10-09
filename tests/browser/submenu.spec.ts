@@ -268,6 +268,7 @@ test("selection preserves focus deliberately moved by the caller", async ({
   page,
 }) => {
   await page.locator("[data-trigger]").press("ArrowRight");
+  await expect(page.locator("[data-item]")).toBeFocused();
   await page.locator("[data-redirect]").press("Enter");
   await expect(page.locator("[data-parent]")).toBeHidden();
   await expect(page.locator("[data-outside]")).toBeFocused();
