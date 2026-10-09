@@ -34,7 +34,7 @@ export function preserveFocus(container: Container, mutate: () => void): void {
       selection?.();
       // Selection repair can focus an outer editing host or fire a listener
       // that redirects focus. Make at most one explicit focus attempt afterward;
-      // final component policy belongs to useBeforePaint.
+      // bindings and useBeforePaint apply their policy after restoration.
       if (root.activeElement !== focused && isVisible(focused))
         focused.focus?.({ preventScroll: true });
     }

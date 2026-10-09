@@ -783,3 +783,110 @@ test("unchanged child boundaries avoid selection repair and visibility checks", 
   await page.keyboard.insertText("X");
   await expect(page.locator("#editor")).toHaveText("AAXCC");
 });
+
+for (const kind of ["callback", "host"] as const) {
+  test(`${kind} binding focus runs after full commit restoration`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate((kind) => {
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      outside.focus();
+      window.focusFixture.renderBinding(kind, "focus");
+      const mountFocused = document.activeElement?.id;
+      const mountObservations = [...window.focusFixture.bindingObservations];
+      outside.focus();
+      window.focusFixture.bindingObservations.length = 0;
+      window.focusFixture.renderBinding(kind, "focus");
+      return {
+        mountFocused,
+        mountObservations,
+        updateFocused: document.activeElement?.id,
+        updateObservations: window.focusFixture.bindingObservations,
+      };
+    }, kind);
+    expect(result.mountFocused).toBe("binding-target");
+    expect(result.mountObservations).toEqual(
+      test.info().project.name.endsWith("development")
+        ? ["focus", "focus-event", "focus"]
+        : ["focus", "focus-event"],
+    );
+    expect(result.updateFocused).toBe("binding-target");
+    expect(result.updateObservations).toEqual(["focus", "focus-event"]);
+  });
+
+  for (const action of ["selection", "blur"] as const) {
+    test(`${kind} binding ${action} survives restoration`, async ({ page }) => {
+      const result = await page.evaluate(
+        ({ kind, action }) => {
+          window.focusFixture.renderBinding(kind, "none");
+          const input = document.getElementById(
+            "binding-target",
+          ) as HTMLInputElement;
+          input.focus();
+          input.setSelectionRange(2, 8);
+          window.focusFixture.bindingObservations.length = 0;
+          window.focusFixture.renderBinding(kind, action);
+          return {
+            focused: document.activeElement === input,
+            selection: [input.selectionStart, input.selectionEnd],
+            observations: window.focusFixture.bindingObservations,
+          };
+        },
+        { kind, action },
+      );
+      expect(result.observations).toEqual([action]);
+      expect(result.focused).toBe(action === "selection");
+      if (action === "selection") expect(result.selection).toEqual([0, 3]);
+    });
+  }
+
+  test(`${kind} hydration binding focuses after publishing the committed tree`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate((kind) => {
+      const container = document.getElementById("root")!;
+      container.innerHTML =
+        '<input id="binding-target" value="Selected text"><output id="binding-output">focus</output>';
+      const input = container.firstElementChild;
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      outside.focus();
+      window.focusFixture.renderBinding(kind, "focus", undefined, true);
+      return {
+        reused: container.firstElementChild === input,
+        focused: document.activeElement === input,
+        observations: window.focusFixture.bindingObservations,
+      };
+    }, kind);
+    expect(result.reused).toBe(true);
+    expect(result.focused).toBe(true);
+    expect(result.observations).toContain("focus-event");
+  });
+
+  test(`${kind} Activity binding skips hide and focuses on reveal`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate((kind) => {
+      window.focusFixture.renderBinding(kind, "focus", false);
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      outside.focus();
+      window.focusFixture.bindingObservations.length = 0;
+      window.focusFixture.renderBinding(kind, "focus", true);
+      const hiddenObservations = [...window.focusFixture.bindingObservations];
+      const hiddenFocused = document.activeElement === outside;
+      window.focusFixture.renderBinding(kind, "focus", false);
+      return {
+        hiddenObservations,
+        hiddenFocused,
+        revealedFocus: document.activeElement?.id,
+        observations: window.focusFixture.bindingObservations,
+      };
+    }, kind);
+    expect(result.hiddenObservations).toEqual([]);
+    expect(result.hiddenFocused).toBe(true);
+    expect(result.revealedFocus).toBe("binding-target");
+    expect(result.observations).toEqual(["focus", "focus-event"]);
+  });
+}

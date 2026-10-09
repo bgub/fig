@@ -259,6 +259,7 @@ describe("reconciler", () => {
           } finally {
             order.push("restore");
           }
+          return () => order.push("activate");
         },
         insertBefore(parent, child, before) {
           order.push("insert");
@@ -304,6 +305,7 @@ describe("reconciler", () => {
         "capture",
         "insert",
         "restore",
+        "activate",
         "before-paint",
         "before-paint",
         ...(mode === "ordinary" ? [] : ["after-layout"]),

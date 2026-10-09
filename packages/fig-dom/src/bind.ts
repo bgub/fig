@@ -51,6 +51,40 @@ interface BindSlot {
 const bindSlots = new WeakMap<Element, Map<string, BindSlot>>();
 const suspendedBindElements = new WeakSet<Element>();
 
+interface PendingBind {
+  element: Element;
+  key: string;
+  update: boolean;
+}
+
+let pendingBinds: Map<BindSlot, PendingBind> | null = null;
+
+/** Collect callbacks during mutation/restoration; activate after tree publication. */
+export function deferBindCallbacks(
+  mutate: () => void,
+): (run: (element: Element, callback: () => void) => void) => void {
+  const previous = pendingBinds;
+  const pending = new Map<BindSlot, PendingBind>();
+  pendingBinds = pending;
+  try {
+    mutate();
+  } finally {
+    pendingBinds = previous;
+  }
+  return (run) => {
+    // Callback-triggered work must not join a surrounding mutation's queue.
+    const surrounding = pendingBinds;
+    pendingBinds = null;
+    try {
+      for (const [slot, { element, key, update }] of pending)
+        run(element, () => runBindSlot(element, key, slot, update));
+    } finally {
+      pending.clear();
+      pendingBinds = surrounding;
+    }
+  };
+}
+
 /** Compose callbacks into one callable binding with a shared lifetime. */
 export function composeBind<T extends Element = Element>(
   ...binds: Array<Bind<T> | false | null | undefined>
@@ -123,17 +157,14 @@ export function updateBind(element: Element, value: unknown): void {
   // Publish every retained lifetime before user code can throw and trigger
   // teardown, including siblings whose update has not run yet.
   bindSlots.set(element, slots);
-  for (const slot of slots.values()) {
-    if (slot.controller === null) attachBindSlot(element, slot);
-    else if (slot.owner !== undefined)
-      slot.callback(element, slot.controller.signal);
-  }
+  for (const [key, slot] of slots)
+    scheduleBindSlot(element, key, slot, slot.owner !== undefined);
   if (slots.size === 0) bindSlots.delete(element);
 }
 
 export function attachElementBind(element: Element): void {
-  for (const slot of bindSlots.get(element)?.values() ?? [])
-    attachBindSlot(element, slot);
+  for (const [key, slot] of bindSlots.get(element) ?? [])
+    scheduleBindSlot(element, key, slot, false);
 }
 
 export function suspendBind(element: Element): void {
@@ -144,8 +175,8 @@ export function suspendBind(element: Element): void {
 
 export function resumeBind(element: Element): void {
   suspendedBindElements.delete(element);
-  for (const slot of bindSlots.get(element)?.values() ?? [])
-    attachBindSlot(element, slot);
+  for (const [key, slot] of bindSlots.get(element) ?? [])
+    scheduleBindSlot(element, key, slot, false);
 }
 
 export function detachElementBind(element: Element): void {
@@ -154,12 +185,35 @@ export function detachElementBind(element: Element): void {
   bindSlots.delete(element);
 }
 
-function attachBindSlot(element: Element, slot: BindSlot): void {
+function scheduleBindSlot(
+  element: Element,
+  key: string,
+  slot: BindSlot,
+  update: boolean,
+): void {
+  if (slot.controller !== null && !update) return;
+  if (pendingBinds !== null) {
+    pendingBinds.set(slot, { element, key, update });
+  } else {
+    runBindSlot(element, key, slot, update);
+  }
+}
+
+function runBindSlot(
+  element: Element,
+  key: string,
+  slot: BindSlot,
+  update: boolean,
+): void {
+  // A later mutation, visibility change, or callback can retire queued work.
   if (
-    slot.controller !== null ||
+    bindSlots.get(element)?.get(key) !== slot ||
     element.parentNode === null ||
     suspendedBindElements.has(element)
-  ) {
+  )
+    return;
+  if (slot.controller !== null) {
+    if (update) slot.callback(element, slot.controller.signal);
     return;
   }
 

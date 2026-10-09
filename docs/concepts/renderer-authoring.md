@@ -23,9 +23,9 @@ Portal children use the normal mutation methods against their target. Optional p
 
 ## Commit Mutation Scope
 
-Optional `commitMutation(container, mutate)` surrounds one synchronous host mutation phase. The host must call `mutate()` exactly once, synchronously, and propagate errors. It can capture host state before that call and restore it in `finally`. Hosts without the hook execute mutations directly.
+Optional `commitMutation(container, mutate)` surrounds one synchronous host mutation phase. The host must call `mutate()` exactly once, synchronously, and propagate errors. It can capture host state before that call and restore it in `finally`. It may return an activation callback, which runs synchronously after the committed tree and hydration state are published, before external-store subscriptions and `useBeforePaint`. The callback receives `run(instance, callback)`; invoke host callbacks through this runner so thrown errors retain their owning component stack and normal uncaught commit-error teardown. Hosts without the hook execute mutations directly.
 
-The scope includes deletions, host updates, placements, hydration changes, and Activity visibility changes. It runs after `useBeforeLayout` and finishes before `useBeforePaint`. A commit coordinator can delay the transaction, but the hook runs only when the coordinator actually invokes its mutation callback. State stays local to that invocation, including on failure. Fig DOM uses this scope to preserve focus and selection across the entire commit; component focus policy runs afterward in `useBeforePaint`.
+The scope includes deletions, host updates, placements, hydration changes, and Activity visibility changes. It runs after `useBeforeLayout` and finishes before `useBeforePaint`. A commit coordinator can delay the transaction, but the hook runs only when the coordinator actually invokes its mutation callback. State stays local to that invocation, including on failure. Fig DOM uses this scope to preserve focus and selection across the entire commit; binding callbacks activate afterward, followed by component policy in `useBeforePaint`. Failed mutations never activate their pending callbacks; activation errors stop remaining callbacks and propagate through commit-error teardown.
 
 ## Hoisted Assets
 

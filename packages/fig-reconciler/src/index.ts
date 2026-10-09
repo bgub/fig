@@ -359,7 +359,13 @@ export interface HostConfig<Container, Instance, TextInstance> {
   ): boolean;
   // Wrap the synchronous host mutation phase, before before-paint effects.
   // The host must invoke mutate exactly once and must not defer it.
-  commitMutation?(container: Container, mutate: () => void): void;
+  // An optional returned callback runs after publishing the committed tree and
+  // retiring hydration state, before external subscriptions and before-paint effects.
+  // Run each callback through the supplied instance runner to retain error attribution.
+  commitMutation?(
+    container: Container,
+    mutate: () => void,
+  ): void | ((run: (instance: Instance, callback: () => void) => void) => void);
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -3875,6 +3881,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         root.clearContainerBeforeCommit = false;
       };
+      let activateHost: ReturnType<NonNullable<typeof host.commitMutation>>;
       const commitHostChanges = () => {
         // A coordinator may defer this transaction. Publish hook instances and
         // run before-layout effects only when its host mutation actually begins.
@@ -3893,7 +3900,8 @@ export function createRenderer<Container, Instance, TextInstance>(
           }
         }
         commitEffects(root, finishedWork.child, BeforeLayoutEffect);
-        if (host.commitMutation) host.commitMutation(root.container, mutate);
+        if (host.commitMutation)
+          activateHost = host.commitMutation(root.container, mutate);
         else mutate();
       };
       const completeCommit = () => {
@@ -3926,6 +3934,20 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
+          activateHost?.((instance, callback) => {
+            try {
+              callback();
+            } catch (error) {
+              // Deferred host callbacks no longer run on the mutation stack.
+              // Recover their owner only on failure, without a live instance map.
+              let source = finishedWork;
+              walkFiberSubtree(finishedWork, (node) => {
+                if (isHost(node) && node.stateNode === instance) source = node;
+              });
+              root.uncaughtErrorInfo = errorInfoFor(source, error);
+              throw error;
+            }
+          });
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
           attachCommittedSuspenseRetries(root, attempt.retries);

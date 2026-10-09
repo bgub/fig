@@ -1,5 +1,18 @@
-import { Activity, createElement, useBeforePaint } from "@bgub/fig";
-import { createRoot, flushSync } from "@bgub/fig-dom";
+import {
+  Activity,
+  createElement,
+  createMixin,
+  useBeforePaint,
+} from "@bgub/fig";
+import {
+  createRoot,
+  flushSync,
+  hostBinding,
+  hydrateRoot,
+  on,
+  type Bind,
+  type FigRoot,
+} from "@bgub/fig-dom";
 
 type EditorKind =
   | "input"
@@ -25,8 +38,64 @@ declare global {
       hide(): void;
       mountChildren(fallback: boolean): void;
       updateChildren(keys: string[]): void;
+      renderBinding(
+        kind: "callback" | "host",
+        action: "focus" | "selection" | "blur" | "none",
+        hidden?: boolean,
+        hydrate?: boolean,
+      ): void;
+      bindingObservations: string[];
     };
   }
+}
+
+let bindingRoot: FigRoot | undefined;
+const bindingOwner = {};
+const behavior = createMixin((context, callback: Bind) => ({
+  bind: hostBinding(context, bindingOwner, callback),
+}));
+function BindingApp({
+  kind,
+  action,
+  hidden,
+}: {
+  kind: "callback" | "host";
+  action: "focus" | "selection" | "blur" | "none";
+  hidden?: boolean;
+}) {
+  useBeforePaint(() => {
+    window.focusFixture.beforePaint?.();
+  });
+  const callback: Bind = (node) => {
+    const input = node as HTMLInputElement;
+    window.focusFixture.bindingObservations.push(
+      document.getElementById("binding-output")?.textContent ?? "missing",
+    );
+    if (action === "focus") input.focus();
+    else if (action === "selection") input.setSelectionRange(0, 3);
+    else if (action === "blur") input.blur();
+  };
+  const children = [
+    createElement("input", {
+      id: "binding-target",
+      defaultValue: "Selected text",
+      bind: kind === "callback" ? callback : undefined,
+      mix: [
+        kind === "host" && behavior(callback),
+        on("focus", () => {
+          window.focusFixture.bindingObservations.push("focus-event");
+        }),
+      ],
+    }),
+    createElement("output", { id: "binding-output" }, action),
+  ];
+  return hidden === undefined
+    ? children
+    : createElement(
+        Activity,
+        { mode: hidden ? "hidden" : "visible" },
+        children,
+      );
 }
 
 window.focusFixture = {
@@ -147,4 +216,17 @@ window.focusFixture = {
       });
   },
   updateChildren() {},
+  bindingObservations: [],
+  renderBinding(kind, action, hidden, hydrate = false) {
+    const node = createElement(BindingApp, { kind, action, hidden });
+    const container = document.getElementById("root")!;
+    flushSync(() => {
+      if (bindingRoot) bindingRoot.render(node);
+      else if (hydrate) bindingRoot = hydrateRoot(container, node);
+      else {
+        bindingRoot = createRoot(container);
+        bindingRoot.render(node);
+      }
+    });
+  },
 };
