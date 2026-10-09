@@ -334,7 +334,7 @@ test("opens a modal dialog the platform owns", async ({ page }) => {
   expect(errors()).toEqual([]);
 });
 
-test("anchors a popover the platform positions and dismisses", async ({
+test("positions a popover while the platform owns focus and dismissal", async ({
   page,
 }) => {
   const errors = collectBrowserErrors(page);
@@ -364,10 +364,9 @@ test("anchors a popover the platform positions and dismisses", async ({
   await expect(popover).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
 
-  // Anchor positioning placed it against the trigger without any measurement.
-  // Which side depends on the room available, since the demo declares a
-  // try-fallback, so adjacency is what separates anchoring from the centered
-  // placement a top-layer popover takes by default.
+  await expect(page.locator("[data-popover-demo-filter]")).toBeFocused();
+  // The optional helper supplies placement; native popover still owns focus
+  // and dismissal. Flipping may choose either vertical side.
   const geometry = await page.evaluate(() => {
     const trigger = document
       .querySelector("[data-popover-demo-trigger]")
@@ -378,12 +377,9 @@ test("anchors a popover the platform positions and dismisses", async ({
     return {
       gapAbove: Math.abs((trigger?.top ?? 0) - (panel?.bottom ?? 0)),
       gapBelow: Math.abs((panel?.top ?? 0) - (trigger?.bottom ?? 0)),
-      supported: CSS.supports("position-area: block-end"),
     };
   });
-  if (geometry.supported) {
-    expect(Math.min(geometry.gapAbove, geometry.gapBelow)).toBeLessThan(24);
-  }
+  expect(Math.min(geometry.gapAbove, geometry.gapBelow)).toBeLessThan(24);
 
   // Light dismiss is the platform's, not a listener the widget installed.
   await page.mouse.click(5, 5);

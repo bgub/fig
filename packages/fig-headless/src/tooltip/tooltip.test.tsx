@@ -316,3 +316,27 @@ async function pointer(element: HTMLElement, type: string): Promise<void> {
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
+
+it("ignores touch boundaries on the popup without canceling mouse intent", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const container = await render(<Example delay={10} />);
+  const trigger = required(container, "[data-trigger]");
+  const tooltip = required(container, '[role="tooltip"]');
+  await pointer(trigger, "pointerenter");
+  await act(() => vi.advanceTimersByTimeAsync(10));
+  await act(() =>
+    tooltip.dispatchEvent(
+      new PointerEvent("pointerleave", { pointerType: "touch" }),
+    ),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(10));
+  expect(tooltip.hidden).toBe(false);
+  await pointer(trigger, "pointerleave");
+  await act(() =>
+    tooltip.dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "touch" }),
+    ),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(tooltip.hidden).toBe(true);
+});

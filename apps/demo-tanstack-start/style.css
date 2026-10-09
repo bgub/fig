@@ -321,7 +321,8 @@
     }
   }
 
-  /* The widget publishes the anchor name; placement is ordinary CSS. */
+  /* Native placement works before hydration. Each floating example composes
+     the optional positioner after hydration for consistent collision handling. */
   [data-popover-demo] {
     margin: 0;
     margin-block-start: 0.5rem;
@@ -336,10 +337,6 @@
     margin-block-start: 0.25rem;
     position-area: block-end span-inline-end;
     position-try-fallbacks: block-start span-inline-end;
-  }
-
-  [data-tooltip-demo] {
-    pointer-events: none;
   }
 
   /* Without anchor positioning the popover still opens in the top layer, so

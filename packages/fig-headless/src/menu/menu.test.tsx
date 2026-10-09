@@ -556,3 +556,25 @@ it("ignores legacy IME confirmation without isComposing", async () => {
   );
   expect(selected).toEqual([]);
 });
+
+it.each([false, true])(
+  "restores native dismissal focus without stealing caller focus: redirected=%s",
+  async (redirected) => {
+    const host = await openMenu(await renderMenu({}));
+    const popup = requiredElement(host, '[role="menu"]');
+    const focused = document.activeElement;
+    expect(focused).toBe(items(host)[0]);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    await act(() => {
+      const event = new Event("beforetoggle");
+      Object.defineProperty(event, "newState", { value: "closed" });
+      popup.dispatchEvent(event);
+      if (redirected) outside.focus();
+      else if (focused instanceof HTMLElement) focused.blur();
+    });
+    expect(document.activeElement).toBe(
+      redirected ? outside : requiredElement(host, "[data-trigger]"),
+    );
+  },
+);

@@ -15,6 +15,7 @@ import { useField } from "@bgub/fig-headless/field";
 import { useListbox } from "@bgub/fig-headless/listbox";
 import { useMenu } from "@bgub/fig-headless/menu";
 import { useMenuSubmenu } from "@bgub/fig-headless/menu/submenu";
+import { usePopupPosition } from "@bgub/fig-headless/popup/position";
 import { usePopover } from "@bgub/fig-headless/popover";
 import { useRadioGroup } from "@bgub/fig-headless/radio-group";
 import { useSelect } from "@bgub/fig-headless/select";
@@ -361,44 +362,62 @@ function DialogExample(): FigNode {
 
 function PopoverExample(): FigNode {
   const popover = usePopover();
+  const position = usePopupPosition({ open: popover.open });
 
   return (
     <div>
       <button
         class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-popover-demo-trigger=""
-        mix={popover.trigger()}
+        aria-haspopup="dialog"
+        mix={[popover.trigger(), position.anchor()]}
       >
         Filters
       </button>
       <div
         class="w-56 rounded-lg border border-demo-border bg-demo-card p-3 text-sm text-demo-fg shadow-lg"
         data-popover-demo=""
-        mix={popover.popover()}
+        role="dialog"
+        aria-label="Filters"
+        mix={[popover.popover(), position.popup()]}
       >
-        Placement is CSS anchor positioning. The widget names the pair and
-        measures nothing.
+        <label class="flex items-center gap-2">
+          <input type="checkbox" autofocus data-popover-demo-filter="" />
+          Only show available items
+        </label>
+        <button
+          class="mt-3 rounded border border-demo-border px-2 py-1"
+          data-popover-demo-apply=""
+          mix={on("click", () => popover.setOpen(false))}
+        >
+          Apply filters
+        </button>
       </div>
     </div>
   );
 }
 
 function TooltipExample(): FigNode {
-  const tooltip = useTooltip({ id: "demo-save-tooltip" });
+  const tooltip = useTooltip({ id: "demo-save-tooltip", closeDelay: 150 });
+  const position = usePopupPosition({
+    open: tooltip.open,
+    side: "top",
+    align: "center",
+  });
 
   return (
     <div>
       <button
         class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-tooltip-demo-trigger=""
-        mix={tooltip.trigger()}
+        mix={[tooltip.trigger(), position.anchor()]}
       >
         Save
       </button>
       <div
         class="rounded bg-slate-950 px-2 py-1 text-xs text-white shadow-lg"
         data-tooltip-demo=""
-        mix={tooltip.tooltip()}
+        mix={[tooltip.tooltip(), position.popup()]}
       >
         Save this document
       </div>
@@ -443,20 +462,21 @@ function SelectExample(): FigNode {
   const select = useSelect<(typeof demoFruits)[number]>({
     defaultValue: "apple",
   });
+  const position = usePopupPosition({ open: select.open });
 
   return (
     <div>
       <button
         class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-select-demo-trigger=""
-        mix={select.trigger()}
+        mix={[select.trigger(), position.anchor()]}
       >
         {select.value}
       </button>
       <div
         class="w-40 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-select-demo=""
-        mix={select.popup()}
+        mix={[select.popup(), position.popup()]}
       >
         {demoFruits.map((fruit) => (
           <div
@@ -474,6 +494,7 @@ function SelectExample(): FigNode {
 
 function ComboboxExample(): FigNode {
   const combobox = useCombobox<(typeof demoFruits)[number]>();
+  const position = usePopupPosition({ open: combobox.open });
   const matches = demoFruits.filter((fruit) =>
     fruit.startsWith(combobox.inputValue.toLowerCase()),
   );
@@ -484,13 +505,13 @@ function ComboboxExample(): FigNode {
         aria-label="Find a fruit"
         class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm placeholder:text-demo-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-combobox-demo-input=""
-        mix={combobox.input()}
+        mix={[combobox.input(), position.anchor()]}
         placeholder="Find a fruit"
       />
       <div
         class="w-48 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-combobox-demo=""
-        mix={combobox.popup()}
+        mix={[combobox.popup(), position.popup()]}
       >
         {matches.map((fruit) => (
           <div
@@ -522,6 +543,11 @@ function MenuExample(): FigNode {
     delay: 50,
     onSelect: (value) => setChosen(value),
   });
+  const menuPosition = usePopupPosition({ open: menu.open });
+  const sharePosition = usePopupPosition({
+    open: share.open,
+    side: "inline-end",
+  });
   const itemClass =
     "block w-full rounded px-3 py-1.5 text-left text-sm hover:bg-demo-hover focus:outline-2 focus:-outline-offset-2 focus:outline-demo-link";
 
@@ -530,14 +556,14 @@ function MenuExample(): FigNode {
       <button
         class="rounded-md border border-demo-border bg-demo-card px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-demo-link"
         data-menu-demo-trigger=""
-        mix={menu.trigger()}
+        mix={[menu.trigger(), menuPosition.anchor()]}
       >
         Actions
       </button>
       <div
         class="w-44 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
         data-menu-demo=""
-        mix={menu.menu()}
+        mix={[menu.menu(), menuPosition.popup()]}
       >
         {(["rename", "duplicate"] as const).map((value) => (
           <button
@@ -572,14 +598,14 @@ function MenuExample(): FigNode {
         <button
           class={itemClass}
           data-menu-demo-submenu-trigger=""
-          mix={share.trigger()}
+          mix={[share.trigger(), sharePosition.anchor()]}
         >
           Share…
         </button>
         <div
           class="w-36 rounded-lg border border-demo-border bg-demo-card p-1 shadow-lg"
           data-menu-demo-submenu=""
-          mix={share.menu()}
+          mix={[share.menu(), sharePosition.popup()]}
         >
           <button
             class={itemClass}

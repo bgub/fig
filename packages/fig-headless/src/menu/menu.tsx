@@ -8,6 +8,7 @@ import {
 } from "@bgub/fig";
 import type { ChangeDetails } from "../internal/changes.ts";
 import { createChangeDetails } from "../internal/changes.ts";
+import { createPopupFocus } from "../internal/popup-focus.ts";
 import { isNativeEnabled } from "../internal/composite.ts";
 import { assertAccessibleName } from "../internal/diagnostics.ts";
 import { createPartSlot } from "../internal/registration.ts";
@@ -85,11 +86,14 @@ export function useMenu<Value = unknown>(
   const popover = usePopover(options);
   const registry = useMemo(() => createMenuRegistry(), []);
   const trigger = useMemo(() => createPartSlot(() => {}), []);
-  const tracker = useMemo<{
-    open: boolean;
-    pending: MenuFocusTarget | null;
-    closingFocus?: Element;
-  }>(() => ({ open: false, pending: null }), []);
+  const tracker = useMemo<{ pending: MenuFocusTarget | null }>(
+    () => ({ pending: null }),
+    [],
+  );
+  const focus = useMemo(
+    () => createPopupFocus(registry.containerNode, trigger.node),
+    [],
+  );
 
   const noteTrigger = useStableEvent(
     (node: HTMLElement, signal: AbortSignal) => {
@@ -109,7 +113,7 @@ export function useMenu<Value = unknown>(
   });
 
   const close = useStableEvent((focusOrigin?: Element) => {
-    tracker.closingFocus = focusOrigin;
+    focus.closingFrom(focusOrigin);
     popover.setOpen(false);
   });
 
@@ -148,25 +152,11 @@ export function useMenu<Value = unknown>(
       registry.syncLabel(menu, triggerNode?.id);
       assertAccessibleName(menu, "menu");
     }
-    if (popover.open === tracker.open) return;
-    tracker.open = popover.open;
-    if (popover.open) {
-      tracker.closingFocus = undefined;
-      const focus = tracker.pending;
+    focus.sync(popover.open, () => {
+      const pending = tracker.pending;
       tracker.pending = null;
-      focusItem(focus);
-      return;
-    }
-    // Light dismiss moves focus itself, so only take it back when it is still
-    // inside the menu that just closed.
-    if (
-      registry.containsFocus() ||
-      (tracker.closingFocus !== undefined &&
-        tracker.closingFocus === triggerNode?.ownerDocument.activeElement)
-    ) {
-      triggerNode?.focus();
-    }
-    tracker.closingFocus = undefined;
+      focusItem(pending);
+    });
   });
 
   function focusItem(focus: MenuFocusTarget | null): void {
@@ -177,6 +167,7 @@ export function useMenu<Value = unknown>(
   }
 
   const state = {
+    noteNativeToggle: focus.beforeToggle,
     activate,
     close,
     noteTrigger,

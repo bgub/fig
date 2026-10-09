@@ -6,6 +6,19 @@ module.exports = defineConfig({
   expect: {
     timeout: 7_000,
   },
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" } },
+    {
+      name: "firefox",
+      testMatch: ["submenu-position.spec.ts", "floating-widgets.spec.ts"],
+      use: { browserName: "firefox" },
+    },
+    {
+      name: "webkit",
+      testMatch: ["submenu-position.spec.ts", "floating-widgets.spec.ts"],
+      use: { browserName: "webkit" },
+    },
+  ],
   fullyParallel: true,
   workers: process.env.CI === "true" ? 1 : 4,
   outputDir: "test-results",

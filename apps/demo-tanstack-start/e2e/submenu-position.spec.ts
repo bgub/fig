@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { collectBrowserErrors } from "../../../tests/browser/browser-errors.ts";
 
 for (const scenario of [
@@ -7,6 +7,7 @@ for (const scenario of [
   "bottom edge",
   "narrow",
   "rtl",
+  "scrolled fixed trigger",
 ] as const) {
   test(`submenu stays beside its trigger and inside the viewport: ${scenario}`, async ({
     page,
@@ -23,7 +24,13 @@ for (const scenario of [
         .locator("html")
         .evaluate((element) => element.setAttribute("dir", "rtl"));
     }
-    if (scenario === "right edge" || scenario === "bottom edge") {
+    if (scenario === "scrolled fixed trigger")
+      await page.evaluate(() => window.scrollTo(0, 400));
+    if (
+      scenario === "right edge" ||
+      scenario === "bottom edge" ||
+      scenario === "scrolled fixed trigger"
+    ) {
       await page.addStyleTag({
         content: `[data-menu-demo-trigger] {
         position: fixed;
@@ -90,7 +97,7 @@ for (const scenario of [
 }
 
 for (const direction of ["ltr", "rtl"] as const) {
-  test(`focusing a submenu trigger reveals it without moving focus: ${direction}`, async ({
+  test(`submenus require explicit keyboard activation: ${direction}`, async ({
     page,
   }) => {
     const errors = collectBrowserErrors(page);
@@ -113,18 +120,7 @@ for (const direction of ["ltr", "rtl"] as const) {
       .getByRole("menuitem", { name: "remove", exact: true })
       .press("ArrowUp");
     await expect(trigger).toBeFocused();
-    await expect(submenu).toBeVisible();
-
-    await trigger.press("ArrowUp");
-    await expect(
-      page.getByRole("menuitemradio", { name: "Sort by date" }),
-    ).toBeFocused();
     await expect(submenu).toBeHidden();
-    await page
-      .getByRole("menuitemradio", { name: "Sort by date" })
-      .press("ArrowDown");
-    await expect(trigger).toBeFocused();
-    await expect(submenu).toBeVisible();
 
     await trigger.press(openKey);
     await expect(email).toBeFocused();
@@ -138,8 +134,7 @@ for (const direction of ["ltr", "rtl"] as const) {
     await expect(trigger).toBeFocused();
     await expect(submenu).toBeHidden();
 
-    // A pointer click includes focus before activation; it must not toggle
-    // the newly revealed submenu closed again.
+    // Mouse activation enters the child after moving focus to its trigger.
     await trigger.press("ArrowUp");
     await trigger.click();
     await expect(submenu).toBeVisible();
@@ -149,4 +144,124 @@ for (const direction of ["ltr", "rtl"] as const) {
     await expect(root).toBeFocused();
     expect(errors()).toEqual([]);
   });
+}
+
+for (const change of [
+  "scroll",
+  "ancestor scroll",
+  "resize",
+  "grow",
+  "parent grow",
+  "shrink",
+] as const) {
+  test(`open menus track ${change}`, async ({ page }) => {
+    const errors = collectBrowserErrors(page);
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await page.goto("/");
+    await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
+    if (change === "resize") {
+      // Keep the anchor visible while responsive content above it reflows.
+      await page.addStyleTag({
+        content:
+          "[data-menu-demo-trigger] {position:fixed;left:20px;top:100px}",
+      });
+    }
+    if (change === "ancestor scroll") {
+      await page.addStyleTag({ content: "[data-menu-demo] {height:160px}" });
+    }
+    const root = page.locator("[data-menu-demo-trigger]");
+    const trigger = page.locator("[data-menu-demo-submenu-trigger]");
+    await root.press("ArrowDown");
+    await expect(page.locator('[data-menu-demo-item="rename"]')).toBeFocused();
+    await trigger.press("ArrowRight");
+    await expect(
+      page.locator('[data-menu-demo-submenu-item="email"]'),
+    ).toBeFocused();
+    await expectMenusPlaced(page);
+    if (change === "scroll") {
+      await page.evaluate(() => window.scrollBy(0, 100));
+    } else if (change === "ancestor scroll") {
+      await page.locator("[data-menu-demo]").evaluate((node) => {
+        node.scrollTop -= 12;
+      });
+    } else if (change === "parent grow") {
+      await trigger.evaluate((node) => {
+        const extra = document.createElement("div");
+        extra.textContent = "Additional parent content";
+        extra.style.height = "40px";
+        node.before(extra);
+      });
+    } else if (change === "resize") {
+      await page.setViewportSize({ width: 320, height: 600 });
+    } else {
+      await page.locator("[data-menu-demo-submenu]").evaluate((node, mode) => {
+        if (mode === "grow") {
+          const extra = document.createElement("div");
+          extra.textContent =
+            "Additional information about this menu item. ".repeat(10);
+          node.append(extra);
+        } else {
+          node.lastElementChild?.remove();
+        }
+      }, change);
+    }
+    await expectMenusPlaced(page);
+    await expect(
+      page.locator('[data-menu-demo-submenu-item="email"]'),
+    ).toBeFocused();
+    expect(errors()).toEqual([]);
+  });
+}
+
+async function expectMenusPlaced(page: Page): Promise<void> {
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const root = document
+          .querySelector("[data-menu-demo-trigger]")!
+          .getBoundingClientRect();
+        const parent = document
+          .querySelector("[data-menu-demo]")!
+          .getBoundingClientRect();
+        const trigger = document
+          .querySelector("[data-menu-demo-submenu-trigger]")!
+          .getBoundingClientRect();
+        const child = document
+          .querySelector("[data-menu-demo-submenu]")!
+          .getBoundingClientRect();
+        const visible = (r: DOMRect) =>
+          r.width > 0 &&
+          r.height > 0 &&
+          r.left >= -1 &&
+          r.top >= -1 &&
+          r.right <= innerWidth + 1 &&
+          r.bottom <= innerHeight + 1;
+        const adjacent = (a: DOMRect, b: DOMRect) => {
+          const horizontal = Math.min(
+            Math.abs(a.left - b.right),
+            Math.abs(b.left - a.right),
+          );
+          const vertical = Math.min(
+            Math.abs(a.top - b.bottom),
+            Math.abs(b.top - a.bottom),
+          );
+          return (
+            (horizontal <= 5 && a.top < b.bottom && b.top < a.bottom) ||
+            (vertical <= 5 && a.left < b.right && b.left < a.right)
+          );
+        };
+        return {
+          parentVisible: visible(parent),
+          childVisible: visible(child),
+          parentAnchored: adjacent(root, parent),
+          childAnchored: adjacent(trigger, child),
+        };
+      }),
+    )
+    .toEqual({
+      parentVisible: true,
+      childVisible: true,
+      parentAnchored: true,
+      childAnchored: true,
+    });
 }

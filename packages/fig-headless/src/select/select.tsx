@@ -95,7 +95,7 @@ interface SelectState {
   readonly readOnly: boolean;
   readonly registry: SelectRegistry;
   readonly select: (option: ListboxOption, event: Event) => void;
-  readonly setHighlighted: (value: unknown) => void;
+  readonly setHighlighted: (value: unknown, scroll: boolean) => void;
   readonly triggerId: string;
 }
 
@@ -136,7 +136,7 @@ const selectTriggerBehavior = /* @__PURE__ */ createMixin(
         const moved = state.registry.move(state.highlighted, event.key);
         if (moved !== undefined) {
           event.preventDefault();
-          state.setHighlighted(moved.value);
+          state.setHighlighted(moved.value, true);
           if (!state.open) state.popover.setOpen(true);
           return;
         }
@@ -154,7 +154,7 @@ const selectTriggerBehavior = /* @__PURE__ */ createMixin(
         }
         const match = state.registry.typeahead(state.highlighted, event.key);
         if (match === undefined) return;
-        state.setHighlighted(match.value);
+        state.setHighlighted(match.value, true);
         if (!state.open && !state.readOnly) state.select(match, event);
       }),
       role: "combobox",
@@ -200,7 +200,7 @@ const selectPopupBehavior = /* @__PURE__ */ createMixin(
           if (event.pointerType === "touch") return;
           const option = state.registry.optionAt(event.target);
           if (option !== undefined && !option.disabled) {
-            state.setHighlighted(option.value);
+            state.setHighlighted(option.value, false);
           }
         }),
       ],
@@ -308,13 +308,23 @@ export function useSelect<Value = unknown>(
       return;
     popover.setOpen(false);
   });
-  const setHighlighted = useStableEvent((next: unknown) => {
-    if (!sameValue(highlighted.value, next)) {
-      setHighlightedState({ value: next });
-    }
-  });
+  const navigation = useMemo<{ open: boolean; scrollTo?: { value: unknown } }>(
+    () => ({ open: false }),
+    [],
+  );
+  const setHighlighted = useStableEvent(
+    (next: unknown, scroll: boolean | undefined) => {
+      if (scroll !== undefined)
+        navigation.scrollTo = scroll ? { value: next } : undefined;
+      if (!sameValue(highlighted.value, next)) {
+        setHighlightedState({ value: next });
+      } else if (scroll) registrationChanged();
+    },
+  );
 
-  useBeforePaint(() => {
+  useBeforePaint((signal) => {
+    const opening = popover.open && !navigation.open;
+    navigation.open = popover.open;
     const mounted = registry.options();
     if (!controlled && mounted.length > 0) {
       const selected = value === null ? undefined : registry.option(value);
@@ -327,7 +337,7 @@ export function useSelect<Value = unknown>(
         if (!sameValue(next, value)) {
           const details = createChangeDetails(null);
           if (selection.request(() => next as Value | null, details)) {
-            setHighlighted(next);
+            setHighlighted(next, undefined);
           }
         }
       }
@@ -339,8 +349,22 @@ export function useSelect<Value = unknown>(
           : registry.option(value)?.disabled === false
             ? value
             : (mounted.find((entry) => !entry.disabled)?.value ?? null);
-      setHighlighted(next);
-    }
+      setHighlighted(next, undefined);
+      // Wait until every layout hook (including optional positioning) has
+      // applied its size constraints. Keep intent across interrupted commits.
+      if (opening && navigation.scrollTo === undefined)
+        navigation.scrollTo = { value: next };
+      const scrollTo = navigation.scrollTo;
+      if (scrollTo !== undefined && sameValue(scrollTo.value, next)) {
+        queueMicrotask(() => {
+          if (signal.aborted || navigation.scrollTo !== scrollTo) return;
+          navigation.scrollTo = undefined;
+          registry
+            .option(next)
+            ?.node.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        });
+      } else navigation.scrollTo = undefined;
+    } else navigation.scrollTo = undefined;
     const triggerNode = trigger.node();
     const popupNode = registry.containerNode();
     if (triggerNode !== null && popupNode !== null) {

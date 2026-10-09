@@ -10,6 +10,7 @@ import {
 } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { createAnchoredPopup } from "../internal/anchored-popup.ts";
+import { createHoverIntent } from "../internal/hover.ts";
 import { expectPopupId } from "../internal/diagnostics.ts";
 import type {
   OpenChangeDetails,
@@ -131,12 +132,18 @@ const tooltipMixin = /* @__PURE__ */ createMixin(
           state.nativeToggle(event);
         }),
         on("pointerenter", (event) => {
-          if (event.currentTarget instanceof Element) {
+          if (
+            event.pointerType === "mouse" &&
+            event.currentTarget instanceof Element
+          ) {
             state.schedule(undefined, event, event.currentTarget, 0);
           }
         }),
         on("pointerleave", (event) => {
-          if (event.currentTarget instanceof Element) {
+          if (
+            event.pointerType === "mouse" &&
+            event.currentTarget instanceof Element
+          ) {
             state.schedule(false, event, event.currentTarget, -1);
           }
         }),
@@ -162,10 +169,7 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
   const id = useId();
   const tooltipId = options.id ?? `${id}-tooltip`;
   const anchorName = `--fig-tooltip-${id.replaceAll(/[^\w-]/g, "-")}`;
-  const timer = useMemo<{
-    value: ReturnType<typeof setTimeout> | undefined;
-    opening: boolean;
-  }>(() => ({ value: undefined, opening: false }), []);
+  const intent = useMemo(createHoverIntent, []);
 
   const schedule = useStableEvent(
     (
@@ -175,37 +179,26 @@ export function useTooltip(options: TooltipOptions = {}): TooltipParts {
       requestedDelay: number,
       signal: AbortSignal,
     ) => {
-      if (timer.value !== undefined) clearTimeout(timer.value);
-      timer.value = undefined;
+      intent.cancel();
       if (next === undefined || (next && disabled)) return;
       const wait =
         requestedDelay === -1 ? (next ? delay : closeDelay) : requestedDelay;
       const anchor = registry.anchor();
-      timer.opening = next;
-      timer.value = setTimeout(() => {
-        timer.value = undefined;
-        // A root can outlive a removed/replaced trigger. Its old pointer
-        // intent must not open a tooltip for the new host. Rebinding the same
-        // DOM host on a render still preserves the pending intent.
-        if (!signal.aborted && (!next || registry.anchor() === anchor))
-          requestOpen(next, event, trigger);
-      }, wait);
-      signal.addEventListener(
-        "abort",
+      intent.schedule(
+        next,
         () => {
-          if (timer.value !== undefined) clearTimeout(timer.value);
-          timer.value = undefined;
+          // Same-host rebinding preserves intent; replacement invalidates it.
+          if (!next || registry.anchor() === anchor)
+            requestOpen(next, event, trigger);
         },
-        { once: true },
+        wait,
+        signal,
       );
     },
   );
 
   useBeforePaint(() => {
-    if (disabled && timer.opening && timer.value !== undefined) {
-      clearTimeout(timer.value);
-      timer.value = undefined;
-    }
+    if (disabled) intent.cancelOpening();
     registry.sync(getOpen(), anchorName);
   });
 

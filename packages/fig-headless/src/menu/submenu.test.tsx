@@ -17,21 +17,62 @@ afterEach(async () => {
 });
 
 describe("Menu submenu", () => {
-  it("opens immediately on focus and closes when focus moves to a sibling", async () => {
-    const container = await render(<NestedMenu delay={1000} />);
+  it("keeps a submenu closed while keyboard focus moves through its trigger", async () => {
+    const container = await render(<NestedMenu />);
     await keydown(required(container, "[data-root-trigger]"), "ArrowDown");
     const trigger = required(container, "[data-submenu-trigger]");
     expect(document.activeElement).toBe(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-
-    await keydown(trigger, "ArrowDown");
-    expect(document.activeElement?.textContent).toBe("Rename");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-
+    await keydown(trigger, "ArrowDown");
     await keydown(required(container, "[data-rename]"), "ArrowUp");
     expect(document.activeElement).toBe(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
+
+  it("toggles a submenu with Enter after explicit activation", async () => {
+    const key = "Enter";
+    const container = await render(<NestedMenu />);
+    await keydown(required(container, "[data-root-trigger]"), "ArrowDown");
+    const trigger = required(container, "[data-submenu-trigger]");
+    await keydown(trigger, key);
+    expect(document.activeElement).toBe(
+      required(container, "[data-child-item]"),
+    );
+    await act(() => trigger.focus());
+    await keydown(trigger, key);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it.each(["touch", "", "mouse"])(
+    "handles repeated %s clicks",
+    async (pointerType) => {
+      const container = await render(<NestedMenu />);
+      await keydown(required(container, "[data-root-trigger]"), "ArrowDown");
+      const trigger = required(container, "[data-submenu-trigger]");
+      const click = () =>
+        act(() => {
+          trigger.dispatchEvent(
+            new PointerEvent("pointerdown", { bubbles: true, pointerType }),
+          );
+          trigger.dispatchEvent(
+            new PointerEvent("click", {
+              bubbles: true,
+              cancelable: true,
+              pointerType,
+              detail: pointerType === "" ? 0 : 1,
+            }),
+          );
+        });
+      await click();
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      await act(() => trigger.focus());
+      await click();
+      expect(trigger.getAttribute("aria-expanded")).toBe(
+        String(pointerType === "mouse"),
+      );
+    },
+  );
 
   it("opens toward the inline end and returns focus toward the parent", async () => {
     const container = await render(<NestedMenu />);
@@ -486,3 +527,54 @@ it.each(["ArrowRight", "Enter"])(
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   },
 );
+
+it("keeps pending hover across same-host renders but cancels it on replacement", async () => {
+  let update = (_replace: boolean) => {};
+  function Replace(): FigNode {
+    const [version, setVersion] = useState(0);
+    const [replacement, setReplacement] = useState(false);
+    update = (replace) => {
+      setVersion((v) => v + 1);
+      setReplacement(replace);
+    };
+    const parent = useMenu();
+    const child = useMenuSubmenu(parent, "more", { delay: 20 });
+    return (
+      <>
+        <button data-root-trigger="" mix={parent.trigger()}>
+          Root
+        </button>
+        <div mix={parent.menu()}>
+          <button
+            data-submenu-trigger=""
+            key={String(replacement)}
+            data-version={version}
+            mix={child.trigger()}
+          >
+            More
+          </button>
+          <div mix={child.menu()}>
+            <button mix={child.item("copy")}>Copy</button>
+          </div>
+        </div>
+      </>
+    );
+  }
+  const host = await render(<Replace />);
+  await keydown(required(host, "[data-root-trigger]"), "ArrowDown");
+  let trigger = required(host, "[data-submenu-trigger]");
+  await pointer(trigger, "pointerenter");
+  await act(() => update(false));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 40)));
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  await keydown(trigger, "Enter");
+  await keydown(
+    required(host, '[role="menuitem"]:not([data-submenu-trigger])'),
+    "ArrowLeft",
+  );
+  await pointer(trigger, "pointerenter");
+  await act(() => update(true));
+  trigger = required(host, "[data-submenu-trigger]");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 40)));
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+});
