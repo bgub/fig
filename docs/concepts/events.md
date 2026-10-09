@@ -24,7 +24,7 @@ Changing only the callback updates the existing listener. Changing its event typ
 
 Bubbling events are delegated at the root and dispatched through the logical Fig tree. This includes portals: an event inside a portal bubbles through the component that created it, even though the DOM nodes live elsewhere.
 
-Fig maps each event to discrete, continuous, or default priority. Dispatch also runs inside the batching scope, so updates from one event commit together.
+Fig maps each event to discrete, continuous, or default priority. Native `beforetoggle`, `toggle`, `cancel`, `close`, `reset`, `pointercancel`, and `touchcancel` events use discrete priority, so a browser-driven dismissal or cancellation settles alongside the input that follows it. A lower-priority dismissal can otherwise leave stale open state in a click render and reopen a popup the browser just closed. Dispatch also runs inside the batching scope, so updates from one event commit together.
 
 ## Native Propagation
 
@@ -53,12 +53,14 @@ The first hydration root drains the document queue and removes the temporary cap
 DOM access uses a normal prop:
 
 ```tsx
-<input bind={(node, signal) => node.focus()} />
+<input bind={(node, signal) => observeInput(node, signal)} />
 ```
 
 The callback returns nothing. Its signal aborts when the callback identity changes or the node unmounts; moving the node does not re-run it. `composeBind` combines several binds and accepts falsy entries.
 
-In development, a first-time bind follows the same run, abort, and run-again check as effects. Binds run during insertion, so use `useBeforePaint` when you need layout measurement.
+In development, a first-time bind follows the same run, abort, and run-again check as effects. Binding records and native event listeners update during mutation; removed or replaced binding signals abort synchronously. Binding callbacks run after all host mutations and commit-level focus/selection restoration, once the committed tree and hydration state are published, before external-store subscriptions and `useBeforePaint`. This applies to mounts, callback replacements, host-binding updates, hydration, adopted asset resources, portals, and Activity reveals. Binds observe the completed DOM and can choose focus, selection, or explicit blur without restoration overwriting them. `useBeforePaint` runs afterward for component layout work and final focus policy.
+
+Pending callbacks are skipped if their binding has been removed or hidden before activation. A failed mutation discards its pending callbacks. A callback failure stops activation and follows normal uncaught commit-error teardown, including aborting live binding signals. Callbacks run synchronously in commit order; state updates they schedule follow the existing commit batching rules. Native listeners and custom-element lifecycle callbacks still run during mutation and restoration: their focus choices can be overwritten by restoration.
 
 `on()` owns event behavior. General host-prop composition belongs to [`createMixin`](./mixins.md), while `bind` remains the direct DOM-node lifetime API.
 
@@ -77,10 +79,12 @@ const registeredPart = createMixin((context, registry, value) => ({
 }));
 ```
 
-The update callback runs for each committed host update, after that host’s attributes and form properties have been applied. Callback bindings follow the same ordering; their observation of host configuration does not depend on prop or mixin order. Its signal stays live when only configuration changes. The signal aborts synchronously when the host, owner, or mixin slot is removed or replaced, and when Activity hides the host. Revealing an Activity attaches the latest committed configuration with a fresh signal. Suspended renders never publish configuration. A callback that installs long-lived work must key that work by the signal, installing cleanup once per lifetime while updating its configuration on subsequent calls.
+The update callback runs for each committed host update, after the whole commit’s host mutations and focus/selection restoration. Callback bindings follow the same ordering; their observation of host configuration does not depend on prop or mixin order. Its signal stays live when only configuration changes. The signal aborts synchronously when the host, owner, or mixin slot is removed or replaced, and when Activity hides the host. Revealing an Activity attaches the latest committed configuration with a fresh signal. Suspended renders never publish configuration. A callback that installs long-lived work must key that work by the signal, installing cleanup once per lifetime while updating its configuration on subsequent calls.
 
 `Bind` remains a callable `(node, signal) => undefined` callback; `BindCallback` is an alias. `composeBind(...callbacks)` still returns one callable `Bind`: it invokes its callbacks in order with the same signal, and the entire group follows that wrapper’s identity-based lifetime and development run–abort–run check. It accepts callbacks and falsy entries, not host-binding descriptions.
 
 The additive `Binding` type describes the full host prop: a callback, a host binding, or a nested array of bindings and falsy entries. Use an array when its members need independent lifetimes, including when composing a host binding with an authored `bind`. Raw callbacks in an array retain their own identity-based lifetimes; array grouping and adding a host behavior do not restart them. Falsy callback entries retain their positions. Each array member gets its own signal and its own development run–abort–run check. Independent bindings must not depend on sharing a signal or on a grouped strict-mode invocation order.
+
+Deferred binding errors retain the declaring asset owner when multiple components share one hoisted element, so their component stacks identify the binding declaration.
 
 If a binding callback throws during an update, error teardown still aborts every live binding on the removed host, including retained siblings whose update did not run.

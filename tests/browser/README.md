@@ -5,6 +5,10 @@ Chromium without starting a demo server. Submenu interaction and popup positioni
 tests also run in Firefox and WebKit. Keep application/framework integration
 tests with their respective demos under `apps/*/e2e`.
 
+Focus and selection preservation tests run against development and production
+builds in Chromium, Firefox, and WebKit. Cases requiring native atomic moves skip
+when the browser does not implement `moveBefore()`.
+
 Run `pnpm test:browser` from the repository root. Install the browsers first with
 `pnpm exec playwright install chromium firefox webkit` if needed. `pnpm test:popup` remains an
 alias, and `pnpm test:e2e` runs this suite before the demo integration tests.

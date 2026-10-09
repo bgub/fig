@@ -110,13 +110,14 @@ export function acquireDocumentResource(
   const resolved = existing ?? element;
   // An existing delivery asset keeps its first live definition, including
   // assets inserted by a payload or another owner while this render suspended.
-  if (existing === null) updateElement(element, {}, props, { initial: true });
+  if (existing === null)
+    updateElement(element, {}, props, { initial: true, assetOwner: owner });
   else {
     // Adoption still commits client behavior. Keep the live asset attributes,
     // and leave existing behavior alone when this owner declares none.
     const events = eventDescriptorsFromProps(props);
     if (events.length !== 0) updateEvents(existing, events);
-    if (!isEmptyPropValue(props.bind)) updateBind(existing, props.bind);
+    if (!isEmptyPropValue(props.bind)) updateBind(existing, props.bind, owner);
   }
   return acquirePersistentResource(registry, resolved, key, hostResource.kind);
 }
@@ -210,7 +211,7 @@ export function updateHoistedResource(
   const key = assetResourceKey(resource);
   const registry = currentDocumentResources();
   if (registry === null) {
-    updateElement(element, previousProps, nextProps);
+    updateElement(element, previousProps, nextProps, { assetOwner: owner });
     return element;
   }
 
@@ -231,7 +232,7 @@ export function updateHoistedResource(
   }
 
   if (meta === undefined || key === meta.key) {
-    updateElement(element, previousProps, nextProps);
+    updateElement(element, previousProps, nextProps, { assetOwner: owner });
     return element;
   }
 

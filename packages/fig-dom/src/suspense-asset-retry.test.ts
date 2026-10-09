@@ -104,13 +104,16 @@ it.each(["server", "payload"])(
       ]);
     }
     const existing = document.head.querySelector("link")!;
-    const root = createRoot(document.createElement("div"));
-    const bind = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const bind = vi.fn((_node: Element, _signal: AbortSignal) => {
+      expect(container.textContent).toBe("ready");
+    });
     const load = vi.fn();
     const error = vi.fn();
     try {
       flushSync(() =>
-        root.render(
+        root.render([
           h("link", {
             rel: "preload",
             as: "script",
@@ -119,7 +122,8 @@ it.each(["server", "payload"])(
             bind,
             mix: [on("load", load), on("error", error)],
           }),
-        ),
+          h("output", null, "ready"),
+        ]),
       );
       expect(document.head.querySelectorAll("link")).toHaveLength(1);
       expect(document.head.querySelector("link")).toBe(existing);

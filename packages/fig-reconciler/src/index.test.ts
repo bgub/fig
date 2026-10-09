@@ -244,6 +244,76 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("latest");
   });
 
+  it.each(["ordinary", "coordinated", "deferred"] as const)(
+    "wraps host mutations before layout policy in a %s commit",
+    (mode) => {
+      const order: string[] = [];
+      const container = new TestElement("root");
+      const renderer = createRenderer({
+        ...host,
+        commitMutation(target, mutate) {
+          expect(target).toBe(container);
+          order.push("capture");
+          try {
+            mutate();
+          } finally {
+            order.push("restore");
+          }
+          return () => order.push("activate");
+        },
+        insertBefore(parent, child, before) {
+          order.push("insert");
+          host.insertBefore(parent, child, before);
+        },
+      });
+      const deferred: { commit?: () => void } = {};
+      if (mode !== "ordinary")
+        renderer.installCommitCoordinator({
+          name: "test",
+          commit(context) {
+            const commit = () => {
+              context.runMutation(() => order.push("after-layout"));
+              context.captureFinished();
+            };
+            if (mode === "deferred") {
+              deferred.commit = commit;
+              return { interrupt: commit };
+            }
+            commit();
+            return "committed";
+          },
+        });
+      function App() {
+        useBeforeLayout(() => {
+          order.push("before-layout");
+        }, []);
+        useBeforePaint(() => {
+          order.push("before-paint");
+        }, []);
+        return createElement("span", null, "Committed");
+      }
+      const root = renderer.createRoot(container);
+      renderer.flushSync(() => root.render(createElement(App, null)));
+      if (mode === "deferred") {
+        expect(order).toEqual([]);
+        expect(container.textContent).toBe("");
+        deferred.commit?.();
+      }
+      expect(order).toEqual([
+        "before-layout",
+        "before-layout",
+        "capture",
+        "insert",
+        "restore",
+        "activate",
+        "before-paint",
+        "before-paint",
+        ...(mode === "ordinary" ? [] : ["after-layout"]),
+      ]);
+      expect(container.textContent).toBe("Committed");
+    },
+  );
+
   it("installs one commit coordinator idempotently", () => {
     const renderer = createRenderer(host);
     const container = new TestElement("root");

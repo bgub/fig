@@ -264,6 +264,15 @@ export interface AssetResourceOwner {
   readonly [AssetResourceOwnerBrand]: true;
 }
 
+/** Activate host callbacks after the committed tree and hydration state are published. */
+export type HostCommitActivation<Instance> = (
+  run: (
+    instance: Instance,
+    callback: () => void,
+    assetOwner?: AssetResourceOwner,
+  ) => void,
+) => void;
+
 /** Describes host configuration. */
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
@@ -357,6 +366,15 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousProps: Props,
     nextProps: Props,
   ): boolean;
+  // Wrap the synchronous host mutation phase, before before-paint effects.
+  // The host must invoke mutate exactly once and must not defer it.
+  // An optional returned callback runs after publishing the committed tree and
+  // retiring hydration state, before external subscriptions and before-paint effects.
+  // Run callbacks through the supplied runner; shared assets also pass their declaring owner.
+  commitMutation?(
+    container: Container,
+    mutate: () => void,
+  ): void | HostCommitActivation<Instance>;
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -1358,6 +1376,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRoot(root: R, mode: WorkMode): void {
+    // Event-triggered hydration can reach here without going through flushSync.
+    // Finish the active candidate before starting another render attempt.
+    if (commitDepth > 0) {
+      needsPostCommitSyncFlush = true;
+      return;
+    }
     try {
       performRootWork(root, mode);
     } catch (error) {
@@ -3842,24 +3866,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     commitDepth += 1;
     try {
       const attempt = root.attempt;
-      const commitHostChanges = () => {
-        // A coordinator may defer this transaction. Publish hook instances and
-        // run before-layout effects only when its host mutation actually begins.
-        commitLiveHookInstances(root);
-        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
-        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-        if (root.needsCommitDeletions) {
-          // Retire every deleted owner before any effect, unsubscribe, or data
-          // cleanup can call a hook in another deletion. Bound each walk so kept
-          // siblings remain live.
-          for (const owner of root.attempt.commitIndex) {
-            if (owner.deletions === null) continue;
-            for (const deleted of owner.deletions) {
-              walkFiberSubtree(deleted, deactivateFiberHooks);
-            }
-          }
-        }
-        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+      const mutate = () => {
         const recoveringHydration = root.clearContainerBeforeCommit;
         if (recoveringHydration) {
           requireHydrationHostConfig().clearContainer(root.container);
@@ -3888,6 +3895,29 @@ export function createRenderer<Container, Instance, TextInstance>(
           if (__DEV__) assertAssetResourceCommitParity(finishedWork.child);
         }
         root.clearContainerBeforeCommit = false;
+      };
+      let activateHost: void | HostCommitActivation<Instance>;
+      const commitHostChanges = () => {
+        // A coordinator may defer this transaction. Publish hook instances and
+        // run before-layout effects only when its host mutation actually begins.
+        commitLiveHookInstances(root);
+        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
+        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
+        if (root.needsCommitDeletions) {
+          // Retire every deleted owner before any effect, unsubscribe, or data
+          // cleanup can call a hook in another deletion. Bound each walk so kept
+          // siblings remain live.
+          for (const owner of root.attempt.commitIndex) {
+            if (owner.deletions === null) continue;
+            for (const deleted of owner.deletions) {
+              walkFiberSubtree(deleted, deactivateFiberHooks);
+            }
+          }
+        }
+        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+        if (host.commitMutation)
+          activateHost = host.commitMutation(root.container, mutate);
+        else mutate();
       };
       const completeCommit = () => {
         // Recompute from committed reality: the eager render-time set is sticky, so
@@ -3919,6 +3949,26 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
+          activateHost?.((instance, callback, assetOwner) => {
+            try {
+              callback();
+            } catch (error) {
+              // Deferred host callbacks no longer run on the mutation stack.
+              // Shared instances need their declaring asset owner, not whichever
+              // fiber last matched the DOM node. Resolve only on failure.
+              let source = finishedWork;
+              walkFiberSubtree(finishedWork, (node) => {
+                if (
+                  assetOwner === undefined
+                    ? isHost(node) && node.stateNode === instance
+                    : node.assetResourceOwner === assetOwner
+                )
+                  source = node;
+              });
+              root.uncaughtErrorInfo = errorInfoFor(source, error);
+              throw error;
+            }
+          });
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
           attachCommittedSuspenseRetries(root, attempt.retries);

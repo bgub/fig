@@ -22,7 +22,7 @@ Single-text host children hydrate as text fibers and keep that shape. Fig does n
 
 ## Event Replay
 
-Clicks, key events, and pointer events targeting a dehydrated boundary are queued and replayed after that boundary hydrates. Capture listeners also let an interaction request hydration at the event's priority.
+Clicks, key events, and pointer events targeting a dehydrated boundary are queued and replayed after that boundary hydrates. Capture listeners also let an interaction request hydration at the event's priority. If a native event fires during a commit (including mutation, binding, or layout callbacks), its hydration request is queued until that commit finishes; Fig never re-enters an active commit candidate. Synchronous hydration requests use the post-commit flush and preserve queued click/key/pointer replay. Events fired outside a commit still request synchronous hydration immediately. Deferred view-transition commits retain their existing capture scheduling rules.
 
 Once a root has no dehydrated Suspense boundaries, Fig removes those listeners and clears the selective-hydration callback.
 

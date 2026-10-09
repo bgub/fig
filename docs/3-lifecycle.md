@@ -34,8 +34,10 @@ The normal order is:
 ```text
 publish stable handlers
 useBeforeLayout
-DOM deletions, insertions, and updates + bind
+DOM deletions, insertions, and updates
+restore surviving focus and selection
 root.current = finishedWork
+bind callbacks
 useBeforePaint
 browser paints
 useReactive
@@ -83,7 +85,7 @@ The signal is the source of truth everywhere in Fig. Dependency changes and unmo
 
 ## DOM access and stable events
 
-`bind` follows the same lifetime model, but it is tied to a DOM node instead of an effect. Its callback runs during the DOM mutation part of commit, so the node is available by the time `useBeforePaint` runs. Its signal aborts when the binding identity changes, the node unmounts, or its `Activity` subtree suspends.
+`bind` follows the same lifetime model, but it is tied to a DOM node instead of an effect. Its callback runs after DOM mutations and focus/selection restoration, against the published tree and before `useBeforePaint`. It can focus, select, or blur a node without restoration overwriting that choice. Its signal aborts when the binding identity changes, the node unmounts, or its `Activity` subtree suspends.
 
 `useStableEvent` works in the other direction: the returned function keeps one identity, while commit publishes the handler from the newest finished render. An abandoned render never leaks a handler that closes over state the user cannot see.
 
