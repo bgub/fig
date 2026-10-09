@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @source "./src";
 
+/* Semantic colors also apply inside hover, focus, and data-attribute variants. */
+@theme inline {
+  --color-demo-card: var(--fig-tanstack-card);
+  --color-demo-fg: var(--fig-tanstack-fg);
+  --color-demo-muted: var(--fig-tanstack-muted);
+  --color-demo-border: var(--fig-tanstack-border);
+  --color-demo-link: var(--fig-tanstack-link);
+  --color-demo-hover: var(--fig-tanstack-hover);
+  --color-demo-selected: var(--fig-tanstack-selected-bg);
+  --color-demo-selected-fg: var(--fig-tanstack-selected-fg);
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -13,7 +25,7 @@
     --fig-tanstack-bg: #f5f7f8;
     --fig-tanstack-card: #ffffff;
     --fig-tanstack-fg: #182025;
-    --fig-tanstack-muted: #64748b;
+    --fig-tanstack-muted: #5b6b80;
     --fig-tanstack-border: #cbd5e1;
     --fig-tanstack-link: #0f766e;
     --fig-tanstack-hover: #f1f5f9;
@@ -125,34 +137,6 @@
     color: var(--fig-tanstack-fg);
   }
 
-  .fig-tanstack-shell .bg-white {
-    background: var(--fig-tanstack-card);
-  }
-
-  .fig-tanstack-shell .border-slate-300 {
-    border-color: var(--fig-tanstack-border);
-  }
-
-  .fig-tanstack-shell .text-slate-950,
-  .fig-tanstack-shell .text-slate-800,
-  .fig-tanstack-shell .text-slate-700 {
-    color: var(--fig-tanstack-fg);
-  }
-
-  .fig-tanstack-shell .text-slate-500 {
-    color: var(--fig-tanstack-muted);
-  }
-
-  .fig-tanstack-shell .text-teal-700,
-  .fig-tanstack-shell .text-teal-800 {
-    color: var(--fig-tanstack-link);
-  }
-
-  .fig-tanstack-shell .bg-teal-50,
-  .fig-tanstack-shell .bg-slate-100 {
-    background: var(--fig-tanstack-hover);
-  }
-
   [data-theme-choice] + [data-theme-choice] {
     border-left: 1px solid var(--fig-tanstack-border);
   }
@@ -161,8 +145,8 @@
     background: var(--fig-tanstack-hover);
   }
 
-  [data-theme-selected],
-  [data-theme-selected]:hover {
+  [data-theme-choice][data-theme-selected],
+  [data-theme-choice][data-theme-selected]:hover {
     background: var(--fig-tanstack-selected-bg);
     color: var(--fig-tanstack-selected-fg);
   }
@@ -198,7 +182,10 @@
 
   /* Frame chrome belongs to the group, which morphs, and never to the images,
      which slide. The live frame drops its own chrome for the transition. */
-  ::view-transition-group(tabs-demo-panel) {
+  :root:is(
+      :active-view-transition-type(fig-tabs-left),
+      :active-view-transition-type(fig-tabs-right)
+    )::view-transition-group(tabs-demo-panel) {
     background: var(--fig-tanstack-card);
     border: 1px solid var(--fig-tanstack-border);
     border-radius: 0 0 0.5rem 0.5rem;
@@ -334,7 +321,8 @@
     }
   }
 
-  /* The widget publishes the anchor name; placement is ordinary CSS. */
+  /* Native placement works before hydration. Each floating example composes
+     the optional positioner after hydration for consistent collision handling. */
   [data-popover-demo] {
     margin: 0;
     margin-block-start: 0.5rem;
@@ -351,17 +339,15 @@
     position-try-fallbacks: block-start span-inline-end;
   }
 
-  [data-tooltip-demo] {
-    pointer-events: none;
-  }
-
   /* Without anchor positioning the popover still opens in the top layer, so
      give it a placement that does not depend on the trigger's box. */
   @supports not (anchor-name: --fallback) {
     [data-popover-demo],
     [data-tooltip-demo],
     [data-select-demo],
-    [data-combobox-demo] {
+    [data-combobox-demo],
+    [data-menu-demo],
+    [data-menu-demo-submenu] {
       inset: auto auto 1rem 1rem;
       margin: 0;
       position: fixed;
@@ -372,11 +358,32 @@
     margin: 0;
     margin-block-start: 0.25rem;
     position-area: block-end span-inline-end;
-    position-try-fallbacks: block-start span-inline-end;
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline;
+  }
+
+  [data-menu-demo-submenu] {
+    margin: 0;
+    margin-inline: 0.25rem;
+    position-area: inline-end span-block-end;
+    position-try-fallbacks:
+      flip-inline,
+      flip-block,
+      flip-inline flip-block,
+      block-end span-inline-end,
+      block-start span-inline-end;
   }
 
   [data-menu-demo] [data-menu-demo-item][data-disabled] {
     color: var(--fig-tanstack-muted);
+  }
+
+  /* Empty menu padding can receive focus too; keep that target visible. */
+  :is([data-menu-demo], [data-menu-demo-submenu]):focus {
+    outline: 2px solid var(--fig-tanstack-link);
+    outline-offset: 2px;
   }
 
   @media (prefers-reduced-motion: reduce) {

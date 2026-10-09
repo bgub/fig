@@ -19,6 +19,7 @@ interface MenuTriggerOwnState {
 
 /** Widget-level state every part reads. Built once per root render. */
 export interface MenuPartState {
+  readonly noteNativeToggle: (event: Event) => void;
   readonly activate: (item: MenuItemRegistration, event: Event) => void;
   readonly close: () => void;
   readonly noteTrigger: (node: HTMLElement, signal: AbortSignal) => void;
@@ -149,7 +150,11 @@ export const menuMixin = /* @__PURE__ */ createMixin(
     _context: MixinContext,
     state: MenuPartState,
     popoverMenu: MixinDescriptor,
-  ) => [popoverMenu, menuBehavior(state)],
+  ) => [
+    on("beforetoggle", state.noteNativeToggle, { capture: true }),
+    popoverMenu,
+    menuBehavior(state),
+  ],
 );
 
 export const menuItemMixin = /* @__PURE__ */ createMixin(

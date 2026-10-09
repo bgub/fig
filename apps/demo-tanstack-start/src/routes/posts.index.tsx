@@ -6,7 +6,7 @@ export const Route = createFileRoute("/posts/")({ component: PostsIndex });
 
 function PostsIndex(): FigNode {
   return (
-    <ul class="list-disc space-y-1 pl-5 leading-8 text-teal-700">
+    <ul class="list-disc space-y-1 pl-5 leading-8 text-demo-link">
       <li>
         <Link params={{ postId: "1" }} to="/posts/$postId">
           Hello Fig

@@ -2,7 +2,7 @@
 import { type FigNode, useState } from "@bgub/fig";
 import { createRoot, type FigRoot, flushSync } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type SelectValueChangeHandler, useSelect } from "./select.tsx";
 
 const roots: FigRoot[] = [];
@@ -71,6 +71,52 @@ describe("Select", () => {
     expect(trigger.textContent).toBe("banana");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(changes.at(-1)).toBe("banana");
+  });
+
+  it("reveals keyboard highlights but does not scroll pointer highlights", async () => {
+    const container = await render(<Example />);
+    const trigger = required(container, "[data-trigger]");
+    const [apple, banana, blueberry] = options(container);
+    const revealApple = vi.fn();
+    const revealBanana = vi.fn();
+    const revealBlueberry = vi.fn();
+    apple.scrollIntoView = revealApple;
+    banana.scrollIntoView = revealBanana;
+    blueberry.scrollIntoView = revealBlueberry;
+
+    await keydown(trigger, "ArrowDown");
+    expect(revealBanana).toHaveBeenCalledWith({
+      block: "nearest",
+      inline: "nearest",
+    });
+    await act(() =>
+      blueberry.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
+    );
+    expect(revealBlueberry).not.toHaveBeenCalled();
+    await keydown(trigger, "Home");
+    expect(revealApple).toHaveBeenCalledTimes(1);
+    await keydown(trigger, "End");
+    await keydown(trigger, "End");
+    expect(revealBlueberry).toHaveBeenCalledTimes(2);
+    await keydown(trigger, "b");
+    await keydown(trigger, "b");
+    expect(revealBanana).toHaveBeenCalledTimes(2);
+  });
+
+  it("reveals the selected option when opening without keyboard navigation", async () => {
+    const container = await render(<Example defaultValue="blueberry" />);
+    const reveal = vi.fn();
+    options(container)[2].scrollIntoView = reveal;
+    await click(required(container, "[data-trigger]"));
+    expect(reveal).toHaveBeenCalledWith({
+      block: "nearest",
+      inline: "nearest",
+    });
   });
 
   it("skips disabled options during typeahead", async () => {

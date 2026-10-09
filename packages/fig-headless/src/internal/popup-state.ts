@@ -13,6 +13,7 @@ export function usePopupState(options: OpenStateOptions) {
     () => ({ requested: state.open, native: undefined as boolean | undefined }),
     [],
   );
+  const beforeToggleSources = useMemo(() => new WeakSet<EventTarget>(), []);
   useBeforeLayout(() => {
     if (options.open !== undefined) tracker.requested = state.open;
     if (state.open === tracker.requested) tracker.native = undefined;
@@ -29,6 +30,13 @@ export function usePopupState(options: OpenStateOptions) {
   });
   const nativeToggle = useStableEvent((event: Event) => {
     if (event.defaultPrevented) return;
+    // beforetoggle is synchronous; toggle is a queued notification that can
+    // arrive after a newer request. Once a host reports beforetoggle, its
+    // later toggle notifications must not become fresh requests.
+    if (event.target !== null) {
+      if (event.type === "beforetoggle") beforeToggleSources.add(event.target);
+      else if (beforeToggleSources.has(event.target)) return;
+    }
     const next = toggledOpen(event);
     if (next === undefined) return;
     // Before/after notifications describe one transition, not two requests.

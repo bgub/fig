@@ -72,6 +72,12 @@
       "import": "./dist/menu/submenu.js",
       "default": "./dist/menu/submenu.js"
     },
+    "./popup/position": {
+      "types": "./dist/popup/position.d.ts",
+      "fig-development": "./dist-development/popup/position.js",
+      "import": "./dist/popup/position.js",
+      "default": "./dist/popup/position.js"
+    },
     "./popover": {
       "types": "./dist/popover.d.ts",
       "fig-development": "./dist-development/popover.js",

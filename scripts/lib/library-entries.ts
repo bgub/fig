@@ -145,6 +145,10 @@ export const libraries: Record<string, LibraryDefinition> = {
         source: "./src/menu/submenu.ts",
         output: "menu/submenu",
       },
+      "./popup/position": {
+        source: "./src/popup/position.ts",
+        output: "popup/position",
+      },
       "./popover": { source: "./src/popover/popover.tsx", output: "popover" },
       "./radio-group": {
         source: "./src/radio-group/radio-group.tsx",

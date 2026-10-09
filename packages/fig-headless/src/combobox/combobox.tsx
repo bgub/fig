@@ -362,12 +362,15 @@ export function useCombobox<Value = unknown>(
     }),
     [],
   );
-  const setHighlighted = useStableEvent((next: unknown, scroll: boolean) => {
-    trackers.scrollTo = scroll ? { value: next } : undefined;
-    if (!sameValue(highlighted.value, next)) {
-      setHighlightedState({ value: next });
-    } else if (scroll) requestReconcile();
-  });
+  const setHighlighted = useStableEvent(
+    (next: unknown, scroll: boolean | undefined) => {
+      if (scroll !== undefined)
+        trackers.scrollTo = scroll ? { value: next } : undefined;
+      if (!sameValue(highlighted.value, next)) {
+        setHighlightedState({ value: next });
+      } else if (scroll) requestReconcile();
+    },
+  );
   const changeInput = useStableEvent(
     (next: string, event: Event, node: HTMLInputElement) => {
       if (
@@ -414,7 +417,7 @@ export function useCombobox<Value = unknown>(
   });
   const formReset = useMemo(() => createFormReset(reset), []);
 
-  useBeforePaint(() => {
+  useBeforePaint((signal) => {
     if (options.inline) {
       if (trackers.anchored) {
         popup.anchor()?.style.removeProperty("anchor-name");
@@ -428,7 +431,6 @@ export function useCombobox<Value = unknown>(
     // Read live DOM order once per reconciliation rather than scanning it for
     // each selected/highlighted lookup. Large inline lists reconcile on edits.
     const scrollTo = trackers.scrollTo;
-    trackers.scrollTo = undefined;
     const mounted = open ? registry.options() : [];
     const highlightedOption = mounted.find((entry) =>
       sameValue(entry.value, highlighted.value),
@@ -443,7 +445,7 @@ export function useCombobox<Value = unknown>(
           : selectedOption?.disabled === false
             ? value
             : (mounted.find((entry) => !entry.disabled)?.value ?? null);
-      setHighlighted(next, false);
+      setHighlighted(next, undefined);
     }
     // Keyboard navigation keeps virtual focus on the input, so it must scroll
     // the active option explicitly after the popup becomes visible. Pointer
@@ -454,11 +456,16 @@ export function useCombobox<Value = unknown>(
       sameValue(scrollTo.value, highlighted.value) &&
       highlightedOption?.disabled === false
     ) {
-      highlightedOption.node.scrollIntoView?.({
-        block: "nearest",
-        inline: "nearest",
+      // Positioning hooks may constrain the popup later in this commit.
+      queueMicrotask(() => {
+        if (signal.aborted || trackers.scrollTo !== scrollTo) return;
+        trackers.scrollTo = undefined;
+        highlightedOption.node.scrollIntoView?.({
+          block: "nearest",
+          inline: "nearest",
+        });
       });
-    }
+    } else trackers.scrollTo = undefined;
     const input = popup.anchor();
     if (input !== undefined) {
       assertControlLabel(input);

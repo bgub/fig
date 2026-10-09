@@ -189,6 +189,33 @@ describe("Popover", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it.each([true, false])(
+    "ignores a delayed toggle after a newer request: %s",
+    async (initial) => {
+      let parts: PopoverParts | undefined;
+      const changes: boolean[] = [];
+      const container = await render(
+        <Example
+          onParts={(value) => {
+            parts = value;
+          }}
+          onOpenChange={(open) => changes.push(open)}
+        />,
+      );
+      const popup = requiredElement(container, "[data-popover]");
+      await beforeToggle(popup, initial ? "open" : "closed");
+      await act(() => parts?.setOpen(!initial));
+      const before = [...changes];
+      await toggle(popup, initial ? "open" : "closed");
+      expect(
+        requiredElement(container, "[data-trigger]").getAttribute(
+          "aria-expanded",
+        ),
+      ).toBe(String(!initial));
+      expect(changes).toEqual(before);
+    },
+  );
+
   it("lets a handler refuse a toggle the element proposed", async () => {
     const container = await render(
       <Example onOpenChange={(_open, details) => details.cancel()} />,

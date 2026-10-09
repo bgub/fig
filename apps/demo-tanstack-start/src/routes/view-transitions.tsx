@@ -68,16 +68,16 @@ function ViewTransitionLab(): FigNode {
             </span>
           </ViewTransition>
         </h1>
-        <p class="text-slate-700">
+        <p class="text-demo-fg">
           TanStack owns navigation while Fig owns the same structural
           `ViewTransition` surfaces used throughout the TanStack Start demo.
         </p>
       </header>
       <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
-        <article class="space-y-3 rounded-lg border border-slate-300 bg-white p-5">
+        <article class="space-y-3 rounded-lg border border-demo-border bg-demo-card p-5">
           <div class="flex flex-wrap gap-2">
             <button
-              class="select-none rounded border border-teal-700 bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+              class="select-none rounded border border-demo-link bg-demo-selected px-3 py-1.5 text-sm font-medium text-demo-selected-fg"
               mix={on("click", () =>
                 transition(() => setTargetId(nextSurfaceId)),
               )}
@@ -86,7 +86,7 @@ function ViewTransitionLab(): FigNode {
               Cycle surface
             </button>
             <button
-              class="select-none rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
+              class="select-none rounded border border-demo-link px-3 py-1.5 text-sm font-medium text-demo-link hover:bg-demo-hover"
               mix={on("click", () =>
                 transition(() => setDense((value) => !value)),
               )}
@@ -108,8 +108,8 @@ function ViewTransitionLab(): FigNode {
                 <button
                   class={
                     surface.id === selected.id
-                      ? "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-teal-700 bg-teal-50 p-3 text-left text-slate-950"
-                      : "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-slate-300 bg-white p-3 text-left text-slate-950 hover:bg-slate-50"
+                      ? "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-demo-link bg-demo-hover p-3 text-left text-demo-fg"
+                      : "grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-demo-border bg-demo-card p-3 text-left text-demo-fg hover:bg-demo-hover"
                   }
                   mix={on("click", () =>
                     transition(() => setTargetId(surface.id)),
@@ -118,9 +118,9 @@ function ViewTransitionLab(): FigNode {
                 >
                   <span class="grid gap-1">
                     <strong>{surface.label}</strong>
-                    <span class="text-sm text-slate-500">{surface.note}</span>
+                    <span class="text-sm text-demo-muted">{surface.note}</span>
                   </span>
-                  <span class="rounded bg-slate-100 px-2 py-1 text-sm font-medium text-slate-700">
+                  <span class="rounded bg-demo-hover px-2 py-1 text-sm font-medium text-demo-fg">
                     {surface.metric}
                   </span>
                 </button>
@@ -135,12 +135,12 @@ function ViewTransitionLab(): FigNode {
           share="fig-tanstack-vt-detail"
           update="fig-tanstack-vt-detail"
         >
-          <aside class="space-y-3 rounded-lg border border-slate-300 bg-white p-5">
-            <span class="inline-flex rounded bg-teal-50 px-2 py-1 text-sm font-medium text-teal-800">
+          <aside class="space-y-3 rounded-lg border border-demo-border bg-demo-card p-5">
+            <span class="inline-flex rounded bg-demo-hover px-2 py-1 text-sm font-medium text-demo-link">
               {selected.metric}
             </span>
             <h2 class="text-xl font-semibold">{selected.label}</h2>
-            <p class="text-slate-700">{selected.note}</p>
+            <p class="text-demo-fg">{selected.note}</p>
           </aside>
         </ViewTransition>
       </div>

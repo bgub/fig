@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
-import type { FigNode } from "@bgub/fig";
+import { type FigNode, useBeforePaint } from "@bgub/fig";
 import { createRoot, type FigRoot, on } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { useCombobox } from "../combobox/combobox.tsx";
 import { useDialog } from "../dialog/dialog.tsx";
 import { useMenu } from "../menu/menu.tsx";
 import { useMenuSubmenu } from "../menu/submenu.ts";
 import { usePopover } from "../popover/popover.tsx";
+import { useSelect } from "../select/select.tsx";
 import { useTooltip } from "../tooltip/tooltip.tsx";
 const roots: FigRoot[] = [];
 afterEach(async () => {
@@ -77,6 +78,7 @@ it.each(["ArrowRight", "Tab"])(
             Actions
           </button>
           <div mix={parent.menu()}>
+            <button mix={parent.item("other")}>Other</button>
             <button
               data-child=""
               mix={[
@@ -177,3 +179,62 @@ it("does not close a dialog after its native cancel event is prevented", async (
   expect(dialog.open).toBe(true);
   expect(dialog.hasAttribute("data-open")).toBe(true);
 });
+
+it.each(["select", "combobox"])(
+  "cancels deferred %s scrolling when another layout hook closes it",
+  async (kind) => {
+    const reveal = vi.fn();
+    function SelectExample() {
+      const select = useSelect();
+      useBeforePaint(() => {
+        if (select.open) select.setOpen(false);
+      });
+      return (
+        <>
+          <button data-input="" mix={select.trigger()}>
+            Choose
+          </button>
+          <div mix={select.popup()}>
+            <div
+              bind={(node) => {
+                node.scrollIntoView = reveal;
+              }}
+              mix={select.option("a")}
+            >
+              Apple
+            </div>
+          </div>
+        </>
+      );
+    }
+    function ComboboxExample() {
+      const combobox = useCombobox();
+      useBeforePaint(() => {
+        if (combobox.open) combobox.setOpen(false);
+      });
+      return (
+        <>
+          <input data-input="" aria-label="Choose" mix={combobox.input()} />
+          <div mix={combobox.popup()}>
+            <div
+              bind={(node) => {
+                node.scrollIntoView = reveal;
+              }}
+              mix={combobox.option("a")}
+            >
+              Apple
+            </div>
+          </div>
+        </>
+      );
+    }
+    const container = await render(
+      kind === "select" ? <SelectExample /> : <ComboboxExample />,
+    );
+    await key(get(container, "[data-input]"), "ArrowDown");
+    expect(get(container, "[data-input]").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(reveal).not.toHaveBeenCalled();
+  },
+);

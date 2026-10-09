@@ -281,13 +281,64 @@ const popover = usePopover({ id: "filters-popover" });
 }
 ```
 
-Two platform features do the work. The popover attribute owns the top layer, light dismiss, and Escape, so the widget adds no outside-click listener; CSS anchor positioning owns placement, so the widget measures nothing and installs no scroll or resize listener. It connects the native popover source to its trigger so separately mounted child popups preserve their native parent relationship. It also names the pair: a generated `anchor-name` goes on the trigger and the matching `position-anchor` on the popover, both as inline styles, leaving the caller free to write `position-area` and `position-try-fallbacks` in ordinary CSS.
+Two platform features do the work. The popover attribute owns the top layer, light dismiss, and Escape, so the widget adds no outside-click listener; CSS anchor positioning owns placement, so the widget measures nothing and installs no scroll or resize listener. It connects the native popover source to its trigger so separately mounted child popups preserve their native parent relationship. Synchronous `beforetoggle` notifications establish native open state; once a host reports them, its queued `toggle` notifications are confirmations and cannot override newer requests. It also names the pair: a generated `anchor-name` goes on the trigger and the matching `position-anchor` on the popover, both as inline styles, leaving the caller free to write `position-area` and `position-try-fallbacks` in ordinary CSS.
 
 The trigger also carries `popovertarget` in server HTML, so it opens and closes before hydration. A custom id belongs on the root option rather than the host: one root-owned value drives the popover's `id`, the trigger's `aria-controls`, and `popovertarget`. State follows the element afterwards: opening `beforetoggle` events are cancelable, and Popover, Combobox, and Tooltip do not adopt an opening already prevented by an earlier native handler. Closing `beforetoggle` events are not cancelable; refused closes are restored through reconciliation. `toggle` reports what actually happened.
 
-Two caveats worth stating plainly. Anchor positioning has not shipped everywhere — Firefox is still missing it at the time of writing — so a popover in a browser without it lands wherever the caller's fallback CSS puts it, and a `@supports not (anchor-name: --a)` block should place it somewhere sensible. And where the popover API itself is missing, the widget falls back to toggling `hidden`: the markup still shows and hides, without the top layer or light dismiss.
+CSS anchor support and nested top-layer positioning vary by browser. A `@supports not (anchor-name: --a)` block can provide static placement, but feature detection alone does not catch native positioning bugs. The demo's real geometry tests run in Chromium, Firefox, and WebKit. Where the popover API itself is missing, widgets fall back to toggling `hidden`, without the top layer or native light dismiss.
+
+Popover is non-modal and keeps native focus behavior. Opening without an authored `autofocus` target leaves focus where the platform put it; interactive content can opt into an initial target with `autofocus`. Closing from inside the popup restores the native previously focused element (normally its trigger), while an intentional move to an outside control is preserved. Tab is not trapped. Supply a role and accessible name appropriate to the content, such as `role="dialog"` and `aria-label="Filters"` for a small interactive panel. The demo uses an autofocus checkbox so opening does not summon a software keyboard. Menu adds its own item-focus policy; Select and Combobox retain DOM focus on their trigger/input. These models must not be replaced with one universal focus policy.
 
 Native anchored popups reconcile against the current element’s `:popover-open` state, so replacing a popup host while its widget remains open shows the replacement as well.
+
+## Optional popup positioning
+
+`usePopupPosition(options)` lives at `@bgub/fig-headless/popup/position`. It is an opt-in alternative when native CSS placement is insufficient; widget entries do not import it. The Popover, Tooltip, Select, Combobox, Menu, and Submenu demos compose it explicitly. WebKit's nested fixed-popover anchors subtract page scrolling twice, while switching every popup to absolute positioning causes different viewport-overflow failures in other engines. There is no browser sniffing or positioning dependency.
+
+```tsx
+import { usePopupPosition } from "@bgub/fig-headless/popup/position";
+
+const menu = useMenu();
+const position = usePopupPosition({ open: menu.open });
+
+<button mix={[menu.trigger(), position.anchor()]}>Actions</button>;
+<div mix={[menu.menu(), position.popup()]}>{/* items */}</div>;
+```
+
+The options use Base UI's placement vocabulary, with menu-oriented defaults:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `open` | Required | The widget's committed open state. |
+| `side` | `"bottom"` | `top`, `bottom`, `left`, `right`, `inline-start`, or `inline-end`. |
+| `align` | `"start"` | `start`, `center`, or `end` along the side. |
+| `sideOffset` | `4` | Distance from the anchor in CSS pixels; negative values allow overlap. Replaces the unpublished `gap` option. |
+| `alignOffset` | `0` | Cross-axis offset in CSS pixels. Positive values move start alignment inward; end alignment reverses the sign. Center follows the positive cross axis. Horizontal offsets follow text direction. |
+| `collisionPadding` | `4` | Nonnegative viewport gutter in CSS pixels, capped at half each viewport dimension. |
+| `trackAnchorAnimation` | `false` | Check anchor bounds every animation frame, for continuous transform animations. |
+
+Logical sides and horizontal start/end alignment follow the anchor's text direction in horizontal writing modes. Placement flips to the opposite side if the requested side cannot fit and the opposite has more room. A horizontal popup stacks below or above if neither horizontal side can fit its width. The helper shifts within the viewport and limits oversized content with scrolling. These collision policies are fixed; they are not a configurable middleware system.
+
+The popup exposes `data-side` and `data-align` for the resolved placement. When a logical side was requested, horizontal results remain logical (`inline-start`/`inline-end`); a vertical fallback reports `top`/`bottom`. Alignment describes the selected alignment before collision shifting. `data-anchor-hidden` is present when the anchor is fully outside the visible viewport, fully clipped by an ancestor, or has no area. This state does not itself hide or dismiss the popup; consumers can style it with `visibility: hidden`.
+
+The helper publishes pixel-valued `--anchor-width`, `--anchor-height`, `--available-width`, and `--available-height`. Available dimensions describe the space for the resolved side inside the viewport gutter, before authored size constraints. `--transform-origin` points toward the anchor: aligned arrowless popups grow from their aligned edge; collision-shifted and centered popups aim toward the anchor's center. For example:
+
+```css
+.popup {
+  width: var(--anchor-width);
+  max-height: min(20rem, var(--available-height));
+  transform-origin: var(--transform-origin);
+}
+.popup[data-anchor-hidden] {
+  visibility: hidden;
+}
+```
+
+Compose the two descriptors after the widget's corresponding parts. After hydration the popup binding owns fixed positioning, insets, margins, box sizing, and overflow. It combines computed authored `max-width`/`max-height` with the available space rather than replacing narrower authored limits. Author width/height and cosmetic styles separately; CSS minimum sizes still take precedence over maximum sizes, so they must permit shrinking if viewport containment is required. Inline author updates and stylesheet constraints are read again on positioning updates. On detach, the helper restores inline styles and placement attributes; newer inline author edits are preserved. Server markup retains authored CSS placement. Native popovers continue to own the top layer, relationships, focus/dismissal semantics, and Escape.
+
+While open, the helper observes popup/anchor/ancestor sizes, listens for document capture scroll, window resize, and visual viewport changes, and uses intersection observers to detect anchor movement without a resize and report clipping. Scroll/resize measurements coalesce per animation frame. Measurements preserve popup scroll offsets while temporarily relaxing size constraints. The popup's own scrolling does not reposition itself; nested popup anchors still track their ancestor popup's scrolling. Fully visible stationary anchors do not need continuous polling. Partially clipped anchors use frame-by-frame bounds checks because their visible intersection can remain unchanged while they move; explicit `trackAnchorAnimation` enables these checks regardless of clipping. Only changed bounds cause repositioning during those checks. Closing, hiding the owner, replacing hosts, or unmounting releases observers, listeners, and pending animation frames.
+
+The scope remains native top-layer popups in horizontal writing modes. Custom collision boundaries, absolute positioning, virtual anchors, arrow positioning, and transformed popup hosts are outside this helper's contract. Animate an inner element when a popup needs a scale/translate effect; the positioning host must retain its measured geometry.
 
 ## Tooltip
 
@@ -302,7 +353,7 @@ const tooltip = useTooltip({ id: "save-help" });
 </>;
 ```
 
-The trigger preserves authored `aria-describedby` references and adds the tooltip id. The popover API owns the top layer and Escape while CSS anchor positioning owns placement; the component measures nothing. Content must remain descriptive and non-interactive. A disclosure containing buttons or links is a popover, not a tooltip. The tooltip is a hook/component rather than a single mixin because delay, dismissal, controlled state, and the relationship between two hosts need one shared lifetime.
+The trigger preserves authored `aria-describedby` references and adds the tooltip id. The popover API owns the top layer and Escape while CSS anchor positioning owns placement; the component measures nothing. Content must remain descriptive and non-interactive. Keep pointer events enabled on the tooltip so readers can hover its content; `closeDelay` can bridge a small placement gap (the demo uses 150ms). A disclosure containing buttons or links is a popover, not a tooltip. The tooltip is a hook/component rather than a single mixin because delay, dismissal, controlled state, and the relationship between two hosts need one shared lifetime.
 
 ## Listbox
 
@@ -341,6 +392,8 @@ const select = useSelect({ defaultValue: "apple", name: "fruit" });
 ```
 
 The trigger keeps DOM focus and exposes a listbox active descendant. An explicit popup `aria-label` or `aria-labelledby` overrides its automatic trigger-derived name. Arrow, Home, and End movement wraps and skips disabled options; Enter and Space accept the highlighted option; typeahead works both open and closed and retains its search across selection rerenders. With no explicit default, an uncontrolled select adopts the first enabled mounted option before paint and repairs a removed selection. If remaining options are all disabled, a removed selection becomes `null`. `readOnly` permits inspection without selection. The hidden input serializes through `getFormValue` and restores the initial uncontrolled selection on form reset. It intentionally does not emulate native constraint validation; applications needing `required` should use native `<select>`.
+
+Select reveals its current highlighted option when opening, and reveals keyboard/typeahead highlights while open, without moving DOM focus off the trigger. Pointer highlighting does not scroll. Select and Combobox defer keyboard scrolling until the current commit's layout hooks, including optional positioning constraints, have finished. Pending work follows committed highlights and is canceled on close, replacement commits, or unmount, so stale work cannot scroll a hidden popup.
 
 ## Combobox
 
@@ -408,7 +461,11 @@ const share = useMenuSubmenu(actions, "share", { delay: 100 });
 </div>;
 ```
 
-The inline-end arrow opens and focuses the first child, including when hover has already opened the submenu; the inline-start arrow closes only the innermost submenu and returns focus to its parent item, with direction taken from the trigger’s computed CSS, including overrides inside an RTL ancestor. Mouse entry and exit use the configurable delay and open without stealing focus. Pending hover work is canceled when keyboard input takes over, the parent closes, or the trigger becomes disabled. Enter also moves focus into an already open submenu. An accepted child action closes its submenu and every parent menu, while canceled selections and checked items that opt out of closing leave the tree open. A disabled submenu trigger remains focusable unless its native host is disabled, and cannot open through hover, directional keys, or Enter. Authored host constraints are preserved. Selecting from a sibling-mounted submenu returns focus to the root trigger unless the action already moved focus elsewhere.
+Keyboard focus alone does not open a submenu. The inline-end arrow opens and focuses the first child, including when hover has already opened the submenu; the inline-start arrow closes only the innermost submenu and returns focus to its parent item, with direction taken from the trigger’s computed CSS, including overrides inside an RTL ancestor. Escape dismisses the innermost open native popover. Menus remember whether native dismissal began with focus inside, restoring it to the trigger if the browser clears it to the document body; focus moved to another control is preserved. Mouse entry and exit use the configurable delay and open without stealing focus. Moving focus from the trigger to a sibling closes its submenu; moving into the child keeps it open. Pending hover work is canceled when keyboard input takes over, the parent closes, or the trigger becomes disabled or is removed. Rerendering the same trigger preserves its pending intent. Enter, Space, and virtual or touch activation open a closed submenu and enter a hover-opened child on the first activation; subsequent activation of the trigger toggles the child closed. Mouse clicks enter the child without toggling it closed. An accepted child action closes its submenu and every parent menu, while canceled selections and checked items that opt out of closing leave the tree open. A disabled submenu trigger remains focusable unless its native host is disabled, and cannot open through hover, directional keys, or activation. Authored host constraints are preserved. Selecting from a sibling-mounted submenu returns focus to the root trigger unless the action already moved focus elsewhere.
+
+Hover timers are shared privately with Tooltip. Cancellation releases both the timer and its abort listener; disabling cancels opening intent without restarting or discarding a pending tooltip close. Submenu pointer travel has a separate private helper so flat menus and tooltips do not bundle corridor geometry. While crossing between a submenu trigger and popup, mouse movement inside the triangle toward the destination keeps the child open. The triangle uses the destination's actual bounding box, including CSS placement flips and either axis. Leaving the corridor resumes the configured close delay; stopping in the gap closes after at least 300ms of inactivity. The document pointer listener exists only during travel and is removed on arrival, cancellation, or expiry. This measures intent, not placement: CSS still owns positioning and no scroll or resize observer is installed.
+
+Menu focus ownership is a private helper shared by flat, nested, and context menus. It runs initial focus once per committed opening and returns focus only while the menu owns it, including focus lost to the body during native dismissal and a focused item in a separately mounted child. The widget supplies the initial target; the helper does not enumerate tabbables or trap focus. Native dialogs retain platform focus handling, and active-descendant widgets retain focus on their controls.
 
 ## Toolbar
 

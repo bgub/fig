@@ -65,7 +65,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "5.2 kB"
+      "limit": "5.3 kB"
     },
     {
       "path": "packages/fig-headless/dist/field.js",
@@ -105,7 +105,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "4.4 kB"
+      "limit": "4.7 kB"
     },
     {
       "path": "packages/fig-headless/dist/menu/submenu.js",
@@ -113,7 +113,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "5 kB"
+      "limit": "6 kB"
     },
     {
       "path": "packages/fig-headless/dist/popover.js",
@@ -137,7 +137,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "5 kB"
+      "limit": "5.3 kB"
     },
     {
       "path": "packages/fig-headless/dist/tabs.js",
@@ -177,7 +177,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "2.3 kB"
+      "limit": "2.5 kB"
     },
     {
       "name": "Fig DOM createRoot without View Transitions",
@@ -207,6 +207,14 @@
         "@bgub/fig-dom"
       ],
       "limit": "25.2 kB"
+    },
+    {
+      "path": "packages/fig-headless/dist/popup/position.js",
+      "ignore": [
+        "@bgub/fig",
+        "@bgub/fig-dom"
+      ],
+      "limit": "2.5 kB"
     }
   ],
   "devDependencies": {

@@ -29,7 +29,7 @@ function DataLab(): FigNode {
     <section class="space-y-5">
       <header class="space-y-2">
         <h1 class="text-3xl font-semibold tracking-tight">Data lab</h1>
-        <p class="text-slate-700">
+        <p class="text-demo-fg">
           This route reads an isomorphic resource and a server-function-backed
           resource from the same Fig data store.
         </p>
@@ -44,7 +44,7 @@ function DataLab(): FigNode {
       </div>
       <p>
         <Link
-          class="font-medium text-teal-700"
+          class="font-medium text-demo-link"
           params={{ postId: "1" }}
           to="/posts/$postId"
         >
@@ -108,16 +108,16 @@ function DataCard(props: {
   value: string;
 }): FigNode {
   return (
-    <article class="space-y-3 rounded-lg border border-slate-300 bg-white p-5">
+    <article class="space-y-3 rounded-lg border border-demo-border bg-demo-card p-5">
       <h2 class="text-xl font-semibold tracking-tight">{props.title}</h2>
-      <p class="text-slate-700" data-data-value={props.title}>
+      <p class="text-demo-fg" data-data-value={props.title}>
         {props.value}
       </p>
       {props.actions === undefined ? null : (
         <div class="flex flex-wrap gap-2">
           {props.actions.map((action) => (
             <button
-              class="rounded border border-teal-700 px-3 py-1.5 text-sm font-medium text-teal-800 hover:bg-teal-50"
+              class="rounded border border-demo-link px-3 py-1.5 text-sm font-medium text-demo-link hover:bg-demo-hover"
               key={action.label}
               mix={on("click", action.run)}
               type="button"

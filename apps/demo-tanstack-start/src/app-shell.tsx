@@ -24,9 +24,9 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
           data-theme={theme}
         >
           <div class="mx-auto max-w-3xl p-6">
-            <header class="mb-6 flex flex-wrap items-baseline gap-4 border-b border-slate-300 pb-3">
-              <strong class="text-slate-950">Fig TanStack Start</strong>
-              <nav class="flex flex-wrap gap-3 text-sm font-medium text-teal-700">
+            <header class="mb-6 flex flex-wrap items-baseline gap-4 border-b border-demo-border pb-3">
+              <strong class="text-demo-fg">Fig TanStack Start</strong>
+              <nav class="flex flex-wrap gap-3 text-sm font-medium text-demo-link">
                 <Link to="/">Home</Link>
                 <Link to="/about">About</Link>
                 <Link to="/asset-lab">Assets</Link>
@@ -36,7 +36,7 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
               </nav>
               <div
                 aria-label="Theme"
-                class="ml-auto inline-flex overflow-hidden rounded border border-slate-300"
+                class="ml-auto inline-flex overflow-hidden rounded border border-demo-border"
                 role="group"
               >
                 <ThemeButton
@@ -54,7 +54,7 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
             </header>
             <main class="min-w-0">
               <Suspense
-                fallback={<p class="italic text-slate-500">Loading...</p>}
+                fallback={<p class="italic text-demo-muted">Loading...</p>}
               >
                 <Outlet />
               </Suspense>
@@ -76,7 +76,7 @@ function ThemeButton(props: {
   return (
     <button
       aria-pressed={selected ? "true" : "false"}
-      class="px-2.5 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-100"
+      class="px-2.5 py-1.5 text-sm font-medium text-demo-fg hover:bg-demo-hover"
       data-theme-choice={props.value}
       data-theme-selected={selected ? "" : undefined}
       mix={on("click", () => {
@@ -98,9 +98,9 @@ export function NotFound(): FigNode {
   return (
     <section class="space-y-4">
       <h1 class="text-3xl font-semibold tracking-tight">404</h1>
-      <p class="text-slate-700">That page does not exist.</p>
+      <p class="text-demo-fg">That page does not exist.</p>
       <p>
-        <Link class="font-medium text-teal-700" to="/">
+        <Link class="font-medium text-demo-link" to="/">
           Go home
         </Link>
       </p>
