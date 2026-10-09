@@ -56,6 +56,12 @@ On the client, every `Assets` fiber owns its descriptor list. Commit calls the r
 
 Raw hoisted tags use the same ownership model through acquire, update, and release callbacks. Work from a suspended, failed, or abandoned render never reaches commit and therefore never changes the live registry.
 
+Render creates detached candidates for raw hoisted tags without reserving a shared registry entry or initializing a live element. First acquisition selects the asset identity from the latest committed props, since an initial Suspense retry can change those props while retaining the fiber. It initializes only a new delivery asset; an existing asset, including one inserted by a payload while rendering was suspended, keeps its first live definition. Retrying asset B must never rewrite a shared asset A. Metadata still publishes through its owner claims.
+
+Adopting an existing delivery asset still attaches the raw tag's declared `bind` and `on()` behavior at commit without rewriting the asset's attributes. An acquisition that declares no client behavior leaves existing bindings and listeners intact. Suspended or discarded attempts do not attach callbacks.
+
+Discovery of unregistered head assets uses a lazy index separate from ownership. Fig's own asset insertions reuse the index; external insertions, removals, and attribute changes invalidate it, including changes made in the same JavaScript turn before acquisition. When mutation observation is unavailable, discovery scans the head on each lookup. Indexing an existing element does not acquire or modify it.
+
 If full-document hydration recovers at the root, Fig reuses the document's existing `<html>`, `<head>`, and `<body>` singletons. Clearing preserves connected `<style>`, `<script>`, and stylesheet elements while removing mismatched content. Declarative assets then commit against that same `<head>`, so a recoverable mismatch neither disconnects loaded CSS nor leaves the recovered document without its owned metadata.
 
 Delivery assets and metadata have different lifetimes:

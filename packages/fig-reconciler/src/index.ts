@@ -315,9 +315,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     props: Props,
     parent: Parent<Container, Instance>,
   ): Instance | null;
-  // May return a different instance when the fiber's identity already
-  // resolves to a live shared instance (e.g. one inserted while this render
-  // was suspended); the fiber adopts the returned instance.
+  // Owns initial props, text, and acquisition. Generic host initialization
+  // never touches a hoisted instance because it may already be shared.
+  // Resolve using these latest props: retries can change asset identity
+  // before first commit. May return a different instance, which the fiber adopts.
   commitHoistedInstance?(
     instance: Instance,
     props: Props,
@@ -2422,15 +2423,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     const currentPrimary = suspensePrimaryFiber(node.alternate);
-    if (currentPrimary !== null) {
-      // Reveal of a re-suspended boundary: the committed primary was kept hidden
-      // and its lanes were cleared (so blocked offscreen work could not busy-loop
-      // the scheduler while suspended). Updates dispatched during the fallback
-      // were parked in their hook queues. Mark the kept-hidden subtree with the
-      // current render lanes so it re-renders instead of bailing out and adopting
-      // the frozen clone — that re-render is what applies the parked updates.
-      markSubtreeLanes(currentPrimary.child, root.renderLanes);
-    }
+    // Re-render the retained primary before reveal. A committed hidden primary
+    // has parked hook updates to apply; an uncommitted primary has discarded
+    // read observations and subscription work to rebuild. Both retain their
+    // hook retry state, but neither can safely adopt completed child output.
+    markSubtreeLanes(
+      currentPrimary === null
+        ? previousSuspenseState.primaryChild
+        : currentPrimary.child,
+      root.renderLanes,
+    );
     beginSuspensePrimary(
       node,
       currentPrimary,
@@ -3548,13 +3550,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (isNewHostInstance(node)) {
       host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
       if (!setInitialHostTextContent(node)) {
-        // A reused instance (re-assembled on Suspense reveal) may still hold
-        // stale children from before the fallback; clear before re-appending.
-        // Gated on a reused node (alternate) with child fibers, so fresh mounts
-        // and content set via props (innerHTML/textarea) are left untouched.
-        if (node.alternate !== null && node.child !== null) {
-          host.setTextContent?.(node.stateNode as Instance, "");
-        }
         appendAllHostChildren(node.stateNode as Instance, node.child);
       }
       if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;
@@ -3581,16 +3576,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isNewHostInstance(node: F): boolean {
-    // A host instance needs initial assembly until it has actually committed —
-    // tracked by committedProps, not by alternate. A reused fiber from a
-    // never-committed render (e.g. a Suspense primary subtree captured when a
-    // child suspended, then revealed) has an alternate but null committedProps:
-    // its host children were never appended into it, so it must assemble like a
-    // fresh instance or its non-suspending descendants are dropped on reveal.
+    // Retried ordinary mounts have fresh instances even with an alternate.
+    // Hydrated, singleton, and hoisted instances can already be live; their
+    // host-owned commit paths handle initialization instead of render assembly.
     return (
       node.tag === HostTag &&
       node.committedProps === null &&
-      (node.flags & (HydrationFlag | SingletonStaticFlag)) === 0
+      (node.flags &
+        (HydrationFlag | SingletonStaticFlag | HoistedStaticFlag)) ===
+        0
     );
   }
 
@@ -4299,18 +4293,22 @@ export function createRenderer<Container, Instance, TextInstance>(
       const current: F = placed;
       const next: F | null = current.sibling;
       const placedHidden = hidden || isHiddenBoundary(current);
+      // Hoisted acquisition owns its contents, including canonical text.
+      // Its render-time children must not place into the shared instance.
+      const hostOwnsChildren =
+        isPreassembledHostSubtree(current) || isHoistedFiber(current);
       // Hide (suspending binds) BEFORE inserting so attach paths in the
       // host's insertBefore never run binds on hidden content; hide again
       // after, since a placement update may rewrite the inline style.
       // Preassembled subtrees also pre-hide nested hidden boundaries'
       // content, which never gets a placement of its own.
       if (placedHidden) hidePlacedNode(current);
-      if (hasHiddenBoundaries && isPreassembledHostSubtree(current)) {
+      if (hasHiddenBoundaries && hostOwnsChildren) {
         hideNestedBoundaryContent(current.child);
       }
       commitHostMutation(current, () => commitPlacement(current, before));
       if (placedHidden) hidePlacedNode(current);
-      if (!isPreassembledHostSubtree(current)) {
+      if (!hostOwnsChildren) {
         commitMutationEffects(current.child, placedHidden);
       } else {
         commitPortalsInPreassembledSubtree(current.child, placedHidden);
@@ -4409,11 +4407,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       host.insertBefore(hostParent(node), hostNode(node), before);
       markHostCommitted(node);
       if (isPreassembledHostSubtree(node)) markHostSubtreeCommitted(node.child);
-    } else if (node.tag === PortalTag) {
-      commitPortal(node);
-      if (node.alternate !== null) insertPortalChildren(node);
-    } else if (node.alternate !== null) {
-      insertHostSubtree(node, hostParent(node), before);
+    } else {
+      if (node.tag === PortalTag) {
+        commitPortal(node);
+        before = null;
+      }
+      if (node.alternate !== null) {
+        for (let child = node.child; child !== null; child = child.sibling) {
+          insertHostSubtree(child, before);
+        }
+      }
     }
   }
 
@@ -4423,6 +4426,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       rootOf(node).container,
       hostParent(node),
     );
+    markHostCommitted(node);
   }
 
   function shouldCommitPlacementUpdate(node: F): boolean {
@@ -4431,57 +4435,20 @@ export function createRenderer<Container, Instance, TextInstance>(
     return host.finalizeInitialInstance === undefined;
   }
 
+  // Move retained hosts through their normal placement lifecycle. New or
+  // explicitly moved children own their placement in the mutation walk.
+  // Nested portals are separate containers and place their own children.
   function insertHostSubtree(
     node: F,
-    parent: Parent<Container, Instance>,
     before: HostNode<Instance, TextInstance> | null,
   ): void {
-    // Re-placing a reused non-host fiber can carry host subtrees that were
-    // assembled inside a render that never committed (a captured Suspense
-    // primary revealed later). Commit those exactly like a direct host
-    // placement would: a live instance whose fiber still claims it never
-    // mounted gets re-assembled in place by the next re-render, mutating
-    // committed DOM during the render phase.
-    visitHostNodes(node, (child) => host.insertBefore(parent, child, before));
-    visitHostFibers(node, (child) => {
-      if (child.committedProps !== null) return;
-      if (child.tag === HostTag && isHoistedFiber(child)) {
-        // Hoisted instances live out-of-band (visitHostNodes skips their
-        // insertion) but still need first-commit acquisition and marking.
-        acquireHoistedInstance(child);
-        markHostCommitted(child);
-        markHostSubtreeCommitted(child.child);
-        return;
-      }
-      markHostCommitted(child);
-      if (isPreassembledHostSubtree(child)) {
-        markHostSubtreeCommitted(child.child);
-      }
-    });
-  }
-
-  // Fiber-level companion to visitHostNodes: same traversal and portal
-  // boundary, but yields the topmost host fibers themselves (hoisted ones
-  // included — callers decide how to commit them).
-  function visitHostFibers(node: F, visitor: (child: F) => void): void {
     if (isHost(node)) {
-      visitor(node);
+      if ((node.flags & PlacementFlag) === 0) commitPlacement(node, before);
       return;
     }
-
     if (node.tag === PortalTag) return;
-
     for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostFibers(child, visitor);
-    }
-  }
-
-  function insertPortalChildren(node: F): void {
-    const parent = portalTarget(node);
-    for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostNodes(child, (hostChild) =>
-        host.insertBefore(parent, hostChild, null),
-      );
+      insertHostSubtree(child, before);
     }
   }
 
@@ -4577,7 +4544,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function markHostCommitted(node: F): void {
-    if (!isHost(node)) return;
     node.committedProps = node.props;
     if (node.alternate !== null) node.alternate.committedProps = node.props;
   }
@@ -4589,7 +4555,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (child.committedProps === null && isHoistedFiber(child)) {
         acquireHoistedInstance(child);
       }
-      markHostCommitted(child);
+      if (isHost(child)) markHostCommitted(child);
     });
   }
 
@@ -4815,6 +4781,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function remove(node: F, parent: Parent<Container, Instance>): void {
+    // Retained mount attempts can be reconciled away without ever acquiring
+    // host ownership. Their hooks and return links are retired by deletion,
+    // but their speculative instances must not remove or release live content.
+    if (
+      (isHost(node) || node.tag === PortalTag) &&
+      node.committedProps === null
+    ) {
+      return;
+    }
     const dehydratedActivity = dehydratedActivityBoundary(node);
     if (dehydratedActivity !== null) {
       host.removeChild(parent, dehydratedActivity);
@@ -4839,12 +4814,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (node.tag === AssetsTag) releaseAssetResources(node);
 
     if (node.tag === HostTag && isHoistedFiber(node)) {
-      if (node.committedProps !== null) {
-        requireHoistedAssetHostConfig().removeHoistedInstance(
-          node.stateNode as Instance,
-          assetResourceOwner(node),
-        );
-      }
+      requireHoistedAssetHostConfig().removeHoistedInstance(
+        node.stateNode as Instance,
+        assetResourceOwner(node),
+      );
       return;
     }
 
@@ -4929,30 +4902,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   function removePortalDescendants(node: F | null): void {
     for (let child = node; child !== null; child = child.sibling) {
       if (child.tag === PortalTag) {
-        removePortalChildren(child);
-        host.removePortalContainer?.(portalTarget(child));
+        remove(child, portalTarget(child));
       } else {
         removePortalDescendants(child.child);
       }
-    }
-  }
-
-  function visitHostNodes(
-    node: F,
-    visitor: (node: HostNode<Instance, TextInstance>) => void,
-  ): void {
-    if (isHost(node)) {
-      // Both callers insert host nodes into a position; hoisted instances
-      // live out-of-band and must never be moved to a fiber position.
-      if (node.tag === HostTag && isHoistedFiber(node)) return;
-      visitor(hostNode(node));
-      return;
-    }
-
-    if (node.tag === PortalTag) return;
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostNodes(child, visitor);
     }
   }
 
@@ -5502,12 +5455,25 @@ export function createRenderer<Container, Instance, TextInstance>(
       current.alternate ??
       fiber(current.tag, current.type, current.key, props, current.stateNode);
 
+    const mountingHost =
+      (isHost(current) || current.tag === PortalTag) &&
+      current.committedProps === null &&
+      (current.flags & HydrationFlag) === 0;
+
     next.props = props;
     next.memoizedProps = current.memoizedProps;
     next.committedProps = current.committedProps;
     next.assetResourceOwner = current.assetResourceOwner;
     next.memoizedState = current.memoizedState;
-    next.stateNode = current.stateNode;
+    // Hook retry state survives an initial suspension; ordinary host output
+    // does not. Reusing a never-committed instance retains stale children and
+    // props, and confuses speculative deletion with removal from live DOM.
+    // Hydrated and renderer-owned identities have separate acquisition paths.
+    next.stateNode =
+      mountingHost &&
+      (current.flags & (HoistedStaticFlag | SingletonStaticFlag)) === 0
+        ? null
+        : current.stateNode;
     next.return = current.return;
     next.child = null;
     next.sibling = null;
@@ -5528,6 +5494,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     //   subtree summary and advertise view-transition boundaries in commits
     //   that have no live view-transition work.
     next.flags = current.flags & (HoistedStaticFlag | SingletonStaticFlag);
+    if (mountingHost) {
+      // A retained fiber is still a mount until it acquired host ownership.
+      next.flags |= PlacementFlag;
+    }
     next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;

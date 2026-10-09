@@ -2,6 +2,7 @@ import {
   Activity,
   assets,
   createContext,
+  createDataStore,
   createElement,
   dataResource,
   ErrorBoundary,
@@ -26,7 +27,7 @@ import {
   useTransition,
   ViewTransition,
 } from "@bgub/fig";
-import { Assets } from "@bgub/fig/internal";
+import { Assets, createPortalNode } from "@bgub/fig/internal";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 import type { ReconcilerCommitCoordinator } from "@bgub/fig-reconciler/commit-coordinator";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -919,6 +920,88 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Hello World");
   });
 
+  it.each(["portal", "singleton", "hoisted", "assets"] as const)(
+    "only releases acquired %s ownership after an initial Suspense retry",
+    async (kind) => {
+      for (const keep of [false, true]) {
+        const ownership: string[] = [];
+        const target = new TestElement("target");
+        const acquire = () => {
+          ownership.push("acquire");
+        };
+        const release = () => {
+          ownership.push("release");
+        };
+        const { createRoot, flushSync } = createRenderer({
+          ...host,
+          preparePortalContainer: acquire,
+          removePortalContainer: release,
+          resolveSingletonInstance: (type) =>
+            type === "singleton" ? target : null,
+          acquireSingletonInstance: acquire,
+          releaseSingletonInstance: release,
+          resolveHoistedInstance: (type) =>
+            type === "hoisted" ? target : null,
+          commitHoistedInstance: acquire,
+          removeHoistedInstance: release,
+          updateHoistedInstance: () => target,
+          commitAssetResources(previous, next) {
+            if (previous === null) acquire();
+            if (next === null) release();
+          },
+        });
+        const gates = [deferred<void>(), deferred<void>()];
+        const resource = dataResource<[], boolean>({ key: () => ["show"] });
+        const store = createDataStore({
+          initialData: [{ key: ["show"], value: true }],
+        });
+        const container = new TestElement("root");
+        const errors: unknown[] = [];
+        const root = createRoot(container, {
+          dataStore: store,
+          onUncaughtError: (error) => errors.push(error),
+        });
+        function Reader() {
+          if (!readData(resource)) return null;
+          const content = createElement("span", null, "content");
+          if (kind === "portal") return createPortalNode(content, target);
+          if (kind === "assets") return assets(title("title"), content);
+          return createElement(kind, null, content);
+        }
+        function Pending() {
+          for (const gate of gates) readPromise(gate.promise);
+          return "ready";
+        }
+        try {
+          flushSync(() =>
+            root.render(
+              createElement(
+                Suspense,
+                { fallback: "waiting" },
+                createElement(Reader),
+                createElement(Pending),
+              ),
+            ),
+          );
+          expect(ownership).toEqual([]);
+          gates[0].resolve();
+          await waitForHostTurns();
+          expect(container.textContent).toBe("waiting");
+          expect(ownership).toEqual([]);
+          store.hydrate([{ key: ["show"], value: keep }]);
+          gates[1].resolve();
+          await waitForHostTurns();
+          expect(errors, `${kind}: keep=${keep}`).toEqual([]);
+          expect(ownership).toEqual(keep ? ["acquire"] : []);
+          flushSync(() => root.unmount());
+          expect(ownership).toEqual(keep ? ["acquire", "release"] : []);
+        } finally {
+          flushSync(() => root.unmount());
+        }
+      }
+    },
+  );
+
   it("keeps tag-specific boundary state isolated across alternates", async () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
@@ -1468,11 +1551,14 @@ describe("reconciler", () => {
 
   it("lets the hoisted host own canonical text and preserves its owner", () => {
     const owners: object[] = [];
+    const shared = new TestElement("asset");
+    let genericInitializations = 0;
     let genericTextWrites = 0;
     let hoistedUpdates = 0;
     const { createRoot, flushSync } = createRenderer({
       ...host,
       finalizeInitialInstance(instance, props) {
+        genericInitializations += 1;
         instance.textContent = String(props.children ?? "");
       },
       setTextContent(instance, text) {
@@ -1480,10 +1566,11 @@ describe("reconciler", () => {
         instance.textContent = text;
       },
       resolveHoistedInstance(type) {
-        return type === "asset" ? new TestElement(type) : null;
+        return type === "asset" ? shared : null;
       },
-      commitHoistedInstance(instance, _props, owner) {
+      commitHoistedInstance(instance, props, owner) {
         owners.push(owner);
+        instance.textContent = String(props.children ?? "");
         return instance;
       },
       updateHoistedInstance(instance, _previousProps, nextProps, owner) {
@@ -1500,13 +1587,14 @@ describe("reconciler", () => {
     const root = createRoot(container);
 
     flushSync(() => root.render(createElement("asset", null, "One")));
+    expect(shared.textContent).toBe("One");
     flushSync(() => root.render(createElement("asset", null, "Two")));
     flushSync(() => root.render(null));
 
     expect(hoistedUpdates).toBe(1);
-    // Initial detached construction uses the generic seam; the committed
-    // shared instance's update is entirely host-owned.
-    expect(genericTextWrites).toBe(1);
+    expect(shared.textContent).toBe("Two");
+    expect(genericInitializations).toBe(0);
+    expect(genericTextWrites).toBe(0);
     expect(owners).toHaveLength(3);
     expect(owners[1]).toBe(owners[0]);
     expect(owners[2]).toBe(owners[0]);
