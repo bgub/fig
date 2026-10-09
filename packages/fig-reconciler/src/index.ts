@@ -264,6 +264,15 @@ export interface AssetResourceOwner {
   readonly [AssetResourceOwnerBrand]: true;
 }
 
+/** Activate host callbacks after the committed tree and hydration state are published. */
+export type HostCommitActivation<Instance> = (
+  run: (
+    instance: Instance,
+    callback: () => void,
+    assetOwner?: AssetResourceOwner,
+  ) => void,
+) => void;
+
 /** Describes host configuration. */
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
@@ -365,15 +374,7 @@ export interface HostConfig<Container, Instance, TextInstance> {
   commitMutation?(
     container: Container,
     mutate: () => void,
-  ):
-    | void
-    | ((
-        run: (
-          instance: Instance,
-          callback: () => void,
-          assetOwner?: AssetResourceOwner,
-        ) => void,
-      ) => void);
+  ): void | HostCommitActivation<Instance>;
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -3895,7 +3896,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         root.clearContainerBeforeCommit = false;
       };
-      let activateHost: ReturnType<NonNullable<typeof host.commitMutation>>;
+      let activateHost: void | HostCommitActivation<Instance>;
       const commitHostChanges = () => {
         // A coordinator may defer this transaction. Publish hook instances and
         // run before-layout effects only when its host mutation actually begins.

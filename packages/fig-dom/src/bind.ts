@@ -1,4 +1,7 @@
-import type { AssetResourceOwner } from "@bgub/fig-reconciler";
+import type {
+  AssetResourceOwner,
+  HostCommitActivation,
+} from "@bgub/fig-reconciler";
 import type { MixinContext } from "@bgub/fig";
 import { mixinSlot } from "@bgub/fig/internal";
 import { isEmptyPropValue } from "./tree.ts";
@@ -64,13 +67,7 @@ let pendingBinds: Map<BindSlot, PendingBind> | null = null;
 /** Collect callbacks during mutation/restoration; activate after tree publication. */
 export function deferBindCallbacks(
   mutate: () => void,
-): (
-  run: (
-    element: Element,
-    callback: () => void,
-    assetOwner?: AssetResourceOwner,
-  ) => void,
-) => void {
+): HostCommitActivation<Element> {
   const previous = pendingBinds;
   const pending = new Map<BindSlot, PendingBind>();
   pendingBinds = pending;
@@ -193,8 +190,7 @@ export function suspendBind(element: Element): void {
 
 export function resumeBind(element: Element): void {
   suspendedBindElements.delete(element);
-  for (const [key, slot] of bindSlots.get(element) ?? [])
-    scheduleBindSlot(element, key, slot, false);
+  attachElementBind(element);
 }
 
 export function detachElementBind(element: Element): void {
