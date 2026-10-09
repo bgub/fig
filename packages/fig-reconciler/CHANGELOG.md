@@ -1,3 +1,99 @@
+## @bgub/fig-reconciler@2.0.0
+
+### Allocate update queues only for queued hooks
+
+Keep update history and rebase state on root, state, transition, and action hooks. Memo, effect, ID, deferred-value, external-store, and stable-event hooks no longer allocate unused queue objects. Hook order, strict rendering, and Suspense retry behavior are unchanged.
+
+### Catch data changes before subscription commit
+
+Recheck rendered data values after installing subscriptions so updates from deletion cleanup or reentrant subscription callbacks cannot leave a newly mounted reader permanently stale. Schedule missed visible updates synchronously after commit or deferred capture release, while preserving offscreen priority for hidden readers.
+
+### Prevent torn external snapshots and partial Suspense updates
+
+Validate external-store snapshots before concurrent commits, including yielded work completed by flushSync and parked commits. Retry inconsistent snapshots before publishing host mutations, and route subscription snapshot errors through render error boundaries.
+
+Preserve skipped transition lanes across Suspense retries and urgent reveals so related updates cannot commit partially or become stranded.
+
+### Preserve async run ownership through abort callbacks and Activity hiding
+
+Publish transition and action run ownership before invoking predecessor abort listeners, so reentrant starts retain their results and pending slots retire correctly. Saved starters and action runners called while hidden or unmounted now receive aborted signals without acquiring update authority or pending slots; revealing their owner restores normal behavior.
+
+### Preserve stable-event lifetime under reentrant cleanup
+
+Publish each stable-event invocation before aborting its predecessor, and publish retirement before running unmount abort listeners. Reentrant calls now receive the correct signal and remain tracked for cleanup. Revealing an Activity no longer revives stable events or effects inside descendants that are still hidden.
+
+### Keep deferred commits and subscription cleanup consistent
+
+Revalidate store snapshots immediately before deferred host mutations. Abandon stale transactions without capturing or dispatching view-transition callbacks, then retry after releasing the prepared capture. Publish live hook callbacks and run before-layout effects only when the transaction actually commits.
+
+Retire external-store listeners before calling subscription cleanup so synchronous notifications cannot read an unmounted or replaced store, and throwing cleanup cannot run repeatedly during error recovery.
+
+### Preserve server DOM when hydrating deferred values
+
+Match Fig's server-rendered current value during hydration even when useDeferredValue has an initial placeholder. Client-only mounts retain their placeholder behavior.
+
+### Finish pending captures before synchronous work
+
+Allow explicit `flushSync` and unmount to interrupt pending View Transition captures. Preserve animations through automatically scheduled synchronous work, including before-paint repairs and external-store notifications, by retaining capture ownership until readiness. Validate pending mutations, restore author styles before urgent work, suppress interrupted transition callbacks, and ignore late browser callbacks.
+
+Automatically cancel captures whose mutation was rejected as stale or failed. Release the document animation lock and wake existing client and streamed-reveal waiters without waiting for the discarded animation, so transition-priority retries can publish promptly even when native cancellation is unavailable or throws.
+
+Custom commit coordinators and View Transition host adapters must return `{ interrupt() }` instead of `"deferred"`. The operation must synchronously finish or reject the pending mutation, restore temporary host state, and release capture. Return `"committed"` only when both mutation and capture restoration have completed.
+
+View Transition host adapters receive `cancelTransition: true` when no candidate was published. Skip the entire native animation and release capture in that case; `canceledNames` and `cancelRootSnapshot` alone only suppress individual snapshots.
+
+Bind DOM pseudo-element handles to the transition signal. Cancel animations created through those handles at completion and reject expired handles, preventing filled animations or saved handles from affecting later transitions with the same surface names. Surface host adapters receive the lifetime signal as a fourth `createSurface` argument.
+
+### Read update queues without consuming them during render
+
+Render candidates read a bounded update history; commit acknowledges the observed prefix while retaining late updates and priority-rebase work. Interrupted renders and strict shadow passes no longer clone, consume, or restore shared queues. Suspense commits release only attempted queue prefixes for retry, preserving skipped priorities and updates arriving after a yield.
+
+### Preserve root renders across initial scheduler yields
+
+Process the root update queue inside its fiber work unit so same-priority root renders arriving during the initial scheduler yield are included. The latest render now commits without needing another update to wake the root.
+
+### Preserve author styles when a View Transition capture is abandoned
+
+Restore the committed surface's author styles when snapshot validation abandons a deferred capture. Speculative `view-transition-name` and `view-transition-class` props are restored only after successful mutation.
+
+### Preserve root render priority during urgent updates
+
+Queue and rebase root renders by lane, so urgent child updates cannot expose pending transition props. Preserve skipped root updates across render restarts and keep later synchronous root renders authoritative when deferred work resumes.
+
+### Own speculative work by render attempt
+
+Render attempts own data read sets, client external-store observations, boundary retries, and the sparse commit index. Checkpoints roll these back together, and terminal commit candidates release all speculative ownership. Data stores retain committed subscriptions without retaining values from abandoned fiber generations.
+
+Commit candidates publish once and retain their identity across deferred host callbacks. Capture release is independent of mutation and cannot finish a newer candidate.
+
+Custom commit coordinators must migrate `runMutation()` result handling from `Result | undefined` to `ReconcilerMutationResult<Result>`: `{ kind: "committed", value }`, `{ kind: "stale" }`, or `{ kind: "failed" }`. Stale candidates skip mutation and the post-mutation callback. Failed results indicate an error during publication or the callback; deferred failures are reported through the root, while synchronous failures still throw. Release prepared capture state and call `captureFinished()` for all returned outcomes. Successful callbacks returning `undefined` remain explicitly committed.
+
+### Retry errors from abandoned renders
+
+Discard speculative ErrorBoundary errors and fallbacks when Suspense abandons their render. Retries revisit the failed primary beneath stable wrappers, allowing recovered content to reveal without reporting a stale error. Persistent failures report once after their fallback commits, while already committed error fallbacks remain sticky across suspension. This also prevents missing error callbacks and the development parity failure on Suspense reveal.
+
+### Simplify render and data ownership
+
+Use controller identity to retire superseded actions and transitions, and keep each pending data load with its controller in one record. Consolidate speculative data dependencies into one read map while preserving thrown-read subscriptions and releasing value snapshots at commit. Server reads skip client dependency bookkeeping.
+
+Process root and component queues through one operation with explicit fiber ownership. Invalidate each inconsistent component once when checking data and external-store snapshots.
+
+### Unwind render scopes through the fiber return chain
+
+Restore context providers while searching for the boundary that handles a suspended or failed render. This removes separate ancestry scans while preserving nested fallback, hydration recovery, and commit-phase error behavior.
+
+Preserve nested Suspense retries when a fallback also suspends. The surviving outer boundary inherits the discarded inner boundary's pending promises, so primary content can reveal without waiting for its fallback to resolve.
+
+### Preserve hydration snapshots and release discarded data reads
+
+Keep intentional server snapshots valid through deferred selective hydration while continuing to validate client snapshot reads in the same commit. Activity reveals no longer repeatedly abandon View Transition captures when server and client snapshots differ.
+
+Release speculative data snapshots before Suspense or error-boundary rollback removes their owners from the commit index, including suspended attempts retained by committed fiber alternates.
+
+### Keep data reads consistent across yielded renders
+
+Track temporary render-time data snapshots and revalidate them before concurrent commits. Initial reads can no longer remain on an old value when hydration or refresh publishes between render chunks before subscriptions exist.
+
 ## @bgub/fig-reconciler@1.0.0
 
 ### Explicit async transition ownership
