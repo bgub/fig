@@ -890,3 +890,47 @@ for (const kind of ["callback", "host"] as const) {
     expect(result.observations).toEqual(["focus", "focus-event"]);
   });
 }
+
+for (const phase of ["bind", "before-layout", "before-paint"] as const) {
+  for (const event of ["focus", "click"] as const) {
+    test(`hydrates safely after ${event} during ${phase}`, async ({ page }) => {
+      await page.evaluate(
+        ({ phase, event }) =>
+          window.focusFixture.mountHydrationCommit(phase, event),
+        { phase, event },
+      );
+      await expect
+        .poll(() => page.evaluate(() => window.focusFixture.hydrationAttempts))
+        .toBeGreaterThan(0);
+      expect(await page.locator("#root").innerHTML()).toContain(
+        "fig:suspense:completed",
+      );
+      const result = await page.evaluate(async () => {
+        const button = document.getElementById("lazy");
+        window.focusFixture.runHydrationCommit();
+        const completedSynchronously = !document
+          .getElementById("root")!
+          .innerHTML.includes("fig:suspense:");
+        await Promise.resolve();
+        return {
+          calls: window.focusFixture.hydrationCalls,
+          errors: window.focusFixture.hydrationErrors,
+          completedSynchronously,
+          retained: document.getElementById("lazy") === button,
+          focused: document.activeElement === button,
+          output: document.querySelector("output")?.textContent,
+        };
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.completedSynchronously).toBe(true);
+      expect(result.retained).toBe(true);
+      expect(result.output).toBe("new");
+      expect(result.calls).toEqual(
+        event === "click"
+          ? ["after-event", "effect", "click"]
+          : ["after-event", "effect"],
+      );
+      if (event === "focus") expect(result.focused).toBe(true);
+    });
+  }
+}

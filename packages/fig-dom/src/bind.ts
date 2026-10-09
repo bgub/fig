@@ -1,3 +1,4 @@
+import type { AssetResourceOwner } from "@bgub/fig-reconciler";
 import type { MixinContext } from "@bgub/fig";
 import { mixinSlot } from "@bgub/fig/internal";
 import { isEmptyPropValue } from "./tree.ts";
@@ -42,6 +43,7 @@ export function hostBinding<T extends Element = Element>(
 }
 
 interface BindSlot {
+  assetOwner: AssetResourceOwner | undefined;
   callback: BindCallback;
   owner: object | undefined;
   controller: AbortController | null;
@@ -62,7 +64,13 @@ let pendingBinds: Map<BindSlot, PendingBind> | null = null;
 /** Collect callbacks during mutation/restoration; activate after tree publication. */
 export function deferBindCallbacks(
   mutate: () => void,
-): (run: (element: Element, callback: () => void) => void) => void {
+): (
+  run: (
+    element: Element,
+    callback: () => void,
+    assetOwner?: AssetResourceOwner,
+  ) => void,
+) => void {
   const previous = pendingBinds;
   const pending = new Map<BindSlot, PendingBind>();
   pendingBinds = pending;
@@ -77,7 +85,11 @@ export function deferBindCallbacks(
     pendingBinds = null;
     try {
       for (const [slot, { element, key, update }] of pending)
-        run(element, () => runBindSlot(element, key, slot, update));
+        run(
+          element,
+          () => runBindSlot(element, key, slot, update),
+          slot.assetOwner,
+        );
     } finally {
       pending.clear();
       pendingBinds = surrounding;
@@ -97,7 +109,11 @@ export function composeBind<T extends Element = Element>(
   };
 }
 
-export function updateBind(element: Element, value: unknown): void {
+export function updateBind(
+  element: Element,
+  value: unknown,
+  assetOwner?: AssetResourceOwner,
+): void {
   const previous = bindSlots.get(element) ?? new Map<string, BindSlot>();
   const descriptors = new Map<
     string,
@@ -146,11 +162,13 @@ export function updateBind(element: Element, value: unknown): void {
       old !== undefined && old.owner === next.owner
         ? old
         : {
+            assetOwner,
             callback: next.callback,
             owner: next.owner,
             controller: null,
             strictRan: false,
           };
+    slot.assetOwner = assetOwner;
     slot.callback = next.callback;
     slots.set(key, slot);
   }

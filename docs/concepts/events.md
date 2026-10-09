@@ -85,4 +85,6 @@ The update callback runs for each committed host update, after the whole commit�
 
 The additive `Binding` type describes the full host prop: a callback, a host binding, or a nested array of bindings and falsy entries. Use an array when its members need independent lifetimes, including when composing a host binding with an authored `bind`. Raw callbacks in an array retain their own identity-based lifetimes; array grouping and adding a host behavior do not restart them. Falsy callback entries retain their positions. Each array member gets its own signal and its own development run–abort–run check. Independent bindings must not depend on sharing a signal or on a grouped strict-mode invocation order.
 
+Deferred binding errors retain the declaring asset owner when multiple components share one hoisted element, so their component stacks identify the binding declaration.
+
 If a binding callback throws during an update, error teardown still aborts every live binding on the removed host, including retained siblings whose update did not run.

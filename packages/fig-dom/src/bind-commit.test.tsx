@@ -385,3 +385,85 @@ it("activates portal bindings after the whole root's mutations and restoration",
   expect(seen).toEqual(["ready", "ready"]);
   expect(document.activeElement).toBe(portal.firstElementChild);
 });
+
+it.each(["mount", "update"] as const)(
+  "attributes a shared asset's throwing binding to its declaring component on %s",
+  (phase) => {
+    const host = container();
+    const reports: string[] = [];
+    const root = createRoot(host, {
+      onUncaughtError(_error, info) {
+        reports.push(info.componentStack);
+      },
+    });
+    roots.push(root);
+    function BindingOwner({ fail }: { fail: boolean }) {
+      return (
+        <link
+          rel="preload"
+          as="script"
+          href="/binding-owner.js"
+          bind={() => {
+            if (fail) throw new Error("owner failed");
+          }}
+        />
+      );
+    }
+    function InnocentOwner() {
+      return <link rel="preload" as="script" href="/binding-owner.js" />;
+    }
+    const view = (fail: boolean) => (
+      <>
+        <BindingOwner fail={fail} />
+        <InnocentOwner />
+      </>
+    );
+    try {
+      if (phase === "update") flushSync(() => root.render(view(false)));
+      expect(() => flushSync(() => root.render(view(true)))).toThrow(
+        "owner failed",
+      );
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toContain("at BindingOwner");
+      expect(reports[0]).not.toContain("at InnocentOwner");
+    } finally {
+      root.unmount();
+      document.head.querySelector('link[href="/binding-owner.js"]')?.remove();
+    }
+  },
+);
+
+it("attributes a metadata winner's binding failure independently of fiber order", () => {
+  const host = container();
+  const reports: string[] = [];
+  const root = createRoot(host, {
+    onUncaughtError(_error, info) {
+      reports.push(info.componentStack);
+    },
+  });
+  roots.push(root);
+  function BindingOwner() {
+    return (
+      <meta
+        name="binding-review"
+        content="new"
+        bind={() => {
+          throw new Error("metadata failed");
+        }}
+      />
+    );
+  }
+  function InnocentOwner() {
+    return <meta name="binding-review" content="old" />;
+  }
+  flushSync(() => root.render(<InnocentOwner key="old" />));
+  expect(() =>
+    flushSync(() =>
+      root.render([<BindingOwner key="new" />, <InnocentOwner key="old" />]),
+    ),
+  ).toThrow("metadata failed");
+  expect(reports).toHaveLength(1);
+  expect(reports[0]).toContain("at BindingOwner");
+  expect(reports[0]).not.toContain("at InnocentOwner");
+  expect(document.head.querySelector('meta[name="binding-review"]')).toBeNull();
+});

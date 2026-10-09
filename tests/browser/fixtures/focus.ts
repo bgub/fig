@@ -2,6 +2,9 @@ import {
   Activity,
   createElement,
   createMixin,
+  readPromise,
+  Suspense,
+  useBeforeLayout,
   useBeforePaint,
 } from "@bgub/fig";
 import {
@@ -45,6 +48,14 @@ declare global {
         hydrate?: boolean,
       ): void;
       bindingObservations: string[];
+      mountHydrationCommit(
+        phase: "bind" | "before-layout" | "before-paint",
+        event: "focus" | "click",
+      ): void;
+      runHydrationCommit(): void;
+      hydrationAttempts: number;
+      hydrationCalls: string[];
+      hydrationErrors: string[];
     };
   }
 }
@@ -216,6 +227,74 @@ window.focusFixture = {
       });
   },
   updateChildren() {},
+  hydrationAttempts: 0,
+  hydrationCalls: [],
+  hydrationErrors: [],
+  runHydrationCommit() {},
+  mountHydrationCommit(phase, event) {
+    const fixture = window.focusFixture;
+    const container = document.getElementById("root")!;
+    container.innerHTML =
+      '<input><!--fig:suspense:completed--><button id="lazy">Lazy</button><!--/fig:suspense--><output>old</output>';
+    let ready = false;
+    let fired = false;
+    const pending = new Promise<void>(() => {});
+    function Deferred() {
+      fixture.hydrationAttempts++;
+      if (!ready) readPromise(pending);
+      return createElement(
+        "button",
+        {
+          id: "lazy",
+          mix: on("click", () => {
+            fixture.hydrationCalls.push("click");
+          }),
+        },
+        "Lazy",
+      );
+    }
+    const boundary = createElement(
+      Suspense,
+      { fallback: "waiting" },
+      createElement(Deferred),
+    );
+    function fire() {
+      if (fired) return;
+      fired = true;
+      container.querySelector<HTMLButtonElement>("#lazy")![event]();
+      fixture.hydrationCalls.push("after-event");
+    }
+    function App({ activate = false }: { activate?: boolean }) {
+      useBeforeLayout(() => {
+        if (activate && phase === "before-layout") fire();
+      }, [activate]);
+      useBeforePaint(() => {
+        if (activate && phase === "before-paint") fire();
+        if (activate) fixture.hydrationCalls.push("effect");
+      }, [activate]);
+      return [
+        createElement("input", {
+          bind: activate && phase === "bind" ? fire : undefined,
+        }),
+        boundary,
+        createElement("output", null, activate ? "new" : "old"),
+      ];
+    }
+    const root = flushSync(() =>
+      hydrateRoot(container, createElement(App), {
+        onUncaughtError(error) {
+          fixture.hydrationErrors.push(String(error));
+        },
+        onRecoverableError(error) {
+          fixture.hydrationErrors.push(String(error));
+        },
+      }),
+    );
+    fixture.runHydrationCommit = () => {
+      ready = true;
+      flushSync(() => root.render(createElement(App, { activate: true })));
+    };
+  },
   bindingObservations: [],
   renderBinding(kind, action, hidden, hydrate = false) {
     const node = createElement(BindingApp, { kind, action, hidden });

@@ -361,11 +361,19 @@ export interface HostConfig<Container, Instance, TextInstance> {
   // The host must invoke mutate exactly once and must not defer it.
   // An optional returned callback runs after publishing the committed tree and
   // retiring hydration state, before external subscriptions and before-paint effects.
-  // Run each callback through the supplied instance runner to retain error attribution.
+  // Run callbacks through the supplied runner; shared assets also pass their declaring owner.
   commitMutation?(
     container: Container,
     mutate: () => void,
-  ): void | ((run: (instance: Instance, callback: () => void) => void) => void);
+  ):
+    | void
+    | ((
+        run: (
+          instance: Instance,
+          callback: () => void,
+          assetOwner?: AssetResourceOwner,
+        ) => void,
+      ) => void);
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -1367,6 +1375,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function performRoot(root: R, mode: WorkMode): void {
+    // Event-triggered hydration can reach here without going through flushSync.
+    // Finish the active candidate before starting another render attempt.
+    if (commitDepth > 0) {
+      needsPostCommitSyncFlush = true;
+      return;
+    }
     try {
       performRootWork(root, mode);
     } catch (error) {
@@ -3934,15 +3948,21 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
-          activateHost?.((instance, callback) => {
+          activateHost?.((instance, callback, assetOwner) => {
             try {
               callback();
             } catch (error) {
               // Deferred host callbacks no longer run on the mutation stack.
-              // Recover their owner only on failure, without a live instance map.
+              // Shared instances need their declaring asset owner, not whichever
+              // fiber last matched the DOM node. Resolve only on failure.
               let source = finishedWork;
               walkFiberSubtree(finishedWork, (node) => {
-                if (isHost(node) && node.stateNode === instance) source = node;
+                if (
+                  assetOwner === undefined
+                    ? isHost(node) && node.stateNode === instance
+                    : node.assetResourceOwner === assetOwner
+                )
+                  source = node;
               });
               root.uncaughtErrorInfo = errorInfoFor(source, error);
               throw error;
