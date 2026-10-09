@@ -1,3 +1,49 @@
+## @bgub/fig@2.0.0
+
+### Catch data changes before subscription commit
+
+Recheck rendered data values after installing subscriptions so updates from deletion cleanup or reentrant subscription callbacks cannot leave a newly mounted reader permanently stale. Schedule missed visible updates synchronously after commit or deferred capture release, while preserving offscreen priority for hidden readers.
+
+### Preserve host behavior lifetimes across configuration updates
+
+Add `context.owns(prop)` to identify the last mixin writer of a host prop, even
+when a later override writes the same value.
+
+Add `hostBinding(context, owner, update)` for mixins that register committed DOM
+configuration. Updates keep their lifetime signal; removal, owner replacement,
+and Activity hiding abort it synchronously.
+
+The host `bind` prop additionally accepts host-binding descriptions and nested
+binding arrays through the new `Binding` type. Array members have independent
+signals and development strict checks. `Bind` remains callable, and
+`composeBind` preserves its callable result and shared lifetime semantics.
+`BindCallback` is an alias for `Bind`.
+
+Headless widgets adopt shared committed value, registration, and reference owners.
+Controlled props cannot leak from suspended renders, accepted uncontrolled
+requests compose before commit, and compound Combobox changes cancel together.
+Host configuration updates preserve typeahead and toast work while actual
+removal cleans up immediately. Caller-authored native disability and accessible
+names remain authoritative.
+
+### Own speculative work by render attempt
+
+Render attempts own data read sets, client external-store observations, boundary retries, and the sparse commit index. Checkpoints roll these back together, and terminal commit candidates release all speculative ownership. Data stores retain committed subscriptions without retaining values from abandoned fiber generations.
+
+Commit candidates publish once and retain their identity across deferred host callbacks. Capture release is independent of mutation and cannot finish a newer candidate.
+
+Custom commit coordinators must migrate `runMutation()` result handling from `Result | undefined` to `ReconcilerMutationResult<Result>`: `{ kind: "committed", value }`, `{ kind: "stale" }`, or `{ kind: "failed" }`. Stale candidates skip mutation and the post-mutation callback. Failed results indicate an error during publication or the callback; deferred failures are reported through the root, while synchronous failures still throw. Release prepared capture state and call `captureFinished()` for all returned outcomes. Successful callbacks returning `undefined` remain explicitly committed.
+
+### Simplify render and data ownership
+
+Use controller identity to retire superseded actions and transitions, and keep each pending data load with its controller in one record. Consolidate speculative data dependencies into one read map while preserving thrown-read subscriptions and releasing value snapshots at commit. Server reads skip client dependency bookkeeping.
+
+Process root and component queues through one operation with explicit fiber ownership. Invalidate each inconsistent component once when checking data and external-store snapshots.
+
+### Keep data reads consistent across yielded renders
+
+Track temporary render-time data snapshots and revalidate them before concurrent commits. Initial reads can no longer remain on an old value when hydration or refresh publishes between render chunks before subscriptions exist.
+
 ## @bgub/fig@1.0.0
 
 ### Preserve Activity boundaries through Payload

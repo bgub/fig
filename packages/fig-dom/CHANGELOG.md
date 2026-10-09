@@ -1,3 +1,45 @@
+## @bgub/fig-dom@2.0.0
+
+### Apply host properties before updating bindings
+
+Run callback and host bindings after the host's attributes and form properties
+have been applied. Widgets now follow form reassociation through later mixins,
+removing the old form's reset listener and registering with the new form.
+
+### Preserve host behavior lifetimes across configuration updates
+
+Add `context.owns(prop)` to identify the last mixin writer of a host prop, even
+when a later override writes the same value.
+
+Add `hostBinding(context, owner, update)` for mixins that register committed DOM
+configuration. Updates keep their lifetime signal; removal, owner replacement,
+and Activity hiding abort it synchronously.
+
+The host `bind` prop additionally accepts host-binding descriptions and nested
+binding arrays through the new `Binding` type. Array members have independent
+signals and development strict checks. `Bind` remains callable, and
+`composeBind` preserves its callable result and shared lifetime semantics.
+`BindCallback` is an alias for `Bind`.
+
+Headless widgets adopt shared committed value, registration, and reference owners.
+Controlled props cannot leak from suspended renders, accepted uncontrolled
+requests compose before commit, and compound Combobox changes cancel together.
+Host configuration updates preserve typeahead and toast work while actual
+removal cleans up immediately. Caller-authored native disability and accessible
+names remain authoritative.
+
+### Finish pending captures before synchronous work
+
+Allow explicit `flushSync` and unmount to interrupt pending View Transition captures. Preserve animations through automatically scheduled synchronous work, including before-paint repairs and external-store notifications, by retaining capture ownership until readiness. Validate pending mutations, restore author styles before urgent work, suppress interrupted transition callbacks, and ignore late browser callbacks.
+
+Automatically cancel captures whose mutation was rejected as stale or failed. Release the document animation lock and wake existing client and streamed-reveal waiters without waiting for the discarded animation, so transition-priority retries can publish promptly even when native cancellation is unavailable or throws.
+
+Custom commit coordinators and View Transition host adapters must return `{ interrupt() }` instead of `"deferred"`. The operation must synchronously finish or reject the pending mutation, restore temporary host state, and release capture. Return `"committed"` only when both mutation and capture restoration have completed.
+
+View Transition host adapters receive `cancelTransition: true` when no candidate was published. Skip the entire native animation and release capture in that case; `canceledNames` and `cancelRootSnapshot` alone only suppress individual snapshots.
+
+Bind DOM pseudo-element handles to the transition signal. Cancel animations created through those handles at completion and reject expired handles, preventing filled animations or saved handles from affecting later transitions with the same surface names. Surface host adapters receive the lifetime signal as a fourth `createSurface` argument.
+
 ## @bgub/fig-dom@0.1.2
 
 ### Ignore temporary view transition styles during hydration

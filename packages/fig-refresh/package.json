@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-refresh",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Fig Fast Refresh runtime (HMR)",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",

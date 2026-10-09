@@ -1,28 +1,112 @@
 core:changelogs:
-  - content: "---\npackages:\n  \"@bgub/fig-tanstack-router\":\n    type: patch\n  \"@bgub/fig-tanstack-start\":\n    type: patch\n---\n\n## Update TanStack cores and hydration streaming\n\nUpdate the TanStack Router and Start integrations to the latest stable cores, including Start Server Core 1.169.39's fix for GHSA-qx66-fv34-fjm8. Adapt SSR script rendering to Router Core's initial hydration tags and stream boundary, preserve exact link search matching and explicit undefined values with the new comparison API, and update History and Store dependencies.\n\nLet browser bundles discard server-only adapter branches and reuse native attribute normalization for route asset resources and positioned tags.\n"
-    filename: tanstack-security-update.md
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Catch data changes before subscription commit\n\nRecheck rendered data values after installing subscriptions so updates from deletion cleanup or reentrant subscription callbacks cannot leave a newly mounted reader permanently stale. Schedule missed visible updates synchronously after commit or deferred capture release, while preserving offscreen priority for hidden readers.\n"
+    filename: catch-up-data-subscriptions.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: minor\n  \"@bgub/fig-dom\":\n    type: minor\n---\n\n## Preserve host behavior lifetimes across configuration updates\n\nAdd `context.owns(prop)` to identify the last mixin writer of a host prop, even\nwhen a later override writes the same value.\n\nAdd `hostBinding(context, owner, update)` for mixins that register committed DOM\nconfiguration. Updates keep their lifetime signal; removal, owner replacement,\nand Activity hiding abort it synchronously.\n\nThe host `bind` prop additionally accepts host-binding descriptions and nested\nbinding arrays through the new `Binding` type. Array members have independent\nsignals and development strict checks. `Bind` remains callable, and\n`composeBind` preserves its callable result and shared lifetime semantics.\n`BindCallback` is an alias for `Bind`.\n\nHeadless widgets adopt shared committed value, registration, and reference owners.\nControlled props cannot leak from suspended renders, accepted uncontrolled\nrequests compose before commit, and compound Combobox changes cancel together.\nHost configuration updates preserve typeahead and toast work while actual\nremoval cleans up immediately. Caller-authored native disability and accessible\nnames remain authoritative.\n"
+    filename: committed-host-ownership.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: major\n---\n\n## Own speculative work by render attempt\n\nRender attempts own data read sets, client external-store observations, boundary retries, and the sparse commit index. Checkpoints roll these back together, and terminal commit candidates release all speculative ownership. Data stores retain committed subscriptions without retaining values from abandoned fiber generations.\n\nCommit candidates publish once and retain their identity across deferred host callbacks. Capture release is independent of mutation and cannot finish a newer candidate.\n\nCustom commit coordinators must migrate `runMutation()` result handling from `Result | undefined` to `ReconcilerMutationResult<Result>`: `{ kind: \"committed\", value }`, `{ kind: \"stale\" }`, or `{ kind: \"failed\" }`. Stale candidates skip mutation and the post-mutation callback. Failed results indicate an error during publication or the callback; deferred failures are reported through the root, while synchronous failures still throw. Release prepared capture state and call `captureFinished()` for all returned outcomes. Successful callbacks returning `undefined` remain explicitly committed.\n"
+    filename: render-attempt-ownership.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n  \"@bgub/fig-server\":\n    type: patch\n---\n\n## Simplify render and data ownership\n\nUse controller identity to retire superseded actions and transitions, and keep each pending data load with its controller in one record. Consolidate speculative data dependencies into one read map while preserving thrown-read subscriptions and releasing value snapshots at commit. Server reads skip client dependency bookkeeping.\n\nProcess root and component queues through one operation with explicit fiber ownership. Invalidate each inconsistent component once when checking data and external-store snapshots.\n"
+    filename: simplify-render-and-data-ownership.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig\":\n    type: patch\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Keep data reads consistent across yielded renders\n\nTrack temporary render-time data snapshots and revalidate them before concurrent commits. Initial reads can no longer remain on an old value when hydration or refresh publishes between render chunks before subscriptions exist.\n"
+    filename: validate-data-resource-commits.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Apply host properties before updating bindings\n\nRun callback and host bindings after the host's attributes and form properties\nhave been applied. Widgets now follow form reassociation through later mixins,\nremoving the old form's reset listener and registering with the new form.\n"
+    filename: committed-binding-props.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: major\n  \"@bgub/fig-dom\":\n    type: patch\n---\n\n## Finish pending captures before synchronous work\n\nAllow explicit `flushSync` and unmount to interrupt pending View Transition captures. Preserve animations through automatically scheduled synchronous work, including before-paint repairs and external-store notifications, by retaining capture ownership until readiness. Validate pending mutations, restore author styles before urgent work, suppress interrupted transition callbacks, and ignore late browser callbacks.\n\nAutomatically cancel captures whose mutation was rejected as stale or failed. Release the document animation lock and wake existing client and streamed-reveal waiters without waiting for the discarded animation, so transition-priority retries can publish promptly even when native cancellation is unavailable or throws.\n\nCustom commit coordinators and View Transition host adapters must return `{ interrupt() }` instead of `\"deferred\"`. The operation must synchronously finish or reject the pending mutation, restore temporary host state, and release capture. Return `\"committed\"` only when both mutation and capture restoration have completed.\n\nView Transition host adapters receive `cancelTransition: true` when no candidate was published. Skip the entire native animation and release capture in that case; `canceledNames` and `cancelRootSnapshot` alone only suppress individual snapshots.\n\nBind DOM pseudo-element handles to the transition signal. Cancel animations created through those handles at completion and reject expired handles, preventing filled animations or saved handles from affecting later transitions with the same surface names. Surface host adapters receive the lifetime signal as a fourth `createSurface` argument.\n"
+    filename: interrupt-pending-capture.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Allocate update queues only for queued hooks\n\nKeep update history and rebase state on root, state, transition, and action hooks. Memo, effect, ID, deferred-value, external-store, and stable-event hooks no longer allocate unused queue objects. Hook order, strict rendering, and Suspense retry behavior are unchanged.\n"
+    filename: allocate-only-needed-hook-state.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Prevent torn external snapshots and partial Suspense updates\n\nValidate external-store snapshots before concurrent commits, including yielded work completed by flushSync and parked commits. Retry inconsistent snapshots before publishing host mutations, and route subscription snapshot errors through render error boundaries.\n\nPreserve skipped transition lanes across Suspense retries and urgent reveals so related updates cannot commit partially or become stranded.\n"
+    filename: consistent-concurrent-updates.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve async run ownership through abort callbacks and Activity hiding\n\nPublish transition and action run ownership before invoking predecessor abort listeners, so reentrant starts retain their results and pending slots retire correctly. Saved starters and action runners called while hidden or unmounted now receive aborted signals without acquiring update authority or pending slots; revealing their owner restores normal behavior.\n"
+    filename: core-async-lifetimes.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve stable-event lifetime under reentrant cleanup\n\nPublish each stable-event invocation before aborting its predecessor, and publish retirement before running unmount abort listeners. Reentrant calls now receive the correct signal and remain tracked for cleanup. Revealing an Activity no longer revives stable events or effects inside descendants that are still hidden.\n"
+    filename: core-live-events.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Keep deferred commits and subscription cleanup consistent\n\nRevalidate store snapshots immediately before deferred host mutations. Abandon stale transactions without capturing or dispatching view-transition callbacks, then retry after releasing the prepared capture. Publish live hook callbacks and run before-layout effects only when the transaction actually commits.\n\nRetire external-store listeners before calling subscription cleanup so synchronous notifications cannot read an unmounted or replaced store, and throwing cleanup cannot run repeatedly during error recovery.\n"
+    filename: deferred-store-commit-safety.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve server DOM when hydrating deferred values\n\nMatch Fig's server-rendered current value during hydration even when useDeferredValue has an initial placeholder. Client-only mounts retain their placeholder behavior.\n"
+    filename: deferred-value-hydration.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Read update queues without consuming them during render\n\nRender candidates read a bounded update history; commit acknowledges the observed prefix while retaining late updates and priority-rebase work. Interrupted renders and strict shadow passes no longer clone, consume, or restore shared queues. Suspense commits release only attempted queue prefixes for retry, preserving skipped priorities and updates arriving after a yield.\n"
+    filename: non-destructive-update-queues.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve root renders across initial scheduler yields\n\nProcess the root update queue inside its fiber work unit so same-priority root renders arriving during the initial scheduler yield are included. The latest render now commits without needing another update to wake the root.\n"
+    filename: preserve-root-renders-across-initial-yields.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve author styles when a View Transition capture is abandoned\n\nRestore the committed surface's author styles when snapshot validation abandons a deferred capture. Speculative `view-transition-name` and `view-transition-class` props are restored only after successful mutation.\n"
+    filename: preserve-styles-after-stale-capture.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve root render priority during urgent updates\n\nQueue and rebase root renders by lane, so urgent child updates cannot expose pending transition props. Preserve skipped root updates across render restarts and keep later synchronous root renders authoritative when deferred work resumes.\n"
+    filename: queue-root-renders-by-priority.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Retry errors from abandoned renders\n\nDiscard speculative ErrorBoundary errors and fallbacks when Suspense abandons their render. Retries revisit the failed primary beneath stable wrappers, allowing recovered content to reveal without reporting a stale error. Persistent failures report once after their fallback commits, while already committed error fallbacks remain sticky across suspension. This also prevents missing error callbacks and the development parity failure on Suspense reveal.\n"
+    filename: retry-abandoned-boundary-errors.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Unwind render scopes through the fiber return chain\n\nRestore context providers while searching for the boundary that handles a suspended or failed render. This removes separate ancestry scans while preserving nested fallback, hydration recovery, and commit-phase error behavior.\n\nPreserve nested Suspense retries when a fallback also suspends. The surviving outer boundary inherits the discarded inner boundary's pending promises, so primary content can reveal without waiting for its fallback to resolve.\n"
+    filename: simplify-render-unwinding.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@bgub/fig-reconciler\":\n    type: patch\n---\n\n## Preserve hydration snapshots and release discarded data reads\n\nKeep intentional server snapshots valid through deferred selective hydration while continuing to validate client snapshot reads in the same commit. Activity reveals no longer repeatedly abandon View Transition captures when server and client snapshots differ.\n\nRelease speculative data snapshots before Suspense or error-boundary rollback removes their owners from the commit index, including suspended attempts retained by committed fiber alternates.\n"
+    filename: snapshot-hydration-and-unwind.md
     v: 0.0.0
 core:packages:
-  - id: npm:@bgub/fig
-    updated: false
-  - id: npm:@bgub/fig-dom
-    updated: false
-  - id: npm:@bgub/fig-reconciler
-    updated: false
-  - id: npm:@bgub/fig-refresh
-    updated: false
-  - id: npm:@bgub/fig-server
-    updated: false
   - changelogIds:
-      - tanstack-security-update.md
-    id: npm:@bgub/fig-tanstack-router
+      - catch-up-data-subscriptions.md
+      - committed-host-ownership.md
+      - render-attempt-ownership.md
+      - simplify-render-and-data-ownership.md
+      - validate-data-resource-commits.md
+    id: npm:@bgub/fig
     updated: true
   - changelogIds:
-      - tanstack-security-update.md
-    id: npm:@bgub/fig-tanstack-start
+      - committed-binding-props.md
+      - committed-host-ownership.md
+      - interrupt-pending-capture.md
+    id: npm:@bgub/fig-dom
+    updated: true
+  - changelogIds:
+      - allocate-only-needed-hook-state.md
+      - catch-up-data-subscriptions.md
+      - consistent-concurrent-updates.md
+      - core-async-lifetimes.md
+      - core-live-events.md
+      - deferred-store-commit-safety.md
+      - deferred-value-hydration.md
+      - interrupt-pending-capture.md
+      - non-destructive-update-queues.md
+      - preserve-root-renders-across-initial-yields.md
+      - preserve-styles-after-stale-capture.md
+      - queue-root-renders-by-priority.md
+      - render-attempt-ownership.md
+      - retry-abandoned-boundary-errors.md
+      - simplify-render-and-data-ownership.md
+      - simplify-render-unwinding.md
+      - snapshot-hydration-and-unwind.md
+      - validate-data-resource-commits.md
+    id: npm:@bgub/fig-reconciler
+    updated: true
+  - id: npm:@bgub/fig-refresh
+    updated: true
+  - changelogIds:
+      - simplify-render-and-data-ownership.md
+    id: npm:@bgub/fig-server
+    updated: true
+  - id: npm:@bgub/fig-tanstack-router
+    updated: true
+  - id: npm:@bgub/fig-tanstack-start
     updated: true
   - id: npm:@bgub/fig-vite
-    updated: false
+    updated: true
 npm:packages:
   - distTag: latest
     id: npm:@bgub/fig
@@ -40,5 +124,11 @@ npm:packages:
     id: npm:@bgub/fig-tanstack-start
   - distTag: latest
     id: npm:@bgub/fig-vite
+  - id: npm:@bgub/fig-demo-client
+  - id: npm:@bgub/fig-demo-payload
+  - id: npm:@bgub/fig-demo-ssr
+  - id: npm:@bgub/fig-devtools
   - id: npm:@bgub/fig-demo-tanstack-start
   - id: npm:@bgub/fig-demo-tanstack-router
+  - id: npm:@bgub/fig-demo-hmr
+  - id: npm:@bgub/fig-headless
